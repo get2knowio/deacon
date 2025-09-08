@@ -197,6 +197,7 @@ dependencies = [
  "predicates",
  "serde",
  "toml",
+ "tracing",
 ]
 
 [[package]]

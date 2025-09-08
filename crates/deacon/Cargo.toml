@@ -9,6 +9,7 @@ authors.workspace = true
 deacon-core.workspace = true
 clap.workspace = true
 anyhow.workspace = true
+tracing.workspace = true
 
 [features]
 default = []
