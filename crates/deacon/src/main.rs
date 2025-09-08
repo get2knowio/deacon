@@ -5,7 +5,7 @@ mod cli;
 
 fn main() -> Result<()> {
     // Initialize logging from core crate
-    deacon_core::logging::init()?;
+    deacon_core::logging::init(None)?;
 
     // Parse CLI arguments
     let parsed = cli::Cli::parse();

@@ -124,10 +124,12 @@ fn test_error_line_col_information() {
     assert!(result.is_err());
 
     match result.unwrap_err() {
-        deacon_core::errors::DeaconError::ConfigurationParse { message } => {
+        deacon_core::errors::DeaconError::Config(deacon_core::errors::ConfigError::Parsing {
+            message,
+        }) => {
             // Should contain some indication of parsing error
             assert!(message.contains("JSON parsing error"));
         }
-        err => panic!("Expected ConfigurationParse error, got: {:?}", err),
+        err => panic!("Expected Config(Parsing) error, got: {:?}", err),
     }
 }
