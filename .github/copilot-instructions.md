@@ -7,7 +7,11 @@ These instructions guide AI assistance (e.g. GitHub Copilot / Chat) when proposi
 2. Prefer incremental, small, reviewable changes. Avoid large refactors unless explicitly requested.
 3. Maintain idiomatic, modern Rust (Edition 2021) with clear module boundaries and test coverage for new logic.
 4. Avoid introducing unsafe code. If absolutely necessary, justify with a comment explaining safety invariants.
-5. Keep build green: run formatting (`cargo fmt`), lint (`cargo clippy --all-targets -- -D warnings`), and tests before presenting a final patch.
+5. **CRITICAL: Keep build green** - ALL code changes MUST pass the complete CI pipeline locally before submission:
+   - `cargo build --verbose` (must compile successfully)
+   - `cargo test --verbose` (all tests must pass)
+   - `cargo fmt --all -- --check` (code must be properly formatted)
+   - `cargo clippy --all-targets -- -D warnings` (no clippy warnings allowed)
 
 ## Scope & Architecture Alignment
 The long-term goal is a Rust implementation of a DevContainer-like CLI. Align concepts with the spec's domains (configuration resolution, feature system, template system, Docker/OCI integration, lifecycle execution). For any new major subsystem:
@@ -16,6 +20,11 @@ The long-term goal is a Rust implementation of a DevContainer-like CLI. Align co
 - Introduce abstractions behind traits to enable future alternate backends (e.g., Docker vs. Podman).
 
 ## Code Style & Patterns
+- **Formatting & Quality**: Code MUST be properly formatted and pass all checks:
+  - Run `cargo fmt --all` before every commit
+  - Ensure no trailing whitespace in source files
+  - Follow standard Rust import ordering (std, external crates, local modules)
+  - Address all clippy warnings - zero tolerance policy
 - Error Handling: Prefer `thiserror` for domain error enums; use `anyhow` only at the binary boundary or for prototyping. Provide context with `.with_context(...)` where it aids diagnosis.
 - Logging: Use `tracing` spans for multi-step workflows (configuration load, feature install, container build) and structured fields instead of string concatenation.
 - Configuration Parsing: Plan for layered merges (defaults -> base -> extends -> overrides -> runtime). Keep parsing pure & testable.
@@ -35,13 +44,56 @@ When proposing a change:
 1. Brief summary (1–2 sentences) of intent referencing spec section(s).
 2. List of modified files and rationale.
 3. Risk assessment: breaking changes, API shifts, perf impact.
-4. Verification: commands run (build, tests, clippy) and outcomes.
+4. **Verification: MANDATORY CI validation** - ALL commands must pass locally:
+   - `cargo build --verbose` ✅
+   - `cargo test --verbose` ✅ 
+   - `cargo fmt --all -- --check` ✅
+   - `cargo clippy --all-targets -- -D warnings` ✅
 5. Follow-ups / deferred work (explicit list) if any.
 
 ## Dependency Management
 - Use `cargo add <crate> --workspace` for shared dependencies; otherwise target the specific crate manifest.
 - Keep dependency set lean; justify additions (functionality vs. complexity). Avoid duplicating features already available in standard library or existing deps.
 - For upgrades prefer `cargo update` (lock refresh) first; use `cargo upgrade --workspace` only when intentional about semver changes.
+
+## CI/CD Requirements & Preventing Build Failures
+**CRITICAL**: The CI pipeline runs on every PR and ALL checks must pass. Common failure causes and prevention:
+
+### Formatting Failures (`cargo fmt --all -- --check`)
+- **Always run `cargo fmt --all` before committing**
+- Remove trailing whitespace from all source files
+- Use consistent indentation (spaces, not tabs for Rust)
+- Follow standard Rust import ordering:
+  1. Standard library (`use std::...`)
+  2. External crates (`use serde::...`)
+  3. Local modules (`use crate::...`, `use super::...`)
+
+### Clippy Failures (`cargo clippy --all-targets -- -D warnings`)
+- Address ALL clippy warnings - zero tolerance policy
+- Common issues: unused variables, unnecessary clones, style violations
+- Run with `-D warnings` flag to treat warnings as errors locally
+- Use `#[allow(clippy::...)]` sparingly and only with justification
+
+### Test Failures (`cargo test --verbose`)
+- Ensure all tests pass locally before submission
+- Update tests when changing functionality
+- Write deterministic tests that don't depend on external state
+
+### Build Failures (`cargo build --verbose`)
+- Code must compile cleanly on stable Rust
+- Check for missing imports, type errors, unused dependencies
+- Verify workspace configuration is correct
+
+**Pre-submission Checklist**:
+```bash
+# Run this exact sequence before every commit:
+cargo build --verbose
+cargo test --verbose  
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+```
+
+If any command fails, fix the issues before submitting. The CI will run these exact same checks.
 
 ## Logging & Observability
 - Provide consistent span names aligned with spec workflows: `config.resolve`, `container.create`, `feature.install`, `template.apply`, `lifecycle.run`.
@@ -83,8 +135,10 @@ Each error enum variant should carry minimal, actionable context. Prefer convert
 > IMPORTANT: All generated code, designs, and refactors MUST remain consistent with `docs/CLI-SPEC.md`. If a requested change deviates (e.g., new command semantics, altered lifecycle order, renamed workflow), respond with a clarification prompt and do not implement until resolved.
 
 Checklist before submitting AI-generated PR suggestions:
+- [ ] **All CI checks pass locally** (build, test, fmt, clippy)
+- [ ] Code properly formatted with `cargo fmt --all`
+- [ ] No trailing whitespace or formatting inconsistencies
 - [ ] Referenced relevant spec sections? (list in PR body)
-- [ ] Build + tests + clippy pass locally
 - [ ] No stray `dbg!` / commented-out code
 - [ ] No new `unsafe` blocks
 - [ ] Errors mapped to domain taxonomy (or TODO noted)
