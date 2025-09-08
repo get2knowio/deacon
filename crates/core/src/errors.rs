@@ -11,6 +11,29 @@ pub enum DeaconError {
     #[error("Configuration error: {message}")]
     Configuration { message: String },
 
+    /// Configuration file not found
+    #[error("Configuration file not found: {path}")]
+    ConfigurationNotFound { path: String },
+
+    /// Configuration file parsing error
+    #[error("Failed to parse configuration file: {message}")]
+    ConfigurationParse { message: String },
+
+    /// Configuration file I/O error
+    #[error("Failed to read configuration file: {source}")]
+    ConfigurationIo {
+        #[from]
+        source: std::io::Error,
+    },
+
+    /// Configuration validation error
+    #[error("Configuration validation error: {message}")]
+    ConfigurationValidation { message: String },
+
+    /// Feature not implemented
+    #[error("Feature not implemented: {feature}")]
+    NotImplemented { feature: String },
+
     /// Docker/Runtime-related errors
     #[error("Docker runtime error: {message}")]
     Docker { message: String },
