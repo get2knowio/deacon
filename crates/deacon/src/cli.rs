@@ -1,31 +1,22 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use anyhow::Result;
 
 #[derive(Parser, Debug)]
-#[command(name = env!("CARGO_PKG_NAME"), version, about = "Development container CLI (Rust reimplementation)")]
+#[command(
+    name = env!("CARGO_PKG_NAME"), 
+    version, 
+    about = "DevContainer CLI (WIP) – no commands implemented yet",
+    long_about = "Development container CLI (Rust reimplementation)\n\nThis is a work-in-progress implementation of a DevContainer CLI. No functional commands are implemented yet."
+)]
 pub struct Cli {
-    #[command(subcommand)]
-    pub command: Commands,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum Commands {
-    /// Say hello (placeholder example command)
-    Hello {
-        /// Name to greet
-        #[arg(short, long, default_value = "world")]
-        name: String,
-    },
+    // No subcommands yet - just global options
 }
 
 impl Cli {
     pub fn dispatch(self) -> Result<()> {
-        match self.command {
-            Commands::Hello { name } => {
-                tracing::info!(%name, "hello command invoked");
-                println!("Hello, {name}!");
-            }
-        }
+        // Just print the placeholder message for now
+        println!("DevContainer CLI (WIP) – no commands implemented yet");
+        println!("Run with --help to see available options.");
         Ok(())
     }
 }

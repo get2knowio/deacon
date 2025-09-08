@@ -1,89 +1,122 @@
 # Contributing to deacon
 
-Welcome! This guide covers the basics for working on the Rust codebase.
+Welcome! This guide covers the development workflow for the Rust DevContainer CLI implementation.
 
 ## Prerequisites
-- Rust toolchain (install via https://rustup.rs)
+- Rust toolchain (stable) - install via https://rustup.rs
 - Git
-- (Optional) `cargo-edit` for dependency upgrades: `cargo install cargo-edit`
+- Docker (for eventual container integration testing)
 
 ## Quick Start
 ```bash
-# Clone and enter
-git clone https://github.com/get2knowio/deacon.git
+# Fork and clone the repository
+git clone https://github.com/YOUR_USERNAME/deacon.git
 cd deacon
 
 # Build all crates
 cargo build
 
-# Run the binary
-cargo run -- hello
+# Run the CLI (currently shows placeholder)
+cargo run -- --help
+cargo run -- --version
+cargo run
 
 # Run all tests
 cargo test
 
-# Run only integration tests
-cargo test --test integration_hello
+# Format and lint
+cargo fmt --all
+cargo clippy --all-targets -- -D warnings
+```
 
-# Run benches (Criterion)
-cargo bench
+## Development Workflow
+1. **Fork the repository** on GitHub
+2. **Clone your fork locally**
+3. **Create a feature branch**: `git checkout -b feature/your-feature`
+4. **Make changes** following the coding guidelines below
+5. **Test your changes**: `cargo test` and manual testing
+6. **Format and lint**: `cargo fmt --all && cargo clippy --all-targets -- -D warnings`
+7. **Commit with clear messages** (preferably following [Conventional Commits](https://conventionalcommits.org/))
+8. **Push to your fork**: `git push origin feature/your-feature`
+9. **Open a Pull Request** with a clear description
+
+## Project Structure
+```
+crates/
+  deacon/          # CLI binary crate (main entrypoint)
+  core/            # Shared library crate (config, docker, features, etc.)
+docs/
+  CLI-SPEC.md      # Authoritative specification
+.github/
+  workflows/       # CI and release automation
 ```
 
 ## Common Tasks
 | Task | Command |
 |------|---------|
+| Build | `cargo build` |
+| Test | `cargo test` |
 | Format code | `cargo fmt --all` |
 | Lint (clippy) | `cargo clippy --all-targets -- -D warnings` |
-| Update lockfile | `cargo update` |
-| Upgrade dependencies (edit Cargo.toml) | `cargo upgrade --workspace` (requires cargo-edit) |
-| Clean build artifacts | `cargo clean` |
-
-## Workspace Layout
-```
-crates/
-  deacon/          # CLI binary crate (current implementation)
-```
-(Additional crates like `core` will be added as functionality grows.)
+| Update dependencies | `cargo update` |
+| Clean build | `cargo clean` |
 
 ## Adding Dependencies
-Add to root workspace if shared:
+Add to workspace root for shared dependencies:
 ```bash
-cargo add crate_name --workspace
-```
-Or only to the CLI crate:
-```bash
-cargo add --manifest-path crates/deacon/Cargo.toml crate_name
+cargo add <crate_name> --workspace
 ```
 
-## Testing Notes
-- Use `assert_cmd` for integration tests that spawn the binary.
-- Keep individual tests fast (< 1s) to maintain quick feedback.
-- Benchmarks live under `crates/deacon/benches/` and use Criterion.
-
-## Logging & Debugging
-Enable more verbose logs:
+Add to specific crate:
 ```bash
-RUST_LOG=debug cargo run -- hello
+cargo add --manifest-path crates/<crate>/Cargo.toml <crate_name>
 ```
 
-## Coding Style
-- Follow `rustfmt` defaults.
-- For new modules keep functions small and focused; prefer `?` for error propagation.
-- Avoid `unsafe` (workspace forbids it currently).
+## Testing Guidelines
+- **Unit tests**: Test individual functions and modules
+- **Integration tests**: Use `assert_cmd` to test the CLI binary
+- **Test coverage**: Aim for good coverage of new functionality
+- **Performance**: Keep tests fast (< 2s) for quick feedback
+- **Deterministic**: Tests should not depend on external networks or random data
 
-## Submitting Changes
-1. Fork the repo.
-2. Create a feature branch: `git checkout -b feature/short-description`.
-3. Make changes; run format & clippy:  
-   `cargo fmt --all && cargo clippy --all-targets -- -D warnings`.
-4. Ensure tests pass: `cargo test`.
-5. Commit with a clear message (consider Conventional Commits style).  
-6. Open a Pull Request describing the change and referencing any issue numbers.
+## Coding Standards
+- **Follow `rustfmt` defaults** - run `cargo fmt --all` before committing
+- **Use `clippy` lints** - fix all warnings flagged by `cargo clippy`
+- **No `unsafe` code** - the workspace forbids unsafe blocks
+- **Error handling**: Use `anyhow::Result` at binary boundaries, domain errors for libraries
+- **Logging**: Use `tracing` for structured logging with appropriate levels
+- **Documentation**: Add rustdoc comments for public APIs
 
-## Release Process (Planned)
-A GitHub Actions release workflow will build multi-platform binaries when a tag like `v0.x.y` is pushed.
+## Architecture Guidelines
+- **Follow the CLI specification** in `docs/CLI-SPEC.md` as the source of truth
+- **Small, incremental changes** - avoid large refactors in single PRs
+- **Domain separation**: Keep CLI concerns in `crates/deacon`, shared logic in `crates/core`
+- **Trait abstractions**: Use traits for testability (Docker client, file system, etc.)
+
+## Debugging
+Enable verbose logging:
+```bash
+RUST_LOG=debug cargo run -- --help
+```
+
+## CI/CD
+- **GitHub Actions** runs tests on every PR and push to main
+- **Multi-platform testing** on Ubuntu and macOS
+- **Release builds** are automatically created on version tags (`v*.*.*`)
+- **Format and clippy checks** must pass for PR approval
+
+## Release Process
+1. Update version in `Cargo.toml` files
+2. Update `CHANGELOG.md` (when created)
+3. Create and push a git tag: `git tag v0.1.0 && git push origin v0.1.0`
+4. GitHub Actions will automatically build and release binaries
 
 ## Getting Help
-Open an issue or start a discussion if uncertain about direction or architecture.
+- **Issues**: Open a GitHub issue for bugs or feature requests
+- **Discussions**: Use GitHub Discussions for questions or ideas
+- **Specification**: Refer to `docs/CLI-SPEC.md` for architecture decisions
 
-Thanks for contributing!
+## Code of Conduct
+Be respectful, constructive, and collaborative in all interactions.
+
+Thanks for contributing to deacon!
