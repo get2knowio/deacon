@@ -1,0 +1,30 @@
+[workspace]
+members = [
+    "crates/deacon"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+authors = ["get2knowio <dev@get2know.io>"]
+
+[workspace.dependencies]
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-error = "0.2"
+color-eyre = "0.6"
+once_cell = "1.21"
+
+[workspace.dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.10"
+insta = { version = "1.39", features = ["yaml" ] }
+criterion = "0.5"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
