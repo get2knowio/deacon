@@ -21,7 +21,7 @@
 //! This implementation aligns with the [Development Containers Specification](https://containers.dev/implementors/spec/)
 //! and follows the configuration resolution workflow defined in the CLI specification.
 
-use crate::errors::{DeaconError, Result};
+use crate::errors::{ConfigError, DeaconError, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -257,23 +257,23 @@ impl ConfigLoader {
 
         // Check if file exists
         if !path.exists() {
-            return Err(DeaconError::ConfigurationNotFound {
+            return Err(DeaconError::Config(ConfigError::NotFound {
                 path: path.display().to_string(),
-            });
+            }));
         }
 
         // Read file content
         let content = std::fs::read_to_string(path).map_err(|e| {
             debug!("Failed to read configuration file: {}", e);
-            DeaconError::ConfigurationIo { source: e }
+            DeaconError::Config(ConfigError::Io(e))
         })?;
 
         // Parse JSON5 (JSON with comments and trailing commas)
         let raw_value: serde_json::Value = json5::from_str(&content).map_err(|e| {
             debug!("Failed to parse configuration file: {}", e);
-            DeaconError::ConfigurationParse {
+            DeaconError::Config(ConfigError::Parsing {
                 message: format!("JSON parsing error: {}", e),
-            }
+            })
         })?;
 
         // Log unknown top-level keys at DEBUG level
@@ -284,18 +284,18 @@ impl ConfigLoader {
         // Check for extends field (not yet implemented)
         if let serde_json::Value::Object(obj) = &raw_value {
             if obj.contains_key("extends") {
-                return Err(DeaconError::NotImplemented {
+                return Err(DeaconError::Config(ConfigError::NotImplemented {
                     feature: "extends configuration".to_string(),
-                });
+                }));
             }
         }
 
         // Deserialize into strongly typed structure
         let config: DevContainerConfig = serde_json::from_value(raw_value).map_err(|e| {
             debug!("Failed to deserialize configuration: {}", e);
-            DeaconError::ConfigurationValidation {
+            DeaconError::Config(ConfigError::Validation {
                 message: format!("Deserialization error: {}", e),
-            }
+            })
         })?;
 
         // Basic validation
@@ -352,10 +352,10 @@ impl ConfigLoader {
         // Validate that either image or dockerfile is specified (but not both)
         match (&config.image, &config.dockerfile) {
             (Some(_), Some(_)) => {
-                return Err(DeaconError::ConfigurationValidation {
+                return Err(DeaconError::Config(ConfigError::Validation {
                     message: "Cannot specify both 'image' and 'dockerFile' - choose one"
                         .to_string(),
-                });
+                }));
             }
             (None, None) => {
                 debug!("Neither 'image' nor 'dockerFile' specified - this may be intended for extends or compose configurations");
@@ -372,12 +372,12 @@ impl ConfigLoader {
                     // Valid values
                 }
                 _ => {
-                    return Err(DeaconError::ConfigurationValidation {
+                    return Err(DeaconError::Config(ConfigError::Validation {
                         message: format!(
                             "Invalid shutdownAction '{}' - must be 'none' or 'stopContainer'",
                             action
                         ),
-                    });
+                    }));
                 }
             }
         }
@@ -451,10 +451,10 @@ mod tests {
         let result = ConfigLoader::load_from_path(Path::new("nonexistent.json"));
         assert!(result.is_err());
         match result.unwrap_err() {
-            DeaconError::ConfigurationNotFound { path } => {
+            DeaconError::Config(ConfigError::NotFound { path }) => {
                 assert!(path.contains("nonexistent.json"));
             }
-            _ => panic!("Expected ConfigurationNotFound error"),
+            _ => panic!("Expected Config(NotFound) error"),
         }
     }
 
@@ -471,10 +471,10 @@ mod tests {
         let result = ConfigLoader::load_from_path(temp_file.path());
         assert!(result.is_err());
         match result.unwrap_err() {
-            DeaconError::ConfigurationParse { message } => {
+            DeaconError::Config(ConfigError::Parsing { message }) => {
                 assert!(message.contains("JSON parsing error"));
             }
-            _ => panic!("Expected ConfigurationParse error"),
+            _ => panic!("Expected Config(Parsing) error"),
         }
 
         Ok(())
@@ -494,10 +494,10 @@ mod tests {
         let result = ConfigLoader::load_from_path(temp_file.path());
         assert!(result.is_err());
         match result.unwrap_err() {
-            DeaconError::ConfigurationValidation { message } => {
+            DeaconError::Config(ConfigError::Validation { message }) => {
                 assert!(message.contains("Cannot specify both 'image' and 'dockerFile'"));
             }
-            _ => panic!("Expected ConfigurationValidation error"),
+            _ => panic!("Expected Config(Validation) error"),
         }
 
         Ok(())
@@ -517,10 +517,10 @@ mod tests {
         let result = ConfigLoader::load_from_path(temp_file.path());
         assert!(result.is_err());
         match result.unwrap_err() {
-            DeaconError::ConfigurationValidation { message } => {
+            DeaconError::Config(ConfigError::Validation { message }) => {
                 assert!(message.contains("Invalid shutdownAction"));
             }
-            _ => panic!("Expected ConfigurationValidation error"),
+            _ => panic!("Expected Config(Validation) error"),
         }
 
         Ok(())
@@ -539,10 +539,10 @@ mod tests {
         let result = ConfigLoader::load_from_path(temp_file.path());
         assert!(result.is_err());
         match result.unwrap_err() {
-            DeaconError::NotImplemented { feature } => {
+            DeaconError::Config(ConfigError::NotImplemented { feature }) => {
                 assert!(feature.contains("extends"));
             }
-            _ => panic!("Expected NotImplemented error"),
+            _ => panic!("Expected Config(NotImplemented) error"),
         }
 
         Ok(())
