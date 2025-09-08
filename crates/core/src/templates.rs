@@ -1,5 +1,5 @@
 //! DevContainer templates system
-//! 
+//!
 //! This module will handle template discovery, downloading, and application.
 
 /// Placeholder for template system

@@ -1,5 +1,5 @@
 //! Configuration resolution and parsing
-//! 
+//!
 //! This module will handle devcontainer.json parsing, workspace discovery,
 //! variable substitution, and configuration merging.
 

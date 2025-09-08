@@ -1,5 +1,5 @@
 //! DevContainer features system
-//! 
+//!
 //! This module will handle feature discovery, installation, and lifecycle management.
 
 /// Placeholder for feature system

@@ -7,8 +7,12 @@ fn test_help_output() {
     cmd.arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Development container CLI (Rust reimplementation)"))
-        .stdout(predicate::str::contains("This is a work-in-progress implementation of a DevContainer CLI"));
+        .stdout(predicate::str::contains(
+            "Development container CLI (Rust reimplementation)",
+        ))
+        .stdout(predicate::str::contains(
+            "This is a work-in-progress implementation of a DevContainer CLI",
+        ));
 }
 
 #[test]
@@ -25,6 +29,10 @@ fn test_default_output() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("DevContainer CLI (WIP) – no commands implemented yet"))
-        .stdout(predicate::str::contains("Run with --help to see available options."));
+        .stdout(predicate::str::contains(
+            "DevContainer CLI (WIP) – no commands implemented yet",
+        ))
+        .stdout(predicate::str::contains(
+            "Run with --help to see available options.",
+        ));
 }

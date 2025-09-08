@@ -1,5 +1,5 @@
 //! Docker and OCI container runtime integration
-//! 
+//!
 //! This module will handle Docker client abstraction, container lifecycle management,
 //! image building, and container execution.
 

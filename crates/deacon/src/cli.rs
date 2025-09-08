@@ -1,10 +1,10 @@
-use clap::Parser;
 use anyhow::Result;
+use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = env!("CARGO_PKG_NAME"), 
-    version, 
+    name = env!("CARGO_PKG_NAME"),
+    version,
     about = "DevContainer CLI (WIP) – no commands implemented yet",
     long_about = "Development container CLI (Rust reimplementation)\n\nThis is a work-in-progress implementation of a DevContainer CLI. No functional commands are implemented yet."
 )]

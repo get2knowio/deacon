@@ -1,5 +1,5 @@
 //! Lifecycle command execution
-//! 
+//!
 //! This module will handle execution of lifecycle commands like postCreateCommand,
 //! postStartCommand, etc.
 
