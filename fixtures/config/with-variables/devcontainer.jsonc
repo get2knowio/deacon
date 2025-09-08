@@ -1,0 +1,68 @@
+{
+    // DevContainer configuration with variable substitution examples
+    "name": "Variable Substitution Test Container",
+    "image": "ubuntu:20.04",
+    
+    // Workspace configuration with variables
+    "workspaceFolder": "${localWorkspaceFolder}/src",
+    
+    // Environment variables using substitution
+    "containerEnv": {
+        "WORKSPACE_ROOT": "${localWorkspaceFolder}",
+        "CONTAINER_ID": "${devcontainerId}",
+        "HOST_USER": "${localEnv:USER}",
+        "MISSING_VAR": "${localEnv:NONEXISTENT_VAR}",
+        "PROJECT_NAME": "project-${devcontainerId}"
+    },
+    
+    // Mounts with variable substitution
+    "mounts": [
+        "source=${localWorkspaceFolder}/.cargo,target=/usr/local/cargo,type=bind,consistency=cached",
+        "source=${localWorkspaceFolder}/target,target=/workspace/target,type=bind",
+        "${localWorkspaceFolder}/data:/data:rw"
+    ],
+    
+    // Run arguments with variables
+    "runArgs": [
+        "--name",
+        "devcontainer-${devcontainerId}",
+        "--label",
+        "workspace=${localWorkspaceFolder}",
+        "--init"
+    ],
+    
+    // Lifecycle commands with variable substitution
+    "onCreateCommand": "echo 'Container created for workspace: ${localWorkspaceFolder}'",
+    "postCreateCommand": [
+        "echo",
+        "Setting up workspace in ${localWorkspaceFolder}",
+        "mkdir -p ${localWorkspaceFolder}/logs"
+    ],
+    "postStartCommand": "echo 'Container ${devcontainerId} started'",
+    "postAttachCommand": {
+        "setup": "echo 'Attached to ${devcontainerId}'"
+    },
+    
+    // Port forwarding
+    "forwardPorts": [3000, 8080],
+    
+    // Features configuration
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:1": {
+            "installZsh": true,
+            "username": "vscode"
+        }
+    },
+    
+    // VS Code customizations
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer"
+            ],
+            "settings": {
+                "terminal.integrated.cwd": "${localWorkspaceFolder}/src"
+            }
+        }
+    }
+}

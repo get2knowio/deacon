@@ -10,6 +10,7 @@ pub mod features;
 pub mod lifecycle;
 pub mod logging;
 pub mod templates;
+pub mod variable;
 
 /// Get the version of the core library
 pub fn version() -> &'static str {
