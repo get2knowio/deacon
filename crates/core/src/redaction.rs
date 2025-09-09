@@ -50,7 +50,7 @@ impl SecretRegistry {
 
         if let Ok(mut inner) = self.inner.write() {
             inner.exact_secrets.insert(secret.to_string());
-            
+
             // Add SHA-256 hash for additional detection
             let hash = sha256_hash(secret);
             inner.secret_hashes.insert(hash);
@@ -121,7 +121,7 @@ impl Default for SecretRegistry {
 }
 
 /// Global secret registry instance
-static GLOBAL_REGISTRY: once_cell::sync::Lazy<SecretRegistry> = 
+static GLOBAL_REGISTRY: once_cell::sync::Lazy<SecretRegistry> =
     once_cell::sync::Lazy::new(SecretRegistry::new);
 
 /// Get the global secret registry instance
@@ -172,7 +172,7 @@ pub fn redact_if_enabled(text: &str, config: &RedactionConfig) -> String {
     }
 
     let redacted = global_registry().redact_text(text);
-    
+
     // Apply custom placeholder if specified
     if let Some(custom_placeholder) = &config.placeholder {
         redacted.replace(REDACTION_PLACEHOLDER, custom_placeholder)
@@ -198,7 +198,7 @@ where
 fn sha256_hash(input: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    
+
     // Note: Using DefaultHasher for simplicity. In production, should use
     // a proper cryptographic hash like SHA-256 from a crate like `sha2`
     let mut hasher = DefaultHasher::new();
@@ -235,7 +235,7 @@ mod tests {
         let registry = SecretRegistry::new();
         let secret = "my-secret-password";
         registry.add_secret(secret);
-        
+
         let text = "The password is my-secret-password and should be hidden";
         let redacted = registry.redact_text(text);
         assert_eq!(redacted, "The password is **** and should be hidden");
@@ -246,7 +246,7 @@ mod tests {
         let registry = SecretRegistry::new();
         let secret = "secret123";
         registry.add_secret(secret);
-        
+
         let text = "secret123 appears twice: secret123";
         let redacted = registry.redact_text(text);
         assert_eq!(redacted, "**** appears twice: ****");
@@ -256,7 +256,7 @@ mod tests {
     fn test_redact_no_match() {
         let registry = SecretRegistry::new();
         registry.add_secret("secret123");
-        
+
         let text = "This text contains no secrets";
         let redacted = registry.redact_text(text);
         assert_eq!(redacted, text);
@@ -266,7 +266,7 @@ mod tests {
     fn test_redact_partial_match_not_redacted() {
         let registry = SecretRegistry::new();
         registry.add_secret("password123");
-        
+
         let text = "The word password appears but not the full secret";
         let redacted = registry.redact_text(text);
         assert_eq!(redacted, text); // Should not be redacted
@@ -275,7 +275,11 @@ mod tests {
     #[test]
     fn test_add_multiple_secrets() {
         let registry = SecretRegistry::new();
-        let secrets = vec!["secretone".to_string(), "secrettwo".to_string(), "password123".to_string()];
+        let secrets = vec![
+            "secretone".to_string(),
+            "secrettwo".to_string(),
+            "password123".to_string(),
+        ];
         registry.add_secrets(secrets);
         assert_eq!(registry.secret_count(), 3);
     }
@@ -285,7 +289,7 @@ mod tests {
         let registry = SecretRegistry::new();
         registry.add_secret("secret123");
         assert_eq!(registry.secret_count(), 1);
-        
+
         registry.clear();
         assert_eq!(registry.secret_count(), 0);
     }
@@ -294,10 +298,10 @@ mod tests {
     fn test_global_registry() {
         let registry = global_registry();
         let initial_count = registry.secret_count();
-        
+
         add_global_secret("global-test-secret");
         assert_eq!(registry.secret_count(), initial_count + 1);
-        
+
         // Clean up for other tests
         registry.clear();
     }
@@ -326,13 +330,13 @@ mod tests {
     fn test_redact_if_enabled_disabled() {
         let config = RedactionConfig::disabled();
         let text = "This contains secret123 but should not be redacted";
-        
+
         // Even if we add the secret to global registry
         add_global_secret("secret123");
-        
+
         let result = redact_if_enabled(text, &config);
         assert_eq!(result, text);
-        
+
         // Clean up
         global_registry().clear();
     }
@@ -341,12 +345,12 @@ mod tests {
     fn test_redact_if_enabled_enabled() {
         let config = RedactionConfig::default();
         let text = "This contains secret123 and should be redacted";
-        
+
         add_global_secret("secret123");
-        
+
         let result = redact_if_enabled(text, &config);
         assert_eq!(result, "This contains **** and should be redacted");
-        
+
         // Clean up
         global_registry().clear();
     }
@@ -355,12 +359,12 @@ mod tests {
     fn test_redact_if_enabled_custom_placeholder() {
         let config = RedactionConfig::with_placeholder("[HIDDEN]".to_string());
         let text = "This contains secret123 and should be redacted";
-        
+
         add_global_secret("secret123");
-        
+
         let result = redact_if_enabled(text, &config);
         assert_eq!(result, "This contains [HIDDEN] and should be redacted");
-        
+
         // Clean up
         global_registry().clear();
     }
@@ -370,10 +374,10 @@ mod tests {
         let input = "test-string";
         let hash1 = sha256_hash(input);
         let hash2 = sha256_hash(input);
-        
+
         // Same input should produce same hash
         assert_eq!(hash1, hash2);
-        
+
         // Different input should produce different hash
         let hash3 = sha256_hash("different-string");
         assert_ne!(hash1, hash3);

@@ -4,8 +4,8 @@
 //! It supports both traditional text-based logging and optional JSON formatting
 //! controlled by feature flags and environment variables.
 
+use crate::redaction::RedactionConfig;
 use anyhow::Result;
-use crate::redaction::{global_registry, RedactionConfig, redact_if_enabled};
 use std::sync::Once;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -46,9 +46,12 @@ static INIT: Once = Once::new();
 /// // Initialize with custom filter and disabled redaction
 /// logging::init_with_redaction(Some("debug,reqwest=warn"), Some(RedactionConfig::disabled())).expect("Failed to initialize logging");
 /// ```
-pub fn init_with_redaction(logging_spec: Option<&str>, redaction_config: Option<RedactionConfig>) -> Result<()> {
+pub fn init_with_redaction(
+    logging_spec: Option<&str>,
+    redaction_config: Option<RedactionConfig>,
+) -> Result<()> {
     let _redaction_config = redaction_config.unwrap_or_default();
-    
+
     INIT.call_once(|| {
         let filter = create_env_filter(logging_spec);
 

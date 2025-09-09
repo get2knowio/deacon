@@ -7,7 +7,7 @@
 //! References: CLI-SPEC.md "Container Lifecycle Management"
 
 use crate::errors::{DeaconError, Result};
-use crate::redaction::{RedactionConfig, redact_if_enabled};
+use crate::redaction::{redact_if_enabled, RedactionConfig};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -279,7 +279,7 @@ pub fn run_phase(
         for line in stdout_reader.lines() {
             let line =
                 line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stdout: {}", e)))?;
-            
+
             // Apply redaction to the line before logging
             let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
             info!("[{}] stdout: {}", phase.as_str(), redacted_line);
@@ -290,7 +290,7 @@ pub fn run_phase(
         for line in stderr_reader.lines() {
             let line =
                 line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stderr: {}", e)))?;
-            
+
             // Apply redaction to the line before logging
             let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
             info!("[{}] stderr: {}", phase.as_str(), redacted_line);
