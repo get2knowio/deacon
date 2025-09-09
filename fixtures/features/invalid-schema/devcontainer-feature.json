@@ -1,0 +1,10 @@
+{
+    "id": "",
+    "options": {
+        "invalidOption": {
+            "type": "string",
+            "enum": ["value1", "value2"],
+            "default": "invalid_value_not_in_enum"
+        }
+    }
+}
