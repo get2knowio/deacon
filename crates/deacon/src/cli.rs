@@ -218,17 +218,60 @@ impl Cli {
         };
 
         // Set environment variable for log level before initializing logging
-        std::env::set_var("RUST_LOG", format!("deacon_core={}", log_level));
+        std::env::set_var(
+            "RUST_LOG",
+            format!("deacon={},deacon_core={}", log_level, log_level),
+        );
         deacon_core::logging::init(log_format.as_deref())?;
 
         // Emit a debug log to help with testing
         tracing::debug!("CLI initialized with log level: {}", log_level);
 
         match self.command {
-            Some(Commands::Up { .. }) => Err(DeaconError::Config(ConfigError::NotImplemented {
-                feature: "up command".to_string(),
-            })
-            .into()),
+            Some(Commands::Up { .. }) => {
+                // Attempt Docker health check and log availability
+                #[cfg(feature = "docker")]
+                {
+                    use deacon_core::docker::{CliDocker, Docker};
+
+                    tracing::info!("Checking Docker availability...");
+                    let docker_client = CliDocker::new();
+
+                    // Check if docker binary is installed first
+                    match docker_client.check_docker_installed() {
+                        Ok(()) => {
+                            // Try to ping the Docker daemon
+                            let runtime = tokio::runtime::Runtime::new().map_err(|e| {
+                                anyhow::anyhow!("Failed to create async runtime: {}", e)
+                            })?;
+
+                            match runtime.block_on(docker_client.ping()) {
+                                Ok(()) => {
+                                    tracing::info!("Docker is available and running");
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Docker daemon is not available: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Docker is not installed or not accessible: {}", e);
+                        }
+                    }
+                }
+
+                #[cfg(not(feature = "docker"))]
+                {
+                    tracing::warn!(
+                        "Docker support is disabled (compiled without 'docker' feature)"
+                    );
+                }
+
+                Err(DeaconError::Config(ConfigError::NotImplemented {
+                    feature: "up command".to_string(),
+                })
+                .into())
+            }
             Some(Commands::Build { .. }) => Err(DeaconError::Config(ConfigError::NotImplemented {
                 feature: "build command".to_string(),
             })
