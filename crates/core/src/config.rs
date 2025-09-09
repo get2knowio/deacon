@@ -23,14 +23,97 @@
 
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 /// Default function to return an empty JSON object for serde defaults.
 fn default_empty_object() -> serde_json::Value {
     serde_json::Value::Object(Default::default())
+}
+
+/// Port specification that can be either a number or a string.
+///
+/// Supports port numbers (e.g., 3000) and port mappings (e.g., "3000:3000").
+/// For now, stores the original value for future parsing.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum PortSpec {
+    /// Port number
+    Number(u16),
+    /// Port string (for mappings like "3000:3000" or just "3000")
+    String(String),
+}
+
+impl PortSpec {
+    /// Get the primary port number from this specification.
+    /// For strings like "3000:8080", returns the first port (3000).
+    /// For numbers, returns the number directly.
+    pub fn primary_port(&self) -> Option<u16> {
+        match self {
+            PortSpec::Number(port) => Some(*port),
+            PortSpec::String(s) => {
+                // Try to parse as number first
+                if let Ok(port) = s.parse::<u16>() {
+                    return Some(port);
+                }
+                // Try to parse as port mapping (e.g., "3000:8080")
+                if let Some(first_part) = s.split(':').next() {
+                    first_part.parse::<u16>().ok()
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Convert port spec to string representation for validation.
+    pub fn to_string(&self) -> String {
+        match self {
+            PortSpec::Number(port) => port.to_string(),
+            PortSpec::String(s) => s.clone(),
+        }
+    }
+}
+
+/// Action to take when a port is auto-forwarded.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OnAutoForward {
+    /// Do nothing when port is auto-forwarded
+    Silent,
+    /// Show a notification when port is auto-forwarded  
+    Notify,
+    /// Open the port in a browser when auto-forwarded
+    OpenBrowser,
+    /// Open the port in a preview panel when auto-forwarded
+    OpenPreview,
+    /// Ignore the port (don't auto-forward)
+    Ignore,
+}
+
+/// Attributes for port configuration.
+///
+/// Defines how ports should be handled when forwarded, including
+/// labeling, auto-forward behavior, and preview options.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortAttributes {
+    /// Human-readable label for the port
+    pub label: Option<String>,
+    
+    /// Action to take when the port is auto-forwarded
+    pub on_auto_forward: Option<OnAutoForward>,
+    
+    /// Whether to open a preview of the port automatically
+    pub open_preview: Option<bool>,
+    
+    /// Whether to require a specific local port for forwarding
+    pub require_local_port: Option<bool>,
+    
+    /// Description of what this port is used for
+    pub description: Option<String>,
 }
 
 /// Configuration file location information
@@ -141,12 +224,25 @@ pub struct DevContainerConfig {
     ///
     /// Reference: [Port Configuration - forwardPorts](https://containers.dev/implementors/json_reference/#forward-ports)
     #[serde(default)]
-    pub forward_ports: Vec<serde_json::Value>,
+    pub forward_ports: Vec<PortSpec>,
 
     /// Primary application port.
     ///
     /// Reference: [Port Configuration - appPort](https://containers.dev/implementors/json_reference/#app-port)
-    pub app_port: Option<serde_json::Value>,
+    pub app_port: Option<PortSpec>,
+
+    /// Attributes for specific ports.
+    ///
+    /// Maps port specifications to their attributes. Keys are port numbers or 
+    /// port/protocol combinations (e.g., "3000", "3000/tcp").
+    #[serde(default)]
+    pub ports_attributes: HashMap<String, PortAttributes>,
+
+    /// Default attributes for ports not explicitly configured.
+    ///
+    /// These attributes are applied to any forwarded ports that don't have
+    /// specific entries in ports_attributes.
+    pub other_ports_attributes: Option<PortAttributes>,
 
     /// Additional arguments to pass to docker run.
     ///
