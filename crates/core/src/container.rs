@@ -44,6 +44,7 @@ pub struct ContainerResult {
 }
 
 /// Container operations for lifecycle management
+#[allow(async_fn_in_trait)]
 pub trait ContainerOps {
     /// Find existing containers with matching workspace and config hashes
     async fn find_matching_containers(&self, identity: &ContainerIdentity) -> Result<Vec<String>>;
@@ -135,13 +136,16 @@ impl ContainerIdentity {
     pub fn labels(&self) -> HashMap<String, String> {
         let mut labels = HashMap::new();
         labels.insert(LABEL_SOURCE.to_string(), DEACON_SOURCE.to_string());
-        labels.insert(LABEL_WORKSPACE_HASH.to_string(), self.workspace_hash.clone());
+        labels.insert(
+            LABEL_WORKSPACE_HASH.to_string(),
+            self.workspace_hash.clone(),
+        );
         labels.insert(LABEL_CONFIG_HASH.to_string(), self.config_hash.clone());
-        
+
         if let Some(ref name) = self.name {
             labels.insert(LABEL_NAME.to_string(), name.clone());
         }
-        
+
         labels
     }
 
@@ -149,9 +153,12 @@ impl ContainerIdentity {
     pub fn label_selector(&self) -> String {
         format!(
             "{}={},{}={},{}={}",
-            LABEL_SOURCE, DEACON_SOURCE,
-            LABEL_WORKSPACE_HASH, self.workspace_hash,
-            LABEL_CONFIG_HASH, self.config_hash
+            LABEL_SOURCE,
+            DEACON_SOURCE,
+            LABEL_WORKSPACE_HASH,
+            self.workspace_hash,
+            LABEL_CONFIG_HASH,
+            self.config_hash
         )
     }
 }
@@ -165,7 +172,7 @@ mod tests {
     fn test_container_identity_creation() {
         let temp_dir = TempDir::new().unwrap();
         let workspace_path = temp_dir.path();
-        
+
         let config = DevContainerConfig {
             name: Some("test-container".to_string()),
             image: Some("ubuntu:20.04".to_string()),
@@ -173,7 +180,7 @@ mod tests {
         };
 
         let identity = ContainerIdentity::new(workspace_path, &config);
-        
+
         assert!(!identity.workspace_hash.is_empty());
         assert!(!identity.config_hash.is_empty());
         assert_eq!(identity.name, Some("test-container".to_string()));
@@ -185,7 +192,7 @@ mod tests {
     fn test_container_name_generation() {
         let temp_dir = TempDir::new().unwrap();
         let workspace_path = temp_dir.path();
-        
+
         let config = DevContainerConfig {
             name: Some("test".to_string()),
             image: Some("ubuntu:20.04".to_string()),
@@ -194,7 +201,7 @@ mod tests {
 
         let identity = ContainerIdentity::new(workspace_path, &config);
         let name = identity.container_name();
-        
+
         assert!(name.starts_with("deacon-"));
         assert_eq!(name.len(), 15); // "deacon-" + 8 char hash
     }
@@ -203,7 +210,7 @@ mod tests {
     fn test_container_name_deterministic() {
         let temp_dir = TempDir::new().unwrap();
         let workspace_path = temp_dir.path();
-        
+
         let config = DevContainerConfig {
             name: Some("test".to_string()),
             image: Some("ubuntu:20.04".to_string()),
@@ -212,7 +219,7 @@ mod tests {
 
         let identity1 = ContainerIdentity::new(workspace_path, &config);
         let identity2 = ContainerIdentity::new(workspace_path, &config);
-        
+
         assert_eq!(identity1.container_name(), identity2.container_name());
     }
 
@@ -220,7 +227,7 @@ mod tests {
     fn test_labels_generation() {
         let temp_dir = TempDir::new().unwrap();
         let workspace_path = temp_dir.path();
-        
+
         let config = DevContainerConfig {
             name: Some("test-container".to_string()),
             image: Some("ubuntu:20.04".to_string()),
@@ -229,9 +236,12 @@ mod tests {
 
         let identity = ContainerIdentity::new(workspace_path, &config);
         let labels = identity.labels();
-        
+
         assert_eq!(labels.get(LABEL_SOURCE), Some(&DEACON_SOURCE.to_string()));
-        assert_eq!(labels.get(LABEL_WORKSPACE_HASH), Some(&identity.workspace_hash));
+        assert_eq!(
+            labels.get(LABEL_WORKSPACE_HASH),
+            Some(&identity.workspace_hash)
+        );
         assert_eq!(labels.get(LABEL_CONFIG_HASH), Some(&identity.config_hash));
         assert_eq!(labels.get(LABEL_NAME), Some(&"test-container".to_string()));
     }
@@ -240,7 +250,7 @@ mod tests {
     fn test_label_selector() {
         let temp_dir = TempDir::new().unwrap();
         let workspace_path = temp_dir.path();
-        
+
         let config = DevContainerConfig {
             name: Some("test".to_string()),
             image: Some("ubuntu:20.04".to_string()),
@@ -249,9 +259,12 @@ mod tests {
 
         let identity = ContainerIdentity::new(workspace_path, &config);
         let selector = identity.label_selector();
-        
+
         assert!(selector.contains(&format!("{}={}", LABEL_SOURCE, DEACON_SOURCE)));
-        assert!(selector.contains(&format!("{}={}", LABEL_WORKSPACE_HASH, identity.workspace_hash)));
+        assert!(selector.contains(&format!(
+            "{}={}",
+            LABEL_WORKSPACE_HASH, identity.workspace_hash
+        )));
         assert!(selector.contains(&format!("{}={}", LABEL_CONFIG_HASH, identity.config_hash)));
     }
 
@@ -259,13 +272,13 @@ mod tests {
     fn test_config_hash_different_configs() {
         let temp_dir = TempDir::new().unwrap();
         let workspace_path = temp_dir.path();
-        
+
         let config1 = DevContainerConfig {
             name: Some("test1".to_string()),
             image: Some("ubuntu:20.04".to_string()),
             ..Default::default()
         };
-        
+
         let config2 = DevContainerConfig {
             name: Some("test2".to_string()),
             image: Some("ubuntu:22.04".to_string()),
@@ -274,7 +287,7 @@ mod tests {
 
         let identity1 = ContainerIdentity::new(workspace_path, &config1);
         let identity2 = ContainerIdentity::new(workspace_path, &config2);
-        
+
         assert_ne!(identity1.config_hash, identity2.config_hash);
     }
 
@@ -282,7 +295,7 @@ mod tests {
     fn test_workspace_hash_different_paths() {
         let temp_dir1 = TempDir::new().unwrap();
         let temp_dir2 = TempDir::new().unwrap();
-        
+
         let config = DevContainerConfig {
             name: Some("test".to_string()),
             image: Some("ubuntu:20.04".to_string()),
@@ -291,7 +304,7 @@ mod tests {
 
         let identity1 = ContainerIdentity::new(temp_dir1.path(), &config);
         let identity2 = ContainerIdentity::new(temp_dir2.path(), &config);
-        
+
         assert_ne!(identity1.workspace_hash, identity2.workspace_hash);
     }
 }

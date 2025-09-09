@@ -236,11 +236,14 @@ impl Cli {
                 skip_post_create,
             }) => {
                 // Initialize configuration and workspace discovery
-                let workspace_folder = self.workspace_folder
-                    .clone()
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+                let workspace_folder = self.workspace_folder.clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
 
-                tracing::info!("Starting up container for workspace: {}", workspace_folder.display());
+                tracing::info!(
+                    "Starting up container for workspace: {}",
+                    workspace_folder.display()
+                );
 
                 #[cfg(feature = "docker")]
                 {
@@ -249,15 +252,14 @@ impl Cli {
                     use deacon_core::docker::{CliDocker, Docker, DockerLifecycle};
 
                     // Load configuration
-                    let config_loader = ConfigLoader;
-                    let config_location = config_loader.discover_config(&workspace_folder)?;
-                    
+                    let config_location = ConfigLoader::discover_config(&workspace_folder)?;
+
                     if !config_location.exists() {
                         return Err(anyhow::anyhow!("No devcontainer.json found in workspace"));
                     }
 
-                    let config = config_loader.load_from_path(config_location.path())?;
-                    
+                    let config = ConfigLoader::load_from_path(config_location.path())?;
+
                     // Ensure we have an image configured
                     if config.image.is_none() {
                         return Err(anyhow::anyhow!("No image specified in devcontainer.json"));
@@ -265,7 +267,7 @@ impl Cli {
 
                     // Create container identity for this workspace and configuration
                     let identity = ContainerIdentity::new(&workspace_folder, &config);
-                    
+
                     // Check Docker availability
                     let docker_client = CliDocker::new();
                     match docker_client.check_docker_installed() {
@@ -278,16 +280,22 @@ impl Cli {
                     }
 
                     // Create async runtime and execute up workflow
-                    let runtime = tokio::runtime::Runtime::new().map_err(|e| {
-                        anyhow::anyhow!("Failed to create async runtime: {}", e)
-                    })?;
+                    let runtime = tokio::runtime::Runtime::new()
+                        .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
 
                     let result = runtime.block_on(async {
                         // Check Docker daemon availability
                         docker_client.ping().await?;
-                        
+
                         // Execute up workflow
-                        docker_client.up(&identity, &config, &workspace_folder, remove_existing_container).await
+                        docker_client
+                            .up(
+                                &identity,
+                                &config,
+                                &workspace_folder,
+                                remove_existing_container,
+                            )
+                            .await
                     })?;
 
                     // Output JSON result
@@ -300,13 +308,19 @@ impl Cli {
                         );
                     }
 
-                    tracing::info!("Container {} (reused: {})", result.container_id, result.reused);
+                    tracing::info!(
+                        "Container {} (reused: {})",
+                        result.container_id,
+                        result.reused
+                    );
                     Ok(())
                 }
 
                 #[cfg(not(feature = "docker"))]
                 {
-                    return Err(anyhow::anyhow!("Docker support is disabled (compiled without 'docker' feature)"));
+                    return Err(anyhow::anyhow!(
+                        "Docker support is disabled (compiled without 'docker' feature)"
+                    ));
                 }
             }
             Some(Commands::Build { .. }) => Err(DeaconError::Config(ConfigError::NotImplemented {
