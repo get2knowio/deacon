@@ -56,6 +56,9 @@ pub enum Commands {
         /// Additional container arguments
         #[arg(long)]
         remove_existing_container: bool,
+        /// Skip postCreate lifecycle phase
+        #[arg(long)]
+        skip_post_create: bool,
     },
 
     /// Build development container image
@@ -228,7 +231,9 @@ impl Cli {
         tracing::debug!("CLI initialized with log level: {}", log_level);
 
         match self.command {
-            Some(Commands::Up { .. }) => {
+            Some(Commands::Up {
+                skip_post_create, ..
+            }) => {
                 // Attempt Docker health check and log availability
                 #[cfg(feature = "docker")]
                 {
@@ -264,6 +269,12 @@ impl Cli {
                 {
                     tracing::warn!(
                         "Docker support is disabled (compiled without 'docker' feature)"
+                    );
+                }
+
+                if skip_post_create {
+                    tracing::info!(
+                        "Skipping postCreate lifecycle phase due to --skip-post-create flag"
                     );
                 }
 
