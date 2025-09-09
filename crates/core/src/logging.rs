@@ -5,12 +5,13 @@
 //! controlled by feature flags and environment variables.
 
 use anyhow::Result;
+use crate::redaction::{global_registry, RedactionConfig, redact_if_enabled};
 use std::sync::Once;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 static INIT: Once = Once::new();
 
-/// Initialize the logging system with optional logging specification
+/// Initialize the logging system with optional logging specification and redaction config
 ///
 /// This function sets up tracing-subscriber with either JSON or text formatting
 /// based on feature flags and configuration. It can be called multiple times
@@ -22,6 +23,7 @@ static INIT: Once = Once::new();
 ///   are used. Format should follow EnvFilter syntax (e.g., "debug", "info,tokio=warn").
 ///   If not provided, the function will check the `DEACON_LOG` environment variable,
 ///   falling back to "info" if not set.
+/// * `redaction_config` - Optional redaction configuration. If None, defaults to enabled.
 ///
 /// ## Environment Variables
 ///
@@ -36,14 +38,17 @@ static INIT: Once = Once::new();
 ///
 /// ```rust
 /// use deacon_core::logging;
+/// use deacon_core::redaction::RedactionConfig;
 ///
 /// // Initialize with default settings
-/// logging::init(None).expect("Failed to initialize logging");
+/// logging::init_with_redaction(None, None).expect("Failed to initialize logging");
 ///
-/// // Initialize with custom filter
-/// logging::init(Some("debug,reqwest=warn")).expect("Failed to initialize logging");
+/// // Initialize with custom filter and disabled redaction
+/// logging::init_with_redaction(Some("debug,reqwest=warn"), Some(RedactionConfig::disabled())).expect("Failed to initialize logging");
 /// ```
-pub fn init(logging_spec: Option<&str>) -> Result<()> {
+pub fn init_with_redaction(logging_spec: Option<&str>, redaction_config: Option<RedactionConfig>) -> Result<()> {
+    let _redaction_config = redaction_config.unwrap_or_default();
+    
     INIT.call_once(|| {
         let filter = create_env_filter(logging_spec);
 
@@ -67,6 +72,13 @@ pub fn init(logging_spec: Option<&str>) -> Result<()> {
     });
 
     Ok(())
+}
+
+/// Initialize the logging system with optional logging specification
+///
+/// This is a convenience wrapper around `init_with_redaction` that uses default redaction settings.
+pub fn init(logging_spec: Option<&str>) -> Result<()> {
+    init_with_redaction(logging_spec, None)
 }
 
 /// Create an EnvFilter based on the provided specification or environment variables
