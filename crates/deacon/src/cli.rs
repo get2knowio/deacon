@@ -38,6 +38,8 @@ pub struct CliContext {
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
     pub config: Option<PathBuf>,
+    /// Whether secret redaction is disabled
+    pub no_redact: bool,
 }
 
 /// DevContainer CLI subcommands
@@ -186,6 +188,10 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
+    /// Disable secret redaction in output (debugging only - WARNING: may expose secrets)
+    #[arg(long, global = true)]
+    pub no_redact: bool,
+
     /// Subcommand to execute
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -200,6 +206,7 @@ impl Cli {
             log_level: self.log_level.clone(),
             workspace_folder: self.workspace_folder.clone(),
             config: self.config.clone(),
+            no_redact: self.no_redact,
         }
     }
 
@@ -229,6 +236,11 @@ impl Cli {
 
         // Emit a debug log to help with testing
         tracing::debug!("CLI initialized with log level: {}", log_level);
+
+        // Warn if redaction is disabled
+        if self.no_redact {
+            tracing::warn!("Secret redaction is DISABLED via --no-redact flag. This may expose sensitive information in logs and output. Use only for debugging purposes!");
+        }
 
         match self.command {
             Some(Commands::Up {

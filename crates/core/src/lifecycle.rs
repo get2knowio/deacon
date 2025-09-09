@@ -7,6 +7,7 @@
 //! References: CLI-SPEC.md "Container Lifecycle Management"
 
 use crate::errors::{DeaconError, Result};
+use crate::redaction::{RedactionConfig, redact_if_enabled};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -110,6 +111,8 @@ pub struct ExecutionContext {
     pub working_directory: Option<std::path::PathBuf>,
     /// Timeout for command execution (placeholder, not enforced yet)
     pub timeout: Option<std::time::Duration>,
+    /// Redaction configuration for sensitive output filtering
+    pub redaction_config: RedactionConfig,
 }
 
 impl ExecutionContext {
@@ -119,6 +122,7 @@ impl ExecutionContext {
             environment: HashMap::new(),
             working_directory: None,
             timeout: None, // TODO: Implement timeout enforcement
+            redaction_config: RedactionConfig::default(),
         }
     }
 
@@ -137,6 +141,12 @@ impl ExecutionContext {
     /// Set timeout (placeholder for future implementation)
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    /// Set redaction configuration
+    pub fn with_redaction_config(mut self, config: RedactionConfig) -> Self {
+        self.redaction_config = config;
         self
     }
 }
@@ -269,16 +279,22 @@ pub fn run_phase(
         for line in stdout_reader.lines() {
             let line =
                 line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stdout: {}", e)))?;
-            info!("[{}] stdout: {}", phase.as_str(), line);
-            stdout_lines.push(line);
+            
+            // Apply redaction to the line before logging
+            let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
+            info!("[{}] stdout: {}", phase.as_str(), redacted_line);
+            stdout_lines.push(line); // Store original for result, log redacted
         }
 
         // Read stderr
         for line in stderr_reader.lines() {
             let line =
                 line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stderr: {}", e)))?;
-            info!("[{}] stderr: {}", phase.as_str(), line);
-            stderr_lines.push(line);
+            
+            // Apply redaction to the line before logging
+            let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
+            info!("[{}] stderr: {}", phase.as_str(), redacted_line);
+            stderr_lines.push(line); // Store original for result, log redacted
         }
 
         // Wait for command to complete
@@ -294,9 +310,13 @@ pub fn run_phase(
         let stdout = stdout_lines.join("\n");
         let stderr = stderr_lines.join("\n");
 
+        // Apply redaction to the combined output for the result
+        let redacted_stdout = redact_if_enabled(&stdout, &ctx.redaction_config);
+        let redacted_stderr = redact_if_enabled(&stderr, &ctx.redaction_config);
+
         debug!("Command completed with exit code: {}", exit_code);
 
-        result.add_command_result(exit_code, stdout, stderr);
+        result.add_command_result(exit_code, redacted_stdout, redacted_stderr);
 
         // If command failed, halt execution and return error with phase context
         if exit_code != 0 {
