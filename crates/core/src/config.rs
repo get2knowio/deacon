@@ -23,8 +23,8 @@
 
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
-use serde::Deserialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, warn};
 
@@ -116,6 +116,35 @@ pub struct PortAttributes {
     pub description: Option<String>,
 }
 
+/// Custom deserializer for extends field that handles both string and array of strings
+fn deserialize_extends<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::String(s)) => Ok(Some(vec![s])),
+        Some(serde_json::Value::Array(arr)) => {
+            let mut result = Vec::new();
+            for item in arr {
+                match item {
+                    serde_json::Value::String(s) => result.push(s),
+                    _ => return Err(D::Error::custom("extends array must contain only strings")),
+                }
+            }
+            Ok(Some(result))
+        }
+        Some(_) => Err(D::Error::custom(
+            "extends must be a string or array of strings",
+        )),
+    }
+}
+
 /// Configuration file location information
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfigLocation {
@@ -157,9 +186,15 @@ impl ConfigLocation {
 /// - [DevContainer Configuration Reference](https://containers.dev/implementors/json_reference/)
 /// - [Container Configuration](https://containers.dev/implementors/json_reference/#container-configuration)
 /// - [Lifecycle Commands](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevContainerConfig {
+    /// Paths to extend from. Can be a single path or array of paths.
+    ///
+    /// Reference: [Configuration - extends](https://containers.dev/implementors/json_reference/#extends)
+    #[serde(default, deserialize_with = "deserialize_extends")]
+    pub extends: Option<Vec<String>>,
+
     /// Human-readable name for the development container.
     ///
     /// Reference: [Container Configuration - name](https://containers.dev/implementors/json_reference/#name)
@@ -435,6 +470,7 @@ impl DevContainerConfig {
 impl Default for DevContainerConfig {
     fn default() -> Self {
         Self {
+            extends: None,
             name: None,
             image: None,
             dockerfile: None,
@@ -462,6 +498,193 @@ impl Default for DevContainerConfig {
     }
 }
 
+/// Configuration merger that implements the DevContainer specification merge rules.
+///
+/// The merger follows these rules:
+/// - Arrays override (no concatenation) for lifecycle commands
+/// - Maps deep-merge with later precedence
+/// - Features map merge keyed by id
+/// - containerEnv & remoteEnv last-writer-wins
+/// - runArgs concatenate
+pub struct ConfigMerger;
+
+impl ConfigMerger {
+    /// Merge multiple configurations in order, with later configs taking precedence.
+    ///
+    /// ## Arguments
+    ///
+    /// * `configs` - Configurations to merge in order (first = lowest precedence)
+    ///
+    /// ## Returns
+    ///
+    /// Returns the merged configuration following DevContainer merge rules.
+    #[instrument(skip_all)]
+    pub fn merge_configs(configs: &[DevContainerConfig]) -> DevContainerConfig {
+        if configs.is_empty() {
+            return DevContainerConfig::default();
+        }
+
+        if configs.len() == 1 {
+            return configs[0].clone();
+        }
+
+        debug!("Merging {} configurations", configs.len());
+
+        let mut result = DevContainerConfig::default();
+
+        for (i, config) in configs.iter().enumerate() {
+            debug!("Merging configuration {} of {}", i + 1, configs.len());
+            result = Self::merge_two_configs(&result, config);
+        }
+
+        debug!("Configuration merge complete");
+        result
+    }
+
+    /// Merge two configurations with the second taking precedence.
+    fn merge_two_configs(
+        base: &DevContainerConfig,
+        overlay: &DevContainerConfig,
+    ) -> DevContainerConfig {
+        DevContainerConfig {
+            // extends is not merged - it's resolved before merging
+            extends: overlay.extends.clone().or_else(|| base.extends.clone()),
+
+            // Simple field overrides (last writer wins)
+            name: overlay.name.clone().or_else(|| base.name.clone()),
+            image: overlay.image.clone().or_else(|| base.image.clone()),
+            dockerfile: overlay
+                .dockerfile
+                .clone()
+                .or_else(|| base.dockerfile.clone()),
+            build: overlay.build.clone().or_else(|| base.build.clone()),
+            workspace_folder: overlay
+                .workspace_folder
+                .clone()
+                .or_else(|| base.workspace_folder.clone()),
+            app_port: overlay.app_port.clone().or_else(|| base.app_port.clone()),
+            shutdown_action: overlay
+                .shutdown_action
+                .clone()
+                .or_else(|| base.shutdown_action.clone()),
+            override_command: overlay.override_command.or(base.override_command),
+
+            // Features: deep merge as objects
+            features: Self::merge_json_objects(&base.features, &overlay.features),
+
+            // Customizations: deep merge as objects
+            customizations: Self::merge_json_objects(&base.customizations, &overlay.customizations),
+
+            // Arrays that override (no concat) - lifecycle commands
+            mounts: if overlay.mounts.is_empty() {
+                base.mounts.clone()
+            } else {
+                overlay.mounts.clone()
+            },
+            forward_ports: if overlay.forward_ports.is_empty() {
+                base.forward_ports.clone()
+            } else {
+                overlay.forward_ports.clone()
+            },
+            on_create_command: overlay
+                .on_create_command
+                .clone()
+                .or_else(|| base.on_create_command.clone()),
+            post_start_command: overlay
+                .post_start_command
+                .clone()
+                .or_else(|| base.post_start_command.clone()),
+            post_create_command: overlay
+                .post_create_command
+                .clone()
+                .or_else(|| base.post_create_command.clone()),
+            post_attach_command: overlay
+                .post_attach_command
+                .clone()
+                .or_else(|| base.post_attach_command.clone()),
+            initialize_command: overlay
+                .initialize_command
+                .clone()
+                .or_else(|| base.initialize_command.clone()),
+            update_content_command: overlay
+                .update_content_command
+                .clone()
+                .or_else(|| base.update_content_command.clone()),
+
+            // Maps: last writer wins for env vars
+            container_env: Self::merge_string_maps(&base.container_env, &overlay.container_env),
+            remote_env: Self::merge_optional_string_maps(&base.remote_env, &overlay.remote_env),
+
+            // runArgs: concatenate arrays
+            run_args: Self::concat_string_arrays(&base.run_args, &overlay.run_args),
+
+            // Port attributes: deep merge maps
+            ports_attributes: Self::merge_port_attributes_maps(&base.ports_attributes, &overlay.ports_attributes),
+            other_ports_attributes: overlay.other_ports_attributes.clone().or_else(|| base.other_ports_attributes.clone()),
+        }
+    }
+
+    /// Merge two JSON objects deeply
+    fn merge_json_objects(
+        base: &serde_json::Value,
+        overlay: &serde_json::Value,
+    ) -> serde_json::Value {
+        match (base, overlay) {
+            (serde_json::Value::Object(base_obj), serde_json::Value::Object(overlay_obj)) => {
+                let mut result = base_obj.clone();
+                for (key, value) in overlay_obj {
+                    match result.get(key) {
+                        Some(existing) => {
+                            result.insert(key.clone(), Self::merge_json_objects(existing, value));
+                        }
+                        None => {
+                            result.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                serde_json::Value::Object(result)
+            }
+            (_, overlay) => overlay.clone(),
+        }
+    }
+
+    /// Merge string maps with overlay taking precedence
+    fn merge_string_maps(
+        base: &HashMap<String, String>,
+        overlay: &HashMap<String, String>,
+    ) -> HashMap<String, String> {
+        let mut result = base.clone();
+        result.extend(overlay.clone());
+        result
+    }
+
+    /// Merge optional string maps with overlay taking precedence
+    fn merge_optional_string_maps(
+        base: &HashMap<String, Option<String>>,
+        overlay: &HashMap<String, Option<String>>,
+    ) -> HashMap<String, Option<String>> {
+        let mut result = base.clone();
+        result.extend(overlay.clone());
+        result
+    }
+
+    /// Concatenate string arrays
+    fn concat_string_arrays(base: &[String], overlay: &[String]) -> Vec<String> {
+        let mut result = base.to_vec();
+        result.extend_from_slice(overlay);
+        result
+    }
+
+    /// Merge port attributes maps with overlay taking precedence
+    fn merge_port_attributes_maps(
+        base: &HashMap<String, PortAttributes>,
+        overlay: &HashMap<String, PortAttributes>,
+    ) -> HashMap<String, PortAttributes> {
+        let mut result = base.clone();
+        result.extend(overlay.clone());
+        result
+    }
+}
 /// Configuration loader for DevContainer configurations.
 ///
 /// Provides methods to load and parse devcontainer.json/devcontainer.jsonc files
@@ -617,15 +840,6 @@ impl ConfigLoader {
             Self::log_unknown_keys(obj);
         }
 
-        // Check for extends field (not yet implemented)
-        if let serde_json::Value::Object(obj) = &raw_value {
-            if obj.contains_key("extends") {
-                return Err(DeaconError::Config(ConfigError::NotImplemented {
-                    feature: "extends configuration".to_string(),
-                }));
-            }
-        }
-
         // Deserialize into strongly typed structure
         let config: DevContainerConfig = serde_json::from_value(raw_value).map_err(|e| {
             debug!("Failed to deserialize configuration: {}", e);
@@ -642,6 +856,154 @@ impl ConfigLoader {
             config.name
         );
         Ok(config)
+    }
+
+    /// Load configuration with extends resolution applied
+    ///
+    /// This method loads a configuration and resolves its extends chain,
+    /// returning the fully merged configuration.
+    ///
+    /// ## Arguments
+    ///
+    /// * `path` - Path to the devcontainer.json or devcontainer.jsonc file
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Ok(DevContainerConfig)` with extends chain resolved and merged.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use deacon_core::config::ConfigLoader;
+    /// use std::path::Path;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let config = ConfigLoader::load_with_extends(Path::new(".devcontainer/devcontainer.json"))?;
+    /// println!("Loaded merged config: {:?}", config.name);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip_all, fields(path = %path.display()))]
+    pub fn load_with_extends(path: &Path) -> Result<DevContainerConfig> {
+        debug!(
+            "Loading configuration with extends resolution from {}",
+            path.display()
+        );
+
+        let mut visited = HashSet::new();
+        let configs = Self::resolve_extends_chain(path, &mut visited)?;
+
+        debug!(
+            "Resolved extends chain with {} configurations",
+            configs.len()
+        );
+
+        // Merge all configurations in order (base to overlay)
+        let merged = ConfigMerger::merge_configs(&configs);
+
+        debug!("Configuration loading with extends complete");
+        Ok(merged)
+    }
+
+    /// Recursively resolve the extends chain for a configuration
+    ///
+    /// This method loads a configuration and recursively resolves all configurations
+    /// in its extends chain, performing cycle detection.
+    ///
+    /// ## Arguments
+    ///
+    /// * `config_path` - Path to the configuration file to resolve
+    /// * `visited` - Set of already visited paths for cycle detection
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector of configurations in merge order (base first, overlay last).
+    #[instrument(skip_all, fields(path = %config_path.display()))]
+    fn resolve_extends_chain(
+        config_path: &Path,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<Vec<DevContainerConfig>> {
+        let canonical_path = config_path.canonicalize().map_err(|e| {
+            debug!(
+                "Failed to canonicalize path {}: {}",
+                config_path.display(),
+                e
+            );
+            DeaconError::Config(ConfigError::NotFound {
+                path: config_path.display().to_string(),
+            })
+        })?;
+
+        // Check for cycles
+        if visited.contains(&canonical_path) {
+            let chain = visited
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            let cycle_chain = format!("{} -> {}", chain, canonical_path.display());
+
+            return Err(DeaconError::Config(ConfigError::ExtendsCycle {
+                chain: cycle_chain,
+            }));
+        }
+
+        visited.insert(canonical_path.clone());
+
+        // Load the current configuration
+        let config = Self::load_from_path(&canonical_path)?;
+
+        let mut all_configs = Vec::new();
+
+        // Recursively resolve extends
+        if let Some(extends_paths) = &config.extends {
+            debug!("Resolving {} extends paths", extends_paths.len());
+
+            for extend_path in extends_paths {
+                // Check for OCI references (not yet implemented)
+                if extend_path.contains("://")
+                    || extend_path.starts_with("ghcr.io/")
+                    || extend_path.starts_with("mcr.microsoft.com/")
+                {
+                    warn!(
+                        "OCI extends reference detected but not yet implemented: {}",
+                        extend_path
+                    );
+                    return Err(DeaconError::Config(ConfigError::NotImplemented {
+                        feature: format!("OCI extends reference: {}", extend_path),
+                    }));
+                }
+
+                // Resolve relative path
+                let base_dir = canonical_path.parent().unwrap_or(&canonical_path);
+                let resolved_path = base_dir.join(extend_path);
+
+                debug!(
+                    "Resolving extends path: {} -> {}",
+                    extend_path,
+                    resolved_path.display()
+                );
+
+                // Recursively resolve the extended configuration
+                let mut extended_configs = Self::resolve_extends_chain(&resolved_path, visited)?;
+                all_configs.append(&mut extended_configs);
+            }
+        }
+
+        // Add the current config last (highest precedence)
+        let mut config_without_extends = config.clone();
+        config_without_extends.extends = None; // Remove extends from final config
+        all_configs.push(config_without_extends);
+
+        visited.remove(&canonical_path);
+
+        debug!(
+            "Resolved extends chain for {}: {} total configs",
+            canonical_path.display(),
+            all_configs.len()
+        );
+
+        Ok(all_configs)
     }
 
     /// Load configuration with variable substitution applied
@@ -708,6 +1070,7 @@ impl ConfigLoader {
     /// keys that are not yet supported without failing the configuration load.
     fn log_unknown_keys(obj: &serde_json::Map<String, serde_json::Value>) {
         let known_keys = [
+            "extends",
             "name",
             "image",
             "dockerFile",
@@ -981,7 +1344,8 @@ mod tests {
     }
 
     #[test]
-    fn test_extends_not_implemented() -> anyhow::Result<()> {
+    fn test_extends_field_parsing() -> anyhow::Result<()> {
+        // Test string extends
         let config_content = r#"{
             "name": "Test",
             "extends": "../base/devcontainer.json"
@@ -991,13 +1355,32 @@ mod tests {
         temp_file.write_all(config_content.as_bytes())?;
 
         let result = ConfigLoader::load_from_path(temp_file.path());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            DeaconError::Config(ConfigError::NotImplemented { feature }) => {
-                assert!(feature.contains("extends"));
-            }
-            _ => panic!("Expected Config(NotImplemented) error"),
-        }
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(
+            config.extends,
+            Some(vec!["../base/devcontainer.json".to_string()])
+        );
+
+        // Test array extends
+        let config_content = r#"{
+            "name": "Test",
+            "extends": ["../base1/devcontainer.json", "../base2/devcontainer.json"]
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let result = ConfigLoader::load_from_path(temp_file.path());
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(
+            config.extends,
+            Some(vec![
+                "../base1/devcontainer.json".to_string(),
+                "../base2/devcontainer.json".to_string()
+            ])
+        );
 
         Ok(())
     }
