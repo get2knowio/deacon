@@ -19,11 +19,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 json5 = "0.4"
 regex = "1.0"
-tokio = { version = "1.0", features = ["rt", "process"] }
+tokio = { version = "1.0", features = ["rt", "process", "macros", "io-util"] }
 
 [dev-dependencies]
 tempfile = "3.12"
 assert_cmd = "2.0"
+tokio-test = "0.4"
 
 [lints]
 workspace = true
