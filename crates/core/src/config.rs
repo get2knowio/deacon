@@ -22,14 +22,42 @@
 //! and follows the configuration resolution workflow defined in the CLI specification.
 
 use crate::errors::{ConfigError, DeaconError, Result};
+use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
 /// Default function to return an empty JSON object for serde defaults.
 fn default_empty_object() -> serde_json::Value {
     serde_json::Value::Object(Default::default())
+}
+
+/// Configuration file location information
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigLocation {
+    /// Path to the configuration file
+    pub path: PathBuf,
+    /// Whether the file exists
+    pub exists: bool,
+}
+
+impl ConfigLocation {
+    /// Create a new ConfigLocation
+    pub fn new(path: PathBuf) -> Self {
+        let exists = path.exists();
+        Self { path, exists }
+    }
+
+    /// Get the path as a reference
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Check if the configuration file exists
+    pub fn exists(&self) -> bool {
+        self.exists
+    }
 }
 
 /// DevContainer configuration structure following the Development Containers Specification.
@@ -167,6 +195,147 @@ pub struct DevContainerConfig {
     pub update_content_command: Option<serde_json::Value>,
 }
 
+impl DevContainerConfig {
+    /// Apply variable substitution to configuration fields
+    ///
+    /// This method applies variable substitution to the following fields:
+    /// - `workspace_folder`
+    /// - `mounts` (string forms)
+    /// - Lifecycle commands (string or array entries)
+    /// - `run_args`
+    /// - `container_env` values
+    ///
+    /// ## Arguments
+    ///
+    /// * `context` - Substitution context with variable values
+    ///
+    /// ## Returns
+    ///
+    /// Returns a tuple of (substituted_config, substitution_report).
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use deacon_core::config::DevContainerConfig;
+    /// use deacon_core::variable::SubstitutionContext;
+    /// use std::path::Path;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let mut config = DevContainerConfig::default();
+    /// config.workspace_folder = Some("${localWorkspaceFolder}/src".to_string());
+    ///
+    /// let context = SubstitutionContext::new(Path::new("/workspace"))?;
+    /// let (substituted_config, report) = config.apply_variable_substitution(&context);
+    ///
+    /// println!("Substituted workspace folder: {:?}", substituted_config.workspace_folder);
+    /// println!("Substitutions made: {}", report.replacements.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip_all)]
+    pub fn apply_variable_substitution(
+        &self,
+        context: &SubstitutionContext,
+    ) -> (Self, SubstitutionReport) {
+        let mut report = SubstitutionReport::new();
+        let mut config = self.clone();
+
+        debug!("Applying variable substitution to DevContainer configuration");
+
+        // Substitute workspace_folder
+        if let Some(ref workspace_folder) = config.workspace_folder {
+            config.workspace_folder = Some(VariableSubstitution::substitute_string(
+                workspace_folder,
+                context,
+                &mut report,
+            ));
+        }
+
+        // Substitute mounts (JSON values that may contain strings)
+        config.mounts = config
+            .mounts
+            .iter()
+            .map(|mount| VariableSubstitution::substitute_json_value(mount, context, &mut report))
+            .collect();
+
+        // Substitute run_args
+        config.run_args = config
+            .run_args
+            .iter()
+            .map(|arg| VariableSubstitution::substitute_string(arg, context, &mut report))
+            .collect();
+
+        // Substitute container_env values
+        config.container_env = config
+            .container_env
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    VariableSubstitution::substitute_string(value, context, &mut report),
+                )
+            })
+            .collect();
+
+        // Substitute lifecycle commands
+        if let Some(ref cmd) = config.on_create_command {
+            config.on_create_command = Some(VariableSubstitution::substitute_json_value(
+                cmd,
+                context,
+                &mut report,
+            ));
+        }
+
+        if let Some(ref cmd) = config.post_create_command {
+            config.post_create_command = Some(VariableSubstitution::substitute_json_value(
+                cmd,
+                context,
+                &mut report,
+            ));
+        }
+
+        if let Some(ref cmd) = config.post_start_command {
+            config.post_start_command = Some(VariableSubstitution::substitute_json_value(
+                cmd,
+                context,
+                &mut report,
+            ));
+        }
+
+        if let Some(ref cmd) = config.post_attach_command {
+            config.post_attach_command = Some(VariableSubstitution::substitute_json_value(
+                cmd,
+                context,
+                &mut report,
+            ));
+        }
+
+        if let Some(ref cmd) = config.initialize_command {
+            config.initialize_command = Some(VariableSubstitution::substitute_json_value(
+                cmd,
+                context,
+                &mut report,
+            ));
+        }
+
+        if let Some(ref cmd) = config.update_content_command {
+            config.update_content_command = Some(VariableSubstitution::substitute_json_value(
+                cmd,
+                context,
+                &mut report,
+            ));
+        }
+
+        debug!(
+            "Variable substitution complete - {} replacements, {} unknown variables",
+            report.replacements.len(),
+            report.unknown_variables.len()
+        );
+
+        (config, report)
+    }
+}
+
 impl Default for DevContainerConfig {
     fn default() -> Self {
         Self {
@@ -215,6 +384,75 @@ impl Default for DevContainerConfig {
 pub struct ConfigLoader;
 
 impl ConfigLoader {
+    /// Discover DevContainer configuration file in workspace
+    ///
+    /// This method implements the configuration discovery rules:
+    /// 1. Search for `.devcontainer/devcontainer.json` first
+    /// 2. Then search for `.devcontainer.json` in workspace root
+    /// 3. Return the first file found (may not exist)
+    ///
+    /// ## Arguments
+    ///
+    /// * `workspace` - Path to the workspace folder
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Ok(ConfigLocation)` with the discovered configuration path.
+    /// The returned location may indicate a non-existent file if no configuration
+    /// is found, allowing callers to decide how to handle missing configurations.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use deacon_core::config::ConfigLoader;
+    /// use std::path::Path;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let location = ConfigLoader::discover_config(Path::new("/workspace"))?;
+    /// if location.exists() {
+    ///     println!("Found config at: {}", location.path().display());
+    /// } else {
+    ///     println!("No config found, would use: {}", location.path().display());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip_all, fields(workspace = %workspace.display()))]
+    pub fn discover_config(workspace: &Path) -> Result<ConfigLocation> {
+        debug!(
+            "Discovering DevContainer configuration in workspace: {}",
+            workspace.display()
+        );
+
+        // Check if workspace exists
+        if !workspace.exists() {
+            return Err(DeaconError::Config(ConfigError::NotFound {
+                path: workspace.display().to_string(),
+            }));
+        }
+
+        // Search order: .devcontainer/devcontainer.json then .devcontainer.json
+        let search_paths = [
+            workspace.join(".devcontainer").join("devcontainer.json"),
+            workspace.join(".devcontainer.json"),
+        ];
+
+        for path in &search_paths {
+            debug!("Checking for configuration file: {}", path.display());
+            if path.exists() {
+                debug!("Found configuration file: {}", path.display());
+                return Ok(ConfigLocation::new(path.clone()));
+            }
+        }
+
+        // Return the first preference even if it doesn't exist
+        let default_path = search_paths[0].clone();
+        debug!(
+            "No configuration file found, defaulting to: {}",
+            default_path.display()
+        );
+        Ok(ConfigLocation::new(default_path))
+    }
     /// Load DevContainer configuration from a file path.
     ///
     /// This method:
@@ -308,6 +546,64 @@ impl ConfigLoader {
         Ok(config)
     }
 
+    /// Load configuration with variable substitution applied
+    ///
+    /// This is a convenience method that combines configuration loading and
+    /// variable substitution in a single call.
+    ///
+    /// ## Arguments
+    ///
+    /// * `path` - Path to the devcontainer.json or devcontainer.jsonc file
+    /// * `workspace` - Workspace path for variable substitution context
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Ok((DevContainerConfig, SubstitutionReport))` on success with
+    /// variable substitution applied.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use deacon_core::config::ConfigLoader;
+    /// use std::path::Path;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let (config, report) = ConfigLoader::load_with_substitution(
+    ///     Path::new(".devcontainer/devcontainer.json"),
+    ///     Path::new("/workspace")
+    /// )?;
+    ///
+    /// println!("Loaded config with {} substitutions", report.replacements.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip_all, fields(path = %path.display(), workspace = %workspace.display()))]
+    pub fn load_with_substitution(
+        path: &Path,
+        workspace: &Path,
+    ) -> Result<(DevContainerConfig, SubstitutionReport)> {
+        debug!(
+            "Loading configuration with substitution from {}",
+            path.display()
+        );
+
+        // Load base configuration
+        let config = Self::load_from_path(path)?;
+
+        // Create substitution context
+        let context = SubstitutionContext::new(workspace)?;
+
+        // Apply variable substitution
+        let (substituted_config, report) = config.apply_variable_substitution(&context);
+
+        debug!(
+            "Configuration loaded and substituted - {} replacements",
+            report.replacements.len()
+        );
+
+        Ok((substituted_config, report))
+    }
+
     /// Log unknown top-level keys at DEBUG level.
     ///
     /// This helps with forward compatibility by informing users of configuration
@@ -390,7 +686,7 @@ impl ConfigLoader {
 mod tests {
     use super::*;
     use std::io::Write;
-    use tempfile::NamedTempFile;
+    use tempfile::{NamedTempFile, TempDir};
 
     #[test]
     fn test_config_default() {
@@ -592,6 +888,141 @@ mod tests {
         // JSON objects should default to empty objects
         assert!(config.features.is_object());
         assert!(config.customizations.is_object());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_devcontainer_dir() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let devcontainer_dir = workspace.join(".devcontainer");
+        std::fs::create_dir_all(&devcontainer_dir)?;
+
+        let config_path = devcontainer_dir.join("devcontainer.json");
+        std::fs::write(&config_path, r#"{"name": "Test"}"#)?;
+
+        let location = ConfigLoader::discover_config(workspace)?;
+        assert!(location.exists());
+        assert_eq!(location.path(), &config_path);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_root_file() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let config_path = workspace.join(".devcontainer.json");
+        std::fs::write(&config_path, r#"{"name": "Test"}"#)?;
+
+        let location = ConfigLoader::discover_config(workspace)?;
+        assert!(location.exists());
+        assert_eq!(location.path(), &config_path);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_preference_order() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let devcontainer_dir = workspace.join(".devcontainer");
+        std::fs::create_dir_all(&devcontainer_dir)?;
+
+        // Create both files
+        let dir_config_path = devcontainer_dir.join("devcontainer.json");
+        let root_config_path = workspace.join(".devcontainer.json");
+        std::fs::write(&dir_config_path, r#"{"name": "Dir Config"}"#)?;
+        std::fs::write(&root_config_path, r#"{"name": "Root Config"}"#)?;
+
+        let location = ConfigLoader::discover_config(workspace)?;
+        assert!(location.exists());
+        // Should prefer .devcontainer/devcontainer.json
+        assert_eq!(location.path(), &dir_config_path);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_no_file_exists() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+
+        let location = ConfigLoader::discover_config(workspace)?;
+        assert!(!location.exists());
+        // Should return preferred path even if it doesn't exist
+        assert_eq!(
+            location.path(),
+            &workspace.join(".devcontainer").join("devcontainer.json")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_workspace_not_exists() {
+        let result = ConfigLoader::discover_config(Path::new("/nonexistent/workspace"));
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DeaconError::Config(ConfigError::NotFound { path }) => {
+                assert!(path.contains("nonexistent"));
+            }
+            _ => panic!("Expected Config(NotFound) error"),
+        }
+    }
+
+    #[test]
+    fn test_load_with_substitution() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        // Use canonical path for comparisons to avoid platform-specific symlink prefixes
+        // (e.g., macOS may canonicalize /var/... to /private/var/...).
+        let workspace_canonical = workspace.canonicalize()?;
+        let workspace_canonical_str = workspace_canonical.to_str().unwrap();
+
+        let config_content = r#"{
+            "name": "Test Container",
+            "workspaceFolder": "${localWorkspaceFolder}/src",
+            "mounts": [
+                "source=${localWorkspaceFolder}/.cargo,target=/cargo,type=bind"
+            ],
+            "containerEnv": {
+                "WORKSPACE_ROOT": "${localWorkspaceFolder}",
+                "CONTAINER_ID": "${devcontainerId}"
+            },
+            "runArgs": ["--name", "${devcontainerId}"],
+            "postCreateCommand": "echo 'Workspace: ${localWorkspaceFolder}'"
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let (config, report) = ConfigLoader::load_with_substitution(temp_file.path(), workspace)?;
+
+        // Check that substitution was applied
+        assert!(report.has_substitutions());
+        assert!(report.replacements.len() >= 2); // At least localWorkspaceFolder and devcontainerId
+
+        // Check specific substitutions
+        if let Some(workspace_folder) = &config.workspace_folder {
+            assert!(workspace_folder.starts_with(workspace_canonical_str));
+            assert!(workspace_folder.ends_with("/src"));
+        }
+
+        // Check container env substitution
+        assert!(config
+            .container_env
+            .get("WORKSPACE_ROOT")
+            .unwrap()
+            .starts_with(workspace_canonical_str));
+
+        // Check mounts substitution
+        if !config.mounts.is_empty() {
+            if let serde_json::Value::String(mount_str) = &config.mounts[0] {
+                assert!(mount_str.contains(workspace_canonical_str));
+            }
+        }
 
         Ok(())
     }
