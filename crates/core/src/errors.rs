@@ -69,6 +69,22 @@ pub enum FeatureError {
     /// JSON parsing error
     #[error("JSON parsing error")]
     Json(#[from] serde_json::Error),
+
+    /// OCI registry error
+    #[error("OCI registry error: {message}")]
+    Oci { message: String },
+
+    /// Feature download error
+    #[error("Feature download error: {message}")]
+    Download { message: String },
+
+    /// Feature extraction error  
+    #[error("Feature extraction error: {message}")]
+    Extraction { message: String },
+
+    /// Feature installation error
+    #[error("Feature installation error: {message}")]
+    Installation { message: String },
 }
 
 /// Internal/generic fallback errors

@@ -5,11 +5,13 @@
 
 pub mod cache;
 pub mod config;
+pub mod container;
 pub mod docker;
 pub mod errors;
 pub mod features;
 pub mod lifecycle;
 pub mod logging;
+pub mod oci;
 pub mod templates;
 pub mod variable;
 
