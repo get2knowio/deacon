@@ -230,34 +230,6 @@ pub struct DevContainerConfig {
     pub update_content_command: Option<serde_json::Value>,
 }
 
-impl Default for DevContainerConfig {
-    fn default() -> Self {
-        Self {
-            name: None,
-            image: None,
-            dockerfile: None,
-            build: None,
-            features: default_empty_object(),
-            customizations: default_empty_object(),
-            workspace_folder: None,
-            mounts: Vec::new(),
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            forward_ports: Vec::new(),
-            app_port: None,
-            run_args: Vec::new(),
-            shutdown_action: None,
-            override_command: None,
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: None,
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        }
-    }
-}
-
 impl DevContainerConfig {
     /// Apply variable substitution to configuration fields
     ///
