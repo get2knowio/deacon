@@ -45,3 +45,21 @@ See the [CLI specification](docs/CLI-SPEC.md) for detailed architecture and plan
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, testing guidelines, and contribution requirements.
+
+## Test Coverage
+
+We use cargo-llvm-cov (LLVM source-based coverage) locally and in CI.
+
+- Install toolchain addon and helper:
+	- rustup component add llvm-tools-preview
+	- cargo install cargo-llvm-cov
+
+- Run coverage locally and open HTML report:
+	- cargo llvm-cov --workspace --open
+
+- Generate LCOV for external services:
+	- cargo llvm-cov --workspace --lcov --output-path lcov.info
+
+CI enforces a minimum line coverage threshold (see MIN_COVERAGE in `.github/workflows/ci.yml`). To try the same locally:
+
+- cargo llvm-cov --workspace --fail-under-lines 80
