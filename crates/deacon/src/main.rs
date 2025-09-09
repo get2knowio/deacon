@@ -3,12 +3,13 @@ use clap::Parser;
 
 mod cli;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Parse CLI arguments
     let parsed = cli::Cli::parse();
 
     // Dispatch to CLI handler and handle NotImplemented errors
-    match parsed.dispatch() {
+    match parsed.dispatch().await {
         Ok(()) => Ok(()),
         Err(err) => {
             // Check if this is a NotImplemented error for special handling

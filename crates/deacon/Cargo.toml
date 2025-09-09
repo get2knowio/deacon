@@ -10,7 +10,7 @@ deacon-core.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
-tokio = { version = "1.0", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
 default = ["docker"]

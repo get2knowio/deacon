@@ -113,6 +113,18 @@ pub enum Commands {
         /// Commands to run
         commands: Vec<String>,
     },
+
+    /// Environment diagnostics and support bundle creation
+    ///
+    /// Collects system information for troubleshooting and support
+    Doctor {
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+        /// Create support bundle at specified path
+        #[arg(long)]
+        bundle: Option<PathBuf>,
+    },
 }
 
 /// Feature management subcommands
@@ -203,7 +215,7 @@ impl Cli {
         }
     }
 
-    pub fn dispatch(self) -> Result<()> {
+    pub async fn dispatch(self) -> Result<()> {
         use deacon_core::errors::{ConfigError, DeaconError};
 
         // Initialize logging based on global options
@@ -314,6 +326,19 @@ impl Cli {
                     feature: "run-user-commands command".to_string(),
                 })
                 .into())
+            }
+            Some(Commands::Doctor { json, bundle }) => {
+                // Create a DoctorContext for doctor command
+                let context = deacon_core::doctor::DoctorContext {
+                    workspace_folder: self.workspace_folder.clone(),
+                    config: self.config.clone(),
+                };
+                
+                // Execute doctor command
+                match deacon_core::doctor::run_doctor(json, bundle, context).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => Err(e.into()),
+                }
             }
             None => {
                 // No subcommand provided - show help-like message

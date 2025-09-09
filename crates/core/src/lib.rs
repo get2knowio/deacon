@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod docker;
+pub mod doctor;
 pub mod errors;
 pub mod features;
 pub mod lifecycle;
