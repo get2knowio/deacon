@@ -23,7 +23,7 @@
 
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
@@ -74,7 +74,7 @@ impl ConfigLocation {
 /// - [DevContainer Configuration Reference](https://containers.dev/implementors/json_reference/)
 /// - [Container Configuration](https://containers.dev/implementors/json_reference/#container-configuration)
 /// - [Lifecycle Commands](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevContainerConfig {
     /// Human-readable name for the development container.
@@ -193,6 +193,34 @@ pub struct DevContainerConfig {
     ///
     /// Reference: [Lifecycle Commands - updateContentCommand](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
     pub update_content_command: Option<serde_json::Value>,
+}
+
+impl Default for DevContainerConfig {
+    fn default() -> Self {
+        Self {
+            name: None,
+            image: None,
+            dockerfile: None,
+            build: None,
+            features: default_empty_object(),
+            customizations: default_empty_object(),
+            workspace_folder: None,
+            mounts: Vec::new(),
+            container_env: HashMap::new(),
+            remote_env: HashMap::new(),
+            forward_ports: Vec::new(),
+            app_port: None,
+            run_args: Vec::new(),
+            shutdown_action: None,
+            override_command: None,
+            on_create_command: None,
+            post_start_command: None,
+            post_create_command: None,
+            post_attach_command: None,
+            initialize_command: None,
+            update_content_command: None,
+        }
+    }
 }
 
 impl DevContainerConfig {
@@ -333,34 +361,6 @@ impl DevContainerConfig {
         );
 
         (config, report)
-    }
-}
-
-impl Default for DevContainerConfig {
-    fn default() -> Self {
-        Self {
-            name: None,
-            image: None,
-            dockerfile: None,
-            build: None,
-            features: default_empty_object(),
-            customizations: default_empty_object(),
-            workspace_folder: None,
-            mounts: Vec::new(),
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            forward_ports: Vec::new(),
-            app_port: None,
-            run_args: Vec::new(),
-            shutdown_action: None,
-            override_command: None,
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: None,
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        }
     }
 }
 

@@ -4,6 +4,7 @@
 //! feature system, template system, lifecycle execution, logging, and error handling.
 
 pub mod config;
+pub mod container;
 pub mod docker;
 pub mod errors;
 pub mod features;
