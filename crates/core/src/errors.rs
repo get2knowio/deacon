@@ -43,12 +43,32 @@ pub enum DockerError {
     CLIError(String),
 }
 
-/// Feature-related errors (placeholder implementation)
+/// Feature-related errors
 #[derive(Error, Debug)]
 pub enum FeatureError {
     /// Feature not implemented
     #[error("Feature not implemented")]
     NotImplemented,
+
+    /// Feature metadata parsing error
+    #[error("Failed to parse feature metadata: {message}")]
+    Parsing { message: String },
+
+    /// Feature metadata validation error
+    #[error("Feature validation error: {message}")]
+    Validation { message: String },
+
+    /// Feature metadata file I/O error
+    #[error("Failed to read feature metadata file")]
+    Io(#[from] std::io::Error),
+
+    /// Feature metadata file not found
+    #[error("Feature metadata file not found: {path}")]
+    NotFound { path: String },
+
+    /// JSON parsing error
+    #[error("JSON parsing error")]
+    Json(#[from] serde_json::Error),
 }
 
 /// Internal/generic fallback errors
