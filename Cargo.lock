@@ -341,6 +341,7 @@ dependencies = [
  "deacon-core",
  "predicates",
  "serde",
+ "tempfile",
  "tokio",
  "toml",
  "tracing",

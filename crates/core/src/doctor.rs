@@ -8,7 +8,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Simple context for doctor command
 #[derive(Debug, Clone)]
@@ -104,10 +104,11 @@ pub async fn run_doctor(
 
     // Output results
     if json_output {
-        let json_output = serde_json::to_string_pretty(&doctor_info)
-            .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+        let json_output = serde_json::to_string_pretty(&doctor_info).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
                 message: format!("Failed to serialize doctor info to JSON: {}", e),
-            }))?;
+            })
+        })?;
         println!("{}", json_output);
     } else {
         print_text_output(&doctor_info);
@@ -151,7 +152,7 @@ async fn collect_diagnostics(context: &DoctorContext) -> Result<DoctorInfo> {
 fn collect_host_os_info() -> HostOsInfo {
     let name = std::env::consts::OS.to_string();
     let arch = std::env::consts::ARCH.to_string();
-    
+
     // Try to get more detailed version info
     let version = if cfg!(target_os = "linux") {
         fs::read_to_string("/etc/os-release")
@@ -160,7 +161,11 @@ fn collect_host_os_info() -> HostOsInfo {
                 content
                     .lines()
                     .find(|line| line.starts_with("PRETTY_NAME="))
-                    .map(|line| line.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string())
+                    .map(|line| {
+                        line.trim_start_matches("PRETTY_NAME=")
+                            .trim_matches('"')
+                            .to_string()
+                    })
             })
             .unwrap_or_else(|| "Unknown".to_string())
     } else if cfg!(target_os = "macos") {
@@ -171,7 +176,11 @@ fn collect_host_os_info() -> HostOsInfo {
         "Unknown".to_string()
     };
 
-    HostOsInfo { name, version, arch }
+    HostOsInfo {
+        name,
+        version,
+        arch,
+    }
 }
 
 /// Collect Docker diagnostics information
@@ -183,10 +192,10 @@ async fn collect_docker_info() -> DockerDiagnostics {
         use crate::docker::{CliDocker, Docker};
 
         let docker_client = CliDocker::new();
-        
+
         // Check if Docker is installed
         let installed = docker_client.check_docker_installed().is_ok();
-        
+
         if !installed {
             return DockerDiagnostics {
                 installed: false,
@@ -198,10 +207,10 @@ async fn collect_docker_info() -> DockerDiagnostics {
 
         // Get Docker version
         let version = docker_client.get_version().await.ok();
-        
+
         // Check if daemon is running
         let daemon_running = docker_client.ping().await.is_ok();
-        
+
         // Get Docker info summary if daemon is running
         let info_summary = if daemon_running {
             docker_client.get_info_summary().await.ok()
@@ -232,19 +241,19 @@ async fn collect_docker_info() -> DockerDiagnostics {
 /// Collect disk space information for current directory
 fn collect_disk_space_info() -> DiskSpaceInfo {
     debug!("Collecting disk space information");
-    
+
     // Get disk space for current working directory
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    
+
     // Use statvfs on Unix systems or GetDiskFreeSpace on Windows
     #[cfg(unix)]
     {
         if let Ok(_metadata) = fs::metadata(&current_dir) {
             // This is a simplified approach - in a real implementation you'd use statvfs
             let total_bytes = 1_000_000_000_000; // 1TB placeholder
-            let available_bytes = 500_000_000_000; // 500GB placeholder  
+            let available_bytes = 500_000_000_000; // 500GB placeholder
             let used_bytes = total_bytes - available_bytes;
-            
+
             DiskSpaceInfo {
                 total_bytes,
                 available_bytes,
@@ -258,7 +267,7 @@ fn collect_disk_space_info() -> DiskSpaceInfo {
             }
         }
     }
-    
+
     #[cfg(not(unix))]
     {
         // Placeholder for non-Unix systems
@@ -273,33 +282,36 @@ fn collect_disk_space_info() -> DiskSpaceInfo {
 /// Collect configuration discovery information
 fn collect_config_discovery_info(context: &DoctorContext) -> ConfigDiscoveryInfo {
     debug!("Collecting configuration discovery information");
-    
+
     let mut config_files_found = Vec::new();
-    let workspace_folder = context.workspace_folder.as_ref().map(|p| p.display().to_string());
-    
+    let workspace_folder = context
+        .workspace_folder
+        .as_ref()
+        .map(|p| p.display().to_string());
+
     // Look for common devcontainer config files
     let possible_configs = [
         ".devcontainer/devcontainer.json",
         ".devcontainer.json",
         "devcontainer.json",
     ];
-    
+
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let base_path = context.workspace_folder.as_ref().unwrap_or(&current_dir);
-    
+
     for config_path in &possible_configs {
         let full_path = base_path.join(config_path);
         if full_path.exists() {
             config_files_found.push(config_path.to_string());
         }
     }
-    
+
     let primary_config = if let Some(config_override) = &context.config {
         Some(config_override.display().to_string())
     } else {
         config_files_found.first().cloned()
     };
-    
+
     ConfigDiscoveryInfo {
         config_files_found,
         workspace_folder,
@@ -310,7 +322,7 @@ fn collect_config_discovery_info(context: &DoctorContext) -> ConfigDiscoveryInfo
 /// Collect features information
 fn collect_features_info() -> Vec<String> {
     debug!("Collecting features information");
-    
+
     // Placeholder - in a real implementation this would scan for available features
     vec![
         "docker-in-docker".to_string(),
@@ -323,7 +335,7 @@ fn collect_features_info() -> Vec<String> {
 /// Collect last build hash if available
 fn collect_last_build_hash() -> Option<String> {
     debug!("Collecting last build hash");
-    
+
     // Placeholder - in a real implementation this would check for build artifacts
     None
 }
@@ -331,7 +343,7 @@ fn collect_last_build_hash() -> Option<String> {
 /// Collect cache statistics
 async fn collect_cache_stats() -> CacheStats {
     debug!("Collecting cache statistics");
-    
+
     // Placeholder - in a real implementation this would check Docker cache and build cache
     CacheStats {
         docker_cache_size: None,
@@ -344,16 +356,16 @@ fn print_text_output(info: &DoctorInfo) {
     println!("Deacon Doctor Diagnostics");
     println!("========================");
     println!();
-    
+
     println!("CLI Version: {}", info.cli_version);
     println!();
-    
+
     println!("Host OS:");
     println!("  Name: {}", info.host_os.name);
     println!("  Version: {}", info.host_os.version);
     println!("  Architecture: {}", info.host_os.arch);
     println!();
-    
+
     println!("Docker:");
     println!("  Installed: {}", info.docker_info.installed);
     if let Some(version) = &info.docker_info.version {
@@ -361,20 +373,29 @@ fn print_text_output(info: &DoctorInfo) {
     }
     println!("  Daemon Running: {}", info.docker_info.daemon_running);
     if let Some(summary) = &info.docker_info.info_summary {
-        println!("  Containers Running: {}", summary.containers_running.unwrap_or(0));
+        println!(
+            "  Containers Running: {}",
+            summary.containers_running.unwrap_or(0)
+        );
         println!("  Images: {}", summary.images.unwrap_or(0));
         if let Some(storage) = &summary.storage_driver {
             println!("  Storage Driver: {}", storage);
         }
     }
     println!();
-    
+
     println!("Disk Space:");
-    println!("  Total: {} GB", info.disk_space.total_bytes / 1_000_000_000);
-    println!("  Available: {} GB", info.disk_space.available_bytes / 1_000_000_000);
+    println!(
+        "  Total: {} GB",
+        info.disk_space.total_bytes / 1_000_000_000
+    );
+    println!(
+        "  Available: {} GB",
+        info.disk_space.available_bytes / 1_000_000_000
+    );
     println!("  Used: {} GB", info.disk_space.used_bytes / 1_000_000_000);
     println!();
-    
+
     println!("Configuration Discovery:");
     if let Some(workspace) = &info.config_discovery.workspace_folder {
         println!("  Workspace: {}", workspace);
@@ -382,12 +403,15 @@ fn print_text_output(info: &DoctorInfo) {
     if let Some(primary) = &info.config_discovery.primary_config {
         println!("  Primary Config: {}", primary);
     }
-    println!("  Config Files Found: {:?}", info.config_discovery.config_files_found);
+    println!(
+        "  Config Files Found: {:?}",
+        info.config_discovery.config_files_found
+    );
     println!();
-    
+
     println!("Available Features: {:?}", info.features);
     println!();
-    
+
     if let Some(hash) = &info.last_build_hash {
         println!("Last Build Hash: {}", hash);
         println!();
@@ -401,74 +425,86 @@ async fn create_support_bundle(
     context: &DoctorContext,
 ) -> Result<()> {
     info!("Creating support bundle at: {}", bundle_path.display());
-    
+
     use std::io::Write;
-    
-    let file = std::fs::File::create(bundle_path)
-        .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+
+    let file = std::fs::File::create(bundle_path).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
             message: format!("Failed to create bundle file: {}", e),
-        }))?;
-    
+        })
+    })?;
+
     let mut zip = zip::ZipWriter::new(file);
-    let options: zip::write::FileOptions<()> = zip::write::FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-    
+    let options: zip::write::FileOptions<()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
     // Add doctor.json to bundle
-    zip.start_file("doctor.json", options)
-        .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+    zip.start_file("doctor.json", options).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
             message: format!("Failed to add doctor.json to bundle: {}", e),
-        }))?;
-    let doctor_json = serde_json::to_string_pretty(doctor_info)
-        .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+        })
+    })?;
+    let doctor_json = serde_json::to_string_pretty(doctor_info).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
             message: format!("Failed to serialize doctor info: {}", e),
-        }))?;
-    zip.write_all(doctor_json.as_bytes())
-        .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+        })
+    })?;
+    zip.write_all(doctor_json.as_bytes()).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
             message: format!("Failed to write doctor.json: {}", e),
-        }))?;
-    
+        })
+    })?;
+
     // Add sanitized config files if they exist
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let base_path = context.workspace_folder.as_ref().unwrap_or(&current_dir);
-    
+
     for config_file in &doctor_info.config_discovery.config_files_found {
         let config_path = base_path.join(config_file);
         if let Ok(content) = fs::read_to_string(&config_path) {
             let sanitized_content = sanitize_secrets(&content)?;
-            zip.start_file(&format!("configs/{}", config_file), options)
-                .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
-                    message: format!("Failed to add config file to bundle: {}", e),
-                }))?;
-            zip.write_all(sanitized_content.as_bytes())
-                .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+            zip.start_file(format!("configs/{}", config_file), options)
+                .map_err(|e| {
+                    DeaconError::Internal(crate::errors::InternalError::Generic {
+                        message: format!("Failed to add config file to bundle: {}", e),
+                    })
+                })?;
+            zip.write_all(sanitized_content.as_bytes()).map_err(|e| {
+                DeaconError::Internal(crate::errors::InternalError::Generic {
                     message: format!("Failed to write config file: {}", e),
-                }))?;
+                })
+            })?;
         }
     }
-    
+
     // Add truncated docker info if available
     #[cfg(feature = "docker")]
     if doctor_info.docker_info.daemon_running {
         zip.start_file("docker-info-summary.json", options)
-            .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
-                message: format!("Failed to add docker info to bundle: {}", e),
-            }))?;
+            .map_err(|e| {
+                DeaconError::Internal(crate::errors::InternalError::Generic {
+                    message: format!("Failed to add docker info to bundle: {}", e),
+                })
+            })?;
         if let Some(summary) = &doctor_info.docker_info.info_summary {
-            let summary_json = serde_json::to_string_pretty(summary)
-                .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+            let summary_json = serde_json::to_string_pretty(summary).map_err(|e| {
+                DeaconError::Internal(crate::errors::InternalError::Generic {
                     message: format!("Failed to serialize Docker info summary: {}", e),
-                }))?;
-            zip.write_all(summary_json.as_bytes())
-                .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+                })
+            })?;
+            zip.write_all(summary_json.as_bytes()).map_err(|e| {
+                DeaconError::Internal(crate::errors::InternalError::Generic {
                     message: format!("Failed to write docker info: {}", e),
-                }))?;
+                })
+            })?;
         }
     }
-    
-    zip.finish()
-        .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+
+    zip.finish().map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
             message: format!("Failed to finish bundle: {}", e),
-        }))?;
+        })
+    })?;
     Ok(())
 }
 
@@ -476,27 +512,37 @@ async fn create_support_bundle(
 /// Replaces values of keys matching regex (PASS|TOKEN|SECRET) with ****
 pub fn sanitize_secrets(content: &str) -> Result<String> {
     debug!("Sanitizing secrets from content");
-    
+
     // Regex to match keys containing PASS, TOKEN, or SECRET (case-insensitive)
     let secret_key_regex = Regex::new(r#"(?i)("[^"]*(?:pass|token|secret)[^"]*"\s*:\s*)"[^"]*""#)
-        .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+        .map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
             message: format!("Failed to compile secret key regex: {}", e),
-        }))?;
-    
+        })
+    })?;
+
     // Also handle non-quoted keys
-    let secret_key_regex_unquoted = Regex::new(r#"(?i)([a-zA-Z_][a-zA-Z0-9_]*(?:pass|token|secret)[a-zA-Z0-9_]*\s*[:=]\s*)"[^"]*""#)
-        .map_err(|e| DeaconError::Internal(crate::errors::InternalError::Generic {
+    let secret_key_regex_unquoted = Regex::new(
+        r#"(?i)([a-zA-Z_][a-zA-Z0-9_]*(?:pass|token|secret)[a-zA-Z0-9_]*\s*[:=]\s*)"[^"]*""#,
+    )
+    .map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
             message: format!("Failed to compile unquoted secret key regex: {}", e),
-        }))?;
-    
+        })
+    })?;
+
     let mut sanitized = content.to_string();
-    
+
     // Replace quoted keys
-    sanitized = secret_key_regex.replace_all(&sanitized, r#"$1"****""#).to_string();
-    
-    // Replace unquoted keys  
-    sanitized = secret_key_regex_unquoted.replace_all(&sanitized, r#"$1"****""#).to_string();
-    
+    sanitized = secret_key_regex
+        .replace_all(&sanitized, r#"$1"****""#)
+        .to_string();
+
+    // Replace unquoted keys
+    sanitized = secret_key_regex_unquoted
+        .replace_all(&sanitized, r#"$1"****""#)
+        .to_string();
+
     Ok(sanitized)
 }
 
@@ -508,15 +554,21 @@ impl crate::docker::CliDocker {
             .arg("--version")
             .output()
             .await
-            .map_err(|e| DeaconError::Docker(crate::errors::DockerError::CLIError(
-                format!("Failed to execute docker --version: {}", e),
-            )))?;
-            
+            .map_err(|e| {
+                DeaconError::Docker(crate::errors::DockerError::CLIError(format!(
+                    "Failed to execute docker --version: {}",
+                    e
+                )))
+            })?;
+
         if output.status.success() {
             let version = String::from_utf8(output.stdout)
-                .map_err(|e| DeaconError::Docker(crate::errors::DockerError::CLIError(
-                    format!("Invalid UTF-8 in docker version output: {}", e),
-                )))?
+                .map_err(|e| {
+                    DeaconError::Docker(crate::errors::DockerError::CLIError(format!(
+                        "Invalid UTF-8 in docker version output: {}",
+                        e
+                    )))
+                })?
                 .trim()
                 .to_string();
             Ok(version)
@@ -526,7 +578,7 @@ impl crate::docker::CliDocker {
             )))
         }
     }
-    
+
     /// Get summarized Docker info (not full docker info to avoid sensitive data)
     pub async fn get_info_summary(&self) -> Result<DockerInfoSummary> {
         let output = tokio::process::Command::new("docker")
@@ -536,10 +588,13 @@ impl crate::docker::CliDocker {
             .arg("json")
             .output()
             .await
-            .map_err(|e| DeaconError::Docker(crate::errors::DockerError::CLIError(
-                format!("Failed to execute docker system df: {}", e),
-            )))?;
-            
+            .map_err(|e| {
+                DeaconError::Docker(crate::errors::DockerError::CLIError(format!(
+                    "Failed to execute docker system df: {}",
+                    e
+                )))
+            })?;
+
         if output.status.success() {
             // For now, return a basic summary. In a real implementation,
             // this would parse docker info and extract safe, non-sensitive information
@@ -573,15 +628,15 @@ mod tests {
             "regular_field": "not_secret"
         }
         "#;
-        
+
         let sanitized = sanitize_secrets(content).unwrap();
-        
+
         assert!(sanitized.contains(r#""password": "****""#));
         assert!(sanitized.contains(r#""api_token": "****""#));
         assert!(sanitized.contains(r#""database_secret": "****""#));
         assert!(sanitized.contains(r#""regular_field": "not_secret""#));
     }
-    
+
     #[test]
     fn test_sanitize_secrets_case_insensitive() {
         let content = r#"
@@ -591,14 +646,14 @@ mod tests {
             "MY_SECRET": "mysecret"
         }
         "#;
-        
+
         let sanitized = sanitize_secrets(content).unwrap();
-        
+
         assert!(sanitized.contains(r#""PASSWORD": "****""#));
         assert!(sanitized.contains(r#""Token": "****""#));
         assert!(sanitized.contains(r#""MY_SECRET": "****""#));
     }
-    
+
     #[test]
     fn test_sanitize_secrets_no_secrets() {
         let content = r#"
@@ -608,13 +663,13 @@ mod tests {
             "description": "A test configuration"
         }
         "#;
-        
+
         let sanitized = sanitize_secrets(content).unwrap();
-        
+
         // Content should remain unchanged
         assert_eq!(sanitized.trim(), content.trim());
     }
-    
+
     #[test]
     fn test_sanitize_secrets_partial_matches() {
         let content = r#"
@@ -625,9 +680,9 @@ mod tests {
             "password_reset_url": "url123"
         }
         "#;
-        
+
         let sanitized = sanitize_secrets(content).unwrap();
-        
+
         assert!(sanitized.contains(r#""user_password_hash": "****""#));
         assert!(sanitized.contains(r#""token_expiry": "****""#));
         assert!(sanitized.contains(r#""secret_key": "****""#));

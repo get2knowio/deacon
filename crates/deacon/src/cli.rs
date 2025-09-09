@@ -333,7 +333,7 @@ impl Cli {
                     workspace_folder: self.workspace_folder.clone(),
                     config: self.config.clone(),
                 };
-                
+
                 // Execute doctor command
                 match deacon_core::doctor::run_doctor(json, bundle, context).await {
                     Ok(()) => Ok(()),
