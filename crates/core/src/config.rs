@@ -37,7 +37,7 @@ fn default_empty_object() -> serde_json::Value {
 ///
 /// Supports port numbers (e.g., 3000) and port mappings (e.g., "3000:3000").
 /// For now, stores the original value for future parsing.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum PortSpec {
     /// Port number
@@ -78,7 +78,7 @@ impl PortSpec {
 }
 
 /// Action to take when a port is auto-forwarded.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OnAutoForward {
     /// Do nothing when port is auto-forwarded
@@ -97,7 +97,7 @@ pub enum OnAutoForward {
 ///
 /// Defines how ports should be handled when forwarded, including
 /// labeling, auto-forward behavior, and preview options.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortAttributes {
     /// Human-readable label for the port
@@ -619,8 +619,14 @@ impl ConfigMerger {
             run_args: Self::concat_string_arrays(&base.run_args, &overlay.run_args),
 
             // Port attributes: deep merge maps
-            ports_attributes: Self::merge_port_attributes_maps(&base.ports_attributes, &overlay.ports_attributes),
-            other_ports_attributes: overlay.other_ports_attributes.clone().or_else(|| base.other_ports_attributes.clone()),
+            ports_attributes: Self::merge_port_attributes_maps(
+                &base.ports_attributes,
+                &overlay.ports_attributes,
+            ),
+            other_ports_attributes: overlay
+                .other_ports_attributes
+                .clone()
+                .or_else(|| base.other_ports_attributes.clone()),
         }
     }
 
