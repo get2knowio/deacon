@@ -360,19 +360,21 @@ mod tests {
 
     #[test]
     fn test_local_env_substitution() -> anyhow::Result<()> {
-        env::set_var("TEST_VAR", "test_value");
+        // Use a unique env var to avoid interference with other tests running in parallel.
+        const VAR: &str = "DEACON_TEST_LOCAL_ENV_SUBST";
+        env::set_var(VAR, "test_value");
 
         let temp_dir = TempDir::new()?;
         let context = SubstitutionContext::new(temp_dir.path())?;
         let mut report = SubstitutionReport::new();
 
-        let input = "Value: ${localEnv:TEST_VAR}";
+        let input = &format!("Value: ${{localEnv:{VAR}}}");
         let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
         assert_eq!(result, "Value: test_value");
-        assert!(report.replacements.contains_key("localEnv:TEST_VAR"));
+        assert!(report.replacements.contains_key(&format!("localEnv:{VAR}")));
 
-        env::remove_var("TEST_VAR");
+        env::remove_var(VAR);
         Ok(())
     }
 

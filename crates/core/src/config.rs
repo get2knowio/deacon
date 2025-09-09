@@ -976,6 +976,10 @@ mod tests {
     fn test_load_with_substitution() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
+        // Use canonical path for comparisons to avoid platform-specific symlink prefixes
+        // (e.g., macOS may canonicalize /var/... to /private/var/...).
+        let workspace_canonical = workspace.canonicalize()?;
+        let workspace_canonical_str = workspace_canonical.to_str().unwrap();
 
         let config_content = r#"{
             "name": "Test Container",
@@ -1002,7 +1006,7 @@ mod tests {
 
         // Check specific substitutions
         if let Some(workspace_folder) = &config.workspace_folder {
-            assert!(workspace_folder.starts_with(workspace.to_str().unwrap()));
+            assert!(workspace_folder.starts_with(workspace_canonical_str));
             assert!(workspace_folder.ends_with("/src"));
         }
 
@@ -1011,12 +1015,12 @@ mod tests {
             .container_env
             .get("WORKSPACE_ROOT")
             .unwrap()
-            .starts_with(workspace.to_str().unwrap()));
+            .starts_with(workspace_canonical_str));
 
         // Check mounts substitution
         if !config.mounts.is_empty() {
             if let serde_json::Value::String(mount_str) = &config.mounts[0] {
-                assert!(mount_str.contains(workspace.to_str().unwrap()));
+                assert!(mount_str.contains(workspace_canonical_str));
             }
         }
 
