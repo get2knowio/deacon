@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod docker;
+pub mod env_probe;
 pub mod errors;
 pub mod features;
 pub mod lifecycle;
