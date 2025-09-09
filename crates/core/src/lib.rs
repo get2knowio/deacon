@@ -3,12 +3,17 @@
 //! This crate contains shared logic for configuration resolution, Docker integration,
 //! feature system, template system, lifecycle execution, logging, and error handling.
 
+pub mod cache;
 pub mod config;
+pub mod container;
 pub mod docker;
+pub mod dotfiles;
+pub mod env_probe;
 pub mod errors;
 pub mod features;
 pub mod lifecycle;
 pub mod logging;
+pub mod oci;
 pub mod templates;
 pub mod variable;
 
