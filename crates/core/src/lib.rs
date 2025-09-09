@@ -9,6 +9,8 @@ pub mod errors;
 pub mod features;
 pub mod lifecycle;
 pub mod logging;
+#[cfg(feature = "plugins")]
+pub mod plugins;
 pub mod templates;
 pub mod variable;
 

@@ -16,6 +16,7 @@ tokio = { version = "1.0", features = ["rt", "rt-multi-thread"] }
 default = ["docker"]
 docker = ["deacon-core/docker"]
 config = ["dep:serde", "dep:toml"]
+plugins = ["deacon-core/plugins"]
 
 [dependencies.serde]
 version = "1.0"
