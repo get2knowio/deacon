@@ -23,7 +23,7 @@
 
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, warn};
@@ -68,8 +68,8 @@ impl PortSpec {
         }
     }
 
-    /// Convert port spec to string representation for validation.
-    pub fn to_string(&self) -> String {
+    /// Get the string representation of this port spec for validation.
+    pub fn as_string(&self) -> String {
         match self {
             PortSpec::Number(port) => port.to_string(),
             PortSpec::String(s) => s.clone(),
@@ -102,16 +102,16 @@ pub enum OnAutoForward {
 pub struct PortAttributes {
     /// Human-readable label for the port
     pub label: Option<String>,
-    
+
     /// Action to take when the port is auto-forwarded
     pub on_auto_forward: Option<OnAutoForward>,
-    
+
     /// Whether to open a preview of the port automatically
     pub open_preview: Option<bool>,
-    
+
     /// Whether to require a specific local port for forwarding
     pub require_local_port: Option<bool>,
-    
+
     /// Description of what this port is used for
     pub description: Option<String>,
 }
@@ -233,7 +233,7 @@ pub struct DevContainerConfig {
 
     /// Attributes for specific ports.
     ///
-    /// Maps port specifications to their attributes. Keys are port numbers or 
+    /// Maps port specifications to their attributes. Keys are port numbers or
     /// port/protocol combinations (e.g., "3000", "3000/tcp").
     #[serde(default)]
     pub ports_attributes: HashMap<String, PortAttributes>,
@@ -447,6 +447,8 @@ impl Default for DevContainerConfig {
             remote_env: HashMap::new(),
             forward_ports: Vec::new(),
             app_port: None,
+            ports_attributes: HashMap::new(),
+            other_ports_attributes: None,
             run_args: Vec::new(),
             shutdown_action: None,
             override_command: None,
@@ -718,6 +720,8 @@ impl ConfigLoader {
             "remoteEnv",
             "forwardPorts",
             "appPort",
+            "portsAttributes",
+            "otherPortsAttributes",
             "runArgs",
             "shutdownAction",
             "overrideCommand",
@@ -770,6 +774,64 @@ impl ConfigLoader {
                             action
                         ),
                     }));
+                }
+            }
+        }
+
+        // Validate port attributes references
+        Self::validate_port_attributes(config)?;
+
+        Ok(())
+    }
+
+    /// Validate that ports referenced in port attributes exist in forwardPorts or appPort.
+    ///
+    /// This method checks that all ports specified in `ports_attributes` have corresponding
+    /// entries in `forward_ports` or match the `app_port`. Issues warnings for missing references.
+    fn validate_port_attributes(config: &DevContainerConfig) -> Result<()> {
+        if config.ports_attributes.is_empty() {
+            return Ok(());
+        }
+
+        // Collect all valid port references
+        let mut valid_ports = std::collections::HashSet::new();
+
+        // Add ports from forward_ports
+        for port_spec in &config.forward_ports {
+            if let Some(port_num) = port_spec.primary_port() {
+                valid_ports.insert(port_num.to_string());
+                // Also add with /tcp suffix which is common
+                valid_ports.insert(format!("{}/tcp", port_num));
+            }
+            // Also add the string representation for exact matching
+            valid_ports.insert(port_spec.as_string());
+        }
+
+        // Add app_port if specified
+        if let Some(app_port) = &config.app_port {
+            if let Some(port_num) = app_port.primary_port() {
+                valid_ports.insert(port_num.to_string());
+                valid_ports.insert(format!("{}/tcp", port_num));
+            }
+            valid_ports.insert(app_port.as_string());
+        }
+
+        // Check each port attribute reference
+        for port_key in config.ports_attributes.keys() {
+            if !valid_ports.contains(port_key) {
+                // Try parsing as just a port number
+                if let Ok(port_num) = port_key.parse::<u16>() {
+                    if !valid_ports.contains(&port_num.to_string()) {
+                        warn!(
+                            "Port '{}' in portsAttributes does not match any port in forwardPorts or appPort",
+                            port_key
+                        );
+                    }
+                } else {
+                    warn!(
+                        "Port '{}' in portsAttributes does not match any port in forwardPorts or appPort",
+                        port_key
+                    );
                 }
             }
         }
@@ -1121,5 +1183,237 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_port_spec_number() {
+        let port = PortSpec::Number(3000);
+        assert_eq!(port.primary_port(), Some(3000));
+        assert_eq!(port.as_string(), "3000");
+    }
+
+    #[test]
+    fn test_port_spec_string_number() {
+        let port = PortSpec::String("3000".to_string());
+        assert_eq!(port.primary_port(), Some(3000));
+        assert_eq!(port.as_string(), "3000");
+    }
+
+    #[test]
+    fn test_port_spec_string_mapping() {
+        let port = PortSpec::String("3000:8080".to_string());
+        assert_eq!(port.primary_port(), Some(3000));
+        assert_eq!(port.as_string(), "3000:8080");
+    }
+
+    #[test]
+    fn test_port_spec_string_invalid() {
+        let port = PortSpec::String("invalid".to_string());
+        assert_eq!(port.primary_port(), None);
+        assert_eq!(port.as_string(), "invalid");
+    }
+
+    #[test]
+    fn test_port_spec_deserialization() -> anyhow::Result<()> {
+        // Test deserializing a number
+        let json_number = "3000";
+        let port: PortSpec = serde_json::from_str(json_number)?;
+        assert_eq!(port, PortSpec::Number(3000));
+
+        // Test deserializing a string
+        let json_string = r#""3000:8080""#;
+        let port: PortSpec = serde_json::from_str(json_string)?;
+        assert_eq!(port, PortSpec::String("3000:8080".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_on_auto_forward_deserialization() -> anyhow::Result<()> {
+        let test_cases = [
+            ("\"silent\"", OnAutoForward::Silent),
+            ("\"notify\"", OnAutoForward::Notify),
+            ("\"openBrowser\"", OnAutoForward::OpenBrowser),
+            ("\"openPreview\"", OnAutoForward::OpenPreview),
+            ("\"ignore\"", OnAutoForward::Ignore),
+        ];
+
+        for (json, expected) in test_cases {
+            let parsed: OnAutoForward = serde_json::from_str(json)?;
+            assert_eq!(parsed, expected);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_attributes_deserialization() -> anyhow::Result<()> {
+        let json = r#"{
+            "label": "Web Server",
+            "onAutoForward": "openBrowser",
+            "openPreview": true,
+            "requireLocalPort": false,
+            "description": "Main application port"
+        }"#;
+
+        let attrs: PortAttributes = serde_json::from_str(json)?;
+        assert_eq!(attrs.label, Some("Web Server".to_string()));
+        assert_eq!(attrs.on_auto_forward, Some(OnAutoForward::OpenBrowser));
+        assert_eq!(attrs.open_preview, Some(true));
+        assert_eq!(attrs.require_local_port, Some(false));
+        assert_eq!(attrs.description, Some("Main application port".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_attributes_partial() -> anyhow::Result<()> {
+        let json = r#"{
+            "label": "API Server"
+        }"#;
+
+        let attrs: PortAttributes = serde_json::from_str(json)?;
+        assert_eq!(attrs.label, Some("API Server".to_string()));
+        assert_eq!(attrs.on_auto_forward, None);
+        assert_eq!(attrs.open_preview, None);
+        assert_eq!(attrs.require_local_port, None);
+        assert_eq!(attrs.description, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_with_ports_and_attributes() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "name": "Test Container",
+            "image": "node:18",
+            "forwardPorts": [3000, "8080:8080"],
+            "appPort": 3000,
+            "portsAttributes": {
+                "3000": {
+                    "label": "Web Server",
+                    "onAutoForward": "openBrowser",
+                    "description": "Main web application"
+                },
+                "8080": {
+                    "label": "API Server",
+                    "onAutoForward": "notify"
+                }
+            },
+            "otherPortsAttributes": {
+                "label": "Other Service",
+                "onAutoForward": "silent"
+            }
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let config = ConfigLoader::load_from_path(temp_file.path())?;
+
+        assert_eq!(config.name, Some("Test Container".to_string()));
+        assert_eq!(config.forward_ports.len(), 2);
+        assert_eq!(config.app_port, Some(PortSpec::Number(3000)));
+
+        // Check port attributes
+        assert_eq!(config.ports_attributes.len(), 2);
+
+        let port_3000_attrs = config.ports_attributes.get("3000").unwrap();
+        assert_eq!(port_3000_attrs.label, Some("Web Server".to_string()));
+        assert_eq!(
+            port_3000_attrs.on_auto_forward,
+            Some(OnAutoForward::OpenBrowser)
+        );
+        assert_eq!(
+            port_3000_attrs.description,
+            Some("Main web application".to_string())
+        );
+
+        let port_8080_attrs = config.ports_attributes.get("8080").unwrap();
+        assert_eq!(port_8080_attrs.label, Some("API Server".to_string()));
+        assert_eq!(port_8080_attrs.on_auto_forward, Some(OnAutoForward::Notify));
+
+        // Check other ports attributes
+        let other_attrs = config.other_ports_attributes.as_ref().unwrap();
+        assert_eq!(other_attrs.label, Some("Other Service".to_string()));
+        assert_eq!(other_attrs.on_auto_forward, Some(OnAutoForward::Silent));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_validation_valid_references() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "name": "Test Container",
+            "image": "node:18",
+            "forwardPorts": [3000, 8080],
+            "appPort": 9000,
+            "portsAttributes": {
+                "3000": { "label": "Web" },
+                "8080": { "label": "API" },
+                "9000": { "label": "App" }
+            }
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        // This should not fail validation
+        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        assert_eq!(config.ports_attributes.len(), 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_validation_with_string_ports() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "name": "Test Container",
+            "image": "node:18", 
+            "forwardPorts": ["3000:3000", "8080"],
+            "portsAttributes": {
+                "3000:3000": { "label": "Web" },
+                "8080": { "label": "API" }
+            }
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        assert_eq!(config.ports_attributes.len(), 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_validation_missing_references() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "name": "Test Container",
+            "image": "node:18",
+            "forwardPorts": [3000],
+            "portsAttributes": {
+                "3000": { "label": "Web" },
+                "8080": { "label": "Missing Port" }
+            }
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        // This should load but log warnings about missing port 8080
+        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        assert_eq!(config.ports_attributes.len(), 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_default_includes_new_fields() {
+        let config = DevContainerConfig::default();
+        assert_eq!(config.ports_attributes.len(), 0);
+        assert_eq!(config.other_ports_attributes, None);
+        assert_eq!(config.forward_ports.len(), 0);
+        assert_eq!(config.app_port, None);
     }
 }
