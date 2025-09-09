@@ -18,6 +18,10 @@ pub enum ConfigError {
     #[error("Configuration validation error: {message}")]
     Validation { message: String },
 
+    /// Cycle detected in extends chain
+    #[error("Cycle detected in extends chain: {chain}")]
+    ExtendsCycle { chain: String },
+
     /// Feature not implemented
     #[error("Feature not implemented: {feature}")]
     NotImplemented { feature: String },
