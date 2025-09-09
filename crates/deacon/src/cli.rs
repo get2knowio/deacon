@@ -74,6 +74,15 @@ pub enum Commands {
     ///
     /// References: CLI-SPEC.md "Process Management and Shell Integration"
     Exec {
+        /// User to run the command as
+        #[arg(long)]
+        user: Option<String>,
+        /// Disable TTY allocation
+        #[arg(long)]
+        no_tty: bool,
+        /// Environment variables to set (KEY=VALUE format)
+        #[arg(long, action = clap::ArgAction::Append)]
+        env: Vec<String>,
         /// Command to execute
         command: Vec<String>,
     },
@@ -287,10 +296,76 @@ impl Cli {
                 feature: "build command".to_string(),
             })
             .into()),
-            Some(Commands::Exec { .. }) => Err(DeaconError::Config(ConfigError::NotImplemented {
-                feature: "exec command".to_string(),
-            })
-            .into()),
+            Some(Commands::Exec { user, no_tty, env, command }) => {
+                if command.is_empty() {
+                    return Err(anyhow::anyhow!("No command specified for exec"));
+                }
+
+                #[cfg(feature = "docker")]
+                {
+                    use deacon_core::docker::{CliDocker, Docker, ExecConfig};
+                    use std::collections::HashMap;
+
+                    tracing::info!("Executing command in container: {:?}", command);
+
+                    let docker_client = CliDocker::new();
+
+                    // Parse environment variables
+                    let mut env_map = HashMap::new();
+                    for env_var in env {
+                        if let Some((key, value)) = env_var.split_once('=') {
+                            env_map.insert(key.to_string(), value.to_string());
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "Invalid environment variable format: '{}'. Expected KEY=VALUE",
+                                env_var
+                            ));
+                        }
+                    }
+
+                    // Determine TTY allocation
+                    let should_use_tty = !no_tty && CliDocker::is_tty();
+
+                    // Create exec config
+                    let exec_config = ExecConfig {
+                        user: user.clone(),
+                        working_dir: self.workspace_folder.as_ref().map(|p| p.to_string_lossy().to_string()),
+                        env: env_map,
+                        tty: should_use_tty,
+                        interactive: should_use_tty,
+                        detach: false,
+                    };
+
+                    let runtime = tokio::runtime::Runtime::new()
+                        .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
+
+                    // For now, use a default container ID - in a real implementation,
+                    // this would be discovered from the workspace configuration
+                    let container_id = "devcontainer"; // This should be discovered
+
+                    match runtime.block_on(docker_client.exec(&container_id, &command, exec_config)) {
+                        Ok(result) => {
+                            tracing::info!("Command completed with exit code: {}", result.exit_code);
+                            std::process::exit(result.exit_code);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to execute command: {}", e);
+                            return Err(e.into());
+                        }
+                    }
+                }
+
+                #[cfg(not(feature = "docker"))]
+                {
+                    tracing::warn!(
+                        "Docker support is disabled (compiled without 'docker' feature)"
+                    );
+                    Err(DeaconError::Config(ConfigError::NotImplemented {
+                        feature: "exec command (docker support disabled)".to_string(),
+                    })
+                    .into())
+                }
+            }
             Some(Commands::ReadConfiguration { .. }) => {
                 Err(DeaconError::Config(ConfigError::NotImplemented {
                     feature: "read-configuration command".to_string(),

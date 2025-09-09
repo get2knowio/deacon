@@ -8,6 +8,8 @@ use crate::errors::{DockerError, Result};
 #[cfg(feature = "docker")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "docker")]
+use std::collections::HashMap;
+#[cfg(feature = "docker")]
 use std::process::Command;
 #[cfg(feature = "docker")]
 use tracing::{debug, instrument};
@@ -28,6 +30,34 @@ pub struct ContainerInfo {
     pub state: String,
 }
 
+/// Configuration for executing commands in containers
+#[cfg(feature = "docker")]
+#[derive(Debug, Clone)]
+pub struct ExecConfig {
+    /// User to run command as
+    pub user: Option<String>,
+    /// Working directory
+    pub working_dir: Option<String>,
+    /// Environment variables
+    pub env: HashMap<String, String>,
+    /// Whether to allocate a TTY
+    pub tty: bool,
+    /// Whether to attach stdin
+    pub interactive: bool,
+    /// Whether to detach the command
+    pub detach: bool,
+}
+
+/// Result of executing a command in a container
+#[cfg(feature = "docker")]
+#[derive(Debug)]
+pub struct ExecResult {
+    /// Exit code of the command
+    pub exit_code: i32,
+    /// Whether the command completed successfully (exit code 0)
+    pub success: bool,
+}
+
 /// Docker client abstraction trait
 #[cfg(feature = "docker")]
 #[allow(async_fn_in_trait)]
@@ -40,6 +70,9 @@ pub trait Docker {
 
     /// Inspect a specific container by ID
     async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>>;
+
+    /// Execute a command in a running container
+    async fn exec(&self, container_id: &str, command: &[String], config: ExecConfig) -> Result<ExecResult>;
 }
 
 /// CLI-based Docker implementation using docker command
@@ -173,9 +206,30 @@ impl CliDocker {
         Ok(result)
     }
 
-    /// Parse docker inspect JSON output into ContainerInfo
-    #[allow(dead_code)] // Used by future features
-    fn parse_container_inspect(&self, json_output: &str) -> Result<Option<ContainerInfo>> {
+    /// Check if we're running in a TTY
+    #[cfg(feature = "docker")]
+    pub fn is_tty() -> bool {
+        use std::io::IsTerminal;
+        std::io::stdin().is_terminal()
+    }
+
+    /// Parse environment variables from KEY=VALUE format
+    #[allow(dead_code)] // Used by exec command
+    fn parse_env_vars(env_vars: &[String]) -> Result<HashMap<String, String>> {
+        let mut env_map = HashMap::new();
+        for env_var in env_vars {
+            if let Some((key, value)) = env_var.split_once('=') {
+                env_map.insert(key.to_string(), value.to_string());
+            } else {
+                return Err(DockerError::CLIError(format!(
+                    "Invalid environment variable format: '{}'. Expected KEY=VALUE",
+                    env_var
+                ))
+                .into());
+            }
+        }
+        Ok(env_map)
+    }
         if json_output.trim().is_empty() {
             return Ok(None);
         }
@@ -413,6 +467,83 @@ impl Docker for CliDocker {
             };
 
             Ok(Some(container_info))
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+    }
+
+    #[instrument(skip(self))]
+    async fn exec(&self, container_id: &str, command: &[String], config: ExecConfig) -> Result<ExecResult> {
+        debug!("Executing command in container: {}", container_id);
+
+        let docker_path = self.docker_path.clone();
+        let container_id = container_id.to_string();
+        let command = command.to_vec();
+
+        tokio::task::spawn_blocking(move || {
+            let mut args = vec!["exec"];
+
+            // Add TTY and interactive flags
+            if config.tty {
+                args.push("-t");
+            }
+            if config.interactive {
+                args.push("-i");
+            }
+
+            // Add detach flag
+            if config.detach {
+                args.push("-d");
+            }
+
+            // Add user if specified
+            if let Some(ref user) = config.user {
+                args.push("-u");
+                args.push(user);
+            }
+
+            // Add working directory if specified
+            if let Some(ref workdir) = config.working_dir {
+                args.push("-w");
+                args.push(workdir);
+            }
+
+            // Add environment variables
+            let env_args: Vec<String> = config.env.iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            for env_arg in &env_args {
+                args.push("-e");
+                args.push(env_arg);
+            }
+
+            // Add signal proxy for TTY sessions
+            if config.tty {
+                args.push("--sig-proxy=true");
+            }
+
+            // Add container ID
+            args.push(&container_id);
+
+            // Add the command and arguments
+            for cmd_part in &command {
+                args.push(cmd_part);
+            }
+
+            debug!("Docker exec args: {:?}", args);
+
+            let mut child = std::process::Command::new(&docker_path)
+                .args(&args)
+                .spawn()
+                .map_err(|e| DockerError::CLIError(format!("Failed to spawn docker exec: {}", e)))?;
+
+            let exit_status = child.wait()
+                .map_err(|e| DockerError::CLIError(format!("Failed to wait for docker exec: {}", e)))?;
+
+            let exit_code = exit_status.code().unwrap_or(-1);
+            let success = exit_status.success();
+
+            Ok(ExecResult { exit_code, success })
         })
         .await
         .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
