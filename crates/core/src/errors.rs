@@ -90,6 +90,10 @@ pub enum DeaconError {
     #[error("Authentication error: {message}")]
     Authentication { message: String },
 
+    /// Lifecycle command execution errors
+    #[error("Lifecycle error: {0}")]
+    Lifecycle(String),
+
     /// Internal/generic errors
     #[error("Internal error")]
     Internal(#[from] InternalError),
