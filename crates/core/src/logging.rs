@@ -10,69 +10,89 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 
 static INIT: Once = Once::new();
 
-/// Initialize the logging system with optional logging specification
+/// Initialize the logging system with optional format specification
 ///
 /// This function sets up tracing-subscriber with either JSON or text formatting
-/// based on feature flags and configuration. It can be called multiple times
+/// based on runtime configuration. It can be called multiple times
 /// safely - subsequent calls will be no-ops.
 ///
 /// ## Arguments
 ///
-/// * `logging_spec` - Optional logging specification string. If None, defaults
-///   are used. Format should follow EnvFilter syntax (e.g., "debug", "info,tokio=warn").
-///   If not provided, the function will check the `DEACON_LOG` environment variable,
-///   falling back to "info" if not set.
+/// * `format` - Optional format specification string. Supports:
+///   - `None` or `"text"` for human-readable text format
+///   - `"json"` for structured JSON format
 ///
 /// ## Environment Variables
 ///
-/// * `DEACON_LOG` - Controls the logging filter level when `logging_spec` is None
+/// * `DEACON_LOG` - Controls the logging filter level
 /// * `RUST_LOG` - Standard Rust logging environment variable (used as fallback)
 ///
-/// ## Features
+/// ## JSON Schema
 ///
-/// * `json-logs` - When enabled, outputs logs in JSON format instead of text
+/// When using JSON format, logs follow this structure:
+/// ```json
+/// {
+///   "timestamp": "2025-09-09T23:32:24.004390Z",
+///   "level": "INFO",
+///   "target": "deacon_core::logging",
+///   "span": { "name": "config_load", "id": 1 },
+///   "message": "Configuration loaded successfully",
+///   "fields": { "config_path": "/path/to/config" }
+/// }
+/// ```
 ///
 /// ## Example
 ///
 /// ```rust
 /// use deacon_core::logging;
 ///
-/// // Initialize with default settings
+/// // Initialize with default text format
 /// logging::init(None).expect("Failed to initialize logging");
 ///
-/// // Initialize with custom filter
-/// logging::init(Some("debug,reqwest=warn")).expect("Failed to initialize logging");
+/// // Initialize with JSON format
+/// logging::init(Some("json")).expect("Failed to initialize logging");
 /// ```
-pub fn init(logging_spec: Option<&str>) -> Result<()> {
+pub fn init(format: Option<&str>) -> Result<()> {
     INIT.call_once(|| {
-        let filter = create_env_filter(logging_spec);
+        let filter = create_env_filter(None);
 
-        #[cfg(feature = "json-logs")]
-        {
-            tracing_subscriber::registry()
-                .with(fmt::layer().json())
-                .with(filter)
-                .init();
+        match format {
+            Some("json") => {
+                tracing_subscriber::registry()
+                    .with(
+                        fmt::layer().json().with_target(true).with_span_events(
+                            fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE,
+                        ),
+                    )
+                    .with(filter)
+                    .init();
+            }
+            _ => {
+                // Default to text format (including None, "text", or any other value)
+                tracing_subscriber::registry()
+                    .with(
+                        fmt::layer().with_target(true).with_span_events(
+                            fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE,
+                        ),
+                    )
+                    .with(filter)
+                    .init();
+            }
         }
 
-        #[cfg(not(feature = "json-logs"))]
-        {
-            tracing_subscriber::registry()
-                .with(fmt::layer())
-                .with(filter)
-                .init();
-        }
-
-        tracing::info!("Logging initialized");
+        tracing::info!(
+            "Logging initialized with format: {}",
+            format.unwrap_or("text")
+        );
     });
 
     Ok(())
 }
 
-/// Create an EnvFilter based on the provided specification or environment variables
+/// Create an EnvFilter based on environment variables
 fn create_env_filter(logging_spec: Option<&str>) -> EnvFilter {
     if let Some(spec) = logging_spec {
-        // Use provided specification
+        // Use provided specification (for backward compatibility)
         EnvFilter::try_new(spec).unwrap_or_else(|_| {
             tracing::warn!(
                 "Invalid logging specification '{}', using default 'info'",
@@ -117,8 +137,19 @@ mod tests {
 
         // Multiple calls should not panic or fail
         assert!(init(None).is_ok());
-        assert!(init(Some("debug")).is_ok());
-        assert!(init(Some("warn")).is_ok());
+        assert!(init(Some("json")).is_ok());
+        assert!(init(Some("text")).is_ok());
+    }
+
+    #[test]
+    fn test_init_format_selection() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+
+        // Test various format options
+        assert!(init(None).is_ok()); // Default text format
+        assert!(init(Some("json")).is_ok()); // JSON format
+        assert!(init(Some("text")).is_ok()); // Explicit text format
+        assert!(init(Some("invalid")).is_ok()); // Should fall back to text format
     }
 
     #[test]
@@ -154,12 +185,11 @@ mod tests {
         assert!(is_initialized());
     }
 
-    #[cfg(feature = "json-logs")]
     #[test]
-    fn test_json_logs_feature() {
+    fn test_json_format() {
         let _guard = TEST_MUTEX.lock().unwrap();
 
-        // Test that initialization works with json-logs feature
-        assert!(init(Some("info")).is_ok());
+        // Test that JSON format initialization works
+        assert!(init(Some("json")).is_ok());
     }
 }

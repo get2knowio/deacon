@@ -16,7 +16,7 @@
 //! This implementation aligns with the extensibility requirements outlined in the CLI specification.
 
 use crate::config::DevContainerConfig;
-use crate::errors::{DeaconError, Result};
+use crate::errors::Result;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tracing::{info, instrument, warn};
@@ -103,7 +103,6 @@ pub trait Plugin: Send + Sync {
 }
 
 /// Plugin registry entry containing the plugin instance and metadata
-#[derive(Debug)]
 struct PluginEntry {
     plugin: Box<dyn Plugin>,
     initialized: bool,
@@ -149,14 +148,17 @@ impl PluginManager {
     pub fn register(plugin: Box<dyn Plugin>) {
         let registry = PLUGIN_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
         let mut registry = registry.lock().unwrap();
-        
+
         let plugin_name = plugin.name();
-        
+
         // Check for duplicate names and warn
-        if registry.iter().any(|entry| entry.plugin.name() == plugin_name) {
+        if registry
+            .iter()
+            .any(|entry| entry.plugin.name() == plugin_name)
+        {
             warn!("Plugin with name '{}' already registered", plugin_name);
         }
-        
+
         registry.push(PluginEntry {
             plugin,
             initialized: false,
@@ -180,21 +182,21 @@ impl PluginManager {
     pub fn initialize_all(ctx: &PluginContext) -> Result<()> {
         let registry = PLUGIN_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
         let mut registry = registry.lock().unwrap();
-        
+
         info!("Initializing {} registered plugins", registry.len());
-        
+
         let mut first_error = None;
-        
+
         for entry in registry.iter_mut() {
             let plugin_name = entry.plugin.name();
-            
+
             if entry.initialized {
                 warn!("Plugin '{}' already initialized, skipping", plugin_name);
                 continue;
             }
-            
+
             info!("Initializing plugin: {}", plugin_name);
-            
+
             match entry.plugin.initialize(ctx) {
                 Ok(()) => {
                     entry.initialized = true;
@@ -208,11 +210,11 @@ impl PluginManager {
                 }
             }
         }
-        
+
         if let Some(error) = first_error {
             return Err(error);
         }
-        
+
         info!("All plugins initialized successfully");
         Ok(())
     }
@@ -230,22 +232,22 @@ impl PluginManager {
     pub fn shutdown_all() -> Result<()> {
         let registry = PLUGIN_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
         let mut registry = registry.lock().unwrap();
-        
+
         let initialized_count = registry.iter().filter(|entry| entry.initialized).count();
         info!("Shutting down {} initialized plugins", initialized_count);
-        
+
         let mut first_error = None;
-        
+
         // Shutdown in reverse order
         for entry in registry.iter_mut().rev() {
             let plugin_name = entry.plugin.name();
-            
+
             if !entry.initialized {
                 continue;
             }
-            
+
             info!("Shutting down plugin: {}", plugin_name);
-            
+
             match entry.plugin.shutdown() {
                 Ok(()) => {
                     entry.initialized = false;
@@ -259,11 +261,11 @@ impl PluginManager {
                 }
             }
         }
-        
+
         if let Some(error) = first_error {
             return Err(error);
         }
-        
+
         info!("All plugins shut down successfully");
         Ok(())
     }
@@ -285,23 +287,29 @@ impl PluginManager {
     pub fn augment_config(config: &mut DevContainerConfig) -> Result<()> {
         let registry = PLUGIN_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
         let registry = registry.lock().unwrap();
-        
+
         let initialized_count = registry.iter().filter(|entry| entry.initialized).count();
-        info!("Applying configuration augmentation from {} plugins", initialized_count);
-        
+        info!(
+            "Applying configuration augmentation from {} plugins",
+            initialized_count
+        );
+
         let mut first_error = None;
-        
+
         for entry in registry.iter() {
             if !entry.initialized {
                 continue;
             }
-            
+
             let plugin_name = entry.plugin.name();
             info!("Applying config augmentation from plugin: {}", plugin_name);
-            
+
             match entry.plugin.augment_config(config) {
                 Ok(()) => {
-                    info!("Successfully applied config augmentation from plugin: {}", plugin_name);
+                    info!(
+                        "Successfully applied config augmentation from plugin: {}",
+                        plugin_name
+                    );
                 }
                 Err(e) => {
                     warn!("Plugin '{}' failed to augment config: {}", plugin_name, e);
@@ -311,11 +319,11 @@ impl PluginManager {
                 }
             }
         }
-        
+
         if let Some(error) = first_error {
             return Err(error);
         }
-        
+
         Ok(())
     }
 
@@ -325,7 +333,7 @@ impl PluginManager {
     pub fn plugin_names() -> Vec<String> {
         let registry = PLUGIN_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
         let registry = registry.lock().unwrap();
-        
+
         registry
             .iter()
             .map(|entry| entry.plugin.name().to_string())
@@ -537,6 +545,7 @@ mod tests {
         PluginManager::initialize_all(&ctx).unwrap();
 
         let mut config = DevContainerConfig {
+            extends: None,
             name: Some("test".to_string()),
             image: Some("ubuntu".to_string()),
             dockerfile: None,
@@ -549,6 +558,17 @@ mod tests {
             remote_env: std::collections::HashMap::new(),
             forward_ports: Vec::new(),
             app_port: None,
+            ports_attributes: std::collections::HashMap::new(),
+            other_ports_attributes: None,
+            run_args: Vec::new(),
+            shutdown_action: None,
+            override_command: None,
+            on_create_command: None,
+            post_start_command: None,
+            post_create_command: None,
+            post_attach_command: None,
+            initialize_command: None,
+            update_content_command: None,
         };
 
         PluginManager::augment_config(&mut config).unwrap();
@@ -565,7 +585,10 @@ mod tests {
     fn test_plugin_context() {
         let ctx = PluginContext::new()
             .with_workspace_root("/test/workspace".into())
-            .with_config("key1".to_string(), serde_json::Value::String("value1".to_string()));
+            .with_config(
+                "key1".to_string(),
+                serde_json::Value::String("value1".to_string()),
+            );
 
         assert_eq!(ctx.workspace_root, Some("/test/workspace".into()));
         assert_eq!(
@@ -577,13 +600,14 @@ mod tests {
     #[test]
     fn test_noop_plugin() {
         let plugin = NoOpPlugin::new("noop_test");
-        
+
         assert_eq!(plugin.name(), "noop_test");
-        
+
         let ctx = PluginContext::new();
         assert!(plugin.initialize(&ctx).is_ok());
-        
+
         let mut config = DevContainerConfig {
+            extends: None,
             name: Some("test".to_string()),
             image: Some("ubuntu".to_string()),
             dockerfile: None,
@@ -596,8 +620,19 @@ mod tests {
             remote_env: std::collections::HashMap::new(),
             forward_ports: Vec::new(),
             app_port: None,
+            ports_attributes: std::collections::HashMap::new(),
+            other_ports_attributes: None,
+            run_args: Vec::new(),
+            shutdown_action: None,
+            override_command: None,
+            on_create_command: None,
+            post_start_command: None,
+            post_create_command: None,
+            post_attach_command: None,
+            initialize_command: None,
+            update_content_command: None,
         };
-        
+
         assert!(plugin.augment_config(&mut config).is_ok());
         assert!(plugin.shutdown().is_ok());
     }
