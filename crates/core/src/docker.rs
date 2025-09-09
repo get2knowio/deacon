@@ -72,7 +72,12 @@ pub trait Docker {
     async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>>;
 
     /// Execute a command in a running container
-    async fn exec(&self, container_id: &str, command: &[String], config: ExecConfig) -> Result<ExecResult>;
+    async fn exec(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+    ) -> Result<ExecResult>;
 }
 
 /// CLI-based Docker implementation using docker command
@@ -230,6 +235,10 @@ impl CliDocker {
         }
         Ok(env_map)
     }
+
+    /// Parse docker inspect JSON output into ContainerInfo
+    #[allow(dead_code)] // Used by future features
+    fn parse_container_inspect(&self, json_output: &str) -> Result<Option<ContainerInfo>> {
         if json_output.trim().is_empty() {
             return Ok(None);
         }
@@ -473,7 +482,12 @@ impl Docker for CliDocker {
     }
 
     #[instrument(skip(self))]
-    async fn exec(&self, container_id: &str, command: &[String], config: ExecConfig) -> Result<ExecResult> {
+    async fn exec(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+    ) -> Result<ExecResult> {
         debug!("Executing command in container: {}", container_id);
 
         let docker_path = self.docker_path.clone();
@@ -509,7 +523,9 @@ impl Docker for CliDocker {
             }
 
             // Add environment variables
-            let env_args: Vec<String> = config.env.iter()
+            let env_args: Vec<String> = config
+                .env
+                .iter()
                 .map(|(k, v)| format!("{}={}", k, v))
                 .collect();
             for env_arg in &env_args {
@@ -535,10 +551,13 @@ impl Docker for CliDocker {
             let mut child = std::process::Command::new(&docker_path)
                 .args(&args)
                 .spawn()
-                .map_err(|e| DockerError::CLIError(format!("Failed to spawn docker exec: {}", e)))?;
+                .map_err(|e| {
+                    DockerError::CLIError(format!("Failed to spawn docker exec: {}", e))
+                })?;
 
-            let exit_status = child.wait()
-                .map_err(|e| DockerError::CLIError(format!("Failed to wait for docker exec: {}", e)))?;
+            let exit_status = child.wait().map_err(|e| {
+                DockerError::CLIError(format!("Failed to wait for docker exec: {}", e))
+            })?;
 
             let exit_code = exit_status.code().unwrap_or(-1);
             let success = exit_status.success();

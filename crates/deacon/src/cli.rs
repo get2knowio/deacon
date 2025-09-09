@@ -296,7 +296,12 @@ impl Cli {
                 feature: "build command".to_string(),
             })
             .into()),
-            Some(Commands::Exec { user, no_tty, env, command }) => {
+            Some(Commands::Exec {
+                user,
+                no_tty,
+                env,
+                command,
+            }) => {
                 if command.is_empty() {
                     return Err(anyhow::anyhow!("No command specified for exec"));
                 }
@@ -329,7 +334,10 @@ impl Cli {
                     // Create exec config
                     let exec_config = ExecConfig {
                         user: user.clone(),
-                        working_dir: self.workspace_folder.as_ref().map(|p| p.to_string_lossy().to_string()),
+                        working_dir: self
+                            .workspace_folder
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().to_string()),
                         env: env_map,
                         tty: should_use_tty,
                         interactive: should_use_tty,
@@ -343,14 +351,18 @@ impl Cli {
                     // this would be discovered from the workspace configuration
                     let container_id = "devcontainer"; // This should be discovered
 
-                    match runtime.block_on(docker_client.exec(&container_id, &command, exec_config)) {
+                    match runtime.block_on(docker_client.exec(container_id, &command, exec_config))
+                    {
                         Ok(result) => {
-                            tracing::info!("Command completed with exit code: {}", result.exit_code);
+                            tracing::info!(
+                                "Command completed with exit code: {}",
+                                result.exit_code
+                            );
                             std::process::exit(result.exit_code);
                         }
                         Err(e) => {
                             tracing::error!("Failed to execute command: {}", e);
-                            return Err(e.into());
+                            Err(e.into())
                         }
                     }
                 }

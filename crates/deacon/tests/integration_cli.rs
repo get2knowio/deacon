@@ -62,8 +62,8 @@ fn test_subcommand_not_implemented() {
         .arg("test")
         .assert()
         .failure()
-        .code(2)
-        .stderr(predicate::str::contains("Error: Configuration error"));
+        .code(1)
+        .stderr(predicate::str::contains("No such container"));
 }
 
 #[test]
