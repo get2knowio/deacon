@@ -24,6 +24,11 @@ fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
     // Create a temporary workspace directory
     let temp_workspace = TempDir::new()?;
     let workspace = temp_workspace.path();
+    // Use a canonicalized workspace path for assertions to avoid macOS /var vs /private/var issues
+    let workspace_canon = std::fs::canonicalize(workspace)?;
+    let workspace_canon_str = workspace_canon
+        .to_str()
+        .expect("canonicalized workspace path should be valid UTF-8");
 
     // Copy the fixture to a .devcontainer directory in the temp workspace
     let devcontainer_dir = workspace.join(".devcontainer");
@@ -54,13 +59,13 @@ fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
 
     // Check workspace folder substitution
     if let Some(workspace_folder) = &config.workspace_folder {
-        assert!(workspace_folder.starts_with(workspace.to_str().unwrap()));
+        assert!(workspace_folder.starts_with(workspace_canon_str));
         assert!(workspace_folder.ends_with("/src"));
     }
 
     // Check container environment variable substitution
     let workspace_root = config.container_env.get("WORKSPACE_ROOT").unwrap();
-    assert!(workspace_root.starts_with(workspace.to_str().unwrap()));
+    assert!(workspace_root.starts_with(workspace_canon_str));
 
     let container_id = config.container_env.get("CONTAINER_ID").unwrap();
     assert_eq!(container_id.len(), 12); // Should be 12-character deterministic ID
@@ -78,7 +83,7 @@ fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
     for mount in &config.mounts {
         if let serde_json::Value::String(mount_str) = mount {
             if mount_str.contains("source=") || mount_str.contains(":") {
-                assert!(mount_str.contains(workspace.to_str().unwrap()));
+                assert!(mount_str.contains(workspace_canon_str));
             }
         }
     }
@@ -94,14 +99,14 @@ fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
 
     // Check lifecycle commands substitution
     if let Some(serde_json::Value::String(on_create)) = &config.on_create_command {
-        assert!(on_create.contains(workspace.to_str().unwrap()));
+        assert!(on_create.contains(workspace_canon_str));
     }
 
     if let Some(serde_json::Value::Array(post_create)) = &config.post_create_command {
         // Check that at least one array element contains the substituted workspace path
         let has_workspace_path = post_create.iter().any(|cmd| {
             if let serde_json::Value::String(s) = cmd {
-                s.contains(workspace.to_str().unwrap())
+                s.contains(workspace_canon_str)
             } else {
                 false
             }
