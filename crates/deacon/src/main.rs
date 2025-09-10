@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 
 mod cli;
+mod commands;
 
 fn main() -> Result<()> {
     // Parse CLI arguments

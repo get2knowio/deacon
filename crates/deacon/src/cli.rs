@@ -2,6 +2,15 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+/// Output format options
+#[derive(Debug, Clone, ValueEnum)]
+pub enum OutputFormat {
+    /// Human-readable text format
+    Text,
+    /// JSON structured format
+    Json,
+}
+
 /// Log format options
 #[derive(Debug, Clone, ValueEnum)]
 pub enum LogFormat {
@@ -68,6 +77,18 @@ pub enum Commands {
         /// Build without cache
         #[arg(long)]
         no_cache: bool,
+        /// Target platform for build (e.g. linux/amd64)
+        #[arg(long)]
+        platform: Option<String>,
+        /// Build argument in key=value format
+        #[arg(long)]
+        build_arg: Vec<String>,
+        /// Force rebuild even if cache is valid
+        #[arg(long)]
+        force: bool,
+        /// Output format (text or json)
+        #[arg(long, value_enum, default_value = "text")]
+        output_format: OutputFormat,
     },
 
     /// Execute command in running container
@@ -283,10 +304,31 @@ impl Cli {
                 })
                 .into())
             }
-            Some(Commands::Build { .. }) => Err(DeaconError::Config(ConfigError::NotImplemented {
-                feature: "build command".to_string(),
-            })
-            .into()),
+            Some(Commands::Build {
+                no_cache,
+                platform,
+                build_arg,
+                force,
+                output_format,
+            }) => {
+                use crate::commands::build::{execute_build, BuildArgs};
+
+                let args = BuildArgs {
+                    no_cache,
+                    platform,
+                    build_arg,
+                    force,
+                    output_format,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
+
+                let runtime = tokio::runtime::Runtime::new()
+                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
+
+                runtime.block_on(execute_build(args))?;
+                Ok(())
+            }
             Some(Commands::Exec { .. }) => Err(DeaconError::Config(ConfigError::NotImplemented {
                 feature: "exec command".to_string(),
             })
