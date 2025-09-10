@@ -45,6 +45,18 @@ pub enum DockerError {
     /// Docker CLI command error
     #[error("Docker CLI error: {0}")]
     CLIError(String),
+
+    /// Container not found
+    #[error("Container not found: {id}")]
+    ContainerNotFound { id: String },
+
+    /// Command execution failed
+    #[error("Command execution failed with exit code {code}")]
+    ExecFailed { code: i32 },
+
+    /// TTY allocation failed
+    #[error("TTY allocation failed: {reason}")]
+    TTYFailed { reason: String },
 }
 
 /// Git-related errors

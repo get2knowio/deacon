@@ -65,8 +65,14 @@ fn test_subcommand_not_implemented() {
         .arg("test")
         .assert()
         .failure()
-        .code(2)
-        .stderr(predicate::str::contains("Error: Configuration error"));
+        .code(1)
+        // On Linux runners with Docker installed, this yields "No such container".
+        // On macOS runners without Docker CLI, spawning `docker` fails with ENOENT.
+        .stderr(
+            predicate::str::contains("No such container")
+                .or(predicate::str::contains("Failed to spawn docker"))
+                .or(predicate::str::contains("Docker CLI error")),
+        );
 }
 
 #[test]
