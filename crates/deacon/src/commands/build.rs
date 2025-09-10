@@ -461,6 +461,7 @@ mod tests {
     #[test]
     fn test_build_config_dockerfile_parsing() {
         let mut config = DevContainerConfig {
+            extends: None,
             name: Some("test".to_string()),
             dockerfile: Some("Dockerfile".to_string()),
             build: None,
@@ -473,6 +474,8 @@ mod tests {
             remote_env: HashMap::new(),
             forward_ports: vec![],
             app_port: None,
+            ports_attributes: HashMap::new(),
+            other_ports_attributes: None,
             run_args: vec![],
             shutdown_action: None,
             override_command: None,

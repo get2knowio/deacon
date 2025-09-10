@@ -17,13 +17,8 @@ serde_json = "1.0"
 [features]
 default = ["docker"]
 docker = ["deacon-core/docker"]
-config = ["dep:serde", "dep:toml"]
+config = ["dep:toml"]
 plugins = ["deacon-core/plugins"]
-
-[dependencies.serde]
-version = "1.0"
-features = ["derive"]
-optional = true
 
 [dependencies.toml]
 version = "0.8"
