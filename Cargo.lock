@@ -329,6 +329,7 @@ dependencies = [
  "predicates",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "toml",
  "tracing",

@@ -51,12 +51,13 @@ fn test_subcommand_not_implemented() {
             "No devcontainer.json found in workspace",
         ));
 
+    // Build command is now implemented and should try to find config
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("build")
         .assert()
         .failure()
-        .code(2)
-        .stderr(predicate::str::contains("Error: Configuration error"));
+        .code(1)
+        .stderr(predicate::str::contains("Configuration file not found"));
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("exec")
