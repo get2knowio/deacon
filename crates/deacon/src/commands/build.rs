@@ -133,7 +133,6 @@ fn extract_build_config(
             .into(),
         );
     }
-
     // Check if we have a dockerfile specified
     if let Some(dockerfile) = &config.dockerfile {
         let dockerfile_path = workspace_folder.join(dockerfile);

@@ -657,7 +657,6 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.shutdown_action.clone()),
             override_command: overlay.override_command.or(base.override_command),
-
             // Docker Compose fields
             docker_compose_file: overlay
                 .docker_compose_file
@@ -669,7 +668,6 @@ impl ConfigMerger {
             } else {
                 overlay.run_services.clone()
             },
-
             // Features: deep merge as objects
             features: Self::merge_json_objects(&base.features, &overlay.features),
 
@@ -1182,6 +1180,9 @@ impl ConfigLoader {
             "image",
             "dockerFile",
             "build",
+            "dockerComposeFile",
+            "service",
+            "runServices",
             "features",
             "customizations",
             "workspaceFolder",

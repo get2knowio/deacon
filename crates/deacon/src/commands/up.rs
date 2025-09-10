@@ -102,7 +102,7 @@ async fn execute_compose_up(
 }
 
 /// Execute up for traditional container configurations
-#[instrument(skip(config, workspace_folder, args))]
+#[instrument(skip_all)]
 async fn execute_container_up(
     _config: &DevContainerConfig,
     _workspace_folder: &Path,
