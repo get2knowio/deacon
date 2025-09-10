@@ -6,8 +6,6 @@ A Rust reimplementation of the Development Containers CLI, following the [contai
 
 ## Quick Start
 
-## Quick Start
-
 ### Install with Script (Recommended)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | sh
