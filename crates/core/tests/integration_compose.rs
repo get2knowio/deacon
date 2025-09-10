@@ -57,7 +57,7 @@ fn create_test_devcontainer_config(compose_file: &str, service: &str) -> DevCont
 fn test_compose_project_creation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
+
     let _compose_file = create_test_compose_file(&base_path);
     let config = create_test_devcontainer_config("docker-compose.yml", "app");
 
@@ -78,10 +78,10 @@ fn test_compose_project_creation() {
 fn test_compose_project_multiple_files() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
+
     // Create main compose file
     let _compose_file = create_test_compose_file(&base_path);
-    
+
     // Create override file
     let override_content = r#"
 services:
@@ -114,7 +114,7 @@ services:
 fn test_compose_command_building() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
+
     let _compose_file = create_test_compose_file(&base_path);
     let config = create_test_devcontainer_config("docker-compose.yml", "app");
 
@@ -138,7 +138,7 @@ fn test_compose_command_building() {
     assert!(args.contains(&"ps".to_string()));
     assert!(args.contains(&"--format".to_string()));
     assert!(args.contains(&"json".to_string()));
-    
+
     // Check that the project name is included
     let project_name_index = args.iter().position(|arg| arg == "-p").unwrap();
     assert_eq!(args[project_name_index + 1], project.name);
@@ -222,26 +222,31 @@ fn test_config_loading_from_file() {
     });
 
     let config_file = config_dir.join("devcontainer.json");
-    fs::write(&config_file, devcontainer_content.to_string())
-        .expect("Failed to write config file");
+    fs::write(&config_file, devcontainer_content.to_string()).expect("Failed to write config file");
 
     // Load configuration using ConfigLoader
-    let loaded_config = ConfigLoader::load_from_path(&config_file)
-        .expect("Failed to load configuration");
+    let loaded_config =
+        ConfigLoader::load_from_path(&config_file).expect("Failed to load configuration");
 
-    assert_eq!(loaded_config.name, Some("Compose Dev Container".to_string()));
+    assert_eq!(
+        loaded_config.name,
+        Some("Compose Dev Container".to_string())
+    );
     assert!(loaded_config.uses_compose());
     assert_eq!(loaded_config.service, Some("app".to_string()));
     assert_eq!(loaded_config.run_services, vec!["db", "redis"]);
     assert!(loaded_config.has_stop_compose_shutdown());
-    assert_eq!(loaded_config.workspace_folder, Some("/workspace".to_string()));
+    assert_eq!(
+        loaded_config.workspace_folder,
+        Some("/workspace".to_string())
+    );
 }
 
 #[test]
 fn test_compose_project_name_generation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
+
     let _compose_file = create_test_compose_file(&base_path);
     let config = create_test_devcontainer_config("docker-compose.yml", "app");
 
@@ -255,7 +260,7 @@ fn test_compose_project_name_generation() {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("deacon-compose");
-    
+
     assert_eq!(project.name, expected_name);
 }
 
@@ -269,7 +274,7 @@ fn test_full_compose_integration_setup() {
 
     // Create compose files
     let _main_compose = create_test_compose_file(&workspace_dir);
-    
+
     let override_content = r#"
 services:
   app:
@@ -309,8 +314,8 @@ services:
         .expect("Failed to write devcontainer config");
 
     // Load and validate configuration
-    let config = ConfigLoader::load_from_path(&config_file)
-        .expect("Failed to load devcontainer config");
+    let config =
+        ConfigLoader::load_from_path(&config_file).expect("Failed to load devcontainer config");
 
     assert_eq!(config.name, Some("Full Stack Development".to_string()));
     assert!(config.uses_compose());
