@@ -251,9 +251,7 @@ impl Cli {
                             e.downcast_ref::<DeaconError>()
                         {
                             // Match legacy CLI message expected by tests
-                            Err(anyhow::anyhow!(
-                                "No devcontainer.json found in workspace"
-                            ))
+                            Err(anyhow::anyhow!("No devcontainer.json found in workspace"))
                         } else {
                             Err(e)
                         }
