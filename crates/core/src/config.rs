@@ -216,6 +216,24 @@ pub struct DevContainerConfig {
     /// Reference: [Container Configuration - build](https://containers.dev/implementors/json_reference/#build)
     pub build: Option<serde_json::Value>,
 
+    /// Docker Compose file(s) to use for multi-container environments.
+    ///
+    /// Can be a single file path or an array of file paths.
+    /// Reference: [Container Configuration - dockerComposeFile](https://containers.dev/implementors/json_reference/#docker-compose-file)
+    #[serde(rename = "dockerComposeFile")]
+    pub docker_compose_file: Option<serde_json::Value>,
+
+    /// Name of the Docker Compose service to connect to as the primary development container.
+    ///
+    /// Reference: [Container Configuration - service](https://containers.dev/implementors/json_reference/#service)
+    pub service: Option<String>,
+
+    /// Array of additional Docker Compose services to start alongside the primary service.
+    ///
+    /// Reference: [Container Configuration - runServices](https://containers.dev/implementors/json_reference/#run-services)
+    #[serde(default)]
+    pub run_services: Vec<String>,
+
     /// Features to install in the container.
     ///
     /// Kept as raw JSON value for initial implementation. Will be strongly typed in future iterations.
@@ -465,6 +483,74 @@ impl DevContainerConfig {
 
         (config, report)
     }
+
+    /// Get Docker Compose files as a vector of strings
+    ///
+    /// Parses the `docker_compose_file` field which can be either a string or an array of strings.
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector of compose file paths. Empty vector if no compose files are specified.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use deacon_core::config::DevContainerConfig;
+    /// use serde_json::json;
+    ///
+    /// let mut config = DevContainerConfig::default();
+    /// config.docker_compose_file = Some(json!("docker-compose.yml"));
+    /// assert_eq!(config.get_compose_files(), vec!["docker-compose.yml"]);
+    ///
+    /// config.docker_compose_file = Some(json!(["docker-compose.yml", "docker-compose.override.yml"]));
+    /// assert_eq!(config.get_compose_files(), vec!["docker-compose.yml", "docker-compose.override.yml"]);
+    /// ```
+    pub fn get_compose_files(&self) -> Vec<String> {
+        match &self.docker_compose_file {
+            Some(serde_json::Value::String(file)) => vec![file.clone()],
+            Some(serde_json::Value::Array(files)) => files
+                .iter()
+                .filter_map(|f| f.as_str())
+                .map(|s| s.to_string())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Check if this configuration uses Docker Compose
+    ///
+    /// ## Returns
+    ///
+    /// Returns true if `docker_compose_file` is specified and `service` is specified.
+    pub fn uses_compose(&self) -> bool {
+        self.docker_compose_file.is_some() && self.service.is_some()
+    }
+
+    /// Get all services to start (primary service + run services)
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector containing the primary service (if specified) followed by any run services.
+    pub fn get_all_services(&self) -> Vec<String> {
+        let mut services = Vec::new();
+        if let Some(ref service) = self.service {
+            services.push(service.clone());
+        }
+        services.extend(self.run_services.clone());
+        services
+    }
+
+    /// Check if the configuration specifies stopCompose shutdown action
+    ///
+    /// ## Returns
+    ///
+    /// Returns true if shutdown_action is set to "stopCompose".
+    pub fn has_stop_compose_shutdown(&self) -> bool {
+        self.shutdown_action
+            .as_ref()
+            .map(|action| action == "stopCompose")
+            .unwrap_or(false)
+    }
 }
 
 impl Default for DevContainerConfig {
@@ -475,6 +561,9 @@ impl Default for DevContainerConfig {
             image: None,
             dockerfile: None,
             build: None,
+            docker_compose_file: None,
+            service: None,
+            run_services: Vec::new(),
             features: default_empty_object(),
             customizations: default_empty_object(),
             workspace_folder: None,
@@ -568,7 +657,17 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.shutdown_action.clone()),
             override_command: overlay.override_command.or(base.override_command),
-
+            // Docker Compose fields
+            docker_compose_file: overlay
+                .docker_compose_file
+                .clone()
+                .or_else(|| base.docker_compose_file.clone()),
+            service: overlay.service.clone().or_else(|| base.service.clone()),
+            run_services: if overlay.run_services.is_empty() {
+                base.run_services.clone()
+            } else {
+                overlay.run_services.clone()
+            },
             // Features: deep merge as objects
             features: Self::merge_json_objects(&base.features, &overlay.features),
 
@@ -1081,6 +1180,9 @@ impl ConfigLoader {
             "image",
             "dockerFile",
             "build",
+            "dockerComposeFile",
+            "service",
+            "runServices",
             "features",
             "customizations",
             "workspaceFolder",
@@ -1133,13 +1235,13 @@ impl ConfigLoader {
         // Validate shutdown action values
         if let Some(action) = &config.shutdown_action {
             match action.as_str() {
-                "none" | "stopContainer" => {
+                "none" | "stopContainer" | "stopCompose" => {
                     // Valid values
                 }
                 _ => {
                     return Err(DeaconError::Config(ConfigError::Validation {
                         message: format!(
-                            "Invalid shutdownAction '{}' - must be 'none' or 'stopContainer'",
+                            "Invalid shutdownAction '{}' - must be 'none', 'stopContainer', or 'stopCompose'",
                             action
                         ),
                     }));

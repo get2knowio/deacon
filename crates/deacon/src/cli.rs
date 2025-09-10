@@ -53,19 +53,11 @@ pub struct CliContext {
 }
 
 /// DevContainer CLI subcommands
-///
-/// References CLI-SPEC.md sections:
-/// - Container Lifecycle Management
-/// - Configuration System
-/// - Feature System
-/// - Template System
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     /// Create and run development container
-    ///
-    /// References: CLI-SPEC.md "Container Lifecycle Management"
     Up {
-        /// Additional container arguments
+        /// Remove existing container(s) first
         #[arg(long)]
         remove_existing_container: bool,
         /// Skip postCreate lifecycle phase
@@ -74,8 +66,6 @@ pub enum Commands {
     },
 
     /// Build development container image
-    ///
-    /// References: CLI-SPEC.md "Docker Integration"
     Build {
         /// Build without cache
         #[arg(long)]
@@ -95,8 +85,6 @@ pub enum Commands {
     },
 
     /// Execute command in running container
-    ///
-    /// References: CLI-SPEC.md "Process Management and Shell Integration"
     Exec {
         /// User to run the command as
         #[arg(long)]
@@ -112,8 +100,6 @@ pub enum Commands {
     },
 
     /// Read and display configuration
-    ///
-    /// References: CLI-SPEC.md "Configuration System"
     ReadConfiguration {
         /// Include merged configuration
         #[arg(long)]
@@ -121,8 +107,6 @@ pub enum Commands {
     },
 
     /// Feature management commands
-    ///
-    /// References: CLI-SPEC.md "Feature System"
     Features {
         /// Feature subcommand
         #[command(subcommand)]
@@ -130,8 +114,6 @@ pub enum Commands {
     },
 
     /// Template management commands
-    ///
-    /// References: CLI-SPEC.md "Template System"
     Templates {
         /// Template subcommand
         #[command(subcommand)]
@@ -139,8 +121,6 @@ pub enum Commands {
     },
 
     /// Run user-defined commands
-    ///
-    /// References: CLI-SPEC.md "Container Lifecycle Management"
     #[allow(clippy::enum_variant_names)]
     RunUserCommands {
         /// Commands to run
@@ -152,47 +132,24 @@ pub enum Commands {
 #[derive(Debug, Subcommand)]
 pub enum FeatureCommands {
     /// Test feature implementations
-    Test {
-        /// Target to test
-        target: Option<String>,
-    },
+    Test { target: Option<String> },
     /// Package features for distribution
-    Package {
-        /// Target to package
-        target: String,
-    },
+    Package { target: String },
     /// Publish features to registry
-    Publish {
-        /// Target to publish
-        target: String,
-    },
+    Publish { target: String },
     /// Get feature information
-    Info {
-        /// Information mode
-        mode: String,
-        /// Feature identifier
-        feature: String,
-    },
+    Info { mode: String, feature: String },
 }
 
 /// Template management subcommands
 #[derive(Debug, Subcommand)]
 pub enum TemplateCommands {
     /// Apply template to current project
-    Apply {
-        /// Template identifier
-        template: String,
-    },
+    Apply { template: String },
     /// Publish templates to registry
-    Publish {
-        /// Target to publish
-        target: String,
-    },
+    Publish { target: String },
     /// Get template metadata
-    Metadata {
-        /// Template identifier
-        template_id: String,
-    },
+    Metadata { template_id: String },
 }
 
 #[derive(Parser, Debug)]
@@ -275,92 +232,30 @@ impl Cli {
                 remove_existing_container,
                 skip_post_create,
             }) => {
-                // Initialize configuration and workspace discovery
-                let workspace_folder = self.workspace_folder.clone().unwrap_or_else(|| {
-                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                });
+                use crate::commands::up::{execute_up, UpArgs};
 
-                tracing::info!(
-                    "Starting up container for workspace: {}",
-                    workspace_folder.display()
-                );
+                let args = UpArgs {
+                    remove_existing_container,
+                    skip_post_create,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
 
-                #[cfg(feature = "docker")]
-                {
-                    use deacon_core::config::ConfigLoader;
-                    use deacon_core::container::ContainerIdentity;
-                    use deacon_core::docker::{CliDocker, Docker, DockerLifecycle};
+                let runtime = tokio::runtime::Runtime::new()
+                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
 
-                    // Load configuration
-                    let config_location = ConfigLoader::discover_config(&workspace_folder)?;
-
-                    if !config_location.exists() {
-                        return Err(anyhow::anyhow!("No devcontainer.json found in workspace"));
-                    }
-
-                    let config = ConfigLoader::load_from_path(config_location.path())?;
-
-                    // Ensure we have an image configured
-                    if config.image.is_none() {
-                        return Err(anyhow::anyhow!("No image specified in devcontainer.json"));
-                    }
-
-                    // Create container identity for this workspace and configuration
-                    let identity = ContainerIdentity::new(&workspace_folder, &config);
-
-                    // Check Docker availability
-                    let docker_client = CliDocker::new();
-                    match docker_client.check_docker_installed() {
-                        Ok(()) => {
-                            tracing::info!("Docker is available");
-                        }
-                        Err(e) => {
-                            return Err(anyhow::anyhow!("Docker is not available: {}", e));
+                match runtime.block_on(execute_up(args)) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if let Some(DeaconError::Config(ConfigError::NotFound { .. })) =
+                            e.downcast_ref::<DeaconError>()
+                        {
+                            // Match legacy CLI message expected by tests
+                            Err(anyhow::anyhow!("No devcontainer.json found in workspace"))
+                        } else {
+                            Err(e)
                         }
                     }
-
-                    // Create async runtime and execute up workflow
-                    let runtime = tokio::runtime::Runtime::new()
-                        .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-
-                    let result = runtime.block_on(async {
-                        // Check Docker daemon availability
-                        docker_client.ping().await?;
-
-                        // Execute up workflow
-                        docker_client
-                            .up(
-                                &identity,
-                                &config,
-                                &workspace_folder,
-                                remove_existing_container,
-                            )
-                            .await
-                    })?;
-
-                    // Output JSON result
-                    let json_output = serde_json::to_string_pretty(&result)?;
-                    println!("{}", json_output);
-
-                    if skip_post_create {
-                        tracing::info!(
-                            "Skipping postCreate lifecycle phase due to --skip-post-create flag"
-                        );
-                    }
-
-                    tracing::info!(
-                        "Container {} (reused: {})",
-                        result.container_id,
-                        result.reused
-                    );
-                    Ok(())
-                }
-
-                #[cfg(not(feature = "docker"))]
-                {
-                    return Err(anyhow::anyhow!(
-                        "Docker support is disabled (compiled without 'docker' feature)"
-                    ));
                 }
             }
             Some(Commands::Build {

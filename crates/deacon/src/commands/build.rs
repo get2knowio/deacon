@@ -124,6 +124,15 @@ fn extract_build_config(
     config: &DevContainerConfig,
     workspace_folder: &Path,
 ) -> Result<BuildConfig> {
+    // Check if this is a compose-based configuration
+    if config.uses_compose() {
+        return Err(
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: "Docker Compose configurations cannot be built directly. Use 'docker compose build' to build individual services.".to_string(),
+            })
+            .into(),
+        );
+    }
     // Check if we have a dockerfile specified
     if let Some(dockerfile) = &config.dockerfile {
         let dockerfile_path = workspace_folder.join(dockerfile);
@@ -479,6 +488,9 @@ mod tests {
             run_args: vec![],
             shutdown_action: None,
             override_command: None,
+            docker_compose_file: None,
+            service: None,
+            run_services: vec![],
             on_create_command: None,
             post_start_command: None,
             post_create_command: None,
