@@ -38,6 +38,9 @@ pub struct CliContext {
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
     pub config: Option<PathBuf>,
+    /// Enabled plugins
+    #[cfg(feature = "plugins")]
+    pub plugins: Vec<String>,
 }
 
 /// DevContainer CLI subcommands
@@ -186,6 +189,11 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
+    /// Enable specific plugins
+    #[cfg(feature = "plugins")]
+    #[arg(long, global = true, value_name = "NAME")]
+    pub plugin: Vec<String>,
+
     /// Subcommand to execute
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -200,6 +208,8 @@ impl Cli {
             log_level: self.log_level.clone(),
             workspace_folder: self.workspace_folder.clone(),
             config: self.config.clone(),
+            #[cfg(feature = "plugins")]
+            plugins: self.plugin.clone(),
         }
     }
 
@@ -232,56 +242,96 @@ impl Cli {
 
         match self.command {
             Some(Commands::Up {
-                skip_post_create, ..
+                remove_existing_container,
+                skip_post_create,
             }) => {
-                // Attempt Docker health check and log availability
+                // Initialize configuration and workspace discovery
+                let workspace_folder = self.workspace_folder.clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+
+                tracing::info!(
+                    "Starting up container for workspace: {}",
+                    workspace_folder.display()
+                );
+
                 #[cfg(feature = "docker")]
                 {
-                    use deacon_core::docker::{CliDocker, Docker};
+                    use deacon_core::config::ConfigLoader;
+                    use deacon_core::container::ContainerIdentity;
+                    use deacon_core::docker::{CliDocker, Docker, DockerLifecycle};
 
-                    tracing::info!("Checking Docker availability...");
+                    // Load configuration
+                    let config_location = ConfigLoader::discover_config(&workspace_folder)?;
+
+                    if !config_location.exists() {
+                        return Err(anyhow::anyhow!("No devcontainer.json found in workspace"));
+                    }
+
+                    let config = ConfigLoader::load_from_path(config_location.path())?;
+
+                    // Ensure we have an image configured
+                    if config.image.is_none() {
+                        return Err(anyhow::anyhow!("No image specified in devcontainer.json"));
+                    }
+
+                    // Create container identity for this workspace and configuration
+                    let identity = ContainerIdentity::new(&workspace_folder, &config);
+
+                    // Check Docker availability
                     let docker_client = CliDocker::new();
-
-                    // Check if docker binary is installed first
                     match docker_client.check_docker_installed() {
                         Ok(()) => {
-                            // Try to ping the Docker daemon
-                            let runtime = tokio::runtime::Runtime::new().map_err(|e| {
-                                anyhow::anyhow!("Failed to create async runtime: {}", e)
-                            })?;
-
-                            match runtime.block_on(docker_client.ping()) {
-                                Ok(()) => {
-                                    tracing::info!("Docker is available and running");
-                                }
-                                Err(e) => {
-                                    tracing::warn!("Docker daemon is not available: {}", e);
-                                }
-                            }
+                            tracing::info!("Docker is available");
                         }
                         Err(e) => {
-                            tracing::warn!("Docker is not installed or not accessible: {}", e);
+                            return Err(anyhow::anyhow!("Docker is not available: {}", e));
                         }
                     }
+
+                    // Create async runtime and execute up workflow
+                    let runtime = tokio::runtime::Runtime::new()
+                        .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
+
+                    let result = runtime.block_on(async {
+                        // Check Docker daemon availability
+                        docker_client.ping().await?;
+
+                        // Execute up workflow
+                        docker_client
+                            .up(
+                                &identity,
+                                &config,
+                                &workspace_folder,
+                                remove_existing_container,
+                            )
+                            .await
+                    })?;
+
+                    // Output JSON result
+                    let json_output = serde_json::to_string_pretty(&result)?;
+                    println!("{}", json_output);
+
+                    if skip_post_create {
+                        tracing::info!(
+                            "Skipping postCreate lifecycle phase due to --skip-post-create flag"
+                        );
+                    }
+
+                    tracing::info!(
+                        "Container {} (reused: {})",
+                        result.container_id,
+                        result.reused
+                    );
+                    Ok(())
                 }
 
                 #[cfg(not(feature = "docker"))]
                 {
-                    tracing::warn!(
+                    return Err(anyhow::anyhow!(
                         "Docker support is disabled (compiled without 'docker' feature)"
-                    );
+                    ));
                 }
-
-                if skip_post_create {
-                    tracing::info!(
-                        "Skipping postCreate lifecycle phase due to --skip-post-create flag"
-                    );
-                }
-
-                Err(DeaconError::Config(ConfigError::NotImplemented {
-                    feature: "up command".to_string(),
-                })
-                .into())
             }
             Some(Commands::Build { .. }) => Err(DeaconError::Config(ConfigError::NotImplemented {
                 feature: "build command".to_string(),
