@@ -341,13 +341,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
-<<<<<<< HEAD
- "is-terminal",
-=======
  "async-trait",
  "bincode",
  "bytes",
->>>>>>> origin/main
  "json5",
  "libc",
  "linked-hash-map",
@@ -667,15 +663,6 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "hermit-abi"
 version = "0.5.2"
-<<<<<<< HEAD
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
-
-[[package]]
-name = "indexmap"
-version = "2.11.0"
-=======
->>>>>>> origin/main
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
@@ -935,16 +922,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-name = "is-terminal"
-version = "0.4.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
-dependencies = [
- "hermit-abi",
- "libc",
- "windows-sys 0.59.0",
-=======
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -958,7 +935,6 @@ checksum = "dbc5ebe9c3a1a7a5127f920a418f7585e9e758e911d0466ed004f393b0e380b2"
 dependencies = [
  "memchr",
  "serde",
->>>>>>> origin/main
 ]
 
 [[package]]
