@@ -46,15 +46,18 @@ fn test_subcommand_not_implemented() {
     cmd.arg("up")
         .assert()
         .failure()
-        .code(2)
-        .stderr(predicate::str::contains("Error: Configuration error"));
+        .code(1)
+        .stderr(predicate::str::contains(
+            "No devcontainer.json found in workspace",
+        ));
 
+    // Build command is now implemented and should try to find config
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("build")
         .assert()
         .failure()
-        .code(2)
-        .stderr(predicate::str::contains("Error: Configuration error"));
+        .code(1)
+        .stderr(predicate::str::contains("Configuration file not found"));
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("exec")
@@ -62,8 +65,14 @@ fn test_subcommand_not_implemented() {
         .arg("test")
         .assert()
         .failure()
-        .code(2)
-        .stderr(predicate::str::contains("Error: Configuration error"));
+        .code(1)
+        // On Linux runners with Docker installed, this yields "No such container".
+        // On macOS runners without Docker CLI, spawning `docker` fails with ENOENT.
+        .stderr(
+            predicate::str::contains("No such container")
+                .or(predicate::str::contains("Failed to spawn docker"))
+                .or(predicate::str::contains("Docker CLI error")),
+        );
 }
 
 #[test]
@@ -108,8 +117,10 @@ fn test_debug_logging_with_subcommand() {
         .arg("up")
         .assert()
         .failure()
-        .code(2)
-        .stderr(predicate::str::contains("Error: Configuration error"));
+        .code(1)
+        .stderr(predicate::str::contains(
+            "No devcontainer.json found in workspace",
+        ));
 
     // Note: The actual debug log "CLI initialized with log level: debug"
     // should appear in stderr when running with RUST_LOG=debug, but it's hard

@@ -4,9 +4,17 @@
 //! image building, and container execution.
 
 #[cfg(feature = "docker")]
+use crate::config::DevContainerConfig;
+#[cfg(feature = "docker")]
+use crate::container::{ContainerIdentity, ContainerOps, ContainerResult};
+#[cfg(feature = "docker")]
 use crate::errors::{DockerError, Result};
 #[cfg(feature = "docker")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "docker")]
+use std::collections::HashMap;
+#[cfg(feature = "docker")]
+use std::path::Path;
 #[cfg(feature = "docker")]
 use std::process::Command;
 #[cfg(feature = "docker")]
@@ -28,6 +36,34 @@ pub struct ContainerInfo {
     pub state: String,
 }
 
+/// Configuration for executing commands in containers
+#[cfg(feature = "docker")]
+#[derive(Debug, Clone)]
+pub struct ExecConfig {
+    /// User to run command as
+    pub user: Option<String>,
+    /// Working directory
+    pub working_dir: Option<String>,
+    /// Environment variables
+    pub env: HashMap<String, String>,
+    /// Whether to allocate a TTY
+    pub tty: bool,
+    /// Whether to attach stdin
+    pub interactive: bool,
+    /// Whether to detach the command
+    pub detach: bool,
+}
+
+/// Result of executing a command in a container
+#[cfg(feature = "docker")]
+#[derive(Debug)]
+pub struct ExecResult {
+    /// Exit code of the command
+    pub exit_code: i32,
+    /// Whether the command completed successfully (exit code 0)
+    pub success: bool,
+}
+
 /// Docker client abstraction trait
 #[cfg(feature = "docker")]
 #[allow(async_fn_in_trait)]
@@ -40,6 +76,28 @@ pub trait Docker {
 
     /// Inspect a specific container by ID
     async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>>;
+
+    /// Execute a command in a running container
+    async fn exec(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+    ) -> Result<ExecResult>;
+}
+
+/// Docker client abstraction trait extended with container lifecycle operations
+#[cfg(feature = "docker")]
+#[allow(async_fn_in_trait)]
+pub trait DockerLifecycle: Docker + ContainerOps {
+    /// Execute the complete `up` workflow: find existing containers, reuse or create new
+    async fn up(
+        &self,
+        identity: &ContainerIdentity,
+        config: &DevContainerConfig,
+        workspace_path: &Path,
+        remove_existing: bool,
+    ) -> Result<ContainerResult>;
 }
 
 /// CLI-based Docker implementation using docker command
@@ -171,6 +229,31 @@ impl CliDocker {
         }
 
         Ok(result)
+    }
+
+    /// Check if we're running in a TTY
+    #[cfg(feature = "docker")]
+    pub fn is_tty() -> bool {
+        use std::io::IsTerminal;
+        std::io::stdin().is_terminal()
+    }
+
+    /// Parse environment variables from KEY=VALUE format
+    #[allow(dead_code)] // Used by exec command
+    fn parse_env_vars(env_vars: &[String]) -> Result<HashMap<String, String>> {
+        let mut env_map = HashMap::new();
+        for env_var in env_vars {
+            if let Some((key, value)) = env_var.split_once('=') {
+                env_map.insert(key.to_string(), value.to_string());
+            } else {
+                return Err(DockerError::CLIError(format!(
+                    "Invalid environment variable format: '{}'. Expected KEY=VALUE",
+                    env_var
+                ))
+                .into());
+            }
+        }
+        Ok(env_map)
     }
 
     /// Parse docker inspect JSON output into ContainerInfo
@@ -417,8 +500,338 @@ impl Docker for CliDocker {
         .await
         .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
     }
+
+    #[instrument(skip(self))]
+    async fn exec(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+    ) -> Result<ExecResult> {
+        debug!("Executing command in container: {}", container_id);
+
+        let docker_path = self.docker_path.clone();
+        let container_id = container_id.to_string();
+        let command = command.to_vec();
+
+        tokio::task::spawn_blocking(move || {
+            let mut args = vec!["exec"];
+
+            // Add TTY and interactive flags
+            if config.tty {
+                args.push("-t");
+            }
+            if config.interactive {
+                args.push("-i");
+            }
+
+            // Add detach flag
+            if config.detach {
+                args.push("-d");
+            }
+
+            // Add user if specified
+            if let Some(ref user) = config.user {
+                args.push("-u");
+                args.push(user);
+            }
+
+            // Add working directory if specified
+            if let Some(ref workdir) = config.working_dir {
+                args.push("-w");
+                args.push(workdir);
+            }
+
+            // Add environment variables
+            let env_args: Vec<String> = config
+                .env
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            for env_arg in &env_args {
+                args.push("-e");
+                args.push(env_arg);
+            }
+
+            // Add signal proxy for TTY sessions
+            if config.tty {
+                args.push("--sig-proxy=true");
+            }
+
+            // Add container ID
+            args.push(&container_id);
+
+            // Add the command and arguments
+            for cmd_part in &command {
+                args.push(cmd_part);
+            }
+
+            debug!("Docker exec args: {:?}", args);
+
+            let mut child = std::process::Command::new(&docker_path)
+                .args(&args)
+                .spawn()
+                .map_err(|e| {
+                    DockerError::CLIError(format!("Failed to spawn docker exec: {}", e))
+                })?;
+
+            let exit_status = child.wait().map_err(|e| {
+                DockerError::CLIError(format!("Failed to wait for docker exec: {}", e))
+            })?;
+
+            let exit_code = exit_status.code().unwrap_or(-1);
+            let success = exit_status.success();
+
+            Ok(ExecResult { exit_code, success })
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+    }
 }
 
+#[cfg(feature = "docker")]
+impl ContainerOps for CliDocker {
+    #[instrument(skip(self))]
+    async fn find_matching_containers(&self, identity: &ContainerIdentity) -> Result<Vec<String>> {
+        debug!("Finding containers with identity: {:?}", identity);
+
+        let label_selector = identity.label_selector();
+        let containers = self.list_containers(Some(&label_selector)).await?;
+
+        let container_ids: Vec<String> = containers.into_iter().map(|c| c.id).collect();
+        debug!("Found {} matching containers", container_ids.len());
+
+        Ok(container_ids)
+    }
+
+    #[instrument(skip(self, config))]
+    async fn create_container(
+        &self,
+        identity: &ContainerIdentity,
+        config: &DevContainerConfig,
+        workspace_path: &Path,
+    ) -> Result<String> {
+        debug!("Creating container with identity: {:?}", identity);
+
+        let container_name = identity.container_name();
+        let labels = identity.labels();
+
+        // Build docker run command
+        let mut args = vec!["create".to_string()];
+
+        // Add container name
+        args.push("--name".to_string());
+        args.push(container_name.clone());
+
+        // Add labels
+        for (key, value) in labels {
+            args.push("--label".to_string());
+            args.push(format!("{}={}", key, value));
+        }
+
+        // Add workspace mount
+        let workspace_mount = format!(
+            "type=bind,source={},target=/workspaces/{}",
+            workspace_path.display(),
+            workspace_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("workspace")
+        );
+        args.push("--mount".to_string());
+        args.push(workspace_mount);
+
+        // Add runArgs if present
+        args.extend(config.run_args.iter().cloned());
+
+        // Add image
+        let image = config.image.as_ref().ok_or_else(|| {
+            DockerError::CLIError("No image specified in configuration".to_string())
+        })?;
+        args.push(image.clone());
+
+        // Execute docker create command
+        let docker_path = self.docker_path.clone();
+        let container_id = tokio::task::spawn_blocking(move || {
+            let output = Command::new(&docker_path)
+                .args(&args)
+                .output()
+                .map_err(|e| DockerError::CLIError(format!("Failed to create container: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(DockerError::CLIError(format!(
+                    "Docker create failed: {}",
+                    stderr
+                )));
+            }
+
+            let stdout = String::from_utf8(output.stdout).map_err(|e| {
+                DockerError::CLIError(format!("Invalid UTF-8 in docker output: {}", e))
+            })?;
+
+            Ok(stdout.trim().to_string())
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))??;
+
+        debug!("Created container with ID: {}", container_id);
+        Ok(container_id)
+    }
+
+    #[instrument(skip(self))]
+    async fn start_container(&self, container_id: &str) -> Result<()> {
+        debug!("Starting container: {}", container_id);
+
+        let docker_path = self.docker_path.clone();
+        let container_id = container_id.to_string();
+
+        tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
+            let output = Command::new(&docker_path)
+                .args(["start", &container_id])
+                .output()
+                .map_err(|e| DockerError::CLIError(format!("Failed to start container: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(DockerError::CLIError(format!(
+                    "Docker start failed: {}",
+                    stderr
+                )));
+            }
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        .map_err(Into::into)
+    }
+
+    #[instrument(skip(self))]
+    async fn remove_container(&self, container_id: &str) -> Result<()> {
+        debug!("Removing container: {}", container_id);
+
+        let docker_path = self.docker_path.clone();
+        let container_id = container_id.to_string();
+
+        tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
+            let output = Command::new(&docker_path)
+                .args(["rm", "-f", &container_id])
+                .output()
+                .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(DockerError::CLIError(format!(
+                    "Docker rm failed: {}",
+                    stderr
+                )));
+            }
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        .map_err(Into::into)
+    }
+
+    #[instrument(skip(self))]
+    async fn get_container_image(&self, container_id: &str) -> Result<String> {
+        debug!("Getting image for container: {}", container_id);
+
+        let docker_path = self.docker_path.clone();
+        let container_id = container_id.to_string();
+
+        tokio::task::spawn_blocking(move || -> std::result::Result<String, DockerError> {
+            let output = Command::new(&docker_path)
+                .args(["inspect", "--format", "{{.Image}}", &container_id])
+                .output()
+                .map_err(|e| {
+                    DockerError::CLIError(format!("Failed to inspect container: {}", e))
+                })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(DockerError::CLIError(format!(
+                    "Docker inspect failed: {}",
+                    stderr
+                )));
+            }
+
+            let stdout = String::from_utf8(output.stdout).map_err(|e| {
+                DockerError::CLIError(format!("Invalid UTF-8 in docker output: {}", e))
+            })?;
+
+            Ok(stdout.trim().to_string())
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        .map_err(Into::into)
+    }
+}
+
+#[cfg(feature = "docker")]
+impl DockerLifecycle for CliDocker {
+    #[instrument(skip(self, config))]
+    async fn up(
+        &self,
+        identity: &ContainerIdentity,
+        config: &DevContainerConfig,
+        workspace_path: &Path,
+        remove_existing: bool,
+    ) -> Result<ContainerResult> {
+        debug!("Starting up container workflow");
+
+        // Find existing containers
+        let existing_containers = self.find_matching_containers(identity).await?;
+
+        if !existing_containers.is_empty() && !remove_existing {
+            // Reuse existing container
+            let container_id = existing_containers[0].clone();
+            debug!("Reusing existing container: {}", container_id);
+
+            // Start the container if it's not running
+            self.start_container(&container_id).await?;
+
+            // Get the image ID
+            let image_id = self.get_container_image(&container_id).await?;
+
+            return Ok(ContainerResult {
+                container_id,
+                reused: true,
+                image_id,
+            });
+        }
+
+        // Remove existing containers if requested
+        if remove_existing {
+            for container_id in existing_containers {
+                debug!("Removing existing container: {}", container_id);
+                self.remove_container(&container_id).await?;
+            }
+        }
+
+        // Create new container
+        let container_id = self
+            .create_container(identity, config, workspace_path)
+            .await?;
+        self.start_container(&container_id).await?;
+
+        // Get the image ID
+        let image_id = self.get_container_image(&container_id).await?;
+
+        debug!(
+            "Successfully created and started new container: {}",
+            container_id
+        );
+
+        Ok(ContainerResult {
+            container_id,
+            reused: false,
+            image_id,
+        })
+    }
+}
 // Non-docker feature fallback
 #[cfg(not(feature = "docker"))]
 pub struct DockerClient;

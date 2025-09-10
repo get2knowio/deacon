@@ -40,19 +40,14 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            asset_name: deacon-${{ needs.create-release.outputs.version }}-x86_64-linux
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            asset_name: deacon-${{ needs.create-release.outputs.version }}-aarch64-linux
           - os: macos-latest
             target: x86_64-apple-darwin
-            asset_name: deacon-${{ needs.create-release.outputs.version }}-x86_64-macos
           - os: macos-latest
             target: aarch64-apple-darwin
-            asset_name: deacon-${{ needs.create-release.outputs.version }}-aarch64-macos
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            asset_name: deacon-${{ needs.create-release.outputs.version }}-x86_64-windows.exe
             
     steps:
     - name: Checkout code
@@ -84,22 +79,83 @@ jobs:
     - name: Build release binary
       run: cargo build --release --target ${{ matrix.target }}
       
-    - name: Prepare binary for upload (Unix)
+    - name: Create archive (Unix)
       if: runner.os != 'Windows'
       run: |
-        cp target/${{ matrix.target }}/release/deacon ${{ matrix.asset_name }}
+        cd target/${{ matrix.target }}/release
+        tar -czf ../../../deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz deacon
+        cd ../../..
         
-    - name: Prepare binary for upload (Windows)
+    - name: Create archive (Windows)
       if: runner.os == 'Windows'
       run: |
-        copy target\${{ matrix.target }}\release\deacon.exe ${{ matrix.asset_name }}
+        cd target/${{ matrix.target }}/release
+        7z a ../../../deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip deacon.exe
+        cd ../../..
         
-    - name: Upload Release Asset
+    - name: Generate checksums (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        sha256sum deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz > deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz.sha256
+        
+    - name: Generate checksums (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        Get-FileHash -Algorithm SHA256 deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip | ForEach-Object { "$($_.Hash.ToLower())  deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip" } > deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip.sha256
+        
+    - name: Upload archive artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}
+        path: |
+          deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.*
+        
+    - name: Upload Release Asset (Unix)
+      if: runner.os != 'Windows'
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./${{ matrix.asset_name }}
-        asset_name: ${{ matrix.asset_name }}
-        asset_content_type: application/octet-stream
+        asset_path: ./deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz
+        asset_name: deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz
+        asset_content_type: application/gzip
+        
+    - name: Upload Release Asset (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip
+        asset_name: deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip
+        asset_content_type: application/zip
+
+  checksums:
+    name: Generate SHA256SUMS
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: deacon-${{ needs.create-release.outputs.version }}-*
+        merge-multiple: true
+        
+    - name: Generate combined SHA256SUMS
+      run: |
+        # Combine all individual checksum files
+        cat *.sha256 > SHA256SUMS
+        # Verify the format and content
+        cat SHA256SUMS
+        
+    - name: Upload SHA256SUMS
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./SHA256SUMS
+        asset_name: SHA256SUMS
+        asset_content_type: text/plain

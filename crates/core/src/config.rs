@@ -23,14 +23,126 @@
 
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
-use serde::Deserialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 /// Default function to return an empty JSON object for serde defaults.
 fn default_empty_object() -> serde_json::Value {
     serde_json::Value::Object(Default::default())
+}
+
+/// Port specification that can be either a number or a string.
+///
+/// Supports port numbers (e.g., 3000) and port mappings (e.g., "3000:3000").
+/// For now, stores the original value for future parsing.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum PortSpec {
+    /// Port number
+    Number(u16),
+    /// Port string (for mappings like "3000:3000" or just "3000")
+    String(String),
+}
+
+impl PortSpec {
+    /// Get the primary port number from this specification.
+    /// For strings like "3000:8080", returns the first port (3000).
+    /// For numbers, returns the number directly.
+    pub fn primary_port(&self) -> Option<u16> {
+        match self {
+            PortSpec::Number(port) => Some(*port),
+            PortSpec::String(s) => {
+                // Try to parse as number first
+                if let Ok(port) = s.parse::<u16>() {
+                    return Some(port);
+                }
+                // Try to parse as port mapping (e.g., "3000:8080")
+                if let Some(first_part) = s.split(':').next() {
+                    first_part.parse::<u16>().ok()
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Get the string representation of this port spec for validation.
+    pub fn as_string(&self) -> String {
+        match self {
+            PortSpec::Number(port) => port.to_string(),
+            PortSpec::String(s) => s.clone(),
+        }
+    }
+}
+
+/// Action to take when a port is auto-forwarded.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OnAutoForward {
+    /// Do nothing when port is auto-forwarded
+    Silent,
+    /// Show a notification when port is auto-forwarded  
+    Notify,
+    /// Open the port in a browser when auto-forwarded
+    OpenBrowser,
+    /// Open the port in a preview panel when auto-forwarded
+    OpenPreview,
+    /// Ignore the port (don't auto-forward)
+    Ignore,
+}
+
+/// Attributes for port configuration.
+///
+/// Defines how ports should be handled when forwarded, including
+/// labeling, auto-forward behavior, and preview options.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortAttributes {
+    /// Human-readable label for the port
+    pub label: Option<String>,
+
+    /// Action to take when the port is auto-forwarded
+    pub on_auto_forward: Option<OnAutoForward>,
+
+    /// Whether to open a preview of the port automatically
+    pub open_preview: Option<bool>,
+
+    /// Whether to require a specific local port for forwarding
+    pub require_local_port: Option<bool>,
+
+    /// Description of what this port is used for
+    pub description: Option<String>,
+}
+
+/// Custom deserializer for extends field that handles both string and array of strings
+fn deserialize_extends<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::String(s)) => Ok(Some(vec![s])),
+        Some(serde_json::Value::Array(arr)) => {
+            let mut result = Vec::new();
+            for item in arr {
+                match item {
+                    serde_json::Value::String(s) => result.push(s),
+                    _ => return Err(D::Error::custom("extends array must contain only strings")),
+                }
+            }
+            Ok(Some(result))
+        }
+        Some(_) => Err(D::Error::custom(
+            "extends must be a string or array of strings",
+        )),
+    }
 }
 
 /// Configuration file location information
@@ -74,9 +186,15 @@ impl ConfigLocation {
 /// - [DevContainer Configuration Reference](https://containers.dev/implementors/json_reference/)
 /// - [Container Configuration](https://containers.dev/implementors/json_reference/#container-configuration)
 /// - [Lifecycle Commands](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevContainerConfig {
+    /// Paths to extend from. Can be a single path or array of paths.
+    ///
+    /// Reference: [Configuration - extends](https://containers.dev/implementors/json_reference/#extends)
+    #[serde(default, deserialize_with = "deserialize_extends")]
+    pub extends: Option<Vec<String>>,
+
     /// Human-readable name for the development container.
     ///
     /// Reference: [Container Configuration - name](https://containers.dev/implementors/json_reference/#name)
@@ -97,6 +215,24 @@ pub struct DevContainerConfig {
     ///
     /// Reference: [Container Configuration - build](https://containers.dev/implementors/json_reference/#build)
     pub build: Option<serde_json::Value>,
+
+    /// Docker Compose file(s) to use for multi-container environments.
+    ///
+    /// Can be a single file path or an array of file paths.
+    /// Reference: [Container Configuration - dockerComposeFile](https://containers.dev/implementors/json_reference/#docker-compose-file)
+    #[serde(rename = "dockerComposeFile")]
+    pub docker_compose_file: Option<serde_json::Value>,
+
+    /// Name of the Docker Compose service to connect to as the primary development container.
+    ///
+    /// Reference: [Container Configuration - service](https://containers.dev/implementors/json_reference/#service)
+    pub service: Option<String>,
+
+    /// Array of additional Docker Compose services to start alongside the primary service.
+    ///
+    /// Reference: [Container Configuration - runServices](https://containers.dev/implementors/json_reference/#run-services)
+    #[serde(default)]
+    pub run_services: Vec<String>,
 
     /// Features to install in the container.
     ///
@@ -141,12 +277,25 @@ pub struct DevContainerConfig {
     ///
     /// Reference: [Port Configuration - forwardPorts](https://containers.dev/implementors/json_reference/#forward-ports)
     #[serde(default)]
-    pub forward_ports: Vec<serde_json::Value>,
+    pub forward_ports: Vec<PortSpec>,
 
     /// Primary application port.
     ///
     /// Reference: [Port Configuration - appPort](https://containers.dev/implementors/json_reference/#app-port)
-    pub app_port: Option<serde_json::Value>,
+    pub app_port: Option<PortSpec>,
+
+    /// Attributes for specific ports.
+    ///
+    /// Maps port specifications to their attributes. Keys are port numbers or
+    /// port/protocol combinations (e.g., "3000", "3000/tcp").
+    #[serde(default)]
+    pub ports_attributes: HashMap<String, PortAttributes>,
+
+    /// Default attributes for ports not explicitly configured.
+    ///
+    /// These attributes are applied to any forwarded ports that don't have
+    /// specific entries in ports_attributes.
+    pub other_ports_attributes: Option<PortAttributes>,
 
     /// Additional arguments to pass to docker run.
     ///
@@ -334,15 +483,87 @@ impl DevContainerConfig {
 
         (config, report)
     }
+
+    /// Get Docker Compose files as a vector of strings
+    ///
+    /// Parses the `docker_compose_file` field which can be either a string or an array of strings.
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector of compose file paths. Empty vector if no compose files are specified.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use deacon_core::config::DevContainerConfig;
+    /// use serde_json::json;
+    ///
+    /// let mut config = DevContainerConfig::default();
+    /// config.docker_compose_file = Some(json!("docker-compose.yml"));
+    /// assert_eq!(config.get_compose_files(), vec!["docker-compose.yml"]);
+    ///
+    /// config.docker_compose_file = Some(json!(["docker-compose.yml", "docker-compose.override.yml"]));
+    /// assert_eq!(config.get_compose_files(), vec!["docker-compose.yml", "docker-compose.override.yml"]);
+    /// ```
+    pub fn get_compose_files(&self) -> Vec<String> {
+        match &self.docker_compose_file {
+            Some(serde_json::Value::String(file)) => vec![file.clone()],
+            Some(serde_json::Value::Array(files)) => files
+                .iter()
+                .filter_map(|f| f.as_str())
+                .map(|s| s.to_string())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Check if this configuration uses Docker Compose
+    ///
+    /// ## Returns
+    ///
+    /// Returns true if `docker_compose_file` is specified and `service` is specified.
+    pub fn uses_compose(&self) -> bool {
+        self.docker_compose_file.is_some() && self.service.is_some()
+    }
+
+    /// Get all services to start (primary service + run services)
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector containing the primary service (if specified) followed by any run services.
+    pub fn get_all_services(&self) -> Vec<String> {
+        let mut services = Vec::new();
+        if let Some(ref service) = self.service {
+            services.push(service.clone());
+        }
+        services.extend(self.run_services.clone());
+        services
+    }
+
+    /// Check if the configuration specifies stopCompose shutdown action
+    ///
+    /// ## Returns
+    ///
+    /// Returns true if shutdown_action is set to "stopCompose".
+    pub fn has_stop_compose_shutdown(&self) -> bool {
+        self.shutdown_action
+            .as_ref()
+            .map(|action| action == "stopCompose")
+            .unwrap_or(false)
+    }
 }
 
 impl Default for DevContainerConfig {
     fn default() -> Self {
         Self {
+            extends: None,
             name: None,
             image: None,
             dockerfile: None,
             build: None,
+            docker_compose_file: None,
+            service: None,
+            run_services: Vec::new(),
             features: default_empty_object(),
             customizations: default_empty_object(),
             workspace_folder: None,
@@ -351,6 +572,8 @@ impl Default for DevContainerConfig {
             remote_env: HashMap::new(),
             forward_ports: Vec::new(),
             app_port: None,
+            ports_attributes: HashMap::new(),
+            other_ports_attributes: None,
             run_args: Vec::new(),
             shutdown_action: None,
             override_command: None,
@@ -364,6 +587,209 @@ impl Default for DevContainerConfig {
     }
 }
 
+/// Configuration merger that implements the DevContainer specification merge rules.
+///
+/// The merger follows these rules:
+/// - Arrays override (no concatenation) for lifecycle commands
+/// - Maps deep-merge with later precedence
+/// - Features map merge keyed by id
+/// - containerEnv & remoteEnv last-writer-wins
+/// - runArgs concatenate
+pub struct ConfigMerger;
+
+impl ConfigMerger {
+    /// Merge multiple configurations in order, with later configs taking precedence.
+    ///
+    /// ## Arguments
+    ///
+    /// * `configs` - Configurations to merge in order (first = lowest precedence)
+    ///
+    /// ## Returns
+    ///
+    /// Returns the merged configuration following DevContainer merge rules.
+    #[instrument(skip_all)]
+    pub fn merge_configs(configs: &[DevContainerConfig]) -> DevContainerConfig {
+        if configs.is_empty() {
+            return DevContainerConfig::default();
+        }
+
+        if configs.len() == 1 {
+            return configs[0].clone();
+        }
+
+        debug!("Merging {} configurations", configs.len());
+
+        let mut result = DevContainerConfig::default();
+
+        for (i, config) in configs.iter().enumerate() {
+            debug!("Merging configuration {} of {}", i + 1, configs.len());
+            result = Self::merge_two_configs(&result, config);
+        }
+
+        debug!("Configuration merge complete");
+        result
+    }
+
+    /// Merge two configurations with the second taking precedence.
+    fn merge_two_configs(
+        base: &DevContainerConfig,
+        overlay: &DevContainerConfig,
+    ) -> DevContainerConfig {
+        DevContainerConfig {
+            // extends is not merged - it's resolved before merging
+            extends: overlay.extends.clone().or_else(|| base.extends.clone()),
+
+            // Simple field overrides (last writer wins)
+            name: overlay.name.clone().or_else(|| base.name.clone()),
+            image: overlay.image.clone().or_else(|| base.image.clone()),
+            dockerfile: overlay
+                .dockerfile
+                .clone()
+                .or_else(|| base.dockerfile.clone()),
+            build: overlay.build.clone().or_else(|| base.build.clone()),
+            workspace_folder: overlay
+                .workspace_folder
+                .clone()
+                .or_else(|| base.workspace_folder.clone()),
+            app_port: overlay.app_port.clone().or_else(|| base.app_port.clone()),
+            shutdown_action: overlay
+                .shutdown_action
+                .clone()
+                .or_else(|| base.shutdown_action.clone()),
+            override_command: overlay.override_command.or(base.override_command),
+            // Docker Compose fields
+            docker_compose_file: overlay
+                .docker_compose_file
+                .clone()
+                .or_else(|| base.docker_compose_file.clone()),
+            service: overlay.service.clone().or_else(|| base.service.clone()),
+            run_services: if overlay.run_services.is_empty() {
+                base.run_services.clone()
+            } else {
+                overlay.run_services.clone()
+            },
+            // Features: deep merge as objects
+            features: Self::merge_json_objects(&base.features, &overlay.features),
+
+            // Customizations: deep merge as objects
+            customizations: Self::merge_json_objects(&base.customizations, &overlay.customizations),
+
+            // Arrays that override (no concat) - lifecycle commands
+            mounts: if overlay.mounts.is_empty() {
+                base.mounts.clone()
+            } else {
+                overlay.mounts.clone()
+            },
+            forward_ports: if overlay.forward_ports.is_empty() {
+                base.forward_ports.clone()
+            } else {
+                overlay.forward_ports.clone()
+            },
+            on_create_command: overlay
+                .on_create_command
+                .clone()
+                .or_else(|| base.on_create_command.clone()),
+            post_start_command: overlay
+                .post_start_command
+                .clone()
+                .or_else(|| base.post_start_command.clone()),
+            post_create_command: overlay
+                .post_create_command
+                .clone()
+                .or_else(|| base.post_create_command.clone()),
+            post_attach_command: overlay
+                .post_attach_command
+                .clone()
+                .or_else(|| base.post_attach_command.clone()),
+            initialize_command: overlay
+                .initialize_command
+                .clone()
+                .or_else(|| base.initialize_command.clone()),
+            update_content_command: overlay
+                .update_content_command
+                .clone()
+                .or_else(|| base.update_content_command.clone()),
+
+            // Maps: last writer wins for env vars
+            container_env: Self::merge_string_maps(&base.container_env, &overlay.container_env),
+            remote_env: Self::merge_optional_string_maps(&base.remote_env, &overlay.remote_env),
+
+            // runArgs: concatenate arrays
+            run_args: Self::concat_string_arrays(&base.run_args, &overlay.run_args),
+
+            // Port attributes: deep merge maps
+            ports_attributes: Self::merge_port_attributes_maps(
+                &base.ports_attributes,
+                &overlay.ports_attributes,
+            ),
+            other_ports_attributes: overlay
+                .other_ports_attributes
+                .clone()
+                .or_else(|| base.other_ports_attributes.clone()),
+        }
+    }
+
+    /// Merge two JSON objects deeply
+    fn merge_json_objects(
+        base: &serde_json::Value,
+        overlay: &serde_json::Value,
+    ) -> serde_json::Value {
+        match (base, overlay) {
+            (serde_json::Value::Object(base_obj), serde_json::Value::Object(overlay_obj)) => {
+                let mut result = base_obj.clone();
+                for (key, value) in overlay_obj {
+                    match result.get(key) {
+                        Some(existing) => {
+                            result.insert(key.clone(), Self::merge_json_objects(existing, value));
+                        }
+                        None => {
+                            result.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                serde_json::Value::Object(result)
+            }
+            (_, overlay) => overlay.clone(),
+        }
+    }
+
+    /// Merge string maps with overlay taking precedence
+    fn merge_string_maps(
+        base: &HashMap<String, String>,
+        overlay: &HashMap<String, String>,
+    ) -> HashMap<String, String> {
+        let mut result = base.clone();
+        result.extend(overlay.clone());
+        result
+    }
+
+    /// Merge optional string maps with overlay taking precedence
+    fn merge_optional_string_maps(
+        base: &HashMap<String, Option<String>>,
+        overlay: &HashMap<String, Option<String>>,
+    ) -> HashMap<String, Option<String>> {
+        let mut result = base.clone();
+        result.extend(overlay.clone());
+        result
+    }
+
+    /// Concatenate string arrays
+    fn concat_string_arrays(base: &[String], overlay: &[String]) -> Vec<String> {
+        let mut result = base.to_vec();
+        result.extend_from_slice(overlay);
+        result
+    }
+
+    /// Merge port attributes maps with overlay taking precedence
+    fn merge_port_attributes_maps(
+        base: &HashMap<String, PortAttributes>,
+        overlay: &HashMap<String, PortAttributes>,
+    ) -> HashMap<String, PortAttributes> {
+        let mut result = base.clone();
+        result.extend(overlay.clone());
+        result
+    }
+}
 /// Configuration loader for DevContainer configurations.
 ///
 /// Provides methods to load and parse devcontainer.json/devcontainer.jsonc files
@@ -519,15 +945,6 @@ impl ConfigLoader {
             Self::log_unknown_keys(obj);
         }
 
-        // Check for extends field (not yet implemented)
-        if let serde_json::Value::Object(obj) = &raw_value {
-            if obj.contains_key("extends") {
-                return Err(DeaconError::Config(ConfigError::NotImplemented {
-                    feature: "extends configuration".to_string(),
-                }));
-            }
-        }
-
         // Deserialize into strongly typed structure
         let config: DevContainerConfig = serde_json::from_value(raw_value).map_err(|e| {
             debug!("Failed to deserialize configuration: {}", e);
@@ -544,6 +961,154 @@ impl ConfigLoader {
             config.name
         );
         Ok(config)
+    }
+
+    /// Load configuration with extends resolution applied
+    ///
+    /// This method loads a configuration and resolves its extends chain,
+    /// returning the fully merged configuration.
+    ///
+    /// ## Arguments
+    ///
+    /// * `path` - Path to the devcontainer.json or devcontainer.jsonc file
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Ok(DevContainerConfig)` with extends chain resolved and merged.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use deacon_core::config::ConfigLoader;
+    /// use std::path::Path;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let config = ConfigLoader::load_with_extends(Path::new(".devcontainer/devcontainer.json"))?;
+    /// println!("Loaded merged config: {:?}", config.name);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip_all, fields(path = %path.display()))]
+    pub fn load_with_extends(path: &Path) -> Result<DevContainerConfig> {
+        debug!(
+            "Loading configuration with extends resolution from {}",
+            path.display()
+        );
+
+        let mut visited = HashSet::new();
+        let configs = Self::resolve_extends_chain(path, &mut visited)?;
+
+        debug!(
+            "Resolved extends chain with {} configurations",
+            configs.len()
+        );
+
+        // Merge all configurations in order (base to overlay)
+        let merged = ConfigMerger::merge_configs(&configs);
+
+        debug!("Configuration loading with extends complete");
+        Ok(merged)
+    }
+
+    /// Recursively resolve the extends chain for a configuration
+    ///
+    /// This method loads a configuration and recursively resolves all configurations
+    /// in its extends chain, performing cycle detection.
+    ///
+    /// ## Arguments
+    ///
+    /// * `config_path` - Path to the configuration file to resolve
+    /// * `visited` - Set of already visited paths for cycle detection
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector of configurations in merge order (base first, overlay last).
+    #[instrument(skip_all, fields(path = %config_path.display()))]
+    fn resolve_extends_chain(
+        config_path: &Path,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<Vec<DevContainerConfig>> {
+        let canonical_path = config_path.canonicalize().map_err(|e| {
+            debug!(
+                "Failed to canonicalize path {}: {}",
+                config_path.display(),
+                e
+            );
+            DeaconError::Config(ConfigError::NotFound {
+                path: config_path.display().to_string(),
+            })
+        })?;
+
+        // Check for cycles
+        if visited.contains(&canonical_path) {
+            let chain = visited
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            let cycle_chain = format!("{} -> {}", chain, canonical_path.display());
+
+            return Err(DeaconError::Config(ConfigError::ExtendsCycle {
+                chain: cycle_chain,
+            }));
+        }
+
+        visited.insert(canonical_path.clone());
+
+        // Load the current configuration
+        let config = Self::load_from_path(&canonical_path)?;
+
+        let mut all_configs = Vec::new();
+
+        // Recursively resolve extends
+        if let Some(extends_paths) = &config.extends {
+            debug!("Resolving {} extends paths", extends_paths.len());
+
+            for extend_path in extends_paths {
+                // Check for OCI references (not yet implemented)
+                if extend_path.contains("://")
+                    || extend_path.starts_with("ghcr.io/")
+                    || extend_path.starts_with("mcr.microsoft.com/")
+                {
+                    warn!(
+                        "OCI extends reference detected but not yet implemented: {}",
+                        extend_path
+                    );
+                    return Err(DeaconError::Config(ConfigError::NotImplemented {
+                        feature: format!("OCI extends reference: {}", extend_path),
+                    }));
+                }
+
+                // Resolve relative path
+                let base_dir = canonical_path.parent().unwrap_or(&canonical_path);
+                let resolved_path = base_dir.join(extend_path);
+
+                debug!(
+                    "Resolving extends path: {} -> {}",
+                    extend_path,
+                    resolved_path.display()
+                );
+
+                // Recursively resolve the extended configuration
+                let mut extended_configs = Self::resolve_extends_chain(&resolved_path, visited)?;
+                all_configs.append(&mut extended_configs);
+            }
+        }
+
+        // Add the current config last (highest precedence)
+        let mut config_without_extends = config.clone();
+        config_without_extends.extends = None; // Remove extends from final config
+        all_configs.push(config_without_extends);
+
+        visited.remove(&canonical_path);
+
+        debug!(
+            "Resolved extends chain for {}: {} total configs",
+            canonical_path.display(),
+            all_configs.len()
+        );
+
+        Ok(all_configs)
     }
 
     /// Load configuration with variable substitution applied
@@ -610,10 +1175,14 @@ impl ConfigLoader {
     /// keys that are not yet supported without failing the configuration load.
     fn log_unknown_keys(obj: &serde_json::Map<String, serde_json::Value>) {
         let known_keys = [
+            "extends",
             "name",
             "image",
             "dockerFile",
             "build",
+            "dockerComposeFile",
+            "service",
+            "runServices",
             "features",
             "customizations",
             "workspaceFolder",
@@ -622,6 +1191,8 @@ impl ConfigLoader {
             "remoteEnv",
             "forwardPorts",
             "appPort",
+            "portsAttributes",
+            "otherPortsAttributes",
             "runArgs",
             "shutdownAction",
             "overrideCommand",
@@ -664,16 +1235,74 @@ impl ConfigLoader {
         // Validate shutdown action values
         if let Some(action) = &config.shutdown_action {
             match action.as_str() {
-                "none" | "stopContainer" => {
+                "none" | "stopContainer" | "stopCompose" => {
                     // Valid values
                 }
                 _ => {
                     return Err(DeaconError::Config(ConfigError::Validation {
                         message: format!(
-                            "Invalid shutdownAction '{}' - must be 'none' or 'stopContainer'",
+                            "Invalid shutdownAction '{}' - must be 'none', 'stopContainer', or 'stopCompose'",
                             action
                         ),
                     }));
+                }
+            }
+        }
+
+        // Validate port attributes references
+        Self::validate_port_attributes(config)?;
+
+        Ok(())
+    }
+
+    /// Validate that ports referenced in port attributes exist in forwardPorts or appPort.
+    ///
+    /// This method checks that all ports specified in `ports_attributes` have corresponding
+    /// entries in `forward_ports` or match the `app_port`. Issues warnings for missing references.
+    fn validate_port_attributes(config: &DevContainerConfig) -> Result<()> {
+        if config.ports_attributes.is_empty() {
+            return Ok(());
+        }
+
+        // Collect all valid port references
+        let mut valid_ports = std::collections::HashSet::new();
+
+        // Add ports from forward_ports
+        for port_spec in &config.forward_ports {
+            if let Some(port_num) = port_spec.primary_port() {
+                valid_ports.insert(port_num.to_string());
+                // Also add with /tcp suffix which is common
+                valid_ports.insert(format!("{}/tcp", port_num));
+            }
+            // Also add the string representation for exact matching
+            valid_ports.insert(port_spec.as_string());
+        }
+
+        // Add app_port if specified
+        if let Some(app_port) = &config.app_port {
+            if let Some(port_num) = app_port.primary_port() {
+                valid_ports.insert(port_num.to_string());
+                valid_ports.insert(format!("{}/tcp", port_num));
+            }
+            valid_ports.insert(app_port.as_string());
+        }
+
+        // Check each port attribute reference
+        for port_key in config.ports_attributes.keys() {
+            if !valid_ports.contains(port_key) {
+                // Try parsing as just a port number
+                if let Ok(port_num) = port_key.parse::<u16>() {
+                    if !valid_ports.contains(&port_num.to_string()) {
+                        warn!(
+                            "Port '{}' in portsAttributes does not match any port in forwardPorts or appPort",
+                            port_key
+                        );
+                    }
+                } else {
+                    warn!(
+                        "Port '{}' in portsAttributes does not match any port in forwardPorts or appPort",
+                        port_key
+                    );
                 }
             }
         }
@@ -823,7 +1452,8 @@ mod tests {
     }
 
     #[test]
-    fn test_extends_not_implemented() -> anyhow::Result<()> {
+    fn test_extends_field_parsing() -> anyhow::Result<()> {
+        // Test string extends
         let config_content = r#"{
             "name": "Test",
             "extends": "../base/devcontainer.json"
@@ -833,13 +1463,32 @@ mod tests {
         temp_file.write_all(config_content.as_bytes())?;
 
         let result = ConfigLoader::load_from_path(temp_file.path());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            DeaconError::Config(ConfigError::NotImplemented { feature }) => {
-                assert!(feature.contains("extends"));
-            }
-            _ => panic!("Expected Config(NotImplemented) error"),
-        }
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(
+            config.extends,
+            Some(vec!["../base/devcontainer.json".to_string()])
+        );
+
+        // Test array extends
+        let config_content = r#"{
+            "name": "Test",
+            "extends": ["../base1/devcontainer.json", "../base2/devcontainer.json"]
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let result = ConfigLoader::load_from_path(temp_file.path());
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(
+            config.extends,
+            Some(vec![
+                "../base1/devcontainer.json".to_string(),
+                "../base2/devcontainer.json".to_string()
+            ])
+        );
 
         Ok(())
     }
@@ -1025,5 +1674,237 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_port_spec_number() {
+        let port = PortSpec::Number(3000);
+        assert_eq!(port.primary_port(), Some(3000));
+        assert_eq!(port.as_string(), "3000");
+    }
+
+    #[test]
+    fn test_port_spec_string_number() {
+        let port = PortSpec::String("3000".to_string());
+        assert_eq!(port.primary_port(), Some(3000));
+        assert_eq!(port.as_string(), "3000");
+    }
+
+    #[test]
+    fn test_port_spec_string_mapping() {
+        let port = PortSpec::String("3000:8080".to_string());
+        assert_eq!(port.primary_port(), Some(3000));
+        assert_eq!(port.as_string(), "3000:8080");
+    }
+
+    #[test]
+    fn test_port_spec_string_invalid() {
+        let port = PortSpec::String("invalid".to_string());
+        assert_eq!(port.primary_port(), None);
+        assert_eq!(port.as_string(), "invalid");
+    }
+
+    #[test]
+    fn test_port_spec_deserialization() -> anyhow::Result<()> {
+        // Test deserializing a number
+        let json_number = "3000";
+        let port: PortSpec = serde_json::from_str(json_number)?;
+        assert_eq!(port, PortSpec::Number(3000));
+
+        // Test deserializing a string
+        let json_string = r#""3000:8080""#;
+        let port: PortSpec = serde_json::from_str(json_string)?;
+        assert_eq!(port, PortSpec::String("3000:8080".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_on_auto_forward_deserialization() -> anyhow::Result<()> {
+        let test_cases = [
+            ("\"silent\"", OnAutoForward::Silent),
+            ("\"notify\"", OnAutoForward::Notify),
+            ("\"openBrowser\"", OnAutoForward::OpenBrowser),
+            ("\"openPreview\"", OnAutoForward::OpenPreview),
+            ("\"ignore\"", OnAutoForward::Ignore),
+        ];
+
+        for (json, expected) in test_cases {
+            let parsed: OnAutoForward = serde_json::from_str(json)?;
+            assert_eq!(parsed, expected);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_attributes_deserialization() -> anyhow::Result<()> {
+        let json = r#"{
+            "label": "Web Server",
+            "onAutoForward": "openBrowser",
+            "openPreview": true,
+            "requireLocalPort": false,
+            "description": "Main application port"
+        }"#;
+
+        let attrs: PortAttributes = serde_json::from_str(json)?;
+        assert_eq!(attrs.label, Some("Web Server".to_string()));
+        assert_eq!(attrs.on_auto_forward, Some(OnAutoForward::OpenBrowser));
+        assert_eq!(attrs.open_preview, Some(true));
+        assert_eq!(attrs.require_local_port, Some(false));
+        assert_eq!(attrs.description, Some("Main application port".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_attributes_partial() -> anyhow::Result<()> {
+        let json = r#"{
+            "label": "API Server"
+        }"#;
+
+        let attrs: PortAttributes = serde_json::from_str(json)?;
+        assert_eq!(attrs.label, Some("API Server".to_string()));
+        assert_eq!(attrs.on_auto_forward, None);
+        assert_eq!(attrs.open_preview, None);
+        assert_eq!(attrs.require_local_port, None);
+        assert_eq!(attrs.description, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_with_ports_and_attributes() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "name": "Test Container",
+            "image": "node:18",
+            "forwardPorts": [3000, "8080:8080"],
+            "appPort": 3000,
+            "portsAttributes": {
+                "3000": {
+                    "label": "Web Server",
+                    "onAutoForward": "openBrowser",
+                    "description": "Main web application"
+                },
+                "8080": {
+                    "label": "API Server",
+                    "onAutoForward": "notify"
+                }
+            },
+            "otherPortsAttributes": {
+                "label": "Other Service",
+                "onAutoForward": "silent"
+            }
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let config = ConfigLoader::load_from_path(temp_file.path())?;
+
+        assert_eq!(config.name, Some("Test Container".to_string()));
+        assert_eq!(config.forward_ports.len(), 2);
+        assert_eq!(config.app_port, Some(PortSpec::Number(3000)));
+
+        // Check port attributes
+        assert_eq!(config.ports_attributes.len(), 2);
+
+        let port_3000_attrs = config.ports_attributes.get("3000").unwrap();
+        assert_eq!(port_3000_attrs.label, Some("Web Server".to_string()));
+        assert_eq!(
+            port_3000_attrs.on_auto_forward,
+            Some(OnAutoForward::OpenBrowser)
+        );
+        assert_eq!(
+            port_3000_attrs.description,
+            Some("Main web application".to_string())
+        );
+
+        let port_8080_attrs = config.ports_attributes.get("8080").unwrap();
+        assert_eq!(port_8080_attrs.label, Some("API Server".to_string()));
+        assert_eq!(port_8080_attrs.on_auto_forward, Some(OnAutoForward::Notify));
+
+        // Check other ports attributes
+        let other_attrs = config.other_ports_attributes.as_ref().unwrap();
+        assert_eq!(other_attrs.label, Some("Other Service".to_string()));
+        assert_eq!(other_attrs.on_auto_forward, Some(OnAutoForward::Silent));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_validation_valid_references() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "name": "Test Container",
+            "image": "node:18",
+            "forwardPorts": [3000, 8080],
+            "appPort": 9000,
+            "portsAttributes": {
+                "3000": { "label": "Web" },
+                "8080": { "label": "API" },
+                "9000": { "label": "App" }
+            }
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        // This should not fail validation
+        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        assert_eq!(config.ports_attributes.len(), 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_validation_with_string_ports() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "name": "Test Container",
+            "image": "node:18", 
+            "forwardPorts": ["3000:3000", "8080"],
+            "portsAttributes": {
+                "3000:3000": { "label": "Web" },
+                "8080": { "label": "API" }
+            }
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        assert_eq!(config.ports_attributes.len(), 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_port_validation_missing_references() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "name": "Test Container",
+            "image": "node:18",
+            "forwardPorts": [3000],
+            "portsAttributes": {
+                "3000": { "label": "Web" },
+                "8080": { "label": "Missing Port" }
+            }
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        // This should load but log warnings about missing port 8080
+        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        assert_eq!(config.ports_attributes.len(), 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_default_includes_new_fields() {
+        let config = DevContainerConfig::default();
+        assert_eq!(config.ports_attributes.len(), 0);
+        assert_eq!(config.other_ports_attributes, None);
+        assert_eq!(config.forward_ports.len(), 0);
+        assert_eq!(config.app_port, None);
     }
 }

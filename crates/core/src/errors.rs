@@ -18,6 +18,10 @@ pub enum ConfigError {
     #[error("Configuration validation error: {message}")]
     Validation { message: String },
 
+    /// Cycle detected in extends chain
+    #[error("Cycle detected in extends chain: {chain}")]
+    ExtendsCycle { chain: String },
+
     /// Feature not implemented
     #[error("Feature not implemented: {feature}")]
     NotImplemented { feature: String },
@@ -41,6 +45,38 @@ pub enum DockerError {
     /// Docker CLI command error
     #[error("Docker CLI error: {0}")]
     CLIError(String),
+
+    /// Container not found
+    #[error("Container not found: {id}")]
+    ContainerNotFound { id: String },
+
+    /// Command execution failed
+    #[error("Command execution failed with exit code {code}")]
+    ExecFailed { code: i32 },
+
+    /// TTY allocation failed
+    #[error("TTY allocation failed: {reason}")]
+    TTYFailed { reason: String },
+}
+
+/// Git-related errors
+#[derive(Error, Debug)]
+pub enum GitError {
+    /// Git is not installed or not accessible
+    #[error("Git is not installed or not accessible")]
+    NotInstalled,
+
+    /// Git CLI command error
+    #[error("Git CLI error: {0}")]
+    CLIError(String),
+
+    /// Repository clone failed
+    #[error("Failed to clone repository: {0}")]
+    CloneFailed(String),
+
+    /// Invalid repository URL
+    #[error("Invalid repository URL: {0}")]
+    InvalidUrl(String),
 }
 
 /// Feature-related errors
@@ -69,6 +105,22 @@ pub enum FeatureError {
     /// JSON parsing error
     #[error("JSON parsing error")]
     Json(#[from] serde_json::Error),
+
+    /// OCI registry error
+    #[error("OCI registry error: {message}")]
+    Oci { message: String },
+
+    /// Feature download error
+    #[error("Feature download error: {message}")]
+    Download { message: String },
+
+    /// Feature extraction error  
+    #[error("Feature extraction error: {message}")]
+    Extraction { message: String },
+
+    /// Feature installation error
+    #[error("Feature installation error: {message}")]
+    Installation { message: String },
 }
 
 /// Internal/generic fallback errors
@@ -93,6 +145,10 @@ pub enum DeaconError {
     /// Docker/Runtime-related errors
     #[error("Docker error")]
     Docker(#[from] DockerError),
+
+    /// Git-related errors
+    #[error("Git error")]
+    Git(#[from] GitError),
 
     /// Feature-related errors
     #[error("Feature error")]
@@ -172,6 +228,27 @@ mod tests {
     }
 
     #[test]
+    fn test_git_error_display() {
+        let error = GitError::NotInstalled;
+        assert_eq!(
+            format!("{}", error),
+            "Git is not installed or not accessible"
+        );
+
+        let error = GitError::CLIError("Command failed".to_string());
+        assert_eq!(format!("{}", error), "Git CLI error: Command failed");
+
+        let error = GitError::CloneFailed("Permission denied".to_string());
+        assert_eq!(
+            format!("{}", error),
+            "Failed to clone repository: Permission denied"
+        );
+
+        let error = GitError::InvalidUrl("not-a-url".to_string());
+        assert_eq!(format!("{}", error), "Invalid repository URL: not-a-url");
+    }
+
+    #[test]
     fn test_feature_error_display() {
         let error = FeatureError::NotImplemented;
         assert_eq!(format!("{}", error), "Feature not implemented");
@@ -204,6 +281,10 @@ mod tests {
         let docker_error = DockerError::NotInstalled;
         let deacon_error: DeaconError = docker_error.into();
         assert!(matches!(deacon_error, DeaconError::Docker(_)));
+
+        let git_error = GitError::NotInstalled;
+        let deacon_error: DeaconError = git_error.into();
+        assert!(matches!(deacon_error, DeaconError::Git(_)));
 
         let feature_error = FeatureError::NotImplemented;
         let deacon_error: DeaconError = feature_error.into();
