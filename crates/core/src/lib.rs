@@ -14,6 +14,9 @@ pub mod features;
 pub mod lifecycle;
 pub mod logging;
 pub mod oci;
+
+#[cfg(feature = "plugins")]
+pub mod plugins;
 pub mod templates;
 pub mod variable;
 

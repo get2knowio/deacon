@@ -38,6 +38,9 @@ pub struct CliContext {
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
     pub config: Option<PathBuf>,
+    /// Enabled plugins
+    #[cfg(feature = "plugins")]
+    pub plugins: Vec<String>,
 }
 
 /// DevContainer CLI subcommands
@@ -186,6 +189,11 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
+    /// Enable specific plugins
+    #[cfg(feature = "plugins")]
+    #[arg(long, global = true, value_name = "NAME")]
+    pub plugin: Vec<String>,
+
     /// Subcommand to execute
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -200,6 +208,8 @@ impl Cli {
             log_level: self.log_level.clone(),
             workspace_folder: self.workspace_folder.clone(),
             config: self.config.clone(),
+            #[cfg(feature = "plugins")]
+            plugins: self.plugin.clone(),
         }
     }
 

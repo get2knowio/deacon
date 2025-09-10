@@ -9,6 +9,7 @@ authors.workspace = true
 default = ["docker"]
 docker = []
 json-logs = ["tracing-subscriber/json"]
+plugins = []
 
 [dependencies]
 anyhow.workspace = true
