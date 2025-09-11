@@ -16,6 +16,7 @@ use tracing::{debug, info, instrument, warn};
 pub struct UpArgs {
     pub remove_existing_container: bool,
     pub skip_post_create: bool,
+    #[allow(dead_code)] // TODO: Connect to container lifecycle execution
     pub skip_non_blocking_commands: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,

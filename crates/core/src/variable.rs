@@ -275,7 +275,9 @@ impl VariableSubstitution {
             }
             expr if expr.starts_with("containerEnv:") => {
                 let env_var = &expr[13..]; // Remove "containerEnv:" prefix
-                context.container_env.as_ref()
+                context
+                    .container_env
+                    .as_ref()
                     .and_then(|env| env.get(env_var).cloned())
                     .or_else(|| Some(String::new())) // Return empty string if container env not available or var not found
             }
@@ -598,9 +600,8 @@ mod tests {
         let temp_dir = TempDir::new()?;
         let mut container_env = HashMap::new();
         container_env.insert("NODE_ENV".to_string(), "production".to_string());
-        
-        let context = SubstitutionContext::new(temp_dir.path())?
-            .with_container_env(container_env);
+
+        let context = SubstitutionContext::new(temp_dir.path())?.with_container_env(container_env);
         let mut report = SubstitutionReport::new();
 
         let input = "Environment: ${containerEnv:NODE_ENV}";
@@ -616,9 +617,8 @@ mod tests {
     fn test_container_env_missing_var() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let container_env = HashMap::new();
-        
-        let context = SubstitutionContext::new(temp_dir.path())?
-            .with_container_env(container_env);
+
+        let context = SubstitutionContext::new(temp_dir.path())?.with_container_env(container_env);
         let mut report = SubstitutionReport::new();
 
         let input = "Environment: ${containerEnv:MISSING_VAR}";
@@ -649,11 +649,11 @@ mod tests {
     #[test]
     fn test_mixed_container_and_local_variables() -> anyhow::Result<()> {
         env::set_var("TEST_LOCAL", "local_value");
-        
+
         let temp_dir = TempDir::new()?;
         let mut container_env = HashMap::new();
         container_env.insert("TEST_CONTAINER".to_string(), "container_value".to_string());
-        
+
         let context = SubstitutionContext::new(temp_dir.path())?
             .with_container_workspace_folder("/workspaces/test".to_string())
             .with_container_env(container_env);

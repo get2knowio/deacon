@@ -1,11 +1,10 @@
 //! Integration test for container lifecycle execution with variable substitution
 
 use deacon_core::container_lifecycle::{
-    ContainerLifecycleCommands, ContainerLifecycleConfig, execute_container_lifecycle,
+    execute_container_lifecycle, ContainerLifecycleCommands, ContainerLifecycleConfig,
 };
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
-use std::path::Path;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -45,7 +44,7 @@ async fn test_container_lifecycle_with_variable_substitution() {
             "touch ${containerWorkspaceFolder}/.post-create-marker".to_string(),
         ])
         .with_post_start(vec![
-            "echo 'postStart: Debug mode=${containerEnv:DEBUG}'".to_string(),
+            "echo 'postStart: Debug mode=${containerEnv:DEBUG}'".to_string()
         ])
         .with_post_attach(vec![
             "echo 'postAttach: Ready in ${containerWorkspaceFolder}'".to_string(),
@@ -59,7 +58,10 @@ async fn test_container_lifecycle_with_variable_substitution() {
     let error = result.unwrap_err();
     println!("Error: {}", error);
     // The error should be related to container execution failure
-    assert!(error.to_string().contains("Container command failed") || error.to_string().contains("No such container"));
+    assert!(
+        error.to_string().contains("Container command failed")
+            || error.to_string().contains("No such container")
+    );
 }
 
 #[tokio::test]
@@ -109,7 +111,10 @@ fn test_container_lifecycle_config_validation() {
     assert_eq!(config.container_id, "test-container");
     assert_eq!(config.user, Some("testuser".to_string()));
     assert_eq!(config.container_workspace_folder, "/workspaces/myproject");
-    assert_eq!(config.container_env.get("TEST_VAR"), Some(&"test_value".to_string()));
+    assert_eq!(
+        config.container_env.get("TEST_VAR"),
+        Some(&"test_value".to_string())
+    );
     assert!(!config.skip_post_create);
     assert!(config.skip_non_blocking_commands);
 }
@@ -121,25 +126,19 @@ fn test_lifecycle_commands_structure() {
             "echo 'Setting up project'".to_string(),
             "npm install".to_string(),
         ])
-        .with_post_create(vec![
-            "echo 'Project initialized'".to_string(),
-        ])
-        .with_post_start(vec![
-            "echo 'Starting services'".to_string(),
-        ])
-        .with_post_attach(vec![
-            "echo 'Ready for development'".to_string(),
-        ]);
+        .with_post_create(vec!["echo 'Project initialized'".to_string()])
+        .with_post_start(vec!["echo 'Starting services'".to_string()])
+        .with_post_attach(vec!["echo 'Ready for development'".to_string()]);
 
     assert!(commands.on_create.is_some());
     assert_eq!(commands.on_create.unwrap().len(), 2);
-    
+
     assert!(commands.post_create.is_some());
     assert_eq!(commands.post_create.unwrap().len(), 1);
-    
+
     assert!(commands.post_start.is_some());
     assert_eq!(commands.post_start.unwrap().len(), 1);
-    
+
     assert!(commands.post_attach.is_some());
     assert_eq!(commands.post_attach.unwrap().len(), 1);
 }

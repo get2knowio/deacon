@@ -6,7 +6,7 @@
 use crate::docker::{CliDocker, Docker, ExecConfig};
 use crate::errors::{DeaconError, Result};
 use crate::lifecycle::LifecyclePhase;
-use crate::variable::{SubstitutionContext, VariableSubstitution, SubstitutionReport};
+use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::{debug, error, info, instrument};
@@ -41,37 +41,47 @@ pub async fn execute_container_lifecycle(
     commands: &ContainerLifecycleCommands,
     substitution_context: &SubstitutionContext,
 ) -> Result<ContainerLifecycleResult> {
-    info!("Starting container lifecycle execution in container: {}", config.container_id);
+    info!(
+        "Starting container lifecycle execution in container: {}",
+        config.container_id
+    );
 
     let mut result = ContainerLifecycleResult::new();
     let docker = CliDocker::new();
 
     // Create substitution context with container information
-    let container_context = substitution_context.clone()
+    let container_context = substitution_context
+        .clone()
         .with_container_workspace_folder(config.container_workspace_folder.clone())
         .with_container_env(config.container_env.clone());
 
     // Execute onCreate phase
     if let Some(on_create_commands) = &commands.on_create {
-        result.phases.push(execute_lifecycle_phase(
-            LifecyclePhase::OnCreate,
-            on_create_commands,
-            &config,
-            &docker,
-            &container_context,
-        ).await?);
+        result.phases.push(
+            execute_lifecycle_phase(
+                LifecyclePhase::OnCreate,
+                on_create_commands,
+                config,
+                &docker,
+                &container_context,
+            )
+            .await?,
+        );
     }
 
     // Execute postCreate phase (if not skipped)
     if !config.skip_post_create {
         if let Some(post_create_commands) = &commands.post_create {
-            result.phases.push(execute_lifecycle_phase(
-                LifecyclePhase::PostCreate,
-                post_create_commands,
-                &config,
-                &docker,
-                &container_context,
-            ).await?);
+            result.phases.push(
+                execute_lifecycle_phase(
+                    LifecyclePhase::PostCreate,
+                    post_create_commands,
+                    config,
+                    &docker,
+                    &container_context,
+                )
+                .await?,
+            );
         }
     } else {
         info!("Skipping postCreate phase");
@@ -80,13 +90,16 @@ pub async fn execute_container_lifecycle(
     // Execute postStart phase (if not skipped by non-blocking commands flag)
     if !config.skip_non_blocking_commands {
         if let Some(post_start_commands) = &commands.post_start {
-            result.phases.push(execute_lifecycle_phase(
-                LifecyclePhase::PostStart,
-                post_start_commands,
-                &config,
-                &docker,
-                &container_context,
-            ).await?);
+            result.phases.push(
+                execute_lifecycle_phase(
+                    LifecyclePhase::PostStart,
+                    post_start_commands,
+                    config,
+                    &docker,
+                    &container_context,
+                )
+                .await?,
+            );
         }
     } else {
         info!("Skipping postStart phase (non-blocking commands disabled)");
@@ -95,13 +108,16 @@ pub async fn execute_container_lifecycle(
     // Execute postAttach phase (if not skipped by non-blocking commands flag)
     if !config.skip_non_blocking_commands {
         if let Some(post_attach_commands) = &commands.post_attach {
-            result.phases.push(execute_lifecycle_phase(
-                LifecyclePhase::PostAttach,
-                post_attach_commands,
-                &config,
-                &docker,
-                &container_context,
-            ).await?);
+            result.phases.push(
+                execute_lifecycle_phase(
+                    LifecyclePhase::PostAttach,
+                    post_attach_commands,
+                    config,
+                    &docker,
+                    &container_context,
+                )
+                .await?,
+            );
         }
     } else {
         info!("Skipping postAttach phase (non-blocking commands disabled)");
@@ -155,9 +171,15 @@ async fn execute_lifecycle_phase(
         );
 
         if substitution_report.has_substitutions() {
-            debug!("Variable substitutions applied: {:?}", substitution_report.replacements);
+            debug!(
+                "Variable substitutions applied: {:?}",
+                substitution_report.replacements
+            );
             if !substitution_report.unknown_variables.is_empty() {
-                debug!("Unknown variables left unchanged: {:?}", substitution_report.unknown_variables);
+                debug!(
+                    "Unknown variables left unchanged: {:?}",
+                    substitution_report.unknown_variables
+                );
             }
         }
 
@@ -178,7 +200,9 @@ async fn execute_lifecycle_phase(
             substituted_command.clone(),
         ];
 
-        let exec_result = docker.exec(&config.container_id, &command_args, exec_config).await;
+        let exec_result = docker
+            .exec(&config.container_id, &command_args, exec_config)
+            .await;
 
         let duration = start_time.elapsed();
 
@@ -233,7 +257,11 @@ async fn execute_lifecycle_phase(
     }
 
     phase_result.total_duration = phase_start.elapsed();
-    info!("Completed lifecycle phase: {} in {:?}", phase.as_str(), phase_result.total_duration);
+    info!(
+        "Completed lifecycle phase: {} in {:?}",
+        phase.as_str(),
+        phase_result.total_duration
+    );
     Ok(phase_result)
 }
 
@@ -318,12 +346,16 @@ pub struct ContainerLifecycleResult {
     pub phases: Vec<PhaseResult>,
 }
 
+impl Default for ContainerLifecycleResult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContainerLifecycleResult {
     /// Create new empty result
     pub fn new() -> Self {
-        Self {
-            phases: Vec::new(),
-        }
+        Self { phases: Vec::new() }
     }
 
     /// Check if all phases succeeded
@@ -340,9 +372,6 @@ impl ContainerLifecycleResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::variable::SubstitutionContext;
-    use std::path::Path;
-    use tempfile::TempDir;
 
     #[test]
     fn test_container_lifecycle_config_creation() {

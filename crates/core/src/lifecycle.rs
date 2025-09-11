@@ -8,14 +8,12 @@
 
 use crate::errors::{DeaconError, Result};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
-#[cfg(feature = "docker")]
-use crate::docker::{CliDocker, Docker, ExecConfig};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::Instant;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
 /// Lifecycle phases representing different stages of container setup
 ///
@@ -207,9 +205,7 @@ impl ExecutionContext {
     /// Set container working directory for container execution
     pub fn with_container_working_dir(mut self, working_dir: String) -> Self {
         if let ExecutionMode::Container {
-            container_id,
-            user,
-            ..
+            container_id, user, ..
         } = self.execution_mode
         {
             self.execution_mode = ExecutionMode::Container {
@@ -256,7 +252,13 @@ impl LifecycleResult {
     }
 
     /// Add command result with duration
-    pub fn add_command_result(&mut self, exit_code: i32, stdout: String, stderr: String, duration: std::time::Duration) {
+    pub fn add_command_result(
+        &mut self,
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
+        duration: std::time::Duration,
+    ) {
         self.exit_codes.push(exit_code);
         self.durations.push(duration);
         if !stdout.is_empty() {
@@ -296,11 +298,10 @@ pub fn run_phase(
 ) -> Result<LifecycleResult> {
     match &ctx.execution_mode {
         ExecutionMode::Host => run_phase_host_sync(phase, commands, ctx),
-        ExecutionMode::Container { .. } => {
-            Err(DeaconError::Lifecycle(
-                "Container execution not supported in sync version - use container_lifecycle module".to_string()
-            ))
-        }
+        ExecutionMode::Container { .. } => Err(DeaconError::Lifecycle(
+            "Container execution not supported in sync version - use container_lifecycle module"
+                .to_string(),
+        )),
     }
 }
 
@@ -311,7 +312,6 @@ fn run_phase_host_sync(
     commands: &LifecycleCommands,
     ctx: &ExecutionContext,
 ) -> Result<LifecycleResult> {
-
     let mut result = LifecycleResult::new();
 
     for (i, command_template) in commands.commands.iter().enumerate() {
@@ -372,7 +372,8 @@ fn run_phase_host_sync(
 
         // Read stdout
         for line in stdout_reader.lines() {
-            let line = line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stdout: {}", e)))?;
+            let line =
+                line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stdout: {}", e)))?;
 
             // Apply redaction to the line before logging
             let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
@@ -382,7 +383,8 @@ fn run_phase_host_sync(
 
         // Read stderr
         for line in stderr_reader.lines() {
-            let line = line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stderr: {}", e)))?;
+            let line =
+                line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stderr: {}", e)))?;
 
             // Apply redaction to the line before logging
             let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
@@ -408,7 +410,10 @@ fn run_phase_host_sync(
         let redacted_stdout = redact_if_enabled(&stdout, &ctx.redaction_config);
         let redacted_stderr = redact_if_enabled(&stderr, &ctx.redaction_config);
 
-        debug!("Command completed with exit code: {} in {:?}", exit_code, duration);
+        debug!(
+            "Command completed with exit code: {} in {:?}",
+            exit_code, duration
+        );
 
         result.add_command_result(exit_code, redacted_stdout, redacted_stderr, duration);
 
@@ -430,128 +435,6 @@ fn run_phase_host_sync(
 
     info!("Completed lifecycle phase: {}", phase.as_str());
     Ok(result)
-}
-
-/// Execute a lifecycle phase in a container
-#[cfg(feature = "docker")]
-#[instrument(skip(commands, ctx), fields(phase = %phase.as_str()))]
-async fn run_phase_container(
-    phase: LifecyclePhase,
-    commands: &LifecycleCommands,
-    ctx: &ExecutionContext,
-) -> Result<LifecycleResult> {
-    let mut result = LifecycleResult::new();
-
-    // Extract container execution details
-    let (container_id, user, working_dir) = match &ctx.execution_mode {
-        ExecutionMode::Container {
-            container_id,
-            user,
-            working_dir,
-        } => (container_id, user.as_deref(), working_dir.as_deref()),
-        _ => unreachable!("This function should only be called for container execution"),
-    };
-
-    let docker = CliDocker::new();
-
-    for (i, command_template) in commands.commands.iter().enumerate() {
-        debug!(
-            "Executing command {} of {} for phase {} in container {}: {}",
-            i + 1,
-            commands.commands.len(),
-            phase.as_str(),
-            container_id,
-            command_template.command
-        );
-
-        let start_time = Instant::now();
-
-        // Combine environment variables from template and context
-        let mut env_vars = command_template.env_vars.clone();
-        env_vars.extend(ctx.environment.clone());
-
-        // Create exec configuration
-        let exec_config = ExecConfig {
-            user: user.map(|u| u.to_string()),
-            working_dir: working_dir.map(|w| w.to_string()),
-            env: env_vars,
-            tty: false,
-            interactive: false,
-            detach: false,
-        };
-
-        // Execute command in container using sh -c
-        let command_args = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            command_template.command.clone(),
-        ];
-
-        let exec_result = docker.exec(container_id, &command_args, exec_config).await;
-
-        let duration = start_time.elapsed();
-
-        match exec_result {
-            Ok(exec_result) => {
-                debug!(
-                    "Container command completed with exit code: {} in {:?}",
-                    exec_result.exit_code, duration
-                );
-
-                // For container exec, we don't capture stdout/stderr yet - this is simplified
-                // TODO: Enhance docker exec to capture output
-                result.add_command_result(
-                    exec_result.exit_code,
-                    String::new(), // stdout not captured yet
-                    String::new(), // stderr not captured yet
-                    duration,
-                );
-
-                // If command failed, halt execution and return error with phase context
-                if exec_result.exit_code != 0 {
-                    error!(
-                        "Container command failed in phase {} with exit code {}",
-                        phase.as_str(),
-                        exec_result.exit_code
-                    );
-                    return Err(DeaconError::Lifecycle(format!(
-                        "Container command failed in phase {} with exit code {}: Command: {}",
-                        phase.as_str(),
-                        exec_result.exit_code,
-                        command_template.command
-                    )));
-                }
-            }
-            Err(e) => {
-                error!(
-                    "Failed to execute container command in phase {}: {}",
-                    phase.as_str(),
-                    e
-                );
-                return Err(DeaconError::Lifecycle(format!(
-                    "Failed to execute container command in phase {}: {}",
-                    phase.as_str(),
-                    e
-                )));
-            }
-        }
-    }
-
-    info!("Completed lifecycle phase: {}", phase.as_str());
-    Ok(result)
-}
-
-/// Execute a lifecycle phase in a container (fallback for non-docker builds)
-#[cfg(not(feature = "docker"))]
-async fn run_phase_container(
-    phase: LifecyclePhase,
-    _commands: &LifecycleCommands,
-    _ctx: &ExecutionContext,
-) -> Result<LifecycleResult> {
-    Err(DeaconError::Lifecycle(format!(
-        "Container execution for phase {} is not available without docker feature",
-        phase.as_str()
-    )))
 }
 
 #[cfg(test)]
@@ -615,13 +498,23 @@ mod tests {
         assert!(result.success);
         assert!(result.exit_codes.is_empty());
 
-        result.add_command_result(0, "output".to_string(), "".to_string(), std::time::Duration::from_millis(100));
+        result.add_command_result(
+            0,
+            "output".to_string(),
+            "".to_string(),
+            std::time::Duration::from_millis(100),
+        );
         assert!(result.success);
         assert_eq!(result.exit_codes, vec![0]);
         assert_eq!(result.stdout, "output");
         assert_eq!(result.durations.len(), 1);
 
-        result.add_command_result(1, "".to_string(), "error".to_string(), std::time::Duration::from_millis(200));
+        result.add_command_result(
+            1,
+            "".to_string(),
+            "error".to_string(),
+            std::time::Duration::from_millis(200),
+        );
         assert!(!result.success);
         assert_eq!(result.exit_codes, vec![0, 1]);
         assert_eq!(result.stderr, "error");
