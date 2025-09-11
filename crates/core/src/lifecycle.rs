@@ -287,7 +287,7 @@ impl Default for LifecycleResult {
 ///
 /// This function runs commands sequentially and captures their output.
 /// If any command fails, execution halts and returns an error with phase context.
-/// For host execution only - use run_phase_async for container execution.
+/// This version only supports host execution.
 #[instrument(skip(commands, ctx), fields(phase = %phase.as_str()))]
 pub fn run_phase(
     phase: LifecyclePhase,
@@ -298,47 +298,10 @@ pub fn run_phase(
         ExecutionMode::Host => run_phase_host_sync(phase, commands, ctx),
         ExecutionMode::Container { .. } => {
             Err(DeaconError::Lifecycle(
-                "Container execution requires async context - use run_phase_async".to_string()
+                "Container execution not supported in sync version - use container_lifecycle module".to_string()
             ))
         }
     }
-}
-
-/// Execute a lifecycle phase with the given commands and context (async version)
-///
-/// This function runs commands sequentially and captures their output.
-/// If any command fails, execution halts and returns an error with phase context.
-/// Supports both host execution and in-container execution.
-#[instrument(skip(commands, ctx), fields(phase = %phase.as_str()))]
-pub async fn run_phase_async(
-    phase: LifecyclePhase,
-    commands: &LifecycleCommands,
-    ctx: &ExecutionContext,
-) -> Result<LifecycleResult> {
-    info!("Starting lifecycle phase: {}", phase.as_str());
-
-    match &ctx.execution_mode {
-        ExecutionMode::Host => run_phase_host(phase, commands, ctx).await,
-        ExecutionMode::Container { .. } => run_phase_container(phase, commands, ctx).await,
-    }
-}
-
-/// Execute a lifecycle phase with the given commands and context (synchronous version)
-///
-/// This is a convenience wrapper around the async version for backwards compatibility.
-/// For container execution, this will block the current thread.
-#[instrument(skip(commands, ctx), fields(phase = %phase.as_str()))]
-pub fn run_phase_sync(
-    phase: LifecyclePhase,
-    commands: &LifecycleCommands,
-    ctx: &ExecutionContext,
-) -> Result<LifecycleResult> {
-    // Use a simple runtime for the sync version
-    let rt = tokio::runtime::Runtime::new().map_err(|e| {
-        DeaconError::Lifecycle(format!("Failed to create tokio runtime: {}", e))
-    })?;
-    
-    rt.block_on(run_phase_async(phase, commands, ctx))
 }
 
 /// Execute a lifecycle phase on the host system (synchronous)
@@ -379,99 +342,71 @@ fn run_phase_host_sync(
         }
 
         // Execute command in blocking task to use sync stdio handling
-        let command_str = command_template.command.clone();
-        let env_vars = command_template.env_vars.clone();
-        let ctx_env = ctx.environment.clone();
-        let working_dir = ctx.working_directory.clone();
-        let redaction_config = ctx.redaction_config.clone();
+        // Add environment variables from template and context
+        for (key, value) in &command_template.env_vars {
+            command.env(key, value);
+        }
+        for (key, value) in &ctx.environment {
+            command.env(key, value);
+        }
 
-        let (exit_code, stdout, stderr) = tokio::task::spawn_blocking(move || {
-            // Create the actual command from the template
-            let mut command = if cfg!(target_os = "windows") {
-                let mut cmd = Command::new("cmd");
-                cmd.args(["/C", &command_str]);
-                cmd
-            } else {
-                let mut cmd = Command::new("sh");
-                cmd.args(["-c", &command_str]);
-                cmd
-            };
+        // Configure stdio
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
 
-            // Set working directory if specified
-            if let Some(ref dir) = working_dir {
-                command.current_dir(dir);
-            }
+        // Execute command
+        let mut child = command.spawn().map_err(|e| {
+            DeaconError::Lifecycle(format!(
+                "Failed to spawn command for phase {}: {}",
+                phase.as_str(),
+                e
+            ))
+        })?;
 
-            // Add environment variables from template and context
-            for (key, value) in &env_vars {
-                command.env(key, value);
-            }
-            for (key, value) in &ctx_env {
-                command.env(key, value);
-            }
+        // Capture stdout line by line
+        let stdout_reader = BufReader::new(child.stdout.take().unwrap());
+        let stderr_reader = BufReader::new(child.stderr.take().unwrap());
 
-            // Configure stdio
-            command.stdout(Stdio::piped());
-            command.stderr(Stdio::piped());
+        let mut stdout_lines = Vec::new();
+        let mut stderr_lines = Vec::new();
 
-            // Execute command
-            let mut child = command.spawn().map_err(|e| {
-                DeaconError::Lifecycle(format!(
-                    "Failed to spawn command: {}",
-                    e
-                ))
-            })?;
+        // Read stdout
+        for line in stdout_reader.lines() {
+            let line = line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stdout: {}", e)))?;
 
-            // Capture stdout line by line
-            let stdout_reader = BufReader::new(child.stdout.take().unwrap());
-            let stderr_reader = BufReader::new(child.stderr.take().unwrap());
+            // Apply redaction to the line before logging
+            let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
+            info!("[{}] stdout: {}", phase.as_str(), redacted_line);
+            stdout_lines.push(line); // Store original for result, log redacted
+        }
 
-            let mut stdout_lines = Vec::new();
-            let mut stderr_lines = Vec::new();
+        // Read stderr
+        for line in stderr_reader.lines() {
+            let line = line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stderr: {}", e)))?;
 
-            // Read stdout
-            for line in stdout_reader.lines() {
-                let line = line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stdout: {}", e)))?;
-                stdout_lines.push(line);
-            }
+            // Apply redaction to the line before logging
+            let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
+            info!("[{}] stderr: {}", phase.as_str(), redacted_line);
+            stderr_lines.push(line); // Store original for result, log redacted
+        }
 
-            // Read stderr
-            for line in stderr_reader.lines() {
-                let line = line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stderr: {}", e)))?;
-                stderr_lines.push(line);
-            }
+        // Wait for command to complete
+        let exit_status = child.wait().map_err(|e| {
+            DeaconError::Lifecycle(format!(
+                "Failed to wait for command in phase {}: {}",
+                phase.as_str(),
+                e
+            ))
+        })?;
 
-            // Wait for command to complete
-            let exit_status = child.wait().map_err(|e| {
-                DeaconError::Lifecycle(format!(
-                    "Failed to wait for command: {}",
-                    e
-                ))
-            })?;
-
-            let exit_code = exit_status.code().unwrap_or(-1);
-            let stdout = stdout_lines.join("\n");
-            let stderr = stderr_lines.join("\n");
-
-            Ok::<_, DeaconError>((exit_code, stdout, stderr))
-        }).await.map_err(|e| {
-            DeaconError::Lifecycle(format!("Command execution task failed: {}", e))
-        })??;
+        let exit_code = exit_status.code().unwrap_or(-1);
         let duration = start_time.elapsed();
+        let stdout = stdout_lines.join("\n");
+        let stderr = stderr_lines.join("\n");
 
         // Apply redaction to the combined output for the result
         let redacted_stdout = redact_if_enabled(&stdout, &ctx.redaction_config);
         let redacted_stderr = redact_if_enabled(&stderr, &ctx.redaction_config);
-
-        // Log the output with redaction
-        for line in stdout.lines() {
-            let redacted_line = redact_if_enabled(line, &ctx.redaction_config);
-            info!("[{}] stdout: {}", phase.as_str(), redacted_line);
-        }
-        for line in stderr.lines() {
-            let redacted_line = redact_if_enabled(line, &ctx.redaction_config);
-            info!("[{}] stderr: {}", phase.as_str(), redacted_line);
-        }
 
         debug!("Command completed with exit code: {} in {:?}", exit_code, duration);
 
