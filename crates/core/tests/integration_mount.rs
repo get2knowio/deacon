@@ -92,14 +92,16 @@ fn test_mount_variable_substitution() {
     // Verify first mount has variable substituted
     let mount1 = &mounts[0];
     assert_eq!(mount1.mount_type, MountType::Bind);
-    let expected_source = format!("{}/src", workspace_path.display());
+    // Use canonicalized path from substitution context to be robust across platforms (e.g., macOS /var -> /private/var)
+    let expected_source = format!("{}/src", context.local_workspace_folder);
     assert_eq!(mount1.source, Some(expected_source));
     assert_eq!(mount1.target, "/workspaces/src");
 
     // Verify second mount has variable substituted
     let mount2 = &mounts[1];
     assert_eq!(mount2.mount_type, MountType::Bind);
-    let expected_source = format!("{}/cache", workspace_path.display());
+    // Use canonicalized path from substitution context
+    let expected_source = format!("{}/cache", context.local_workspace_folder);
     assert_eq!(mount2.source, Some(expected_source));
     assert_eq!(mount2.target, "/cache");
 }
@@ -127,9 +129,11 @@ fn test_workspace_mount_configuration() {
     let workspace_mount = MountParser::parse_mount(&workspace_mount_str).unwrap();
 
     assert_eq!(workspace_mount.mount_type, MountType::Bind);
+    // Compare against the canonicalized workspace path from the substitution
+    // context
     assert_eq!(
         workspace_mount.source,
-        Some(workspace_path.to_string_lossy().to_string())
+        Some(context.local_workspace_folder.clone())
     );
     assert_eq!(workspace_mount.target, "/workspace");
     assert_eq!(
@@ -321,7 +325,7 @@ fn test_mount_with_variables_fixture() {
             // Variables should be substituted
             assert!(!source.contains("${localWorkspaceFolder}"));
             // Should contain actual workspace path
-            assert!(source.contains(&workspace_path.to_string_lossy().to_string()));
+            assert!(source.contains(&context.local_workspace_folder));
         }
     }
 }

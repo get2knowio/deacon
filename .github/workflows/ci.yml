@@ -10,8 +10,6 @@ env:
   CARGO_TERM_COLOR: always
   # Minimum line coverage required for CI to pass (used by coverage job)
   MIN_COVERAGE: "80"
-  # Explicitly skip interactive/login shell probing in CI to avoid macOS hangs
-  DEACON_CI_SKIP_SHELL: "1"
 
 jobs:
   test:
