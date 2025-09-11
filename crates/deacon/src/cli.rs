@@ -253,10 +253,7 @@ impl Cli {
                     config_path: self.config,
                 };
 
-                let runtime = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-
-                match runtime.block_on(execute_up(args)) {
+                match execute_up(args).await {
                     Ok(()) => Ok(()),
                     Err(e) => {
                         if let Some(DeaconError::Config(ConfigError::NotFound { .. })) =
@@ -289,10 +286,7 @@ impl Cli {
                     config_path: self.config,
                 };
 
-                let runtime = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-
-                runtime.block_on(execute_build(args))?;
+                execute_build(args).await?;
                 Ok(())
             }
             Some(Commands::Exec {
@@ -343,14 +337,13 @@ impl Cli {
                         detach: false,
                     };
 
-                    let runtime = tokio::runtime::Runtime::new()
-                        .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-
                     // For now, use a default container ID - in a real implementation,
                     // this would be discovered from the workspace configuration
                     let container_id = "devcontainer"; // This should be discovered
 
-                    match runtime.block_on(docker_client.exec(container_id, &command, exec_config))
+                    match docker_client
+                        .exec(container_id, &command, exec_config)
+                        .await
                     {
                         Ok(result) => {
                             tracing::info!(
