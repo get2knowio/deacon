@@ -34,6 +34,34 @@ pub struct ContainerInfo {
     pub status: String,
     /// Container state
     pub state: String,
+    /// Exposed ports from the container
+    pub exposed_ports: Vec<ExposedPort>,
+    /// Port mappings from host to container
+    pub port_mappings: Vec<PortMapping>,
+}
+
+/// Represents an exposed port from a container
+#[cfg(feature = "docker")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExposedPort {
+    /// Port number
+    pub port: u16,
+    /// Protocol (tcp/udp)
+    pub protocol: String,
+}
+
+/// Represents a port mapping from host to container
+#[cfg(feature = "docker")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortMapping {
+    /// Host port
+    pub host_port: u16,
+    /// Container port
+    pub container_port: u16,
+    /// Protocol (tcp/udp)
+    pub protocol: String,
+    /// Host IP
+    pub host_ip: String,
 }
 
 /// Configuration for executing commands in containers
@@ -120,6 +148,67 @@ impl CliDocker {
     /// Create a new CliDocker instance with custom docker binary path
     pub fn with_path(docker_path: String) -> Self {
         Self { docker_path }
+    }
+
+    /// Parse exposed ports from container Config.ExposedPorts
+    fn parse_exposed_ports(config: &serde_json::Value) -> Vec<ExposedPort> {
+        let mut exposed_ports = Vec::new();
+        
+        if let Some(exposed_ports_obj) = config
+            .get("Config")
+            .and_then(|c| c.get("ExposedPorts"))
+            .and_then(|ep| ep.as_object())
+        {
+            for port_spec in exposed_ports_obj.keys() {
+                if let Some((port_str, protocol)) = port_spec.split_once('/') {
+                    if let Ok(port) = port_str.parse::<u16>() {
+                        exposed_ports.push(ExposedPort {
+                            port,
+                            protocol: protocol.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        
+        exposed_ports
+    }
+
+    /// Parse port mappings from container NetworkSettings.Ports
+    fn parse_port_mappings(container: &serde_json::Value) -> Vec<PortMapping> {
+        let mut port_mappings = Vec::new();
+        
+        if let Some(ports_obj) = container
+            .get("NetworkSettings")
+            .and_then(|ns| ns.get("Ports"))
+            .and_then(|p| p.as_object())
+        {
+            for (port_spec, bindings) in ports_obj.iter() {
+                if let Some((port_str, protocol)) = port_spec.split_once('/') {
+                    if let Ok(container_port) = port_str.parse::<u16>() {
+                        if let Some(bindings_array) = bindings.as_array() {
+                            for binding in bindings_array {
+                                if let (Some(host_port_str), Some(host_ip)) = (
+                                    binding.get("HostPort").and_then(|hp| hp.as_str()),
+                                    binding.get("HostIp").and_then(|hi| hi.as_str()),
+                                ) {
+                                    if let Ok(host_port) = host_port_str.parse::<u16>() {
+                                        port_mappings.push(PortMapping {
+                                            host_port,
+                                            container_port,
+                                            protocol: protocol.to_string(),
+                                            host_ip: host_ip.to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        port_mappings
     }
 
     /// Check if docker binary is available
@@ -224,6 +313,8 @@ impl CliDocker {
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string(),
+                exposed_ports: vec![], // Not available in list format
+                port_mappings: vec![], // Not available in list format
             };
             result.push(container_info);
         }
@@ -271,6 +362,9 @@ impl CliDocker {
         }
 
         let container = &containers[0];
+        let exposed_ports = Self::parse_exposed_ports(container);
+        let port_mappings = Self::parse_port_mappings(container);
+        
         let container_info = ContainerInfo {
             id: container
                 .get("Id")
@@ -300,6 +394,8 @@ impl CliDocker {
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string(),
+            exposed_ports,
+            port_mappings,
         };
 
         Ok(Some(container_info))
@@ -415,6 +511,8 @@ impl Docker for CliDocker {
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown")
                         .to_string(),
+                    exposed_ports: vec![], // Not available in list format
+                    port_mappings: vec![], // Not available in list format
                 };
                 containers.push(container_info);
             }
@@ -464,6 +562,9 @@ impl Docker for CliDocker {
             }
 
             let container = &containers[0];
+            let exposed_ports = Self::parse_exposed_ports(container);
+            let port_mappings = Self::parse_port_mappings(container);
+            
             let container_info = ContainerInfo {
                 id: container
                     .get("Id")
@@ -493,6 +594,8 @@ impl Docker for CliDocker {
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string(),
+                exposed_ports,
+                port_mappings,
             };
 
             Ok(Some(container_info))
@@ -941,6 +1044,8 @@ mod tests {
         assert_eq!(container.image, "ubuntu:20.04");
         assert_eq!(container.status, "running");
         assert_eq!(container.state, "running");
+        assert_eq!(container.exposed_ports.len(), 0); // No exposed ports in this test data
+        assert_eq!(container.port_mappings.len(), 0); // No port mappings in this test data
     }
 
     #[cfg(feature = "docker")]
@@ -960,6 +1065,8 @@ mod tests {
             image: "ubuntu:20.04".to_string(),
             status: "running".to_string(),
             state: "running".to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
         };
 
         let serialized = serde_json::to_string(&container).unwrap();
@@ -970,6 +1077,55 @@ mod tests {
         assert_eq!(container.image, deserialized.image);
         assert_eq!(container.status, deserialized.status);
         assert_eq!(container.state, deserialized.state);
+        assert_eq!(container.exposed_ports.len(), deserialized.exposed_ports.len());
+        assert_eq!(container.port_mappings.len(), deserialized.port_mappings.len());
+    }
+
+    #[cfg(feature = "docker")]
+    #[test]
+    fn test_parse_container_with_ports() {
+        let docker = CliDocker::new();
+        let json_input = r#"[{
+            "Id":"abc123def456",
+            "Name":"/test-container",
+            "Config":{
+                "Image":"ubuntu:20.04",
+                "ExposedPorts":{
+                    "3000/tcp":{},
+                    "8080/tcp":{}
+                }
+            },
+            "State":{"Status":"running"},
+            "NetworkSettings":{
+                "Ports":{
+                    "3000/tcp":[{"HostIp":"0.0.0.0","HostPort":"3000"}],
+                    "8080/tcp":[{"HostIp":"127.0.0.1","HostPort":"8080"}]
+                }
+            }
+        }]"#;
+        let result = docker.parse_container_inspect(json_input).unwrap();
+
+        assert!(result.is_some());
+        let container = result.unwrap();
+        assert_eq!(container.id, "abc123def456");
+        assert_eq!(container.names, vec!["test-container"]);
+        assert_eq!(container.image, "ubuntu:20.04");
+        assert_eq!(container.status, "running");
+        assert_eq!(container.state, "running");
+        
+        // Check exposed ports
+        assert_eq!(container.exposed_ports.len(), 2);
+        assert!(container.exposed_ports.iter().any(|p| p.port == 3000 && p.protocol == "tcp"));
+        assert!(container.exposed_ports.iter().any(|p| p.port == 8080 && p.protocol == "tcp"));
+        
+        // Check port mappings
+        assert_eq!(container.port_mappings.len(), 2);
+        assert!(container.port_mappings.iter().any(|p| 
+            p.host_port == 3000 && p.container_port == 3000 && p.protocol == "tcp" && p.host_ip == "0.0.0.0"
+        ));
+        assert!(container.port_mappings.iter().any(|p| 
+            p.host_port == 8080 && p.container_port == 8080 && p.protocol == "tcp" && p.host_ip == "127.0.0.1"
+        ));
     }
 
     #[cfg(not(feature = "docker"))]

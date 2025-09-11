@@ -18,6 +18,7 @@ pub mod lifecycle;
 pub mod logging;
 pub mod mount;
 pub mod oci;
+pub mod ports;
 pub mod redaction;
 pub mod retry;
 

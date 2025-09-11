@@ -8,6 +8,7 @@ use deacon_core::compose::{ComposeManager, ComposeProject};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::docker::{CliDocker, Docker, ExecConfig};
 use deacon_core::errors::{DeaconError, DockerError};
+use deacon_core::ports::PortForwardingManager;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
 
@@ -18,6 +19,7 @@ pub struct UpArgs {
     pub skip_post_create: bool,
     #[allow(dead_code)] // TODO: Connect to container lifecycle execution
     pub skip_non_blocking_commands: bool,
+    pub ports_events: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
 }
@@ -100,6 +102,11 @@ async fn execute_compose_up(
         execute_compose_post_create(&project, config).await?;
     }
 
+    // Handle port forwarding and events
+    if args.ports_events {
+        handle_port_events(config, &project).await?;
+    }
+
     Ok(())
 }
 
@@ -173,6 +180,52 @@ async fn execute_compose_post_create(
     Ok(())
 }
 
+/// Handle port events for compose projects
+#[instrument(skip(config, project))]
+async fn handle_port_events(
+    config: &DevContainerConfig,
+    project: &ComposeProject,
+) -> Result<()> {
+    info!("Processing port events for compose project");
+
+    let compose_manager = ComposeManager::new();
+    let container_id = match compose_manager.get_primary_container_id(project)? {
+        Some(id) => id,
+        None => {
+            warn!("Primary service container not found, skipping port events");
+            return Ok(());
+        }
+    };
+
+    // Inspect the container to get port information
+    let docker = CliDocker::new();
+    let container_info = match docker.inspect_container(&container_id).await? {
+        Some(info) => info,
+        None => {
+            warn!("Container {} not found, skipping port events", container_id);
+            return Ok(());
+        }
+    };
+
+    debug!(
+        "Container {} has {} exposed ports and {} port mappings",
+        container_id,
+        container_info.exposed_ports.len(),
+        container_info.port_mappings.len()
+    );
+
+    // Process ports and emit events
+    let events = PortForwardingManager::process_container_ports(
+        config,
+        &container_info,
+        true, // emit_events = true
+    );
+
+    info!("Emitted {} port events", events.len());
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +239,7 @@ mod tests {
             remove_existing_container: true,
             skip_post_create: false,
             skip_non_blocking_commands: false,
+            ports_events: false,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
         };
@@ -193,6 +247,7 @@ mod tests {
         assert!(args.remove_existing_container);
         assert!(!args.skip_post_create);
         assert!(!args.skip_non_blocking_commands);
+        assert!(!args.ports_events);
         assert_eq!(args.workspace_folder, Some(PathBuf::from("/test")));
         assert!(args.config_path.is_none());
     }
