@@ -16,6 +16,7 @@ use tracing::{debug, info, instrument, warn};
 pub struct UpArgs {
     pub remove_existing_container: bool,
     pub skip_post_create: bool,
+    pub skip_non_blocking_commands: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
 }
@@ -183,12 +184,14 @@ mod tests {
         let args = UpArgs {
             remove_existing_container: true,
             skip_post_create: false,
+            skip_non_blocking_commands: false,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
         };
 
         assert!(args.remove_existing_container);
         assert!(!args.skip_post_create);
+        assert!(!args.skip_non_blocking_commands);
         assert_eq!(args.workspace_folder, Some(PathBuf::from("/test")));
         assert!(args.config_path.is_none());
     }
