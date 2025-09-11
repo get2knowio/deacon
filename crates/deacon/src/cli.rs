@@ -385,7 +385,9 @@ impl Cli {
             Some(Commands::ReadConfiguration {
                 include_merged_configuration,
             }) => {
-                use crate::commands::read_configuration::{execute_read_configuration, ReadConfigurationArgs};
+                use crate::commands::read_configuration::{
+                    execute_read_configuration, ReadConfigurationArgs,
+                };
 
                 let args = ReadConfigurationArgs {
                     include_merged_configuration,
