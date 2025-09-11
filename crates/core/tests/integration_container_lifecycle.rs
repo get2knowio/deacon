@@ -59,8 +59,13 @@ async fn test_container_lifecycle_with_variable_substitution() {
     println!("Error: {}", error);
     // The error should be related to container execution failure
     assert!(
-        error.to_string().contains("Container command failed")
-            || error.to_string().contains("No such container")
+        error
+            .to_string()
+            .contains("Container command failed in phase onCreate")
+            || error
+                .to_string()
+                .contains("Failed to execute container command")
+            || error.to_string().contains("Docker error")
     );
 }
 
