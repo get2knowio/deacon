@@ -9,6 +9,7 @@ pub mod config;
 pub mod container;
 pub mod container_lifecycle;
 pub mod docker;
+pub mod docker_user_mapper;
 pub mod doctor;
 pub mod dotfiles;
 pub mod env_probe;
@@ -23,6 +24,7 @@ pub mod retry;
 #[cfg(feature = "plugins")]
 pub mod plugins;
 pub mod templates;
+pub mod user_mapping;
 pub mod variable;
 
 /// Get the version of the core library

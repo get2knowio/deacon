@@ -273,6 +273,21 @@ pub struct DevContainerConfig {
     #[serde(default)]
     pub remote_env: HashMap<String, Option<String>>,
 
+    /// User to run commands as inside the container.
+    ///
+    /// Reference: [User Configuration - containerUser](https://containers.dev/implementors/json_reference/#container-user)
+    pub container_user: Option<String>,
+
+    /// User to run commands as in the remote environment.
+    ///
+    /// Reference: [User Configuration - remoteUser](https://containers.dev/implementors/json_reference/#remote-user)
+    pub remote_user: Option<String>,
+
+    /// Whether to update the remote user's UID/GID to match the host user.
+    ///
+    /// Reference: [User Configuration - updateRemoteUserUID](https://containers.dev/implementors/json_reference/#update-remote-user-uid)
+    pub update_remote_user_uid: Option<bool>,
+
     /// Ports to forward from the container.
     ///
     /// Reference: [Port Configuration - forwardPorts](https://containers.dev/implementors/json_reference/#forward-ports)
@@ -570,6 +585,9 @@ impl Default for DevContainerConfig {
             mounts: Vec::new(),
             container_env: HashMap::new(),
             remote_env: HashMap::new(),
+            container_user: None,
+            remote_user: None,
+            update_remote_user_uid: None,
             forward_ports: Vec::new(),
             app_port: None,
             ports_attributes: HashMap::new(),
@@ -713,6 +731,19 @@ impl ConfigMerger {
             // Maps: last writer wins for env vars
             container_env: Self::merge_string_maps(&base.container_env, &overlay.container_env),
             remote_env: Self::merge_optional_string_maps(&base.remote_env, &overlay.remote_env),
+
+            // User configuration: last writer wins
+            container_user: overlay
+                .container_user
+                .clone()
+                .or_else(|| base.container_user.clone()),
+            remote_user: overlay
+                .remote_user
+                .clone()
+                .or_else(|| base.remote_user.clone()),
+            update_remote_user_uid: overlay
+                .update_remote_user_uid
+                .or(base.update_remote_user_uid),
 
             // runArgs: concatenate arrays
             run_args: Self::concat_string_arrays(&base.run_args, &overlay.run_args),
@@ -1189,6 +1220,9 @@ impl ConfigLoader {
             "mounts",
             "containerEnv",
             "remoteEnv",
+            "containerUser",
+            "remoteUser",
+            "updateRemoteUserUID",
             "forwardPorts",
             "appPort",
             "portsAttributes",
@@ -1906,5 +1940,59 @@ mod tests {
         assert_eq!(config.other_ports_attributes, None);
         assert_eq!(config.forward_ports.len(), 0);
         assert_eq!(config.app_port, None);
+        assert_eq!(config.container_user, None);
+        assert_eq!(config.remote_user, None);
+        assert_eq!(config.update_remote_user_uid, None);
+    }
+
+    #[test]
+    fn test_config_with_user_mapping_fields() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "name": "Test Container with User Mapping",
+            "image": "ubuntu:20.04",
+            "containerUser": "1000",
+            "remoteUser": "vscode",
+            "updateRemoteUserUID": true
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let config = ConfigLoader::load_from_path(temp_file.path())?;
+
+        assert_eq!(config.name, Some("Test Container with User Mapping".to_string()));
+        assert_eq!(config.image, Some("ubuntu:20.04".to_string()));
+        assert_eq!(config.container_user, Some("1000".to_string()));
+        assert_eq!(config.remote_user, Some("vscode".to_string()));
+        assert_eq!(config.update_remote_user_uid, Some(true));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_user_mapping_merge() {
+        let base_config = DevContainerConfig {
+            name: Some("Base".to_string()),
+            image: Some("ubuntu:20.04".to_string()),
+            container_user: Some("root".to_string()),
+            remote_user: Some("user".to_string()),
+            update_remote_user_uid: Some(false),
+            ..DevContainerConfig::default()
+        };
+
+        let overlay_config = DevContainerConfig {
+            name: Some("Overlay".to_string()),
+            remote_user: Some("vscode".to_string()),
+            update_remote_user_uid: Some(true),
+            ..DevContainerConfig::default()
+        };
+
+        let merged = ConfigMerger::merge_configs(&[base_config, overlay_config]);
+
+        assert_eq!(merged.name, Some("Overlay".to_string()));
+        assert_eq!(merged.image, Some("ubuntu:20.04".to_string()));
+        assert_eq!(merged.container_user, Some("root".to_string())); // From base
+        assert_eq!(merged.remote_user, Some("vscode".to_string())); // From overlay
+        assert_eq!(merged.update_remote_user_uid, Some(true)); // From overlay
     }
 }
