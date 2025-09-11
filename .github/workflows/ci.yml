@@ -43,7 +43,7 @@ jobs:
       run: cargo build --verbose
       
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose -- --test-threads=1
       
     - name: Check formatting
       run: cargo fmt --all -- --check
@@ -82,7 +82,7 @@ jobs:
     - name: Generate coverage (fail under ${{ env.MIN_COVERAGE }}%)
       run: |
         mkdir -p coverage
-        cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info --text --fail-under-lines ${{ env.MIN_COVERAGE }} | tee -a "$GITHUB_STEP_SUMMARY"
+        cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info --text --fail-under-lines ${{ env.MIN_COVERAGE }} -- --test-threads=1 | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Upload lcov artifact
       uses: actions/upload-artifact@v4

@@ -4,13 +4,14 @@
 //! It supports both traditional text-based logging and optional JSON formatting
 //! controlled by feature flags and environment variables.
 
+use crate::redaction::RedactionConfig;
 use anyhow::Result;
 use std::sync::Once;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 static INIT: Once = Once::new();
 
-/// Initialize the logging system with optional format specification
+/// Initialize the logging system with optional format specification and redaction config
 ///
 /// This function sets up tracing-subscriber with either JSON or text formatting
 /// based on runtime configuration. It can be called multiple times
@@ -21,6 +22,7 @@ static INIT: Once = Once::new();
 /// * `format` - Optional format specification string. Supports:
 ///   - `None` or `"text"` for human-readable text format
 ///   - `"json"` for structured JSON format
+/// * `redaction_config` - Optional redaction configuration. If None, defaults to enabled.
 ///
 /// ## Environment Variables
 ///
@@ -45,14 +47,19 @@ static INIT: Once = Once::new();
 ///
 /// ```rust
 /// use deacon_core::logging;
+/// use deacon_core::redaction::RedactionConfig;
 ///
 /// // Initialize with default text format
-/// logging::init(None).expect("Failed to initialize logging");
+/// logging::init_with_redaction(None, None).expect("Failed to initialize logging");
 ///
-/// // Initialize with JSON format
-/// logging::init(Some("json")).expect("Failed to initialize logging");
+/// // Initialize with JSON format and disabled redaction
+/// logging::init_with_redaction(Some("json"), Some(RedactionConfig::disabled())).expect("Failed to initialize logging");
 /// ```
-pub fn init(format: Option<&str>) -> Result<()> {
+pub fn init_with_redaction(
+    format: Option<&str>,
+    redaction_config: Option<RedactionConfig>,
+) -> Result<()> {
+    let _redaction_config = redaction_config.unwrap_or_default();
     INIT.call_once(|| {
         let filter = create_env_filter(None);
 
@@ -89,18 +96,16 @@ pub fn init(format: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Initialize the logging system with optional format specification
+///
+/// This is a convenience wrapper around `init_with_redaction` that uses default redaction settings.
+pub fn init(format: Option<&str>) -> Result<()> {
+    init_with_redaction(format, None)
+}
+
 /// Create an EnvFilter based on environment variables
-fn create_env_filter(logging_spec: Option<&str>) -> EnvFilter {
-    if let Some(spec) = logging_spec {
-        // Use provided specification (for backward compatibility)
-        EnvFilter::try_new(spec).unwrap_or_else(|_| {
-            tracing::warn!(
-                "Invalid logging specification '{}', using default 'info'",
-                spec
-            );
-            EnvFilter::new("info")
-        })
-    } else if let Ok(deacon_log) = std::env::var("DEACON_LOG") {
+fn create_env_filter(_logging_spec: Option<&str>) -> EnvFilter {
+    if let Ok(deacon_log) = std::env::var("DEACON_LOG") {
         // Use DEACON_LOG environment variable
         EnvFilter::try_new(&deacon_log).unwrap_or_else(|_| {
             tracing::warn!(

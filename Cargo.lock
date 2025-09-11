@@ -440,6 +440,7 @@ dependencies = [
  "json5",
  "libc",
  "linked-hash-map",
+ "once_cell",
  "regex",
  "reqwest",
  "serde",

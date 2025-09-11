@@ -16,6 +16,7 @@ pub mod features;
 pub mod lifecycle;
 pub mod logging;
 pub mod oci;
+pub mod redaction;
 
 #[cfg(feature = "plugins")]
 pub mod plugins;
