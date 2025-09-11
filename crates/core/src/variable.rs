@@ -9,6 +9,8 @@
 //! - `${localWorkspaceFolder}` - Canonical workspace path
 //! - `${localEnv:VAR}` - Host environment variable
 //! - `${devcontainerId}` - Deterministic hash ID (first 12 chars of SHA256 of workspace path)
+//! - `${containerWorkspaceFolder}` - Container workspace path (available after container start)
+//! - `${containerEnv:VAR}` - Container environment variable (available after container start)
 //!
 //! ## Variable Substitution Workflow
 //!
@@ -44,6 +46,10 @@ pub struct SubstitutionContext {
     pub local_env: HashMap<String, String>,
     /// Deterministic container ID based on workspace path
     pub devcontainer_id: String,
+    /// Container workspace folder path (for in-container execution)
+    pub container_workspace_folder: Option<String>,
+    /// Container environment variables (for in-container execution)
+    pub container_env: Option<HashMap<String, String>>,
 }
 
 impl SubstitutionContext {
@@ -111,6 +117,8 @@ impl SubstitutionContext {
             local_workspace_folder,
             local_env,
             devcontainer_id,
+            container_workspace_folder: None,
+            container_env: None,
         })
     }
 
@@ -128,6 +136,18 @@ impl SubstitutionContext {
 
         // Convert to hex and take first 12 characters for deterministic ID
         format!("{:016x}", hash)[..12].to_string()
+    }
+
+    /// Set container workspace folder path for in-container variable substitution
+    pub fn with_container_workspace_folder(mut self, container_workspace_folder: String) -> Self {
+        self.container_workspace_folder = Some(container_workspace_folder);
+        self
+    }
+
+    /// Set container environment variables for in-container variable substitution
+    pub fn with_container_env(mut self, container_env: HashMap<String, String>) -> Self {
+        self.container_env = Some(container_env);
+        self
     }
 }
 
@@ -238,17 +258,28 @@ impl VariableSubstitution {
 
     /// Resolve a variable expression to its value
     ///
-    /// Handles the three supported variable types:
+    /// Handles the supported variable types:
     /// - `localWorkspaceFolder` - Returns canonical workspace path
     /// - `localEnv:VAR` - Returns environment variable or empty string if missing
     /// - `devcontainerId` - Returns deterministic container ID
+    /// - `containerWorkspaceFolder` - Returns container workspace path (if available)
+    /// - `containerEnv:VAR` - Returns container environment variable (if available)
     fn resolve_variable(variable_expr: &str, context: &SubstitutionContext) -> Option<String> {
         match variable_expr {
             "localWorkspaceFolder" => Some(context.local_workspace_folder.clone()),
             "devcontainerId" => Some(context.devcontainer_id.clone()),
+            "containerWorkspaceFolder" => context.container_workspace_folder.clone(),
             expr if expr.starts_with("localEnv:") => {
                 let env_var = &expr[9..]; // Remove "localEnv:" prefix
                 Some(context.local_env.get(env_var).cloned().unwrap_or_default())
+            }
+            expr if expr.starts_with("containerEnv:") => {
+                let env_var = &expr[13..]; // Remove "containerEnv:" prefix
+                context
+                    .container_env
+                    .as_ref()
+                    .and_then(|env| env.get(env_var).cloned())
+                    .or_else(|| Some(String::new())) // Return empty string if container env not available or var not found
             }
             _ => None, // Unknown variable
         }
@@ -527,6 +558,117 @@ mod tests {
             .chars()
             .all(|c| c.is_ascii_hexdigit()));
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_container_workspace_folder_substitution() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?
+            .with_container_workspace_folder("/workspaces/test".to_string());
+        let mut report = SubstitutionReport::new();
+
+        let input = "${containerWorkspaceFolder}/src";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        assert_eq!(result, "/workspaces/test/src");
+        assert!(report.replacements.contains_key("containerWorkspaceFolder"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_container_workspace_folder_not_available() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?;
+        let mut report = SubstitutionReport::new();
+
+        let input = "${containerWorkspaceFolder}/src";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        // Should be left unchanged when container workspace folder is not available
+        assert_eq!(result, "${containerWorkspaceFolder}/src");
+        assert!(report
+            .unknown_variables
+            .contains(&"containerWorkspaceFolder".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_container_env_substitution() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let mut container_env = HashMap::new();
+        container_env.insert("NODE_ENV".to_string(), "production".to_string());
+
+        let context = SubstitutionContext::new(temp_dir.path())?.with_container_env(container_env);
+        let mut report = SubstitutionReport::new();
+
+        let input = "Environment: ${containerEnv:NODE_ENV}";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        assert_eq!(result, "Environment: production");
+        assert!(report.replacements.contains_key("containerEnv:NODE_ENV"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_container_env_missing_var() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let container_env = HashMap::new();
+
+        let context = SubstitutionContext::new(temp_dir.path())?.with_container_env(container_env);
+        let mut report = SubstitutionReport::new();
+
+        let input = "Environment: ${containerEnv:MISSING_VAR}";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        assert_eq!(result, "Environment: ");
+        assert!(report.replacements.contains_key("containerEnv:MISSING_VAR"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_container_env_not_available() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?;
+        let mut report = SubstitutionReport::new();
+
+        let input = "Environment: ${containerEnv:NODE_ENV}";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        // Should return empty string when container env is not available
+        assert_eq!(result, "Environment: ");
+        assert!(report.replacements.contains_key("containerEnv:NODE_ENV"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_mixed_container_and_local_variables() -> anyhow::Result<()> {
+        env::set_var("TEST_LOCAL", "local_value");
+
+        let temp_dir = TempDir::new()?;
+        let mut container_env = HashMap::new();
+        container_env.insert("TEST_CONTAINER".to_string(), "container_value".to_string());
+
+        let context = SubstitutionContext::new(temp_dir.path())?
+            .with_container_workspace_folder("/workspaces/test".to_string())
+            .with_container_env(container_env);
+        let mut report = SubstitutionReport::new();
+
+        let input = "${localWorkspaceFolder} -> ${containerWorkspaceFolder}, ${localEnv:TEST_LOCAL} vs ${containerEnv:TEST_CONTAINER}";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        assert!(result.contains(&context.local_workspace_folder));
+        assert!(result.contains("/workspaces/test"));
+        assert!(result.contains("local_value"));
+        assert!(result.contains("container_value"));
+        assert_eq!(report.replacements.len(), 4);
+
+        env::remove_var("TEST_LOCAL");
         Ok(())
     }
 }

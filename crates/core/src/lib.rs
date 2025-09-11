@@ -7,6 +7,7 @@ pub mod cache;
 pub mod compose;
 pub mod config;
 pub mod container;
+pub mod container_lifecycle;
 pub mod docker;
 pub mod doctor;
 pub mod dotfiles;

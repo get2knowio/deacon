@@ -65,6 +65,9 @@ pub enum Commands {
         /// Skip postCreate lifecycle phase
         #[arg(long)]
         skip_post_create: bool,
+        /// Skip non-blocking commands (postStart & postAttach phases)
+        #[arg(long)]
+        skip_non_blocking_commands: bool,
     },
 
     /// Build development container image
@@ -255,12 +258,14 @@ impl Cli {
             Some(Commands::Up {
                 remove_existing_container,
                 skip_post_create,
+                skip_non_blocking_commands,
             }) => {
                 use crate::commands::up::{execute_up, UpArgs};
 
                 let args = UpArgs {
                     remove_existing_container,
                     skip_post_create,
+                    skip_non_blocking_commands,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                 };

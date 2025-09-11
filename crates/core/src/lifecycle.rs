@@ -12,7 +12,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
-use tracing::{debug, error, info, instrument, warn};
+use std::time::Instant;
+use tracing::{debug, error, info, instrument};
 
 /// Lifecycle phases representing different stages of container setup
 ///
@@ -102,27 +103,61 @@ impl LifecycleCommands {
     }
 }
 
+/// Execution mode for lifecycle commands
+#[derive(Debug, Clone)]
+pub enum ExecutionMode {
+    /// Execute commands on the host system
+    Host,
+    /// Execute commands in a container
+    Container {
+        /// Container ID to execute commands in
+        container_id: String,
+        /// User to run commands as (optional, defaults to root)
+        user: Option<String>,
+        /// Working directory in the container
+        working_dir: Option<String>,
+    },
+}
+
 /// Execution context for lifecycle commands
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
     /// Environment variables to pass to commands
     pub environment: HashMap<String, String>,
-    /// Working directory for command execution
+    /// Working directory for command execution (host mode only)
     pub working_directory: Option<std::path::PathBuf>,
     /// Timeout for command execution (placeholder, not enforced yet)
     pub timeout: Option<std::time::Duration>,
     /// Redaction configuration for sensitive output filtering
     pub redaction_config: RedactionConfig,
+    /// Execution mode (host or container)
+    pub execution_mode: ExecutionMode,
 }
 
 impl ExecutionContext {
-    /// Create new execution context
+    /// Create new execution context for host execution
     pub fn new() -> Self {
         Self {
             environment: HashMap::new(),
             working_directory: None,
             timeout: None, // TODO: Implement timeout enforcement
             redaction_config: RedactionConfig::default(),
+            execution_mode: ExecutionMode::Host,
+        }
+    }
+
+    /// Create new execution context for container execution
+    pub fn new_container(container_id: String) -> Self {
+        Self {
+            environment: HashMap::new(),
+            working_directory: None,
+            timeout: None,
+            redaction_config: RedactionConfig::default(),
+            execution_mode: ExecutionMode::Container {
+                container_id,
+                user: None,
+                working_dir: None,
+            },
         }
     }
 
@@ -149,6 +184,38 @@ impl ExecutionContext {
         self.redaction_config = config;
         self
     }
+
+    /// Set container user for container execution
+    pub fn with_container_user(mut self, user: String) -> Self {
+        if let ExecutionMode::Container {
+            container_id,
+            working_dir,
+            ..
+        } = self.execution_mode
+        {
+            self.execution_mode = ExecutionMode::Container {
+                container_id,
+                user: Some(user),
+                working_dir,
+            };
+        }
+        self
+    }
+
+    /// Set container working directory for container execution
+    pub fn with_container_working_dir(mut self, working_dir: String) -> Self {
+        if let ExecutionMode::Container {
+            container_id, user, ..
+        } = self.execution_mode
+        {
+            self.execution_mode = ExecutionMode::Container {
+                container_id,
+                user,
+                working_dir: Some(working_dir),
+            };
+        }
+        self
+    }
 }
 
 impl Default for ExecutionContext {
@@ -168,6 +235,8 @@ pub struct LifecycleResult {
     pub stderr: String,
     /// Whether all commands succeeded
     pub success: bool,
+    /// Duration of each command execution
+    pub durations: Vec<std::time::Duration>,
 }
 
 impl LifecycleResult {
@@ -178,12 +247,20 @@ impl LifecycleResult {
             stdout: String::new(),
             stderr: String::new(),
             success: true,
+            durations: Vec::new(),
         }
     }
 
-    /// Add command result
-    pub fn add_command_result(&mut self, exit_code: i32, stdout: String, stderr: String) {
+    /// Add command result with duration
+    pub fn add_command_result(
+        &mut self,
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
+        duration: std::time::Duration,
+    ) {
         self.exit_codes.push(exit_code);
+        self.durations.push(duration);
         if !stdout.is_empty() {
             if !self.stdout.is_empty() {
                 self.stdout.push('\n');
@@ -212,14 +289,29 @@ impl Default for LifecycleResult {
 ///
 /// This function runs commands sequentially and captures their output.
 /// If any command fails, execution halts and returns an error with phase context.
+/// This version only supports host execution.
 #[instrument(skip(commands, ctx), fields(phase = %phase.as_str()))]
 pub fn run_phase(
     phase: LifecyclePhase,
     commands: &LifecycleCommands,
     ctx: &ExecutionContext,
 ) -> Result<LifecycleResult> {
-    info!("Starting lifecycle phase: {}", phase.as_str());
+    match &ctx.execution_mode {
+        ExecutionMode::Host => run_phase_host_sync(phase, commands, ctx),
+        ExecutionMode::Container { .. } => Err(DeaconError::Lifecycle(
+            "Container execution not supported in sync version - use container_lifecycle module"
+                .to_string(),
+        )),
+    }
+}
 
+/// Execute a lifecycle phase on the host system (synchronous)
+#[instrument(skip(commands, ctx), fields(phase = %phase.as_str()))]
+fn run_phase_host_sync(
+    phase: LifecyclePhase,
+    commands: &LifecycleCommands,
+    ctx: &ExecutionContext,
+) -> Result<LifecycleResult> {
     let mut result = LifecycleResult::new();
 
     for (i, command_template) in commands.commands.iter().enumerate() {
@@ -230,6 +322,8 @@ pub fn run_phase(
             phase.as_str(),
             command_template.command
         );
+
+        let start_time = Instant::now();
 
         // Create the actual command from the template
         let mut command = if cfg!(target_os = "windows") {
@@ -247,6 +341,7 @@ pub fn run_phase(
             command.current_dir(dir);
         }
 
+        // Execute command in blocking task to use sync stdio handling
         // Add environment variables from template and context
         for (key, value) in &command_template.env_vars {
             command.env(key, value);
@@ -307,6 +402,7 @@ pub fn run_phase(
         })?;
 
         let exit_code = exit_status.code().unwrap_or(-1);
+        let duration = start_time.elapsed();
         let stdout = stdout_lines.join("\n");
         let stderr = stderr_lines.join("\n");
 
@@ -314,9 +410,12 @@ pub fn run_phase(
         let redacted_stdout = redact_if_enabled(&stdout, &ctx.redaction_config);
         let redacted_stderr = redact_if_enabled(&stderr, &ctx.redaction_config);
 
-        debug!("Command completed with exit code: {}", exit_code);
+        debug!(
+            "Command completed with exit code: {} in {:?}",
+            exit_code, duration
+        );
 
-        result.add_command_result(exit_code, redacted_stdout, redacted_stderr);
+        result.add_command_result(exit_code, redacted_stdout, redacted_stderr, duration);
 
         // If command failed, halt execution and return error with phase context
         if exit_code != 0 {
@@ -399,14 +498,26 @@ mod tests {
         assert!(result.success);
         assert!(result.exit_codes.is_empty());
 
-        result.add_command_result(0, "output".to_string(), "".to_string());
+        result.add_command_result(
+            0,
+            "output".to_string(),
+            "".to_string(),
+            std::time::Duration::from_millis(100),
+        );
         assert!(result.success);
         assert_eq!(result.exit_codes, vec![0]);
         assert_eq!(result.stdout, "output");
+        assert_eq!(result.durations.len(), 1);
 
-        result.add_command_result(1, "".to_string(), "error".to_string());
+        result.add_command_result(
+            1,
+            "".to_string(),
+            "error".to_string(),
+            std::time::Duration::from_millis(200),
+        );
         assert!(!result.success);
         assert_eq!(result.exit_codes, vec![0, 1]);
         assert_eq!(result.stderr, "error");
+        assert_eq!(result.durations.len(), 2);
     }
 }
