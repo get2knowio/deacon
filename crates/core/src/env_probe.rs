@@ -198,9 +198,11 @@ impl EnvironmentProber {
 
         // Add appropriate flags based on mode
         // In CI environments, avoid interactive flags that can hang
+        // Also honor explicit escape hatch env var to force skipping in automation
         let is_ci = std::env::var("CI").is_ok()
             || std::env::var("GITHUB_ACTIONS").is_ok()
-            || std::env::var("CONTINUOUS_INTEGRATION").is_ok();
+            || std::env::var("CONTINUOUS_INTEGRATION").is_ok()
+            || std::env::var("DEACON_CI_SKIP_SHELL").is_ok();
 
         // In CI environments, skip complex shell probing to avoid hanging
         if is_ci
