@@ -8,6 +8,7 @@ pub mod compose;
 pub mod config;
 pub mod container;
 pub mod docker;
+pub mod doctor;
 pub mod dotfiles;
 pub mod env_probe;
 pub mod errors;

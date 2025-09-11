@@ -126,6 +126,18 @@ pub enum Commands {
         /// Commands to run
         commands: Vec<String>,
     },
+
+    /// Environment diagnostics and support bundle creation
+    ///
+    /// Collects system information for troubleshooting and support
+    Doctor {
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+        /// Create support bundle at specified path
+        #[arg(long)]
+        bundle: Option<PathBuf>,
+    },
 }
 
 /// Feature management subcommands
@@ -200,7 +212,7 @@ impl Cli {
         }
     }
 
-    pub fn dispatch(self) -> Result<()> {
+    pub async fn dispatch(self) -> Result<()> {
         use deacon_core::errors::{ConfigError, DeaconError};
 
         // Initialize logging based on global options
@@ -241,10 +253,7 @@ impl Cli {
                     config_path: self.config,
                 };
 
-                let runtime = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-
-                match runtime.block_on(execute_up(args)) {
+                match execute_up(args).await {
                     Ok(()) => Ok(()),
                     Err(e) => {
                         if let Some(DeaconError::Config(ConfigError::NotFound { .. })) =
@@ -277,10 +286,7 @@ impl Cli {
                     config_path: self.config,
                 };
 
-                let runtime = tokio::runtime::Runtime::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-
-                runtime.block_on(execute_build(args))?;
+                execute_build(args).await?;
                 Ok(())
             }
             Some(Commands::Exec {
@@ -331,14 +337,13 @@ impl Cli {
                         detach: false,
                     };
 
-                    let runtime = tokio::runtime::Runtime::new()
-                        .map_err(|e| anyhow::anyhow!("Failed to create async runtime: {}", e))?;
-
                     // For now, use a default container ID - in a real implementation,
                     // this would be discovered from the workspace configuration
                     let container_id = "devcontainer"; // This should be discovered
 
-                    match runtime.block_on(docker_client.exec(container_id, &command, exec_config))
+                    match docker_client
+                        .exec(container_id, &command, exec_config)
+                        .await
                     {
                         Ok(result) => {
                             tracing::info!(
@@ -388,6 +393,19 @@ impl Cli {
                     feature: "run-user-commands command".to_string(),
                 })
                 .into())
+            }
+            Some(Commands::Doctor { json, bundle }) => {
+                // Create a DoctorContext for doctor command
+                let context = deacon_core::doctor::DoctorContext {
+                    workspace_folder: self.workspace_folder.clone(),
+                    config: self.config.clone(),
+                };
+
+                // Execute doctor command
+                match deacon_core::doctor::run_doctor(json, bundle, context).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => Err(e.into()),
+                }
             }
             None => {
                 // No subcommand provided - show help-like message
