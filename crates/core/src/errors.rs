@@ -206,6 +206,10 @@ pub enum DeaconError {
     #[error("Lifecycle error: {0}")]
     Lifecycle(String),
 
+    /// Feature not implemented
+    #[error("Feature not implemented: {feature}")]
+    NotImplemented { feature: String },
+
     /// Internal/generic errors
     #[error("Internal error")]
     Internal(#[from] InternalError),

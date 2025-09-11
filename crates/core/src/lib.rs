@@ -23,6 +23,7 @@ pub mod retry;
 #[cfg(feature = "plugins")]
 pub mod plugins;
 pub mod templates;
+pub mod user_mapping;
 pub mod variable;
 
 /// Get the version of the core library
