@@ -478,6 +478,7 @@ mod tests {
             features: serde_json::Value::Object(Default::default()),
             customizations: serde_json::Value::Object(Default::default()),
             workspace_folder: None,
+            workspace_mount: None,
             mounts: vec![],
             container_env: HashMap::new(),
             remote_env: HashMap::new(),

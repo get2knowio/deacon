@@ -629,17 +629,31 @@ impl ContainerOps for CliDocker {
             args.push(format!("{}={}", key, value));
         }
 
-        // Add workspace mount
-        let workspace_mount = format!(
-            "type=bind,source={},target=/workspaces/{}",
-            workspace_path.display(),
-            workspace_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("workspace")
-        );
-        args.push("--mount".to_string());
-        args.push(workspace_mount);
+        // Add workspace mount (either from workspaceMount config or default)
+        if let Some(ref workspace_mount) = config.workspace_mount {
+            // Use custom workspace mount from config
+            let mount = crate::mount::MountParser::parse_mount(workspace_mount)
+                .map_err(|e| DockerError::CLIError(format!("Invalid workspaceMount: {}", e)))?;
+            args.extend(mount.to_docker_args());
+        } else {
+            // Use default workspace mount
+            let workspace_mount = format!(
+                "type=bind,source={},target=/workspaces/{}",
+                workspace_path.display(),
+                workspace_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("workspace")
+            );
+            args.push("--mount".to_string());
+            args.push(workspace_mount);
+        }
+
+        // Add additional mounts from configuration
+        let mounts = crate::mount::MountParser::parse_mounts_from_json(&config.mounts);
+        for mount in mounts {
+            args.extend(mount.to_docker_args());
+        }
 
         // Add runArgs if present
         args.extend(config.run_args.iter().cloned());

@@ -255,6 +255,12 @@ pub struct DevContainerConfig {
     /// Reference: [Workspace Configuration - workspaceFolder](https://containers.dev/implementors/json_reference/#workspace-folder)
     pub workspace_folder: Option<String>,
 
+    /// Mount configuration for the workspace folder.
+    ///
+    /// Reference: [Container Configuration - workspaceMount](https://containers.dev/implementors/json_reference/#workspace-mount)
+    #[serde(rename = "workspaceMount")]
+    pub workspace_mount: Option<String>,
+
     /// Additional mount points for the container.
     ///
     /// Reference: [Container Configuration - mounts](https://containers.dev/implementors/json_reference/#mounts)
@@ -411,6 +417,15 @@ impl DevContainerConfig {
         if let Some(ref workspace_folder) = config.workspace_folder {
             config.workspace_folder = Some(VariableSubstitution::substitute_string(
                 workspace_folder,
+                context,
+                &mut report,
+            ));
+        }
+
+        // Substitute workspace_mount
+        if let Some(ref workspace_mount) = config.workspace_mount {
+            config.workspace_mount = Some(VariableSubstitution::substitute_string(
+                workspace_mount,
                 context,
                 &mut report,
             ));
@@ -583,6 +598,7 @@ impl Default for DevContainerConfig {
             features: default_empty_object(),
             customizations: default_empty_object(),
             workspace_folder: None,
+            workspace_mount: None,
             mounts: Vec::new(),
             container_env: HashMap::new(),
             remote_env: HashMap::new(),
@@ -670,6 +686,10 @@ impl ConfigMerger {
                 .workspace_folder
                 .clone()
                 .or_else(|| base.workspace_folder.clone()),
+            workspace_mount: overlay
+                .workspace_mount
+                .clone()
+                .or_else(|| base.workspace_mount.clone()),
             app_port: overlay.app_port.clone().or_else(|| base.app_port.clone()),
             shutdown_action: overlay
                 .shutdown_action
