@@ -123,6 +123,42 @@ pub enum FeatureError {
     Installation { message: String },
 }
 
+/// Template-related errors
+#[derive(Error, Debug)]
+pub enum TemplateError {
+    /// Template not implemented
+    #[error("Template not implemented")]
+    NotImplemented,
+
+    /// Template metadata parsing error
+    #[error("Failed to parse template metadata: {message}")]
+    Parsing { message: String },
+
+    /// Template metadata validation error
+    #[error("Template validation error: {message}")]
+    Validation { message: String },
+
+    /// Template metadata file I/O error
+    #[error("Failed to read template metadata file")]
+    Io(#[from] std::io::Error),
+
+    /// Template metadata file not found
+    #[error("Template metadata file not found: {path}")]
+    NotFound { path: String },
+
+    /// JSON parsing error
+    #[error("JSON parsing error")]
+    Json(#[from] serde_json::Error),
+
+    /// Template application error
+    #[error("Template application error: {message}")]
+    Application { message: String },
+
+    /// File operation error during template application
+    #[error("Template file operation error: {message}")]
+    FileOperation { message: String },
+}
+
 /// Internal/generic fallback errors
 #[derive(Error, Debug)]
 pub enum InternalError {
@@ -155,8 +191,8 @@ pub enum DeaconError {
     Feature(#[from] FeatureError),
 
     /// Template-related errors
-    #[error("Template error: {message}")]
-    Template { message: String },
+    #[error("Template error")]
+    Template(#[from] TemplateError),
 
     /// Network-related errors
     #[error("Network error: {message}")]
@@ -255,6 +291,36 @@ mod tests {
     }
 
     #[test]
+    fn test_template_error_display() {
+        let error = TemplateError::NotImplemented;
+        assert_eq!(format!("{}", error), "Template not implemented");
+
+        let error = TemplateError::Parsing {
+            message: "Invalid JSON".to_string(),
+        };
+        assert_eq!(
+            format!("{}", error),
+            "Failed to parse template metadata: Invalid JSON"
+        );
+
+        let error = TemplateError::Validation {
+            message: "Missing required field".to_string(),
+        };
+        assert_eq!(
+            format!("{}", error),
+            "Template validation error: Missing required field"
+        );
+
+        let error = TemplateError::NotFound {
+            path: "/path/to/template.json".to_string(),
+        };
+        assert_eq!(
+            format!("{}", error),
+            "Template metadata file not found: /path/to/template.json"
+        );
+    }
+
+    #[test]
     fn test_internal_error_display() {
         let error = InternalError::Generic {
             message: "Something went wrong".to_string(),
@@ -289,6 +355,10 @@ mod tests {
         let feature_error = FeatureError::NotImplemented;
         let deacon_error: DeaconError = feature_error.into();
         assert!(matches!(deacon_error, DeaconError::Feature(_)));
+
+        let template_error = TemplateError::NotImplemented;
+        let deacon_error: DeaconError = template_error.into();
+        assert!(matches!(deacon_error, DeaconError::Template(_)));
 
         let internal_error = InternalError::Generic {
             message: "Test".to_string(),
