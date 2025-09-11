@@ -9,7 +9,6 @@ pub mod config;
 pub mod container;
 pub mod container_lifecycle;
 pub mod docker;
-pub mod docker_user_mapper;
 pub mod doctor;
 pub mod dotfiles;
 pub mod env_probe;

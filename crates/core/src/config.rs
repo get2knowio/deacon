@@ -286,6 +286,7 @@ pub struct DevContainerConfig {
     /// Whether to update the remote user's UID/GID to match the host user.
     ///
     /// Reference: [User Configuration - updateRemoteUserUID](https://containers.dev/implementors/json_reference/#update-remote-user-uid)
+    #[serde(rename = "updateRemoteUserUID")]
     pub update_remote_user_uid: Option<bool>,
 
     /// Ports to forward from the container.
@@ -1960,7 +1961,10 @@ mod tests {
 
         let config = ConfigLoader::load_from_path(temp_file.path())?;
 
-        assert_eq!(config.name, Some("Test Container with User Mapping".to_string()));
+        assert_eq!(
+            config.name,
+            Some("Test Container with User Mapping".to_string())
+        );
         assert_eq!(config.image, Some("ubuntu:20.04".to_string()));
         assert_eq!(config.container_user, Some("1000".to_string()));
         assert_eq!(config.remote_user, Some("vscode".to_string()));
