@@ -75,9 +75,42 @@ cargo add --manifest-path crates/<crate>/Cargo.toml <crate_name>
 ## Testing Guidelines
 - **Unit tests**: Test individual functions and modules
 - **Integration tests**: Use `assert_cmd` to test the CLI binary
+- **End-to-end tests**: Comprehensive scenarios validating complete workflows
 - **Test coverage**: Aim for good coverage of new functionality
-- **Performance**: Keep tests fast (< 2s) for quick feedback
+- **Performance**: Keep tests fast (< 2s) for quick feedback, e2e tests < 30s total
 - **Deterministic**: Tests should not depend on external networks or random data
+
+### Running End-to-End Tests
+The e2e test suite validates the complete integration of:
+- Configuration discovery and loading
+- Variable substitution
+- Feature parsing and handling
+- Lifecycle command processing
+- Plugin customization support
+- Logging and error handling
+
+```bash
+# Run all e2e tests
+cargo test --test integration_e2e --manifest-path crates/deacon/Cargo.toml
+
+# Run specific e2e test scenarios
+cargo test test_e2e_basic_config_read --manifest-path crates/deacon/Cargo.toml
+cargo test test_e2e_variable_substitution --manifest-path crates/deacon/Cargo.toml
+cargo test test_e2e_features_configuration --manifest-path crates/deacon/Cargo.toml
+cargo test test_e2e_plugin_customizations --manifest-path crates/deacon/Cargo.toml
+cargo test test_e2e_lifecycle_simulation --manifest-path crates/deacon/Cargo.toml
+cargo test test_e2e_performance_under_30s --manifest-path crates/deacon/Cargo.toml
+cargo test test_e2e_error_handling --manifest-path crates/deacon/Cargo.toml
+```
+
+The e2e tests are designed to run quickly (total runtime < 30 seconds) and validate:
+1. **Basic config reading**: Configuration discovery, loading, and JSON output
+2. **Variable substitution**: Replacement of workspace and environment variables
+3. **Feature configuration**: Parsing of local and remote feature references
+4. **Plugin customizations**: VSCode extensions and settings handling
+5. **Lifecycle simulation**: Command processing with variable substitution
+6. **Performance validation**: Ensuring operations complete within time limits
+7. **Error handling**: Proper handling of missing files and invalid JSON
 
 ## Coding Standards
 - **Follow `rustfmt` defaults** - run `cargo fmt --all` before committing

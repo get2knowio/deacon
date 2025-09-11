@@ -2,7 +2,33 @@
 
 A Rust reimplementation of the Development Containers CLI, following the [containers.dev specification](https://containers.dev).
 
-**Status**: Work in Progress - No functional commands implemented yet.
+**Status**: Early Development - Basic configuration reading and CLI framework implemented.
+
+## Current Implementation Status
+
+### ✅ Implemented Features
+- **Configuration Discovery**: Finds devcontainer.json in workspace
+- **Configuration Loading**: Parses JSON-with-comments (JSONC) format
+- **Variable Substitution**: Replaces workspace and environment variables
+- **Read Configuration Command**: `deacon read-configuration` outputs processed JSON
+- **CLI Framework**: Complete command structure with help and logging
+- **Error Handling**: Proper error messages for missing files and invalid JSON
+
+### 🚧 In Progress
+- **Feature System**: Basic parsing implemented, installation simulation in tests
+- **Plugin Support**: Configuration parsing ready, plugin execution framework needed
+- **Extends Resolution**: Configuration inheritance partially implemented
+
+### 📋 Planned Features
+- **Container Lifecycle**: Building and running containers
+- **Docker Integration**: Real Docker operations (currently simulated)
+- **Template System**: DevContainer template management
+- **OCI Registry Support**: Pulling features and templates from registries
+
+### 🧪 Test Coverage
+- **Unit Tests**: Core functionality well-tested
+- **Integration Tests**: CLI commands and basic workflows
+- **End-to-End Tests**: Complete workflow validation (7 scenarios, runtime < 30s)
 
 ## Quick Start
 
@@ -56,6 +82,62 @@ cargo install deacon
 ### Verify Installation
 ```bash
 deacon --help
+```
+
+## Usage
+
+### Reading DevContainer Configuration
+The `read-configuration` command loads, processes, and outputs your devcontainer.json:
+
+```bash
+# In a directory with .devcontainer/devcontainer.json or .devcontainer.json
+deacon read-configuration
+
+# With explicit config path
+deacon read-configuration --config /path/to/devcontainer.json
+
+# Include merged configuration (with extends resolution)
+deacon read-configuration --include-merged-configuration
+
+# With debug logging
+deacon read-configuration --log-level debug
+```
+
+**Example output:**
+```json
+{
+  "name": "my-dev-container",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "workspaceFolder": "/workspaces/my-project",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"]
+    }
+  }
+}
+```
+
+**Variable Substitution:**
+Variables like `${localWorkspaceFolder}` are automatically replaced:
+```json
+{
+  "workspaceFolder": "${localWorkspaceFolder}/src",
+  "containerEnv": {
+    "PROJECT_ROOT": "${localWorkspaceFolder}"
+  }
+}
+```
+becomes:
+```json
+{
+  "workspaceFolder": "/home/user/project/src",
+  "containerEnv": {
+    "PROJECT_ROOT": "/home/user/project"
+  }
+}
 ```
 
 ### Development Build

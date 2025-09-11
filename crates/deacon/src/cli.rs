@@ -382,11 +382,21 @@ impl Cli {
                     .into())
                 }
             }
-            Some(Commands::ReadConfiguration { .. }) => {
-                Err(DeaconError::Config(ConfigError::NotImplemented {
-                    feature: "read-configuration command".to_string(),
-                })
-                .into())
+            Some(Commands::ReadConfiguration {
+                include_merged_configuration,
+            }) => {
+                use crate::commands::read_configuration::{
+                    execute_read_configuration, ReadConfigurationArgs,
+                };
+
+                let args = ReadConfigurationArgs {
+                    include_merged_configuration,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
+
+                execute_read_configuration(args).await?;
+                Ok(())
             }
             Some(Commands::Features { .. }) => {
                 Err(DeaconError::Config(ConfigError::NotImplemented {
