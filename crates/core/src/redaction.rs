@@ -136,6 +136,8 @@ pub struct RedactionConfig {
     pub enabled: bool,
     /// Custom redaction placeholder (if different from default)
     pub placeholder: Option<String>,
+    /// Custom registry to use instead of global (primarily for testing)
+    pub custom_registry: Option<SecretRegistry>,
 }
 
 impl Default for RedactionConfig {
@@ -143,6 +145,7 @@ impl Default for RedactionConfig {
         Self {
             enabled: true,
             placeholder: None,
+            custom_registry: None,
         }
     }
 }
@@ -153,6 +156,7 @@ impl RedactionConfig {
         Self {
             enabled: false,
             placeholder: None,
+            custom_registry: None,
         }
     }
 
@@ -161,17 +165,49 @@ impl RedactionConfig {
         Self {
             enabled: true,
             placeholder: Some(placeholder),
+            custom_registry: None,
+        }
+    }
+
+    /// Create config with custom registry (primarily for testing)
+    pub fn with_custom_registry(registry: SecretRegistry) -> Self {
+        Self {
+            enabled: true,
+            placeholder: None,
+            custom_registry: Some(registry),
+        }
+    }
+
+    /// Create config with both custom placeholder and registry
+    pub fn with_placeholder_and_registry(placeholder: String, registry: SecretRegistry) -> Self {
+        Self {
+            enabled: true,
+            placeholder: Some(placeholder),
+            custom_registry: Some(registry),
         }
     }
 }
 
 /// Redact text using the global registry if redaction is enabled
 pub fn redact_if_enabled(text: &str, config: &RedactionConfig) -> String {
+    let registry = config
+        .custom_registry
+        .as_ref()
+        .unwrap_or_else(|| global_registry());
+    redact_with_registry(text, config, registry)
+}
+
+/// Redact text using a specific registry if redaction is enabled
+pub fn redact_with_registry(
+    text: &str,
+    config: &RedactionConfig,
+    registry: &SecretRegistry,
+) -> String {
     if !config.enabled {
         return text.to_string();
     }
 
-    let redacted = global_registry().redact_text(text);
+    let redacted = registry.redact_text(text);
 
     // Apply custom placeholder if specified
     if let Some(custom_placeholder) = &config.placeholder {
@@ -324,6 +360,26 @@ mod tests {
         let config = RedactionConfig::with_placeholder("[REDACTED]".to_string());
         assert!(config.enabled);
         assert_eq!(config.placeholder.as_ref().unwrap(), "[REDACTED]");
+        assert!(config.custom_registry.is_none());
+    }
+
+    #[test]
+    fn test_redaction_config_custom_registry() {
+        let registry = SecretRegistry::new();
+        let config = RedactionConfig::with_custom_registry(registry);
+        assert!(config.enabled);
+        assert!(config.placeholder.is_none());
+        assert!(config.custom_registry.is_some());
+    }
+
+    #[test]
+    fn test_redaction_config_custom_placeholder_and_registry() {
+        let registry = SecretRegistry::new();
+        let config =
+            RedactionConfig::with_placeholder_and_registry("[HIDDEN]".to_string(), registry);
+        assert!(config.enabled);
+        assert_eq!(config.placeholder.as_ref().unwrap(), "[HIDDEN]");
+        assert!(config.custom_registry.is_some());
     }
 
     #[test]
@@ -367,6 +423,23 @@ mod tests {
 
         // Clean up
         global_registry().clear();
+    }
+
+    #[test]
+    fn test_redact_if_enabled_with_custom_registry() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("test-secret-123");
+
+        let config = RedactionConfig::with_custom_registry(registry);
+        let text = "This contains test-secret-123";
+
+        let result = redact_if_enabled(text, &config);
+        assert_eq!(result, "This contains ****");
+        assert!(!result.contains("test-secret-123"));
+
+        // Verify global registry is unaffected
+        let global_result = global_registry().redact_text(text);
+        assert_eq!(global_result, text); // Should not be redacted by global registry
     }
 
     #[test]
