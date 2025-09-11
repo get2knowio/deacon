@@ -202,23 +202,33 @@ impl EnvironmentProber {
             || std::env::var("GITHUB_ACTIONS").is_ok()
             || std::env::var("CONTINUOUS_INTEGRATION").is_ok();
 
+        // In CI environments, skip complex shell probing to avoid hanging
+        if is_ci
+            && matches!(
+                mode,
+                ProbeMode::InteractiveShell
+                    | ProbeMode::LoginInteractiveShell
+                    | ProbeMode::LoginShell
+            )
+        {
+            warn!(
+                "CI environment detected, skipping shell probing for mode {:?} to prevent hanging",
+                mode
+            );
+            // Return empty environment for CI - remote env will still be used if provided
+            return Ok(ProbeResult {
+                env_vars: HashMap::new(),
+                var_count: 0,
+            });
+        }
+
         match mode {
             ProbeMode::None => unreachable!("None mode should be handled earlier"),
             ProbeMode::LoginInteractiveShell => {
-                if is_ci {
-                    warn!("CI environment detected, using non-interactive shell for LoginInteractiveShell mode");
-                    cmd.args(["-l", "-c", "env"]);
-                } else {
-                    cmd.args(["-l", "-i", "-c", "env"]);
-                }
+                cmd.args(["-l", "-i", "-c", "env"]);
             }
             ProbeMode::InteractiveShell => {
-                if is_ci {
-                    warn!("CI environment detected, using non-interactive shell for InteractiveShell mode");
-                    cmd.args(["-c", "env"]);
-                } else {
-                    cmd.args(["-i", "-c", "env"]);
-                }
+                cmd.args(["-i", "-c", "env"]);
             }
             ProbeMode::LoginShell => {
                 cmd.args(["-l", "-c", "env"]);
@@ -227,8 +237,12 @@ impl EnvironmentProber {
 
         debug!("Executing shell command: {:?}", cmd);
 
-        // Set a timeout for the command to prevent hanging in CI environments
-        let timeout_duration = Duration::from_secs(10);
+        // Use shorter timeout for better performance
+        let timeout_duration = if is_ci {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(10)
+        };
 
         let output = self
             .execute_with_timeout(cmd, timeout_duration)
@@ -274,38 +288,39 @@ impl EnvironmentProber {
         mut cmd: Command,
         timeout: Duration,
     ) -> std::io::Result<std::process::Output> {
+        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::mpsc;
+        use std::sync::Arc;
         use std::thread;
 
         let (tx, rx) = mpsc::channel();
-        let tx_timeout = tx.clone();
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished_clone = finished.clone();
 
         // Spawn command in a separate thread
         let cmd_thread = thread::spawn(move || {
             let result = cmd.output();
+            finished_clone.store(true, Ordering::Relaxed);
             let _ = tx.send(result);
         });
 
-        // Spawn timeout thread
-        let timeout_thread = thread::spawn(move || {
-            thread::sleep(timeout);
-            let _ = tx_timeout.send(Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "Command execution timed out",
-            )));
-        });
-
         // Wait for either completion or timeout
-        let result = rx.recv().unwrap_or_else(|_| {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Interrupted,
-                "Channel closed unexpectedly",
-            ))
+        let result = rx.recv_timeout(timeout).unwrap_or_else(|_| {
+            if finished.load(Ordering::Relaxed) {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "Channel closed unexpectedly",
+                ))
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Command execution timed out",
+                ))
+            }
         });
 
-        // Clean up threads (best effort)
+        // Clean up command thread (best effort, non-blocking)
         let _ = cmd_thread.join();
-        let _ = timeout_thread.join();
 
         result
     }
