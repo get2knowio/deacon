@@ -17,6 +17,7 @@ pub mod lifecycle;
 pub mod logging;
 pub mod oci;
 pub mod redaction;
+pub mod retry;
 
 #[cfg(feature = "plugins")]
 pub mod plugins;

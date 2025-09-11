@@ -5,6 +5,7 @@
 
 use crate::errors::{FeatureError, Result};
 use crate::features::{parse_feature_metadata, FeatureMetadata};
+use crate::retry::{retry_async, RetryConfig, RetryDecision};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -156,18 +157,55 @@ impl HttpClient for ReqwestClient {
 pub struct FeatureFetcher<C: HttpClient> {
     client: C,
     cache_dir: PathBuf,
+    retry_config: RetryConfig,
+}
+
+/// Error classifier for network operations
+/// Only retries on network-related errors, not on parsing or other logical errors
+fn classify_network_error(error: &FeatureError) -> RetryDecision {
+    match error {
+        FeatureError::Download { .. } => RetryDecision::Retry,
+        FeatureError::Oci { .. } => RetryDecision::Retry,
+        // Don't retry parsing, validation, or other logical errors
+        FeatureError::Parsing { .. }
+        | FeatureError::Validation { .. }
+        | FeatureError::Extraction { .. }
+        | FeatureError::Installation { .. }
+        | FeatureError::NotFound { .. } => RetryDecision::Stop,
+        // For IO errors, retry as they might be transient
+        FeatureError::Io(_) => RetryDecision::Retry,
+        FeatureError::Json(_) => RetryDecision::Stop,
+        FeatureError::NotImplemented => RetryDecision::Stop,
+    }
 }
 
 impl<C: HttpClient> FeatureFetcher<C> {
     /// Create a new FeatureFetcher with custom HTTP client
     pub fn new(client: C) -> Self {
         let cache_dir = std::env::temp_dir().join("deacon-features");
-        Self { client, cache_dir }
+        Self {
+            client,
+            cache_dir,
+            retry_config: RetryConfig::default(),
+        }
     }
 
     /// Create a new FeatureFetcher with custom cache directory
     pub fn with_cache_dir(client: C, cache_dir: PathBuf) -> Self {
-        Self { client, cache_dir }
+        Self {
+            client,
+            cache_dir,
+            retry_config: RetryConfig::default(),
+        }
+    }
+
+    /// Create a new FeatureFetcher with custom retry configuration
+    pub fn with_retry_config(client: C, cache_dir: PathBuf, retry_config: RetryConfig) -> Self {
+        Self {
+            client,
+            cache_dir,
+            retry_config,
+        }
     }
 
     /// Get a reference to the HTTP client (for testing)
@@ -265,13 +303,24 @@ impl<C: HttpClient> FeatureFetcher<C> {
             "application/vnd.oci.image.manifest.v1+json".to_string(),
         );
 
-        let manifest_data = self
-            .client
-            .get_with_headers(&manifest_url, headers)
-            .await
-            .map_err(|e| FeatureError::Download {
-                message: format!("Failed to download manifest: {}", e),
-            })?;
+        // Retry the manifest download with exponential backoff
+        let manifest_data = retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let headers = headers.clone();
+                async move {
+                    client.get_with_headers(url, headers).await.map_err(|e| {
+                        FeatureError::Download {
+                            message: format!("Failed to download manifest: {}", e),
+                        }
+                    })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
 
         let manifest: Manifest =
             serde_json::from_slice(&manifest_data).map_err(|e| FeatureError::Parsing {
@@ -292,13 +341,21 @@ impl<C: HttpClient> FeatureFetcher<C> {
 
         debug!("Downloading layer from: {}", blob_url);
 
-        let layer_data = self
-            .client
-            .get(&blob_url)
-            .await
-            .map_err(|e| FeatureError::Download {
-                message: format!("Failed to download layer: {}", e),
-            })?;
+        // Retry the layer download with exponential backoff
+        let layer_data = retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &blob_url;
+                async move {
+                    client.get(url).await.map_err(|e| FeatureError::Download {
+                        message: format!("Failed to download layer: {}", e),
+                    })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
 
         Ok(layer_data)
     }
@@ -507,5 +564,197 @@ mod tests {
         // Test non-existent URL
         let result = client.get("https://example.com/nonexistent").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_retry_integration_with_manifest_fetch() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+
+        // Mock client that fails first N attempts
+        #[derive(Debug, Clone)]
+        struct FailingMockClient {
+            failure_count: Arc<AtomicU32>,
+            fail_attempts: u32,
+        }
+
+        impl FailingMockClient {
+            fn new(fail_attempts: u32) -> Self {
+                Self {
+                    failure_count: Arc::new(AtomicU32::new(0)),
+                    fail_attempts,
+                }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl HttpClient for FailingMockClient {
+            async fn get(
+                &self,
+                _url: &str,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                let current = self.failure_count.fetch_add(1, Ordering::SeqCst);
+                if current < self.fail_attempts {
+                    Err("network error".into())
+                } else {
+                    // Return a valid manifest JSON after failures
+                    let manifest = serde_json::json!({
+                        "schemaVersion": 2,
+                        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        "layers": [{
+                            "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                            "size": 1024,
+                            "digest": "sha256:abc123"
+                        }]
+                    });
+                    Ok(Bytes::from(manifest.to_string()))
+                }
+            }
+
+            async fn get_with_headers(
+                &self,
+                url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                self.get(url).await
+            }
+        }
+
+        // Test that retry works - should succeed after 2 failures
+        let client = FailingMockClient::new(2);
+        let retry_config = crate::retry::RetryConfig {
+            max_attempts: 3,
+            base_delay: std::time::Duration::from_millis(1),
+            max_delay: std::time::Duration::from_millis(10),
+            jitter: crate::retry::JitterStrategy::FullJitter,
+        };
+
+        let fetcher = FeatureFetcher::with_retry_config(
+            client.clone(),
+            std::env::temp_dir().join("test-cache"),
+            retry_config,
+        );
+
+        let feature_ref = FeatureRef::new(
+            "test.registry".to_string(),
+            "test".to_string(),
+            "feature".to_string(),
+            Some("v1.0".to_string()),
+        );
+
+        let result = fetcher.get_manifest(&feature_ref).await;
+        assert!(result.is_ok());
+
+        let manifest = result.unwrap();
+        assert_eq!(manifest.layers.len(), 1);
+        assert_eq!(manifest.layers[0].digest, "sha256:abc123");
+
+        // Verify that it tried 3 times (initial + 2 retries)
+        assert_eq!(client.failure_count.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn test_retry_gives_up_after_max_attempts() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+
+        // Mock client that always fails
+        #[derive(Debug, Clone)]
+        struct AlwaysFailingClient {
+            call_count: Arc<AtomicU32>,
+        }
+
+        impl AlwaysFailingClient {
+            fn new() -> Self {
+                Self {
+                    call_count: Arc::new(AtomicU32::new(0)),
+                }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl HttpClient for AlwaysFailingClient {
+            async fn get(
+                &self,
+                _url: &str,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                self.call_count.fetch_add(1, Ordering::SeqCst);
+                Err("permanent network error".into())
+            }
+
+            async fn get_with_headers(
+                &self,
+                url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                self.get(url).await
+            }
+        }
+
+        let client = AlwaysFailingClient::new();
+        let retry_config = crate::retry::RetryConfig {
+            max_attempts: 2,
+            base_delay: std::time::Duration::from_millis(1),
+            max_delay: std::time::Duration::from_millis(10),
+            jitter: crate::retry::JitterStrategy::FullJitter,
+        };
+
+        let fetcher = FeatureFetcher::with_retry_config(
+            client.clone(),
+            std::env::temp_dir().join("test-cache"),
+            retry_config,
+        );
+
+        let feature_ref = FeatureRef::new(
+            "test.registry".to_string(),
+            "test".to_string(),
+            "feature".to_string(),
+            Some("v1.0".to_string()),
+        );
+
+        let result = fetcher.get_manifest(&feature_ref).await;
+        assert!(result.is_err());
+
+        // Should have tried 3 times total (initial + 2 retries)
+        assert_eq!(client.call_count.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn test_error_classifier() {
+        use crate::errors::FeatureError;
+
+        // Test that network errors are retried
+        let download_error = FeatureError::Download {
+            message: "network timeout".to_string(),
+        };
+        assert_eq!(
+            classify_network_error(&download_error),
+            crate::retry::RetryDecision::Retry
+        );
+
+        let oci_error = FeatureError::Oci {
+            message: "registry unavailable".to_string(),
+        };
+        assert_eq!(
+            classify_network_error(&oci_error),
+            crate::retry::RetryDecision::Retry
+        );
+
+        // Test that logical errors are not retried
+        let parsing_error = FeatureError::Parsing {
+            message: "invalid json".to_string(),
+        };
+        assert_eq!(
+            classify_network_error(&parsing_error),
+            crate::retry::RetryDecision::Stop
+        );
+
+        let validation_error = FeatureError::Validation {
+            message: "missing field".to_string(),
+        };
+        assert_eq!(
+            classify_network_error(&validation_error),
+            crate::retry::RetryDecision::Stop
+        );
     }
 }

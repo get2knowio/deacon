@@ -437,6 +437,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "bytes",
+ "fastrand",
  "json5",
  "libc",
  "linked-hash-map",
