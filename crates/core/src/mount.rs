@@ -16,15 +16,19 @@
 //! ## Examples
 //! ```rust
 //! use deacon_core::mount::{Mount, MountParser};
+//! use deacon_core::errors::Result;
 //!
-//! // Parse Docker mount syntax
-//! let mount = MountParser::parse_mount("type=bind,source=/host/path,target=/container/path")?;
+//! fn example() -> Result<()> {
+//!     // Parse Docker mount syntax
+//!     let mount = MountParser::parse_mount("type=bind,source=/host/path,target=/container/path")?;
 //!
-//! // Parse volume syntax  
-//! let mount = MountParser::parse_mount("/host/path:/container/path:ro")?;
+//!     // Parse volume syntax  
+//!     let mount = MountParser::parse_mount("/host/path:/container/path:ro")?;
 //!
-//! // Convert to Docker CLI arguments
-//! let args = mount.to_docker_args();
+//!     // Convert to Docker CLI arguments
+//!     let args = mount.to_docker_args();
+//!     Ok(())
+//! }
 //! ```
 
 use crate::errors::{ConfigError, Result};

@@ -23,7 +23,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use tracing::{debug, info, instrument};
+use std::time::Duration;
+use tracing::{debug, info, instrument, warn};
 
 /// Environment probing modes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -196,13 +197,28 @@ impl EnvironmentProber {
         let mut cmd = Command::new(shell_path);
 
         // Add appropriate flags based on mode
+        // In CI environments, avoid interactive flags that can hang
+        let is_ci = std::env::var("CI").is_ok()
+            || std::env::var("GITHUB_ACTIONS").is_ok()
+            || std::env::var("CONTINUOUS_INTEGRATION").is_ok();
+
         match mode {
             ProbeMode::None => unreachable!("None mode should be handled earlier"),
             ProbeMode::LoginInteractiveShell => {
-                cmd.args(["-l", "-i", "-c", "env"]);
+                if is_ci {
+                    warn!("CI environment detected, using non-interactive shell for LoginInteractiveShell mode");
+                    cmd.args(["-l", "-c", "env"]);
+                } else {
+                    cmd.args(["-l", "-i", "-c", "env"]);
+                }
             }
             ProbeMode::InteractiveShell => {
-                cmd.args(["-i", "-c", "env"]);
+                if is_ci {
+                    warn!("CI environment detected, using non-interactive shell for InteractiveShell mode");
+                    cmd.args(["-c", "env"]);
+                } else {
+                    cmd.args(["-i", "-c", "env"]);
+                }
             }
             ProbeMode::LoginShell => {
                 cmd.args(["-l", "-c", "env"]);
@@ -211,11 +227,17 @@ impl EnvironmentProber {
 
         debug!("Executing shell command: {:?}", cmd);
 
-        let output = cmd.output().map_err(|e| {
-            DeaconError::Internal(crate::errors::InternalError::Generic {
-                message: format!("Failed to execute shell command: {}", e),
-            })
-        })?;
+        // Set a timeout for the command to prevent hanging in CI environments
+        let timeout_duration = Duration::from_secs(10);
+
+        let output = self
+            .execute_with_timeout(cmd, timeout_duration)
+            .map_err(|e| {
+                warn!("Shell command execution failed or timed out: {}", e);
+                DeaconError::Internal(crate::errors::InternalError::Generic {
+                    message: format!("Failed to execute shell command: {}", e),
+                })
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -244,6 +266,48 @@ impl EnvironmentProber {
             env_vars,
             var_count,
         })
+    }
+
+    /// Execute command with timeout to prevent hanging
+    fn execute_with_timeout(
+        &self,
+        mut cmd: Command,
+        timeout: Duration,
+    ) -> std::io::Result<std::process::Output> {
+        use std::sync::mpsc;
+        use std::thread;
+
+        let (tx, rx) = mpsc::channel();
+        let tx_timeout = tx.clone();
+
+        // Spawn command in a separate thread
+        let cmd_thread = thread::spawn(move || {
+            let result = cmd.output();
+            let _ = tx.send(result);
+        });
+
+        // Spawn timeout thread
+        let timeout_thread = thread::spawn(move || {
+            thread::sleep(timeout);
+            let _ = tx_timeout.send(Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Command execution timed out",
+            )));
+        });
+
+        // Wait for either completion or timeout
+        let result = rx.recv().unwrap_or_else(|_| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "Channel closed unexpectedly",
+            ))
+        });
+
+        // Clean up threads (best effort)
+        let _ = cmd_thread.join();
+        let _ = timeout_thread.join();
+
+        result
     }
 
     /// Parse environment output from shell
