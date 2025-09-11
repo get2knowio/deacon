@@ -93,6 +93,8 @@ cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 ```
 
+> IMPORTANT: Only commit and push if ALL of the above commands succeed locally. If any step fails, fix the issues and re-run until everything is green. Do not create commits or PRs that fail build, tests, formatting, or clippy checks.
+
 If any command fails, fix the issues before submitting. The CI will run these exact same checks.
 
 ## Logging & Observability
