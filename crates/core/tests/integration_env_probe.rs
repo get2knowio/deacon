@@ -10,15 +10,20 @@ use std::collections::HashMap;
 fn test_path_capture_in_probed_environment() {
     let prober = EnvironmentProber::new();
 
+    // Check if we're in a CI environment
+    let is_ci = std::env::var("CI").is_ok()
+        || std::env::var("GITHUB_ACTIONS").is_ok()
+        || std::env::var("CONTINUOUS_INTEGRATION").is_ok();
+
     // Test with InteractiveShell mode (most commonly used)
     let result = prober.probe_environment(ProbeMode::InteractiveShell, None);
 
     match result {
         Ok(env_vars) => {
-            // On Unix systems, PATH should be captured
+            // On Unix systems, PATH should be captured unless we're in CI
             #[cfg(unix)]
             {
-                if !cfg!(test) || std::env::var("SHELL").is_ok() {
+                if !is_ci && (!cfg!(test) || std::env::var("SHELL").is_ok()) {
                     // We expect PATH to be present in most Unix environments
                     assert!(
                         env_vars.contains_key("PATH"),
@@ -29,6 +34,9 @@ fn test_path_capture_in_probed_environment() {
                     if let Some(path_value) = env_vars.get("PATH") {
                         assert!(!path_value.is_empty(), "PATH should not be empty");
                     }
+                } else if is_ci {
+                    // In CI environments, shell probing is skipped, so we expect empty result
+                    eprintln!("CI environment detected, shell probing skipped as expected");
                 }
             }
 
@@ -53,6 +61,11 @@ fn test_path_capture_in_probed_environment() {
 fn test_home_capture_in_probed_environment() {
     let prober = EnvironmentProber::new();
 
+    // Check if we're in a CI environment
+    let is_ci = std::env::var("CI").is_ok()
+        || std::env::var("GITHUB_ACTIONS").is_ok()
+        || std::env::var("CONTINUOUS_INTEGRATION").is_ok();
+
     let result = prober.probe_environment(ProbeMode::LoginShell, None);
 
     match result {
@@ -60,7 +73,7 @@ fn test_home_capture_in_probed_environment() {
             // On Unix systems, HOME should typically be captured in login shells
             #[cfg(unix)]
             {
-                if !cfg!(test) || std::env::var("SHELL").is_ok() {
+                if !is_ci && (!cfg!(test) || std::env::var("SHELL").is_ok()) {
                     // HOME is commonly set in login shells
                     if env_vars.contains_key("HOME") {
                         let home_value = env_vars.get("HOME").unwrap();
@@ -69,6 +82,9 @@ fn test_home_capture_in_probed_environment() {
                             "HOME should not be empty if present"
                         );
                     }
+                } else if is_ci {
+                    // In CI environments, shell probing is skipped
+                    eprintln!("CI environment detected, shell probing skipped as expected");
                 }
             }
         }

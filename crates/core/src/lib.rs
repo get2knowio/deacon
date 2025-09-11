@@ -16,6 +16,7 @@ pub mod errors;
 pub mod features;
 pub mod lifecycle;
 pub mod logging;
+pub mod mount;
 pub mod oci;
 pub mod redaction;
 pub mod retry;
