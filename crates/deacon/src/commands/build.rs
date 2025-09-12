@@ -468,40 +468,11 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_build_config_dockerfile_parsing() {
-        let mut config = DevContainerConfig {
-            extends: None,
-            name: Some("test".to_string()),
-            dockerfile: Some("Dockerfile".to_string()),
-            build: None,
-            image: None,
-            features: serde_json::Value::Object(Default::default()),
-            customizations: serde_json::Value::Object(Default::default()),
-            workspace_folder: None,
-            workspace_mount: None,
-            mounts: vec![],
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            container_user: None,
-            remote_user: None,
-            update_remote_user_uid: None,
-            forward_ports: vec![],
-            app_port: None,
-            ports_attributes: HashMap::new(),
-            other_ports_attributes: None,
-            run_args: vec![],
-            shutdown_action: None,
-            override_command: None,
-            docker_compose_file: None,
-            service: None,
-            run_services: vec![],
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: None,
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        };
+        let mut config = DevContainerConfig::default();
+        config.name = Some("test".to_string());
+        config.dockerfile = Some("Dockerfile".to_string());
 
         // Test with simple dockerfile
         let temp_dir = tempfile::tempdir().unwrap();
