@@ -7,10 +7,11 @@ These instructions guide AI assistance (e.g. GitHub Copilot / Chat) when proposi
 2. Prefer incremental, small, reviewable changes. Avoid large refactors unless explicitly requested.
 3. Maintain idiomatic, modern Rust (Edition 2021) with clear module boundaries and test coverage for new logic.
 4. Avoid introducing unsafe code. If absolutely necessary, justify with a comment explaining safety invariants.
-5. **CRITICAL: Keep build green** - ALL code changes MUST pass the complete CI pipeline locally before submission:
+5. **CRITICAL: Keep build green** - ALL code changes MUST pass the complete CI pipeline locally before submission. **Run checks after EVERY code change, not just before committing**:
    - `cargo build --verbose` (must compile successfully)
-   - `cargo test --verbose` (all tests must pass)
-   - `cargo fmt --all -- --check` (code must be properly formatted)
+   - `cargo test --verbose -- --test-threads=1` (all tests must pass)
+   - `cargo fmt --all` (format code immediately after changes)
+   - `cargo fmt --all -- --check` (verify no formatting changes needed)
    - `cargo clippy --all-targets -- -D warnings` (no clippy warnings allowed)
 
 ## Scope & Architecture Alignment
@@ -21,10 +22,13 @@ The long-term goal is a Rust implementation of a DevContainer-like CLI. Align co
 
 ## Code Style & Patterns
 - **Formatting & Quality**: Code MUST be properly formatted and pass all checks:
-  - Run `cargo fmt --all` before every commit
-  - Ensure no trailing whitespace in source files
-  - Follow standard Rust import ordering (std, external crates, local modules)
-  - Address all clippy warnings - zero tolerance policy
+  - **CRITICAL**: Run `cargo fmt --all` after EVERY code change, not just before committing
+  - Remove ALL trailing whitespace from source files (check with `cargo fmt --all -- --check`)
+  - Follow standard Rust import ordering:
+    1. Standard library (`use std::...`) 
+    2. External crates (`use serde::...`)
+    3. Local modules (`use crate::...`, `use super::...`)
+  - Address all clippy warnings immediately - zero tolerance policy
 - Error Handling: Prefer `thiserror` for domain error enums; use `anyhow` only at the binary boundary or for prototyping. Provide context with `.with_context(...)` where it aids diagnosis.
 - Logging: Use `tracing` spans for multi-step workflows (configuration load, feature install, container build) and structured fields instead of string concatenation.
 - Configuration Parsing: Plan for layered merges (defaults -> base -> extends -> overrides -> runtime). Keep parsing pure & testable.
@@ -44,10 +48,11 @@ When proposing a change:
 1. Brief summary (1–2 sentences) of intent referencing spec section(s).
 2. List of modified files and rationale.
 3. Risk assessment: breaking changes, API shifts, perf impact.
-4. **Verification: MANDATORY CI validation** - ALL commands must pass locally:
+4. **Verification: MANDATORY CI validation** - ALL commands must pass locally after EVERY change:
    - `cargo build --verbose` ✅
-   - `cargo test --verbose` ✅ 
-   - `cargo fmt --all -- --check` ✅
+   - `cargo test --verbose -- --test-threads=1` ✅ 
+   - `cargo fmt --all` (format immediately) ✅
+   - `cargo fmt --all -- --check` (verify formatting) ✅
    - `cargo clippy --all-targets -- -D warnings` ✅
 5. Follow-ups / deferred work (explicit list) if any.
 
@@ -73,12 +78,19 @@ Add to Pre-submission Checklist:
 **CRITICAL**: The CI pipeline runs on every PR and ALL checks must pass. Common failure causes and prevention:
 
 ### Formatting Failures (`cargo fmt --all -- --check`)
-- **Always run `cargo fmt --all` before committing**
-- Remove trailing whitespace from all source files
-- Use consistent indentation (spaces, not tabs for Rust)
-- Follow standard Rust import ordering:
+- **Always run `cargo fmt --all` after EVERY code change, not just before committing**
+- **Common formatting issues that cause failures:**
+  - Incorrect line breaking in complex `if` conditions - let rustfmt handle this automatically
+  - Manual import formatting - always let rustfmt organize imports
+  - Trailing whitespace in any source file (Rust, TOML, markdown, etc.)
+  - Inconsistent indentation (spaces vs tabs)
+- **Prevention strategy:**
+  - Run `cargo fmt --all` immediately after writing any code
+  - Check with `cargo fmt --all -- --check` before any commit
+  - Use editor plugins that auto-format on save and show trailing whitespace
+- Follow standard Rust import ordering (rustfmt will enforce this):
   1. Standard library (`use std::...`)
-  2. External crates (`use serde::...`)
+  2. External crates (`use serde::...`) 
   3. Local modules (`use crate::...`, `use super::...`)
 
 ### Clippy Failures (`cargo clippy --all-targets -- -D warnings`)
@@ -99,16 +111,72 @@ Add to Pre-submission Checklist:
 
 **Pre-submission Checklist**:
 ```bash
-# Run this exact sequence before every commit:
+# Run this exact sequence after EVERY code change AND before every commit:
 cargo build --verbose
-cargo test --verbose  
-cargo fmt --all -- --check
+cargo test --verbose -- --test-threads=1
+cargo fmt --all
+cargo fmt --all -- --check  # Must show "no changes required"
 cargo clippy --all-targets -- -D warnings
 ```
 
-> IMPORTANT: Only commit and push if ALL of the above commands succeed locally. If any step fails, fix the issues and re-run until everything is green. Do not create commits or PRs that fail build, tests, formatting, or clippy checks.
+**Iterative Development Workflow**:
+1. Make a small code change (add function, modify logic, etc.)
+2. **Immediately** run `cargo fmt --all` 
+3. Run `cargo build --verbose` to check compilation
+4. Run relevant tests with `cargo test --verbose -- --test-threads=1`
+5. Run `cargo clippy --all-targets -- -D warnings` 
+6. Only proceed to next change if ALL steps pass
+7. Before final commit, run the complete checklist above
+
+> **CRITICAL**: Never make multiple changes before validating each one. Always fix formatting and clippy issues immediately after each small change. Do not accumulate technical debt or "fix it later" - the CI will fail and block the PR.
 
 If any command fails, fix the issues before submitting. The CI will run these exact same checks.
+
+## Formatting Best Practices & Common Pitfalls
+
+### Critical Formatting Rules
+- **NEVER manually format code** - always let `cargo fmt` handle formatting
+- **Run `cargo fmt --all` immediately after any code change**
+- **Always verify with `cargo fmt --all -- --check` before committing**
+
+### Common Formatting Issues That Cause CI Failures
+1. **Complex conditional statements**: Don't manually break lines in `if` conditions
+   ```rust
+   // ❌ BAD - manual line breaking
+   if let Some(cycle) = Self::dfs_find_cycle(dep, graph, visited, rec_stack, path)
+   {
+       return Some(cycle);
+   }
+   
+   // ✅ GOOD - let rustfmt handle it
+   if let Some(cycle) = Self::dfs_find_cycle(dep, graph, visited, rec_stack, path) {
+       return Some(cycle);
+   }
+   ```
+
+2. **Import statements**: Don't manually format imports
+   ```rust
+   // ❌ BAD - manual line breaking
+   use deacon_core::features::{
+       FeatureDependencyResolver, FeatureMetadata, ResolvedFeature,
+   };
+   
+   // ✅ GOOD - let rustfmt handle it
+   use deacon_core::features::{FeatureDependencyResolver, FeatureMetadata, ResolvedFeature};
+   ```
+
+3. **Trailing whitespace**: Check ALL file types (not just .rs files)
+   - Rust source files (.rs)
+   - TOML files (Cargo.toml, etc.)
+   - Markdown files (.md) 
+   - YAML files (.yml)
+
+### Prevention Workflow
+1. Write code naturally, don't worry about formatting while coding
+2. **Immediately** run `cargo fmt --all` after any change
+3. Verify with `cargo fmt --all -- --check`  
+4. If it shows changes needed, run `cargo fmt --all` again
+5. Only proceed when `--check` shows "no changes required"
 
 ## Logging & Observability
 - Provide consistent span names aligned with spec workflows: `config.resolve`, `container.create`, `feature.install`, `template.apply`, `lifecycle.run`.
@@ -150,9 +218,10 @@ Each error enum variant should carry minimal, actionable context. Prefer convert
 > IMPORTANT: All generated code, designs, and refactors MUST remain consistent with `docs/CLI-SPEC.md`. If a requested change deviates (e.g., new command semantics, altered lifecycle order, renamed workflow), respond with a clarification prompt and do not implement until resolved.
 
 Checklist before submitting AI-generated PR suggestions:
-- [ ] **All CI checks pass locally** (build, test, fmt, clippy)
-- [ ] Code properly formatted with `cargo fmt --all`
-- [ ] No trailing whitespace or formatting inconsistencies
+- [ ] **All CI checks pass locally after EVERY code change** (build, test, fmt, clippy)
+- [ ] **Code properly formatted with `cargo fmt --all` after each change**
+- [ ] **No trailing whitespace or formatting inconsistencies anywhere**
+- [ ] **Verified with `cargo fmt --all -- --check` (shows "no changes required")**
 - [ ] Referenced relevant spec sections? (list in PR body)
 - [ ] No stray `dbg!` / commented-out code
 - [ ] No new `unsafe` blocks

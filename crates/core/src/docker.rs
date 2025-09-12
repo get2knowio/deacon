@@ -112,6 +112,9 @@ pub trait Docker {
         command: &[String],
         config: ExecConfig,
     ) -> Result<ExecResult>;
+
+    /// Stop a container with optional timeout
+    async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()>;
 }
 
 /// Docker client abstraction trait extended with container lifecycle operations
@@ -697,6 +700,45 @@ impl Docker for CliDocker {
         })
         .await
         .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+    }
+
+    #[instrument(skip(self))]
+    async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()> {
+        debug!("Stopping container: {}", container_id);
+
+        let docker_path = self.docker_path.clone();
+        let container_id = container_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let mut args = vec!["stop"];
+
+            let timeout_str = timeout.map(|t| t.to_string());
+            if let Some(ref timeout_str) = timeout_str {
+                args.push("-t");
+                args.push(timeout_str);
+            }
+
+            args.push(&container_id);
+
+            let output = std::process::Command::new(&docker_path)
+                .args(&args)
+                .output()
+                .map_err(|e| DockerError::CLIError(format!("Failed to run docker stop: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(DockerError::CLIError(format!(
+                    "docker stop failed: {}",
+                    stderr
+                )));
+            }
+
+            debug!("Container {} stopped successfully", container_id);
+            Ok(())
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        .map_err(Into::into)
     }
 }
 

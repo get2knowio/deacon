@@ -71,6 +71,18 @@ pub enum Commands {
         /// Emit machine-readable port events to stdout with PORT_EVENT prefix
         #[arg(long)]
         ports_events: bool,
+        /// Automatically shut down when process exits
+        #[arg(long)]
+        shutdown: bool,
+        /// Additional features to install (JSON map of id -> value/options)
+        #[arg(long)]
+        additional_features: Option<String>,
+        /// CLI features take precedence over config features on conflicts
+        #[arg(long)]
+        prefer_cli_features: bool,
+        /// Override feature installation order (comma-separated list of IDs)
+        #[arg(long)]
+        feature_install_order: Option<String>,
     },
 
     /// Build development container image
@@ -90,6 +102,15 @@ pub enum Commands {
         /// Output format (text or json)
         #[arg(long, value_enum, default_value = "text")]
         output_format: OutputFormat,
+        /// Additional features to install (JSON map of id -> value/options)
+        #[arg(long)]
+        additional_features: Option<String>,
+        /// CLI features take precedence over config features on conflicts
+        #[arg(long)]
+        prefer_cli_features: bool,
+        /// Override feature installation order (comma-separated list of IDs)
+        #[arg(long)]
+        feature_install_order: Option<String>,
     },
 
     /// Execute command in running container
@@ -135,6 +156,13 @@ pub enum Commands {
         commands: Vec<String>,
     },
 
+    /// Stop and optionally remove development container or compose project
+    Down {
+        /// Remove containers after stopping them
+        #[arg(long)]
+        remove: bool,
+    },
+
     /// Environment diagnostics and support bundle creation
     ///
     /// Collects system information for troubleshooting and support
@@ -149,14 +177,41 @@ pub enum Commands {
 }
 
 /// Feature management subcommands
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub enum FeatureCommands {
     /// Test feature implementations
-    Test { target: Option<String> },
+    Test {
+        /// Path to feature directory to test
+        path: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
     /// Package features for distribution
-    Package { target: String },
+    Package {
+        /// Path to feature directory to package
+        path: String,
+        /// Output directory for the package
+        #[arg(long)]
+        output: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
     /// Publish features to registry
-    Publish { target: String },
+    Publish {
+        /// Path to feature directory to publish
+        path: String,
+        /// Target registry URL
+        #[arg(long)]
+        registry: String,
+        /// Dry run (don't actually publish)
+        #[arg(long)]
+        dry_run: bool,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
     /// Get feature information
     Info { mode: String, feature: String },
 }
@@ -263,6 +318,10 @@ impl Cli {
                 skip_post_create,
                 skip_non_blocking_commands,
                 ports_events,
+                shutdown,
+                additional_features,
+                prefer_cli_features,
+                feature_install_order,
             }) => {
                 use crate::commands::up::{execute_up, UpArgs};
 
@@ -271,8 +330,12 @@ impl Cli {
                     skip_post_create,
                     skip_non_blocking_commands,
                     ports_events,
+                    shutdown,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    additional_features,
+                    prefer_cli_features,
+                    feature_install_order,
                 };
 
                 match execute_up(args).await {
@@ -295,6 +358,9 @@ impl Cli {
                 build_arg,
                 force,
                 output_format,
+                additional_features,
+                prefer_cli_features,
+                feature_install_order,
             }) => {
                 use crate::commands::build::{execute_build, BuildArgs};
 
@@ -306,6 +372,9 @@ impl Cli {
                     output_format,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    additional_features,
+                    prefer_cli_features,
+                    feature_install_order,
                 };
 
                 execute_build(args).await?;
@@ -346,11 +415,16 @@ impl Cli {
                 execute_read_configuration(args).await?;
                 Ok(())
             }
-            Some(Commands::Features { .. }) => {
-                Err(DeaconError::Config(ConfigError::NotImplemented {
-                    feature: "features command".to_string(),
-                })
-                .into())
+            Some(Commands::Features { command }) => {
+                use crate::commands::features::{execute_features, FeaturesArgs};
+
+                let args = FeaturesArgs {
+                    command,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
+
+                execute_features(args).await
             }
             Some(Commands::Templates { .. }) => {
                 Err(DeaconError::Config(ConfigError::NotImplemented {
@@ -363,6 +437,17 @@ impl Cli {
                     feature: "run-user-commands command".to_string(),
                 })
                 .into())
+            }
+            Some(Commands::Down { remove }) => {
+                use crate::commands::down::{execute_down, DownArgs};
+
+                let args = DownArgs {
+                    remove,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
+
+                execute_down(args).await
             }
             Some(Commands::Doctor { json, bundle }) => {
                 // Create a DoctorContext for doctor command

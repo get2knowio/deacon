@@ -9,6 +9,7 @@ use deacon_core::ports::{PortEvent, PortForwardingManager};
 use std::collections::HashMap;
 
 #[test]
+#[allow(clippy::field_reassign_with_default)]
 fn test_port_event_generation_with_attributes() {
     // Create a sample DevContainer configuration with port forwards and attributes
     let mut ports_attributes = HashMap::new();
@@ -33,48 +34,22 @@ fn test_port_event_generation_with_attributes() {
         },
     );
 
-    let config = DevContainerConfig {
-        extends: None,
-        name: Some("Test Container".to_string()),
-        image: Some("node:18".to_string()),
-        dockerfile: None,
-        build: None,
-        docker_compose_file: None,
-        service: None,
-        run_services: vec![],
-        features: serde_json::Value::Object(Default::default()),
-        customizations: serde_json::Value::Object(Default::default()),
-        workspace_folder: None,
-        workspace_mount: None,
-        mounts: vec![],
-        container_env: HashMap::new(),
-        remote_env: HashMap::new(),
-        container_user: None,
-        remote_user: None,
-        update_remote_user_uid: None,
-        forward_ports: vec![
-            PortSpec::Number(3000),
-            PortSpec::String("8080:8080".to_string()),
-        ],
-        app_port: Some(PortSpec::Number(4000)),
-        ports_attributes,
-        other_ports_attributes: Some(PortAttributes {
-            label: Some("Default Service".to_string()),
-            on_auto_forward: Some(OnAutoForward::Silent),
-            open_preview: Some(false),
-            require_local_port: Some(false),
-            description: Some("Fallback description".to_string()),
-        }),
-        run_args: vec![],
-        shutdown_action: None,
-        override_command: None,
-        on_create_command: None,
-        post_start_command: None,
-        post_create_command: None,
-        post_attach_command: None,
-        initialize_command: None,
-        update_content_command: None,
-    };
+    let mut config = DevContainerConfig::default();
+    config.name = Some("Test Container".to_string());
+    config.image = Some("node:18".to_string());
+    config.forward_ports = vec![
+        PortSpec::Number(3000),
+        PortSpec::String("8080:8080".to_string()),
+    ];
+    config.app_port = Some(PortSpec::Number(4000));
+    config.ports_attributes = ports_attributes;
+    config.other_ports_attributes = Some(PortAttributes {
+        label: Some("Default Service".to_string()),
+        on_auto_forward: Some(OnAutoForward::Silent),
+        open_preview: Some(false),
+        require_local_port: Some(false),
+        description: Some("Fallback description".to_string()),
+    });
 
     // Create mock container info with exposed ports and port mappings
     let container_info = ContainerInfo {
@@ -205,47 +180,20 @@ fn test_port_event_serialization() {
 }
 
 #[test]
+#[allow(clippy::field_reassign_with_default)]
 fn test_port_attribute_fallback_behavior() {
     // Test case where a port has no specific attributes but should use otherPortsAttributes
-    let config = DevContainerConfig {
-        extends: None,
-        name: Some("Test Container".to_string()),
-        image: Some("node:18".to_string()),
-        dockerfile: None,
-        build: None,
-        docker_compose_file: None,
-        service: None,
-        run_services: vec![],
-        features: serde_json::Value::Object(Default::default()),
-        customizations: serde_json::Value::Object(Default::default()),
-        workspace_folder: None,
-        workspace_mount: None,
-        mounts: vec![],
-        container_env: HashMap::new(),
-        remote_env: HashMap::new(),
-        container_user: None,
-        remote_user: None,
-        update_remote_user_uid: None,
-        forward_ports: vec![PortSpec::Number(3000)],
-        app_port: None,
-        ports_attributes: HashMap::new(), // No specific attributes
-        other_ports_attributes: Some(PortAttributes {
-            label: Some("Generic Service".to_string()),
-            on_auto_forward: Some(OnAutoForward::Silent),
-            open_preview: Some(false),
-            require_local_port: Some(false),
-            description: Some("Generic description".to_string()),
-        }),
-        run_args: vec![],
-        shutdown_action: None,
-        override_command: None,
-        on_create_command: None,
-        post_start_command: None,
-        post_create_command: None,
-        post_attach_command: None,
-        initialize_command: None,
-        update_content_command: None,
-    };
+    let mut config = DevContainerConfig::default();
+    config.name = Some("Test Container".to_string());
+    config.image = Some("node:18".to_string());
+    config.forward_ports = vec![PortSpec::Number(3000)];
+    config.other_ports_attributes = Some(PortAttributes {
+        label: Some("Generic Service".to_string()),
+        on_auto_forward: Some(OnAutoForward::Silent),
+        open_preview: Some(false),
+        require_local_port: Some(false),
+        description: Some("Generic description".to_string()),
+    });
 
     let container_info = ContainerInfo {
         id: "test-container-123".to_string(),
@@ -279,41 +227,13 @@ fn test_port_attribute_fallback_behavior() {
 }
 
 #[test]
+#[allow(clippy::field_reassign_with_default)]
 fn test_exposed_ports_without_mappings() {
     // Test case where container has exposed ports but no port mappings (not forwarded)
-    let config = DevContainerConfig {
-        extends: None,
-        name: Some("Test Container".to_string()),
-        image: Some("node:18".to_string()),
-        dockerfile: None,
-        build: None,
-        docker_compose_file: None,
-        service: None,
-        run_services: vec![],
-        features: serde_json::Value::Object(Default::default()),
-        customizations: serde_json::Value::Object(Default::default()),
-        workspace_folder: None,
-        workspace_mount: None,
-        mounts: vec![],
-        container_env: HashMap::new(),
-        remote_env: HashMap::new(),
-        container_user: None,
-        remote_user: None,
-        update_remote_user_uid: None,
-        forward_ports: vec![PortSpec::Number(3000)],
-        app_port: None,
-        ports_attributes: HashMap::new(),
-        other_ports_attributes: None,
-        run_args: vec![],
-        shutdown_action: None,
-        override_command: None,
-        on_create_command: None,
-        post_start_command: None,
-        post_create_command: None,
-        post_attach_command: None,
-        initialize_command: None,
-        update_content_command: None,
-    };
+    let mut config = DevContainerConfig::default();
+    config.name = Some("Test Container".to_string());
+    config.image = Some("node:18".to_string());
+    config.forward_ports = vec![PortSpec::Number(3000)];
 
     let container_info = ContainerInfo {
         id: "test-container-123".to_string(),

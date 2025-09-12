@@ -121,6 +121,18 @@ pub enum FeatureError {
     /// Feature installation error
     #[error("Feature installation error: {message}")]
     Installation { message: String },
+
+    /// Feature dependency cycle detected
+    #[error("Dependency cycle detected in features: {cycle_path}")]
+    DependencyCycle { cycle_path: String },
+
+    /// Invalid dependency reference
+    #[error("Invalid dependency reference: {message}")]
+    InvalidDependency { message: String },
+
+    /// Feature dependency resolution error
+    #[error("Feature dependency resolution error: {message}")]
+    DependencyResolution { message: String },
 }
 
 /// Template-related errors

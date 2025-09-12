@@ -7,6 +7,7 @@ use crate::cli::OutputFormat;
 use anyhow::Result;
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::errors::{DeaconError, DockerError};
+use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,9 @@ pub struct BuildArgs {
     pub output_format: OutputFormat,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
+    pub additional_features: Option<String>,
+    pub prefer_cli_features: bool,
+    pub feature_install_order: Option<String>,
 }
 
 /// Build configuration extracted from DevContainer config
@@ -62,7 +66,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     // Load configuration
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
-    let config = if let Some(config_path) = args.config_path.as_ref() {
+    let mut config = if let Some(config_path) = args.config_path.as_ref() {
         ConfigLoader::load_from_path(config_path)?
     } else {
         let config_location = ConfigLoader::discover_config(workspace_folder)?;
@@ -78,6 +82,28 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     };
 
     debug!("Loaded configuration: {:?}", config.name);
+
+    // Apply feature merging if CLI features are provided
+    if args.additional_features.is_some() || args.feature_install_order.is_some() {
+        let merge_config = FeatureMergeConfig::new(
+            args.additional_features.clone(),
+            args.prefer_cli_features,
+            args.feature_install_order.clone(),
+        );
+
+        // Merge features
+        config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
+        debug!("Applied feature merging");
+
+        // Update override feature install order if provided
+        if let Some(effective_order) = FeatureMerger::get_effective_install_order(
+            config.override_feature_install_order.as_ref(),
+            &merge_config,
+        )? {
+            config.override_feature_install_order = Some(effective_order);
+            debug!("Updated feature install order");
+        }
+    }
 
     // Extract build configuration
     let build_config = extract_build_config(&config, workspace_folder)?;
@@ -468,40 +494,11 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_build_config_dockerfile_parsing() {
-        let mut config = DevContainerConfig {
-            extends: None,
-            name: Some("test".to_string()),
-            dockerfile: Some("Dockerfile".to_string()),
-            build: None,
-            image: None,
-            features: serde_json::Value::Object(Default::default()),
-            customizations: serde_json::Value::Object(Default::default()),
-            workspace_folder: None,
-            workspace_mount: None,
-            mounts: vec![],
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            container_user: None,
-            remote_user: None,
-            update_remote_user_uid: None,
-            forward_ports: vec![],
-            app_port: None,
-            ports_attributes: HashMap::new(),
-            other_ports_attributes: None,
-            run_args: vec![],
-            shutdown_action: None,
-            override_command: None,
-            docker_compose_file: None,
-            service: None,
-            run_services: vec![],
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: None,
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        };
+        let mut config = DevContainerConfig::default();
+        config.name = Some("test".to_string());
+        config.dockerfile = Some("Dockerfile".to_string());
 
         // Test with simple dockerfile
         let temp_dir = tempfile::tempdir().unwrap();
@@ -576,6 +573,9 @@ mod tests {
             output_format: OutputFormat::Text,
             workspace_folder: None,
             config_path: None,
+            additional_features: None,
+            prefer_cli_features: false,
+            feature_install_order: None,
         };
 
         // Verify args are structured correctly

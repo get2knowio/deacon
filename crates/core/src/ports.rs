@@ -309,43 +309,14 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_collect_configured_ports() {
-        let config = DevContainerConfig {
-            extends: None,
-            name: None,
-            image: None,
-            dockerfile: None,
-            build: None,
-            docker_compose_file: None,
-            service: None,
-            run_services: vec![],
-            features: serde_json::Value::Object(Default::default()),
-            customizations: serde_json::Value::Object(Default::default()),
-            workspace_folder: None,
-            workspace_mount: None,
-            mounts: vec![],
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            container_user: None,
-            remote_user: None,
-            update_remote_user_uid: None,
-            forward_ports: vec![
-                PortSpec::Number(3000),
-                PortSpec::String("8080:8080".to_string()),
-            ],
-            app_port: Some(PortSpec::Number(4000)),
-            ports_attributes: HashMap::new(),
-            other_ports_attributes: None,
-            run_args: vec![],
-            shutdown_action: None,
-            override_command: None,
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: None,
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        };
+        let mut config = DevContainerConfig::default();
+        config.forward_ports = vec![
+            PortSpec::Number(3000),
+            PortSpec::String("8080:8080".to_string()),
+        ];
+        config.app_port = Some(PortSpec::Number(4000));
 
         let ports = PortForwardingManager::collect_configured_ports(&config);
 
@@ -356,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_get_port_attributes_with_defaults() {
         let mut ports_attributes = HashMap::new();
         ports_attributes.insert(
@@ -369,45 +341,15 @@ mod tests {
             },
         );
 
-        let config = DevContainerConfig {
-            extends: None,
-            name: None,
-            image: None,
-            dockerfile: None,
-            build: None,
-            docker_compose_file: None,
-            service: None,
-            run_services: vec![],
-            features: serde_json::Value::Object(Default::default()),
-            customizations: serde_json::Value::Object(Default::default()),
-            workspace_folder: None,
-            workspace_mount: None,
-            mounts: vec![],
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            container_user: None,
-            remote_user: None,
-            update_remote_user_uid: None,
-            forward_ports: vec![],
-            app_port: None,
-            ports_attributes,
-            other_ports_attributes: Some(PortAttributes {
-                label: Some("Default Service".to_string()),
-                on_auto_forward: Some(OnAutoForward::Silent),
-                open_preview: Some(false),
-                require_local_port: Some(false),
-                description: Some("Default description".to_string()),
-            }),
-            run_args: vec![],
-            shutdown_action: None,
-            override_command: None,
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: None,
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        };
+        let mut config = DevContainerConfig::default();
+        config.ports_attributes = ports_attributes;
+        config.other_ports_attributes = Some(PortAttributes {
+            label: Some("Default Service".to_string()),
+            on_auto_forward: Some(OnAutoForward::Silent),
+            open_preview: Some(false),
+            require_local_port: Some(false),
+            description: Some("Default description".to_string()),
+        });
 
         // Test specific port override
         let attrs = PortForwardingManager::get_port_attributes(3000, &config);
@@ -425,6 +367,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_create_port_event() {
         let exposed_port = ExposedPort {
             port: 3000,
@@ -452,39 +395,8 @@ mod tests {
             },
         );
 
-        let config = DevContainerConfig {
-            extends: None,
-            name: None,
-            image: None,
-            dockerfile: None,
-            build: None,
-            docker_compose_file: None,
-            service: None,
-            run_services: vec![],
-            features: serde_json::Value::Object(Default::default()),
-            customizations: serde_json::Value::Object(Default::default()),
-            workspace_folder: None,
-            workspace_mount: None,
-            mounts: vec![],
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            container_user: None,
-            remote_user: None,
-            update_remote_user_uid: None,
-            forward_ports: vec![],
-            app_port: None,
-            ports_attributes,
-            other_ports_attributes: None,
-            run_args: vec![],
-            shutdown_action: None,
-            override_command: None,
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: None,
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        };
+        let mut config = DevContainerConfig::default();
+        config.ports_attributes = ports_attributes;
 
         let event = PortForwardingManager::create_port_event(
             &exposed_port,
@@ -505,6 +417,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_unknown_port_attributes_warning() {
         // Test that warnings are generated for port attributes that don't match configured ports
         let mut ports_attributes = HashMap::new();
@@ -529,39 +442,9 @@ mod tests {
             },
         );
 
-        let config = DevContainerConfig {
-            extends: None,
-            name: None,
-            image: None,
-            dockerfile: None,
-            build: None,
-            docker_compose_file: None,
-            service: None,
-            run_services: vec![],
-            features: serde_json::Value::Object(Default::default()),
-            customizations: serde_json::Value::Object(Default::default()),
-            workspace_folder: None,
-            workspace_mount: None,
-            mounts: vec![],
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            container_user: None,
-            remote_user: None,
-            update_remote_user_uid: None,
-            forward_ports: vec![PortSpec::Number(3000)], // Only 3000 is configured
-            app_port: None,
-            ports_attributes,
-            other_ports_attributes: None,
-            run_args: vec![],
-            shutdown_action: None,
-            override_command: None,
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: None,
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        };
+        let mut config = DevContainerConfig::default();
+        config.forward_ports = vec![PortSpec::Number(3000)]; // Only 3000 is configured
+        config.ports_attributes = ports_attributes;
 
         let container_info = ContainerInfo {
             id: "test-container-123".to_string(),
