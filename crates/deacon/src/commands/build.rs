@@ -7,6 +7,7 @@ use crate::cli::OutputFormat;
 use anyhow::Result;
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::errors::{DeaconError, DockerError};
+use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,9 @@ pub struct BuildArgs {
     pub output_format: OutputFormat,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
+    pub additional_features: Option<String>,
+    pub prefer_cli_features: bool,
+    pub feature_install_order: Option<String>,
 }
 
 /// Build configuration extracted from DevContainer config
@@ -62,7 +66,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     // Load configuration
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
-    let config = if let Some(config_path) = args.config_path.as_ref() {
+    let mut config = if let Some(config_path) = args.config_path.as_ref() {
         ConfigLoader::load_from_path(config_path)?
     } else {
         let config_location = ConfigLoader::discover_config(workspace_folder)?;
@@ -78,6 +82,28 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     };
 
     debug!("Loaded configuration: {:?}", config.name);
+
+    // Apply feature merging if CLI features are provided
+    if args.additional_features.is_some() || args.feature_install_order.is_some() {
+        let merge_config = FeatureMergeConfig::new(
+            args.additional_features.clone(),
+            args.prefer_cli_features,
+            args.feature_install_order.clone(),
+        );
+
+        // Merge features
+        config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
+        debug!("Applied feature merging");
+
+        // Update override feature install order if provided
+        if let Some(effective_order) = FeatureMerger::get_effective_install_order(
+            config.override_feature_install_order.as_ref(),
+            &merge_config,
+        )? {
+            config.override_feature_install_order = Some(effective_order);
+            debug!("Updated feature install order");
+        }
+    }
 
     // Extract build configuration
     let build_config = extract_build_config(&config, workspace_folder)?;
@@ -547,6 +573,9 @@ mod tests {
             output_format: OutputFormat::Text,
             workspace_folder: None,
             config_path: None,
+            additional_features: None,
+            prefer_cli_features: false,
+            feature_install_order: None,
         };
 
         // Verify args are structured correctly

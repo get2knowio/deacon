@@ -9,6 +9,7 @@ use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::{CliDocker, Docker, ExecConfig};
 use deacon_core::errors::DeaconError;
+use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::ports::PortForwardingManager;
 use deacon_core::state::{ComposeState, ContainerState, StateManager};
 use std::path::{Path, PathBuf};
@@ -25,6 +26,9 @@ pub struct UpArgs {
     pub shutdown: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
+    pub additional_features: Option<String>,
+    pub prefer_cli_features: bool,
+    pub feature_install_order: Option<String>,
 }
 
 /// Execute the up command
@@ -36,7 +40,7 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
     // Load configuration
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
-    let config = if let Some(config_path) = args.config_path.as_ref() {
+    let mut config = if let Some(config_path) = args.config_path.as_ref() {
         ConfigLoader::load_from_path(config_path)?
     } else {
         let config_location = ConfigLoader::discover_config(workspace_folder)?;
@@ -52,6 +56,28 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
     };
 
     debug!("Loaded configuration: {:?}", config.name);
+
+    // Apply feature merging if CLI features are provided
+    if args.additional_features.is_some() || args.feature_install_order.is_some() {
+        let merge_config = FeatureMergeConfig::new(
+            args.additional_features.clone(),
+            args.prefer_cli_features,
+            args.feature_install_order.clone(),
+        );
+
+        // Merge features
+        config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
+        debug!("Applied feature merging");
+
+        // Update override feature install order if provided
+        if let Some(effective_order) = FeatureMerger::get_effective_install_order(
+            config.override_feature_install_order.as_ref(),
+            &merge_config,
+        )? {
+            config.override_feature_install_order = Some(effective_order);
+            debug!("Updated feature install order");
+        }
+    }
 
     // Create container identity for state tracking
     let identity = ContainerIdentity::new(workspace_folder, &config);
@@ -632,6 +658,9 @@ mod tests {
             shutdown: false,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
+            additional_features: None,
+            prefer_cli_features: false,
+            feature_install_order: None,
         };
 
         assert!(args.remove_existing_container);
@@ -674,6 +703,9 @@ mod tests {
             shutdown: true,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
+            additional_features: None,
+            prefer_cli_features: false,
+            feature_install_order: None,
         };
 
         assert!(args.remove_existing_container);
