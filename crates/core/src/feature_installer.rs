@@ -243,8 +243,7 @@ impl FeatureInstaller {
         // Copy devcontainer-feature.json
         let feature_json_path = downloaded_feature.path.join("devcontainer-feature.json");
         if feature_json_path.exists() {
-            let content =
-                std::fs::read_to_string(&feature_json_path).map_err(FeatureError::Io)?;
+            let content = std::fs::read_to_string(&feature_json_path).map_err(FeatureError::Io)?;
 
             self.write_file_to_container(
                 container_id,
