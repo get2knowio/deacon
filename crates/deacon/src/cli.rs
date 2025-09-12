@@ -68,6 +68,9 @@ pub enum Commands {
         /// Skip non-blocking commands (postStart & postAttach phases)
         #[arg(long)]
         skip_non_blocking_commands: bool,
+        /// Emit machine-readable port events to stdout with PORT_EVENT prefix
+        #[arg(long)]
+        ports_events: bool,
     },
 
     /// Build development container image
@@ -259,6 +262,7 @@ impl Cli {
                 remove_existing_container,
                 skip_post_create,
                 skip_non_blocking_commands,
+                ports_events,
             }) => {
                 use crate::commands::up::{execute_up, UpArgs};
 
@@ -266,6 +270,7 @@ impl Cli {
                     remove_existing_container,
                     skip_post_create,
                     skip_non_blocking_commands,
+                    ports_events,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                 };
