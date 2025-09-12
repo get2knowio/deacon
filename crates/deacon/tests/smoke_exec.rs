@@ -115,7 +115,10 @@ fn test_exec_exit_code_propagation() {
         if actual_code == Some(123) {
             println!("Exec exit code propagation test passed");
         } else {
-            println!("Note: Got exit code {:?} instead of 123, possibly due to container state", actual_code);
+            println!(
+                "Note: Got exit code {:?} instead of 123, possibly due to container state",
+                actual_code
+            );
         }
     }
 }
