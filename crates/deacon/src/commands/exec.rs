@@ -5,8 +5,9 @@
 
 use anyhow::Result;
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
-use deacon_core::container::{ContainerIdentity, ContainerOps};
+use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::CliDocker;
+use deacon_core::docker::Docker;
 use deacon_core::errors::{ConfigError, DeaconError};
 use std::collections::HashMap;
 use std::path::Path;
@@ -42,8 +43,14 @@ pub async fn resolve_target_container(
     let identity = ContainerIdentity::new(workspace_folder, config);
     debug!("Created container identity: {:?}", identity);
 
-    // Find matching containers
-    let matching_containers = docker_client.find_matching_containers(&identity).await?;
+    // Find matching containers and only keep running ones
+    let label_selector = identity.label_selector();
+    let containers = docker_client.list_containers(Some(&label_selector)).await?;
+    let matching_containers: Vec<String> = containers
+        .into_iter()
+        .filter(|c| c.state == "running")
+        .map(|c| c.id)
+        .collect();
 
     match matching_containers.len() {
         0 => {
