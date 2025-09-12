@@ -62,7 +62,10 @@ fn test_exec_with_valid_config_but_no_container() {
         .stderr(
             predicate::str::contains("No running container found")
                 .or(predicate::str::contains("Failed to spawn docker"))
-                .or(predicate::str::contains("Docker CLI error")),
+                .or(predicate::str::contains("Docker CLI error"))
+                .or(predicate::str::contains(
+                    "Docker is not installed or not accessible",
+                )),
         );
 }
 
@@ -128,6 +131,9 @@ fn test_exec_working_directory_config() {
         .stderr(
             predicate::str::contains("No running container found")
                 .or(predicate::str::contains("Failed to spawn docker"))
-                .or(predicate::str::contains("Docker CLI error")),
+                .or(predicate::str::contains("Docker CLI error"))
+                .or(predicate::str::contains(
+                    "Docker is not installed or not accessible",
+                )),
         );
 }
