@@ -51,6 +51,19 @@ When proposing a change:
    - `cargo clippy --all-targets -- -D warnings` ✅
 5. Follow-ups / deferred work (explicit list) if any.
 
+### Smoke Tests Maintenance
+- Keep the smoke tests under `crates/deacon/tests/smoke_basic.rs` up to date when changing CLI behavior for:
+  - read-configuration
+  - build
+  - up (traditional) and exec
+  - doctor
+- Ensure tests are resilient in environments without Docker by accepting well-defined Docker-unavailable errors.
+- When adding a new user-facing subcommand or changing flags/output, extend the smoke tests accordingly.
+
+Add to Pre-submission Checklist:
+- `cargo test --verbose` passes including smoke tests ✅
+- If behavior changed, corresponding assertions in `smoke_basic.rs` updated ✅
+
 ## Dependency Management
 - Use `cargo add <crate> --workspace` for shared dependencies; otherwise target the specific crate manifest.
 - Keep dependency set lean; justify additions (functionality vs. complexity). Avoid duplicating features already available in standard library or existing deps.

@@ -447,8 +447,8 @@ impl Docker for CliDocker {
             label_selector
         );
 
-    let docker_path = self.docker_path.clone();
-    let label_selector = label_selector.map(|s| s.to_string());
+        let docker_path = self.docker_path.clone();
+        let label_selector = label_selector.map(|s| s.to_string());
 
         tokio::task::spawn_blocking(move || {
             let mut args: Vec<String> = vec!["ps", "--all", "--format", "json"]

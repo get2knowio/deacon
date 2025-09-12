@@ -13,12 +13,11 @@ env:
 
 jobs:
   test:
-    name: Test
+    name: Test (unit + integration)
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -42,12 +41,51 @@ jobs:
     - name: Build
       run: cargo build --verbose
       
-    - name: Run tests
-      run: cargo test --verbose -- --test-threads=1
+    - name: Run unit/integration tests (exclude smoke on macOS)
+      run: |
+        if [[ "${{ runner.os }}" == "macOS" ]]; then
+          # Exclude smoke_basic.rs which requires Docker; run other tests
+          cargo test --verbose -- --test-threads=1 --skip smoke_basic
+        else
+          cargo test --verbose -- --test-threads=1 --skip smoke_basic
+        fi
       
     - name: Check formatting
       run: cargo fmt --all -- --check
       
+    - name: Run clippy
+      run: cargo clippy --all-targets -- -D warnings
+
+  smoke:
+    name: Smoke tests (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Run smoke tests only
+      run: cargo test --verbose --test smoke_basic -- --test-threads=1
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
     - name: Run clippy
       run: cargo clippy --all-targets -- -D warnings
 
