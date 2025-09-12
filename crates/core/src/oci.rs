@@ -171,7 +171,10 @@ fn classify_network_error(error: &FeatureError) -> RetryDecision {
         | FeatureError::Validation { .. }
         | FeatureError::Extraction { .. }
         | FeatureError::Installation { .. }
-        | FeatureError::NotFound { .. } => RetryDecision::Stop,
+        | FeatureError::NotFound { .. }
+        | FeatureError::DependencyCycle { .. }
+        | FeatureError::InvalidDependency { .. }
+        | FeatureError::DependencyResolution { .. } => RetryDecision::Stop,
         // For IO errors, retry as they might be transient
         FeatureError::Io(_) => RetryDecision::Retry,
         FeatureError::Json(_) => RetryDecision::Stop,

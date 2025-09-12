@@ -621,7 +621,6 @@ mod tests {
     use super::*;
     use deacon_core::config::DevContainerConfig;
     use serde_json::json;
-    use std::collections::HashMap;
 
     #[test]
     fn test_up_args_creation() {
@@ -685,80 +684,26 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_compose_config_detection() {
-        let compose_config = DevContainerConfig {
-            extends: None,
-            name: Some("Test Compose".to_string()),
-            image: None,
-            dockerfile: None,
-            build: None,
-            docker_compose_file: Some(json!("docker-compose.yml")),
-            service: Some("app".to_string()),
-            run_services: vec!["db".to_string()],
-            features: serde_json::Value::Object(Default::default()),
-            customizations: serde_json::Value::Object(Default::default()),
-            workspace_folder: None,
-            workspace_mount: None,
-            mounts: vec![],
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            container_user: None,
-            remote_user: None,
-            update_remote_user_uid: None,
-            forward_ports: vec![],
-            app_port: None,
-            ports_attributes: HashMap::new(),
-            other_ports_attributes: None,
-            run_args: vec![],
-            shutdown_action: Some("stopCompose".to_string()),
-            override_command: None,
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: Some(json!("echo 'Container ready'")),
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        };
+        let mut compose_config = DevContainerConfig::default();
+        compose_config.name = Some("Test Compose".to_string());
+        compose_config.docker_compose_file = Some(json!("docker-compose.yml"));
+        compose_config.service = Some("app".to_string());
+        compose_config.run_services = vec!["db".to_string()];
+        compose_config.shutdown_action = Some("stopCompose".to_string());
+        compose_config.post_create_command = Some(json!("echo 'Container ready'"));
 
         assert!(compose_config.uses_compose());
         assert!(compose_config.has_stop_compose_shutdown());
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_traditional_config_detection() {
-        let traditional_config = DevContainerConfig {
-            extends: None,
-            name: Some("Test Traditional".to_string()),
-            image: Some("node:18".to_string()),
-            dockerfile: None,
-            build: None,
-            docker_compose_file: None,
-            service: None,
-            run_services: vec![],
-            features: serde_json::Value::Object(Default::default()),
-            customizations: serde_json::Value::Object(Default::default()),
-            workspace_folder: None,
-            workspace_mount: None,
-            mounts: vec![],
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
-            container_user: None,
-            remote_user: None,
-            update_remote_user_uid: None,
-            forward_ports: vec![],
-            app_port: None,
-            ports_attributes: HashMap::new(),
-            other_ports_attributes: None,
-            run_args: vec![],
-            shutdown_action: None,
-            override_command: None,
-            on_create_command: None,
-            post_start_command: None,
-            post_create_command: None,
-            post_attach_command: None,
-            initialize_command: None,
-            update_content_command: None,
-        };
+        let mut traditional_config = DevContainerConfig::default();
+        traditional_config.name = Some("Test Traditional".to_string());
+        traditional_config.image = Some("node:18".to_string());
 
         assert!(!traditional_config.uses_compose());
         assert!(!traditional_config.has_stop_compose_shutdown());

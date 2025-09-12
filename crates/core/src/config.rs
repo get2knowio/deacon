@@ -242,6 +242,15 @@ pub struct DevContainerConfig {
     #[serde(default = "default_empty_object")]
     pub features: serde_json::Value,
 
+    /// Override the default feature installation order.
+    ///
+    /// Specifies the order in which features should be installed, overriding the
+    /// default topological sort order while still respecting dependencies.
+    ///
+    /// Reference: [Feature Configuration - overrideFeatureInstallOrder](https://containers.dev/implementors/json_reference/#override-feature-install-order)
+    #[serde(default)]
+    pub override_feature_install_order: Option<Vec<String>>,
+
     /// Tool-specific customizations.
     ///
     /// Kept as raw JSON value for initial implementation.
@@ -596,6 +605,7 @@ impl Default for DevContainerConfig {
             service: None,
             run_services: Vec::new(),
             features: default_empty_object(),
+            override_feature_install_order: None,
             customizations: default_empty_object(),
             workspace_folder: None,
             workspace_mount: None,
@@ -709,6 +719,12 @@ impl ConfigMerger {
             },
             // Features: deep merge as objects
             features: Self::merge_json_objects(&base.features, &overlay.features),
+
+            // Override feature install order: last writer wins
+            override_feature_install_order: overlay
+                .override_feature_install_order
+                .clone()
+                .or_else(|| base.override_feature_install_order.clone()),
 
             // Customizations: deep merge as objects
             customizations: Self::merge_json_objects(&base.customizations, &overlay.customizations),
