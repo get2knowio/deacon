@@ -177,14 +177,41 @@ pub enum Commands {
 }
 
 /// Feature management subcommands
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub enum FeatureCommands {
     /// Test feature implementations
-    Test { target: Option<String> },
+    Test {
+        /// Path to feature directory to test
+        path: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
     /// Package features for distribution
-    Package { target: String },
+    Package {
+        /// Path to feature directory to package
+        path: String,
+        /// Output directory for the package
+        #[arg(long)]
+        output: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
     /// Publish features to registry
-    Publish { target: String },
+    Publish {
+        /// Path to feature directory to publish
+        path: String,
+        /// Target registry URL
+        #[arg(long)]
+        registry: String,
+        /// Dry run (don't actually publish)
+        #[arg(long)]
+        dry_run: bool,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
     /// Get feature information
     Info { mode: String, feature: String },
 }
@@ -388,11 +415,16 @@ impl Cli {
                 execute_read_configuration(args).await?;
                 Ok(())
             }
-            Some(Commands::Features { .. }) => {
-                Err(DeaconError::Config(ConfigError::NotImplemented {
-                    feature: "features command".to_string(),
-                })
-                .into())
+            Some(Commands::Features { command }) => {
+                use crate::commands::features::{execute_features, FeaturesArgs};
+
+                let args = FeaturesArgs {
+                    command,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
+
+                execute_features(args).await
             }
             Some(Commands::Templates { .. }) => {
                 Err(DeaconError::Config(ConfigError::NotImplemented {
