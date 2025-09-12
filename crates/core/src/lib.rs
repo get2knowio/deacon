@@ -13,6 +13,7 @@ pub mod doctor;
 pub mod dotfiles;
 pub mod env_probe;
 pub mod errors;
+pub mod feature_installer;
 pub mod features;
 pub mod lifecycle;
 pub mod logging;
