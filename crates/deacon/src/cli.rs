@@ -74,6 +74,15 @@ pub enum Commands {
         /// Automatically shut down when process exits
         #[arg(long)]
         shutdown: bool,
+        /// Additional features to install (JSON map of id -> value/options)
+        #[arg(long)]
+        additional_features: Option<String>,
+        /// CLI features take precedence over config features on conflicts
+        #[arg(long)]
+        prefer_cli_features: bool,
+        /// Override feature installation order (comma-separated list of IDs)
+        #[arg(long)]
+        feature_install_order: Option<String>,
     },
 
     /// Build development container image
@@ -93,6 +102,15 @@ pub enum Commands {
         /// Output format (text or json)
         #[arg(long, value_enum, default_value = "text")]
         output_format: OutputFormat,
+        /// Additional features to install (JSON map of id -> value/options)
+        #[arg(long)]
+        additional_features: Option<String>,
+        /// CLI features take precedence over config features on conflicts
+        #[arg(long)]
+        prefer_cli_features: bool,
+        /// Override feature installation order (comma-separated list of IDs)
+        #[arg(long)]
+        feature_install_order: Option<String>,
     },
 
     /// Execute command in running container
@@ -274,6 +292,9 @@ impl Cli {
                 skip_non_blocking_commands,
                 ports_events,
                 shutdown,
+                additional_features,
+                prefer_cli_features,
+                feature_install_order,
             }) => {
                 use crate::commands::up::{execute_up, UpArgs};
 
@@ -285,6 +306,9 @@ impl Cli {
                     shutdown,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    additional_features,
+                    prefer_cli_features,
+                    feature_install_order,
                 };
 
                 match execute_up(args).await {
@@ -307,6 +331,9 @@ impl Cli {
                 build_arg,
                 force,
                 output_format,
+                additional_features,
+                prefer_cli_features,
+                feature_install_order,
             }) => {
                 use crate::commands::build::{execute_build, BuildArgs};
 
@@ -318,6 +345,9 @@ impl Cli {
                     output_format,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    additional_features,
+                    prefer_cli_features,
+                    feature_install_order,
                 };
 
                 execute_build(args).await?;

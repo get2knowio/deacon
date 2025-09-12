@@ -584,6 +584,354 @@ impl Feature {
     }
 }
 
+/// Configuration for feature merging behavior
+#[derive(Debug, Clone)]
+pub struct FeatureMergeConfig {
+    /// Additional features from CLI (JSON string)
+    pub additional_features: Option<String>,
+    /// Whether CLI features take precedence over config features on conflicts
+    pub prefer_cli_features: bool,
+    /// Override for feature installation order
+    pub feature_install_order: Option<String>,
+}
+
+impl FeatureMergeConfig {
+    /// Create a new feature merge configuration
+    pub fn new(
+        additional_features: Option<String>,
+        prefer_cli_features: bool,
+        feature_install_order: Option<String>,
+    ) -> Self {
+        Self {
+            additional_features,
+            prefer_cli_features,
+            feature_install_order,
+        }
+    }
+}
+
+/// Feature merger that combines config features with CLI features
+#[derive(Debug)]
+pub struct FeatureMerger;
+
+impl FeatureMerger {
+    /// Parse additional features JSON string into a features map
+    #[instrument(level = "debug")]
+    pub fn parse_additional_features(
+        json_str: &str,
+    ) -> std::result::Result<serde_json::Value, FeatureError> {
+        debug!("Parsing additional features JSON: {}", json_str);
+
+        // Parse the JSON string
+        let parsed: serde_json::Value =
+            serde_json::from_str(json_str).map_err(|e| FeatureError::Parsing {
+                message: format!("Failed to parse additional features JSON: {}", e),
+            })?;
+
+        // Validate it's an object (map)
+        if !parsed.is_object() {
+            return Err(FeatureError::Validation {
+                message: "Additional features must be a JSON object (map of id -> value/options)"
+                    .to_string(),
+            });
+        }
+
+        // Validate all keys are strings and values are valid feature values
+        if let serde_json::Value::Object(map) = &parsed {
+            for (key, value) in map {
+                if key.is_empty() {
+                    return Err(FeatureError::Validation {
+                        message: "Feature ID cannot be empty".to_string(),
+                    });
+                }
+
+                // Validate value is a valid feature value (bool, string, or object)
+                match value {
+                    serde_json::Value::Bool(_)
+                    | serde_json::Value::String(_)
+                    | serde_json::Value::Object(_) => {}
+                    _ => {
+                        return Err(FeatureError::Validation {
+                            message: format!(
+                                "Feature '{}' has invalid value type. Must be boolean, string, or object",
+                                key
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+
+        debug!(
+            "Successfully parsed {} additional features",
+            parsed.as_object().unwrap().len()
+        );
+        Ok(parsed)
+    }
+
+    /// Parse feature install order string into a list of feature IDs
+    #[instrument(level = "debug")]
+    pub fn parse_feature_install_order(
+        order_str: &str,
+    ) -> std::result::Result<Vec<String>, FeatureError> {
+        debug!("Parsing feature install order: {}", order_str);
+
+        let ids: Vec<String> = order_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if ids.is_empty() {
+            return Err(FeatureError::Validation {
+                message: "Feature install order cannot be empty".to_string(),
+            });
+        }
+
+        // Check for duplicates
+        let mut seen = HashSet::new();
+        for id in &ids {
+            if !seen.insert(id.clone()) {
+                return Err(FeatureError::Validation {
+                    message: format!("Duplicate feature ID '{}' in install order", id),
+                });
+            }
+        }
+
+        debug!("Parsed {} feature IDs in install order", ids.len());
+        Ok(ids)
+    }
+
+    /// Merge config features with additional CLI features
+    #[instrument(level = "debug")]
+    pub fn merge_features(
+        config_features: &serde_json::Value,
+        merge_config: &FeatureMergeConfig,
+    ) -> std::result::Result<serde_json::Value, FeatureError> {
+        debug!("Merging features with CLI configuration");
+
+        // Start with config features
+        let mut merged = config_features.clone();
+
+        // Parse and merge additional features if provided
+        if let Some(ref additional_json) = merge_config.additional_features {
+            let additional_features = Self::parse_additional_features(additional_json)?;
+
+            if let (
+                serde_json::Value::Object(merged_map),
+                serde_json::Value::Object(additional_map),
+            ) = (&mut merged, &additional_features)
+            {
+                for (key, value) in additional_map {
+                    if merged_map.contains_key(key) {
+                        // Handle conflict based on precedence preference
+                        if merge_config.prefer_cli_features {
+                            debug!("CLI feature '{}' overriding config feature", key);
+                            merged_map.insert(key.clone(), value.clone());
+                        } else {
+                            debug!("Config feature '{}' takes precedence over CLI feature", key);
+                            // Keep existing config value, don't override
+                        }
+                    } else {
+                        // No conflict, add CLI feature
+                        debug!("Adding CLI feature '{}'", key);
+                        merged_map.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+
+        debug!("Feature merging completed");
+        Ok(merged)
+    }
+
+    /// Get the effective feature install order combining config and CLI overrides
+    #[instrument(level = "debug")]
+    pub fn get_effective_install_order(
+        config_order: Option<&Vec<String>>,
+        merge_config: &FeatureMergeConfig,
+    ) -> std::result::Result<Option<Vec<String>>, FeatureError> {
+        debug!("Determining effective feature install order");
+
+        // CLI override takes precedence if provided
+        if let Some(ref cli_order_str) = merge_config.feature_install_order {
+            let cli_order = Self::parse_feature_install_order(cli_order_str)?;
+            debug!("Using CLI feature install order: {:?}", cli_order);
+            return Ok(Some(cli_order));
+        }
+
+        // Otherwise use config order if available
+        if let Some(config_order) = config_order {
+            debug!("Using config feature install order: {:?}", config_order);
+            return Ok(Some(config_order.clone()));
+        }
+
+        debug!("No feature install order override specified");
+        Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_additional_features_valid() {
+        let json = r#"{"git": true, "node": "18", "docker": {"version": "latest"}}"#;
+        let result = FeatureMerger::parse_additional_features(json).unwrap();
+
+        assert!(result.is_object());
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj.len(), 3);
+        assert_eq!(obj["git"], serde_json::Value::Bool(true));
+        assert_eq!(obj["node"], serde_json::Value::String("18".to_string()));
+        assert!(obj["docker"].is_object());
+    }
+
+    #[test]
+    fn test_parse_additional_features_invalid_json() {
+        let json = r#"{"git": true, "node": 18,}"#; // trailing comma
+        let result = FeatureMerger::parse_additional_features(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_additional_features_not_object() {
+        let json = r#"["git", "node"]"#;
+        let result = FeatureMerger::parse_additional_features(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_additional_features_invalid_value_type() {
+        let json = r#"{"git": true, "node": 123}"#; // number not allowed
+        let result = FeatureMerger::parse_additional_features(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_feature_install_order_valid() {
+        let order_str = "git,node,docker";
+        let result = FeatureMerger::parse_feature_install_order(order_str).unwrap();
+        assert_eq!(result, vec!["git", "node", "docker"]);
+    }
+
+    #[test]
+    fn test_parse_feature_install_order_with_spaces() {
+        let order_str = " git , node , docker ";
+        let result = FeatureMerger::parse_feature_install_order(order_str).unwrap();
+        assert_eq!(result, vec!["git", "node", "docker"]);
+    }
+
+    #[test]
+    fn test_parse_feature_install_order_duplicates() {
+        let order_str = "git,node,git";
+        let result = FeatureMerger::parse_feature_install_order(order_str);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_feature_install_order_empty() {
+        let order_str = "";
+        let result = FeatureMerger::parse_feature_install_order(order_str);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_features_no_conflicts() {
+        let config_features = serde_json::json!({"git": true, "node": "16"});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"docker": true, "python": "3.9"}"#.to_string()),
+            false,
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        assert_eq!(obj.len(), 4);
+        assert_eq!(obj["git"], serde_json::Value::Bool(true));
+        assert_eq!(obj["node"], serde_json::Value::String("16".to_string()));
+        assert_eq!(obj["docker"], serde_json::Value::Bool(true));
+        assert_eq!(obj["python"], serde_json::Value::String("3.9".to_string()));
+    }
+
+    #[test]
+    fn test_merge_features_config_precedence() {
+        let config_features = serde_json::json!({"git": true, "node": "16"});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"git": false, "node": "18"}"#.to_string()),
+            false, // config wins
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        assert_eq!(obj.len(), 2);
+        assert_eq!(obj["git"], serde_json::Value::Bool(true)); // config wins
+        assert_eq!(obj["node"], serde_json::Value::String("16".to_string())); // config wins
+    }
+
+    #[test]
+    fn test_merge_features_cli_precedence() {
+        let config_features = serde_json::json!({"git": true, "node": "16"});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"git": false, "node": "18"}"#.to_string()),
+            true, // CLI wins
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        assert_eq!(obj.len(), 2);
+        assert_eq!(obj["git"], serde_json::Value::Bool(false)); // CLI wins
+        assert_eq!(obj["node"], serde_json::Value::String("18".to_string())); // CLI wins
+    }
+
+    #[test]
+    fn test_get_effective_install_order_cli_override() {
+        let config_order = Some(vec!["git".to_string(), "node".to_string()]);
+        let merge_config =
+            FeatureMergeConfig::new(None, false, Some("docker,git,node".to_string()));
+
+        let result =
+            FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
+                .unwrap();
+        assert_eq!(
+            result,
+            Some(vec![
+                "docker".to_string(),
+                "git".to_string(),
+                "node".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn test_get_effective_install_order_config_fallback() {
+        let config_order = Some(vec!["git".to_string(), "node".to_string()]);
+        let merge_config = FeatureMergeConfig::new(None, false, None);
+
+        let result =
+            FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
+                .unwrap();
+        assert_eq!(result, Some(vec!["git".to_string(), "node".to_string()]));
+    }
+
+    #[test]
+    fn test_get_effective_install_order_none() {
+        let config_order: Option<Vec<String>> = None;
+        let merge_config = FeatureMergeConfig::new(None, false, None);
+
+        let result =
+            FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
+                .unwrap();
+        assert_eq!(result, None);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
