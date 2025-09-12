@@ -153,6 +153,14 @@ impl ComposeCommand {
         self.execute(&["down"])
     }
 
+    /// Stop and remove containers with additional flags
+    #[instrument(skip(self))]
+    pub fn down_with_flags(&self, flags: &[&str]) -> Result<String> {
+        let mut args = vec!["down"];
+        args.extend(flags);
+        self.execute(&args)
+    }
+
     /// List services with their status
     #[instrument(skip(self))]
     pub fn ps(&self) -> Result<Vec<ComposeService>> {
@@ -343,6 +351,23 @@ impl ComposeManager {
         command.down()?;
 
         debug!("Compose project {} stopped successfully", project.name);
+        Ok(())
+    }
+
+    /// Stop and remove compose project containers
+    #[instrument(skip(self))]
+    pub fn down_project(&self, project: &ComposeProject) -> Result<()> {
+        let command = self.get_command(project);
+
+        debug!("Stopping and removing compose project {}", project.name);
+
+        // Use down with --volumes to remove named volumes as well
+        command.down_with_flags(&["--volumes"])?;
+
+        debug!(
+            "Compose project {} stopped and removed successfully",
+            project.name
+        );
         Ok(())
     }
 

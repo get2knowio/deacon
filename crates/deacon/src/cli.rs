@@ -71,6 +71,9 @@ pub enum Commands {
         /// Emit machine-readable port events to stdout with PORT_EVENT prefix
         #[arg(long)]
         ports_events: bool,
+        /// Automatically shut down when process exits
+        #[arg(long)]
+        shutdown: bool,
     },
 
     /// Build development container image
@@ -133,6 +136,13 @@ pub enum Commands {
     RunUserCommands {
         /// Commands to run
         commands: Vec<String>,
+    },
+
+    /// Stop and optionally remove development container or compose project
+    Down {
+        /// Remove containers after stopping them
+        #[arg(long)]
+        remove: bool,
     },
 
     /// Environment diagnostics and support bundle creation
@@ -263,6 +273,7 @@ impl Cli {
                 skip_post_create,
                 skip_non_blocking_commands,
                 ports_events,
+                shutdown,
             }) => {
                 use crate::commands::up::{execute_up, UpArgs};
 
@@ -271,6 +282,7 @@ impl Cli {
                     skip_post_create,
                     skip_non_blocking_commands,
                     ports_events,
+                    shutdown,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                 };
@@ -363,6 +375,17 @@ impl Cli {
                     feature: "run-user-commands command".to_string(),
                 })
                 .into())
+            }
+            Some(Commands::Down { remove }) => {
+                use crate::commands::down::{execute_down, DownArgs};
+
+                let args = DownArgs {
+                    remove,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
+
+                execute_down(args).await
             }
             Some(Commands::Doctor { json, bundle }) => {
                 // Create a DoctorContext for doctor command

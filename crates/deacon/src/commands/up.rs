@@ -6,9 +6,11 @@
 use anyhow::Result;
 use deacon_core::compose::{ComposeManager, ComposeProject};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::{CliDocker, Docker, ExecConfig};
 use deacon_core::errors::DeaconError;
 use deacon_core::ports::PortForwardingManager;
+use deacon_core::state::{ComposeState, ContainerState, StateManager};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
 
@@ -20,6 +22,7 @@ pub struct UpArgs {
     #[allow(dead_code)] // TODO: Connect to container lifecycle execution
     pub skip_non_blocking_commands: bool,
     pub ports_events: bool,
+    pub shutdown: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
 }
@@ -50,20 +53,43 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
 
     debug!("Loaded configuration: {:?}", config.name);
 
+    // Create container identity for state tracking
+    let identity = ContainerIdentity::new(workspace_folder, &config);
+    let workspace_hash = identity.workspace_hash.clone();
+
+    // Initialize state manager
+    let mut state_manager = StateManager::new()?;
+
     // Check if this is a compose-based configuration
     if config.uses_compose() {
-        execute_compose_up(&config, workspace_folder, &args).await
+        execute_compose_up(
+            &config,
+            workspace_folder,
+            &args,
+            &mut state_manager,
+            &workspace_hash,
+        )
+        .await
     } else {
-        execute_container_up(&config, workspace_folder, &args).await
+        execute_container_up(
+            &config,
+            workspace_folder,
+            &args,
+            &mut state_manager,
+            &workspace_hash,
+        )
+        .await
     }
 }
 
 /// Execute up for Docker Compose configurations
-#[instrument(skip(config, workspace_folder, args))]
+#[instrument(skip(config, workspace_folder, args, state_manager))]
 async fn execute_compose_up(
     config: &DevContainerConfig,
     workspace_folder: &Path,
     args: &UpArgs,
+    state_manager: &mut StateManager,
+    workspace_hash: &str,
 ) -> Result<()> {
     info!("Starting Docker Compose project");
 
@@ -97,6 +123,22 @@ async fn execute_compose_up(
 
     info!("Compose project {} started successfully", project.name);
 
+    // Save compose state for shutdown tracking
+    let compose_state = ComposeState {
+        project_name: project.name.clone(),
+        service_name: project.service.clone(),
+        base_path: project.base_path.to_string_lossy().to_string(),
+        compose_files: project
+            .compose_files
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect(),
+        shutdown_action: config.shutdown_action.clone(),
+    };
+
+    state_manager.save_compose_state(workspace_hash, compose_state)?;
+    debug!("Saved compose state for workspace hash: {}", workspace_hash);
+
     // Execute post-create lifecycle if not skipped
     if !args.skip_post_create {
         execute_compose_post_create(&project, config).await?;
@@ -105,6 +147,11 @@ async fn execute_compose_up(
     // Handle port forwarding and events
     if args.ports_events {
         handle_port_events(config, &project).await?;
+    }
+
+    // Handle shutdown if requested
+    if args.shutdown {
+        handle_compose_shutdown(config, &project, state_manager, workspace_hash).await?;
     }
 
     Ok(())
@@ -116,11 +163,13 @@ async fn execute_container_up(
     config: &DevContainerConfig,
     workspace_folder: &Path,
     args: &UpArgs,
+    state_manager: &mut StateManager,
+    workspace_hash: &str,
 ) -> Result<()> {
     info!("Starting traditional development container");
 
     // Create container identity for deterministic naming and labels
-    let identity = deacon_core::container::ContainerIdentity::new(workspace_folder, config);
+    let identity = ContainerIdentity::new(workspace_folder, config);
     debug!("Container identity: {:?}", identity);
 
     // Initialize Docker client
@@ -151,6 +200,20 @@ async fn execute_container_up(
         container_result.image_id
     );
 
+    // Save container state for shutdown tracking
+    let container_state = ContainerState {
+        container_id: container_result.container_id.clone(),
+        container_name: identity.name.clone(),
+        image_id: container_result.image_id.clone(),
+        shutdown_action: config.shutdown_action.clone(),
+    };
+
+    state_manager.save_container_state(workspace_hash, container_state)?;
+    debug!(
+        "Saved container state for workspace hash: {}",
+        workspace_hash
+    );
+
     // Apply user mapping if configured
     if config.remote_user.is_some() || config.container_user.is_some() {
         apply_user_mapping(&container_result.container_id, config, workspace_folder).await?;
@@ -168,6 +231,17 @@ async fn execute_container_up(
     // Handle port events if requested
     if args.ports_events {
         handle_container_port_events(&container_result.container_id, config).await?;
+    }
+
+    // Handle shutdown if requested
+    if args.shutdown {
+        handle_container_shutdown(
+            config,
+            &container_result.container_id,
+            state_manager,
+            workspace_hash,
+        )
+        .await?;
     }
 
     info!("Traditional container up completed successfully");
@@ -474,6 +548,74 @@ async fn handle_container_port_events(
     Ok(())
 }
 
+/// Handle shutdown for container configurations
+#[instrument(skip(config, state_manager))]
+async fn handle_container_shutdown(
+    config: &DevContainerConfig,
+    container_id: &str,
+    state_manager: &mut StateManager,
+    workspace_hash: &str,
+) -> Result<()> {
+    info!("Handling shutdown for container: {}", container_id);
+
+    let shutdown_action = config.shutdown_action.as_deref().unwrap_or("stopContainer");
+
+    match shutdown_action {
+        "none" => {
+            info!("Shutdown action is 'none', leaving container running");
+        }
+        "stopContainer" => {
+            info!("Stopping container due to shutdown action");
+            let docker = CliDocker::new();
+            docker.stop_container(container_id, Some(30)).await?;
+            state_manager.remove_workspace_state(workspace_hash);
+            info!("Container stopped and removed from state");
+        }
+        _ => {
+            warn!(
+                "Unknown shutdown action '{}', leaving container running",
+                shutdown_action
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle shutdown for compose configurations
+#[instrument(skip(config, state_manager))]
+async fn handle_compose_shutdown(
+    config: &DevContainerConfig,
+    project: &ComposeProject,
+    state_manager: &mut StateManager,
+    workspace_hash: &str,
+) -> Result<()> {
+    info!("Handling shutdown for compose project: {}", project.name);
+
+    let shutdown_action = config.shutdown_action.as_deref().unwrap_or("stopCompose");
+
+    match shutdown_action {
+        "none" => {
+            info!("Shutdown action is 'none', leaving compose project running");
+        }
+        "stopCompose" => {
+            info!("Stopping compose project due to shutdown action");
+            let compose_manager = ComposeManager::new();
+            compose_manager.stop_project(project)?;
+            state_manager.remove_workspace_state(workspace_hash);
+            info!("Compose project stopped and removed from state");
+        }
+        _ => {
+            warn!(
+                "Unknown shutdown action '{}', leaving compose project running",
+                shutdown_action
+            );
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,6 +630,7 @@ mod tests {
             skip_post_create: false,
             skip_non_blocking_commands: false,
             ports_events: false,
+            shutdown: false,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
         };
@@ -496,6 +639,7 @@ mod tests {
         assert!(!args.skip_post_create);
         assert!(!args.skip_non_blocking_commands);
         assert!(!args.ports_events);
+        assert!(!args.shutdown);
         assert_eq!(args.workspace_folder, Some(PathBuf::from("/test")));
         assert!(args.config_path.is_none());
     }
@@ -528,6 +672,7 @@ mod tests {
             skip_post_create: true,
             skip_non_blocking_commands: true,
             ports_events: true,
+            shutdown: true,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
         };
@@ -536,6 +681,7 @@ mod tests {
         assert!(args.skip_post_create);
         assert!(args.skip_non_blocking_commands);
         assert!(args.ports_events);
+        assert!(args.shutdown);
     }
 
     #[test]
