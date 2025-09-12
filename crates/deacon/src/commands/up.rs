@@ -7,7 +7,7 @@ use anyhow::Result;
 use deacon_core::compose::{ComposeManager, ComposeProject};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::docker::{CliDocker, Docker, ExecConfig};
-use deacon_core::errors::{DeaconError, DockerError};
+use deacon_core::errors::DeaconError;
 use deacon_core::ports::PortForwardingManager;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
@@ -113,17 +113,65 @@ async fn execute_compose_up(
 /// Execute up for traditional container configurations
 #[instrument(skip_all)]
 async fn execute_container_up(
-    _config: &DevContainerConfig,
-    _workspace_folder: &Path,
-    _args: &UpArgs,
+    config: &DevContainerConfig,
+    workspace_folder: &Path,
+    args: &UpArgs,
 ) -> Result<()> {
     info!("Starting traditional development container");
 
-    // For now, return an error indicating this needs implementation
-    // The existing CLI implementation in cli.rs handles this case
-    Err(DeaconError::Docker(DockerError::CLIError(
-        "Traditional container up is not yet fully implemented in this command. Use existing CLI workflow.".to_string()
-    )).into())
+    // Create container identity for deterministic naming and labels
+    let identity = deacon_core::container::ContainerIdentity::new(workspace_folder, config);
+    debug!("Container identity: {:?}", identity);
+
+    // Initialize Docker client
+    let docker = CliDocker::new();
+
+    // Check Docker availability
+    docker.ping().await?;
+
+    // Create container using DockerLifecycle trait
+    use deacon_core::docker::DockerLifecycle;
+    let container_result = docker
+        .up(
+            &identity,
+            config,
+            workspace_folder,
+            args.remove_existing_container,
+        )
+        .await?;
+
+    info!(
+        "Container {} {} (image: {})",
+        if container_result.reused {
+            "reused"
+        } else {
+            "created"
+        },
+        container_result.container_id,
+        container_result.image_id
+    );
+
+    // Apply user mapping if configured
+    if config.remote_user.is_some() || config.container_user.is_some() {
+        apply_user_mapping(&container_result.container_id, config, workspace_folder).await?;
+    }
+
+    // Execute lifecycle commands if not skipped
+    execute_lifecycle_commands(
+        &container_result.container_id,
+        config,
+        workspace_folder,
+        args,
+    )
+    .await?;
+
+    // Handle port events if requested
+    if args.ports_events {
+        handle_container_port_events(&container_result.container_id, config).await?;
+    }
+
+    info!("Traditional container up completed successfully");
+    Ok(())
 }
 
 /// Execute post-create lifecycle for compose projects
@@ -223,6 +271,209 @@ async fn handle_port_events(config: &DevContainerConfig, project: &ComposeProjec
     Ok(())
 }
 
+/// Apply user mapping configuration to the container
+#[instrument(skip(config))]
+async fn apply_user_mapping(
+    container_id: &str,
+    config: &DevContainerConfig,
+    workspace_folder: &Path,
+) -> Result<()> {
+    use deacon_core::user_mapping::{get_host_user_info, UserMappingConfig};
+
+    info!("Applying user mapping configuration");
+
+    // Create user mapping configuration
+    let mut user_config = UserMappingConfig::new(
+        config.remote_user.clone(),
+        config.container_user.clone(),
+        config.update_remote_user_uid.unwrap_or(false),
+    );
+
+    // Add host user information if updateRemoteUserUID is enabled
+    if user_config.update_remote_user_uid {
+        match get_host_user_info() {
+            Ok((uid, gid)) => {
+                user_config = user_config.with_host_user(uid, gid);
+                debug!("Host user: UID={}, GID={}", uid, gid);
+            }
+            Err(e) => {
+                warn!("Failed to get host user info, skipping UID mapping: {}", e);
+            }
+        }
+    }
+
+    // Set workspace path for ownership adjustments
+    if let Some(container_workspace_folder) = &config.workspace_folder {
+        user_config = user_config.with_workspace_path(container_workspace_folder.clone());
+    } else {
+        // Default container workspace folder
+        let workspace_name = workspace_folder
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("workspace");
+        user_config = user_config.with_workspace_path(format!("/workspaces/{}", workspace_name));
+    }
+
+    // Apply user mapping if needed
+    if user_config.needs_user_mapping() {
+        debug!("User mapping required, applying configuration");
+
+        // TODO: Implement user mapping application using UserMappingService
+        // For now, log that user mapping would be applied
+        info!(
+            "User mapping configured: remote_user={:?}, container_user={:?}, update_uid={}",
+            user_config.remote_user, user_config.container_user, user_config.update_remote_user_uid
+        );
+    }
+
+    Ok(())
+}
+
+/// Execute lifecycle commands in the container
+#[instrument(skip(config, args))]
+async fn execute_lifecycle_commands(
+    container_id: &str,
+    config: &DevContainerConfig,
+    workspace_folder: &Path,
+    args: &UpArgs,
+) -> Result<()> {
+    use deacon_core::container_lifecycle::{
+        execute_container_lifecycle, ContainerLifecycleCommands, ContainerLifecycleConfig,
+    };
+    use deacon_core::variable::SubstitutionContext;
+
+    info!("Executing lifecycle commands in container");
+
+    // Create substitution context
+    let substitution_context = SubstitutionContext::new(workspace_folder)?;
+
+    // Determine container workspace folder
+    let container_workspace_folder = if let Some(ref workspace_folder) = config.workspace_folder {
+        workspace_folder.clone()
+    } else {
+        let workspace_name = workspace_folder
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("workspace");
+        format!("/workspaces/{}", workspace_name)
+    };
+
+    // Create container lifecycle configuration
+    let lifecycle_config = ContainerLifecycleConfig {
+        container_id: container_id.to_string(),
+        user: config
+            .remote_user
+            .clone()
+            .or_else(|| config.container_user.clone()),
+        container_workspace_folder,
+        container_env: config.container_env.clone(),
+        skip_post_create: args.skip_post_create,
+        skip_non_blocking_commands: args.skip_non_blocking_commands,
+    };
+
+    // Build lifecycle commands from configuration
+    let mut commands = ContainerLifecycleCommands::new();
+
+    if let Some(ref on_create) = config.on_create_command {
+        commands = commands.with_on_create(commands_from_json_value(on_create)?);
+    }
+
+    if let Some(ref post_create) = config.post_create_command {
+        commands = commands.with_post_create(commands_from_json_value(post_create)?);
+    }
+
+    if let Some(ref post_start) = config.post_start_command {
+        commands = commands.with_post_start(commands_from_json_value(post_start)?);
+    }
+
+    if let Some(ref post_attach) = config.post_attach_command {
+        commands = commands.with_post_attach(commands_from_json_value(post_attach)?);
+    }
+
+    // Execute lifecycle commands
+    let result =
+        execute_container_lifecycle(&lifecycle_config, &commands, &substitution_context).await?;
+
+    info!(
+        "Lifecycle execution completed: {} phases executed",
+        result.phases.len()
+    );
+
+    Ok(())
+}
+
+/// Convert JSON value to vector of command strings
+fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<String>> {
+    match value {
+        serde_json::Value::String(cmd) => Ok(vec![cmd.clone()]),
+        serde_json::Value::Array(cmds) => {
+            let mut commands = Vec::new();
+            for cmd_value in cmds {
+                if let serde_json::Value::String(cmd) = cmd_value {
+                    commands.push(cmd.clone());
+                } else {
+                    return Err(DeaconError::Config(
+                        deacon_core::errors::ConfigError::Validation {
+                            message: format!(
+                                "Invalid command in array: expected string, got {:?}",
+                                cmd_value
+                            ),
+                        },
+                    )
+                    .into());
+                }
+            }
+            Ok(commands)
+        }
+        _ => Err(
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: format!(
+                    "Invalid command format: expected string or array of strings, got {:?}",
+                    value
+                ),
+            })
+            .into(),
+        ),
+    }
+}
+
+/// Handle port events for the container
+#[instrument(skip(config))]
+async fn handle_container_port_events(
+    container_id: &str,
+    config: &DevContainerConfig,
+) -> Result<()> {
+    info!("Processing port events for container");
+
+    // Inspect the container to get port information
+    let docker = CliDocker::new();
+    let container_info = match docker.inspect_container(container_id).await? {
+        Some(info) => info,
+        None => {
+            warn!("Container {} not found, skipping port events", container_id);
+            return Ok(());
+        }
+    };
+
+    debug!(
+        "Container {} has {} exposed ports and {} port mappings",
+        container_id,
+        container_info.exposed_ports.len(),
+        container_info.port_mappings.len()
+    );
+
+    // Process ports and emit events
+    let events = PortForwardingManager::process_container_ports(
+        config,
+        &container_info,
+        true, // emit_events = true
+    );
+
+    info!("Emitted {} port events", events.len());
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +498,44 @@ mod tests {
         assert!(!args.ports_events);
         assert_eq!(args.workspace_folder, Some(PathBuf::from("/test")));
         assert!(args.config_path.is_none());
+    }
+
+    #[test]
+    fn test_commands_from_json_value_string() {
+        let json_value = serde_json::Value::String("echo hello".to_string());
+        let commands = commands_from_json_value(&json_value).unwrap();
+        assert_eq!(commands, vec!["echo hello"]);
+    }
+
+    #[test]
+    fn test_commands_from_json_value_array() {
+        let json_value = serde_json::json!(["echo hello", "echo world"]);
+        let commands = commands_from_json_value(&json_value).unwrap();
+        assert_eq!(commands, vec!["echo hello", "echo world"]);
+    }
+
+    #[test]
+    fn test_commands_from_json_value_invalid() {
+        let json_value = serde_json::Value::Number(serde_json::Number::from(42));
+        let result = commands_from_json_value(&json_value);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_up_args_with_all_flags() {
+        let args = UpArgs {
+            remove_existing_container: true,
+            skip_post_create: true,
+            skip_non_blocking_commands: true,
+            ports_events: true,
+            workspace_folder: Some(PathBuf::from("/test")),
+            config_path: None,
+        };
+
+        assert!(args.remove_existing_container);
+        assert!(args.skip_post_create);
+        assert!(args.skip_non_blocking_commands);
+        assert!(args.ports_events);
     }
 
     #[test]
