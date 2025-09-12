@@ -521,7 +521,8 @@ impl FeatureDependencyResolver {
         if let Some(dependencies) = graph.get(node) {
             for dep in dependencies {
                 if !visited.contains(dep) {
-                    if let Some(cycle) = Self::dfs_find_cycle(dep, graph, visited, rec_stack, path) {
+                    if let Some(cycle) = Self::dfs_find_cycle(dep, graph, visited, rec_stack, path)
+                    {
                         return Some(cycle);
                     }
                 } else if rec_stack.contains(dep) {

@@ -3,9 +3,7 @@
 //! Tests the complete workflow of feature dependency graph resolution,
 //! topological sorting, and installation plan generation.
 
-use deacon_core::features::{
-    FeatureDependencyResolver, FeatureMetadata, ResolvedFeature,
-};
+use deacon_core::features::{FeatureDependencyResolver, FeatureMetadata, ResolvedFeature};
 use std::collections::HashMap;
 
 #[test]
