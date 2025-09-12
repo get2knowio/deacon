@@ -210,7 +210,11 @@ async fn execute_compose_down(
     let project = ComposeProject {
         name: compose_state.project_name.clone(),
         base_path: PathBuf::from(&compose_state.base_path),
-        compose_files: compose_state.compose_files.iter().map(PathBuf::from).collect(),
+        compose_files: compose_state
+            .compose_files
+            .iter()
+            .map(PathBuf::from)
+            .collect(),
         service: compose_state.service_name.clone(),
         run_services: vec![], // We don't track run_services in state currently
     };
