@@ -447,17 +447,25 @@ impl Docker for CliDocker {
             label_selector
         );
 
-        let docker_path = self.docker_path.clone();
-        let label_selector = label_selector.map(|s| s.to_string());
+    let docker_path = self.docker_path.clone();
+    let label_selector = label_selector.map(|s| s.to_string());
 
         tokio::task::spawn_blocking(move || {
-            let mut args = vec!["ps", "--all", "--format", "json"];
-            let label_filter;
+            let mut args: Vec<String> = vec!["ps", "--all", "--format", "json"]
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
 
+            // Support multiple label filters; Docker expects one --filter per label
             if let Some(label) = &label_selector {
-                label_filter = format!("label={}", label);
-                args.push("--filter");
-                args.push(&label_filter);
+                for part in label.split(',') {
+                    let trimmed = part.trim();
+                    if !trimmed.is_empty() {
+                        args.push("--filter".to_string());
+                        // Each part is expected to be key or key=value
+                        args.push(format!("label={}", trimmed));
+                    }
+                }
             }
 
             let output = Command::new(&docker_path)
