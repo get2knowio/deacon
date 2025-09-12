@@ -49,26 +49,24 @@ impl PortForwardingManager {
 
         // Collect all configured ports from forwardPorts and appPort
         let configured_ports = Self::collect_configured_ports(config);
-        
+
+        // Validate port attributes and warn about unknown references
+        Self::validate_port_attributes(config, &configured_ports);
+
         // Process exposed ports from container
         for exposed_port in &container_info.exposed_ports {
             if let Some(port_config) = configured_ports.get(&exposed_port.port) {
-                let port_mapping = container_info
-                    .port_mappings
-                    .iter()
-                    .find(|pm| pm.container_port == exposed_port.port && pm.protocol == exposed_port.protocol);
-                
-                let event = Self::create_port_event(
-                    exposed_port,
-                    port_mapping,
-                    port_config,
-                    config,
-                );
-                
+                let port_mapping = container_info.port_mappings.iter().find(|pm| {
+                    pm.container_port == exposed_port.port && pm.protocol == exposed_port.protocol
+                });
+
+                let event =
+                    Self::create_port_event(exposed_port, port_mapping, port_config, config);
+
                 if emit_events {
                     Self::emit_port_event(&event);
                 }
-                
+
                 events.push(event);
             }
         }
@@ -77,28 +75,24 @@ impl PortForwardingManager {
         for port_mapping in &container_info.port_mappings {
             if let Some(port_config) = configured_ports.get(&port_mapping.container_port) {
                 // Skip if we already processed this port via exposed ports
-                if container_info.exposed_ports.iter().any(|ep| 
+                if container_info.exposed_ports.iter().any(|ep| {
                     ep.port == port_mapping.container_port && ep.protocol == port_mapping.protocol
-                ) {
+                }) {
                     continue;
                 }
-                
+
                 let exposed_port = ExposedPort {
                     port: port_mapping.container_port,
                     protocol: port_mapping.protocol.clone(),
                 };
-                
-                let event = Self::create_port_event(
-                    &exposed_port,
-                    Some(port_mapping),
-                    port_config,
-                    config,
-                );
-                
+
+                let event =
+                    Self::create_port_event(&exposed_port, Some(port_mapping), port_config, config);
+
                 if emit_events {
                     Self::emit_port_event(&event);
                 }
-                
+
                 events.push(event);
             }
         }
@@ -125,6 +119,51 @@ impl PortForwardingManager {
         }
 
         ports
+    }
+
+    /// Validate port attributes and warn about unknown port references
+    fn validate_port_attributes(
+        config: &DevContainerConfig,
+        configured_ports: &HashMap<u16, &PortSpec>,
+    ) {
+        // Check each port attribute reference
+        for port_key in config.ports_attributes.keys() {
+            let mut found = false;
+
+            // Try direct port number match
+            if let Ok(port_num) = port_key.parse::<u16>() {
+                if configured_ports.contains_key(&port_num) {
+                    found = true;
+                }
+            }
+
+            // Try with /tcp suffix removal
+            if !found && port_key.ends_with("/tcp") {
+                let port_without_suffix = &port_key[..port_key.len() - 4];
+                if let Ok(port_num) = port_without_suffix.parse::<u16>() {
+                    if configured_ports.contains_key(&port_num) {
+                        found = true;
+                    }
+                }
+            }
+
+            // Try exact string match with configured port specs
+            if !found {
+                for port_spec in configured_ports.values() {
+                    if port_spec.as_string() == *port_key {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if !found {
+                warn!(
+                    "Port attribute '{}' does not match any configured port in forwardPorts or appPort",
+                    port_key
+                );
+            }
+        }
     }
 
     /// Create a port event from the exposed port and configuration
@@ -228,18 +267,25 @@ impl PortForwardingManager {
         if let Some(ref action) = event.on_auto_forward {
             match action {
                 OnAutoForward::Notify => {
-                    info!("Port {} is now available at localhost:{}", 
-                          event.port, 
-                          event.local_port.unwrap_or(event.port));
+                    info!(
+                        "Port {} is now available at localhost:{}",
+                        event.port,
+                        event.local_port.unwrap_or(event.port)
+                    );
                 }
                 OnAutoForward::OpenBrowser => {
-                    info!("Port {} is now available - would open browser at http://localhost:{}", 
-                          event.port, 
-                          event.local_port.unwrap_or(event.port));
+                    info!(
+                        "Port {} is now available - would open browser at http://localhost:{}",
+                        event.port,
+                        event.local_port.unwrap_or(event.port)
+                    );
                     // In a real implementation, this would open the browser
                 }
                 OnAutoForward::OpenPreview => {
-                    info!("Port {} is now available - would open preview panel", event.port);
+                    info!(
+                        "Port {} is now available - would open preview panel",
+                        event.port
+                    );
                     // In a real implementation, this would open a preview panel
                 }
                 OnAutoForward::Silent => {
@@ -247,7 +293,10 @@ impl PortForwardingManager {
                 }
                 OnAutoForward::Ignore => {
                     // Should not happen as ignored ports shouldn't generate events
-                    warn!("Port {} marked as ignore but still generated event", event.port);
+                    warn!(
+                        "Port {} marked as ignore but still generated event",
+                        event.port
+                    );
                 }
             }
         }
@@ -299,7 +348,7 @@ mod tests {
         };
 
         let ports = PortForwardingManager::collect_configured_ports(&config);
-        
+
         assert_eq!(ports.len(), 3);
         assert!(ports.contains_key(&3000));
         assert!(ports.contains_key(&8080));
@@ -309,13 +358,16 @@ mod tests {
     #[test]
     fn test_get_port_attributes_with_defaults() {
         let mut ports_attributes = HashMap::new();
-        ports_attributes.insert("3000".to_string(), PortAttributes {
-            label: Some("Web Server".to_string()),
-            on_auto_forward: Some(OnAutoForward::Notify),
-            open_preview: None,
-            require_local_port: None,
-            description: None,
-        });
+        ports_attributes.insert(
+            "3000".to_string(),
+            PortAttributes {
+                label: Some("Web Server".to_string()),
+                on_auto_forward: Some(OnAutoForward::Notify),
+                open_preview: None,
+                require_local_port: None,
+                description: None,
+            },
+        );
 
         let config = DevContainerConfig {
             extends: None,
@@ -389,13 +441,16 @@ mod tests {
         let port_spec = PortSpec::Number(3000);
 
         let mut ports_attributes = HashMap::new();
-        ports_attributes.insert("3000".to_string(), PortAttributes {
-            label: Some("Web Server".to_string()),
-            on_auto_forward: Some(OnAutoForward::Notify),
-            open_preview: Some(true),
-            require_local_port: None,
-            description: Some("Main web server".to_string()),
-        });
+        ports_attributes.insert(
+            "3000".to_string(),
+            PortAttributes {
+                label: Some("Web Server".to_string()),
+                on_auto_forward: Some(OnAutoForward::Notify),
+                open_preview: Some(true),
+                require_local_port: None,
+                description: Some("Main web server".to_string()),
+            },
+        );
 
         let config = DevContainerConfig {
             extends: None,
@@ -447,5 +502,95 @@ mod tests {
         assert_eq!(event.host_ip, Some("0.0.0.0".to_string()));
         assert_eq!(event.description, Some("Main web server".to_string()));
         assert_eq!(event.open_preview, Some(true));
+    }
+
+    #[test]
+    fn test_unknown_port_attributes_warning() {
+        // Test that warnings are generated for port attributes that don't match configured ports
+        let mut ports_attributes = HashMap::new();
+        ports_attributes.insert(
+            "3000".to_string(),
+            PortAttributes {
+                label: Some("Valid Port".to_string()),
+                on_auto_forward: Some(OnAutoForward::Notify),
+                open_preview: None,
+                require_local_port: None,
+                description: None,
+            },
+        );
+        ports_attributes.insert(
+            "9999".to_string(),
+            PortAttributes {
+                label: Some("Unknown Port".to_string()),
+                on_auto_forward: Some(OnAutoForward::Silent),
+                open_preview: None,
+                require_local_port: None,
+                description: None,
+            },
+        );
+
+        let config = DevContainerConfig {
+            extends: None,
+            name: None,
+            image: None,
+            dockerfile: None,
+            build: None,
+            docker_compose_file: None,
+            service: None,
+            run_services: vec![],
+            features: serde_json::Value::Object(Default::default()),
+            customizations: serde_json::Value::Object(Default::default()),
+            workspace_folder: None,
+            workspace_mount: None,
+            mounts: vec![],
+            container_env: HashMap::new(),
+            remote_env: HashMap::new(),
+            container_user: None,
+            remote_user: None,
+            update_remote_user_uid: None,
+            forward_ports: vec![PortSpec::Number(3000)], // Only 3000 is configured
+            app_port: None,
+            ports_attributes,
+            other_ports_attributes: None,
+            run_args: vec![],
+            shutdown_action: None,
+            override_command: None,
+            on_create_command: None,
+            post_start_command: None,
+            post_create_command: None,
+            post_attach_command: None,
+            initialize_command: None,
+            update_content_command: None,
+        };
+
+        let container_info = ContainerInfo {
+            id: "test-container-123".to_string(),
+            names: vec!["test-container".to_string()],
+            image: "node:18".to_string(),
+            status: "running".to_string(),
+            state: "running".to_string(),
+            exposed_ports: vec![ExposedPort {
+                port: 3000,
+                protocol: "tcp".to_string(),
+            }],
+            port_mappings: vec![PortMapping {
+                host_port: 3000,
+                container_port: 3000,
+                protocol: "tcp".to_string(),
+                host_ip: "0.0.0.0".to_string(),
+            }],
+        };
+
+        // This should generate a warning for port 9999 which is not configured
+        let events =
+            PortForwardingManager::process_container_ports(&config, &container_info, false);
+
+        // Only the configured port (3000) should generate an event
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].port, 3000);
+
+        // Note: The warning for port 9999 would be generated but not easily testable
+        // without capturing log output. In practice, this test validates the logic
+        // and ensures the warning path is exercised.
     }
 }

@@ -182,10 +182,7 @@ async fn execute_compose_post_create(
 
 /// Handle port events for compose projects
 #[instrument(skip(config, project))]
-async fn handle_port_events(
-    config: &DevContainerConfig,
-    project: &ComposeProject,
-) -> Result<()> {
+async fn handle_port_events(config: &DevContainerConfig, project: &ComposeProject) -> Result<()> {
     info!("Processing port events for compose project");
 
     let compose_manager = ComposeManager::new();

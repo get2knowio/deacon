@@ -153,7 +153,7 @@ impl CliDocker {
     /// Parse exposed ports from container Config.ExposedPorts
     fn parse_exposed_ports(config: &serde_json::Value) -> Vec<ExposedPort> {
         let mut exposed_ports = Vec::new();
-        
+
         if let Some(exposed_ports_obj) = config
             .get("Config")
             .and_then(|c| c.get("ExposedPorts"))
@@ -170,14 +170,14 @@ impl CliDocker {
                 }
             }
         }
-        
+
         exposed_ports
     }
 
     /// Parse port mappings from container NetworkSettings.Ports
     fn parse_port_mappings(container: &serde_json::Value) -> Vec<PortMapping> {
         let mut port_mappings = Vec::new();
-        
+
         if let Some(ports_obj) = container
             .get("NetworkSettings")
             .and_then(|ns| ns.get("Ports"))
@@ -207,7 +207,7 @@ impl CliDocker {
                 }
             }
         }
-        
+
         port_mappings
     }
 
@@ -364,7 +364,7 @@ impl CliDocker {
         let container = &containers[0];
         let exposed_ports = Self::parse_exposed_ports(container);
         let port_mappings = Self::parse_port_mappings(container);
-        
+
         let container_info = ContainerInfo {
             id: container
                 .get("Id")
@@ -564,7 +564,7 @@ impl Docker for CliDocker {
             let container = &containers[0];
             let exposed_ports = Self::parse_exposed_ports(container);
             let port_mappings = Self::parse_port_mappings(container);
-            
+
             let container_info = ContainerInfo {
                 id: container
                     .get("Id")
@@ -1077,8 +1077,14 @@ mod tests {
         assert_eq!(container.image, deserialized.image);
         assert_eq!(container.status, deserialized.status);
         assert_eq!(container.state, deserialized.state);
-        assert_eq!(container.exposed_ports.len(), deserialized.exposed_ports.len());
-        assert_eq!(container.port_mappings.len(), deserialized.port_mappings.len());
+        assert_eq!(
+            container.exposed_ports.len(),
+            deserialized.exposed_ports.len()
+        );
+        assert_eq!(
+            container.port_mappings.len(),
+            deserialized.port_mappings.len()
+        );
     }
 
     #[cfg(feature = "docker")]
@@ -1112,20 +1118,28 @@ mod tests {
         assert_eq!(container.image, "ubuntu:20.04");
         assert_eq!(container.status, "running");
         assert_eq!(container.state, "running");
-        
+
         // Check exposed ports
         assert_eq!(container.exposed_ports.len(), 2);
-        assert!(container.exposed_ports.iter().any(|p| p.port == 3000 && p.protocol == "tcp"));
-        assert!(container.exposed_ports.iter().any(|p| p.port == 8080 && p.protocol == "tcp"));
-        
+        assert!(container
+            .exposed_ports
+            .iter()
+            .any(|p| p.port == 3000 && p.protocol == "tcp"));
+        assert!(container
+            .exposed_ports
+            .iter()
+            .any(|p| p.port == 8080 && p.protocol == "tcp"));
+
         // Check port mappings
         assert_eq!(container.port_mappings.len(), 2);
-        assert!(container.port_mappings.iter().any(|p| 
-            p.host_port == 3000 && p.container_port == 3000 && p.protocol == "tcp" && p.host_ip == "0.0.0.0"
-        ));
-        assert!(container.port_mappings.iter().any(|p| 
-            p.host_port == 8080 && p.container_port == 8080 && p.protocol == "tcp" && p.host_ip == "127.0.0.1"
-        ));
+        assert!(container.port_mappings.iter().any(|p| p.host_port == 3000
+            && p.container_port == 3000
+            && p.protocol == "tcp"
+            && p.host_ip == "0.0.0.0"));
+        assert!(container.port_mappings.iter().any(|p| p.host_port == 8080
+            && p.container_port == 8080
+            && p.protocol == "tcp"
+            && p.host_ip == "127.0.0.1"));
     }
 
     #[cfg(not(feature = "docker"))]
