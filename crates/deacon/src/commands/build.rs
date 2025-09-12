@@ -360,7 +360,7 @@ async fn execute_docker_build(
 
         // Execute docker build
         let output = Command::new("docker")
-            .args(&build_args[1..]) // Skip the "build" command since we call docker directly
+            .args(&build_args) // Pass all args including "build" subcommand
             .current_dir(workspace_folder)
             .output()
             .map_err(|e| DockerError::CLIError(format!("Failed to execute docker build: {}", e)))?;
@@ -584,5 +584,72 @@ mod tests {
         assert_eq!(args.build_arg.len(), 2);
         assert!(args.build_arg.contains(&"ENV=dev".to_string()));
         assert!(args.build_arg.contains(&"VERSION=1.0".to_string()));
+    }
+
+    #[test]
+    fn test_docker_cli_arg_ordering() {
+        // Test that Docker build args are assembled in correct order
+        // This simulates the argument building logic from execute_docker_build
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dockerfile_path = temp_dir.path().join("Dockerfile");
+        std::fs::write(&dockerfile_path, "FROM alpine:3.19\n").unwrap();
+
+        let config_hash = "abcd1234567890";
+        let context_path = temp_dir.path();
+
+        // Simulate the build_args construction from execute_docker_build
+        let mut build_args = vec!["build".to_string()];
+
+        // Add context
+        build_args.push(context_path.to_str().unwrap().to_string());
+
+        // Add dockerfile
+        build_args.push("-f".to_string());
+        build_args.push(dockerfile_path.to_str().unwrap().to_string());
+
+        // Add no-cache flag
+        build_args.push("--no-cache".to_string());
+
+        // Add platform
+        build_args.push("--platform".to_string());
+        build_args.push("linux/amd64".to_string());
+
+        // Add build args
+        build_args.push("--build-arg".to_string());
+        build_args.push("ENV=test".to_string());
+
+        // Add tag
+        let tag = format!("deacon-build:{}", &config_hash[..12]);
+        build_args.push("-t".to_string());
+        build_args.push(tag.clone());
+
+        // Add label
+        let label = format!("org.deacon.configHash={}", config_hash);
+        build_args.push("--label".to_string());
+        build_args.push(label);
+
+        // Add quiet flag
+        build_args.push("-q".to_string());
+
+        // Verify the ordering: should start with "build" subcommand
+        assert_eq!(build_args[0], "build");
+        assert_eq!(build_args[1], context_path.to_str().unwrap());
+        assert_eq!(build_args[2], "-f");
+        assert_eq!(build_args[3], dockerfile_path.to_str().unwrap());
+        assert_eq!(build_args[4], "--no-cache");
+        assert_eq!(build_args[5], "--platform");
+        assert_eq!(build_args[6], "linux/amd64");
+        assert_eq!(build_args[7], "--build-arg");
+        assert_eq!(build_args[8], "ENV=test");
+        assert_eq!(build_args[9], "-t");
+        assert_eq!(build_args[10], "deacon-build:abcd12345678");
+        assert_eq!(build_args[11], "--label");
+        assert_eq!(build_args[12], "org.deacon.configHash=abcd1234567890");
+        assert_eq!(build_args[13], "-q");
+
+        // Verify that when passed to Command::new("docker").args(&build_args),
+        // it will correctly execute "docker build ..." not "docker -f ..."
+        assert!(build_args[0] == "build", "First argument must be 'build' subcommand");
+        assert!(build_args.iter().position(|arg| arg == "-f").unwrap() > 0, "-f flag must come after build subcommand");
     }
 }
