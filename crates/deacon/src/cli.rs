@@ -317,80 +317,18 @@ impl Cli {
                 env,
                 command,
             }) => {
-                if command.is_empty() {
-                    return Err(anyhow::anyhow!("No command specified for exec"));
-                }
+                use crate::commands::exec::{execute_exec, ExecArgs};
 
-                #[cfg(feature = "docker")]
-                {
-                    use deacon_core::docker::{CliDocker, Docker, ExecConfig};
-                    use std::collections::HashMap;
+                let args = ExecArgs {
+                    user,
+                    no_tty,
+                    env,
+                    command,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
 
-                    tracing::info!("Executing command in container: {:?}", command);
-
-                    let docker_client = CliDocker::new();
-
-                    // Parse environment variables
-                    let mut env_map = HashMap::new();
-                    for env_var in env {
-                        if let Some((key, value)) = env_var.split_once('=') {
-                            env_map.insert(key.to_string(), value.to_string());
-                        } else {
-                            return Err(anyhow::anyhow!(
-                                "Invalid environment variable format: '{}'. Expected KEY=VALUE",
-                                env_var
-                            ));
-                        }
-                    }
-
-                    // Determine TTY allocation
-                    let should_use_tty = !no_tty && CliDocker::is_tty();
-
-                    // Create exec config
-                    let exec_config = ExecConfig {
-                        user: user.clone(),
-                        working_dir: self
-                            .workspace_folder
-                            .as_ref()
-                            .map(|p| p.to_string_lossy().to_string()),
-                        env: env_map,
-                        tty: should_use_tty,
-                        interactive: should_use_tty,
-                        detach: false,
-                    };
-
-                    // For now, use a default container ID - in a real implementation,
-                    // this would be discovered from the workspace configuration
-                    let container_id = "devcontainer"; // This should be discovered
-
-                    match docker_client
-                        .exec(container_id, &command, exec_config)
-                        .await
-                    {
-                        Ok(result) => {
-                            tracing::info!(
-                                "Command completed with exit code: {}",
-                                result.exit_code
-                            );
-                            std::process::exit(result.exit_code);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to execute command: {}", e);
-                            Err(e.into())
-                        }
-                    }
-                }
-
-                #[cfg(not(feature = "docker"))]
-                {
-                    tracing::warn!(
-                        "Docker support is disabled (compiled without 'docker' feature)"
-                    );
-                    Err(DeaconError::Config(ConfigError::NotImplemented {
-                        feature: "exec command (docker support disabled)".to_string(),
-                    })
-                    .into())
-                }
+                execute_exec(args).await
             }
             Some(Commands::ReadConfiguration {
                 include_merged_configuration,
