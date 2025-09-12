@@ -649,7 +649,13 @@ mod tests {
 
         // Verify that when passed to Command::new("docker").args(&build_args),
         // it will correctly execute "docker build ..." not "docker -f ..."
-        assert!(build_args[0] == "build", "First argument must be 'build' subcommand");
-        assert!(build_args.iter().position(|arg| arg == "-f").unwrap() > 0, "-f flag must come after build subcommand");
+        assert!(
+            build_args[0] == "build",
+            "First argument must be 'build' subcommand"
+        );
+        assert!(
+            build_args.iter().position(|arg| arg == "-f").unwrap() > 0,
+            "-f flag must come after build subcommand"
+        );
     }
 }
