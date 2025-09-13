@@ -192,7 +192,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     // Record metrics
     if let Ok(tracker_guard) = args.progress_tracker.lock() {
-        if let Some(ref tracker) = tracker_guard.as_ref() {
+        if let Some(tracker) = tracker_guard.as_ref() {
             tracker.record_duration("build", build_duration);
         }
     }
@@ -212,7 +212,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     // Output final summary in debug mode
     if let Ok(tracker_guard) = args.progress_tracker.lock() {
-        if let Some(ref tracker) = tracker_guard.as_ref() {
+        if let Some(tracker) = tracker_guard.as_ref() {
             if let Some(metrics_summary) = tracker.metrics_summary() {
                 debug!("Metrics summary: {:?}", metrics_summary);
             }
@@ -655,6 +655,7 @@ mod tests {
             prefer_cli_features: false,
             feature_install_order: None,
             ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
 
         // Verify args are structured correctly

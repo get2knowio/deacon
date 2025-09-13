@@ -148,7 +148,7 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
 
     // Output final metrics summary in debug mode
     if let Ok(tracker_guard) = args.progress_tracker.lock() {
-        if let Some(ref tracker) = tracker_guard.as_ref() {
+        if let Some(tracker) = tracker_guard.as_ref() {
             if let Some(metrics_summary) = tracker.metrics_summary() {
                 debug!("Final metrics summary: {:?}", metrics_summary);
             }
@@ -313,7 +313,7 @@ async fn execute_container_up(
 
     // Record metrics
     if let Ok(tracker_guard) = args.progress_tracker.lock() {
-        if let Some(ref tracker) = tracker_guard.as_ref() {
+        if let Some(tracker) = tracker_guard.as_ref() {
             tracker.record_duration("container.create", container_duration);
         }
     }
@@ -646,7 +646,7 @@ async fn execute_lifecycle_commands(
 
     // Record metrics
     if let Ok(tracker_guard) = args.progress_tracker.lock() {
-        if let Some(ref tracker) = tracker_guard.as_ref() {
+        if let Some(tracker) = tracker_guard.as_ref() {
             tracker.record_duration("lifecycle", lifecycle_duration);
         }
     }
@@ -821,6 +821,7 @@ mod tests {
             prefer_cli_features: false,
             feature_install_order: None,
             ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
 
         assert!(args.remove_existing_container);
@@ -867,6 +868,7 @@ mod tests {
             prefer_cli_features: false,
             feature_install_order: None,
             ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
 
         assert!(args.remove_existing_container);
