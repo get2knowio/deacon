@@ -33,6 +33,7 @@ zip = "2.1"
 fastrand = "2.3.0"
 base64 = "0.22"
 sysinfo = "0.37.0"
+directories-next = "2.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

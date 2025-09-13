@@ -35,6 +35,37 @@ pub enum LogLevel {
     Trace,
 }
 
+/// Progress format options
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ProgressFormat {
+    /// No progress output
+    None,
+    /// JSON structured progress events
+    Json,
+    /// Auto mode: silent unless --progress-file is set (future: TTY spinner)
+    Auto,
+}
+
+impl From<ProgressFormat> for deacon_core::progress::ProgressFormat {
+    /// Convert this crate's `ProgressFormat` into the corresponding
+    /// `deacon_core::progress::ProgressFormat`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deacon::cli::ProgressFormat;
+    /// let core: deacon_core::progress::ProgressFormat = ProgressFormat::Json.into();
+    /// assert_eq!(core, deacon_core::progress::ProgressFormat::Json);
+    /// ```
+    fn from(format: ProgressFormat) -> Self {
+        match format {
+            ProgressFormat::None => deacon_core::progress::ProgressFormat::None,
+            ProgressFormat::Json => deacon_core::progress::ProgressFormat::Json,
+            ProgressFormat::Auto => deacon_core::progress::ProgressFormat::Auto,
+        }
+    }
+}
+
 /// Global options available to all subcommands
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Used for future command implementations
@@ -43,6 +74,10 @@ pub struct CliContext {
     pub log_format: LogFormat,
     /// Log level
     pub log_level: LogLevel,
+    /// Progress format
+    pub progress_format: ProgressFormat,
+    /// Progress file path (for JSON output)
+    pub progress_file: Option<PathBuf>,
     /// Workspace folder path
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
@@ -293,6 +328,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_redact: bool,
 
+    /// Progress format (json|none|auto). Auto is silent unless --progress-file is set.
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    pub progress: ProgressFormat,
+
+    /// Progress file path (for JSON output when using --progress auto or json)
+    #[arg(long, global = true, value_name = "PATH")]
+    pub progress_file: Option<PathBuf>,
+
     /// Enable specific plugins
     #[cfg(feature = "plugins")]
     #[arg(long, global = true, value_name = "NAME")]
@@ -306,10 +349,27 @@ pub struct Cli {
 impl Cli {
     /// Extract global options into CliContext
     #[allow(dead_code)] // For future command implementations
+    /// Build a CliContext from the parsed CLI options.
+    ///
+    /// Returns a new `CliContext` populated with the values from this `Cli` instance
+    /// (log and progress settings, workspace/config paths, secrets, and plugin list when enabled).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use clap::Parser;
+    /// // Parse CLI arguments (use just the program name to rely on defaults)
+    /// let cli = deacon::cli::Cli::parse_from(&["deacon"]);
+    /// let ctx = cli.context();
+    /// // Context should be constructed; workspace_folder is optional by default
+    /// assert!(ctx.workspace_folder.is_none());
+    /// ```
     pub fn context(&self) -> CliContext {
         CliContext {
             log_format: self.log_format.clone(),
             log_level: self.log_level.clone(),
+            progress_format: self.progress.clone(),
+            progress_file: self.progress_file.clone(),
             workspace_folder: self.workspace_folder.clone(),
             config: self.config.clone(),
             override_config: self.override_config.clone(),
@@ -320,6 +380,27 @@ impl Cli {
         }
     }
 
+    /// Dispatches the CLI subcommand represented by this `Cli` instance.
+    ///
+    /// Initializes logging and progress tracking according to the CLI options, then
+    /// executes the selected subcommand. Returns `Ok(())` on success or an error
+    /// propagated from the invoked command. If no subcommand is provided, a brief
+    /// help-like message is printed and `Ok(())` is returned. For the `up`
+    /// subcommand, a missing configuration file is mapped to a user-facing error
+    /// message ("No devcontainer.json found in workspace") to preserve CLI
+    /// compatibility.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use tokio::runtime::Runtime;
+    /// // Construct `Cli` via your preferred method (e.g., `Cli::parse()` or manual).
+    /// // let cli = Cli::parse_from(&["deacon", "build", "--no-cache"]);
+    /// // For demonstration, assume `cli` is available:
+    /// // let cli = ... ;
+    /// // Execute the dispatcher in a tokio runtime:
+    /// // Runtime::new().unwrap().block_on(cli.dispatch()).unwrap();
+    /// ```
     pub async fn dispatch(self) -> Result<()> {
         use deacon_core::errors::{ConfigError, DeaconError};
 
@@ -352,6 +433,17 @@ impl Cli {
             tracing::warn!("Secret redaction is DISABLED via --no-redact flag. This may expose sensitive information in logs and output. Use only for debugging purposes!");
         }
 
+        // Initialize progress tracking
+        let progress_format: deacon_core::progress::ProgressFormat = self.progress.clone().into();
+        let progress_tracker = deacon_core::progress::create_progress_tracker(
+            &progress_format,
+            self.progress_file.as_deref(),
+            self.workspace_folder.as_deref(),
+        )?;
+
+        // Convert to Arc<Mutex<Option<_>>> for sharing between operations
+        let progress_tracker = std::sync::Arc::new(std::sync::Mutex::new(progress_tracker));
+
         match self.command {
             Some(Commands::Up {
                 remove_existing_container,
@@ -378,6 +470,7 @@ impl Cli {
                     prefer_cli_features,
                     feature_install_order,
                     ignore_host_requirements,
+                    progress_tracker: progress_tracker.clone(),
                 };
 
                 match execute_up(args).await {
@@ -419,6 +512,7 @@ impl Cli {
                     prefer_cli_features,
                     feature_install_order,
                     ignore_host_requirements,
+                    progress_tracker: progress_tracker.clone(),
                 };
 
                 execute_build(args).await?;

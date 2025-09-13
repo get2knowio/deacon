@@ -21,6 +21,7 @@ pub mod logging;
 pub mod mount;
 pub mod oci;
 pub mod ports;
+pub mod progress;
 pub mod redaction;
 pub mod retry;
 pub mod secrets;

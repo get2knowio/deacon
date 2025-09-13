@@ -28,6 +28,27 @@ pub struct BuildArgs {
     pub prefer_cli_features: bool,
     pub feature_install_order: Option<String>,
     pub ignore_host_requirements: bool,
+    pub progress_tracker:
+        std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
+}
+
+impl Default for BuildArgs {
+    fn default() -> Self {
+        Self {
+            no_cache: false,
+            platform: None,
+            build_arg: Vec::new(),
+            force: false,
+            output_format: OutputFormat::Text,
+            workspace_folder: None,
+            config_path: None,
+            additional_features: None,
+            prefer_cli_features: false,
+            feature_install_order: None,
+            ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
 }
 
 /// Build configuration extracted from DevContainer config
@@ -58,11 +79,47 @@ pub struct BuildResult {
     pub config_hash: String,
 }
 
-/// Execute the build command
+/// Execute the build command.
+///
+/// Loads the DevContainer configuration (from the provided path or by discovery),
+/// validates host requirements, applies feature merges from CLI flags, and
+/// derives a build configuration. It computes a deterministic configuration
+/// hash, optionally uses a cached build result (unless `force` is set), and
+/// performs a Docker build when needed. Progress events (BuildBegin / BuildEnd)
+/// are emitted to the configured progress tracker and the build duration is
+/// recorded. The final `BuildResult` is cached and printed in the requested
+/// output format.
+///
+/// Errors are returned if configuration loading or validation fails, or if the
+/// underlying build (Docker) fails when that feature is enabled.
+///
+/// # Examples
+///
+/// ```no_run
+/// use deacon::commands::build::execute_build;
+/// use deacon::commands::build::BuildArgs;
+///
+/// // Run the build in an async context (example uses Tokio).
+/// #[tokio::main]
+/// async fn main() {
+///     let args = BuildArgs::default();
+///     let _ = execute_build(args).await;
+/// }
+/// ```
 #[instrument(skip(args))]
 pub async fn execute_build(args: BuildArgs) -> Result<()> {
     info!("Starting build command execution");
     debug!("Build args: {:?}", args);
+
+    // Initialize progress tracking
+    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
+        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
+            if let Some(ref mut tracker) = tracker_guard.as_mut() {
+                tracker.emit_event(event)?;
+            }
+        }
+        Ok(())
+    };
 
     // Load configuration
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
@@ -150,14 +207,44 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     }
 
     // Execute build
-    let start_time = Instant::now();
-    let result = execute_docker_build(&build_config, &args, &config_hash, workspace_folder).await?;
-    let build_duration = start_time.elapsed().as_secs_f64();
+    let build_start_time = Instant::now();
 
+    // Emit build begin event
+    emit_progress_event(deacon_core::progress::ProgressEvent::BuildBegin {
+        id: deacon_core::progress::ProgressTracker::next_event_id(),
+        timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+        context: build_config.context.clone(),
+        dockerfile: Some(build_config.dockerfile.clone()),
+    })?;
+
+    let result = execute_docker_build(&build_config, &args, &config_hash, workspace_folder).await;
+    let build_duration = build_start_time.elapsed();
+
+    // Emit build end event
+    let build_success = result.is_ok();
+    let image_id = result.as_ref().ok().map(|r| r.image_id.clone());
+
+    emit_progress_event(deacon_core::progress::ProgressEvent::BuildEnd {
+        id: deacon_core::progress::ProgressTracker::next_event_id(),
+        timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+        context: build_config.context.clone(),
+        duration_ms: build_duration.as_millis() as u64,
+        success: build_success,
+        image_id,
+    })?;
+
+    let result = result?;
+
+    // Record metrics
+    if let Ok(tracker_guard) = args.progress_tracker.lock() {
+        if let Some(tracker) = tracker_guard.as_ref() {
+            tracker.record_duration("build", build_duration);
+        }
+    }
     let final_result = BuildResult {
         image_id: result.image_id,
         tags: result.tags,
-        build_duration,
+        build_duration: build_duration.as_secs_f64(),
         metadata: result.metadata,
         config_hash: config_hash.clone(),
     };
@@ -167,6 +254,15 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     // Output result
     output_result(&final_result, &args.output_format)?;
+
+    // Output final summary in debug mode
+    if let Ok(tracker_guard) = args.progress_tracker.lock() {
+        if let Some(tracker) = tracker_guard.as_ref() {
+            if let Some(metrics_summary) = tracker.metrics_summary() {
+                debug!("Metrics summary: {:?}", metrics_summary);
+            }
+        }
+    }
 
     info!("Build command completed successfully");
     Ok(())
@@ -604,6 +700,7 @@ mod tests {
             prefer_cli_features: false,
             feature_install_order: None,
             ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
 
         // Verify args are structured correctly

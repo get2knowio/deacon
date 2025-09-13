@@ -109,11 +109,35 @@ Add to Pre-submission Checklist:
 - Check for missing imports, type errors, unused dependencies
 - Verify workspace configuration is correct
 
+### Doctest Failures (`cargo test --doc`)
+- **All documentation examples must compile and run successfully**
+- **Common doctest issues that cause CI failures:**
+  - Missing trait imports in doctest scope (e.g., `clap::Parser` for CLI parsing)
+  - Struct/enum missing `Default` implementations when used in examples
+  - Incorrect path references in doctests (`crate::` vs proper module paths)
+  - Function visibility issues (referencing private functions in public doctests)
+- **Prevention strategies:**
+  - Add required trait imports at the top of doctest examples
+  - Implement `Default` trait for structs used in doctests when appropriate
+  - Use proper module paths that work from external crate perspective
+  - Avoid referencing internal/private functions in public API doctests
+  - Test doctests locally with `cargo test --doc -p <crate>` before submitting
+- **Common fixes:**
+  ```rust
+  /// # Examples  
+  /// ```
+  /// use clap::Parser;  // Add missing trait import
+  /// use your_crate::SomeStruct;  // Use proper external path
+  /// let example = SomeStruct::default();  // Ensure Default is implemented
+  /// ```
+  ```
+
 **Pre-submission Checklist**:
 ```bash
 # Run this exact sequence after EVERY code change AND before every commit:
 cargo build --verbose
 cargo test --verbose -- --test-threads=1
+cargo test --doc  # Verify all doctests pass
 cargo fmt --all
 cargo fmt --all -- --check  # Must show "no changes required"
 cargo clippy --all-targets -- -D warnings

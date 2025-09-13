@@ -30,9 +30,58 @@ pub struct UpArgs {
     pub prefer_cli_features: bool,
     pub feature_install_order: Option<String>,
     pub ignore_host_requirements: bool,
+    pub progress_tracker:
+        std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
 }
 
-/// Execute the up command
+impl Default for UpArgs {
+    fn default() -> Self {
+        Self {
+            remove_existing_container: false,
+            skip_post_create: false,
+            skip_non_blocking_commands: false,
+            ports_events: false,
+            shutdown: false,
+            workspace_folder: None,
+            config_path: None,
+            additional_features: None,
+            prefer_cli_features: false,
+            feature_install_order: None,
+            ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+}
+
+/// Starts development containers for the current workspace according to the resolved devcontainer configuration.
+///
+/// This is the top-level entry point for the `up` command. It:
+/// - Loads or discovers the devcontainer configuration (from `args.config_path` or `args.workspace_folder`).
+/// - Validates host requirements (unless skipped via flags).
+/// - Optionally merges CLI-provided feature modifications into the effective configuration.
+/// - Creates a workspace container identity and initializes state tracking.
+/// - Delegates to either the Docker Compose flow or the single-container flow depending on the configuration.
+/// - Emits progress events to the optional shared progress tracker and logs a final metrics summary when available.
+///
+/// Returns Ok(()) on success; errors returned by configuration loading, host-requirements validation,
+/// feature merging, container/compose operations, or state management are propagated.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::PathBuf;
+/// use tokio::runtime::Runtime;
+/// use deacon::commands::up::UpArgs;
+///
+/// // Construct minimal arguments for a workspace at the current directory.
+/// let mut args = UpArgs::default();
+/// args.workspace_folder = Some(PathBuf::from("."));
+///
+/// let rt = Runtime::new().unwrap();
+/// rt.block_on(async {
+///     let _ = deacon::commands::up::execute_up(args).await;
+/// });
+/// ```
 #[instrument(skip(args))]
 pub async fn execute_up(args: UpArgs) -> Result<()> {
     info!("Starting up command execution");
@@ -122,7 +171,7 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
             &mut state_manager,
             &workspace_hash,
         )
-        .await
+        .await?;
     } else {
         execute_container_up(
             &config,
@@ -131,8 +180,19 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
             &mut state_manager,
             &workspace_hash,
         )
-        .await
+        .await?;
     }
+
+    // Output final metrics summary in debug mode
+    if let Ok(tracker_guard) = args.progress_tracker.lock() {
+        if let Some(tracker) = tracker_guard.as_ref() {
+            if let Some(metrics_summary) = tracker.metrics_summary() {
+                debug!("Final metrics summary: {:?}", metrics_summary);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Execute up for Docker Compose configurations
@@ -210,7 +270,31 @@ async fn execute_compose_up(
     Ok(())
 }
 
-/// Execute up for traditional container configurations
+/// Start and manage a single traditional development container for the given workspace.
+///
+/// This function ensures Docker is available, creates or reuses a container (deterministically
+/// named from the workspace and config), emits progress events when a shared progress tracker
+/// is provided, records timing metrics, saves runtime state for later shutdown handling, and
+/// runs configured user-mapping and lifecycle commands. Optionally emits port events and
+/// performs the configured shutdown action.
+///
+/// The function returns an error if Docker is unreachable, container creation/start fails,
+/// state persistence fails, or any lifecycle/post-create actions fail; errors are propagated
+/// through the returned `Result`.
+///
+/// Parameters:
+/// - `workspace_hash`: identifier used to persist workspace-specific runtime state.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// // Setup `config`, `workspace_folder`, `args`, and `state_manager` according to your test harness.
+/// // Then call the async function from a Tokio runtime:
+/// // tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// //     execute_container_up(&config, &workspace_folder, &args, &mut state_manager, &workspace_hash).await.unwrap();
+/// // });
+/// ```
 #[instrument(skip_all)]
 async fn execute_container_up(
     config: &DevContainerConfig,
@@ -220,6 +304,16 @@ async fn execute_container_up(
     workspace_hash: &str,
 ) -> Result<()> {
     info!("Starting traditional development container");
+
+    // Initialize progress tracking
+    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
+        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
+            if let Some(ref mut tracker) = tracker_guard.as_mut() {
+                tracker.emit_event(event)?;
+            }
+        }
+        Ok(())
+    };
 
     // Create container identity for deterministic naming and labels
     let identity = ContainerIdentity::new(workspace_folder, config);
@@ -231,6 +325,22 @@ async fn execute_container_up(
     // Check Docker availability
     docker.ping().await?;
 
+    // Emit container create begin event
+    emit_progress_event(deacon_core::progress::ProgressEvent::ContainerCreateBegin {
+        id: deacon_core::progress::ProgressTracker::next_event_id(),
+        timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+        name: identity
+            .name
+            .clone()
+            .unwrap_or_else(|| "unnamed".to_string()),
+        image: config
+            .image
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
+    })?;
+
+    let container_start_time = std::time::Instant::now();
+
     // Create container using DockerLifecycle trait
     use deacon_core::docker::DockerLifecycle;
     let container_result = docker
@@ -240,7 +350,36 @@ async fn execute_container_up(
             workspace_folder,
             args.remove_existing_container,
         )
-        .await?;
+        .await;
+
+    let container_duration = container_start_time.elapsed();
+    let container_success = container_result.is_ok();
+    let container_id = container_result
+        .as_ref()
+        .ok()
+        .map(|r| r.container_id.clone());
+
+    // Emit container create end event
+    emit_progress_event(deacon_core::progress::ProgressEvent::ContainerCreateEnd {
+        id: deacon_core::progress::ProgressTracker::next_event_id(),
+        timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+        name: identity
+            .name
+            .clone()
+            .unwrap_or_else(|| "unnamed".to_string()),
+        duration_ms: container_duration.as_millis() as u64,
+        success: container_success,
+        container_id,
+    })?;
+
+    // Record metrics
+    if let Ok(tracker_guard) = args.progress_tracker.lock() {
+        if let Some(tracker) = tracker_guard.as_ref() {
+            tracker.record_duration("container.create", container_duration);
+        }
+    }
+
+    let container_result = container_result?;
 
     info!(
         "Container {} {} (image: {})",
@@ -456,8 +595,41 @@ async fn apply_user_mapping(
     Ok(())
 }
 
-/// Execute lifecycle commands in the container
-#[instrument(skip(config, args))]
+/// Execute configured lifecycle phases inside a running container.
+///
+/// This runs the lifecycle command phases defined in `config` (onCreate, postCreate,
+/// postStart, postAttach) in that order, emitting per-phase progress events to
+/// `args.progress_tracker` when present and recording an overall lifecycle duration metric.
+///
+/// Parameters:
+/// - `container_id`: container identifier where commands will be executed.
+/// - `config`: devcontainer configuration containing lifecycle command definitions and environment.
+/// - `workspace_folder`: host path used to build the substitution context and to derive the container workspace path when not explicitly set in `config`.
+/// - `args`: runtime flags that influence execution (e.g., skipping post-create, non-blocking behavior) and an optional progress tracker.
+///
+/// Behavior notes:
+/// - Commands may be provided as a single string or an array in the config; non-string entries produce a configuration validation error.
+/// - Emits LifecyclePhaseBegin for each phase before execution and LifecyclePhaseEnd for each phase after execution (end events contain an approximate per-phase duration).
+/// - Records the total lifecycle duration under the metric name "lifecycle" if a progress tracker is available.
+/// - Returns any error produced by the underlying lifecycle executor.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use std::path::Path;
+/// use deacon::commands::up::UpArgs;
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// // Prepare inputs (placeholders shown; real values come from your application)
+/// let container_id = "container-123";
+/// let config = deacon_core::config::DevContainerConfig::default();
+/// let workspace_folder = Path::new("/path/to/workspace");
+/// let args = UpArgs::default();
+///
+/// // Execute lifecycle phases inside the container
+/// // Note: execute_lifecycle_commands is an internal function
+/// // This example shows the expected signature and usage pattern
+/// # Ok(()) }
+/// ```
 async fn execute_lifecycle_commands(
     container_id: &str,
     config: &DevContainerConfig,
@@ -470,6 +642,16 @@ async fn execute_lifecycle_commands(
     use deacon_core::variable::SubstitutionContext;
 
     info!("Executing lifecycle commands in container");
+
+    // Initialize progress tracking
+    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
+        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
+            if let Some(ref mut tracker) = tracker_guard.as_mut() {
+                tracker.emit_event(event)?;
+            }
+        }
+        Ok(())
+    };
 
     // Create substitution context
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
@@ -500,26 +682,75 @@ async fn execute_lifecycle_commands(
 
     // Build lifecycle commands from configuration
     let mut commands = ContainerLifecycleCommands::new();
+    let mut phases_to_execute = Vec::new();
 
     if let Some(ref on_create) = config.on_create_command {
-        commands = commands.with_on_create(commands_from_json_value(on_create)?);
+        let phase_commands = commands_from_json_value(on_create)?;
+        commands = commands.with_on_create(phase_commands.clone());
+        phases_to_execute.push(("onCreate".to_string(), phase_commands));
     }
 
     if let Some(ref post_create) = config.post_create_command {
-        commands = commands.with_post_create(commands_from_json_value(post_create)?);
+        let phase_commands = commands_from_json_value(post_create)?;
+        commands = commands.with_post_create(phase_commands.clone());
+        phases_to_execute.push(("postCreate".to_string(), phase_commands));
     }
 
     if let Some(ref post_start) = config.post_start_command {
-        commands = commands.with_post_start(commands_from_json_value(post_start)?);
+        let phase_commands = commands_from_json_value(post_start)?;
+        commands = commands.with_post_start(phase_commands.clone());
+        phases_to_execute.push(("postStart".to_string(), phase_commands));
     }
 
     if let Some(ref post_attach) = config.post_attach_command {
-        commands = commands.with_post_attach(commands_from_json_value(post_attach)?);
+        let phase_commands = commands_from_json_value(post_attach)?;
+        commands = commands.with_post_attach(phase_commands.clone());
+        phases_to_execute.push(("postAttach".to_string(), phase_commands));
     }
+
+    // Emit begin events for each phase
+    for (phase_name, phase_commands) in &phases_to_execute {
+        emit_progress_event(deacon_core::progress::ProgressEvent::LifecyclePhaseBegin {
+            id: deacon_core::progress::ProgressTracker::next_event_id(),
+            timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+            phase: phase_name.clone(),
+            commands: phase_commands.clone(),
+        })?;
+    }
+
+    let lifecycle_start_time = std::time::Instant::now();
 
     // Execute lifecycle commands
     let result =
-        execute_container_lifecycle(&lifecycle_config, &commands, &substitution_context).await?;
+        execute_container_lifecycle(&lifecycle_config, &commands, &substitution_context).await;
+
+    let lifecycle_duration = lifecycle_start_time.elapsed();
+    let lifecycle_success = result.is_ok();
+
+    // Emit end events for each phase (in reverse order since execution is complete)
+    let per_phase_ms = if phases_to_execute.is_empty() {
+        0
+    } else {
+        (lifecycle_duration.as_millis() as u64) / (phases_to_execute.len() as u64)
+    };
+    for (phase_name, _) in phases_to_execute.iter().rev() {
+        emit_progress_event(deacon_core::progress::ProgressEvent::LifecyclePhaseEnd {
+            id: deacon_core::progress::ProgressTracker::next_event_id(),
+            timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+            phase: phase_name.clone(),
+            duration_ms: per_phase_ms, // Approximate duration per phase
+            success: lifecycle_success,
+        })?;
+    }
+
+    // Record metrics
+    if let Ok(tracker_guard) = args.progress_tracker.lock() {
+        if let Some(tracker) = tracker_guard.as_ref() {
+            tracker.record_duration("lifecycle", lifecycle_duration);
+        }
+    }
+
+    let result = result?;
 
     info!(
         "Lifecycle execution completed: {} phases executed",
@@ -689,6 +920,7 @@ mod tests {
             prefer_cli_features: false,
             feature_install_order: None,
             ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
 
         assert!(args.remove_existing_container);
@@ -735,6 +967,7 @@ mod tests {
             prefer_cli_features: false,
             feature_install_order: None,
             ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
 
         assert!(args.remove_existing_container);
