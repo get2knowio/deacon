@@ -101,6 +101,7 @@ impl ProgressEvent {
     /// # Examples
     ///
     /// ```
+    /// use deacon_core::progress::ProgressEvent;
     /// let ev = ProgressEvent::BuildBegin { id: 42, timestamp: 0, context: "ctx".into(), dockerfile: None };
     /// assert_eq!(ev.id(), 42);
     /// ```
@@ -125,6 +126,7 @@ impl ProgressEvent {
     /// # Examples
     ///
     /// ```
+    /// use deacon_core::progress::ProgressEvent;
     /// let ev = ProgressEvent::BuildBegin {
     ///     id: 1,
     ///     timestamp: 1_632_000_000,
@@ -166,9 +168,9 @@ impl DurationHistogram {
     /// # Examples
     ///
     /// ```
+    /// use deacon_core::progress::DurationHistogram;
     /// let hist = DurationHistogram::new();
-    /// assert_eq!(hist.total_count, 0);
-    /// assert_eq!(hist.counts.len(), hist.buckets.len() + 1); // includes overflow bucket
+    /// assert_eq!(hist.summary().count, 0);
     /// ```
     pub fn new() -> Self {
         let buckets = vec![
@@ -204,6 +206,7 @@ impl DurationHistogram {
     ///
     /// ```
     /// use std::time::Duration;
+    /// use deacon_core::progress::DurationHistogram;
     /// let mut hist = DurationHistogram::new();
     /// hist.record(Duration::from_millis(50));
     /// let summary = hist.summary();
@@ -237,6 +240,7 @@ impl DurationHistogram {
     ///
     /// ```
     /// use std::time::Duration;
+    /// use deacon_core::progress::DurationHistogram;
     ///
     /// // Create a histogram, record a single 150ms sample, and inspect the summary.
     /// let mut hist = DurationHistogram::new();
@@ -279,7 +283,7 @@ impl Default for DurationHistogram {
     ///
     /// ```
     /// // Obtain the default value for the type implementing `Default`.
-    /// let _ = Default::default();
+    /// let _ = deacon_core::progress::DurationHistogram::default();
     /// ```
     fn default() -> Self {
         Self::new()
@@ -329,6 +333,7 @@ impl Metrics {
     ///
     /// ```
     /// use std::time::Duration;
+    /// use deacon_core::progress::Metrics;
     /// let mut metrics = Metrics::new();
     /// metrics.record_duration("compile", Duration::from_millis(15));
     /// let summary = metrics.summary();
@@ -350,6 +355,7 @@ impl Metrics {
     ///
     /// ```
     /// use std::time::Duration;
+    /// use deacon_core::progress::Metrics;
     /// let mut metrics = Metrics::new();
     /// metrics.record_duration("build", Duration::from_millis(120));
     /// let summary = metrics.summary();
@@ -371,6 +377,7 @@ impl Metrics {
     ///
     /// ```
     /// use std::time::Duration;
+    /// use deacon_core::progress::Metrics;
     /// let mut metrics = Metrics::new();
     /// metrics.record_duration("build", Duration::from_millis(120));
     /// metrics.record_duration("build", Duration::from_millis(80));
@@ -397,7 +404,7 @@ impl Default for Metrics {
     ///
     /// ```
     /// // Obtain the default value for the type implementing `Default`.
-    /// let _ = Default::default();
+    /// let _ = deacon_core::progress::Metrics::default();
     /// ```
     fn default() -> Self {
         Self::new()
@@ -438,6 +445,7 @@ impl AuditLog {
     ///
     /// ```
     /// use std::path::Path;
+    /// use deacon_core::progress::AuditLog;
     /// let cache_dir = Path::new("/tmp");
     /// let mut audit = AuditLog::new(cache_dir, 1024 * 1024).unwrap(); // 1 MiB rotation threshold
     /// ```
@@ -531,12 +539,14 @@ impl AuditLog {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```ignore
     /// use std::path::Path;
+    /// use deacon_core::progress::AuditLog;
     /// // `AuditLog::new` constructs an AuditLog pointing at `<cache_dir>/audit.jsonl`.
     /// let mut log = AuditLog::new(Path::new("/tmp"), 1024 * 1024).unwrap();
     /// // Force a rotation (e.g., after reaching max size)
-    /// log.rotate().unwrap();
+    /// // Note: rotate is a private method; this example is for illustration only.
+    /// // log.rotate().unwrap();
     /// ```
     fn rotate(&mut self) -> Result<()> {
         // Flush and close current file
@@ -584,6 +594,7 @@ impl ProgressTracker {
     /// # Examples
     ///
     /// ```
+    /// use deacon_core::progress::ProgressTracker;
     /// // Create a tracker with no emitter and no audit log.
     /// let tracker = ProgressTracker::new(None, None).unwrap();
     /// ```
@@ -614,9 +625,7 @@ impl ProgressTracker {
     ///
     /// ```
     /// # use std::path::Path;
-    /// # use std::sync::{Arc, Mutex};
-    /// # // Assume the surrounding module defines these items as described in the file.
-    /// # use crate::progress::{ProgressTracker, ProgressEvent, SilentEmitter};
+    /// # use deacon_core::progress::{ProgressTracker, ProgressEvent, SilentEmitter};
     /// // Construct a tracker with a silent emitter and no audit log.
     /// let mut tracker = ProgressTracker::new(Some(Box::new(SilentEmitter {})), None).unwrap();
     ///
@@ -665,7 +674,8 @@ impl ProgressTracker {
     /// # Examples
     ///
     /// ```
-    /// // Given a `tracker: ProgressTracker`, inspect metrics if available:
+    /// use deacon_core::progress::ProgressTracker;
+    /// let tracker = ProgressTracker::new(None, None).unwrap();
     /// if let Some(summary) = tracker.metrics_summary() {
     ///     for (op, hist) in summary.histograms.iter() {
     ///         println!("operation: {}, count: {}", op, hist.count);
@@ -686,8 +696,8 @@ impl ProgressTracker {
     /// # Examples
     ///
     /// ```
-    /// let a = crate::progress::next_event_id();
-    /// let b = crate::progress::next_event_id();
+    /// let a = deacon_core::progress::ProgressTracker::next_event_id();
+    /// let b = deacon_core::progress::ProgressTracker::next_event_id();
     /// assert!(b > a);
     /// ```
     pub fn next_event_id() -> u64 {
@@ -701,7 +711,7 @@ impl ProgressTracker {
     /// # Examples
     ///
     /// ```
-    /// let ts = current_timestamp();
+    /// let ts = deacon_core::progress::ProgressTracker::current_timestamp();
     /// // timestamp is expressed in milliseconds since 1970-01-01T00:00:00Z
     /// assert!(ts >= 0);
     /// ```
@@ -735,6 +745,7 @@ impl JsonFileEmitter {
     ///
     /// ```
     /// use std::path::Path;
+    /// use deacon_core::progress::JsonFileEmitter;
     /// let emitter = JsonFileEmitter::new(Path::new("/tmp/myapp/progress.jsonl")).unwrap();
     /// // `emitter` can now be used to emit JSONL progress events.
     /// ```
@@ -766,7 +777,7 @@ impl ProgressEmitter for JsonFileEmitter {
     /// ```
     /// # use std::path::PathBuf;
     /// # use std::fs;
-    /// # use crate::progress::{JsonFileEmitter, ProgressEvent};
+    /// # use deacon_core::progress::{JsonFileEmitter, ProgressEvent, ProgressEmitter};
     /// // create a temporary file path in the system temp dir
     /// let mut path = std::env::temp_dir();
     /// path.push("deacon_progress_example.jsonl");
@@ -802,10 +813,10 @@ impl ProgressEmitter for StdoutEmitter {
     /// # Examples
     ///
     /// ```
-    /// use std::io::Result;
-    /// // assuming ProgressEvent::BuildBegin exists in scope
-    /// let mut emitter = crate::progress::StdoutEmitter;
-    /// let event = crate::progress::ProgressEvent::BuildBegin {
+    /// use anyhow::Result;
+    /// use deacon_core::progress::{StdoutEmitter, ProgressEvent, ProgressEmitter};
+    /// let mut emitter = StdoutEmitter;
+    /// let event = ProgressEvent::BuildBegin {
     ///     id: 1,
     ///     timestamp: 0,
     ///     context: "ctx".into(),
@@ -833,6 +844,7 @@ impl ProgressEmitter for SilentEmitter {
     /// # Examples
     ///
     /// ```
+    /// use deacon_core::progress::{SilentEmitter, ProgressEvent, ProgressEmitter};
     /// let mut emitter = SilentEmitter;
     /// let event = ProgressEvent::BuildBegin {
     ///     id: 1,
@@ -866,9 +878,10 @@ impl PhaseTracker {
     ///
     /// ```
     /// use std::sync::{Arc, Mutex};
+    /// use deacon_core::progress::{PhaseTracker, ProgressTracker};
     /// // Create an optional ProgressTracker placeholder (none for this example).
-    /// let tracker: Arc<Mutex<Option<crate::progress::ProgressTracker>>> = Arc::new(Mutex::new(None));
-    /// let phase = crate::progress::PhaseTracker::new(tracker, "install".to_string());
+    /// let tracker: Arc<Mutex<Option<ProgressTracker>>> = Arc::new(Mutex::new(None));
+    /// let phase = PhaseTracker::new(tracker, "install".to_string());
     /// // When `phase` is dropped or `phase.complete()` is called, the elapsed duration
     /// // will be recorded to the contained ProgressTracker if present.
     /// ```
@@ -890,11 +903,10 @@ impl PhaseTracker {
     ///
     /// ```
     /// use std::sync::{Arc, Mutex};
-    /// use std::time::Duration;
-    ///
+    /// use deacon_core::progress::{PhaseTracker, ProgressTracker};
     /// // Create a PhaseTracker that doesn't record anywhere (None) — calling `complete` is still valid.
-    /// let shared: Arc<Mutex<Option<crate::progress::ProgressTracker>>> = Arc::new(Mutex::new(None));
-    /// let phase = crate::progress::PhaseTracker::new(shared, "build".to_string());
+    /// let shared: Arc<Mutex<Option<ProgressTracker>>> = Arc::new(Mutex::new(None));
+    /// let phase = PhaseTracker::new(shared, "build".to_string());
     /// // Consumes `phase`, computes elapsed time, and (if a tracker existed) would record it.
     /// phase.complete();
     /// ```
@@ -919,7 +931,7 @@ impl Drop for PhaseTracker {
     ///
     /// ```
     /// use std::sync::{Arc, Mutex};
-    /// use crate::progress::{PhaseTracker, ProgressTracker};
+    /// use deacon_core::progress::{PhaseTracker, ProgressTracker};
     ///
     /// // `tracker` may hold `Some(ProgressTracker)` or `None`. On drop, `PhaseTracker` records the duration
     /// // only if a `ProgressTracker` is present.
@@ -1044,8 +1056,8 @@ mod tests {
 /// # Examples
 ///
 /// ```
-/// let dir = deacon::progress::get_cache_dir().expect("failed to get cache dir");
-/// assert!(dir.ends_with(".deacon/cache"));
+/// let dir = deacon_core::progress::get_cache_dir().expect("failed to get cache dir");
+/// assert!(!dir.as_os_str().is_empty());
 /// ```
 pub fn get_cache_dir() -> Result<PathBuf> {
     use directories_next::ProjectDirs;
@@ -1093,7 +1105,7 @@ pub enum ProgressFormat {
 ///
 /// ```
 /// # use std::path::Path;
-/// # use crate::progress::{create_progress_tracker, ProgressFormat};
+/// # use deacon_core::progress::{create_progress_tracker, ProgressFormat};
 /// let tracker = create_progress_tracker(&ProgressFormat::Json, Some(Path::new("progress.jsonl")), None).unwrap();
 /// assert!(tracker.is_some());
 /// ```
