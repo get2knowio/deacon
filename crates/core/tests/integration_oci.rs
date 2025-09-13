@@ -182,7 +182,7 @@ echo "Installation completed"
     };
 
     // Create fetcher and test installation
-    let client = ReqwestClient::new();
+    let client = ReqwestClient::new().unwrap();
     let fetcher = FeatureFetcher::new(client);
 
     // Test the install operation
@@ -221,7 +221,7 @@ async fn test_oci_feature_install_no_script() {
     };
 
     // Create fetcher and test installation
-    let client = ReqwestClient::new();
+    let client = ReqwestClient::new().unwrap();
     let fetcher = FeatureFetcher::new(client);
 
     // Test the install operation - should succeed even without install.sh
