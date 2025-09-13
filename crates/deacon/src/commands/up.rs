@@ -34,6 +34,25 @@ pub struct UpArgs {
         std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
 }
 
+impl Default for UpArgs {
+    fn default() -> Self {
+        Self {
+            remove_existing_container: false,
+            skip_post_create: false,
+            skip_non_blocking_commands: false,
+            ports_events: false,
+            shutdown: false,
+            workspace_folder: None,
+            config_path: None,
+            additional_features: None,
+            prefer_cli_features: false,
+            feature_install_order: None,
+            ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+}
+
 /// Starts development containers for the current workspace according to the resolved devcontainer configuration.
 ///
 /// This is the top-level entry point for the `up` command. It:
@@ -52,9 +71,10 @@ pub struct UpArgs {
 /// ```no_run
 /// use std::path::PathBuf;
 /// use tokio::runtime::Runtime;
+/// use deacon::commands::up::UpArgs;
 ///
 /// // Construct minimal arguments for a workspace at the current directory.
-/// let mut args = deacon::commands::up::UpArgs::default();
+/// let mut args = UpArgs::default();
 /// args.workspace_folder = Some(PathBuf::from("."));
 ///
 /// let rt = Runtime::new().unwrap();
@@ -597,15 +617,17 @@ async fn apply_user_mapping(
 ///
 /// ```no_run
 /// # use std::path::Path;
+/// use deacon::commands::up::UpArgs;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// // Prepare inputs (placeholders shown; real values come from your application)
 /// let container_id = "container-123";
 /// let config = deacon_core::config::DevContainerConfig::default();
 /// let workspace_folder = Path::new("/path/to/workspace");
-/// let args = crate::commands::up::UpArgs::default();
+/// let args = UpArgs::default();
 ///
 /// // Execute lifecycle phases inside the container
-/// execute_lifecycle_commands(container_id, &config, workspace_folder, &args).await?;
+/// // Note: execute_lifecycle_commands is an internal function
+/// // This example shows the expected signature and usage pattern
 /// # Ok(()) }
 /// ```
 async fn execute_lifecycle_commands(

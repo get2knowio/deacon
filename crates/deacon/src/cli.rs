@@ -357,6 +357,7 @@ impl Cli {
     /// # Examples
     ///
     /// ```
+    /// use clap::Parser;
     /// // Parse CLI arguments (use just the program name to rely on defaults)
     /// let cli = deacon::cli::Cli::parse_from(&["deacon"]);
     /// let ctx = cli.context();

@@ -32,6 +32,25 @@ pub struct BuildArgs {
         std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
 }
 
+impl Default for BuildArgs {
+    fn default() -> Self {
+        Self {
+            no_cache: false,
+            platform: None,
+            build_arg: Vec::new(),
+            force: false,
+            output_format: OutputFormat::Text,
+            workspace_folder: None,
+            config_path: None,
+            additional_features: None,
+            prefer_cli_features: false,
+            feature_install_order: None,
+            ignore_host_requirements: false,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+}
+
 /// Build configuration extracted from DevContainer config
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildConfig {
