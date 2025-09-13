@@ -210,6 +210,15 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     // Output result
     output_result(&final_result, &args.output_format)?;
 
+    // Output final summary in debug mode
+    if let Ok(tracker_guard) = args.progress_tracker.lock() {
+        if let Some(ref tracker) = tracker_guard.as_ref() {
+            if let Some(metrics_summary) = tracker.metrics_summary() {
+                debug!("Metrics summary: {:?}", metrics_summary);
+            }
+        }
+    }
+
     info!("Build command completed successfully");
     Ok(())
 }

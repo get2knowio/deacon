@@ -423,6 +423,7 @@ impl Cli {
                     prefer_cli_features,
                     feature_install_order,
                     ignore_host_requirements,
+                    progress_tracker: progress_tracker.clone(),
                 };
 
                 match execute_up(args).await {
