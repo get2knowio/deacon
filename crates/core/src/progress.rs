@@ -94,7 +94,16 @@ pub enum ProgressEvent {
 }
 
 impl ProgressEvent {
-    /// Get the event ID
+    /// Returns the unique identifier for this event.
+    ///
+    /// Every `ProgressEvent` variant carries an `id` field; this method returns that id as a `u64`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = ProgressEvent::BuildBegin { id: 42, timestamp: 0, context: "ctx".into(), dockerfile: None };
+    /// assert_eq!(ev.id(), 42);
+    /// ```
     pub fn id(&self) -> u64 {
         match self {
             ProgressEvent::BuildBegin { id, .. } => *id,
@@ -108,7 +117,22 @@ impl ProgressEvent {
         }
     }
 
-    /// Get the event timestamp
+    /// Returns the event's timestamp in milliseconds since the Unix epoch.
+    ///
+    /// Every `ProgressEvent` variant carries a `timestamp` field; this accessor returns
+    /// that value for the event.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ev = ProgressEvent::BuildBegin {
+    ///     id: 1,
+    ///     timestamp: 1_632_000_000,
+    ///     context: "example".into(),
+    ///     dockerfile: None,
+    /// };
+    /// assert_eq!(ev.timestamp(), 1_632_000_000);
+    /// ```
     pub fn timestamp(&self) -> u64 {
         match self {
             ProgressEvent::BuildBegin { timestamp, .. } => *timestamp,
@@ -133,7 +157,19 @@ pub struct DurationHistogram {
 }
 
 impl DurationHistogram {
-    /// Create a new histogram with default buckets
+    /// Constructs a new `DurationHistogram` with a sensible set of default buckets.
+    ///
+    /// The histogram uses the following bucket thresholds (ascending): 10ms, 50ms, 100ms, 500ms,
+    /// 1s, 5s, 10s, 30s, 60s, 300s. An extra overflow bucket collects durations greater than the
+    /// largest threshold. All counters and totals are initialized to zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let hist = DurationHistogram::new();
+    /// assert_eq!(hist.total_count, 0);
+    /// assert_eq!(hist.counts.len(), hist.buckets.len() + 1); // includes overflow bucket
+    /// ```
     pub fn new() -> Self {
         let buckets = vec![
             Duration::from_millis(10),
@@ -157,7 +193,22 @@ impl DurationHistogram {
         }
     }
 
-    /// Record a duration
+    /// Records a measured duration into the histogram.
+    ///
+    /// Increments the histogram's total count and total duration, then assigns the duration
+    /// to the first bucket whose threshold is >= `duration`. If the duration exceeds all
+    /// configured bucket thresholds, it is counted in the overflow bucket (the final entry
+    /// in `counts`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// let mut hist = DurationHistogram::new();
+    /// hist.record(Duration::from_millis(50));
+    /// let summary = hist.summary();
+    /// assert_eq!(summary.count, 1);
+    /// ```
     pub fn record(&mut self, duration: Duration) {
         self.total_count += 1;
         self.total_duration += duration;
@@ -173,7 +224,29 @@ impl DurationHistogram {
         self.counts[bucket_index] += 1;
     }
 
-    /// Get summary statistics
+    /// Returns a serializable summary of the histogram's recorded durations.
+    ///
+    /// The returned `HistogramSummary` contains:
+    /// - `count`: total number of recorded samples.
+    /// - `total_duration`: sum of all recorded `Duration`s.
+    /// - `avg_duration`: average duration (zero if no samples).
+    /// - `buckets`: per-bucket counts where each `threshold_ms` is the bucket boundary in milliseconds.
+    /// - `overflow_count`: count of recordings that exceeded the largest bucket threshold.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// // Create a histogram, record a single 150ms sample, and inspect the summary.
+    /// let mut hist = DurationHistogram::new();
+    /// hist.record(Duration::from_millis(150));
+    /// let summary = hist.summary();
+    /// assert_eq!(summary.count, 1);
+    /// assert_eq!(summary.total_duration, Duration::from_millis(150));
+    /// assert_eq!(summary.avg_duration, Duration::from_millis(150));
+    /// // buckets and overflow_count reflect where 150ms falls relative to histogram thresholds
+    /// ```
     pub fn summary(&self) -> HistogramSummary {
         let avg_duration = if self.total_count > 0 {
             self.total_duration / self.total_count as u32
@@ -200,6 +273,14 @@ impl DurationHistogram {
 }
 
 impl Default for DurationHistogram {
+    /// Returns the default instance by delegating to `Self::new()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Obtain the default value for the type implementing `Default`.
+    /// let _ = Default::default();
+    /// ```
     fn default() -> Self {
         Self::new()
     }
@@ -229,21 +310,62 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    /// Create new metrics collection
+    /// Create a new, empty Metrics collection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// let mut metrics = Metrics::new();
+    /// metrics.record_duration("compile", Duration::from_millis(15));
+    /// let summary = metrics.summary();
+    /// assert!(summary.histograms.contains_key("compile"));
+    /// ```
     pub fn new() -> Self {
         Self {
             histograms: HashMap::new(),
         }
     }
 
-    /// Record a duration for a specific operation
+    /// Record a duration for the named operation into the in-memory histogram.
+    ///
+    /// If a histogram for `operation` does not yet exist, one is created. The provided
+    /// `duration` is added to that histogram's buckets and contributes to the overall
+    /// totals.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// let mut metrics = Metrics::new();
+    /// metrics.record_duration("build", Duration::from_millis(120));
+    /// let summary = metrics.summary();
+    /// assert!(summary.histograms.contains_key("build"));
+    /// ```
     pub fn record_duration(&mut self, operation: &str, duration: Duration) {
         let histogram = self.histograms.entry(operation.to_string()).or_default();
         histogram.record(duration);
         debug!("Recorded {} duration: {:?}", operation, duration);
     }
 
-    /// Get summary of all metrics
+    /// Returns a snapshot summary of all recorded histograms.
+    ///
+    /// Produces a MetricsSummary that maps each operation name to its corresponding
+    /// HistogramSummary. This does not modify the metrics collector; it only
+    /// aggregates the current state into a serializable summary.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// let mut metrics = Metrics::new();
+    /// metrics.record_duration("build", Duration::from_millis(120));
+    /// metrics.record_duration("build", Duration::from_millis(80));
+    /// let summary = metrics.summary();
+    /// assert!(summary.histograms.contains_key("build"));
+    /// let hs = &summary.histograms["build"];
+    /// assert_eq!(hs.count, 2);
+    /// ```
     pub fn summary(&self) -> MetricsSummary {
         MetricsSummary {
             histograms: self
@@ -256,6 +378,14 @@ impl Metrics {
 }
 
 impl Default for Metrics {
+    /// Returns the default instance by delegating to `Self::new()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Obtain the default value for the type implementing `Default`.
+    /// let _ = Default::default();
+    /// ```
     fn default() -> Self {
         Self::new()
     }
@@ -278,7 +408,26 @@ pub struct AuditLog {
 }
 
 impl AuditLog {
-    /// Create a new audit log with rotation
+    /// Create a new audit log backed by `cache_dir/audit.jsonl`, prepared for size-based rotation.
+    ///
+    /// Ensures the cache directory exists, opens (or creates) `audit.jsonl` in append mode, and
+    /// initializes the writer and current file size. The returned AuditLog will rotate the file
+    /// once written bytes reach `max_size`.
+    ///
+    /// # Parameters
+    /// - `cache_dir`: directory under which `audit.jsonl` will be created (parent directories are created if missing).
+    /// - `max_size`: rotation threshold in bytes; when `current_size` reaches or exceeds this value the log will be rotated.
+    ///
+    /// # Returns
+    /// Returns `Ok(AuditLog)` on success or an I/O error if directory creation or file operations fail.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// let cache_dir = Path::new("/tmp");
+    /// let mut audit = AuditLog::new(cache_dir, 1024 * 1024).unwrap(); // 1 MiB rotation threshold
+    /// ```
     pub fn new(cache_dir: &Path, max_size: u64) -> Result<Self> {
         let log_path = cache_dir.join("audit.jsonl");
 
@@ -304,7 +453,38 @@ impl AuditLog {
         })
     }
 
-    /// Write an event to the audit log
+    /// Appends a ProgressEvent to the audit log as a single JSON line, flushes the file,
+    /// updates the tracked file size, and rotates the log file if the size threshold is reached.
+    ///
+    /// The event is serialized with `serde_json::to_string` and written followed by a newline.
+    /// `current_size` is incremented by the serialized byte length plus one (for the newline).
+    /// If the updated `current_size` is greater than or equal to `max_size`, the log is rotated
+    /// via `rotate()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns any I/O or serialization errors produced while serializing, writing, flushing,
+    /// or performing rotation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// use deacon_core::progress::{AuditLog, ProgressEvent};
+    ///
+    /// // Create an AuditLog in a temp directory (error handling omitted for brevity)
+    /// let tmp = tempfile::tempdir().unwrap();
+    /// let mut audit = AuditLog::new(tmp.path(), 1024).unwrap();
+    ///
+    /// let event = ProgressEvent::BuildBegin {
+    ///     id: 1,
+    ///     timestamp: 0,
+    ///     context: "ctx".into(),
+    ///     dockerfile: None,
+    /// };
+    ///
+    /// audit.log_event(&event).unwrap();
+    /// ```
     #[instrument(skip(self))]
     pub fn log_event(&mut self, event: &ProgressEvent) -> Result<()> {
         let line = serde_json::to_string(event)?;
@@ -326,7 +506,25 @@ impl AuditLog {
         Ok(())
     }
 
-    /// Rotate the audit log file
+    /// Rotate the audit log file.
+    ///
+    /// This flushes and closes the current log writer, renames the active log file
+    /// (`audit.jsonl`) to `audit.jsonl.{rotation_count}`, creates a new empty
+    /// `audit.jsonl`, resets the in-memory current size counter to zero, and
+    /// increments the rotation counter.
+    ///
+    /// Returns any I/O or serialization error encountered while flushing, renaming,
+    /// or creating the new file.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    /// // `AuditLog::new` constructs an AuditLog pointing at `<cache_dir>/audit.jsonl`.
+    /// let mut log = AuditLog::new(Path::new("/tmp"), 1024 * 1024).unwrap();
+    /// // Force a rotation (e.g., after reaching max size)
+    /// log.rotate().unwrap();
+    /// ```
     fn rotate(&mut self) -> Result<()> {
         // Flush and close current file
         self.file.flush()?;
@@ -361,7 +559,21 @@ pub struct ProgressTracker {
 }
 
 impl ProgressTracker {
-    /// Create a new progress tracker with the specified emitter
+    /// Creates a new ProgressTracker.
+    ///
+    /// If `cache_dir` is `Some`, an AuditLog is created at `<cache_dir>/audit.jsonl` with a 10 MiB
+    /// rotation threshold; otherwise no audit logging is enabled. Passing `None` for `emitter`
+    /// disables external event emission (events will still be recorded to metrics and the audit log
+    /// if present).
+    ///
+    /// Returns an error if constructing the AuditLog fails (propagates IO/serialization errors).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Create a tracker with no emitter and no audit log.
+    /// let tracker = ProgressTracker::new(None, None).unwrap();
+    /// ```
     pub fn new(
         emitter: Option<Box<dyn ProgressEmitter>>,
         cache_dir: Option<&Path>,
@@ -379,7 +591,32 @@ impl ProgressTracker {
         })
     }
 
-    /// Emit a progress event
+    /// Dispatches a progress event to the configured emitter and the audit log.
+    ///
+    /// The event is forwarded to the optional `ProgressEmitter` (if configured) and
+    /// appended to the `AuditLog` (if configured). Returns an error if either
+    /// emission or audit logging fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::path::Path;
+    /// # use std::sync::{Arc, Mutex};
+    /// # // Assume the surrounding module defines these items as described in the file.
+    /// # use crate::progress::{ProgressTracker, ProgressEvent, SilentEmitter};
+    /// // Construct a tracker with a silent emitter and no audit log.
+    /// let mut tracker = ProgressTracker::new(Some(Box::new(SilentEmitter {})), None).unwrap();
+    ///
+    /// let event = ProgressEvent::BuildBegin {
+    ///     id: ProgressTracker::next_event_id(),
+    ///     timestamp: ProgressTracker::current_timestamp(),
+    ///     context: "example".into(),
+    ///     dockerfile: None,
+    /// };
+    ///
+    /// // Emit the event; with a SilentEmitter this should succeed and be a no-op.
+    /// tracker.emit_event(event).unwrap();
+    /// ```
     pub fn emit_event(&mut self, event: ProgressEvent) -> Result<()> {
         // Emit to configured emitter
         if let Some(ref mut emitter) = self.emitter {
@@ -394,24 +631,67 @@ impl ProgressTracker {
         Ok(())
     }
 
-    /// Record metrics for an operation
+    /// Records a duration for an operation into the tracker's in-memory metrics.
+    ///
+    /// The `operation` string is used as the histogram key; the duration is added to
+    /// that operation's histogram (created if absent). If the internal metrics
+    /// mutex cannot be acquired (for example, if it is poisoned), this call is a
+    /// no-op.
     pub fn record_duration(&self, operation: &str, duration: Duration) {
         if let Ok(mut metrics) = self.metrics.lock() {
             metrics.record_duration(operation, duration);
         }
     }
 
-    /// Get metrics summary
+    /// Returns a snapshot summary of recorded metrics.
+    ///
+    /// The returned `MetricsSummary` contains per-operation histogram summaries aggregated
+    /// at the time of the call. Returns `None` if the internal metrics mutex cannot be
+    /// locked (e.g., if it is poisoned).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Given a `tracker: ProgressTracker`, inspect metrics if available:
+    /// if let Some(summary) = tracker.metrics_summary() {
+    ///     for (op, hist) in summary.histograms.iter() {
+    ///         println!("operation: {}, count: {}", op, hist.count);
+    ///     }
+    /// }
+    /// ```
     pub fn metrics_summary(&self) -> Option<MetricsSummary> {
         self.metrics.lock().ok().map(|metrics| metrics.summary())
     }
 
-    /// Create a new event ID
+    /// Returns a unique event identifier and advances the global counter.
+    ///
+    /// This atomically reads and increments the global `EVENT_ID_COUNTER` using
+    /// sequentially consistent ordering, ensuring uniqueness across threads. The
+    /// function returns the identifier value before the increment (i.e., the
+    /// current counter value) and increments the counter for subsequent calls.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let a = crate::progress::next_event_id();
+    /// let b = crate::progress::next_event_id();
+    /// assert!(b > a);
+    /// ```
     pub fn next_event_id() -> u64 {
         EVENT_ID_COUNTER.fetch_add(1, Ordering::SeqCst)
     }
 
-    /// Get current timestamp in milliseconds since Unix epoch
+    /// Returns the current wall-clock time as milliseconds since the Unix epoch.
+    ///
+    /// If the system clock is earlier than the Unix epoch, this function returns 0.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let ts = current_timestamp();
+    /// // timestamp is expressed in milliseconds since 1970-01-01T00:00:00Z
+    /// assert!(ts >= 0);
+    /// ```
     pub fn current_timestamp() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -433,7 +713,18 @@ pub struct JsonFileEmitter {
 }
 
 impl JsonFileEmitter {
-    /// Create a new JSON file emitter
+    /// Create a new JsonFileEmitter that writes JSONL events to `file_path`.
+    ///
+    /// Ensures the parent directory exists, opens (or creates) the file in append mode,
+    /// and returns a buffered writer wrapped in a `JsonFileEmitter`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// let emitter = JsonFileEmitter::new(Path::new("/tmp/myapp/progress.jsonl")).unwrap();
+    /// // `emitter` can now be used to emit JSONL progress events.
+    /// ```
     pub fn new(file_path: &Path) -> Result<Self> {
         // Ensure the parent directory exists
         if let Some(parent) = file_path.parent() {
@@ -452,6 +743,31 @@ impl JsonFileEmitter {
 }
 
 impl ProgressEmitter for JsonFileEmitter {
+    /// Writes a ProgressEvent as a single JSON line to the emitter's file and flushes the writer.
+    ///
+    /// The event is serialized to JSON, written followed by a newline, and the underlying writer is flushed
+    /// before returning. Any serialization or I/O error is propagated via the returned `Result`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::path::PathBuf;
+    /// # use std::fs;
+    /// # use crate::progress::{JsonFileEmitter, ProgressEvent};
+    /// // create a temporary file path in the system temp dir
+    /// let mut path = std::env::temp_dir();
+    /// path.push("deacon_progress_example.jsonl");
+    /// let _ = fs::remove_file(&path); // ignore error if not present
+    ///
+    /// let mut emitter = JsonFileEmitter::new(&path).expect("create emitter");
+    /// let event = ProgressEvent::BuildBegin {
+    ///     id: 1,
+    ///     timestamp: 0,
+    ///     context: "ctx".into(),
+    ///     dockerfile: None,
+    /// };
+    /// emitter.emit(&event).expect("emit event");
+    /// ```
     fn emit(&mut self, event: &ProgressEvent) -> Result<()> {
         let line = serde_json::to_string(event)?;
         writeln!(self.writer, "{}", line)?;
@@ -465,6 +781,26 @@ impl ProgressEmitter for JsonFileEmitter {
 pub struct StdoutEmitter;
 
 impl ProgressEmitter for StdoutEmitter {
+    /// Emits a ProgressEvent to standard output as a single JSON line.
+    ///
+    /// Serializes `event` to JSON and writes it to stdout followed by a newline.
+    /// Returns any serialization error encountered.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Result;
+    /// // assuming ProgressEvent::BuildBegin exists in scope
+    /// let mut emitter = crate::progress::StdoutEmitter;
+    /// let event = crate::progress::ProgressEvent::BuildBegin {
+    ///     id: 1,
+    ///     timestamp: 0,
+    ///     context: "ctx".into(),
+    ///     dockerfile: None,
+    /// };
+    /// let res: Result<()> = emitter.emit(&event);
+    /// assert!(res.is_ok());
+    /// ```
     fn emit(&mut self, event: &ProgressEvent) -> Result<()> {
         let line = serde_json::to_string(event)?;
         println!("{}", line);
@@ -477,6 +813,22 @@ impl ProgressEmitter for StdoutEmitter {
 pub struct SilentEmitter;
 
 impl ProgressEmitter for SilentEmitter {
+    /// Silently discards a progress event.
+    ///
+    /// This implementation performs no action and always returns `Ok(())`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut emitter = SilentEmitter;
+    /// let event = ProgressEvent::BuildBegin {
+    ///     id: 1,
+    ///     timestamp: 0,
+    ///     context: "example".into(),
+    ///     dockerfile: None,
+    /// };
+    /// assert!(emitter.emit(&event).is_ok());
+    /// ```
     fn emit(&mut self, _event: &ProgressEvent) -> Result<()> {
         Ok(())
     }
@@ -491,7 +843,22 @@ pub struct PhaseTracker {
 }
 
 impl PhaseTracker {
-    /// Start tracking a phase
+    /// Creates a new PhaseTracker that records the start time of an operation.
+    ///
+    /// The returned tracker captures the current instant and will record the elapsed
+    /// duration to the associated `ProgressTracker` (if any) when completed or when
+    /// it is dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::{Arc, Mutex};
+    /// // Create an optional ProgressTracker placeholder (none for this example).
+    /// let tracker: Arc<Mutex<Option<crate::progress::ProgressTracker>>> = Arc::new(Mutex::new(None));
+    /// let phase = crate::progress::PhaseTracker::new(tracker, "install".to_string());
+    /// // When `phase` is dropped or `phase.complete()` is called, the elapsed duration
+    /// // will be recorded to the contained ProgressTracker if present.
+    /// ```
     pub fn new(tracker: Arc<Mutex<Option<ProgressTracker>>>, operation: String) -> Self {
         Self {
             tracker,
@@ -500,7 +867,24 @@ impl PhaseTracker {
         }
     }
 
-    /// Complete the phase and record duration
+    /// Completes the tracked phase and records its elapsed duration into the associated tracker.
+    ///
+    /// This consumes the PhaseTracker, computes the elapsed time since it was created, and — if the
+    /// underlying shared tracker is present — records the duration under the tracker’s operation name.
+    /// Failures to acquire the internal mutex or a missing tracker are silently ignored.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::{Arc, Mutex};
+    /// use std::time::Duration;
+    ///
+    /// // Create a PhaseTracker that doesn't record anywhere (None) — calling `complete` is still valid.
+    /// let shared: Arc<Mutex<Option<crate::progress::ProgressTracker>>> = Arc::new(Mutex::new(None));
+    /// let phase = crate::progress::PhaseTracker::new(shared, "build".to_string());
+    /// // Consumes `phase`, computes elapsed time, and (if a tracker existed) would record it.
+    /// phase.complete();
+    /// ```
     pub fn complete(self) {
         let duration = self.start_time.elapsed();
         if let Ok(tracker_guard) = self.tracker.lock() {
@@ -512,6 +896,25 @@ impl PhaseTracker {
 }
 
 impl Drop for PhaseTracker {
+    /// Records the elapsed time for this phase into the associated `ProgressTracker` when the `PhaseTracker` is dropped.
+    ///
+    /// If a `ProgressTracker` is available inside the shared `Arc<Mutex<Option<ProgressTracker>>>` it will record the elapsed
+    /// duration for the operation name held by this tracker. If no tracker is present or the mutex cannot be locked, this
+    /// drop handler is a no-op.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::{Arc, Mutex};
+    /// use crate::progress::{PhaseTracker, ProgressTracker};
+    ///
+    /// // `tracker` may hold `Some(ProgressTracker)` or `None`. On drop, `PhaseTracker` records the duration
+    /// // only if a `ProgressTracker` is present.
+    /// let tracker: Arc<Mutex<Option<ProgressTracker>>> = Arc::new(Mutex::new(None));
+    /// {
+    ///     let _phase = PhaseTracker::new(tracker.clone(), "build".to_string());
+    /// } // `_phase` is dropped here; duration is recorded if a ProgressTracker was set
+    /// ```
     fn drop(&mut self) {
         let duration = self.start_time.elapsed();
         if let Ok(tracker_guard) = self.tracker.lock() {
@@ -615,7 +1018,22 @@ mod tests {
     }
 }
 
-/// Get the default cache directory for deacon
+/// Returns the default cache directory for Deacon, creating it if necessary.
+///
+/// Chooses `$HOME/.deacon/cache` when the user's home directory can be determined;
+/// otherwise falls back to `./.deacon/cache` relative to the current working directory.
+/// The directory is created with `create_dir_all` if it does not already exist.
+///
+/// # Errors
+///
+/// Returns an `Err` if the directory cannot be created or if filesystem operations fail.
+///
+/// # Examples
+///
+/// ```
+/// let dir = deacon::progress::get_cache_dir().expect("failed to get cache dir");
+/// assert!(dir.ends_with(".deacon/cache"));
+/// ```
 pub fn get_cache_dir() -> Result<PathBuf> {
     let cache_dir = if let Some(home) = dirs::home_dir() {
         home.join(".deacon").join("cache")
@@ -639,7 +1057,31 @@ pub enum ProgressFormat {
     Auto,
 }
 
-/// Create progress tracker based on CLI configuration
+/// Create a ProgressTracker configured from CLI options.
+///
+/// The chosen `ProgressFormat` and optional `progress_file` determine which
+/// `ProgressEmitter` (if any) is attached:
+/// - `ProgressFormat::None` -> no emitter (silent).
+/// - `ProgressFormat::Json` -> writes JSON lines to `progress_file` if provided,
+///   otherwise to stdout.
+/// - `ProgressFormat::Auto` -> writes JSON lines to `progress_file` if provided;
+///   otherwise remains silent (TTY-based progress UI may be added later).
+///
+/// The function also acquires or creates the default cache directory via
+/// `get_cache_dir()` and uses it when constructing the tracker. If `progress_file`
+/// points to a path that cannot be created or opened, or if any I/O/serialization
+/// error occurs while building the emitter or audit log, an error is returned.
+///
+/// The `_workspace_folder` parameter is currently unused and reserved for future use.
+///
+/// # Examples
+///
+/// ```
+/// # use std::path::Path;
+/// # use crate::progress::{create_progress_tracker, ProgressFormat};
+/// let tracker = create_progress_tracker(&ProgressFormat::Json, Some(Path::new("progress.jsonl")), None).unwrap();
+/// assert!(tracker.is_some());
+/// ```
 pub fn create_progress_tracker(
     format: &ProgressFormat,
     progress_file: Option<&Path>,

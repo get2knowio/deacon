@@ -34,7 +34,34 @@ pub struct UpArgs {
         std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
 }
 
-/// Execute the up command
+/// Starts development containers for the current workspace according to the resolved devcontainer configuration.
+///
+/// This is the top-level entry point for the `up` command. It:
+/// - Loads or discovers the devcontainer configuration (from `args.config_path` or `args.workspace_folder`).
+/// - Validates host requirements (unless skipped via flags).
+/// - Optionally merges CLI-provided feature modifications into the effective configuration.
+/// - Creates a workspace container identity and initializes state tracking.
+/// - Delegates to either the Docker Compose flow or the single-container flow depending on the configuration.
+/// - Emits progress events to the optional shared progress tracker and logs a final metrics summary when available.
+///
+/// Returns Ok(()) on success; errors returned by configuration loading, host-requirements validation,
+/// feature merging, container/compose operations, or state management are propagated.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::PathBuf;
+/// use tokio::runtime::Runtime;
+///
+/// // Construct minimal arguments for a workspace at the current directory.
+/// let mut args = deacon::commands::up::UpArgs::default();
+/// args.workspace_folder = Some(PathBuf::from("."));
+///
+/// let rt = Runtime::new().unwrap();
+/// rt.block_on(async {
+///     let _ = deacon::commands::up::execute_up(args).await;
+/// });
+/// ```
 #[instrument(skip(args))]
 pub async fn execute_up(args: UpArgs) -> Result<()> {
     info!("Starting up command execution");
@@ -233,7 +260,31 @@ async fn execute_compose_up(
     Ok(())
 }
 
-/// Execute up for traditional container configurations
+/// Start and manage a single traditional development container for the given workspace.
+///
+/// This function ensures Docker is available, creates or reuses a container (deterministically
+/// named from the workspace and config), emits progress events when a shared progress tracker
+/// is provided, records timing metrics, saves runtime state for later shutdown handling, and
+/// runs configured user-mapping and lifecycle commands. Optionally emits port events and
+/// performs the configured shutdown action.
+///
+/// The function returns an error if Docker is unreachable, container creation/start fails,
+/// state persistence fails, or any lifecycle/post-create actions fail; errors are propagated
+/// through the returned `Result`.
+///
+/// Parameters:
+/// - `workspace_hash`: identifier used to persist workspace-specific runtime state.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// // Setup `config`, `workspace_folder`, `args`, and `state_manager` according to your test harness.
+/// // Then call the async function from a Tokio runtime:
+/// // tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// //     execute_container_up(&config, &workspace_folder, &args, &mut state_manager, &workspace_hash).await.unwrap();
+/// // });
+/// ```
 #[instrument(skip_all)]
 async fn execute_container_up(
     config: &DevContainerConfig,
@@ -534,8 +585,39 @@ async fn apply_user_mapping(
     Ok(())
 }
 
-/// Execute lifecycle commands in the container
-#[instrument(skip(config, args))]
+/// Execute configured lifecycle phases inside a running container.
+///
+/// This runs the lifecycle command phases defined in `config` (onCreate, postCreate,
+/// postStart, postAttach) in that order, emitting per-phase progress events to
+/// `args.progress_tracker` when present and recording an overall lifecycle duration metric.
+///
+/// Parameters:
+/// - `container_id`: container identifier where commands will be executed.
+/// - `config`: devcontainer configuration containing lifecycle command definitions and environment.
+/// - `workspace_folder`: host path used to build the substitution context and to derive the container workspace path when not explicitly set in `config`.
+/// - `args`: runtime flags that influence execution (e.g., skipping post-create, non-blocking behavior) and an optional progress tracker.
+///
+/// Behavior notes:
+/// - Commands may be provided as a single string or an array in the config; non-string entries produce a configuration validation error.
+/// - Emits LifecyclePhaseBegin for each phase before execution and LifecyclePhaseEnd for each phase after execution (end events contain an approximate per-phase duration).
+/// - Records the total lifecycle duration under the metric name "lifecycle" if a progress tracker is available.
+/// - Returns any error produced by the underlying lifecycle executor.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use std::path::Path;
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// // Prepare inputs (placeholders shown; real values come from your application)
+/// let container_id = "container-123";
+/// let config = deacon_core::config::DevContainerConfig::default();
+/// let workspace_folder = Path::new("/path/to/workspace");
+/// let args = crate::commands::up::UpArgs::default();
+///
+/// // Execute lifecycle phases inside the container
+/// execute_lifecycle_commands(container_id, &config, workspace_folder, &args).await?;
+/// # Ok(()) }
+/// ```
 async fn execute_lifecycle_commands(
     container_id: &str,
     config: &DevContainerConfig,

@@ -60,7 +60,33 @@ pub struct BuildResult {
     pub config_hash: String,
 }
 
-/// Execute the build command
+/// Execute the build command.
+///
+/// Loads the DevContainer configuration (from the provided path or by discovery),
+/// validates host requirements, applies feature merges from CLI flags, and
+/// derives a build configuration. It computes a deterministic configuration
+/// hash, optionally uses a cached build result (unless `force` is set), and
+/// performs a Docker build when needed. Progress events (BuildBegin / BuildEnd)
+/// are emitted to the configured progress tracker and the build duration is
+/// recorded. The final `BuildResult` is cached and printed in the requested
+/// output format.
+///
+/// Errors are returned if configuration loading or validation fails, or if the
+/// underlying build (Docker) fails when that feature is enabled.
+///
+/// # Examples
+///
+/// ```no_run
+/// use deacon::commands::build::execute_build;
+/// use deacon::commands::build::BuildArgs;
+///
+/// // Run the build in an async context (example uses Tokio).
+/// #[tokio::main]
+/// async fn main() {
+///     let args = BuildArgs::default();
+///     let _ = execute_build(args).await;
+/// }
+/// ```
 #[instrument(skip(args))]
 pub async fn execute_build(args: BuildArgs) -> Result<()> {
     info!("Starting build command execution");
