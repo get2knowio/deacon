@@ -808,6 +808,18 @@ impl ContainerOps for CliDocker {
             args.extend(mount.to_docker_args());
         }
 
+        // Add security options from configuration (centralized)
+        {
+            use crate::security::SecurityOptions;
+            let security = SecurityOptions {
+                privileged: config.privileged.unwrap_or(false),
+                cap_add: config.cap_add.clone(),
+                security_opt: config.security_opt.clone(),
+                conflicts: Vec::new(),
+            };
+            args.extend(security.to_docker_args());
+        }
+
         // Add runArgs if present
         args.extend(config.run_args.iter().cloned());
 

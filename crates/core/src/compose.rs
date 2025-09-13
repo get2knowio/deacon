@@ -147,6 +147,45 @@ impl ComposeCommand {
         self.execute(&args)
     }
 
+    /// Warn about security options that cannot be applied dynamically in Docker Compose
+    pub fn warn_security_options_for_compose(config: &DevContainerConfig) {
+        // TODO: In the future, this should accept features parameter to check feature-derived options too
+        use crate::security::SecurityOptions;
+
+        // For now, only check config options. Features would require access to resolved features.
+        let security = SecurityOptions {
+            privileged: config.privileged.unwrap_or(false),
+            cap_add: SecurityOptions::normalize_capabilities(&config.cap_add),
+            security_opt: SecurityOptions::normalize_security_opts(&config.security_opt),
+            conflicts: Vec::new(),
+        };
+
+        if security.has_security_options() {
+            warn!("Security options detected in configuration for Docker Compose:");
+
+            if security.privileged {
+                warn!("  - privileged mode must be defined in docker-compose.yml file");
+            }
+
+            if !security.cap_add.is_empty() {
+                warn!(
+                    "  - capabilities ({:?}) must be defined in docker-compose.yml file",
+                    security.cap_add
+                );
+            }
+
+            if !security.security_opt.is_empty() {
+                warn!(
+                    "  - security options ({:?}) must be defined in docker-compose.yml file",
+                    security.security_opt
+                );
+            }
+
+            warn!("Security options from devcontainer.json cannot be applied dynamically to Docker Compose services.");
+            warn!("Please add these options to your docker-compose.yml service definition.");
+        }
+    }
+
     /// Stop and remove containers
     #[instrument(skip(self))]
     pub fn down(&self) -> Result<String> {
@@ -488,5 +527,25 @@ mod tests {
         // Test stopCompose shutdown action
         config.shutdown_action = Some("stopCompose".to_string());
         assert!(config.has_stop_compose_shutdown());
+    }
+
+    #[test]
+    fn test_security_options_warning_for_compose() {
+        // Test config with security options
+        let config = DevContainerConfig {
+            privileged: Some(true),
+            cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
+            security_opt: vec!["seccomp=unconfined".to_string()],
+            ..Default::default()
+        };
+
+        // This should log warnings - in a real test we'd capture logs
+        ComposeCommand::warn_security_options_for_compose(&config);
+
+        // Test config without security options
+        let empty_config = DevContainerConfig::default();
+
+        // This should not log any warnings
+        ComposeCommand::warn_security_options_for_compose(&empty_config);
     }
 }

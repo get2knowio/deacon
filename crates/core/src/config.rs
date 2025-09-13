@@ -482,6 +482,24 @@ pub struct DevContainerConfig {
     /// must meet to successfully run the development container.
     #[serde(rename = "hostRequirements")]
     pub host_requirements: Option<HostRequirements>,
+
+    /// Whether to run the container in privileged mode.
+    ///
+    /// Reference: [Container Configuration - privileged](https://containers.dev/implementors/json_reference/#privileged)
+    #[serde(default)]
+    pub privileged: Option<bool>,
+
+    /// Linux capabilities to add to the container.
+    ///
+    /// Reference: [Container Configuration - capAdd](https://containers.dev/implementors/json_reference/#cap-add)
+    #[serde(default, rename = "capAdd")]
+    pub cap_add: Vec<String>,
+
+    /// Security options for the container.
+    ///
+    /// Reference: [Container Configuration - securityOpt](https://containers.dev/implementors/json_reference/#security-opt)
+    #[serde(default, rename = "securityOpt")]
+    pub security_opt: Vec<String>,
 }
 
 impl DevContainerConfig {
@@ -738,6 +756,9 @@ impl Default for DevContainerConfig {
             initialize_command: None,
             update_content_command: None,
             host_requirements: None,
+            privileged: None,
+            cap_add: Vec::new(),
+            security_opt: Vec::new(),
         }
     }
 }
@@ -910,6 +931,11 @@ impl ConfigMerger {
                 .host_requirements
                 .clone()
                 .or_else(|| base.host_requirements.clone()),
+
+            // Security options: last writer wins for privileged, concatenate arrays for capabilities and security opts
+            privileged: overlay.privileged.or(base.privileged),
+            cap_add: Self::concat_string_arrays(&base.cap_add, &overlay.cap_add),
+            security_opt: Self::concat_string_arrays(&base.security_opt, &overlay.security_opt),
         }
     }
 
@@ -1460,6 +1486,10 @@ impl ConfigLoader {
             "postAttachCommand",
             "initializeCommand",
             "updateContentCommand",
+            "hostRequirements",
+            "privileged",
+            "capAdd",
+            "securityOpt",
         ];
 
         for key in obj.keys() {
