@@ -25,6 +25,7 @@ pub mod progress;
 pub mod redaction;
 pub mod retry;
 pub mod secrets;
+pub mod security;
 pub mod state;
 
 #[cfg(feature = "plugins")]

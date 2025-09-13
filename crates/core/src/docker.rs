@@ -808,6 +808,23 @@ impl ContainerOps for CliDocker {
             args.extend(mount.to_docker_args());
         }
 
+        // Add security options from configuration
+        if let Some(privileged) = config.privileged {
+            if privileged {
+                args.push("--privileged".to_string());
+            }
+        }
+
+        for cap in &config.cap_add {
+            args.push("--cap-add".to_string());
+            args.push(cap.clone());
+        }
+
+        for security_opt in &config.security_opt {
+            args.push("--security-opt".to_string());
+            args.push(security_opt.clone());
+        }
+
         // Add runArgs if present
         args.extend(config.run_args.iter().cloned());
 
