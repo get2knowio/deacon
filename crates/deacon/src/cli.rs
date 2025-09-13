@@ -217,14 +217,34 @@ pub enum FeatureCommands {
 }
 
 /// Template management subcommands
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub enum TemplateCommands {
     /// Apply template to current project
     Apply { template: String },
     /// Publish templates to registry
-    Publish { target: String },
+    Publish {
+        /// Path to template directory to publish
+        path: String,
+        /// Target registry URL
+        #[arg(long)]
+        registry: String,
+        /// Dry run (don't actually publish)
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Get template metadata
-    Metadata { template_id: String },
+    Metadata {
+        /// Path to template directory
+        path: String,
+    },
+    /// Generate template documentation
+    GenerateDocs {
+        /// Path to template directory
+        path: String,
+        /// Output directory for generated documentation
+        #[arg(long)]
+        output: String,
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -426,11 +446,16 @@ impl Cli {
 
                 execute_features(args).await
             }
-            Some(Commands::Templates { .. }) => {
-                Err(DeaconError::Config(ConfigError::NotImplemented {
-                    feature: "templates command".to_string(),
-                })
-                .into())
+            Some(Commands::Templates { command }) => {
+                use crate::commands::templates::{execute_templates, TemplatesArgs};
+
+                let args = TemplatesArgs {
+                    command,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
+
+                execute_templates(args).await
             }
             Some(Commands::RunUserCommands { .. }) => {
                 Err(DeaconError::Config(ConfigError::NotImplemented {
