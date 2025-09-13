@@ -216,6 +216,5 @@ fn test_event_ordering() {
 
     assert!(id2 > id1, "Event IDs should be incremental");
     assert!(id3 > id2, "Event IDs should be incremental");
-    assert_eq!(id2, id1 + 1, "Event IDs should be consecutive");
-    assert_eq!(id3, id2 + 1, "Event IDs should be consecutive");
+    // Do not assert strict consecutiveness; other tests may interleave emissions.
 }

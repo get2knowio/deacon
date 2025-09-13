@@ -287,19 +287,32 @@ impl Default for DurationHistogram {
 }
 
 /// Summary statistics for a histogram
+/// Summary of a duration histogram containing aggregated statistics
+///
+/// Contains the total number of recorded events, total and average duration,
+/// per-bucket counts, and overflow statistics for events exceeding the largest bucket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistogramSummary {
+    /// Total number of events recorded
     pub count: u64,
+    /// Sum of all recorded durations
     pub total_duration: Duration,
+    /// Average duration per event
     pub avg_duration: Duration,
+    /// Per-bucket statistics
     pub buckets: Vec<BucketSummary>,
+    /// Number of events that exceeded the largest bucket threshold
     pub overflow_count: u64,
 }
 
-/// Summary for a single histogram bucket
+/// Summary for a single histogram bucket containing threshold and count
+///
+/// Each bucket represents events with duration less than or equal to the threshold.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BucketSummary {
+    /// Maximum duration (in milliseconds) for events in this bucket
     pub threshold_ms: u64,
+    /// Number of events that fall within this bucket
     pub count: u64,
 }
 
@@ -1035,8 +1048,10 @@ mod tests {
 /// assert!(dir.ends_with(".deacon/cache"));
 /// ```
 pub fn get_cache_dir() -> Result<PathBuf> {
-    let cache_dir = if let Some(home) = dirs::home_dir() {
-        home.join(".deacon").join("cache")
+    use directories_next::ProjectDirs;
+
+    let cache_dir = if let Some(proj_dirs) = ProjectDirs::from("io", "get2know", "deacon") {
+        proj_dirs.cache_dir().join("deacon").join("cache")
     } else {
         PathBuf::from(".deacon").join("cache")
     };

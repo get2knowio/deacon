@@ -67,16 +67,6 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
     info!("Starting up command execution");
     debug!("Up args: {:?}", args);
 
-    // Initialize progress tracking
-    let _emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
-            if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                tracker.emit_event(event)?;
-            }
-        }
-        Ok(())
-    };
-
     // Load configuration
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
@@ -716,12 +706,17 @@ async fn execute_lifecycle_commands(
     let lifecycle_success = result.is_ok();
 
     // Emit end events for each phase (in reverse order since execution is complete)
+    let per_phase_ms = if phases_to_execute.is_empty() {
+        0
+    } else {
+        (lifecycle_duration.as_millis() as u64) / (phases_to_execute.len() as u64)
+    };
     for (phase_name, _) in phases_to_execute.iter().rev() {
         emit_progress_event(deacon_core::progress::ProgressEvent::LifecyclePhaseEnd {
             id: deacon_core::progress::ProgressTracker::next_event_id(),
             timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
             phase: phase_name.clone(),
-            duration_ms: lifecycle_duration.as_millis() as u64 / phases_to_execute.len() as u64, // Approximate duration per phase
+            duration_ms: per_phase_ms, // Approximate duration per phase
             success: lifecycle_success,
         })?;
     }

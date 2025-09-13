@@ -42,7 +42,7 @@ pub enum ProgressFormat {
     None,
     /// JSON structured progress events
     Json,
-    /// Auto mode: spinner/text to TTY, JSON to file if specified
+    /// Auto mode: silent unless --progress-file is set (future: TTY spinner)
     Auto,
 }
 
@@ -328,7 +328,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_redact: bool,
 
-    /// Progress format (json, none, or auto)
+    /// Progress format (json|none|auto). Auto is silent unless --progress-file is set.
     #[arg(long, global = true, value_enum, default_value = "auto")]
     pub progress: ProgressFormat,
 
@@ -433,8 +433,9 @@ impl Cli {
         }
 
         // Initialize progress tracking
+        let progress_format: deacon_core::progress::ProgressFormat = self.progress.clone().into();
         let progress_tracker = deacon_core::progress::create_progress_tracker(
-            &self.progress.clone().into(),
+            &progress_format,
             self.progress_file.as_deref(),
             self.workspace_folder.as_deref(),
         )?;
