@@ -47,6 +47,16 @@ pub enum ProgressFormat {
 }
 
 impl From<ProgressFormat> for deacon_core::progress::ProgressFormat {
+    /// Convert this crate's `ProgressFormat` into the corresponding
+    /// `deacon_core::progress::ProgressFormat`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deacon::cli::ProgressFormat;
+    /// let core: deacon_core::progress::ProgressFormat = ProgressFormat::Json.into();
+    /// assert_eq!(core, deacon_core::progress::ProgressFormat::Json);
+    /// ```
     fn from(format: ProgressFormat) -> Self {
         match format {
             ProgressFormat::None => deacon_core::progress::ProgressFormat::None,
@@ -339,6 +349,20 @@ pub struct Cli {
 impl Cli {
     /// Extract global options into CliContext
     #[allow(dead_code)] // For future command implementations
+    /// Build a CliContext from the parsed CLI options.
+    ///
+    /// Returns a new `CliContext` populated with the values from this `Cli` instance
+    /// (log and progress settings, workspace/config paths, secrets, and plugin list when enabled).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Parse CLI arguments (use just the program name to rely on defaults)
+    /// let cli = deacon::cli::Cli::parse_from(&["deacon"]);
+    /// let ctx = cli.context();
+    /// // Context should be constructed; workspace_folder is optional by default
+    /// assert!(ctx.workspace_folder.is_none());
+    /// ```
     pub fn context(&self) -> CliContext {
         CliContext {
             log_format: self.log_format.clone(),
@@ -355,6 +379,27 @@ impl Cli {
         }
     }
 
+    /// Dispatches the CLI subcommand represented by this `Cli` instance.
+    ///
+    /// Initializes logging and progress tracking according to the CLI options, then
+    /// executes the selected subcommand. Returns `Ok(())` on success or an error
+    /// propagated from the invoked command. If no subcommand is provided, a brief
+    /// help-like message is printed and `Ok(())` is returned. For the `up`
+    /// subcommand, a missing configuration file is mapped to a user-facing error
+    /// message ("No devcontainer.json found in workspace") to preserve CLI
+    /// compatibility.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use tokio::runtime::Runtime;
+    /// // Construct `Cli` via your preferred method (e.g., `Cli::parse()` or manual).
+    /// // let cli = Cli::parse_from(&["deacon", "build", "--no-cache"]);
+    /// // For demonstration, assume `cli` is available:
+    /// // let cli = ... ;
+    /// // Execute the dispatcher in a tokio runtime:
+    /// // Runtime::new().unwrap().block_on(cli.dispatch()).unwrap();
+    /// ```
     pub async fn dispatch(self) -> Result<()> {
         use deacon_core::errors::{ConfigError, DeaconError};
 
