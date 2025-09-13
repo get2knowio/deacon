@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// Build command arguments
 #[derive(Debug, Clone)]
@@ -27,6 +27,7 @@ pub struct BuildArgs {
     pub additional_features: Option<String>,
     pub prefer_cli_features: bool,
     pub feature_install_order: Option<String>,
+    pub ignore_host_requirements: bool,
 }
 
 /// Build configuration extracted from DevContainer config
@@ -82,6 +83,32 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     };
 
     debug!("Loaded configuration: {:?}", config.name);
+
+    // Validate host requirements if specified in configuration
+    if let Some(host_requirements) = &config.host_requirements {
+        info!("Validating host requirements");
+        let mut evaluator = deacon_core::host_requirements::HostRequirementsEvaluator::new();
+
+        match evaluator.validate_requirements(
+            host_requirements,
+            Some(workspace_folder),
+            args.ignore_host_requirements,
+        ) {
+            Ok(evaluation) => {
+                if evaluation.requirements_met {
+                    info!("Host requirements validation passed");
+                } else if args.ignore_host_requirements {
+                    warn!("Host requirements not met, but proceeding due to --ignore-host-requirements flag");
+                }
+                debug!("Host evaluation: {:?}", evaluation);
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+        }
+    } else {
+        debug!("No host requirements specified in configuration");
+    }
 
     // Apply feature merging if CLI features are provided
     if args.additional_features.is_some() || args.feature_install_order.is_some() {
@@ -576,6 +603,7 @@ mod tests {
             additional_features: None,
             prefer_cli_features: false,
             feature_install_order: None,
+            ignore_host_requirements: false,
         };
 
         // Verify args are structured correctly
