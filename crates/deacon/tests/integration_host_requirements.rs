@@ -16,7 +16,7 @@ fn create_test_devcontainer_with_requirements(
     // Create .devcontainer directory
     let devcontainer_dir = temp_dir.path().join(".devcontainer");
     fs::create_dir_all(&devcontainer_dir)?;
-    
+
     let devcontainer_path = devcontainer_dir.join("devcontainer.json");
     let config = serde_json::json!({
         "image": "ubuntu:22.04",
