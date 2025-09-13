@@ -1,0 +1,81 @@
+# CodeRabbit configuration for deacon
+# Reference: https://docs.coderabbit.ai/reference/configuration
+
+language: "en-US"
+early_access: false
+enable_free_tier: true
+
+reviews:
+  profile: "chill"
+  high_level_summary: true
+
+  # Only run when explicitly requested. Copilot agents open WIP PRs early,
+  # so keep CodeRabbit idle until "Request review" is used.
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    # Require a label so we can trigger via workflow on review request
+    labels:
+      - "ai:review"
+
+  # Keep commit status enabled so manual runs still surface status checks.
+  commit_status: true
+
+  # Keep suggestions and walkthrough useful but lightweight.
+  changed_files_summary: true
+  sequence_diagrams: false
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  auto_apply_labels: false
+  suggested_reviewers: true
+  auto_assign_reviewers: false
+  poem: false
+
+  # Restrict review surface to meaningful paths for this Rust workspace.
+  path_filters:
+    - "crates/**"
+    - "docs/**"
+    - "fixtures/**"
+    - "scripts/**"
+    - "!target/**"
+    - "!coverage/**"
+    - "!**/*.min.*"
+
+  # Enable tools relevant to this repo. Prefer Rust and general safety.
+  tools:
+    clippy:
+      enabled: true
+    yamllint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    semgrep:
+      enabled: true
+
+  # Pre-merge nudges without blocking merges unless desired later.
+  pre_merge_checks:
+    title:
+      mode: "warning"
+      requirements: "Title should be concise and follow Conventional Commits when feasible."
+    description:
+      mode: "warning"
+    docstrings:
+      mode: "off"
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    # Teach CodeRabbit our repo rules and instructions
+    filePatterns:
+      - ".github/copilot-instructions.md"
+      - "AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "docs/CLI-SPEC.md"

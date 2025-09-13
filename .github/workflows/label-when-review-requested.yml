@@ -1,0 +1,22 @@
+name: Label when review requested
+
+on:
+  pull_request:
+    types:
+      - review_requested
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label-on-review-request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add label to trigger CodeRabbit
+        if: ${{ github.event.requested_reviewer.login != 'coderabbit[bot]' }}
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          labels: |
+            ai:review
