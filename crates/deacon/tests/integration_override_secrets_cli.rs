@@ -42,7 +42,7 @@ API_TOKEN=abc123xyz
 
     // Run read-configuration with override config and secrets
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.current_dir(&temp_dir).args(&[
+    cmd.current_dir(&temp_dir).args([
         "--config",
         base_config.to_str().unwrap(),
         "--override-config",
@@ -97,7 +97,7 @@ fn test_cli_with_multiple_secrets_files() {
 
     // Run with multiple secrets files
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.current_dir(&temp_dir).args(&[
+    cmd.current_dir(&temp_dir).args([
         "--config",
         base_config.to_str().unwrap(),
         "--secrets-file",
@@ -134,7 +134,7 @@ fn test_cli_missing_secrets_file_continues() {
 
     // Should not fail even with missing secrets file
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.current_dir(&temp_dir).args(&[
+    cmd.current_dir(&temp_dir).args([
         "--config",
         base_config.to_str().unwrap(),
         "--secrets-file",

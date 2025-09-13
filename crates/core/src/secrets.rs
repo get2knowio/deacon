@@ -15,7 +15,7 @@
 //!
 //! ## Example
 //!
-//! ```
+//! ```text
 //! # Database credentials
 //! DB_PASSWORD=my-secret-password
 //!
