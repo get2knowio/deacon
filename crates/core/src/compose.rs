@@ -149,13 +149,14 @@ impl ComposeCommand {
 
     /// Warn about security options that cannot be applied dynamically in Docker Compose
     pub fn warn_security_options_for_compose(config: &DevContainerConfig) {
+        // TODO: In the future, this should accept features parameter to check feature-derived options too
         use crate::security::SecurityOptions;
 
-        // Check if any security options are configured
+        // For now, only check config options. Features would require access to resolved features.
         let security = SecurityOptions {
             privileged: config.privileged.unwrap_or(false),
-            cap_add: config.cap_add.clone(),
-            security_opt: config.security_opt.clone(),
+            cap_add: SecurityOptions::normalize_capabilities(&config.cap_add),
+            security_opt: SecurityOptions::normalize_security_opts(&config.security_opt),
             conflicts: Vec::new(),
         };
 

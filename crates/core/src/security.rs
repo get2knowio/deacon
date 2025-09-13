@@ -6,6 +6,7 @@
 
 use crate::config::DevContainerConfig;
 use crate::features::ResolvedFeature;
+use std::collections::BTreeSet;
 use tracing::{debug, warn};
 
 /// Merged security options from configuration and features
@@ -37,8 +38,6 @@ pub struct SecurityConflict {
 pub enum SecurityConflictType {
     /// Conflicting privileged settings
     PrivilegedConflict,
-    /// Duplicate capabilities requested
-    DuplicateCapabilities,
     /// Conflicting security options
     SecurityOptConflict,
 }
@@ -54,6 +53,31 @@ impl SecurityOptions {
         }
     }
 
+    /// Normalize a capability name to uppercase and trim whitespace
+    pub fn normalize_capability(cap: &str) -> String {
+        cap.trim().to_uppercase()
+    }
+
+    /// Normalize and deduplicate capabilities
+    pub fn normalize_capabilities(caps: &[String]) -> Vec<String> {
+        let normalized: BTreeSet<String> = caps
+            .iter()
+            .map(|cap| Self::normalize_capability(cap))
+            .filter(|cap| !cap.is_empty())
+            .collect();
+        normalized.into_iter().collect()
+    }
+
+    /// Normalize and deduplicate security options
+    pub fn normalize_security_opts(opts: &[String]) -> Vec<String> {
+        let normalized: BTreeSet<String> = opts
+            .iter()
+            .map(|opt| opt.trim().to_string())
+            .filter(|opt| !opt.is_empty())
+            .collect();
+        normalized.into_iter().collect()
+    }
+
     /// Merge security options from configuration and features
     pub fn merge_from_config_and_features(
         config: &DevContainerConfig,
@@ -67,15 +91,24 @@ impl SecurityOptions {
         let mut result = Self::new();
         let mut conflicts = Vec::new();
 
-        // Start with configuration options
+        // Start with configuration options (normalized)
         result.privileged = config.privileged.unwrap_or(false);
-        result.cap_add.extend(config.cap_add.clone());
-        result.security_opt.extend(config.security_opt.clone());
+        result.cap_add = Self::normalize_capabilities(&config.cap_add);
+        result.security_opt = Self::normalize_security_opts(&config.security_opt);
 
         // Track sources for conflict detection
         let mut privileged_sources = Vec::new();
         if config.privileged.unwrap_or(false) {
             privileged_sources.push("config".to_string());
+        }
+
+        // Track security option sources for conflict detection
+        let mut security_opt_map: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for opt in &result.security_opt {
+            if let Some(key) = opt.split('=').next() {
+                security_opt_map.insert(key.to_string(), "config".to_string());
+            }
         }
 
         // Merge from features
@@ -107,34 +140,59 @@ impl SecurityOptions {
             }
 
             // Handle capabilities
-            for cap in &feature.metadata.cap_add {
-                if !result.cap_add.contains(cap) {
-                    result.cap_add.push(cap.clone());
-                } else {
-                    debug!(
-                        "Duplicate capability '{}' requested by feature '{}'",
-                        cap, feature.id
-                    );
+            let feature_caps = Self::normalize_capabilities(&feature.metadata.cap_add);
+            for cap in feature_caps {
+                if !result.cap_add.contains(&cap) {
+                    result.cap_add.push(cap);
                 }
             }
 
-            // Handle security options
-            result
-                .security_opt
-                .extend(feature.metadata.security_opt.clone());
+            // Handle security options and detect conflicts
+            let feature_opts = Self::normalize_security_opts(&feature.metadata.security_opt);
+            for opt in feature_opts {
+                if let Some(key) = opt.split('=').next() {
+                    if let Some(existing_source) = security_opt_map.get(key) {
+                        // Check if this is a different value for the same key
+                        let existing_opt = result
+                            .security_opt
+                            .iter()
+                            .find(|existing| existing.starts_with(&format!("{}=", key)));
+                        if let Some(existing_opt) = existing_opt {
+                            if existing_opt != &opt {
+                                conflicts.push(SecurityConflict {
+                                    conflict_type: SecurityConflictType::SecurityOptConflict,
+                                    description: format!(
+                                        "Conflicting security option '{}': '{}' from {} vs '{}' from feature '{}'",
+                                        key, existing_opt, existing_source, opt, feature.id
+                                    ),
+                                    features: vec![feature.id.clone()],
+                                });
+                                // Use the feature value (last writer wins)
+                                if let Some(pos) = result
+                                    .security_opt
+                                    .iter()
+                                    .position(|x| x.starts_with(&format!("{}=", key)))
+                                {
+                                    result.security_opt[pos] = opt.clone();
+                                }
+                            }
+                        }
+                    } else {
+                        result.security_opt.push(opt.clone());
+                    }
+                    security_opt_map.insert(key.to_string(), format!("feature:{}", feature.id));
+                } else {
+                    // Option without '=' separator, just add it
+                    if !result.security_opt.contains(&opt) {
+                        result.security_opt.push(opt);
+                    }
+                }
+            }
         }
 
-        // Detect duplicate capabilities
-        let original_len = result.cap_add.len();
+        // Final sort for deterministic output
         result.cap_add.sort();
-        result.cap_add.dedup();
         result.security_opt.sort();
-        result.security_opt.dedup();
-
-        // Only report conflicts if there were actual duplicates removed
-        if result.cap_add.len() < original_len {
-            debug!("Removed duplicate capabilities during merging");
-        }
 
         result.conflicts = conflicts;
 
@@ -159,13 +217,16 @@ impl SecurityOptions {
         for conflict in &self.conflicts {
             match conflict.conflict_type {
                 SecurityConflictType::PrivilegedConflict => {
-                    warn!("Security conflict: {}", conflict.description);
-                }
-                SecurityConflictType::DuplicateCapabilities => {
-                    debug!("Security note: {}", conflict.description);
+                    warn!(
+                        "Security conflict: {} (sources: {:?})",
+                        conflict.description, conflict.features
+                    );
                 }
                 SecurityConflictType::SecurityOptConflict => {
-                    warn!("Security conflict: {}", conflict.description);
+                    warn!(
+                        "Security conflict: {} (sources: {:?})",
+                        conflict.description, conflict.features
+                    );
                 }
             }
         }
@@ -289,7 +350,7 @@ mod tests {
     fn test_merge_config_only() {
         let config = DevContainerConfig {
             privileged: Some(true),
-            cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
+            cap_add: vec!["SYS_PTRACE".to_string(), "net_admin".to_string()], // Test normalization
             security_opt: vec!["seccomp=unconfined".to_string()],
             ..Default::default()
         };
@@ -299,7 +360,7 @@ mod tests {
         let security = SecurityOptions::merge_from_config_and_features(&config, &features);
 
         assert!(security.privileged);
-        assert_eq!(security.cap_add, vec!["NET_ADMIN", "SYS_PTRACE"]); // Sorted
+        assert_eq!(security.cap_add, vec!["NET_ADMIN", "SYS_PTRACE"]); // Normalized and sorted
         assert_eq!(security.security_opt, vec!["seccomp=unconfined"]);
         assert!(security.conflicts.is_empty());
         assert!(security.has_security_options());
@@ -369,5 +430,157 @@ mod tests {
         let security = SecurityOptions::new();
         let args = security.to_docker_args();
         assert!(args.is_empty());
+    }
+
+    #[test]
+    fn test_capability_normalization() {
+        // Test case-insensitive deduplication and normalization
+        let config = DevContainerConfig {
+            cap_add: vec![
+                "net_admin".to_string(),
+                "NET_ADMIN".to_string(),
+                " sys_ptrace ".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        let security = SecurityOptions::merge_from_config_and_features(&config, &[]);
+
+        // Should be normalized to uppercase and deduplicated
+        assert_eq!(security.cap_add, vec!["NET_ADMIN", "SYS_PTRACE"]);
+    }
+
+    #[test]
+    fn test_privileged_conflict() {
+        let config = DevContainerConfig {
+            privileged: Some(true),
+            ..Default::default()
+        };
+
+        let feature = ResolvedFeature {
+            id: "conflicting-feature".to_string(),
+            source: "test://features/conflicting-feature".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "conflicting-feature".to_string(),
+                version: Some("1.0.0".to_string()),
+                name: Some("Conflicting Feature".to_string()),
+                description: None,
+                documentation_url: None,
+                license_url: None,
+                options: HashMap::new(),
+                container_env: HashMap::new(),
+                mounts: Vec::new(),
+                init: None,
+                privileged: Some(false), // Explicit conflict
+                cap_add: Vec::new(),
+                security_opt: Vec::new(),
+                installs_after: Vec::new(),
+                depends_on: HashMap::new(),
+                on_create_command: None,
+                update_content_command: None,
+                post_create_command: None,
+                post_start_command: None,
+                post_attach_command: None,
+            },
+        };
+
+        let security = SecurityOptions::merge_from_config_and_features(&config, &[feature]);
+
+        // Should still be privileged (config wins) but detect conflict
+        assert!(security.privileged);
+        assert_eq!(security.conflicts.len(), 1);
+        assert_eq!(
+            security.conflicts[0].conflict_type,
+            SecurityConflictType::PrivilegedConflict
+        );
+        assert!(security.conflicts[0]
+            .description
+            .contains("conflicting-feature"));
+    }
+
+    #[test]
+    fn test_security_opt_conflict() {
+        let config = DevContainerConfig {
+            security_opt: vec!["seccomp=unconfined".to_string()],
+            ..Default::default()
+        };
+
+        let feature = ResolvedFeature {
+            id: "feature-with-seccomp".to_string(),
+            source: "test://features/feature-with-seccomp".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "feature-with-seccomp".to_string(),
+                version: Some("1.0.0".to_string()),
+                name: Some("Feature with Seccomp".to_string()),
+                description: None,
+                documentation_url: None,
+                license_url: None,
+                options: HashMap::new(),
+                container_env: HashMap::new(),
+                mounts: Vec::new(),
+                init: None,
+                privileged: None,
+                cap_add: Vec::new(),
+                security_opt: vec!["seccomp=profile:default".to_string()], // Conflicts with config
+                installs_after: Vec::new(),
+                depends_on: HashMap::new(),
+                on_create_command: None,
+                update_content_command: None,
+                post_create_command: None,
+                post_start_command: None,
+                post_attach_command: None,
+            },
+        };
+
+        let security = SecurityOptions::merge_from_config_and_features(&config, &[feature]);
+
+        // Feature value should win (last writer wins)
+        assert_eq!(security.security_opt, vec!["seccomp=profile:default"]);
+        assert_eq!(security.conflicts.len(), 1);
+        assert_eq!(
+            security.conflicts[0].conflict_type,
+            SecurityConflictType::SecurityOptConflict
+        );
+        assert!(security.conflicts[0].description.contains("seccomp"));
+        assert!(security.conflicts[0]
+            .description
+            .contains("feature-with-seccomp"));
+    }
+
+    #[test]
+    fn test_normalization_functions() {
+        // Test normalize_capability
+        assert_eq!(
+            SecurityOptions::normalize_capability(" net_admin "),
+            "NET_ADMIN"
+        );
+        assert_eq!(
+            SecurityOptions::normalize_capability("SYS_PTRACE"),
+            "SYS_PTRACE"
+        );
+
+        // Test normalize_capabilities
+        let caps = vec![
+            "net_admin".to_string(),
+            " NET_ADMIN ".to_string(),
+            "sys_ptrace".to_string(),
+            "".to_string(), // Empty should be filtered
+        ];
+        let normalized = SecurityOptions::normalize_capabilities(&caps);
+        assert_eq!(normalized, vec!["NET_ADMIN", "SYS_PTRACE"]);
+
+        // Test normalize_security_opts
+        let opts = vec![
+            " seccomp=unconfined ".to_string(),
+            "apparmor=unconfined".to_string(),
+            "".to_string(), // Empty should be filtered
+        ];
+        let normalized = SecurityOptions::normalize_security_opts(&opts);
+        assert_eq!(
+            normalized,
+            vec!["apparmor=unconfined", "seccomp=unconfined"]
+        );
     }
 }

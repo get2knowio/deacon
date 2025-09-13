@@ -808,21 +808,16 @@ impl ContainerOps for CliDocker {
             args.extend(mount.to_docker_args());
         }
 
-        // Add security options from configuration
-        if let Some(privileged) = config.privileged {
-            if privileged {
-                args.push("--privileged".to_string());
-            }
-        }
-
-        for cap in &config.cap_add {
-            args.push("--cap-add".to_string());
-            args.push(cap.clone());
-        }
-
-        for security_opt in &config.security_opt {
-            args.push("--security-opt".to_string());
-            args.push(security_opt.clone());
+        // Add security options from configuration (centralized)
+        {
+            use crate::security::SecurityOptions;
+            let security = SecurityOptions {
+                privileged: config.privileged.unwrap_or(false),
+                cap_add: config.cap_add.clone(),
+                security_opt: config.security_opt.clone(),
+                conflicts: Vec::new(),
+            };
+            args.extend(security.to_docker_args());
         }
 
         // Add runArgs if present
