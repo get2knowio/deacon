@@ -47,6 +47,10 @@ pub struct CliContext {
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
     pub config: Option<PathBuf>,
+    /// Override configuration file path
+    pub override_config: Option<PathBuf>,
+    /// Secrets file paths
+    pub secrets_files: Vec<PathBuf>,
     /// Whether secret redaction is disabled
     pub no_redact: bool,
     /// Enabled plugins
@@ -217,14 +221,34 @@ pub enum FeatureCommands {
 }
 
 /// Template management subcommands
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub enum TemplateCommands {
     /// Apply template to current project
     Apply { template: String },
     /// Publish templates to registry
-    Publish { target: String },
+    Publish {
+        /// Path to template directory to publish
+        path: String,
+        /// Target registry URL
+        #[arg(long)]
+        registry: String,
+        /// Dry run (don't actually publish)
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Get template metadata
-    Metadata { template_id: String },
+    Metadata {
+        /// Path to template directory
+        path: String,
+    },
+    /// Generate template documentation
+    GenerateDocs {
+        /// Path to template directory
+        path: String,
+        /// Output directory for generated documentation
+        #[arg(long)]
+        output: String,
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -251,6 +275,14 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
+    /// Override configuration file path (highest precedence)
+    #[arg(long, global = true, value_name = "PATH")]
+    pub override_config: Option<PathBuf>,
+
+    /// Secrets file path (KEY=VALUE format, can be specified multiple times)
+    #[arg(long, global = true, value_name = "PATH")]
+    pub secrets_file: Vec<PathBuf>,
+
     /// Disable secret redaction in output (debugging only - WARNING: may expose secrets)
     #[arg(long, global = true)]
     pub no_redact: bool,
@@ -274,6 +306,8 @@ impl Cli {
             log_level: self.log_level.clone(),
             workspace_folder: self.workspace_folder.clone(),
             config: self.config.clone(),
+            override_config: self.override_config.clone(),
+            secrets_files: self.secrets_file.clone(),
             no_redact: self.no_redact,
             #[cfg(feature = "plugins")]
             plugins: self.plugin.clone(),
@@ -410,6 +444,8 @@ impl Cli {
                     include_merged_configuration,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    override_config_path: self.override_config,
+                    secrets_files: self.secrets_file,
                 };
 
                 execute_read_configuration(args).await?;
@@ -426,11 +462,16 @@ impl Cli {
 
                 execute_features(args).await
             }
-            Some(Commands::Templates { .. }) => {
-                Err(DeaconError::Config(ConfigError::NotImplemented {
-                    feature: "templates command".to_string(),
-                })
-                .into())
+            Some(Commands::Templates { command }) => {
+                use crate::commands::templates::{execute_templates, TemplatesArgs};
+
+                let args = TemplatesArgs {
+                    command,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                };
+
+                execute_templates(args).await
             }
             Some(Commands::RunUserCommands { .. }) => {
                 Err(DeaconError::Config(ConfigError::NotImplemented {

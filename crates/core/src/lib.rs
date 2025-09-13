@@ -22,6 +22,7 @@ pub mod oci;
 pub mod ports;
 pub mod redaction;
 pub mod retry;
+pub mod secrets;
 pub mod state;
 
 #[cfg(feature = "plugins")]

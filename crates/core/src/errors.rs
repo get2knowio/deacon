@@ -133,6 +133,10 @@ pub enum FeatureError {
     /// Feature dependency resolution error
     #[error("Feature dependency resolution error: {message}")]
     DependencyResolution { message: String },
+
+    /// Authentication error
+    #[error("Authentication error: {message}")]
+    Authentication { message: String },
 }
 
 /// Template-related errors
