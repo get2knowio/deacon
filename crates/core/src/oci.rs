@@ -157,22 +157,22 @@ pub struct DownloadedFeature {
 /// OCI manifest structure (minimal)
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct Manifest {
+pub struct Manifest {
     #[serde(rename = "schemaVersion")]
-    schema_version: u32,
+    pub schema_version: u32,
     #[serde(rename = "mediaType")]
-    media_type: String,
-    layers: Vec<Layer>,
+    pub media_type: String,
+    pub layers: Vec<Layer>,
 }
 
 /// OCI layer structure (minimal)
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct Layer {
+pub struct Layer {
     #[serde(rename = "mediaType")]
-    media_type: String,
-    size: u64,
-    digest: String,
+    pub media_type: String,
+    pub size: u64,
+    pub digest: String,
 }
 
 /// HTTP client trait to enable mocking and testing
@@ -321,6 +321,11 @@ impl ReqwestClient {
             }
         }
         &self.auth.default_credentials
+    }
+
+    /// Get access to the authentication configuration (for testing)
+    pub fn auth(&self) -> &RegistryAuth {
+        &self.auth
     }
 }
 
@@ -520,7 +525,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
     }
 
     /// Get the OCI manifest for a feature
-    async fn get_manifest(&self, feature_ref: &FeatureRef) -> Result<Manifest> {
+    pub async fn get_manifest(&self, feature_ref: &FeatureRef) -> Result<Manifest> {
         let manifest_url = format!(
             "https://{}/v2/{}/manifests/{}",
             feature_ref.registry,
