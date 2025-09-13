@@ -87,6 +87,9 @@ pub enum Commands {
         /// Override feature installation order (comma-separated list of IDs)
         #[arg(long)]
         feature_install_order: Option<String>,
+        /// Ignore host requirements validation (log warnings instead of failing)
+        #[arg(long)]
+        ignore_host_requirements: bool,
     },
 
     /// Build development container image
@@ -115,6 +118,9 @@ pub enum Commands {
         /// Override feature installation order (comma-separated list of IDs)
         #[arg(long)]
         feature_install_order: Option<String>,
+        /// Ignore host requirements validation (log warnings instead of failing)
+        #[arg(long)]
+        ignore_host_requirements: bool,
     },
 
     /// Execute command in running container
@@ -356,6 +362,7 @@ impl Cli {
                 additional_features,
                 prefer_cli_features,
                 feature_install_order,
+                ignore_host_requirements,
             }) => {
                 use crate::commands::up::{execute_up, UpArgs};
 
@@ -370,6 +377,7 @@ impl Cli {
                     additional_features,
                     prefer_cli_features,
                     feature_install_order,
+                    ignore_host_requirements,
                 };
 
                 match execute_up(args).await {
@@ -395,6 +403,7 @@ impl Cli {
                 additional_features,
                 prefer_cli_features,
                 feature_install_order,
+                ignore_host_requirements,
             }) => {
                 use crate::commands::build::{execute_build, BuildArgs};
 
@@ -409,6 +418,7 @@ impl Cli {
                     additional_features,
                     prefer_cli_features,
                     feature_install_order,
+                    ignore_host_requirements,
                 };
 
                 execute_build(args).await?;

@@ -15,6 +15,7 @@ pub mod env_probe;
 pub mod errors;
 pub mod feature_installer;
 pub mod features;
+pub mod host_requirements;
 pub mod lifecycle;
 pub mod logging;
 pub mod mount;

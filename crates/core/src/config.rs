@@ -172,6 +172,108 @@ impl ConfigLocation {
     }
 }
 
+/// System resource specification with support for units.
+///
+/// Supports numeric values with optional unit suffixes:
+/// - CPU: number of cores (e.g., "2", "4")  
+/// - Memory: bytes with units (e.g., "4GB", "512MB", "1024")
+/// - Storage: bytes with units (e.g., "10GB", "500MB")
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ResourceSpec {
+    /// Numeric value (interpreted as base unit)
+    Number(f64),
+    /// String with optional unit suffix
+    String(String),
+}
+
+impl ResourceSpec {
+    /// Parse the resource specification to a numeric value in base units.
+    ///
+    /// For memory and storage, returns bytes.
+    /// For CPU, returns number of cores.
+    pub fn parse_bytes(&self) -> Result<u64> {
+        match self {
+            ResourceSpec::Number(n) => Ok(*n as u64),
+            ResourceSpec::String(s) => parse_resource_string(s),
+        }
+    }
+
+    /// Parse CPU cores from the resource specification.
+    pub fn parse_cpu_cores(&self) -> Result<f64> {
+        match self {
+            ResourceSpec::Number(n) => Ok(*n),
+            ResourceSpec::String(s) => s.parse::<f64>().map_err(|e| {
+                ConfigError::Validation {
+                    message: format!("Invalid CPU specification '{}': {}", s, e),
+                }
+                .into()
+            }),
+        }
+    }
+}
+
+/// Host system requirements for the development environment.
+///
+/// Specifies minimum system resources required to run the development container.
+/// All fields are optional - only specified requirements will be validated.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct HostRequirements {
+    /// Minimum CPU cores required (e.g., "2", "4.0")
+    pub cpus: Option<ResourceSpec>,
+    /// Minimum memory required (e.g., "4GB", "512MB")
+    pub memory: Option<ResourceSpec>,
+    /// Minimum storage space required (e.g., "10GB", "500MB")
+    pub storage: Option<ResourceSpec>,
+}
+
+/// Parse a resource string with unit suffix to bytes.
+///
+/// Supports units: B, KB, MB, GB, TB (1000-based) and KiB, MiB, GiB, TiB (1024-based)
+fn parse_resource_string(s: &str) -> Result<u64> {
+    let s = s.trim();
+
+    // Try to parse as plain number first
+    if let Ok(n) = s.parse::<f64>() {
+        return Ok(n as u64);
+    }
+
+    // Extract number and unit
+    let re = regex::Regex::new(r"^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)$").map_err(|e| {
+        ConfigError::Validation {
+            message: format!("Invalid regex pattern: {}", e),
+        }
+    })?;
+    let captures = re.captures(s).ok_or_else(|| ConfigError::Validation {
+        message: format!("Invalid resource format: {}", s),
+    })?;
+
+    let number: f64 = captures[1].parse().map_err(|e| ConfigError::Validation {
+        message: format!("Invalid number in resource specification '{}': {}", s, e),
+    })?;
+    let unit = captures[2].to_lowercase();
+
+    let multiplier = match unit.as_str() {
+        "b" => 1,
+        "kb" => 1_000,
+        "mb" => 1_000_000,
+        "gb" => 1_000_000_000,
+        "tb" => 1_000_000_000_000,
+        "kib" => 1_024,
+        "mib" => 1_024 * 1_024,
+        "gib" => 1_024 * 1_024 * 1_024,
+        "tib" => 1_024_u64.pow(4),
+        _ => {
+            return Err(ConfigError::Validation {
+                message: format!("Unknown unit: {}", unit),
+            }
+            .into())
+        }
+    };
+
+    Ok((number * multiplier as f64) as u64)
+}
+
 /// DevContainer configuration structure following the Development Containers Specification.
 ///
 /// This struct represents the subset of fields needed for early implementation, mirroring
@@ -373,6 +475,13 @@ pub struct DevContainerConfig {
     ///
     /// Reference: [Lifecycle Commands - updateContentCommand](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
     pub update_content_command: Option<serde_json::Value>,
+
+    /// Host requirements for the development environment.
+    ///
+    /// Specifies minimum system requirements (CPU, memory, storage) that the host
+    /// must meet to successfully run the development container.
+    #[serde(rename = "hostRequirements")]
+    pub host_requirements: Option<HostRequirements>,
 }
 
 impl DevContainerConfig {
@@ -628,6 +737,7 @@ impl Default for DevContainerConfig {
             post_attach_command: None,
             initialize_command: None,
             update_content_command: None,
+            host_requirements: None,
         }
     }
 }
@@ -794,6 +904,12 @@ impl ConfigMerger {
                 .other_ports_attributes
                 .clone()
                 .or_else(|| base.other_ports_attributes.clone()),
+
+            // Host requirements: last writer wins
+            host_requirements: overlay
+                .host_requirements
+                .clone()
+                .or_else(|| base.host_requirements.clone()),
         }
     }
 
