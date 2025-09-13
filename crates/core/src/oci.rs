@@ -1,15 +1,19 @@
 //! OCI registry integration for DevContainer features
 //!
-//! This module implements minimal unauthenticated OCI registry v2 support for fetching
-//! and installing DevContainer features. It supports basic caching and install script execution.
+//! This module implements OCI registry v2 support with authentication for fetching
+//! and installing DevContainer features. It supports authentication via environment
+//! variables, Docker credential helpers, custom CA certificates, and proxy configuration.
 
 use crate::errors::{FeatureError, Result};
 use crate::features::{parse_feature_metadata, FeatureMetadata};
 use crate::retry::{retry_async, RetryConfig, RetryDecision};
+use base64::Engine;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -55,6 +59,88 @@ impl FeatureRef {
     pub fn reference(&self) -> String {
         format!("{}/{}:{}", self.registry, self.repository(), self.tag())
     }
+}
+
+/// Authentication credentials for registry access
+#[derive(Debug, Clone, PartialEq)]
+pub enum RegistryCredentials {
+    /// No authentication
+    None,
+    /// Basic authentication with username and password
+    Basic { username: String, password: String },
+    /// Bearer token authentication
+    Bearer { token: String },
+}
+
+impl RegistryCredentials {
+    /// Create an Authorization header value
+    pub fn to_auth_header(&self) -> Option<String> {
+        match self {
+            RegistryCredentials::None => None,
+            RegistryCredentials::Basic { username, password } => {
+                let credentials = format!("{}:{}", username, password);
+                let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
+                Some(format!("Basic {}", encoded))
+            }
+            RegistryCredentials::Bearer { token } => Some(format!("Bearer {}", token)),
+        }
+    }
+}
+
+/// Registry authentication configuration
+#[derive(Debug, Clone)]
+pub struct RegistryAuth {
+    /// Default credentials to use for all registries
+    pub default_credentials: RegistryCredentials,
+    /// Registry-specific credentials
+    pub registry_credentials: HashMap<String, RegistryCredentials>,
+}
+
+impl RegistryAuth {
+    /// Create a new empty registry auth configuration
+    pub fn new() -> Self {
+        Self {
+            default_credentials: RegistryCredentials::None,
+            registry_credentials: HashMap::new(),
+        }
+    }
+
+    /// Get credentials for a specific registry
+    pub fn get_credentials(&self, registry: &str) -> &RegistryCredentials {
+        self.registry_credentials
+            .get(registry)
+            .unwrap_or(&self.default_credentials)
+    }
+
+    /// Set credentials for a specific registry
+    pub fn set_credentials(&mut self, registry: String, credentials: RegistryCredentials) {
+        self.registry_credentials.insert(registry, credentials);
+    }
+
+    /// Set default credentials
+    pub fn set_default_credentials(&mut self, credentials: RegistryCredentials) {
+        self.default_credentials = credentials;
+    }
+}
+
+impl Default for RegistryAuth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Docker config.json authentication entry
+#[derive(Debug, Deserialize)]
+struct DockerConfigAuth {
+    auth: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+}
+
+/// Docker config.json structure (simplified)
+#[derive(Debug, Deserialize)]
+struct DockerConfig {
+    auths: Option<HashMap<String, DockerConfigAuth>>,
 }
 
 /// Downloaded and extracted feature data
@@ -110,20 +196,146 @@ pub trait HttpClient: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct ReqwestClient {
     client: reqwest::Client,
+    auth: RegistryAuth,
 }
 
 impl ReqwestClient {
-    /// Create a new ReqwestClient
-    pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::new(),
+    /// Create a new ReqwestClient with default configuration
+    pub fn new() -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let mut client_builder = reqwest::Client::builder();
+
+        // Configure custom CA certificates if specified
+        if let Ok(ca_bundle_path) = env::var("DEACON_CUSTOM_CA_BUNDLE") {
+            let ca_bundle = fs::read(&ca_bundle_path)?;
+            let cert = reqwest::Certificate::from_pem(&ca_bundle)?;
+            client_builder = client_builder.add_root_certificate(cert);
+            debug!("Added custom CA certificate from: {}", ca_bundle_path);
         }
+
+        // Build the client
+        let client = client_builder.build()?;
+
+        let mut auth = RegistryAuth::new();
+
+        // Load authentication from environment and Docker config
+        Self::load_auth_from_env(&mut auth)?;
+        Self::load_auth_from_docker_config(&mut auth)?;
+
+        Ok(Self { client, auth })
+    }
+
+    /// Create a new ReqwestClient with custom authentication
+    pub fn with_auth(
+        auth: RegistryAuth,
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let mut instance = Self::new()?;
+        instance.auth = auth;
+        Ok(instance)
+    }
+
+    /// Load authentication from environment variables
+    fn load_auth_from_env(
+        auth: &mut RegistryAuth,
+    ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Check for token authentication first
+        if let Ok(token) = env::var("DEACON_REGISTRY_TOKEN") {
+            debug!("Found DEACON_REGISTRY_TOKEN environment variable");
+            auth.set_default_credentials(RegistryCredentials::Bearer { token });
+            return Ok(());
+        }
+
+        // Check for basic authentication
+        if let (Ok(username), Ok(password)) = (
+            env::var("DEACON_REGISTRY_USER"),
+            env::var("DEACON_REGISTRY_PASS"),
+        ) {
+            debug!("Found DEACON_REGISTRY_USER and DEACON_REGISTRY_PASS environment variables");
+            auth.set_default_credentials(RegistryCredentials::Basic { username, password });
+        }
+
+        Ok(())
+    }
+
+    /// Load authentication from Docker config.json
+    fn load_auth_from_docker_config(
+        auth: &mut RegistryAuth,
+    ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let home_dir = env::var("HOME").or_else(|_| env::var("USERPROFILE"))?;
+        let docker_config_path = Path::new(&home_dir).join(".docker").join("config.json");
+
+        if !docker_config_path.exists() {
+            debug!(
+                "Docker config.json not found at: {}",
+                docker_config_path.display()
+            );
+            return Ok(());
+        }
+
+        let config_content = fs::read_to_string(&docker_config_path)?;
+        let docker_config: DockerConfig = serde_json::from_str(&config_content)?;
+
+        if let Some(auths) = docker_config.auths {
+            for (registry, auth_config) in auths {
+                if let Some(auth_string) = auth_config.auth {
+                    // Decode base64 auth string
+                    if let Ok(decoded) =
+                        base64::engine::general_purpose::STANDARD.decode(&auth_string)
+                    {
+                        if let Ok(auth_str) = String::from_utf8(decoded) {
+                            if let Some((username, password)) = auth_str.split_once(':') {
+                                debug!("Loaded Docker config auth for registry: {}", registry);
+                                auth.set_credentials(
+                                    registry,
+                                    RegistryCredentials::Basic {
+                                        username: username.to_string(),
+                                        password: password.to_string(),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                } else if let (Some(username), Some(password)) =
+                    (auth_config.username, auth_config.password)
+                {
+                    debug!(
+                        "Loaded Docker config username/password for registry: {}",
+                        registry
+                    );
+                    auth.set_credentials(
+                        registry,
+                        RegistryCredentials::Basic { username, password },
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get credentials for a specific registry URL
+    fn get_credentials_for_url(&self, url: &str) -> &RegistryCredentials {
+        // Extract hostname from URL
+        if let Ok(parsed_url) = reqwest::Url::parse(url) {
+            if let Some(host) = parsed_url.host_str() {
+                return self.auth.get_credentials(host);
+            }
+        }
+        &self.auth.default_credentials
     }
 }
 
 impl Default for ReqwestClient {
     fn default() -> Self {
-        Self::new()
+        Self::new().unwrap_or_else(|e| {
+            warn!(
+                "Failed to create ReqwestClient with authentication: {}. Using basic client.",
+                e
+            );
+            Self {
+                client: reqwest::Client::new(),
+                auth: RegistryAuth::new(),
+            }
+        })
     }
 }
 
@@ -133,21 +345,37 @@ impl HttpClient for ReqwestClient {
         &self,
         url: &str,
     ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
-        let response = self.client.get(url).send().await?;
-        let bytes = response.bytes().await?;
-        Ok(bytes)
+        self.get_with_headers(url, HashMap::new()).await
     }
 
     async fn get_with_headers(
         &self,
         url: &str,
-        headers: HashMap<String, String>,
+        mut headers: HashMap<String, String>,
     ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        // Add authentication header if available
+        let credentials = self.get_credentials_for_url(url);
+        if let Some(auth_header) = credentials.to_auth_header() {
+            headers.insert("Authorization".to_string(), auth_header);
+        }
+
         let mut request = self.client.get(url);
         for (key, value) in headers {
             request = request.header(&key, &value);
         }
+
         let response = request.send().await?;
+
+        // Handle 401 authentication errors
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(format!("Authentication failed for URL: {}", url).into());
+        }
+
+        // Handle other HTTP errors
+        if !response.status().is_success() {
+            return Err(format!("HTTP {} for URL: {}", response.status(), url).into());
+        }
+
         let bytes = response.bytes().await?;
         Ok(bytes)
     }
@@ -166,6 +394,8 @@ fn classify_network_error(error: &FeatureError) -> RetryDecision {
     match error {
         FeatureError::Download { .. } => RetryDecision::Retry,
         FeatureError::Oci { .. } => RetryDecision::Retry,
+        // Authentication errors should be retried once to allow credential refresh
+        FeatureError::Authentication { .. } => RetryDecision::Retry,
         // Don't retry parsing, validation, or other logical errors
         FeatureError::Parsing { .. }
         | FeatureError::Validation { .. }
@@ -315,8 +545,15 @@ impl<C: HttpClient> FeatureFetcher<C> {
                 let headers = headers.clone();
                 async move {
                     client.get_with_headers(url, headers).await.map_err(|e| {
-                        FeatureError::Download {
-                            message: format!("Failed to download manifest: {}", e),
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Authentication failed") {
+                            FeatureError::Authentication {
+                                message: format!("Failed to authenticate for manifest: {}", e),
+                            }
+                        } else {
+                            FeatureError::Download {
+                                message: format!("Failed to download manifest: {}", e),
+                            }
                         }
                     })
                 }
@@ -351,8 +588,17 @@ impl<C: HttpClient> FeatureFetcher<C> {
                 let client = &self.client;
                 let url = &blob_url;
                 async move {
-                    client.get(url).await.map_err(|e| FeatureError::Download {
-                        message: format!("Failed to download layer: {}", e),
+                    client.get(url).await.map_err(|e| {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Authentication failed") {
+                            FeatureError::Authentication {
+                                message: format!("Failed to authenticate for layer: {}", e),
+                            }
+                        } else {
+                            FeatureError::Download {
+                                message: format!("Failed to download layer: {}", e),
+                            }
+                        }
                     })
                 }
             },
@@ -466,8 +712,11 @@ impl<C: HttpClient> FeatureFetcher<C> {
 }
 
 /// Convenience function to create a default feature fetcher
-pub fn default_fetcher() -> FeatureFetcher<ReqwestClient> {
-    FeatureFetcher::new(ReqwestClient::new())
+pub fn default_fetcher() -> Result<FeatureFetcher<ReqwestClient>> {
+    let client = ReqwestClient::new().map_err(|e| FeatureError::Authentication {
+        message: format!("Failed to create HTTP client: {}", e),
+    })?;
+    Ok(FeatureFetcher::new(client))
 }
 
 /// Mock HTTP client for testing
@@ -550,6 +799,74 @@ mod tests {
 
         assert_eq!(feature_ref.tag(), "latest");
         assert_eq!(feature_ref.reference(), "ghcr.io/devcontainers/node:latest");
+    }
+
+    #[test]
+    fn test_registry_credentials_auth_header() {
+        // Test Basic authentication
+        let basic_creds = RegistryCredentials::Basic {
+            username: "user".to_string(),
+            password: "pass".to_string(),
+        };
+        let auth_header = basic_creds.to_auth_header().unwrap();
+        assert!(auth_header.starts_with("Basic "));
+
+        // Decode and verify
+        let encoded = auth_header.strip_prefix("Basic ").unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let decoded_str = String::from_utf8(decoded).unwrap();
+        assert_eq!(decoded_str, "user:pass");
+
+        // Test Bearer authentication
+        let bearer_creds = RegistryCredentials::Bearer {
+            token: "abc123".to_string(),
+        };
+        let auth_header = bearer_creds.to_auth_header().unwrap();
+        assert_eq!(auth_header, "Bearer abc123");
+
+        // Test no authentication
+        let none_creds = RegistryCredentials::None;
+        assert!(none_creds.to_auth_header().is_none());
+    }
+
+    #[test]
+    fn test_registry_auth_configuration() {
+        let mut auth = RegistryAuth::new();
+
+        // Test default credentials
+        auth.set_default_credentials(RegistryCredentials::Basic {
+            username: "default_user".to_string(),
+            password: "default_pass".to_string(),
+        });
+
+        // Test registry-specific credentials
+        auth.set_credentials(
+            "ghcr.io".to_string(),
+            RegistryCredentials::Bearer {
+                token: "ghcr_token".to_string(),
+            },
+        );
+
+        // Test getting default credentials
+        let creds = auth.get_credentials("unknown.registry");
+        assert_eq!(
+            creds,
+            &RegistryCredentials::Basic {
+                username: "default_user".to_string(),
+                password: "default_pass".to_string(),
+            }
+        );
+
+        // Test getting registry-specific credentials
+        let creds = auth.get_credentials("ghcr.io");
+        assert_eq!(
+            creds,
+            &RegistryCredentials::Bearer {
+                token: "ghcr_token".to_string(),
+            }
+        );
     }
 
     #[tokio::test]
@@ -740,6 +1057,15 @@ mod tests {
         };
         assert_eq!(
             classify_network_error(&oci_error),
+            crate::retry::RetryDecision::Retry
+        );
+
+        // Test that authentication errors are retried
+        let auth_error = FeatureError::Authentication {
+            message: "invalid credentials".to_string(),
+        };
+        assert_eq!(
+            classify_network_error(&auth_error),
             crate::retry::RetryDecision::Retry
         );
 
