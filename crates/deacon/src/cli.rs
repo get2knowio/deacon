@@ -35,6 +35,27 @@ pub enum LogLevel {
     Trace,
 }
 
+/// Progress format options
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ProgressFormat {
+    /// No progress output
+    None,
+    /// JSON structured progress events
+    Json,
+    /// Auto mode: spinner/text to TTY, JSON to file if specified
+    Auto,
+}
+
+impl From<ProgressFormat> for deacon_core::progress::ProgressFormat {
+    fn from(format: ProgressFormat) -> Self {
+        match format {
+            ProgressFormat::None => deacon_core::progress::ProgressFormat::None,
+            ProgressFormat::Json => deacon_core::progress::ProgressFormat::Json,
+            ProgressFormat::Auto => deacon_core::progress::ProgressFormat::Auto,
+        }
+    }
+}
+
 /// Global options available to all subcommands
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Used for future command implementations
@@ -43,6 +64,10 @@ pub struct CliContext {
     pub log_format: LogFormat,
     /// Log level
     pub log_level: LogLevel,
+    /// Progress format
+    pub progress_format: ProgressFormat,
+    /// Progress file path (for JSON output)
+    pub progress_file: Option<PathBuf>,
     /// Workspace folder path
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
@@ -293,6 +318,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_redact: bool,
 
+    /// Progress format (json, none, or auto)
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    pub progress: ProgressFormat,
+
+    /// Progress file path (for JSON output when using --progress auto or json)
+    #[arg(long, global = true, value_name = "PATH")]
+    pub progress_file: Option<PathBuf>,
+
     /// Enable specific plugins
     #[cfg(feature = "plugins")]
     #[arg(long, global = true, value_name = "NAME")]
@@ -310,6 +343,8 @@ impl Cli {
         CliContext {
             log_format: self.log_format.clone(),
             log_level: self.log_level.clone(),
+            progress_format: self.progress.clone(),
+            progress_file: self.progress_file.clone(),
             workspace_folder: self.workspace_folder.clone(),
             config: self.config.clone(),
             override_config: self.override_config.clone(),
@@ -351,6 +386,16 @@ impl Cli {
         if self.no_redact {
             tracing::warn!("Secret redaction is DISABLED via --no-redact flag. This may expose sensitive information in logs and output. Use only for debugging purposes!");
         }
+
+        // Initialize progress tracking
+        let progress_tracker = deacon_core::progress::create_progress_tracker(
+            &self.progress.clone().into(),
+            self.progress_file.as_deref(),
+            self.workspace_folder.as_deref(),
+        )?;
+
+        // Convert to Arc<Mutex<Option<_>>> for sharing between operations
+        let progress_tracker = std::sync::Arc::new(std::sync::Mutex::new(progress_tracker));
 
         match self.command {
             Some(Commands::Up {
@@ -419,6 +464,7 @@ impl Cli {
                     prefer_cli_features,
                     feature_install_order,
                     ignore_host_requirements,
+                    progress_tracker: progress_tracker.clone(),
                 };
 
                 execute_build(args).await?;

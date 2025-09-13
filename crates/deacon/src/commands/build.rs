@@ -28,6 +28,8 @@ pub struct BuildArgs {
     pub prefer_cli_features: bool,
     pub feature_install_order: Option<String>,
     pub ignore_host_requirements: bool,
+    pub progress_tracker:
+        std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
 }
 
 /// Build configuration extracted from DevContainer config
@@ -63,6 +65,16 @@ pub struct BuildResult {
 pub async fn execute_build(args: BuildArgs) -> Result<()> {
     info!("Starting build command execution");
     debug!("Build args: {:?}", args);
+
+    // Initialize progress tracking
+    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
+        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
+            if let Some(ref mut tracker) = tracker_guard.as_mut() {
+                tracker.emit_event(event)?;
+            }
+        }
+        Ok(())
+    };
 
     // Load configuration
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
@@ -150,14 +162,44 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     }
 
     // Execute build
-    let start_time = Instant::now();
-    let result = execute_docker_build(&build_config, &args, &config_hash, workspace_folder).await?;
-    let build_duration = start_time.elapsed().as_secs_f64();
+    let build_start_time = Instant::now();
 
+    // Emit build begin event
+    emit_progress_event(deacon_core::progress::ProgressEvent::BuildBegin {
+        id: deacon_core::progress::ProgressTracker::next_event_id(),
+        timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+        context: build_config.context.clone(),
+        dockerfile: Some(build_config.dockerfile.clone()),
+    })?;
+
+    let result = execute_docker_build(&build_config, &args, &config_hash, workspace_folder).await;
+    let build_duration = build_start_time.elapsed();
+
+    // Emit build end event
+    let build_success = result.is_ok();
+    let image_id = result.as_ref().ok().map(|r| r.image_id.clone());
+
+    emit_progress_event(deacon_core::progress::ProgressEvent::BuildEnd {
+        id: deacon_core::progress::ProgressTracker::next_event_id(),
+        timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+        context: build_config.context.clone(),
+        duration_ms: build_duration.as_millis() as u64,
+        success: build_success,
+        image_id,
+    })?;
+
+    let result = result?;
+
+    // Record metrics
+    if let Ok(tracker_guard) = args.progress_tracker.lock() {
+        if let Some(ref tracker) = tracker_guard.as_ref() {
+            tracker.record_duration("build", build_duration);
+        }
+    }
     let final_result = BuildResult {
         image_id: result.image_id,
         tags: result.tags,
-        build_duration,
+        build_duration: build_duration.as_secs_f64(),
         metadata: result.metadata,
         config_hash: config_hash.clone(),
     };
