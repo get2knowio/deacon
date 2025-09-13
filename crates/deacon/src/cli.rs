@@ -47,6 +47,10 @@ pub struct CliContext {
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
     pub config: Option<PathBuf>,
+    /// Override configuration file path
+    pub override_config: Option<PathBuf>,
+    /// Secrets file paths
+    pub secrets_files: Vec<PathBuf>,
     /// Whether secret redaction is disabled
     pub no_redact: bool,
     /// Enabled plugins
@@ -271,6 +275,14 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
+    /// Override configuration file path (highest precedence)
+    #[arg(long, global = true, value_name = "PATH")]
+    pub override_config: Option<PathBuf>,
+
+    /// Secrets file path (KEY=VALUE format, can be specified multiple times)
+    #[arg(long, global = true, value_name = "PATH")]
+    pub secrets_file: Vec<PathBuf>,
+
     /// Disable secret redaction in output (debugging only - WARNING: may expose secrets)
     #[arg(long, global = true)]
     pub no_redact: bool,
@@ -294,6 +306,8 @@ impl Cli {
             log_level: self.log_level.clone(),
             workspace_folder: self.workspace_folder.clone(),
             config: self.config.clone(),
+            override_config: self.override_config.clone(),
+            secrets_files: self.secrets_file.clone(),
             no_redact: self.no_redact,
             #[cfg(feature = "plugins")]
             plugins: self.plugin.clone(),
@@ -430,6 +444,8 @@ impl Cli {
                     include_merged_configuration,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    override_config_path: self.override_config,
+                    secrets_files: self.secrets_file,
                 };
 
                 execute_read_configuration(args).await?;

@@ -1179,6 +1179,77 @@ impl ConfigLoader {
         Ok(all_configs)
     }
 
+    /// Load configuration with extends resolution and optional override config
+    ///
+    /// This method loads the base configuration, resolves extends chain,
+    /// and optionally applies an override configuration with the highest precedence.
+    /// It supports variable substitution with secrets integration.
+    ///
+    /// ## Arguments
+    ///
+    /// * `path` - Path to the base configuration file
+    /// * `override_config_path` - Optional path to override configuration file  
+    /// * `secrets` - Optional secrets collection for variable substitution
+    /// * `workspace_path` - Workspace path for variable substitution context
+    ///
+    /// ## Returns
+    ///
+    /// Returns the merged and substituted configuration with substitution report.
+    #[instrument(skip_all, fields(path = %path.display(), override_path = ?override_config_path.as_ref().map(|p| p.display())))]
+    pub fn load_with_overrides_and_substitution(
+        path: &Path,
+        override_config_path: Option<&Path>,
+        secrets: Option<&crate::secrets::SecretsCollection>,
+        workspace_path: &Path,
+    ) -> Result<(DevContainerConfig, crate::variable::SubstitutionReport)> {
+        debug!(
+            "Loading configuration with overrides and substitution from {}",
+            path.display()
+        );
+
+        // Load base config with extends resolution
+        let mut configs = {
+            let mut visited = HashSet::new();
+            Self::resolve_extends_chain(path, &mut visited)?
+        };
+
+        // Add override config if provided
+        if let Some(override_path) = override_config_path {
+            debug!(
+                "Loading override configuration from {}",
+                override_path.display()
+            );
+            let override_config = Self::load_from_path(override_path)?;
+            configs.push(override_config);
+        }
+
+        debug!(
+            "Resolved configuration chain with {} configs (including override)",
+            configs.len()
+        );
+
+        // Merge all configurations in order (base to overlay to override)
+        let merged = ConfigMerger::merge_configs(&configs);
+
+        // Apply variable substitution with secrets
+        let mut substitution_context = crate::variable::SubstitutionContext::new(workspace_path)?;
+
+        // Add secrets to local environment for substitution
+        if let Some(secrets) = secrets {
+            for (key, value) in secrets.as_env_vars() {
+                substitution_context
+                    .local_env
+                    .insert(key.clone(), value.clone());
+            }
+        }
+
+        let (substituted_config, substitution_report) =
+            merged.apply_variable_substitution(&substitution_context);
+
+        debug!("Configuration loading with overrides and substitution complete");
+        Ok((substituted_config, substitution_report))
+    }
+
     /// Load configuration with variable substitution applied
     ///
     /// This is a convenience method that combines configuration loading and
