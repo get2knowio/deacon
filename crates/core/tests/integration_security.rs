@@ -155,7 +155,7 @@ fn test_config_merge_security_options() -> anyhow::Result<()> {
 
     // Overlay config with additional security options
     let overlay_config = DevContainerConfig {
-        privileged: Some(true), // This should override
+        privileged: Some(true),                 // This should override
         cap_add: vec!["NET_ADMIN".to_string()], // This should be concatenated
         security_opt: vec!["seccomp=unconfined".to_string()],
         ..Default::default()
