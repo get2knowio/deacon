@@ -32,7 +32,7 @@ fn test_run_user_commands_no_container() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     // Should fail because no container is running
     assert!(!output.status.success());
     assert!(stderr.contains("No running container found"));
@@ -103,14 +103,10 @@ fn test_run_user_commands_skip_flags() {
 #[test]
 fn test_run_user_commands_help() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    let output = cmd
-        .arg("run-user-commands")
-        .arg("--help")
-        .output()
-        .unwrap();
+    let output = cmd.arg("run-user-commands").arg("--help").output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     assert!(output.status.success());
     assert!(stdout.contains("Run user-defined lifecycle commands"));
     assert!(stdout.contains("--skip-post-create"));
@@ -144,7 +140,7 @@ fn test_run_user_commands_explicit_config() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     // Should fail because no container is running, but config should be loaded successfully
     assert!(!output.status.success());
     assert!(stderr.contains("No running container found"));
@@ -163,8 +159,10 @@ fn test_run_user_commands_missing_config() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     // Should fail because no devcontainer config is found
     assert!(!output.status.success());
-    assert!(stderr.contains("Configuration error") || stderr.contains("Configuration file not found"));
+    assert!(
+        stderr.contains("Configuration error") || stderr.contains("Configuration file not found")
+    );
 }
