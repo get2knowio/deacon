@@ -34,6 +34,19 @@ pub struct FeatureRef {
     pub version: Option<String>,
 }
 
+/// Reference to a template in an OCI registry
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TemplateRef {
+    /// Registry hostname (e.g., "ghcr.io")
+    pub registry: String,
+    /// Namespace (e.g., "devcontainers")
+    pub namespace: String,
+    /// Template name (e.g., "python")
+    pub name: String,
+    /// Version (optional, defaults to "latest")
+    pub version: Option<String>,
+}
+
 impl FeatureRef {
     /// Create a new FeatureRef
     pub fn new(registry: String, namespace: String, name: String, version: Option<String>) -> Self {
@@ -51,6 +64,33 @@ impl FeatureRef {
     }
 
     /// Get the repository name for this feature
+    pub fn repository(&self) -> String {
+        format!("{}/{}", self.namespace, self.name)
+    }
+
+    /// Get the full reference string
+    pub fn reference(&self) -> String {
+        format!("{}/{}:{}", self.registry, self.repository(), self.tag())
+    }
+}
+
+impl TemplateRef {
+    /// Create a new TemplateRef
+    pub fn new(registry: String, namespace: String, name: String, version: Option<String>) -> Self {
+        Self {
+            registry,
+            namespace,
+            name,
+            version,
+        }
+    }
+
+    /// Get the tag for this template reference
+    pub fn tag(&self) -> &str {
+        self.version.as_deref().unwrap_or("latest")
+    }
+
+    /// Get the repository name for this template
     pub fn repository(&self) -> String {
         format!("{}/{}", self.namespace, self.name)
     }
@@ -154,6 +194,32 @@ pub struct DownloadedFeature {
     pub digest: String,
 }
 
+/// Downloaded and extracted template data
+#[derive(Debug)]
+pub struct DownloadedTemplate {
+    /// Extracted template directory
+    pub path: PathBuf,
+    /// Template metadata
+    pub metadata: crate::templates::TemplateMetadata,
+    /// Template digest for caching
+    pub digest: String,
+}
+
+/// Result of publishing an artifact to an OCI registry
+#[derive(Debug, Clone)]
+pub struct PublishResult {
+    /// Registry URL where the artifact was published
+    pub registry: String,
+    /// Repository name
+    pub repository: String,
+    /// Tag used for publishing
+    pub tag: String,
+    /// Digest of the published manifest
+    pub digest: String,
+    /// Size of the published artifact in bytes
+    pub size: u64,
+}
+
 /// OCI manifest structure (minimal)
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -188,6 +254,22 @@ pub trait HttpClient: Send + Sync {
     async fn get_with_headers(
         &self,
         url: &str,
+        headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// PUT request with data and headers
+    async fn put_with_headers(
+        &self,
+        url: &str,
+        data: Bytes,
+        headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// POST request with data and headers
+    async fn post_with_headers(
+        &self,
+        url: &str,
+        data: Bytes,
         headers: HashMap<String, String>,
     ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 }
@@ -365,6 +447,72 @@ impl HttpClient for ReqwestClient {
         }
 
         let mut request = self.client.get(url);
+        for (key, value) in headers {
+            request = request.header(&key, &value);
+        }
+
+        let response = request.send().await?;
+
+        // Handle 401 authentication errors
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(format!("Authentication failed for URL: {}", url).into());
+        }
+
+        // Handle other HTTP errors
+        if !response.status().is_success() {
+            return Err(format!("HTTP {} for URL: {}", response.status(), url).into());
+        }
+
+        let bytes = response.bytes().await?;
+        Ok(bytes)
+    }
+
+    async fn put_with_headers(
+        &self,
+        url: &str,
+        data: Bytes,
+        mut headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        // Add authentication header if available
+        let credentials = self.get_credentials_for_url(url);
+        if let Some(auth_header) = credentials.to_auth_header() {
+            headers.insert("Authorization".to_string(), auth_header);
+        }
+
+        let mut request = self.client.put(url).body(data);
+        for (key, value) in headers {
+            request = request.header(&key, &value);
+        }
+
+        let response = request.send().await?;
+
+        // Handle 401 authentication errors
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(format!("Authentication failed for URL: {}", url).into());
+        }
+
+        // Handle other HTTP errors
+        if !response.status().is_success() {
+            return Err(format!("HTTP {} for URL: {}", response.status(), url).into());
+        }
+
+        let bytes = response.bytes().await?;
+        Ok(bytes)
+    }
+
+    async fn post_with_headers(
+        &self,
+        url: &str,
+        data: Bytes,
+        mut headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        // Add authentication header if available
+        let credentials = self.get_credentials_for_url(url);
+        if let Some(auth_header) = credentials.to_auth_header() {
+            headers.insert("Authorization".to_string(), auth_header);
+        }
+
+        let mut request = self.client.post(url).body(data);
         for (key, value) in headers {
             request = request.header(&key, &value);
         }
@@ -575,6 +723,424 @@ impl<C: HttpClient> FeatureFetcher<C> {
         Ok(manifest)
     }
 
+    /// Publish a feature to an OCI registry
+    #[instrument(level = "info", skip(self, tar_data))]
+    pub async fn publish_feature(
+        &self,
+        feature_ref: &FeatureRef,
+        tar_data: Bytes,
+        metadata: &FeatureMetadata,
+    ) -> Result<PublishResult> {
+        info!("Publishing feature: {}", feature_ref.reference());
+
+        // Calculate digest for the tar layer
+        let mut hasher = Sha256::new();
+        hasher.update(&tar_data);
+        let layer_digest = format!("sha256:{:x}", hasher.finalize());
+        let layer_size = tar_data.len() as u64;
+
+        // Upload the blob (layer)
+        self.upload_blob(feature_ref, &layer_digest, tar_data)
+            .await?;
+
+        // Create and upload manifest
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.devcontainers.feature.config.v1+json",
+                "size": 0,
+                "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "layers": [{
+                "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                "size": layer_size,
+                "digest": layer_digest
+            }],
+            "annotations": {
+                "org.opencontainers.image.title": metadata.name.as_deref().unwrap_or(&metadata.id),
+                "org.opencontainers.image.description": metadata.description.as_deref().unwrap_or(""),
+                "org.opencontainers.image.version": metadata.version.as_deref().unwrap_or("latest")
+            }
+        });
+
+        let manifest_bytes =
+            Bytes::from(serde_json::to_vec(&manifest).map_err(|e| FeatureError::Json(e))?);
+        let manifest_digest = self
+            .upload_manifest(feature_ref, manifest_bytes.clone())
+            .await?;
+
+        info!(
+            "Successfully published feature {} with digest {}",
+            feature_ref.reference(),
+            manifest_digest
+        );
+
+        Ok(PublishResult {
+            registry: feature_ref.registry.clone(),
+            repository: feature_ref.repository(),
+            tag: feature_ref.tag().to_string(),
+            digest: manifest_digest,
+            size: layer_size,
+        })
+    }
+
+    /// Publish a template to an OCI registry
+    #[instrument(level = "info", skip(self, tar_data))]
+    pub async fn publish_template(
+        &self,
+        template_ref: &TemplateRef,
+        tar_data: Bytes,
+        metadata: &crate::templates::TemplateMetadata,
+    ) -> Result<PublishResult> {
+        info!("Publishing template: {}", template_ref.reference());
+
+        // Calculate digest for the tar layer
+        let mut hasher = Sha256::new();
+        hasher.update(&tar_data);
+        let layer_digest = format!("sha256:{:x}", hasher.finalize());
+        let layer_size = tar_data.len() as u64;
+
+        // Upload the blob (layer)
+        self.upload_blob_template(template_ref, &layer_digest, tar_data)
+            .await?;
+
+        // Create and upload manifest
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.devcontainers.template.config.v1+json",
+                "size": 0,
+                "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "layers": [{
+                "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                "size": layer_size,
+                "digest": layer_digest
+            }],
+            "annotations": {
+                "org.opencontainers.image.title": metadata.name.as_deref().unwrap_or(&metadata.id),
+                "org.opencontainers.image.description": metadata.description.as_deref().unwrap_or(""),
+                "org.opencontainers.image.version": metadata.version.as_deref().unwrap_or("latest")
+            }
+        });
+
+        let manifest_bytes =
+            Bytes::from(serde_json::to_vec(&manifest).map_err(|e| FeatureError::Json(e))?);
+        let manifest_digest = self
+            .upload_manifest_template(template_ref, manifest_bytes.clone())
+            .await?;
+
+        info!(
+            "Successfully published template {} with digest {}",
+            template_ref.reference(),
+            manifest_digest
+        );
+
+        Ok(PublishResult {
+            registry: template_ref.registry.clone(),
+            repository: template_ref.repository(),
+            tag: template_ref.tag().to_string(),
+            digest: manifest_digest,
+            size: layer_size,
+        })
+    }
+
+    /// Fetch a template from an OCI registry  
+    #[instrument(level = "info", skip(self))]
+    pub async fn fetch_template(&self, template_ref: &TemplateRef) -> Result<DownloadedTemplate> {
+        info!("Fetching template: {}", template_ref.reference());
+
+        // Get the manifest
+        let manifest = self.get_manifest_template(template_ref).await?;
+        debug!("Got manifest with {} layers", manifest.layers.len());
+
+        // For now, assume single tar layer (as per requirements)
+        if manifest.layers.is_empty() {
+            return Err(FeatureError::Oci {
+                message: "No layers found in manifest".to_string(),
+            }
+            .into());
+        }
+
+        let layer = &manifest.layers[0];
+        debug!("Using layer: digest={}, size={}", layer.digest, layer.size);
+
+        // Check cache first
+        let cache_key = self.get_cache_key(&layer.digest);
+        let cached_dir = self.cache_dir.join(&cache_key);
+
+        if cached_dir.exists() {
+            info!("Found cached template at: {}", cached_dir.display());
+            return self
+                .load_cached_template(cached_dir, layer.digest.clone())
+                .await;
+        }
+
+        // Download and extract the layer
+        let layer_data = self
+            .download_layer_template(template_ref, &layer.digest)
+            .await?;
+        let extracted_dir = self.extract_layer(layer_data, &cache_key).await?;
+
+        // Parse metadata
+        let metadata_path = extracted_dir.join("devcontainer-template.json");
+        let metadata = crate::templates::parse_template_metadata(&metadata_path)?;
+
+        info!("Successfully fetched template: {}", metadata.id);
+        Ok(DownloadedTemplate {
+            path: extracted_dir,
+            metadata,
+            digest: layer.digest.clone(),
+        })
+    }
+
+    /// Upload a blob to the registry for features
+    async fn upload_blob(&self, feature_ref: &FeatureRef, digest: &str, data: Bytes) -> Result<()> {
+        let blob_url = format!(
+            "https://{}/v2/{}/blobs/{}",
+            feature_ref.registry,
+            feature_ref.repository(),
+            digest
+        );
+
+        debug!("Uploading blob to: {}", blob_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Content-Type".to_string(),
+            "application/octet-stream".to_string(),
+        );
+
+        self.client
+            .put_with_headers(&blob_url, data, headers)
+            .await
+            .map_err(|e| FeatureError::Oci {
+                message: format!("Failed to upload blob: {}", e),
+            })?;
+
+        Ok(())
+    }
+
+    /// Upload a blob to the registry for templates
+    async fn upload_blob_template(
+        &self,
+        template_ref: &TemplateRef,
+        digest: &str,
+        data: Bytes,
+    ) -> Result<()> {
+        let blob_url = format!(
+            "https://{}/v2/{}/blobs/{}",
+            template_ref.registry,
+            template_ref.repository(),
+            digest
+        );
+
+        debug!("Uploading blob to: {}", blob_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Content-Type".to_string(),
+            "application/octet-stream".to_string(),
+        );
+
+        self.client
+            .put_with_headers(&blob_url, data, headers)
+            .await
+            .map_err(|e| FeatureError::Oci {
+                message: format!("Failed to upload blob: {}", e),
+            })?;
+
+        Ok(())
+    }
+
+    /// Upload a manifest to the registry for features
+    async fn upload_manifest(
+        &self,
+        feature_ref: &FeatureRef,
+        manifest_data: Bytes,
+    ) -> Result<String> {
+        let manifest_url = format!(
+            "https://{}/v2/{}/manifests/{}",
+            feature_ref.registry,
+            feature_ref.repository(),
+            feature_ref.tag()
+        );
+
+        debug!("Uploading manifest to: {}", manifest_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Content-Type".to_string(),
+            "application/vnd.oci.image.manifest.v1+json".to_string(),
+        );
+
+        let _response = self
+            .client
+            .put_with_headers(&manifest_url, manifest_data.clone(), headers)
+            .await
+            .map_err(|e| FeatureError::Oci {
+                message: format!("Failed to upload manifest: {}", e),
+            })?;
+
+        // Calculate digest of the manifest
+        let mut hasher = Sha256::new();
+        hasher.update(&manifest_data);
+        let digest = format!("sha256:{:x}", hasher.finalize());
+
+        debug!("Manifest uploaded with digest: {}", digest);
+        Ok(digest)
+    }
+
+    /// Upload a manifest to the registry for templates
+    async fn upload_manifest_template(
+        &self,
+        template_ref: &TemplateRef,
+        manifest_data: Bytes,
+    ) -> Result<String> {
+        let manifest_url = format!(
+            "https://{}/v2/{}/manifests/{}",
+            template_ref.registry,
+            template_ref.repository(),
+            template_ref.tag()
+        );
+
+        debug!("Uploading manifest to: {}", manifest_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Content-Type".to_string(),
+            "application/vnd.oci.image.manifest.v1+json".to_string(),
+        );
+
+        let _response = self
+            .client
+            .put_with_headers(&manifest_url, manifest_data.clone(), headers)
+            .await
+            .map_err(|e| FeatureError::Oci {
+                message: format!("Failed to upload manifest: {}", e),
+            })?;
+
+        // Calculate digest of the manifest
+        let mut hasher = Sha256::new();
+        hasher.update(&manifest_data);
+        let digest = format!("sha256:{:x}", hasher.finalize());
+
+        debug!("Manifest uploaded with digest: {}", digest);
+        Ok(digest)
+    }
+
+    /// Get the OCI manifest for a template
+    async fn get_manifest_template(&self, template_ref: &TemplateRef) -> Result<Manifest> {
+        let manifest_url = format!(
+            "https://{}/v2/{}/manifests/{}",
+            template_ref.registry,
+            template_ref.repository(),
+            template_ref.tag()
+        );
+
+        debug!("Fetching manifest from: {}", manifest_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Accept".to_string(),
+            "application/vnd.oci.image.manifest.v1+json".to_string(),
+        );
+
+        // Retry the manifest download with exponential backoff
+        let manifest_data = retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let headers = headers.clone();
+                async move {
+                    client.get_with_headers(url, headers).await.map_err(|e| {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Authentication failed") {
+                            FeatureError::Authentication {
+                                message: format!("Failed to authenticate for manifest: {}", e),
+                            }
+                        } else {
+                            FeatureError::Download {
+                                message: format!("Failed to download manifest: {}", e),
+                            }
+                        }
+                    })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
+
+        let manifest: Manifest =
+            serde_json::from_slice(&manifest_data).map_err(|e| FeatureError::Parsing {
+                message: format!("Failed to parse manifest: {}", e),
+            })?;
+
+        Ok(manifest)
+    }
+
+    /// Download a layer blob for templates
+    async fn download_layer_template(
+        &self,
+        template_ref: &TemplateRef,
+        digest: &str,
+    ) -> Result<Bytes> {
+        let blob_url = format!(
+            "https://{}/v2/{}/blobs/{}",
+            template_ref.registry,
+            template_ref.repository(),
+            digest
+        );
+
+        debug!("Downloading layer from: {}", blob_url);
+
+        // Retry the layer download with exponential backoff
+        let layer_data = retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &blob_url;
+                async move {
+                    client.get(url).await.map_err(|e| {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Authentication failed") {
+                            FeatureError::Authentication {
+                                message: format!("Failed to authenticate for layer: {}", e),
+                            }
+                        } else {
+                            FeatureError::Download {
+                                message: format!("Failed to download layer: {}", e),
+                            }
+                        }
+                    })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
+
+        Ok(layer_data)
+    }
+
+    /// Load cached template from directory
+    async fn load_cached_template(
+        &self,
+        cached_dir: PathBuf,
+        digest: String,
+    ) -> Result<DownloadedTemplate> {
+        let metadata_path = cached_dir.join("devcontainer-template.json");
+        let metadata = crate::templates::parse_template_metadata(&metadata_path)?;
+
+        Ok(DownloadedTemplate {
+            path: cached_dir,
+            metadata,
+            digest,
+        })
+    }
+
     /// Download a layer blob
     async fn download_layer(&self, feature_ref: &FeatureRef, digest: &str) -> Result<Bytes> {
         let blob_url = format!(
@@ -769,6 +1335,32 @@ impl HttpClient for MockHttpClient {
     ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
         self.get(url).await
     }
+
+    async fn put_with_headers(
+        &self,
+        url: &str,
+        _data: Bytes,
+        _headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        let responses = self.responses.lock().await;
+        responses
+            .get(url)
+            .cloned()
+            .ok_or_else(|| format!("No mock response for URL: {}", url).into())
+    }
+
+    async fn post_with_headers(
+        &self,
+        url: &str,
+        _data: Bytes,
+        _headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        let responses = self.responses.lock().await;
+        responses
+            .get(url)
+            .cloned()
+            .ok_or_else(|| format!("No mock response for URL: {}", url).into())
+    }
 }
 
 #[cfg(test)]
@@ -804,6 +1396,43 @@ mod tests {
 
         assert_eq!(feature_ref.tag(), "latest");
         assert_eq!(feature_ref.reference(), "ghcr.io/devcontainers/node:latest");
+    }
+
+    #[test]
+    fn test_template_ref_creation() {
+        let template_ref = TemplateRef::new(
+            "ghcr.io".to_string(),
+            "devcontainers".to_string(),
+            "python".to_string(),
+            Some("3.11".to_string()),
+        );
+
+        assert_eq!(template_ref.registry, "ghcr.io");
+        assert_eq!(template_ref.namespace, "devcontainers");
+        assert_eq!(template_ref.name, "python");
+        assert_eq!(template_ref.version, Some("3.11".to_string()));
+        assert_eq!(template_ref.tag(), "3.11");
+        assert_eq!(template_ref.repository(), "devcontainers/python");
+        assert_eq!(
+            template_ref.reference(),
+            "ghcr.io/devcontainers/python:3.11"
+        );
+    }
+
+    #[test]
+    fn test_template_ref_default_version() {
+        let template_ref = TemplateRef::new(
+            "ghcr.io".to_string(),
+            "devcontainers".to_string(),
+            "python".to_string(),
+            None,
+        );
+
+        assert_eq!(template_ref.tag(), "latest");
+        assert_eq!(
+            template_ref.reference(),
+            "ghcr.io/devcontainers/python:latest"
+        );
     }
 
     #[test]
@@ -943,6 +1572,34 @@ mod tests {
             ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
                 self.get(url).await
             }
+
+            async fn put_with_headers(
+                &self,
+                _url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                let current = self.failure_count.fetch_add(1, Ordering::SeqCst);
+                if current < self.fail_attempts {
+                    Err("network error".into())
+                } else {
+                    Ok(Bytes::new())
+                }
+            }
+
+            async fn post_with_headers(
+                &self,
+                _url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                let current = self.failure_count.fetch_add(1, Ordering::SeqCst);
+                if current < self.fail_attempts {
+                    Err("network error".into())
+                } else {
+                    Ok(Bytes::new())
+                }
+            }
         }
 
         // Test that retry works - should succeed after 2 failures
@@ -1013,6 +1670,26 @@ mod tests {
                 _headers: HashMap<String, String>,
             ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
                 self.get(url).await
+            }
+
+            async fn put_with_headers(
+                &self,
+                _url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                self.call_count.fetch_add(1, Ordering::SeqCst);
+                Err("permanent network error".into())
+            }
+
+            async fn post_with_headers(
+                &self,
+                _url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                self.call_count.fetch_add(1, Ordering::SeqCst);
+                Err("permanent network error".into())
             }
         }
 
