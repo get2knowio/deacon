@@ -6,6 +6,7 @@
 
 use crate::errors::{FeatureError, Result};
 use crate::features::{parse_feature_metadata, FeatureMetadata};
+use crate::progress::{ProgressEvent, ProgressTracker};
 use crate::retry::{retry_async, RetryConfig, RetryDecision};
 use base64::Engine;
 use bytes::Bytes;
@@ -17,6 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tar::Archive;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
@@ -539,6 +541,7 @@ pub struct FeatureFetcher<C: HttpClient> {
     client: C,
     cache_dir: PathBuf,
     retry_config: RetryConfig,
+    progress_tracker: Arc<Mutex<Option<ProgressTracker>>>,
 }
 
 /// Error classifier for network operations
@@ -573,6 +576,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
             client,
             cache_dir,
             retry_config: RetryConfig::default(),
+            progress_tracker: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -582,6 +586,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
             client,
             cache_dir,
             retry_config: RetryConfig::default(),
+            progress_tracker: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -591,6 +596,22 @@ impl<C: HttpClient> FeatureFetcher<C> {
             client,
             cache_dir,
             retry_config,
+            progress_tracker: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Set progress tracker for emitting events
+    pub async fn set_progress_tracker(&self, tracker: ProgressTracker) {
+        let mut progress = self.progress_tracker.lock().await;
+        *progress = Some(tracker);
+    }
+
+    /// Emit a progress event if a tracker is configured
+    async fn emit_progress_event(&self, event: ProgressEvent) {
+        if let Some(ref mut tracker) = self.progress_tracker.lock().await.as_mut() {
+            if let Err(e) = tracker.emit_event(event) {
+                warn!("Failed to emit progress event: {}", e);
+            }
         }
     }
 
@@ -602,48 +623,126 @@ impl<C: HttpClient> FeatureFetcher<C> {
     /// Fetch a feature from an OCI registry
     #[instrument(level = "info", skip(self))]
     pub async fn fetch_feature(&self, feature_ref: &FeatureRef) -> Result<DownloadedFeature> {
+        let start_time = Instant::now();
+        let event_id =
+            crate::progress::EVENT_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        // Emit fetch begin event
+        self.emit_progress_event(ProgressEvent::OciFetchBegin {
+            id: event_id,
+            timestamp,
+            registry: feature_ref.registry.clone(),
+            repository: feature_ref.repository(),
+            tag: feature_ref.tag().to_string(),
+        })
+        .await;
+
         info!("Fetching feature: {}", feature_ref.reference());
 
-        // Get the manifest
-        let manifest = self.get_manifest(feature_ref).await?;
-        debug!("Got manifest with {} layers", manifest.layers.len());
+        let result = async {
+            // Get the manifest
+            let manifest = self.get_manifest(feature_ref).await.map_err(|e| match e {
+                crate::errors::DeaconError::Feature(f) => f,
+                _ => FeatureError::Oci {
+                    message: format!("Get manifest error: {}", e),
+                },
+            })?;
+            debug!("Got manifest with {} layers", manifest.layers.len());
 
-        // For now, assume single tar layer (as per requirements)
-        if manifest.layers.is_empty() {
-            return Err(FeatureError::Oci {
-                message: "No layers found in manifest".to_string(),
+            // For now, assume single tar layer (as per requirements)
+            if manifest.layers.is_empty() {
+                return Err(FeatureError::Oci {
+                    message: "No layers found in manifest".to_string(),
+                });
             }
-            .into());
+
+            let layer = &manifest.layers[0];
+            debug!("Using layer: digest={}, size={}", layer.digest, layer.size);
+
+            // Check cache first
+            let cache_key = self.get_cache_key(&layer.digest);
+            let cached_dir = self.cache_dir.join(&cache_key);
+
+            let is_cached = cached_dir.exists();
+            if is_cached {
+                info!("Found cached feature at: {}", cached_dir.display());
+                let feature = self
+                    .load_cached_feature(cached_dir, layer.digest.clone())
+                    .await
+                    .map_err(|e| match e {
+                        crate::errors::DeaconError::Feature(f) => f,
+                        _ => FeatureError::Oci {
+                            message: format!("Cache error: {}", e),
+                        },
+                    })?;
+                return Ok((feature, is_cached));
+            }
+
+            // Download and extract the layer
+            let layer_data = self
+                .download_layer(feature_ref, &layer.digest)
+                .await
+                .map_err(|e| match e {
+                    crate::errors::DeaconError::Feature(f) => f,
+                    _ => FeatureError::Oci {
+                        message: format!("Download error: {}", e),
+                    },
+                })?;
+            let extracted_dir = self
+                .extract_layer(layer_data, &cache_key)
+                .await
+                .map_err(|e| match e {
+                    crate::errors::DeaconError::Feature(f) => f,
+                    _ => FeatureError::Oci {
+                        message: format!("Extract error: {}", e),
+                    },
+                })?;
+
+            // Parse metadata
+            let metadata_path = extracted_dir.join("devcontainer-feature.json");
+            let metadata = parse_feature_metadata(&metadata_path).map_err(|e| match e {
+                crate::errors::DeaconError::Feature(f) => f,
+                _ => FeatureError::Oci {
+                    message: format!("Metadata parse error: {}", e),
+                },
+            })?;
+
+            info!("Successfully fetched feature: {}", metadata.id);
+            Ok((
+                DownloadedFeature {
+                    path: extracted_dir,
+                    metadata,
+                    digest: layer.digest.clone(),
+                },
+                is_cached,
+            ))
         }
+        .await;
 
-        let layer = &manifest.layers[0];
-        debug!("Using layer: digest={}, size={}", layer.digest, layer.size);
+        // Emit fetch end event
+        let end_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let duration_ms = start_time.elapsed().as_millis() as u64;
 
-        // Check cache first
-        let cache_key = self.get_cache_key(&layer.digest);
-        let cached_dir = self.cache_dir.join(&cache_key);
-
-        if cached_dir.exists() {
-            info!("Found cached feature at: {}", cached_dir.display());
-            return self
-                .load_cached_feature(cached_dir, layer.digest.clone())
-                .await;
-        }
-
-        // Download and extract the layer
-        let layer_data = self.download_layer(feature_ref, &layer.digest).await?;
-        let extracted_dir = self.extract_layer(layer_data, &cache_key).await?;
-
-        // Parse metadata
-        let metadata_path = extracted_dir.join("devcontainer-feature.json");
-        let metadata = parse_feature_metadata(&metadata_path)?;
-
-        info!("Successfully fetched feature: {}", metadata.id);
-        Ok(DownloadedFeature {
-            path: extracted_dir,
-            metadata,
-            digest: layer.digest.clone(),
+        self.emit_progress_event(ProgressEvent::OciFetchEnd {
+            id: event_id,
+            timestamp: end_timestamp,
+            registry: feature_ref.registry.clone(),
+            repository: feature_ref.repository(),
+            tag: feature_ref.tag().to_string(),
+            duration_ms,
+            success: result.is_ok(),
+            cached: result.as_ref().map(|(_, cached)| *cached).unwrap_or(false),
         })
+        .await;
+
+        result.map(|(feature, _)| feature).map_err(Into::into)
     }
 
     /// Install a downloaded feature by executing its install script
@@ -731,58 +830,107 @@ impl<C: HttpClient> FeatureFetcher<C> {
         tar_data: Bytes,
         metadata: &FeatureMetadata,
     ) -> Result<PublishResult> {
-        info!("Publishing feature: {}", feature_ref.reference());
+        let start_time = Instant::now();
+        let event_id =
+            crate::progress::EVENT_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
 
-        // Calculate digest for the tar layer
-        let mut hasher = Sha256::new();
-        hasher.update(&tar_data);
-        let layer_digest = format!("sha256:{:x}", hasher.finalize());
-        let layer_size = tar_data.len() as u64;
-
-        // Upload the blob (layer)
-        self.upload_blob(feature_ref, &layer_digest, tar_data)
-            .await?;
-
-        // Create and upload manifest
-        let manifest = serde_json::json!({
-            "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
-            "config": {
-                "mediaType": "application/vnd.devcontainers.feature.config.v1+json",
-                "size": 0,
-                "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
-            },
-            "layers": [{
-                "mediaType": "application/vnd.oci.image.layer.v1.tar",
-                "size": layer_size,
-                "digest": layer_digest
-            }],
-            "annotations": {
-                "org.opencontainers.image.title": metadata.name.as_deref().unwrap_or(&metadata.id),
-                "org.opencontainers.image.description": metadata.description.as_deref().unwrap_or(""),
-                "org.opencontainers.image.version": metadata.version.as_deref().unwrap_or("latest")
-            }
-        });
-
-        let manifest_bytes =
-            Bytes::from(serde_json::to_vec(&manifest).map_err(FeatureError::Json)?);
-        let manifest_digest = self
-            .upload_manifest(feature_ref, manifest_bytes.clone())
-            .await?;
-
-        info!(
-            "Successfully published feature {} with digest {}",
-            feature_ref.reference(),
-            manifest_digest
-        );
-
-        Ok(PublishResult {
+        // Emit publish begin event
+        self.emit_progress_event(ProgressEvent::OciPublishBegin {
+            id: event_id,
+            timestamp,
             registry: feature_ref.registry.clone(),
             repository: feature_ref.repository(),
             tag: feature_ref.tag().to_string(),
-            digest: manifest_digest,
-            size: layer_size,
         })
+        .await;
+
+        info!("Publishing feature: {}", feature_ref.reference());
+
+        let result = async {
+            // Calculate digest for the tar layer
+            let mut hasher = Sha256::new();
+            hasher.update(&tar_data);
+            let layer_digest = format!("sha256:{:x}", hasher.finalize());
+            let layer_size = tar_data.len() as u64;
+
+            // Upload the blob (layer)
+            self.upload_blob(feature_ref, &layer_digest, tar_data)
+                .await
+                .map_err(|e| match e {
+                    crate::errors::DeaconError::Feature(f) => f,
+                    _ => FeatureError::Oci { message: format!("Upload blob error: {}", e) },
+                })?;
+
+            // Create and upload manifest
+            let manifest = serde_json::json!({
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "config": {
+                    "mediaType": "application/vnd.devcontainers.feature.config.v1+json",
+                    "size": 0,
+                    "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+                },
+                "layers": [{
+                    "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                    "size": layer_size,
+                    "digest": layer_digest
+                }],
+                "annotations": {
+                    "org.opencontainers.image.title": metadata.name.as_deref().unwrap_or(&metadata.id),
+                    "org.opencontainers.image.description": metadata.description.as_deref().unwrap_or(""),
+                    "org.opencontainers.image.version": metadata.version.as_deref().unwrap_or("latest")
+                }
+            });
+
+            let manifest_bytes =
+                Bytes::from(serde_json::to_vec(&manifest).map_err(FeatureError::Json)?);
+            let manifest_digest = self
+                .upload_manifest(feature_ref, manifest_bytes.clone())
+                .await
+                .map_err(|e| match e {
+                    crate::errors::DeaconError::Feature(f) => f,
+                    _ => FeatureError::Oci { message: format!("Upload manifest error: {}", e) },
+                })?;
+
+            info!(
+                "Successfully published feature {} with digest {}",
+                feature_ref.reference(),
+                manifest_digest
+            );
+
+            Ok::<_, crate::errors::FeatureError>(PublishResult {
+                registry: feature_ref.registry.clone(),
+                repository: feature_ref.repository(),
+                tag: feature_ref.tag().to_string(),
+                digest: manifest_digest.clone(),
+                size: layer_size,
+            })
+        }.await;
+
+        // Emit publish end event
+        let end_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        self.emit_progress_event(ProgressEvent::OciPublishEnd {
+            id: event_id,
+            timestamp: end_timestamp,
+            registry: feature_ref.registry.clone(),
+            repository: feature_ref.repository(),
+            tag: feature_ref.tag().to_string(),
+            duration_ms,
+            success: result.is_ok(),
+            digest: result.as_ref().ok().map(|r| r.digest.clone()),
+        })
+        .await;
+
+        result.map_err(Into::into)
     }
 
     /// Publish a template to an OCI registry
