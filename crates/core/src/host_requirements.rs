@@ -33,10 +33,13 @@ pub fn get_disk_space_for_path(path: &std::path::Path) -> Result<u64> {
     {
         use std::process::Command;
 
-        // Ensure path exists and get its canonical form
-        let canonical_path = path.canonicalize().map_err(|e| ConfigError::Validation {
-            message: format!("Could not access path {}: {}", path.display(), e),
-        })?;
+        // Try to canonicalize path, fall back to parent or current directory if path doesn't exist
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| {
+            // If path doesn't exist, try parent directory
+            path.parent()
+                .and_then(|p| p.canonicalize().ok())
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+        });
 
         // Try df with different options depending on the platform
         let result = if cfg!(target_os = "macos") {
@@ -93,10 +96,13 @@ pub fn get_disk_space_for_path(path: &std::path::Path) -> Result<u64> {
     {
         use std::process::Command;
 
-        // Ensure path exists and get its canonical form
-        let canonical_path = path.canonicalize().map_err(|e| ConfigError::Validation {
-            message: format!("Could not access path {}: {}", path.display(), e),
-        })?;
+        // Try to canonicalize path, fall back to parent or current directory if path doesn't exist
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| {
+            // If path doesn't exist, try parent directory
+            path.parent()
+                .and_then(|p| p.canonicalize().ok())
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+        });
 
         // Use PowerShell to get free space
         let path_str = canonical_path.to_string_lossy();
@@ -423,7 +429,7 @@ impl<F: FilesystemProvider> HostRequirementsEvaluator<F> {
     }
 }
 
-impl Default for HostRequirementsEvaluator {
+impl Default for HostRequirementsEvaluator<DefaultFilesystemProvider> {
     fn default() -> Self {
         Self::new()
     }

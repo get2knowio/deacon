@@ -4,6 +4,7 @@
 //! configuration discovery results, and create support bundles for troubleshooting.
 
 use crate::errors::{DeaconError, Result};
+use bytesize::ByteSize;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -379,15 +380,9 @@ fn print_text_output(info: &DoctorInfo) {
     println!();
 
     println!("Disk Space:");
-    println!(
-        "  Total: {} GB",
-        info.disk_space.total_bytes / 1_000_000_000
-    );
-    println!(
-        "  Available: {} GB",
-        info.disk_space.available_bytes / 1_000_000_000
-    );
-    println!("  Used: {} GB", info.disk_space.used_bytes / 1_000_000_000);
+    println!("  Total: {}", ByteSize(info.disk_space.total_bytes));
+    println!("  Available: {}", ByteSize(info.disk_space.available_bytes));
+    println!("  Used: {}", ByteSize(info.disk_space.used_bytes));
     println!();
 
     println!("Configuration Discovery:");
