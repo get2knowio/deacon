@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, instrument, warn};
 
 /// Global event ID counter for deterministic ordering
-static EVENT_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+pub static EVENT_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Progress event types for different phases
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,6 +91,46 @@ pub enum ProgressEvent {
         duration_ms: u64,
         success: bool,
     },
+
+    /// OCI registry operation events
+    #[serde(rename = "oci.publish.begin")]
+    OciPublishBegin {
+        id: u64,
+        timestamp: u64,
+        registry: String,
+        repository: String,
+        tag: String,
+    },
+    #[serde(rename = "oci.publish.end")]
+    OciPublishEnd {
+        id: u64,
+        timestamp: u64,
+        registry: String,
+        repository: String,
+        tag: String,
+        duration_ms: u64,
+        success: bool,
+        digest: Option<String>,
+    },
+    #[serde(rename = "oci.fetch.begin")]
+    OciFetchBegin {
+        id: u64,
+        timestamp: u64,
+        registry: String,
+        repository: String,
+        tag: String,
+    },
+    #[serde(rename = "oci.fetch.end")]
+    OciFetchEnd {
+        id: u64,
+        timestamp: u64,
+        registry: String,
+        repository: String,
+        tag: String,
+        duration_ms: u64,
+        success: bool,
+        cached: bool,
+    },
 }
 
 impl ProgressEvent {
@@ -115,6 +155,10 @@ impl ProgressEvent {
             ProgressEvent::FeaturesInstallEnd { id, .. } => *id,
             ProgressEvent::LifecyclePhaseBegin { id, .. } => *id,
             ProgressEvent::LifecyclePhaseEnd { id, .. } => *id,
+            ProgressEvent::OciPublishBegin { id, .. } => *id,
+            ProgressEvent::OciPublishEnd { id, .. } => *id,
+            ProgressEvent::OciFetchBegin { id, .. } => *id,
+            ProgressEvent::OciFetchEnd { id, .. } => *id,
         }
     }
 
@@ -145,6 +189,10 @@ impl ProgressEvent {
             ProgressEvent::FeaturesInstallEnd { timestamp, .. } => *timestamp,
             ProgressEvent::LifecyclePhaseBegin { timestamp, .. } => *timestamp,
             ProgressEvent::LifecyclePhaseEnd { timestamp, .. } => *timestamp,
+            ProgressEvent::OciPublishBegin { timestamp, .. } => *timestamp,
+            ProgressEvent::OciPublishEnd { timestamp, .. } => *timestamp,
+            ProgressEvent::OciFetchBegin { timestamp, .. } => *timestamp,
+            ProgressEvent::OciFetchEnd { timestamp, .. } => *timestamp,
         }
     }
 }

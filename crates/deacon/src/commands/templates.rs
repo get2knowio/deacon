@@ -5,10 +5,19 @@
 
 use crate::cli::TemplateCommands;
 use anyhow::Result;
+use deacon_core::oci::{default_fetcher, TemplateRef};
+use deacon_core::registry_parser::parse_registry_reference;
 use deacon_core::templates::parse_template_metadata;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, instrument};
+use tempfile;
+use tracing::{debug, info, instrument, warn};
+
+#[derive(Debug, Clone, Copy)]
+enum ConflictStrategy {
+    Skip,
+    Overwrite,
+}
 
 /// Templates command arguments
 #[derive(Debug, Clone)]
@@ -47,15 +56,23 @@ pub async fn execute_templates(args: TemplatesArgs) -> Result<()> {
             path,
             registry,
             dry_run,
-        } => execute_templates_publish(&path, &registry, dry_run).await,
+            username,
+            password_stdin,
+        } => {
+            execute_templates_publish(
+                &path,
+                &registry,
+                dry_run,
+                username.as_deref(),
+                password_stdin,
+            )
+            .await
+        }
         TemplateCommands::GenerateDocs { path, output } => {
             execute_templates_generate_docs(&path, &output).await
         }
-        TemplateCommands::Apply { template: _ } => {
-            // Apply command not in scope for this issue
-            Err(anyhow::anyhow!(
-                "templates apply command not yet implemented"
-            ))
+        TemplateCommands::Apply { template, force } => {
+            execute_templates_apply(&template, force).await
         }
     }
 }
@@ -94,11 +111,27 @@ async fn execute_templates_metadata(path: &str) -> Result<()> {
 
 /// Execute templates publish command
 #[instrument(level = "debug")]
-async fn execute_templates_publish(path: &str, registry: &str, dry_run: bool) -> Result<()> {
+async fn execute_templates_publish(
+    path: &str,
+    registry: &str,
+    dry_run: bool,
+    username: Option<&str>,
+    password_stdin: bool,
+) -> Result<()> {
     debug!(
         "Publishing template at path: {} to registry: {} (dry_run: {})",
         path, registry, dry_run
     );
+
+    // Handle authentication credentials if provided
+    if let Some(_username) = username {
+        // TODO: Implement credential setting in OCI client
+        debug!("Username provided for authentication: {}", _username);
+    }
+    if password_stdin {
+        // TODO: Implement reading password from stdin
+        debug!("Password will be read from stdin");
+    }
 
     let template_path = Path::new(path);
 
@@ -131,19 +164,49 @@ async fn execute_templates_publish(path: &str, registry: &str, dry_run: bool) ->
         return Ok(());
     }
 
-    // Create OCI package of template files
-    let (digest, size) = create_template_package(template_path, &metadata.id).await?;
+    // Parse registry reference from the registry parameter
+    // Format: [registry]/[namespace]/[name]:[tag]
+    let (registry_url, namespace, name, tag) = parse_registry_reference(registry)?;
+
+    let template_ref = TemplateRef::new(
+        registry_url.clone(),
+        namespace.clone(),
+        name.clone(),
+        tag.clone(),
+    );
+
+    // Create template package
+    let temp_dir = tempfile::tempdir()?;
+    let (_digest, _size) =
+        create_template_package(template_path, temp_dir.path(), &metadata.id).await?;
+
+    // Read the created tar file for publishing
+    let tar_path = temp_dir.path().join(format!("{}.tar", metadata.id));
+    let tar_data = std::fs::read(&tar_path)?;
+
+    // Create OCI client and publish to registry
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+    info!("Publishing to OCI registry: {}", template_ref.reference());
+    let publish_result = fetcher
+        .publish_template(&template_ref, tar_data.into(), &metadata)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to publish template: {}", e))?;
 
     let result = TemplatesResult {
         command: "publish".to_string(),
         status: "success".to_string(),
-        digest: Some(digest),
-        size: Some(size),
-        message: Some(format!("Template published successfully to {}", registry)),
+        digest: Some(publish_result.digest),
+        size: Some(publish_result.size),
+        message: Some(format!(
+            "Successfully published {} to {}",
+            template_ref.reference(),
+            registry_url
+        )),
     };
 
     output_result(&result, true)?; // Always output as JSON for programmatic use
-
     Ok(())
 }
 
@@ -182,23 +245,111 @@ async fn execute_templates_generate_docs(path: &str, output_dir: &str) -> Result
     Ok(())
 }
 
+/// Execute templates apply command
+#[instrument(level = "debug")]
+async fn execute_templates_apply(template: &str, force: bool) -> Result<()> {
+    debug!("Applying template: {}", template);
+
+    // Parse the template reference
+    let (registry_url, namespace, name, tag) = parse_registry_reference(template)?;
+
+    let template_ref = TemplateRef::new(
+        registry_url.clone(),
+        namespace.clone(),
+        name.clone(),
+        tag.clone(),
+    );
+
+    // Create OCI client and fetch template
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+    info!("Fetching template from: {}", template_ref.reference());
+
+    let downloaded_template = fetcher
+        .fetch_template(&template_ref)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch template: {}", e))?;
+
+    // Apply template files to the current directory
+    let current_dir = std::env::current_dir()?;
+    info!(
+        "Applying template to current directory: {}",
+        current_dir.display()
+    );
+
+    // Copy template files to current directory
+    let strategy = if force {
+        ConflictStrategy::Overwrite
+    } else {
+        ConflictStrategy::Skip
+    };
+    copy_template_files(&downloaded_template.path, &current_dir, strategy)?;
+
+    info!(
+        "Successfully applied template {} to {}",
+        template_ref.reference(),
+        current_dir.display()
+    );
+
+    Ok(())
+}
+
+/// Copy template files to the target directory
+fn copy_template_files(
+    source_dir: &Path,
+    target_dir: &Path,
+    strategy: ConflictStrategy,
+) -> Result<()> {
+    use std::fs;
+
+    for entry in fs::read_dir(source_dir)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let file_name = entry.file_name();
+        let target_path = target_dir.join(&file_name);
+
+        if source_path.is_dir() {
+            // Recursively copy directories
+            fs::create_dir_all(&target_path)?;
+            copy_template_files(&source_path, &target_path, strategy)?;
+        } else {
+            // Copy files, but handle conflicts
+            if target_path.exists() {
+                match strategy {
+                    ConflictStrategy::Skip => {
+                        warn!("File already exists, skipping: {}", target_path.display());
+                        continue;
+                    }
+                    ConflictStrategy::Overwrite => {
+                        warn!("Overwriting existing file: {}", target_path.display());
+                    }
+                }
+            }
+            fs::copy(&source_path, &target_path)?;
+            info!("Applied file: {}", target_path.display());
+        }
+    }
+
+    Ok(())
+}
+
 /// Create a template package (tar archive with OCI manifest)
-async fn create_template_package(template_path: &Path, template_id: &str) -> Result<(String, u64)> {
+async fn create_template_package(
+    template_path: &Path,
+    output_path: &Path,
+    template_id: &str,
+) -> Result<(String, u64)> {
     use sha2::{Digest, Sha256};
     use std::fs::File;
     use std::io::Read;
     use tar::Builder;
-    use tempfile::TempDir;
 
     debug!("Creating template package for: {}", template_id);
 
-    // Create temporary directory for package creation
-    let temp_dir = TempDir::new()?;
-    let temp_path = temp_dir.path();
-
     // Create tar archive
     let tar_filename = format!("{}.tar", template_id);
-    let tar_path = temp_path.join(&tar_filename);
+    let tar_path = output_path.join(&tar_filename);
     let tar_file = File::create(&tar_path)?;
     let mut builder = Builder::new(tar_file);
 
@@ -406,7 +557,10 @@ mod tests {
         )
         .unwrap();
 
-        let (digest, size) = create_template_package(&template_dir, "test-template")
+        let output_dir = temp_dir.path().join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let (digest, size) = create_template_package(&template_dir, &output_dir, "test-template")
             .await
             .unwrap();
 

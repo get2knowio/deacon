@@ -104,6 +104,30 @@ impl HttpClient for AuthMockHttpClient {
 
         Err(format!("No mock response for URL: {}", url).into())
     }
+
+    async fn put_with_headers(
+        &self,
+        url: &str,
+        _data: Bytes,
+        headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        // For PUT requests, just return empty response if auth is valid
+        self.get_with_headers(url, headers)
+            .await
+            .map(|_| Bytes::new())
+    }
+
+    async fn post_with_headers(
+        &self,
+        url: &str,
+        _data: Bytes,
+        headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        // For POST requests, just return empty response if auth is valid
+        self.get_with_headers(url, headers)
+            .await
+            .map(|_| Bytes::new())
+    }
 }
 
 #[tokio::test]
@@ -452,5 +476,35 @@ impl HttpClient for MockAuthReqwestClient {
         }
 
         self.mock_client.get_with_headers(url, headers).await
+    }
+
+    async fn put_with_headers(
+        &self,
+        url: &str,
+        data: Bytes,
+        mut headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        // Add authentication header if available
+        let credentials = self.get_credentials_for_url(url);
+        if let Some(auth_header) = credentials.to_auth_header() {
+            headers.insert("Authorization".to_string(), auth_header);
+        }
+
+        self.mock_client.put_with_headers(url, data, headers).await
+    }
+
+    async fn post_with_headers(
+        &self,
+        url: &str,
+        data: Bytes,
+        mut headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        // Add authentication header if available
+        let credentials = self.get_credentials_for_url(url);
+        if let Some(auth_header) = credentials.to_auth_header() {
+            headers.insert("Authorization".to_string(), auth_header);
+        }
+
+        self.mock_client.post_with_headers(url, data, headers).await
     }
 }

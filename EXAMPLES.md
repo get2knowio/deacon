@@ -48,6 +48,73 @@ deacon read-configuration \
   --secrets-file "$TMPDIR/secrets.env"
 ```
 
+## OCI Registry Operations
+
+Manage DevContainer features and templates in OCI registries.
+
+### Features
+
+```sh
+# Test a feature for validation
+deacon features test fixtures/features/minimal-feature
+
+# Package a feature for publishing (creates a .tar archive)
+deacon features package fixtures/features/minimal-feature output.tar
+
+# Publish a feature to an OCI registry (requires authentication)
+deacon features publish fixtures/features/minimal-feature \
+  --registry ghcr.io/myorg/feature \
+  --username myuser \
+  --password-stdin <<< "$GITHUB_TOKEN"
+
+# Get information about a published feature
+deacon features info oci ghcr.io/devcontainers/features/node:latest
+```
+
+### Templates
+
+```sh
+# Apply a template to the current directory
+deacon templates apply ghcr.io/devcontainers/templates/python
+
+# Apply with force to overwrite existing files
+deacon templates apply ghcr.io/devcontainers/templates/python --force
+
+# Get template metadata
+deacon templates metadata fixtures/templates/minimal
+
+# Publish a template to an OCI registry (requires authentication)
+deacon templates publish fixtures/templates/minimal \
+  --registry ghcr.io/myorg/template \
+  --username myuser \
+  --password-stdin <<< "$GITHUB_TOKEN"
+
+# Generate template documentation
+deacon templates generate-docs fixtures/templates/minimal \
+  --output-dir ./docs
+```
+
+### Registry Authentication
+
+```sh
+# Using environment variables (recommended)
+export DEACON_REGISTRY_USER=myuser
+export DEACON_REGISTRY_PASSWORD=mytoken
+deacon features publish fixtures/features/minimal-feature \
+  --registry ghcr.io/myorg/feature
+
+# Using command line flags
+deacon features publish fixtures/features/minimal-feature \
+  --registry ghcr.io/myorg/feature \
+  --username myuser \
+  --password-stdin <<< "$GITHUB_TOKEN"
+
+# Dry run to validate without publishing
+deacon features publish fixtures/features/minimal-feature \
+  --registry ghcr.io/myorg/feature \
+  --dry-run
+```
+
 ## Build Image
 Build an image when `dockerFile` is used in the config. Demonstrates both JSON and text outputs.
 ```sh

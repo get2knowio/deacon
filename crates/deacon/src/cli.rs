@@ -269,6 +269,12 @@ pub enum FeatureCommands {
         /// Output in JSON format
         #[arg(long)]
         json: bool,
+        /// Username for registry authentication
+        #[arg(long)]
+        username: Option<String>,
+        /// Read password from stdin
+        #[arg(long)]
+        password_stdin: bool,
     },
     /// Get feature information
     Info { mode: String, feature: String },
@@ -278,7 +284,12 @@ pub enum FeatureCommands {
 #[derive(Debug, Clone, Subcommand)]
 pub enum TemplateCommands {
     /// Apply template to current project
-    Apply { template: String },
+    Apply {
+        template: String,
+        /// Force overwrite existing files
+        #[arg(long)]
+        force: bool,
+    },
     /// Publish templates to registry
     Publish {
         /// Path to template directory to publish
@@ -289,6 +300,12 @@ pub enum TemplateCommands {
         /// Dry run (don't actually publish)
         #[arg(long)]
         dry_run: bool,
+        /// Username for registry authentication
+        #[arg(long)]
+        username: Option<String>,
+        /// Read password from stdin
+        #[arg(long)]
+        password_stdin: bool,
     },
     /// Get template metadata
     Metadata {

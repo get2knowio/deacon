@@ -23,6 +23,7 @@ pub mod oci;
 pub mod ports;
 pub mod progress;
 pub mod redaction;
+pub mod registry_parser;
 pub mod retry;
 pub mod secrets;
 pub mod security;

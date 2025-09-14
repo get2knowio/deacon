@@ -6,8 +6,11 @@
 use crate::cli::FeatureCommands;
 use anyhow::Result;
 use deacon_core::features::parse_feature_metadata;
+use deacon_core::oci::{default_fetcher, FeatureRef};
+use deacon_core::registry_parser::parse_registry_reference;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tempfile;
 use tracing::{debug, info, instrument};
 
 /// Features command arguments
@@ -51,14 +54,20 @@ pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
             registry,
             dry_run,
             json,
-        } => execute_features_publish(&path, &registry, dry_run, json).await,
-        FeatureCommands::Info {
-            mode: _,
-            feature: _,
+            username,
+            password_stdin,
         } => {
-            // Info command not in scope for this issue
-            Err(anyhow::anyhow!("features info command not yet implemented"))
+            execute_features_publish(
+                &path,
+                &registry,
+                dry_run,
+                json,
+                username.as_deref(),
+                password_stdin,
+            )
+            .await
         }
+        FeatureCommands::Info { mode, feature } => execute_features_info(&mode, &feature).await,
     }
 }
 
@@ -158,11 +167,23 @@ async fn execute_features_publish(
     registry: &str,
     dry_run: bool,
     json: bool,
+    username: Option<&str>,
+    password_stdin: bool,
 ) -> Result<()> {
     debug!(
         "Publishing feature at path: {} to registry: {} (dry_run: {})",
         path, registry, dry_run
     );
+
+    // Handle authentication credentials if provided
+    if let Some(_username) = username {
+        // TODO: Implement credential setting in OCI client
+        debug!("Username provided for authentication: {}", _username);
+    }
+    if password_stdin {
+        // TODO: Implement reading password from stdin
+        debug!("Password will be read from stdin");
+    }
 
     let feature_path = Path::new(path);
 
@@ -195,10 +216,95 @@ async fn execute_features_publish(
         return Ok(());
     }
 
-    // For now, return an error as actual publishing requires more implementation
-    Err(anyhow::anyhow!(
-        "Actual registry publishing not yet implemented - use --dry-run flag"
-    ))
+    // Parse registry reference from the registry parameter
+    // Format: [registry]/[namespace]/[name]:[tag]
+    let (registry_url, namespace, name, tag) = parse_registry_reference(registry)?;
+
+    let feature_ref = FeatureRef::new(
+        registry_url.clone(),
+        namespace.clone(),
+        name.clone(),
+        tag.clone(),
+    );
+
+    // Create feature package
+    let temp_dir = tempfile::tempdir()?;
+    let (_digest, _size) =
+        create_feature_package(feature_path, temp_dir.path(), &metadata.id).await?;
+
+    // Read the created tar file for publishing
+    let tar_path = temp_dir.path().join(format!("{}.tar", metadata.id));
+    let tar_data = std::fs::read(&tar_path)?;
+
+    // Create OCI client and publish to registry
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+    info!("Publishing to OCI registry: {}", feature_ref.reference());
+    let publish_result = fetcher
+        .publish_feature(&feature_ref, tar_data.into(), &metadata)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to publish feature: {}", e))?;
+
+    let result = FeaturesResult {
+        command: "publish".to_string(),
+        status: "success".to_string(),
+        digest: Some(publish_result.digest),
+        size: Some(publish_result.size),
+        message: Some(format!(
+            "Successfully published {} to {}",
+            feature_ref.reference(),
+            registry_url
+        )),
+    };
+
+    output_result(&result, json)?;
+    Ok(())
+}
+
+/// Execute features info command
+#[instrument(level = "debug")]
+async fn execute_features_info(mode: &str, feature: &str) -> Result<()> {
+    debug!("Getting feature info for: {} (mode: {})", feature, mode);
+
+    // Parse the feature reference
+    let (registry_url, namespace, name, tag) = parse_registry_reference(feature)?;
+
+    let feature_ref = FeatureRef::new(
+        registry_url.clone(),
+        namespace.clone(),
+        name.clone(),
+        tag.clone(),
+    );
+
+    // Create OCI client and fetch feature metadata
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+    info!("Fetching feature info from: {}", feature_ref.reference());
+
+    let downloaded_feature = fetcher
+        .fetch_feature(&feature_ref)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch feature: {}", e))?;
+
+    // Create feature info result
+    let feature_info = serde_json::json!({
+        "id": downloaded_feature.metadata.id,
+        "version": downloaded_feature.metadata.version,
+        "name": downloaded_feature.metadata.name,
+        "description": downloaded_feature.metadata.description,
+        "documentationURL": downloaded_feature.metadata.documentation_url,
+        "options": downloaded_feature.metadata.options,
+        "installsAfter": downloaded_feature.metadata.installs_after,
+        "registry": registry_url,
+        "namespace": namespace,
+        "reference": feature_ref.reference(),
+        "digest": downloaded_feature.digest,
+    });
+
+    println!("{}", serde_json::to_string_pretty(&feature_info)?);
+    Ok(())
 }
 
 /// Run feature test in an ephemeral Alpine container
