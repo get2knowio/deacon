@@ -38,52 +38,59 @@ pub fn get_disk_space_for_path(path: &std::path::Path) -> Result<u64> {
             message: format!("Could not access path {}: {}", path.display(), e),
         })?;
 
-        // Use df command to get disk space information
-        let output = Command::new("df")
-            .arg("-B1") // Output in bytes
-            .arg(&canonical_path)
-            .output()
-            .map_err(|e| ConfigError::Validation {
-                message: format!("Failed to execute df command: {}", e),
-            })?;
+        // Try df with different options depending on the platform
+        let result = if cfg!(target_os = "macos") {
+            // macOS df doesn't support -B option, use -k (kilobytes)
+            Command::new("df").arg("-k").arg(&canonical_path).output()
+        } else {
+            // Linux and other Unix systems support -B1 (bytes)
+            Command::new("df").arg("-B1").arg(&canonical_path).output()
+        };
+
+        let output = result.map_err(|e| ConfigError::Validation {
+            message: format!("Failed to execute df command: {}", e),
+        })?;
 
         if !output.status.success() {
-            return Err(ConfigError::Validation {
-                message: format!(
-                    "df command failed for {}: {}",
-                    canonical_path.display(),
-                    String::from_utf8_lossy(&output.stderr)
-                ),
+            // Try fallback with basic df command
+            warn!(
+                "df command failed for {}, trying fallback",
+                canonical_path.display()
+            );
+
+            let fallback_output =
+                Command::new("df")
+                    .arg(&canonical_path)
+                    .output()
+                    .map_err(|e| ConfigError::Validation {
+                        message: format!("Failed to execute fallback df command: {}", e),
+                    })?;
+
+            if !fallback_output.status.success() {
+                return Err(ConfigError::Validation {
+                    message: format!(
+                        "df command failed for {}: {}",
+                        canonical_path.display(),
+                        String::from_utf8_lossy(&fallback_output.stderr)
+                    ),
+                }
+                .into());
             }
-            .into());
+
+            return parse_df_output(
+                &String::from_utf8_lossy(&fallback_output.stdout),
+                &canonical_path,
+                false,
+            );
         }
 
         let output_str = String::from_utf8_lossy(&output.stdout);
-        let lines: Vec<&str> = output_str.lines().collect();
-
-        // df output format: Filesystem 1B-blocks Used Available Use% Mounted on
-        // We want the second line, column 4 (Available)
-        if lines.len() >= 2 {
-            let fields: Vec<&str> = lines[1].split_whitespace().collect();
-            if fields.len() >= 4 {
-                if let Ok(available_bytes) = fields[3].parse::<u64>() {
-                    return Ok(available_bytes);
-                }
-            }
-        }
-
-        // Fallback if parsing fails
-        warn!(
-            "Could not parse df output for {}, using fallback estimate",
-            canonical_path.display()
-        );
-        Ok(1_000_000_000) // 1GB fallback
+        let is_kilobytes = cfg!(target_os = "macos");
+        parse_df_output(&output_str, &canonical_path, is_kilobytes)
     }
 
     #[cfg(windows)]
     {
-        use std::ffi::OsStr;
-        use std::os::windows::ffi::OsStrExt;
         use std::process::Command;
 
         // Ensure path exists and get its canonical form
@@ -134,6 +141,56 @@ pub fn get_disk_space_for_path(path: &std::path::Path) -> Result<u64> {
         );
         Ok(1_000_000_000) // 1GB fallback
     }
+}
+
+/// Parse df command output to extract available space
+fn parse_df_output(
+    output_str: &str,
+    canonical_path: &std::path::Path,
+    is_kilobytes: bool,
+) -> Result<u64> {
+    let lines: Vec<&str> = output_str.lines().collect();
+
+    // df output format varies but generally:
+    // Line 1: Headers (e.g., "Filesystem 1024-blocks Used Available Use% Mounted on")
+    // Line 2+: Data
+    if lines.len() >= 2 {
+        let data_line = lines[1];
+        let fields: Vec<&str> = data_line.split_whitespace().collect();
+
+        // Different df formats might have different column counts
+        // Try to find the available space column (typically 3rd or 4th column)
+        let available_column = if fields.len() >= 4 {
+            3
+        } else if fields.len() >= 3 {
+            2
+        } else {
+            return Err(ConfigError::Validation {
+                message: format!(
+                    "Could not parse df output format for {}: {}",
+                    canonical_path.display(),
+                    data_line
+                ),
+            }
+            .into());
+        };
+
+        if let Ok(available_value) = fields[available_column].parse::<u64>() {
+            let available_bytes = if is_kilobytes {
+                available_value * 1024 // Convert from KB to bytes
+            } else {
+                available_value // Already in bytes (from -B1)
+            };
+            return Ok(available_bytes);
+        }
+    }
+
+    // Fallback if parsing fails
+    warn!(
+        "Could not parse df output for {}, using fallback estimate",
+        canonical_path.display()
+    );
+    Ok(1_000_000_000) // 1GB fallback
 }
 
 /// Host system information collected for requirements evaluation.
