@@ -284,7 +284,7 @@ pub enum FeatureCommands {
 #[derive(Debug, Clone, Subcommand)]
 pub enum TemplateCommands {
     /// Apply template to current project
-    Apply { 
+    Apply {
         template: String,
         /// Force overwrite existing files
         #[arg(long)]

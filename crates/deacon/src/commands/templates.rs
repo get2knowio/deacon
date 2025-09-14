@@ -71,7 +71,9 @@ pub async fn execute_templates(args: TemplatesArgs) -> Result<()> {
         TemplateCommands::GenerateDocs { path, output } => {
             execute_templates_generate_docs(&path, &output).await
         }
-        TemplateCommands::Apply { template, force } => execute_templates_apply(&template, force).await,
+        TemplateCommands::Apply { template, force } => {
+            execute_templates_apply(&template, force).await
+        }
     }
 }
 
