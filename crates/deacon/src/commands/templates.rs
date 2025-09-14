@@ -50,7 +50,18 @@ pub async fn execute_templates(args: TemplatesArgs) -> Result<()> {
             path,
             registry,
             dry_run,
-        } => execute_templates_publish(&path, &registry, dry_run).await,
+            username,
+            password_stdin,
+        } => {
+            execute_templates_publish(
+                &path,
+                &registry,
+                dry_run,
+                username.as_deref(),
+                password_stdin,
+            )
+            .await
+        }
         TemplateCommands::GenerateDocs { path, output } => {
             execute_templates_generate_docs(&path, &output).await
         }
@@ -92,11 +103,27 @@ async fn execute_templates_metadata(path: &str) -> Result<()> {
 
 /// Execute templates publish command
 #[instrument(level = "debug")]
-async fn execute_templates_publish(path: &str, registry: &str, dry_run: bool) -> Result<()> {
+async fn execute_templates_publish(
+    path: &str,
+    registry: &str,
+    dry_run: bool,
+    username: Option<&str>,
+    password_stdin: bool,
+) -> Result<()> {
     debug!(
         "Publishing template at path: {} to registry: {} (dry_run: {})",
         path, registry, dry_run
     );
+
+    // Handle authentication credentials if provided
+    if let Some(_username) = username {
+        // TODO: Implement credential setting in OCI client
+        debug!("Username provided for authentication: {}", _username);
+    }
+    if password_stdin {
+        // TODO: Implement reading password from stdin
+        debug!("Password will be read from stdin");
+    }
 
     let template_path = Path::new(path);
 
@@ -142,7 +169,8 @@ async fn execute_templates_publish(path: &str, registry: &str, dry_run: bool) ->
 
     // Create template package
     let temp_dir = tempfile::tempdir()?;
-    let (_digest, _size) = create_template_package(template_path, &metadata.id).await?;
+    let (_digest, _size) =
+        create_template_package(template_path, temp_dir.path(), &metadata.id).await?;
 
     // Read the created tar file for publishing
     let tar_path = temp_dir.path().join(format!("{}.tar", metadata.id));
@@ -283,22 +311,21 @@ fn copy_template_files(source_dir: &Path, target_dir: &Path) -> Result<()> {
 }
 
 /// Create a template package (tar archive with OCI manifest)
-async fn create_template_package(template_path: &Path, template_id: &str) -> Result<(String, u64)> {
+async fn create_template_package(
+    template_path: &Path,
+    output_path: &Path,
+    template_id: &str,
+) -> Result<(String, u64)> {
     use sha2::{Digest, Sha256};
     use std::fs::File;
     use std::io::Read;
     use tar::Builder;
-    use tempfile::TempDir;
 
     debug!("Creating template package for: {}", template_id);
 
-    // Create temporary directory for package creation
-    let temp_dir = TempDir::new()?;
-    let temp_path = temp_dir.path();
-
     // Create tar archive
     let tar_filename = format!("{}.tar", template_id);
-    let tar_path = temp_path.join(&tar_filename);
+    let tar_path = output_path.join(&tar_filename);
     let tar_file = File::create(&tar_path)?;
     let mut builder = Builder::new(tar_file);
 
@@ -506,7 +533,10 @@ mod tests {
         )
         .unwrap();
 
-        let (digest, size) = create_template_package(&template_dir, "test-template")
+        let output_dir = temp_dir.path().join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let (digest, size) = create_template_package(&template_dir, &output_dir, "test-template")
             .await
             .unwrap();
 

@@ -54,7 +54,19 @@ pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
             registry,
             dry_run,
             json,
-        } => execute_features_publish(&path, &registry, dry_run, json).await,
+            username,
+            password_stdin,
+        } => {
+            execute_features_publish(
+                &path,
+                &registry,
+                dry_run,
+                json,
+                username.as_deref(),
+                password_stdin,
+            )
+            .await
+        }
         FeatureCommands::Info { mode, feature } => execute_features_info(&mode, &feature).await,
     }
 }
@@ -155,11 +167,23 @@ async fn execute_features_publish(
     registry: &str,
     dry_run: bool,
     json: bool,
+    username: Option<&str>,
+    password_stdin: bool,
 ) -> Result<()> {
     debug!(
         "Publishing feature at path: {} to registry: {} (dry_run: {})",
         path, registry, dry_run
     );
+
+    // Handle authentication credentials if provided
+    if let Some(_username) = username {
+        // TODO: Implement credential setting in OCI client
+        debug!("Username provided for authentication: {}", _username);
+    }
+    if password_stdin {
+        // TODO: Implement reading password from stdin
+        debug!("Password will be read from stdin");
+    }
 
     let feature_path = Path::new(path);
 

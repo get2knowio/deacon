@@ -280,9 +280,9 @@ fn test_features_publish_without_dry_run() {
         "ghcr.io/test",
     ]);
 
-    cmd.assert().failure().stderr(predicate::str::contains(
-        "Actual registry publishing not yet implemented",
-    ));
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to publish feature"));
 }
 
 /// Test features command help output

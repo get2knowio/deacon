@@ -1044,14 +1044,15 @@ impl<C: HttpClient> FeatureFetcher<C> {
         })
     }
 
-    /// Upload a blob to the registry for features
-    async fn upload_blob(&self, feature_ref: &FeatureRef, digest: &str, data: Bytes) -> Result<()> {
-        let blob_url = format!(
-            "https://{}/v2/{}/blobs/{}",
-            feature_ref.registry,
-            feature_ref.repository(),
-            digest
-        );
+    /// Upload a blob to any registry with a generic reference
+    async fn upload_blob_generic(
+        &self,
+        registry: &str,
+        repository: &str,
+        digest: &str,
+        data: Bytes,
+    ) -> Result<()> {
+        let blob_url = format!("https://{}/v2/{}/blobs/{}", registry, repository, digest);
 
         debug!("Uploading blob to: {}", blob_url);
 
@@ -1071,6 +1072,17 @@ impl<C: HttpClient> FeatureFetcher<C> {
         Ok(())
     }
 
+    /// Upload a blob to the registry for features
+    async fn upload_blob(&self, feature_ref: &FeatureRef, digest: &str, data: Bytes) -> Result<()> {
+        self.upload_blob_generic(
+            &feature_ref.registry,
+            &feature_ref.repository(),
+            digest,
+            data,
+        )
+        .await
+    }
+
     /// Upload a blob to the registry for templates
     async fn upload_blob_template(
         &self,
@@ -1078,29 +1090,13 @@ impl<C: HttpClient> FeatureFetcher<C> {
         digest: &str,
         data: Bytes,
     ) -> Result<()> {
-        let blob_url = format!(
-            "https://{}/v2/{}/blobs/{}",
-            template_ref.registry,
-            template_ref.repository(),
-            digest
-        );
-
-        debug!("Uploading blob to: {}", blob_url);
-
-        let mut headers = HashMap::new();
-        headers.insert(
-            "Content-Type".to_string(),
-            "application/octet-stream".to_string(),
-        );
-
-        self.client
-            .put_with_headers(&blob_url, data, headers)
-            .await
-            .map_err(|e| FeatureError::Oci {
-                message: format!("Failed to upload blob: {}", e),
-            })?;
-
-        Ok(())
+        self.upload_blob_generic(
+            &template_ref.registry,
+            &template_ref.repository(),
+            digest,
+            data,
+        )
+        .await
     }
 
     /// Upload a manifest to the registry for features

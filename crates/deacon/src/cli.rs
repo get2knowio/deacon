@@ -269,6 +269,12 @@ pub enum FeatureCommands {
         /// Output in JSON format
         #[arg(long)]
         json: bool,
+        /// Username for registry authentication
+        #[arg(long)]
+        username: Option<String>,
+        /// Read password from stdin
+        #[arg(long)]
+        password_stdin: bool,
     },
     /// Get feature information
     Info { mode: String, feature: String },
@@ -289,6 +295,12 @@ pub enum TemplateCommands {
         /// Dry run (don't actually publish)
         #[arg(long)]
         dry_run: bool,
+        /// Username for registry authentication
+        #[arg(long)]
+        username: Option<String>,
+        /// Read password from stdin
+        #[arg(long)]
+        password_stdin: bool,
     },
     /// Get template metadata
     Metadata {
