@@ -7,6 +7,7 @@
 use crate::errors::{FeatureError, Result};
 use crate::features::{parse_feature_metadata, FeatureMetadata};
 use crate::progress::{ProgressEvent, ProgressTracker};
+use crate::redaction;
 use crate::retry::{retry_async, RetryConfig, RetryDecision};
 use base64::Engine;
 use bytes::Bytes;
@@ -324,6 +325,8 @@ impl ReqwestClient {
         // Check for token authentication first
         if let Ok(token) = env::var("DEACON_REGISTRY_TOKEN") {
             debug!("Found DEACON_REGISTRY_TOKEN environment variable");
+            // Add token to redaction registry
+            redaction::add_global_secret(&token);
             auth.set_default_credentials(RegistryCredentials::Bearer { token });
             return Ok(());
         }
@@ -334,6 +337,8 @@ impl ReqwestClient {
             env::var("DEACON_REGISTRY_PASS"),
         ) {
             debug!("Found DEACON_REGISTRY_USER and DEACON_REGISTRY_PASS environment variables");
+            // Add password to redaction registry
+            redaction::add_global_secret(&password);
             auth.set_default_credentials(RegistryCredentials::Basic { username, password });
         }
 

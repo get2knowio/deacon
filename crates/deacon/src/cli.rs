@@ -284,7 +284,12 @@ pub enum FeatureCommands {
 #[derive(Debug, Clone, Subcommand)]
 pub enum TemplateCommands {
     /// Apply template to current project
-    Apply { template: String },
+    Apply { 
+        template: String,
+        /// Force overwrite existing files
+        #[arg(long)]
+        force: bool,
+    },
     /// Publish templates to registry
     Publish {
         /// Path to template directory to publish

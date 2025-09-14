@@ -13,6 +13,12 @@ use std::path::{Path, PathBuf};
 use tempfile;
 use tracing::{debug, info, instrument, warn};
 
+#[derive(Debug, Clone, Copy)]
+enum ConflictStrategy {
+    Skip,
+    Overwrite,
+}
+
 /// Templates command arguments
 #[derive(Debug, Clone)]
 pub struct TemplatesArgs {
@@ -65,7 +71,7 @@ pub async fn execute_templates(args: TemplatesArgs) -> Result<()> {
         TemplateCommands::GenerateDocs { path, output } => {
             execute_templates_generate_docs(&path, &output).await
         }
-        TemplateCommands::Apply { template } => execute_templates_apply(&template).await,
+        TemplateCommands::Apply { template, force } => execute_templates_apply(&template, force).await,
     }
 }
 
@@ -239,7 +245,7 @@ async fn execute_templates_generate_docs(path: &str, output_dir: &str) -> Result
 
 /// Execute templates apply command
 #[instrument(level = "debug")]
-async fn execute_templates_apply(template: &str) -> Result<()> {
+async fn execute_templates_apply(template: &str, force: bool) -> Result<()> {
     debug!("Applying template: {}", template);
 
     // Parse the template reference
@@ -271,7 +277,12 @@ async fn execute_templates_apply(template: &str) -> Result<()> {
     );
 
     // Copy template files to current directory
-    copy_template_files(&downloaded_template.path, &current_dir)?;
+    let strategy = if force {
+        ConflictStrategy::Overwrite
+    } else {
+        ConflictStrategy::Skip
+    };
+    copy_template_files(&downloaded_template.path, &current_dir, strategy)?;
 
     info!(
         "Successfully applied template {} to {}",
@@ -283,7 +294,11 @@ async fn execute_templates_apply(template: &str) -> Result<()> {
 }
 
 /// Copy template files to the target directory
-fn copy_template_files(source_dir: &Path, target_dir: &Path) -> Result<()> {
+fn copy_template_files(
+    source_dir: &Path,
+    target_dir: &Path,
+    strategy: ConflictStrategy,
+) -> Result<()> {
     use std::fs;
 
     for entry in fs::read_dir(source_dir)? {
@@ -295,12 +310,19 @@ fn copy_template_files(source_dir: &Path, target_dir: &Path) -> Result<()> {
         if source_path.is_dir() {
             // Recursively copy directories
             fs::create_dir_all(&target_path)?;
-            copy_template_files(&source_path, &target_path)?;
+            copy_template_files(&source_path, &target_path, strategy)?;
         } else {
             // Copy files, but handle conflicts
             if target_path.exists() {
-                warn!("File already exists, skipping: {}", target_path.display());
-                continue;
+                match strategy {
+                    ConflictStrategy::Skip => {
+                        warn!("File already exists, skipping: {}", target_path.display());
+                        continue;
+                    }
+                    ConflictStrategy::Overwrite => {
+                        warn!("Overwriting existing file: {}", target_path.display());
+                    }
+                }
             }
             fs::copy(&source_path, &target_path)?;
             info!("Applied file: {}", target_path.display());
