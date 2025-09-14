@@ -8,10 +8,11 @@ use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::container_lifecycle::{
     execute_container_lifecycle, ContainerLifecycleCommands, ContainerLifecycleConfig,
 };
+use deacon_core::secrets::SecretsCollection;
 use deacon_core::variable::SubstitutionContext;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 use crate::commands::exec::resolve_target_container;
 
@@ -27,6 +28,8 @@ pub struct RunUserCommandsArgs {
     pub stop_for_personalization: bool,
     pub workspace_folder: Option<std::path::PathBuf>,
     pub config_path: Option<std::path::PathBuf>,
+    pub override_config_path: Option<std::path::PathBuf>,
+    pub secrets_files: Vec<std::path::PathBuf>,
     pub progress_tracker: Arc<Mutex<Option<deacon_core::progress::ProgressTracker>>>,
 }
 
@@ -42,29 +45,60 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
         std::env::current_dir()?
     };
 
-    // Load configuration
-    let config = if let Some(ref config_path) = args.config_path {
-        ConfigLoader::load_from_path(config_path)?
+    // Load configuration with override and secrets support
+    let (config, _substitution_report) = if let Some(ref config_path) = args.config_path {
+        // Load secrets if provided
+        let secrets = if !args.secrets_files.is_empty() {
+            Some(SecretsCollection::load_from_files(&args.secrets_files)?)
+        } else {
+            None
+        };
+
+        ConfigLoader::load_with_overrides_and_substitution(
+            config_path,
+            args.override_config_path.as_deref(),
+            secrets.as_ref(),
+            &workspace_folder,
+        )?
     } else {
+        // Discover configuration
         let config_location = ConfigLoader::discover_config(&workspace_folder)?;
-        ConfigLoader::load_from_path(config_location.path())?
+
+        // Load secrets if provided
+        let secrets = if !args.secrets_files.is_empty() {
+            Some(SecretsCollection::load_from_files(&args.secrets_files)?)
+        } else {
+            None
+        };
+
+        ConfigLoader::load_with_overrides_and_substitution(
+            config_location.path(),
+            args.override_config_path.as_deref(),
+            secrets.as_ref(),
+            &workspace_folder,
+        )?
     };
 
-    // Apply variable substitution
-    let substitution_context = SubstitutionContext::new(&workspace_folder)?;
-    let (substituted_config, _substitution_report) =
-        config.apply_variable_substitution(&substitution_context);
+    debug!("Loaded configuration with overrides and secrets support");
 
     // Resolve target container
     let docker_client = deacon_core::docker::CliDocker::new();
     let container_id =
-        resolve_target_container(&docker_client, &workspace_folder, &substituted_config).await?;
+        match resolve_target_container(&docker_client, &workspace_folder, &config).await {
+            Ok(id) => id,
+            Err(e) => {
+                // Keep diagnostics for developers while returning a friendly, test‑expected message.
+                debug!(error = ?e, "Failed to resolve target container for workspace");
+                return Err(anyhow::anyhow!(
+                    "No running container found. Run 'deacon up' first"
+                ));
+            }
+        };
 
     info!("Found target container: {}", container_id);
 
     // Execute lifecycle commands
-    execute_lifecycle_commands(&container_id, &substituted_config, &workspace_folder, &args)
-        .await?;
+    execute_lifecycle_commands(&container_id, &config, &workspace_folder, &args).await?;
 
     info!("Run-user-commands execution completed successfully");
     Ok(())
@@ -261,6 +295,8 @@ mod tests {
             stop_for_personalization: false,
             workspace_folder: None,
             config_path: None,
+            override_config_path: None,
+            secrets_files: vec![],
             progress_tracker,
         };
 

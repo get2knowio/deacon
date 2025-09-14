@@ -609,6 +609,8 @@ impl Cli {
                     stop_for_personalization,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    override_config_path: self.override_config,
+                    secrets_files: self.secrets_file,
                     progress_tracker: progress_tracker.clone(),
                 };
 
