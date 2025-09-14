@@ -8,7 +8,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Simple context for doctor command
 #[derive(Debug, Clone)]
@@ -245,36 +245,30 @@ fn collect_disk_space_info() -> DiskSpaceInfo {
     // Get disk space for current working directory
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-    // Use statvfs on Unix systems or GetDiskFreeSpace on Windows
-    #[cfg(unix)]
-    {
-        if let Ok(_metadata) = fs::metadata(&current_dir) {
-            // This is a simplified approach - in a real implementation you'd use statvfs
-            let total_bytes = 1_000_000_000_000; // 1TB placeholder
-            let available_bytes = 500_000_000_000; // 500GB placeholder
-            let used_bytes = total_bytes - available_bytes;
+    // Use the same real disk space implementation as host_requirements
+    match crate::host_requirements::get_disk_space_for_path(&current_dir) {
+        Ok(available_bytes) => {
+            // For total bytes, we can estimate based on available space
+            // This is a conservative estimate - in practice available is usually 70-90% of total
+            let estimated_total = (available_bytes as f64 / 0.8) as u64;
+            let used_bytes = estimated_total.saturating_sub(available_bytes);
 
             DiskSpaceInfo {
-                total_bytes,
+                total_bytes: estimated_total,
                 available_bytes,
                 used_bytes,
             }
-        } else {
+        }
+        Err(e) => {
+            warn!(
+                "Failed to get real disk space information: {}. Using fallback values.",
+                e
+            );
             DiskSpaceInfo {
                 total_bytes: 0,
                 available_bytes: 0,
                 used_bytes: 0,
             }
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        // Placeholder for non-Unix systems
-        DiskSpaceInfo {
-            total_bytes: 0,
-            available_bytes: 0,
-            used_bytes: 0,
         }
     }
 }

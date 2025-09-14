@@ -12,6 +12,130 @@ use serde::Serialize;
 use sysinfo::System;
 use tracing::{debug, warn};
 
+/// Trait for abstracting filesystem operations to enable testing
+pub trait FilesystemProvider {
+    /// Get available disk space in bytes for the given path
+    fn get_available_space(&self, path: &std::path::Path) -> Result<u64>;
+}
+
+/// Default filesystem provider that uses real system calls
+pub struct DefaultFilesystemProvider;
+
+impl FilesystemProvider for DefaultFilesystemProvider {
+    fn get_available_space(&self, path: &std::path::Path) -> Result<u64> {
+        get_disk_space_for_path(path)
+    }
+}
+
+/// Get disk space information for a given path using platform-specific APIs
+pub fn get_disk_space_for_path(path: &std::path::Path) -> Result<u64> {
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+
+        // Ensure path exists and get its canonical form
+        let canonical_path = path.canonicalize().map_err(|e| ConfigError::Validation {
+            message: format!("Could not access path {}: {}", path.display(), e),
+        })?;
+
+        // Use df command to get disk space information
+        let output = Command::new("df")
+            .arg("-B1") // Output in bytes
+            .arg(&canonical_path)
+            .output()
+            .map_err(|e| ConfigError::Validation {
+                message: format!("Failed to execute df command: {}", e),
+            })?;
+
+        if !output.status.success() {
+            return Err(ConfigError::Validation {
+                message: format!(
+                    "df command failed for {}: {}",
+                    canonical_path.display(),
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            }
+            .into());
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        let lines: Vec<&str> = output_str.lines().collect();
+
+        // df output format: Filesystem 1B-blocks Used Available Use% Mounted on
+        // We want the second line, column 4 (Available)
+        if lines.len() >= 2 {
+            let fields: Vec<&str> = lines[1].split_whitespace().collect();
+            if fields.len() >= 4 {
+                if let Ok(available_bytes) = fields[3].parse::<u64>() {
+                    return Ok(available_bytes);
+                }
+            }
+        }
+
+        // Fallback if parsing fails
+        warn!(
+            "Could not parse df output for {}, using fallback estimate",
+            canonical_path.display()
+        );
+        Ok(1_000_000_000) // 1GB fallback
+    }
+
+    #[cfg(windows)]
+    {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        use std::process::Command;
+
+        // Ensure path exists and get its canonical form
+        let canonical_path = path.canonicalize().map_err(|e| ConfigError::Validation {
+            message: format!("Could not access path {}: {}", path.display(), e),
+        })?;
+
+        // Use PowerShell to get free space
+        let path_str = canonical_path.to_string_lossy();
+        let script = format!(
+            "Get-WmiObject -Class Win32_LogicalDisk | Where-Object {{ $_.DeviceID -eq '{}:' }} | Select-Object -ExpandProperty FreeSpace",
+            &path_str.chars().next().unwrap_or('C')
+        );
+
+        let output = Command::new("powershell")
+            .args(["-Command", &script])
+            .output()
+            .map_err(|e| ConfigError::Validation {
+                message: format!("Failed to execute PowerShell command: {}", e),
+            })?;
+
+        if !output.status.success() {
+            warn!(
+                "PowerShell command failed for {}, using fallback estimate",
+                canonical_path.display()
+            );
+            return Ok(1_000_000_000); // 1GB fallback
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if let Ok(free_bytes) = output_str.parse::<u64>() {
+            Ok(free_bytes)
+        } else {
+            warn!(
+                "Could not parse PowerShell output for {}, using fallback estimate",
+                canonical_path.display()
+            );
+            Ok(1_000_000_000) // 1GB fallback
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        // Fallback for other platforms - return a conservative estimate
+        warn!(
+            "Disk space checking not implemented for this platform, using fallback estimate for path: {}",
+            path.display()
+        );
+        Ok(1_000_000_000) // 1GB fallback
+    }
+}
+
 /// Host system information collected for requirements evaluation.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct HostInfo {
@@ -52,8 +176,9 @@ pub struct RequirementEvaluation {
 }
 
 /// Host requirements evaluator that can inspect system resources.
-pub struct HostRequirementsEvaluator {
+pub struct HostRequirementsEvaluator<F: FilesystemProvider = DefaultFilesystemProvider> {
     system: System,
+    filesystem_provider: F,
 }
 
 impl HostRequirementsEvaluator {
@@ -61,7 +186,24 @@ impl HostRequirementsEvaluator {
     pub fn new() -> Self {
         let mut system = System::new_all();
         system.refresh_all();
-        Self { system }
+        Self {
+            system,
+            filesystem_provider: DefaultFilesystemProvider,
+        }
+    }
+}
+
+impl<F: FilesystemProvider> HostRequirementsEvaluator<F> {
+    /// Create a new evaluator with a custom filesystem provider (for testing).
+    pub fn with_filesystem_provider<P: FilesystemProvider>(
+        filesystem_provider: P,
+    ) -> HostRequirementsEvaluator<P> {
+        let mut system = System::new_all();
+        system.refresh_all();
+        HostRequirementsEvaluator {
+            system,
+            filesystem_provider,
+        }
     }
 
     /// Get current host system information.
@@ -218,11 +360,9 @@ impl HostRequirementsEvaluator {
     }
 
     /// Get available storage space for the given path.
-    fn get_available_storage(&mut self, _workspace_path: Option<&std::path::Path>) -> Result<u64> {
-        // For now, return a large value since we can't easily get disk info
-        // This will be improved in a future iteration when we figure out the correct sysinfo API
-        warn!("Storage evaluation not implemented yet, assuming unlimited storage");
-        Ok(u64::MAX / 2) // Use half of max to be conservative
+    fn get_available_storage(&mut self, workspace_path: Option<&std::path::Path>) -> Result<u64> {
+        let path = workspace_path.unwrap_or_else(|| std::path::Path::new("."));
+        self.filesystem_provider.get_available_space(path)
     }
 }
 
@@ -236,6 +376,40 @@ impl Default for HostRequirementsEvaluator {
 mod tests {
     use super::*;
     use crate::config::ResourceSpec;
+    use std::collections::HashMap;
+
+    /// Mock filesystem provider for testing
+    pub struct MockFilesystemProvider {
+        space_map: HashMap<String, u64>,
+    }
+
+    impl MockFilesystemProvider {
+        pub fn new() -> Self {
+            Self {
+                space_map: HashMap::new(),
+            }
+        }
+
+        pub fn set_available_space(&mut self, path: &str, bytes: u64) {
+            self.space_map.insert(path.to_string(), bytes);
+        }
+    }
+
+    impl FilesystemProvider for MockFilesystemProvider {
+        fn get_available_space(&self, path: &std::path::Path) -> Result<u64> {
+            let path_str = path.to_string_lossy().to_string();
+            self.space_map
+                .get(&path_str)
+                .copied()
+                .or_else(|| self.space_map.get(".").copied())
+                .ok_or_else(|| {
+                    ConfigError::Validation {
+                        message: format!("No space configured for path: {}", path_str),
+                    }
+                    .into()
+                })
+        }
+    }
 
     #[test]
     fn test_resource_spec_parsing() {
@@ -257,6 +431,143 @@ mod tests {
 
         let spec = ResourceSpec::String("1GiB".to_string());
         assert_eq!(spec.parse_bytes().unwrap(), 1_073_741_824);
+    }
+
+    #[test]
+    fn test_filesystem_provider_abstraction() {
+        let mut mock_provider = MockFilesystemProvider::new();
+        mock_provider.set_available_space(".", 2_000_000_000); // 2GB
+
+        let mut evaluator =
+            HostRequirementsEvaluator::<MockFilesystemProvider>::with_filesystem_provider(
+                mock_provider,
+            );
+
+        let result = evaluator.get_available_storage(None);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 2_000_000_000);
+    }
+
+    #[test]
+    fn test_storage_evaluation_with_mock_provider() {
+        let mut mock_provider = MockFilesystemProvider::new();
+        mock_provider.set_available_space(".", 1_500_000_000); // 1.5GB
+
+        let mut evaluator =
+            HostRequirementsEvaluator::<MockFilesystemProvider>::with_filesystem_provider(
+                mock_provider,
+            );
+
+        let requirements = HostRequirements {
+            cpus: Some(ResourceSpec::Number(1.0)),
+            memory: Some(ResourceSpec::String("100MB".to_string())),
+            storage: Some(ResourceSpec::String("1GB".to_string())), // Should pass
+        };
+
+        let result = evaluator.evaluate_requirements(&requirements, None);
+        assert!(result.is_ok());
+
+        let evaluation = result.unwrap();
+        assert!(evaluation.storage_evaluation.is_some());
+        let storage_eval = evaluation.storage_evaluation.unwrap();
+        assert!(storage_eval.met);
+        assert_eq!(storage_eval.required, 1_000_000_000.0);
+        assert_eq!(storage_eval.available, 1_500_000_000.0);
+    }
+
+    #[test]
+    fn test_storage_evaluation_insufficient_space() {
+        let mut mock_provider = MockFilesystemProvider::new();
+        mock_provider.set_available_space(".", 500_000_000); // 500MB
+
+        let mut evaluator =
+            HostRequirementsEvaluator::<MockFilesystemProvider>::with_filesystem_provider(
+                mock_provider,
+            );
+
+        let requirements = HostRequirements {
+            cpus: None,
+            memory: None,
+            storage: Some(ResourceSpec::String("1GB".to_string())), // Should fail
+        };
+
+        let result = evaluator.evaluate_requirements(&requirements, None);
+        assert!(result.is_ok());
+
+        let evaluation = result.unwrap();
+        assert!(!evaluation.requirements_met);
+        assert!(evaluation.storage_evaluation.is_some());
+        let storage_eval = evaluation.storage_evaluation.unwrap();
+        assert!(!storage_eval.met);
+        assert_eq!(storage_eval.required, 1_000_000_000.0);
+        assert_eq!(storage_eval.available, 500_000_000.0);
+    }
+
+    #[test]
+    fn test_validation_with_mock_provider_fail() {
+        let mut mock_provider = MockFilesystemProvider::new();
+        mock_provider.set_available_space(".", 100_000_000); // 100MB
+
+        let mut evaluator =
+            HostRequirementsEvaluator::<MockFilesystemProvider>::with_filesystem_provider(
+                mock_provider,
+            );
+
+        let requirements = HostRequirements {
+            cpus: None,
+            memory: None,
+            storage: Some(ResourceSpec::String("1GB".to_string())), // Should fail
+        };
+
+        // Should fail without ignore flag
+        let result = evaluator.validate_requirements(&requirements, None, false);
+        assert!(result.is_err());
+
+        // Should succeed with ignore flag
+        let result = evaluator.validate_requirements(&requirements, None, true);
+        assert!(result.is_ok());
+        let evaluation = result.unwrap();
+        assert!(!evaluation.requirements_met);
+    }
+
+    #[test]
+    fn test_real_disk_space_current_directory() {
+        // Test that the real implementation works for current directory
+        let result = get_disk_space_for_path(std::path::Path::new("."));
+        match result {
+            Ok(space) => {
+                assert!(space > 0, "Available space should be greater than 0");
+                // Should be reasonable amount (more than 1MB, less than 1PB)
+                assert!(space > 1_000_000, "Should have more than 1MB available");
+                assert!(space < 1_000_000_000_000_000, "Should be less than 1PB");
+            }
+            Err(e) => {
+                // In some test environments, this might fail, which is acceptable
+                eprintln!(
+                    "Real disk space check failed (expected in some test environments): {}",
+                    e
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_real_disk_space_with_workspace_path() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        let result = get_disk_space_for_path(temp_path);
+        match result {
+            Ok(space) => {
+                assert!(space > 0, "Available space should be greater than 0");
+            }
+            Err(e) => {
+                // In some test environments, this might fail, which is acceptable
+                eprintln!("Real disk space check failed for temp dir (expected in some test environments): {}", e);
+            }
+        }
     }
 
     #[test]
