@@ -5,10 +5,12 @@
 
 use crate::cli::TemplateCommands;
 use anyhow::Result;
+use deacon_core::oci::{default_fetcher, TemplateRef};
 use deacon_core::templates::parse_template_metadata;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, instrument};
+use tempfile;
+use tracing::{debug, info, instrument, warn};
 
 /// Templates command arguments
 #[derive(Debug, Clone)]
@@ -38,6 +40,84 @@ pub struct TemplatesResult {
     pub message: Option<String>,
 }
 
+/// Parse a registry reference into its components
+/// Supports formats like:
+/// - ghcr.io/devcontainers/python:3.11
+/// - registry.com/namespace/name
+/// - namespace/name (assumes default registry)  
+/// - simple-name (assumes default registry and namespace)
+fn parse_registry_reference(
+    registry_ref: &str,
+) -> Result<(String, String, String, Option<String>)> {
+    // Default values
+    let default_registry = "ghcr.io";
+    let default_namespace = "devcontainers";
+
+    // Split by '/' to separate registry, namespace, and name
+    let parts: Vec<&str> = registry_ref.split('/').collect();
+
+    match parts.len() {
+        1 => {
+            // Format: name[:tag]
+            let (name, tag) = parse_name_and_tag(parts[0]);
+            Ok((
+                default_registry.to_string(),
+                default_namespace.to_string(),
+                name.to_string(),
+                tag.map(|t| t.to_string()),
+            ))
+        }
+        2 => {
+            // Format: registry/name or namespace/name[:tag]
+            // Check if the first part looks like a registry (contains a dot)
+            if parts[0].contains('.') {
+                // First part is a registry, use default namespace
+                let (name, tag) = parse_name_and_tag(parts[1]);
+                Ok((
+                    parts[0].to_string(),
+                    default_namespace.to_string(),
+                    name.to_string(),
+                    tag.map(|t| t.to_string()),
+                ))
+            } else {
+                // First part is a namespace, use default registry
+                let (name, tag) = parse_name_and_tag(parts[1]);
+                Ok((
+                    default_registry.to_string(),
+                    parts[0].to_string(),
+                    name.to_string(),
+                    tag.map(|t| t.to_string()),
+                ))
+            }
+        }
+        3 => {
+            // Format: registry/namespace/name[:tag]
+            let (name, tag) = parse_name_and_tag(parts[2]);
+            Ok((
+                parts[0].to_string(),
+                parts[1].to_string(),
+                name.to_string(),
+                tag.map(|t| t.to_string()),
+            ))
+        }
+        _ => Err(anyhow::anyhow!(
+            "Invalid registry reference format: {}. Expected format: [registry/][namespace/]name[:tag]",
+            registry_ref
+        )),
+    }
+}
+
+/// Parse name and tag from a name[:tag] string
+fn parse_name_and_tag(name_and_tag: &str) -> (&str, Option<&str>) {
+    if let Some(colon_pos) = name_and_tag.rfind(':') {
+        let name = &name_and_tag[..colon_pos];
+        let tag = &name_and_tag[colon_pos + 1..];
+        (name, Some(tag))
+    } else {
+        (name_and_tag, None)
+    }
+}
+
 /// Execute the templates command
 #[instrument(level = "debug")]
 pub async fn execute_templates(args: TemplatesArgs) -> Result<()> {
@@ -51,12 +131,7 @@ pub async fn execute_templates(args: TemplatesArgs) -> Result<()> {
         TemplateCommands::GenerateDocs { path, output } => {
             execute_templates_generate_docs(&path, &output).await
         }
-        TemplateCommands::Apply { template: _ } => {
-            // Apply command not in scope for this issue
-            Err(anyhow::anyhow!(
-                "templates apply command not yet implemented"
-            ))
-        }
+        TemplateCommands::Apply { template } => execute_templates_apply(&template).await,
     }
 }
 
@@ -131,19 +206,48 @@ async fn execute_templates_publish(path: &str, registry: &str, dry_run: bool) ->
         return Ok(());
     }
 
-    // Create OCI package of template files
-    let (digest, size) = create_template_package(template_path, &metadata.id).await?;
+    // Parse registry reference from the registry parameter
+    // Format: [registry]/[namespace]/[name]:[tag]
+    let (registry_url, namespace, name, tag) = parse_registry_reference(registry)?;
+
+    let template_ref = TemplateRef::new(
+        registry_url.clone(),
+        namespace.clone(),
+        name.clone(),
+        tag.clone(),
+    );
+
+    // Create template package
+    let temp_dir = tempfile::tempdir()?;
+    let (_digest, _size) = create_template_package(template_path, &metadata.id).await?;
+
+    // Read the created tar file for publishing
+    let tar_path = temp_dir.path().join(format!("{}.tar", metadata.id));
+    let tar_data = std::fs::read(&tar_path)?;
+
+    // Create OCI client and publish to registry
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+    info!("Publishing to OCI registry: {}", template_ref.reference());
+    let publish_result = fetcher
+        .publish_template(&template_ref, tar_data.into(), &metadata)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to publish template: {}", e))?;
 
     let result = TemplatesResult {
         command: "publish".to_string(),
         status: "success".to_string(),
-        digest: Some(digest),
-        size: Some(size),
-        message: Some(format!("Template published successfully to {}", registry)),
+        digest: Some(publish_result.digest),
+        size: Some(publish_result.size),
+        message: Some(format!(
+            "Successfully published {} to {}",
+            template_ref.reference(),
+            registry_url
+        )),
     };
 
     output_result(&result, true)?; // Always output as JSON for programmatic use
-
     Ok(())
 }
 
@@ -178,6 +282,79 @@ async fn execute_templates_generate_docs(path: &str, output_dir: &str) -> Result
     std::fs::write(&readme_path, readme_content)?;
 
     info!("Generated documentation at: {}", readme_path.display());
+
+    Ok(())
+}
+
+/// Execute templates apply command
+#[instrument(level = "debug")]
+async fn execute_templates_apply(template: &str) -> Result<()> {
+    debug!("Applying template: {}", template);
+
+    // Parse the template reference
+    let (registry_url, namespace, name, tag) = parse_registry_reference(template)?;
+
+    let template_ref = TemplateRef::new(
+        registry_url.clone(),
+        namespace.clone(),
+        name.clone(),
+        tag.clone(),
+    );
+
+    // Create OCI client and fetch template
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+    info!("Fetching template from: {}", template_ref.reference());
+
+    let downloaded_template = fetcher
+        .fetch_template(&template_ref)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch template: {}", e))?;
+
+    // Apply template files to the current directory
+    let current_dir = std::env::current_dir()?;
+    info!(
+        "Applying template to current directory: {}",
+        current_dir.display()
+    );
+
+    // Copy template files to current directory
+    copy_template_files(&downloaded_template.path, &current_dir)?;
+
+    info!(
+        "Successfully applied template {} to {}",
+        template_ref.reference(),
+        current_dir.display()
+    );
+
+    Ok(())
+}
+
+/// Copy template files to the target directory
+fn copy_template_files(source_dir: &Path, target_dir: &Path) -> Result<()> {
+    use std::fs;
+
+    for entry in fs::read_dir(source_dir)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let file_name = entry.file_name();
+        let target_path = target_dir.join(&file_name);
+
+        if source_path.is_dir() {
+            // Recursively copy directories
+            fs::create_dir_all(&target_path)?;
+            copy_template_files(&source_path, &target_path)?;
+        } else {
+            // Copy files, but handle conflicts
+            if target_path.exists() {
+                warn!("File already exists, skipping: {}", target_path.display());
+                continue;
+            }
+            fs::copy(&source_path, &target_path)?;
+            info!("Applied file: {}", target_path.display());
+        }
+    }
 
     Ok(())
 }

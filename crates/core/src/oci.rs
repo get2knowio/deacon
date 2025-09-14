@@ -765,7 +765,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
         });
 
         let manifest_bytes =
-            Bytes::from(serde_json::to_vec(&manifest).map_err(|e| FeatureError::Json(e))?);
+            Bytes::from(serde_json::to_vec(&manifest).map_err(FeatureError::Json)?);
         let manifest_digest = self
             .upload_manifest(feature_ref, manifest_bytes.clone())
             .await?;
@@ -827,7 +827,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
         });
 
         let manifest_bytes =
-            Bytes::from(serde_json::to_vec(&manifest).map_err(|e| FeatureError::Json(e))?);
+            Bytes::from(serde_json::to_vec(&manifest).map_err(FeatureError::Json)?);
         let manifest_digest = self
             .upload_manifest_template(template_ref, manifest_bytes.clone())
             .await?;
