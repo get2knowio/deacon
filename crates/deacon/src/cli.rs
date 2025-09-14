@@ -194,11 +194,24 @@ pub enum Commands {
         command: TemplateCommands,
     },
 
-    /// Run user-defined commands
+    /// Run user-defined lifecycle commands
     #[allow(clippy::enum_variant_names)]
     RunUserCommands {
-        /// Commands to run
-        commands: Vec<String>,
+        /// Skip postCreate lifecycle phase
+        #[arg(long)]
+        skip_post_create: bool,
+        /// Skip postAttach lifecycle phase  
+        #[arg(long)]
+        skip_post_attach: bool,
+        /// Skip non-blocking commands (postStart & postAttach phases)
+        #[arg(long)]
+        skip_non_blocking_commands: bool,
+        /// Stop after updateContentCommand (prebuild mode)
+        #[arg(long)]
+        prebuild: bool,
+        /// Stop before personalization
+        #[arg(long)]
+        stop_for_personalization: bool,
     },
 
     /// Stop and optionally remove development container or compose project
@@ -577,11 +590,29 @@ impl Cli {
 
                 execute_templates(args).await
             }
-            Some(Commands::RunUserCommands { .. }) => {
-                Err(DeaconError::Config(ConfigError::NotImplemented {
-                    feature: "run-user-commands command".to_string(),
-                })
-                .into())
+            Some(Commands::RunUserCommands {
+                skip_post_create,
+                skip_post_attach,
+                skip_non_blocking_commands,
+                prebuild,
+                stop_for_personalization,
+            }) => {
+                use crate::commands::run_user_commands::{
+                    execute_run_user_commands, RunUserCommandsArgs,
+                };
+
+                let args = RunUserCommandsArgs {
+                    skip_post_create,
+                    skip_post_attach,
+                    skip_non_blocking_commands,
+                    prebuild,
+                    stop_for_personalization,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                    progress_tracker: progress_tracker.clone(),
+                };
+
+                execute_run_user_commands(args).await
             }
             Some(Commands::Down { remove }) => {
                 use crate::commands::down::{execute_down, DownArgs};
