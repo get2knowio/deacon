@@ -131,6 +131,35 @@ pub trait DockerLifecycle: Docker + ContainerOps {
     ) -> Result<ContainerResult>;
 }
 
+// Implement Docker trait for references to types that implement Docker
+#[cfg(feature = "docker")]
+impl<T: Docker> Docker for &T {
+    async fn ping(&self) -> Result<()> {
+        (*self).ping().await
+    }
+
+    async fn list_containers(&self, label_selector: Option<&str>) -> Result<Vec<ContainerInfo>> {
+        (*self).list_containers(label_selector).await
+    }
+
+    async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>> {
+        (*self).inspect_container(id).await
+    }
+
+    async fn exec(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+    ) -> Result<ExecResult> {
+        (*self).exec(container_id, command, config).await
+    }
+
+    async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()> {
+        (*self).stop_container(container_id, timeout).await
+    }
+}
+
 /// CLI-based Docker implementation using docker command
 #[cfg(feature = "docker")]
 #[derive(Debug, Default)]
@@ -1029,6 +1058,581 @@ impl Default for DockerClient {
     }
 }
 
+/// Mock Docker runtime for testing
+#[cfg(test)]
+pub mod mock {
+    //! Mock Docker runtime for testing exec and lifecycle flows
+    //!
+    //! This module provides a mock implementation of the Docker trait that can be used
+    //! for testing without requiring a real Docker daemon. It supports configurable
+    //! responses for container operations, exec commands, and timing simulation.
+
+    use crate::config::DevContainerConfig;
+    use crate::container::{ContainerIdentity, ContainerOps, ContainerResult};
+    use crate::docker::{ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult};
+    use crate::errors::{DockerError, Result};
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+    use tracing::{debug, instrument};
+
+    /// Configuration for exec command responses
+    #[derive(Debug, Clone)]
+    pub struct MockExecResponse {
+        /// Exit code to return
+        pub exit_code: i32,
+        /// Whether to simulate success
+        pub success: bool,
+        /// Optional delay to simulate command execution time
+        pub delay: Option<Duration>,
+        /// Optional stdout content (for future use)
+        pub stdout: Option<String>,
+        /// Optional stderr content (for future use)
+        pub stderr: Option<String>,
+    }
+
+    impl Default for MockExecResponse {
+        fn default() -> Self {
+            Self {
+                exit_code: 0,
+                success: true,
+                delay: None,
+                stdout: None,
+                stderr: None,
+            }
+        }
+    }
+
+    /// Mock container state for simulation
+    #[derive(Debug, Clone)]
+    pub struct MockContainer {
+        /// Container ID
+        pub id: String,
+        /// Container names
+        pub names: Vec<String>,
+        /// Container image
+        pub image: String,
+        /// Container status
+        pub status: String,
+        /// Container state
+        pub state: String,
+        /// Labels on the container
+        pub labels: HashMap<String, String>,
+    }
+
+    impl MockContainer {
+        /// Create a new mock container
+        pub fn new(id: String, name: String, image: String) -> Self {
+            Self {
+                id,
+                names: vec![name],
+                image,
+                status: "Up 5 minutes".to_string(),
+                state: "running".to_string(),
+                labels: HashMap::new(),
+            }
+        }
+
+        /// Set container labels
+        pub fn with_labels(mut self, labels: HashMap<String, String>) -> Self {
+            self.labels = labels;
+            self
+        }
+
+        /// Set container state
+        pub fn with_state(mut self, state: String, status: String) -> Self {
+            self.state = state;
+            self.status = status;
+            self
+        }
+    }
+
+    /// Configuration for the MockDocker runtime
+    #[derive(Debug, Clone)]
+    pub struct MockDockerConfig {
+        /// Whether ping should succeed
+        pub ping_success: bool,
+        /// Default exec response for commands
+        pub default_exec_response: MockExecResponse,
+        /// Command-specific exec responses (command string -> response)
+        pub exec_responses: HashMap<String, MockExecResponse>,
+        /// Whether to capture TTY flags in exec calls
+        pub capture_tty_flags: bool,
+        /// Simulate Docker daemon unavailable
+        pub daemon_unavailable: bool,
+    }
+
+    impl Default for MockDockerConfig {
+        fn default() -> Self {
+            Self {
+                ping_success: true,
+                default_exec_response: MockExecResponse::default(),
+                exec_responses: HashMap::new(),
+                capture_tty_flags: true,
+                daemon_unavailable: false,
+            }
+        }
+    }
+
+    /// Mock Docker runtime implementation
+    #[derive(Debug)]
+    pub struct MockDocker {
+        /// Configuration for mock behavior
+        config: Arc<Mutex<MockDockerConfig>>,
+        /// Mock containers in the "system"
+        containers: Arc<Mutex<Vec<MockContainer>>>,
+        /// History of exec calls made (for testing verification)
+        exec_history: Arc<Mutex<Vec<MockExecCall>>>,
+    }
+
+    /// Record of an exec call for verification in tests
+    #[derive(Debug, Clone)]
+    pub struct MockExecCall {
+        /// Container ID where exec was called
+        pub container_id: String,
+        /// Command that was executed
+        pub command: Vec<String>,
+        /// Exec configuration used
+        pub config: ExecConfig,
+        /// Timestamp when the call was made
+        pub timestamp: Instant,
+    }
+
+    impl MockDocker {
+        /// Create a new MockDocker instance with default configuration
+        pub fn new() -> Self {
+            Self::with_config(MockDockerConfig::default())
+        }
+
+        /// Create a new MockDocker instance with custom configuration
+        pub fn with_config(config: MockDockerConfig) -> Self {
+            Self {
+                config: Arc::new(Mutex::new(config)),
+                containers: Arc::new(Mutex::new(Vec::new())),
+                exec_history: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        /// Add a mock container to the system
+        pub fn add_container(&self, container: MockContainer) {
+            let mut containers = self.containers.lock().unwrap();
+            containers.push(container);
+        }
+
+        /// Clear all mock containers
+        pub fn clear_containers(&self) {
+            let mut containers = self.containers.lock().unwrap();
+            containers.clear();
+        }
+
+        /// Get history of exec calls made
+        pub fn get_exec_history(&self) -> Vec<MockExecCall> {
+            let history = self.exec_history.lock().unwrap();
+            history.clone()
+        }
+
+        /// Clear exec call history
+        pub fn clear_exec_history(&self) {
+            let mut history = self.exec_history.lock().unwrap();
+            history.clear();
+        }
+
+        /// Update mock configuration
+        pub fn update_config<F>(&self, f: F)
+        where
+            F: FnOnce(&mut MockDockerConfig),
+        {
+            let mut config = self.config.lock().unwrap();
+            f(&mut *config);
+        }
+
+        /// Set specific exec response for a command
+        pub fn set_exec_response(&self, command: String, response: MockExecResponse) {
+            let mut config = self.config.lock().unwrap();
+            config.exec_responses.insert(command, response);
+        }
+
+        /// Convert MockContainer to ContainerInfo for trait compatibility
+        fn container_to_info(&self, container: &MockContainer) -> ContainerInfo {
+            ContainerInfo {
+                id: container.id.clone(),
+                names: container.names.clone(),
+                image: container.image.clone(),
+                status: container.status.clone(),
+                state: container.state.clone(),
+                exposed_ports: vec![], // Not implemented for mock
+                port_mappings: vec![], // Not implemented for mock
+            }
+        }
+
+        /// Check if container matches label selector
+        fn matches_label_selector(&self, container: &MockContainer, selector: &str) -> bool {
+            // Parse label selector (simplified implementation)
+            // Supports: "key=value" or "key" format, comma-separated
+            for part in selector.split(',') {
+                let trimmed = part.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                if let Some((key, value)) = trimmed.split_once('=') {
+                    // key=value format
+                    if let Some(container_value) = container.labels.get(key) {
+                        if container_value != value {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                } else {
+                    // key format - just check if key exists
+                    if !container.labels.contains_key(trimmed) {
+                        return false;
+                    }
+                }
+            }
+            true
+        }
+    }
+
+    impl Default for MockDocker {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    #[allow(async_fn_in_trait)]
+    impl Docker for MockDocker {
+        #[instrument(skip(self))]
+        async fn ping(&self) -> Result<()> {
+            debug!("MockDocker ping called");
+
+            let config = self.config.lock().unwrap();
+            if config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            if config.ping_success {
+                debug!("MockDocker ping successful");
+                Ok(())
+            } else {
+                debug!("MockDocker ping failed (configured)");
+                Err(DockerError::CLIError("Mock ping failure".to_string()).into())
+            }
+        }
+
+        #[instrument(skip(self))]
+        async fn list_containers(&self, label_selector: Option<&str>) -> Result<Vec<ContainerInfo>> {
+            debug!(
+                "MockDocker list_containers called with selector: {:?}",
+                label_selector
+            );
+
+            let config = self.config.lock().unwrap();
+            if config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            let containers = self.containers.lock().unwrap();
+            let mut result = Vec::new();
+
+            for container in containers.iter() {
+                let matches = if let Some(selector) = label_selector {
+                    self.matches_label_selector(container, selector)
+                } else {
+                    true
+                };
+
+                if matches {
+                    result.push(self.container_to_info(container));
+                }
+            }
+
+            debug!("MockDocker returning {} containers", result.len());
+            Ok(result)
+        }
+
+        #[instrument(skip(self))]
+        async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>> {
+            debug!("MockDocker inspect_container called for ID: {}", id);
+
+            let config = self.config.lock().unwrap();
+            if config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            let containers = self.containers.lock().unwrap();
+            for container in containers.iter() {
+                if container.id == id || container.names.contains(&id.to_string()) {
+                    debug!("MockDocker found container for inspection");
+                    return Ok(Some(self.container_to_info(container)));
+                }
+            }
+
+            debug!("MockDocker container not found for inspection");
+            Ok(None)
+        }
+
+        #[instrument(skip(self, config))]
+        async fn exec(
+            &self,
+            container_id: &str,
+            command: &[String],
+            config: ExecConfig,
+        ) -> Result<ExecResult> {
+            debug!(
+                "MockDocker exec called on container {} with command: {:?}",
+                container_id, command
+            );
+
+            let mock_config = self.config.lock().unwrap();
+            if mock_config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            // Record the exec call
+            let exec_call = MockExecCall {
+                container_id: container_id.to_string(),
+                command: command.to_vec(),
+                config: config.clone(),
+                timestamp: Instant::now(),
+            };
+
+            {
+                let mut history = self.exec_history.lock().unwrap();
+                history.push(exec_call);
+            }
+
+            // Find appropriate response
+            let command_str = command.join(" ");
+            let response = mock_config
+                .exec_responses
+                .get(&command_str)
+                .cloned()
+                .unwrap_or_else(|| mock_config.default_exec_response.clone());
+
+            // Simulate execution delay if configured
+            if let Some(delay) = response.delay {
+                debug!("MockDocker simulating exec delay: {:?}", delay);
+                tokio::time::sleep(delay).await;
+            }
+
+            debug!(
+                "MockDocker exec returning exit_code: {}, success: {}",
+                response.exit_code, response.success
+            );
+
+            Ok(ExecResult {
+                exit_code: response.exit_code,
+                success: response.success,
+            })
+        }
+
+        #[instrument(skip(self))]
+        async fn stop_container(&self, container_id: &str, _timeout: Option<u32>) -> Result<()> {
+            debug!("MockDocker stop_container called for ID: {}", container_id);
+
+            let config = self.config.lock().unwrap();
+            if config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            // Update container state to stopped
+            let mut containers = self.containers.lock().unwrap();
+            for container in containers.iter_mut() {
+                if container.id == container_id {
+                    container.state = "exited".to_string();
+                    container.status = "Exited (0) 1 second ago".to_string();
+                    debug!("MockDocker container stopped");
+                    return Ok(());
+                }
+            }
+
+            debug!("MockDocker container not found for stopping");
+            Err(DockerError::CLIError(format!("Container {} not found", container_id)).into())
+        }
+    }
+
+    #[allow(async_fn_in_trait)]
+    impl ContainerOps for MockDocker {
+        #[instrument(skip(self))]
+        async fn find_matching_containers(&self, identity: &ContainerIdentity) -> Result<Vec<String>> {
+            debug!("MockDocker find_matching_containers called");
+
+            let label_selector = identity.label_selector();
+            let containers = self.list_containers(Some(&label_selector)).await?;
+            let container_ids: Vec<String> = containers.into_iter().map(|c| c.id).collect();
+
+            debug!("MockDocker found {} matching containers", container_ids.len());
+            Ok(container_ids)
+        }
+
+        #[instrument(skip(self, config))]
+        async fn create_container(
+            &self,
+            identity: &ContainerIdentity,
+            config: &DevContainerConfig,
+            workspace_path: &Path,
+        ) -> Result<String> {
+            debug!("MockDocker create_container called");
+
+            let mock_config = self.config.lock().unwrap();
+            if mock_config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            // Generate a mock container ID
+            let container_id = format!("mock-container-{}", fastrand::u64(..));
+            let container_name = identity.container_name();
+            let image = config
+                .image
+                .as_deref()
+                .unwrap_or("mock-image:latest")
+                .to_string();
+
+            // Create mock container with identity labels
+            let mut container = MockContainer::new(container_id.clone(), container_name, image);
+            container.labels = identity.labels();
+
+            // Add to mock container list
+            {
+                let mut containers = self.containers.lock().unwrap();
+                containers.push(container);
+            }
+
+            debug!("MockDocker created container: {}", container_id);
+            Ok(container_id)
+        }
+
+        #[instrument(skip(self))]
+        async fn start_container(&self, container_id: &str) -> Result<()> {
+            debug!("MockDocker start_container called for ID: {}", container_id);
+
+            let config = self.config.lock().unwrap();
+            if config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            // Update container state to running
+            let mut containers = self.containers.lock().unwrap();
+            for container in containers.iter_mut() {
+                if container.id == container_id {
+                    container.state = "running".to_string();
+                    container.status = "Up 1 second".to_string();
+                    debug!("MockDocker container started");
+                    return Ok(());
+                }
+            }
+
+            debug!("MockDocker container not found for starting");
+            Err(DockerError::CLIError(format!("Container {} not found", container_id)).into())
+        }
+
+        #[instrument(skip(self))]
+        async fn remove_container(&self, container_id: &str) -> Result<()> {
+            debug!("MockDocker remove_container called for ID: {}", container_id);
+
+            let config = self.config.lock().unwrap();
+            if config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            // Remove container from mock list
+            let mut containers = self.containers.lock().unwrap();
+            let initial_len = containers.len();
+            containers.retain(|c| c.id != container_id);
+
+            if containers.len() < initial_len {
+                debug!("MockDocker container removed");
+                Ok(())
+            } else {
+                debug!("MockDocker container not found for removal");
+                Err(DockerError::CLIError(format!("Container {} not found", container_id)).into())
+            }
+        }
+
+        #[instrument(skip(self))]
+        async fn get_container_image(&self, container_id: &str) -> Result<String> {
+            debug!("MockDocker get_container_image called for ID: {}", container_id);
+
+            let config = self.config.lock().unwrap();
+            if config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            let containers = self.containers.lock().unwrap();
+            for container in containers.iter() {
+                if container.id == container_id {
+                    debug!("MockDocker returning image: {}", container.image);
+                    return Ok(container.image.clone());
+                }
+            }
+
+            debug!("MockDocker container not found for image query");
+            Err(DockerError::CLIError(format!("Container {} not found", container_id)).into())
+        }
+    }
+
+    #[allow(async_fn_in_trait)]
+    impl DockerLifecycle for MockDocker {
+        #[instrument(skip(self, config))]
+        async fn up(
+            &self,
+            identity: &ContainerIdentity,
+            config: &DevContainerConfig,
+            workspace_path: &Path,
+            remove_existing: bool,
+        ) -> Result<ContainerResult> {
+            debug!("MockDocker up called");
+
+            // Find existing containers
+            let existing_containers = self.find_matching_containers(identity).await?;
+
+            if !existing_containers.is_empty() && !remove_existing {
+                // Reuse existing container
+                let container_id = existing_containers[0].clone();
+                debug!("MockDocker reusing existing container: {}", container_id);
+
+                // Start the container if it's not running
+                self.start_container(&container_id).await?;
+
+                // Get the image ID
+                let image_id = self.get_container_image(&container_id).await?;
+
+                return Ok(ContainerResult {
+                    container_id,
+                    reused: true,
+                    image_id,
+                });
+            }
+
+            // Remove existing containers if requested
+            if remove_existing {
+                for container_id in existing_containers {
+                    debug!("MockDocker removing existing container: {}", container_id);
+                    self.remove_container(&container_id).await?;
+                }
+            }
+
+            // Create new container
+            let container_id = self.create_container(identity, config, workspace_path).await?;
+            self.start_container(&container_id).await?;
+
+            // Get the image ID
+            let image_id = self.get_container_image(&container_id).await?;
+
+            debug!("MockDocker successfully created and started new container: {}", container_id);
+
+            Ok(ContainerResult {
+                container_id,
+                reused: false,
+                image_id,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1209,5 +1813,231 @@ mod tests {
     fn test_docker_client_without_feature() {
         let _client = DockerClient::new().unwrap();
         let _default_client = DockerClient::default();
+    }
+
+    // Mock Docker tests
+    use mock::*;
+    use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn test_mock_docker_ping_success() {
+        let mock_docker = MockDocker::new();
+        let result = mock_docker.ping().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_ping_failure() {
+        let mut config = MockDockerConfig::default();
+        config.ping_success = false;
+        let mock_docker = MockDocker::with_config(config);
+
+        let result = mock_docker.ping().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_daemon_unavailable() {
+        let mut config = MockDockerConfig::default();
+        config.daemon_unavailable = true;
+        let mock_docker = MockDocker::with_config(config);
+
+        let result = mock_docker.ping().await;
+        assert!(result.is_err());
+        
+        let result = mock_docker.list_containers(None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_list_containers_empty() {
+        let mock_docker = MockDocker::new();
+        let containers = mock_docker.list_containers(None).await.unwrap();
+        assert!(containers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_list_containers_with_mock_data() {
+        let mock_docker = MockDocker::new();
+        
+        let container = MockContainer::new(
+            "test-123".to_string(),
+            "test-container".to_string(),
+            "ubuntu:20.04".to_string(),
+        );
+        mock_docker.add_container(container);
+
+        let containers = mock_docker.list_containers(None).await.unwrap();
+        assert_eq!(containers.len(), 1);
+        assert_eq!(containers[0].id, "test-123");
+        assert_eq!(containers[0].names, vec!["test-container"]);
+        assert_eq!(containers[0].image, "ubuntu:20.04");
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_list_containers_with_label_selector() {
+        let mock_docker = MockDocker::new();
+        
+        let mut labels = HashMap::new();
+        labels.insert("app".to_string(), "web".to_string());
+        labels.insert("env".to_string(), "test".to_string());
+        
+        let container = MockContainer::new(
+            "test-123".to_string(),
+            "test-container".to_string(),
+            "ubuntu:20.04".to_string(),
+        ).with_labels(labels);
+        
+        mock_docker.add_container(container);
+
+        // Test exact match
+        let containers = mock_docker.list_containers(Some("app=web")).await.unwrap();
+        assert_eq!(containers.len(), 1);
+
+        // Test key existence
+        let containers = mock_docker.list_containers(Some("app")).await.unwrap();
+        assert_eq!(containers.len(), 1);
+
+        // Test no match
+        let containers = mock_docker.list_containers(Some("app=api")).await.unwrap();
+        assert_eq!(containers.len(), 0);
+
+        // Test multiple labels
+        let containers = mock_docker.list_containers(Some("app=web,env=test")).await.unwrap();
+        assert_eq!(containers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_inspect_container() {
+        let mock_docker = MockDocker::new();
+        
+        let container = MockContainer::new(
+            "test-123".to_string(),
+            "test-container".to_string(),
+            "ubuntu:20.04".to_string(),
+        );
+        mock_docker.add_container(container);
+
+        // Test by ID
+        let result = mock_docker.inspect_container("test-123").await.unwrap();
+        assert!(result.is_some());
+        let container_info = result.unwrap();
+        assert_eq!(container_info.id, "test-123");
+
+        // Test by name
+        let result = mock_docker.inspect_container("test-container").await.unwrap();
+        assert!(result.is_some());
+
+        // Test not found
+        let result = mock_docker.inspect_container("nonexistent").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_exec_default_response() {
+        let mock_docker = MockDocker::new();
+        
+        let container = MockContainer::new(
+            "test-123".to_string(),
+            "test-container".to_string(),
+            "ubuntu:20.04".to_string(),
+        );
+        mock_docker.add_container(container);
+
+        let exec_config = ExecConfig {
+            user: Some("root".to_string()),
+            working_dir: Some("/workspace".to_string()),
+            env: HashMap::new(),
+            tty: true,
+            interactive: true,
+            detach: false,
+        };
+
+        let result = mock_docker.exec("test-123", &["echo".to_string(), "hello".to_string()], exec_config).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(result.success);
+
+        // Check exec history
+        let history = mock_docker.get_exec_history();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].container_id, "test-123");
+        assert_eq!(history[0].command, vec!["echo", "hello"]);
+        assert!(history[0].config.tty);
+        assert!(history[0].config.interactive);
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_exec_custom_response() {
+        let mock_docker = MockDocker::new();
+        
+        let container = MockContainer::new(
+            "test-123".to_string(),
+            "test-container".to_string(),
+            "ubuntu:20.04".to_string(),
+        );
+        mock_docker.add_container(container);
+
+        // Set custom response for specific command
+        let response = MockExecResponse {
+            exit_code: 1,
+            success: false,
+            delay: Some(Duration::from_millis(100)),
+            stdout: None,
+            stderr: None,
+        };
+        mock_docker.set_exec_response("failing command".to_string(), response);
+
+        let exec_config = ExecConfig {
+            user: None,
+            working_dir: None,
+            env: HashMap::new(),
+            tty: false,
+            interactive: false,
+            detach: false,
+        };
+
+        let start_time = Instant::now();
+        let result = mock_docker.exec("test-123", &["failing".to_string(), "command".to_string()], exec_config).await.unwrap();
+        let elapsed = start_time.elapsed();
+
+        assert_eq!(result.exit_code, 1);
+        assert!(!result.success);
+        assert!(elapsed >= Duration::from_millis(100)); // Check delay was applied
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_container_lifecycle() {
+        let mock_docker = MockDocker::new();
+        
+        // Test create_container
+        let identity = ContainerIdentity {
+            workspace_hash: "workspace123".to_string(),
+            config_hash: "config456".to_string(),
+            name: Some("test-dev".to_string()),
+        };
+        
+        let config = DevContainerConfig {
+            image: Some("ubuntu:20.04".to_string()),
+            ..Default::default()
+        };
+
+        let container_id = mock_docker.create_container(&identity, &config, Path::new("/workspace")).await.unwrap();
+        assert!(container_id.starts_with("mock-container-"));
+
+        // Test start_container
+        let result = mock_docker.start_container(&container_id).await;
+        assert!(result.is_ok());
+
+        // Test get_container_image
+        let image = mock_docker.get_container_image(&container_id).await.unwrap();
+        assert_eq!(image, "ubuntu:20.04");
+
+        // Test remove_container
+        let result = mock_docker.remove_container(&container_id).await;
+        assert!(result.is_ok());
+
+        // Verify container is gone
+        let result = mock_docker.get_container_image(&container_id).await;
+        assert!(result.is_err());
     }
 }

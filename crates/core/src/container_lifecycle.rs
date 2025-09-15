@@ -43,10 +43,37 @@ pub async fn execute_container_lifecycle(
     commands: &ContainerLifecycleCommands,
     substitution_context: &SubstitutionContext,
 ) -> Result<ContainerLifecycleResult> {
-    execute_container_lifecycle_with_progress_callback(
+    execute_container_lifecycle_with_docker(
         config,
         commands,
         substitution_context,
+        &CliDocker::new(),
+    )
+    .await
+}
+
+/// Execute lifecycle commands in a container with custom Docker implementation
+///
+/// This function executes lifecycle commands in the specified order:
+/// 1. onCreate
+/// 2. postCreate (if not skipped)
+/// 3. postStart (if not skipped by skip_non_blocking_commands)
+/// 4. postAttach (if not skipped by skip_non_blocking_commands)
+#[instrument(skip(config, commands, substitution_context, docker))]
+pub async fn execute_container_lifecycle_with_docker<D>(
+    config: &ContainerLifecycleConfig,
+    commands: &ContainerLifecycleCommands,
+    substitution_context: &SubstitutionContext,
+    docker: &D,
+) -> Result<ContainerLifecycleResult>
+where
+    D: Docker,
+{
+    execute_container_lifecycle_with_progress_callback_and_docker(
+        config,
+        commands,
+        substitution_context,
+        docker,
         None::<fn(ProgressEvent) -> anyhow::Result<()>>,
     )
     .await
@@ -74,13 +101,43 @@ pub async fn execute_container_lifecycle_with_progress_callback<F>(
 where
     F: Fn(ProgressEvent) -> anyhow::Result<()>,
 {
+    execute_container_lifecycle_with_progress_callback_and_docker(
+        config,
+        commands,
+        substitution_context,
+        &CliDocker::new(),
+        progress_callback,
+    )
+    .await
+}
+
+/// Execute lifecycle commands in a container with optional progress event callback and custom Docker implementation
+///
+/// This function executes lifecycle commands in the specified order:
+/// 1. onCreate
+/// 2. postCreate (if not skipped)
+/// 3. postStart (if not skipped by skip_non_blocking_commands)
+/// 4. postAttach (if not skipped by skip_non_blocking_commands)
+///
+/// Emits per-command progress events via the callback if provided.
+#[instrument(skip(config, commands, substitution_context, docker, progress_callback))]
+pub async fn execute_container_lifecycle_with_progress_callback_and_docker<D, F>(
+    config: &ContainerLifecycleConfig,
+    commands: &ContainerLifecycleCommands,
+    substitution_context: &SubstitutionContext,
+    docker: &D,
+    progress_callback: Option<F>,
+) -> Result<ContainerLifecycleResult>
+where
+    D: Docker,
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
     info!(
         "Starting container lifecycle execution in container: {}",
         config.container_id
     );
 
     let mut result = ContainerLifecycleResult::new();
-    let docker = CliDocker::new();
 
     // Create substitution context with container information
     let container_context = substitution_context
@@ -166,15 +223,16 @@ where
 
 /// Execute a single lifecycle phase in the container
 #[instrument(skip(commands, config, docker, context, progress_callback))]
-async fn execute_lifecycle_phase<F>(
+async fn execute_lifecycle_phase<D, F>(
     phase: LifecyclePhase,
     commands: &[String],
     config: &ContainerLifecycleConfig,
-    docker: &CliDocker,
+    docker: &D,
     context: &SubstitutionContext,
     progress_callback: Option<&F>,
 ) -> Result<PhaseResult>
 where
+    D: Docker,
     F: Fn(ProgressEvent) -> anyhow::Result<()>,
 {
     info!("Executing lifecycle phase: {}", phase.as_str());
