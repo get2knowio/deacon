@@ -637,7 +637,8 @@ async fn execute_lifecycle_commands(
     args: &UpArgs,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
-        execute_container_lifecycle, ContainerLifecycleCommands, ContainerLifecycleConfig,
+        execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
+        ContainerLifecycleConfig,
     };
     use deacon_core::variable::SubstitutionContext;
 
@@ -720,9 +721,24 @@ async fn execute_lifecycle_commands(
 
     let lifecycle_start_time = std::time::Instant::now();
 
-    // Execute lifecycle commands
-    let result =
-        execute_container_lifecycle(&lifecycle_config, &commands, &substitution_context).await;
+    // Create a progress event callback
+    let emit_progress_event_fn = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
+        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
+            if let Some(ref mut tracker) = tracker_guard.as_mut() {
+                tracker.emit_event(event)?;
+            }
+        }
+        Ok(())
+    };
+
+    // Execute lifecycle commands with progress callback
+    let result = execute_container_lifecycle_with_progress_callback(
+        &lifecycle_config,
+        &commands,
+        &substitution_context,
+        Some(emit_progress_event_fn),
+    )
+    .await;
 
     let lifecycle_duration = lifecycle_start_time.elapsed();
     let lifecycle_success = result.is_ok();

@@ -92,6 +92,26 @@ pub enum ProgressEvent {
         success: bool,
     },
 
+    /// Lifecycle command events
+    #[serde(rename = "lifecycle.command.begin")]
+    LifecycleCommandBegin {
+        id: u64,
+        timestamp: u64,
+        phase: String,
+        command_id: String,
+        command: String,
+    },
+    #[serde(rename = "lifecycle.command.end")]
+    LifecycleCommandEnd {
+        id: u64,
+        timestamp: u64,
+        phase: String,
+        command_id: String,
+        duration_ms: u64,
+        success: bool,
+        exit_code: Option<i32>,
+    },
+
     /// OCI registry operation events
     #[serde(rename = "oci.publish.begin")]
     OciPublishBegin {
@@ -155,6 +175,8 @@ impl ProgressEvent {
             ProgressEvent::FeaturesInstallEnd { id, .. } => *id,
             ProgressEvent::LifecyclePhaseBegin { id, .. } => *id,
             ProgressEvent::LifecyclePhaseEnd { id, .. } => *id,
+            ProgressEvent::LifecycleCommandBegin { id, .. } => *id,
+            ProgressEvent::LifecycleCommandEnd { id, .. } => *id,
             ProgressEvent::OciPublishBegin { id, .. } => *id,
             ProgressEvent::OciPublishEnd { id, .. } => *id,
             ProgressEvent::OciFetchBegin { id, .. } => *id,
@@ -189,6 +211,8 @@ impl ProgressEvent {
             ProgressEvent::FeaturesInstallEnd { timestamp, .. } => *timestamp,
             ProgressEvent::LifecyclePhaseBegin { timestamp, .. } => *timestamp,
             ProgressEvent::LifecyclePhaseEnd { timestamp, .. } => *timestamp,
+            ProgressEvent::LifecycleCommandBegin { timestamp, .. } => *timestamp,
+            ProgressEvent::LifecycleCommandEnd { timestamp, .. } => *timestamp,
             ProgressEvent::OciPublishBegin { timestamp, .. } => *timestamp,
             ProgressEvent::OciPublishEnd { timestamp, .. } => *timestamp,
             ProgressEvent::OciFetchBegin { timestamp, .. } => *timestamp,
@@ -1026,6 +1050,46 @@ mod tests {
 
         let deserialized: ProgressEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(event, deserialized);
+    }
+
+    #[test]
+    fn test_lifecycle_command_event_serialization() {
+        let begin_event = ProgressEvent::LifecycleCommandBegin {
+            id: 1,
+            timestamp: 1234567890,
+            phase: "postCreate".to_string(),
+            command_id: "postCreate-1".to_string(),
+            command: "echo 'hello'".to_string(),
+        };
+
+        let json = serde_json::to_string(&begin_event).unwrap();
+        assert!(json.contains("lifecycle.command.begin"));
+        assert!(json.contains("postCreate"));
+        assert!(json.contains("postCreate-1"));
+        assert!(json.contains("echo 'hello'"));
+
+        let deserialized: ProgressEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(begin_event, deserialized);
+
+        let end_event = ProgressEvent::LifecycleCommandEnd {
+            id: 2,
+            timestamp: 1234567891,
+            phase: "postCreate".to_string(),
+            command_id: "postCreate-1".to_string(),
+            duration_ms: 500,
+            success: true,
+            exit_code: Some(0),
+        };
+
+        let json = serde_json::to_string(&end_event).unwrap();
+        assert!(json.contains("lifecycle.command.end"));
+        assert!(json.contains("postCreate"));
+        assert!(json.contains("postCreate-1"));
+        assert!(json.contains("500"));
+        assert!(json.contains("true"));
+
+        let deserialized: ProgressEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(end_event, deserialized);
     }
 
     #[test]

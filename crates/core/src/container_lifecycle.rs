@@ -6,6 +6,8 @@
 use crate::docker::{CliDocker, Docker, ExecConfig};
 use crate::errors::{DeaconError, Result};
 use crate::lifecycle::LifecyclePhase;
+use crate::progress::{ProgressEvent, ProgressTracker};
+use crate::redaction::{redact_if_enabled, RedactionConfig};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -41,6 +43,37 @@ pub async fn execute_container_lifecycle(
     commands: &ContainerLifecycleCommands,
     substitution_context: &SubstitutionContext,
 ) -> Result<ContainerLifecycleResult> {
+    execute_container_lifecycle_with_progress_callback(
+        config,
+        commands,
+        substitution_context,
+        None::<fn(ProgressEvent) -> anyhow::Result<()>>,
+    )
+    .await
+}
+
+/// Type alias for progress event callback
+pub type ProgressEventCallback = dyn Fn(ProgressEvent) -> anyhow::Result<()> + Send + Sync;
+
+/// Execute lifecycle commands in a container with optional progress event callback
+///
+/// This function executes lifecycle commands in the specified order:
+/// 1. onCreate
+/// 2. postCreate (if not skipped)
+/// 3. postStart (if not skipped by skip_non_blocking_commands)
+/// 4. postAttach (if not skipped by skip_non_blocking_commands)
+///
+/// Emits per-command progress events via the callback if provided.
+#[instrument(skip(config, commands, substitution_context, progress_callback))]
+pub async fn execute_container_lifecycle_with_progress_callback<F>(
+    config: &ContainerLifecycleConfig,
+    commands: &ContainerLifecycleCommands,
+    substitution_context: &SubstitutionContext,
+    progress_callback: Option<F>,
+) -> Result<ContainerLifecycleResult>
+where
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
     info!(
         "Starting container lifecycle execution in container: {}",
         config.container_id
@@ -64,6 +97,7 @@ pub async fn execute_container_lifecycle(
                 config,
                 &docker,
                 &container_context,
+                progress_callback.as_ref(),
             )
             .await?,
         );
@@ -79,6 +113,7 @@ pub async fn execute_container_lifecycle(
                     config,
                     &docker,
                     &container_context,
+                    progress_callback.as_ref(),
                 )
                 .await?,
             );
@@ -97,6 +132,7 @@ pub async fn execute_container_lifecycle(
                     config,
                     &docker,
                     &container_context,
+                    progress_callback.as_ref(),
                 )
                 .await?,
             );
@@ -115,6 +151,7 @@ pub async fn execute_container_lifecycle(
                     config,
                     &docker,
                     &container_context,
+                    progress_callback.as_ref(),
                 )
                 .await?,
             );
@@ -128,14 +165,18 @@ pub async fn execute_container_lifecycle(
 }
 
 /// Execute a single lifecycle phase in the container
-#[instrument(skip(commands, config, docker, context))]
-async fn execute_lifecycle_phase(
+#[instrument(skip(commands, config, docker, context, progress_callback))]
+async fn execute_lifecycle_phase<F>(
     phase: LifecyclePhase,
     commands: &[String],
     config: &ContainerLifecycleConfig,
     docker: &CliDocker,
     context: &SubstitutionContext,
-) -> Result<PhaseResult> {
+    progress_callback: Option<&F>,
+) -> Result<PhaseResult>
+where
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
     info!("Executing lifecycle phase: {}", phase.as_str());
     let phase_start = Instant::now();
 
@@ -154,6 +195,9 @@ async fn execute_lifecycle_phase(
             phase.as_str(),
             command_template
         );
+
+        // Generate unique command ID
+        let command_id = format!("{}-{}", phase.as_str(), i + 1);
 
         let start_time = Instant::now();
 
@@ -180,6 +224,24 @@ async fn execute_lifecycle_phase(
                     "Unknown variables left unchanged: {:?}",
                     substitution_report.unknown_variables
                 );
+            }
+        }
+
+        // Apply redaction to command string for event emission
+        let redaction_config = RedactionConfig::default(); // Use default for now
+        let redacted_command = redact_if_enabled(&substituted_command, &redaction_config);
+
+        // Emit command begin event
+        if let Some(callback) = progress_callback {
+            let event = ProgressEvent::LifecycleCommandBegin {
+                id: ProgressTracker::next_event_id(),
+                timestamp: ProgressTracker::current_timestamp(),
+                phase: phase.as_str().to_string(),
+                command_id: command_id.clone(),
+                command: redacted_command.clone(),
+            };
+            if let Err(e) = callback(event) {
+                debug!("Failed to emit command begin event: {}", e);
             }
         }
 
@@ -213,6 +275,22 @@ async fn execute_lifecycle_phase(
                     exec_result.exit_code, duration
                 );
 
+                // Emit command end event (success)
+                if let Some(callback) = progress_callback {
+                    let event = ProgressEvent::LifecycleCommandEnd {
+                        id: ProgressTracker::next_event_id(),
+                        timestamp: ProgressTracker::current_timestamp(),
+                        phase: phase.as_str().to_string(),
+                        command_id: command_id.clone(),
+                        duration_ms: duration.as_millis() as u64,
+                        success: exec_result.success,
+                        exit_code: Some(exec_result.exit_code),
+                    };
+                    if let Err(e) = callback(event) {
+                        debug!("Failed to emit command end event: {}", e);
+                    }
+                }
+
                 let command_result = CommandResult {
                     command: substituted_command.clone(),
                     exit_code: exec_result.exit_code,
@@ -241,6 +319,22 @@ async fn execute_lifecycle_phase(
                 }
             }
             Err(e) => {
+                // Emit command end event (failure)
+                if let Some(callback) = progress_callback {
+                    let event = ProgressEvent::LifecycleCommandEnd {
+                        id: ProgressTracker::next_event_id(),
+                        timestamp: ProgressTracker::current_timestamp(),
+                        phase: phase.as_str().to_string(),
+                        command_id: command_id.clone(),
+                        duration_ms: duration.as_millis() as u64,
+                        success: false,
+                        exit_code: None, // No exit code when exec itself fails
+                    };
+                    if let Err(emit_err) = callback(event) {
+                        debug!("Failed to emit command end event: {}", emit_err);
+                    }
+                }
+
                 phase_result.success = false;
                 error!(
                     "Failed to execute container command in phase {}: {}",
