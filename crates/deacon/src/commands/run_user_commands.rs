@@ -115,16 +115,6 @@ async fn execute_lifecycle_commands(
 ) -> Result<()> {
     info!("Executing lifecycle commands in container");
 
-    // Initialize progress tracking
-    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
-            if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                tracker.emit_event(event)?;
-            }
-        }
-        Ok(())
-    };
-
     // Create substitution context
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
 
@@ -187,18 +177,6 @@ async fn execute_lifecycle_commands(
         }
     }
 
-    // Emit begin events for each phase
-    for (phase_name, phase_commands) in &phases_to_execute {
-        emit_progress_event(deacon_core::progress::ProgressEvent::LifecyclePhaseBegin {
-            id: deacon_core::progress::ProgressTracker::next_event_id(),
-            timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
-            phase: phase_name.clone(),
-            commands: phase_commands.clone(),
-        })?;
-    }
-
-    let lifecycle_start_time = std::time::Instant::now();
-
     // Create a progress event callback
     let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
         if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
@@ -217,20 +195,6 @@ async fn execute_lifecycle_commands(
         Some(emit_progress_event),
     )
     .await;
-
-    let lifecycle_duration = lifecycle_start_time.elapsed();
-    let lifecycle_success = result.is_ok();
-
-    // Emit end events for each phase
-    for (phase_name, _phase_commands) in &phases_to_execute {
-        emit_progress_event(deacon_core::progress::ProgressEvent::LifecyclePhaseEnd {
-            id: deacon_core::progress::ProgressTracker::next_event_id(),
-            timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
-            phase: phase_name.clone(),
-            duration_ms: lifecycle_duration.as_millis() as u64,
-            success: lifecycle_success,
-        })?;
-    }
 
     // Return result
     result?;

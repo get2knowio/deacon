@@ -180,6 +180,19 @@ where
     info!("Executing lifecycle phase: {}", phase.as_str());
     let phase_start = Instant::now();
 
+    // Emit phase begin event
+    if let Some(callback) = progress_callback {
+        let event = ProgressEvent::LifecyclePhaseBegin {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: phase.as_str().to_string(),
+            commands: commands.to_vec(),
+        };
+        if let Err(e) = callback(event) {
+            debug!("Failed to emit phase begin event: {}", e);
+        }
+    }
+
     let mut phase_result = PhaseResult {
         phase,
         commands: Vec::new(),
@@ -305,6 +318,22 @@ where
                 // If command failed, halt execution and return error with phase context
                 if exec_result.exit_code != 0 {
                     phase_result.success = false;
+                    phase_result.total_duration = phase_start.elapsed();
+
+                    // Emit phase end event before returning error
+                    if let Some(callback) = progress_callback {
+                        let event = ProgressEvent::LifecyclePhaseEnd {
+                            id: ProgressTracker::next_event_id(),
+                            timestamp: ProgressTracker::current_timestamp(),
+                            phase: phase.as_str().to_string(),
+                            duration_ms: phase_result.total_duration.as_millis() as u64,
+                            success: false,
+                        };
+                        if let Err(e) = callback(event) {
+                            debug!("Failed to emit phase end event: {}", e);
+                        }
+                    }
+
                     error!(
                         "Container command failed in phase {} with exit code {}",
                         phase.as_str(),
@@ -336,6 +365,22 @@ where
                 }
 
                 phase_result.success = false;
+                phase_result.total_duration = phase_start.elapsed();
+
+                // Emit phase end event before returning error
+                if let Some(callback) = progress_callback {
+                    let event = ProgressEvent::LifecyclePhaseEnd {
+                        id: ProgressTracker::next_event_id(),
+                        timestamp: ProgressTracker::current_timestamp(),
+                        phase: phase.as_str().to_string(),
+                        duration_ms: phase_result.total_duration.as_millis() as u64,
+                        success: false,
+                    };
+                    if let Err(emit_err) = callback(event) {
+                        debug!("Failed to emit phase end event: {}", emit_err);
+                    }
+                }
+
                 error!(
                     "Failed to execute container command in phase {}: {}",
                     phase.as_str(),
@@ -351,6 +396,21 @@ where
     }
 
     phase_result.total_duration = phase_start.elapsed();
+
+    // Emit phase end event
+    if let Some(callback) = progress_callback {
+        let event = ProgressEvent::LifecyclePhaseEnd {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: phase.as_str().to_string(),
+            duration_ms: phase_result.total_duration.as_millis() as u64,
+            success: phase_result.success,
+        };
+        if let Err(e) = callback(event) {
+            debug!("Failed to emit phase end event: {}", e);
+        }
+    }
+
     info!(
         "Completed lifecycle phase: {} in {:?}",
         phase.as_str(),
