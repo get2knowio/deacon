@@ -95,12 +95,7 @@ async fn test_per_command_events_emitted() {
     // We should have at least the begin events for each command
     let command_begin_events: Vec<_> = events
         .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                ProgressEvent::LifecycleCommandBegin { .. }
-            )
-        })
+        .filter(|event| matches!(event, ProgressEvent::LifecycleCommandBegin { .. }))
         .collect();
 
     println!(
@@ -108,7 +103,7 @@ async fn test_per_command_events_emitted() {
         command_begin_events.len(),
         events.len()
     );
-    
+
     // Print all events for debugging
     for (i, event) in events.iter().enumerate() {
         println!("Event {}: {:?}", i, event);
@@ -117,7 +112,7 @@ async fn test_per_command_events_emitted() {
     // We expect at least 1 command begin event (the first onCreate command)
     // The execution might fail early due to Docker not being available
     assert!(
-        command_begin_events.len() >= 1,
+        !command_begin_events.is_empty(),
         "Expected at least 1 command begin event, got {}",
         command_begin_events.len()
     );
@@ -125,9 +120,15 @@ async fn test_per_command_events_emitted() {
     // Verify the command IDs are unique and follow expected pattern
     let mut command_ids = Vec::new();
     for event in &command_begin_events {
-        if let ProgressEvent::LifecycleCommandBegin { command_id, phase, .. } = event {
+        if let ProgressEvent::LifecycleCommandBegin {
+            command_id, phase, ..
+        } = event
+        {
             command_ids.push(command_id.clone());
-            println!("Found command begin event: {} in phase {}", command_id, phase);
+            println!(
+                "Found command begin event: {} in phase {}",
+                command_id, phase
+            );
         }
     }
 
