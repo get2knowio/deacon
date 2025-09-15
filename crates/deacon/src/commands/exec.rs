@@ -132,7 +132,7 @@ where
 
     #[cfg(feature = "docker")]
     {
-        use deacon_core::docker::{Docker, ExecConfig};
+        use deacon_core::docker::ExecConfig;
 
         tracing::info!("Executing command in container: {:?}", args.command);
 

@@ -13,7 +13,6 @@ use deacon_core::docker::mock::{MockContainer, MockDocker, MockDockerConfig, Moc
 use deacon_core::docker::{Docker, ExecConfig};
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
-use std::path::Path;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -30,8 +29,14 @@ fn create_test_config() -> DevContainerConfig {
 fn create_labeled_container(workspace_hash: &str, config_hash: &str) -> MockContainer {
     let mut labels = HashMap::new();
     labels.insert("devcontainer.source".to_string(), "deacon".to_string());
-    labels.insert("devcontainer.workspaceHash".to_string(), workspace_hash.to_string());
-    labels.insert("devcontainer.configHash".to_string(), config_hash.to_string());
+    labels.insert(
+        "devcontainer.workspaceHash".to_string(),
+        workspace_hash.to_string(),
+    );
+    labels.insert(
+        "devcontainer.configHash".to_string(),
+        config_hash.to_string(),
+    );
     labels.insert("devcontainer.name".to_string(), "test-dev".to_string());
 
     MockContainer::new(
@@ -45,12 +50,12 @@ fn create_labeled_container(workspace_hash: &str, config_hash: &str) -> MockCont
 #[tokio::test]
 async fn test_exec_with_mock_docker_success() -> Result<()> {
     let mock_docker = MockDocker::new();
-    
+
     // Create test workspace
     let temp_dir = TempDir::new()?;
     let workspace_path = temp_dir.path();
     let config = create_test_config();
-    
+
     // Create container identity and add matching container
     let identity = ContainerIdentity::new(workspace_path, &config);
     let container = create_labeled_container(&identity.workspace_hash, &identity.config_hash);
@@ -67,7 +72,11 @@ async fn test_exec_with_mock_docker_success() -> Result<()> {
     };
 
     let result = mock_docker
-        .exec("test-container-123", &["echo".to_string(), "hello".to_string()], exec_config)
+        .exec(
+            "test-container-123",
+            &["echo".to_string(), "hello".to_string()],
+            exec_config,
+        )
         .await?;
 
     assert_eq!(result.exit_code, 0);
@@ -87,7 +96,7 @@ async fn test_exec_with_mock_docker_success() -> Result<()> {
 #[tokio::test]
 async fn test_exec_with_mock_docker_failure() -> Result<()> {
     let mock_docker = MockDocker::new();
-    
+
     // Configure failing command response
     let failing_response = MockExecResponse {
         exit_code: 1,
@@ -118,7 +127,11 @@ async fn test_exec_with_mock_docker_failure() -> Result<()> {
 
     let start_time = std::time::Instant::now();
     let result = mock_docker
-        .exec("test-container-456", &["failing".to_string(), "command".to_string()], exec_config)
+        .exec(
+            "test-container-456",
+            &["failing".to_string(), "command".to_string()],
+            exec_config,
+        )
         .await?;
     let elapsed = start_time.elapsed();
 
@@ -132,7 +145,7 @@ async fn test_exec_with_mock_docker_failure() -> Result<()> {
 #[tokio::test]
 async fn test_exec_with_tty_flag_capture() -> Result<()> {
     let mock_docker = MockDocker::new();
-    
+
     // Add container
     let container = MockContainer::new(
         "tty-test-container".to_string(),
@@ -156,7 +169,15 @@ async fn test_exec_with_tty_flag_capture() -> Result<()> {
     };
 
     let _result = mock_docker
-        .exec("tty-test-container", &["bash".to_string(), "-c".to_string(), "echo test".to_string()], exec_config_tty)
+        .exec(
+            "tty-test-container",
+            &[
+                "bash".to_string(),
+                "-c".to_string(),
+                "echo test".to_string(),
+            ],
+            exec_config_tty,
+        )
         .await?;
 
     // Test TTY disabled
@@ -170,20 +191,27 @@ async fn test_exec_with_tty_flag_capture() -> Result<()> {
     };
 
     let _result = mock_docker
-        .exec("tty-test-container", &["ls".to_string(), "-la".to_string()], exec_config_no_tty)
+        .exec(
+            "tty-test-container",
+            &["ls".to_string(), "-la".to_string()],
+            exec_config_no_tty,
+        )
         .await?;
 
     // Verify both exec calls captured TTY flags correctly
     let history = mock_docker.get_exec_history();
     assert_eq!(history.len(), 2);
-    
+
     // First call with TTY
     assert!(history[0].config.tty);
     assert!(history[0].config.interactive);
     assert_eq!(history[0].config.user, Some("testuser".to_string()));
     assert_eq!(history[0].config.working_dir, Some("/app".to_string()));
-    assert_eq!(history[0].config.env.get("TEST_VAR"), Some(&"test_value".to_string()));
-    
+    assert_eq!(
+        history[0].config.env.get("TEST_VAR"),
+        Some(&"test_value".to_string())
+    );
+
     // Second call without TTY
     assert!(!history[1].config.tty);
     assert!(!history[1].config.interactive);
@@ -194,56 +222,56 @@ async fn test_exec_with_tty_flag_capture() -> Result<()> {
 #[tokio::test]
 async fn test_container_resolution_no_running_containers() -> Result<()> {
     let mock_docker = MockDocker::new();
-    
+
     // Create test workspace
     let temp_dir = TempDir::new()?;
     let workspace_path = temp_dir.path();
     let config = create_test_config();
-    
+
     // Don't add any containers - should result in error
     let identity = ContainerIdentity::new(workspace_path, &config);
     let label_selector = identity.label_selector();
     let containers = mock_docker.list_containers(Some(&label_selector)).await?;
-    
+
     assert!(containers.is_empty());
-    
+
     Ok(())
 }
 
 #[tokio::test]
 async fn test_container_resolution_multiple_containers_error() -> Result<()> {
     let mock_docker = MockDocker::new();
-    
+
     // Create test workspace
     let temp_dir = TempDir::new()?;
     let workspace_path = temp_dir.path();
     let config = create_test_config();
-    
+
     // Create identity and add multiple matching containers
     let identity = ContainerIdentity::new(workspace_path, &config);
     let container1 = create_labeled_container(&identity.workspace_hash, &identity.config_hash);
     let mut container2 = create_labeled_container(&identity.workspace_hash, &identity.config_hash);
     container2.id = "test-container-456".to_string();
-    
+
     mock_docker.add_container(container1);
     mock_docker.add_container(container2);
 
     // Should find both containers
     let label_selector = identity.label_selector();
     let containers = mock_docker.list_containers(Some(&label_selector)).await?;
-    
+
     assert_eq!(containers.len(), 2);
-    
+
     Ok(())
 }
 
 #[tokio::test]
 async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
     let mock_docker = MockDocker::new();
-    
+
     // Configure different responses for lifecycle commands
     mock_docker.set_exec_response(
-        "npm install".to_string(),
+        "sh -c npm install".to_string(),
         MockExecResponse {
             exit_code: 0,
             success: true,
@@ -252,13 +280,36 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
             stderr: None,
         },
     );
-    
+
     mock_docker.set_exec_response(
-        "npm run build".to_string(),
+        "sh -c npm run build".to_string(),
         MockExecResponse {
             exit_code: 0,
             success: true,
             delay: Some(Duration::from_millis(200)),
+            stdout: None,
+            stderr: None,
+        },
+    );
+
+    // Add minimal delays for other commands so timing test works
+    mock_docker.set_exec_response(
+        "sh -c echo 'container started'".to_string(),
+        MockExecResponse {
+            exit_code: 0,
+            success: true,
+            delay: Some(Duration::from_millis(1)),
+            stdout: None,
+            stderr: None,
+        },
+    );
+
+    mock_docker.set_exec_response(
+        "sh -c echo 'container attached'".to_string(),
+        MockExecResponse {
+            exit_code: 0,
+            success: true,
+            delay: Some(Duration::from_millis(1)),
             stdout: None,
             stderr: None,
         },
@@ -304,20 +355,20 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
     // Verify result
     assert_eq!(result.phases.len(), 4); // onCreate, postCreate, postStart, postAttach
     assert!(result.success());
-    
+
     // Verify timing - should have at least the configured delays
-    assert!(elapsed >= Duration::from_millis(300)); // 100ms + 200ms + minimal for other commands
+    assert!(elapsed >= Duration::from_millis(300)); // 100ms + 200ms + 1ms + 1ms + processing time
 
     // Verify exec history
     let history = mock_docker.get_exec_history();
     assert_eq!(history.len(), 4);
-    
+
     // Check specific commands were executed
     let command_strings: Vec<String> = history.iter().map(|h| h.command.join(" ")).collect();
-    assert!(command_strings.contains(&"npm install".to_string()));
-    assert!(command_strings.contains(&"npm run build".to_string()));
-    assert!(command_strings.contains(&"echo 'container started'".to_string()));
-    assert!(command_strings.contains(&"echo 'container attached'".to_string()));
+    assert!(command_strings.contains(&"sh -c npm install".to_string()));
+    assert!(command_strings.contains(&"sh -c npm run build".to_string()));
+    assert!(command_strings.contains(&"sh -c echo 'container started'".to_string()));
+    assert!(command_strings.contains(&"sh -c echo 'container attached'".to_string()));
 
     Ok(())
 }
@@ -332,8 +383,8 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
         container_env: HashMap::new(),
-        skip_post_create: true,  // Skip postCreate
-        skip_non_blocking_commands: true,  // Skip postStart and postAttach
+        skip_post_create: true,           // Skip postCreate
+        skip_non_blocking_commands: true, // Skip postStart and postAttach
     };
 
     // Create lifecycle commands
@@ -345,7 +396,8 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
     };
 
     // Create substitution context
-    let substitution_context = SubstitutionContext::new(Path::new("/workspace"))?;
+    let temp_dir = TempDir::new()?;
+    let substitution_context = SubstitutionContext::new(temp_dir.path())?;
 
     // Execute lifecycle
     let result = execute_container_lifecycle_with_docker(
@@ -363,7 +415,7 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
     // Verify exec history - only onCreate command should be present
     let history = mock_docker.get_exec_history();
     assert_eq!(history.len(), 1);
-    assert_eq!(history[0].command, vec!["echo", "on create"]);
+    assert_eq!(history[0].command, vec!["sh", "-c", "echo 'on create'"]);
 
     Ok(())
 }
@@ -371,10 +423,10 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
 #[tokio::test]
 async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
     let mock_docker = MockDocker::new();
-    
+
     // Configure failing command in postCreate
     mock_docker.set_exec_response(
-        "failing-command".to_string(),
+        "sh -c failing-command".to_string(),
         MockExecResponse {
             exit_code: 1,
             success: false,
@@ -418,7 +470,7 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
     // Verify result
     assert_eq!(result.phases.len(), 2); // onCreate (success) + postCreate (failure)
     assert!(!result.success()); // Overall failure due to postCreate failure
-    
+
     // Check individual phase results
     assert!(result.phases[0].success); // onCreate succeeded
     assert!(!result.phases[1].success); // postCreate failed
@@ -433,8 +485,10 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
 #[tokio::test]
 async fn test_docker_daemon_unavailable_error() -> Result<()> {
     // Configure mock to simulate daemon unavailable
-    let mut config = MockDockerConfig::default();
-    config.daemon_unavailable = true;
+    let config = MockDockerConfig {
+        daemon_unavailable: true,
+        ..Default::default()
+    };
     let mock_docker = MockDocker::with_config(config);
 
     // Test ping failure
@@ -454,8 +508,10 @@ async fn test_docker_daemon_unavailable_error() -> Result<()> {
         interactive: false,
         detach: false,
     };
-    
-    let exec_result = mock_docker.exec("any-container", &["echo".to_string()], exec_config).await;
+
+    let exec_result = mock_docker
+        .exec("any-container", &["echo".to_string()], exec_config)
+        .await;
     assert!(exec_result.is_err());
 
     Ok(())
@@ -503,12 +559,12 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
     // Verify exec history - should only contain onCreate and postCreate
     let history = mock_docker.get_exec_history();
     assert_eq!(history.len(), 2);
-    
+
     let command_strings: Vec<String> = history.iter().map(|h| h.command.join(" ")).collect();
-    assert!(command_strings.contains(&"echo onCreate".to_string()));
-    assert!(command_strings.contains(&"echo postCreate".to_string()));
-    assert!(!command_strings.contains(&"echo postStart".to_string()));
-    assert!(!command_strings.contains(&"echo postAttach".to_string()));
+    assert!(command_strings.contains(&"sh -c echo 'onCreate'".to_string()));
+    assert!(command_strings.contains(&"sh -c echo 'postCreate'".to_string()));
+    assert!(!command_strings.contains(&"sh -c echo 'postStart'".to_string()));
+    assert!(!command_strings.contains(&"sh -c echo 'postAttach'".to_string()));
 
     Ok(())
 }
