@@ -637,21 +637,12 @@ async fn execute_lifecycle_commands(
     args: &UpArgs,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
-        execute_container_lifecycle, ContainerLifecycleCommands, ContainerLifecycleConfig,
+        execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
+        ContainerLifecycleConfig,
     };
     use deacon_core::variable::SubstitutionContext;
 
     info!("Executing lifecycle commands in container");
-
-    // Initialize progress tracking
-    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
-            if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                tracker.emit_event(event)?;
-            }
-        }
-        Ok(())
-    };
 
     // Create substitution context
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
@@ -708,40 +699,28 @@ async fn execute_lifecycle_commands(
         phases_to_execute.push(("postAttach".to_string(), phase_commands));
     }
 
-    // Emit begin events for each phase
-    for (phase_name, phase_commands) in &phases_to_execute {
-        emit_progress_event(deacon_core::progress::ProgressEvent::LifecyclePhaseBegin {
-            id: deacon_core::progress::ProgressTracker::next_event_id(),
-            timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
-            phase: phase_name.clone(),
-            commands: phase_commands.clone(),
-        })?;
-    }
-
     let lifecycle_start_time = std::time::Instant::now();
 
-    // Execute lifecycle commands
-    let result =
-        execute_container_lifecycle(&lifecycle_config, &commands, &substitution_context).await;
+    // Create a progress event callback
+    let emit_progress_event_fn = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
+        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
+            if let Some(ref mut tracker) = tracker_guard.as_mut() {
+                tracker.emit_event(event)?;
+            }
+        }
+        Ok(())
+    };
+
+    // Execute lifecycle commands with progress callback
+    let result = execute_container_lifecycle_with_progress_callback(
+        &lifecycle_config,
+        &commands,
+        &substitution_context,
+        Some(emit_progress_event_fn),
+    )
+    .await;
 
     let lifecycle_duration = lifecycle_start_time.elapsed();
-    let lifecycle_success = result.is_ok();
-
-    // Emit end events for each phase (in reverse order since execution is complete)
-    let per_phase_ms = if phases_to_execute.is_empty() {
-        0
-    } else {
-        (lifecycle_duration.as_millis() as u64) / (phases_to_execute.len() as u64)
-    };
-    for (phase_name, _) in phases_to_execute.iter().rev() {
-        emit_progress_event(deacon_core::progress::ProgressEvent::LifecyclePhaseEnd {
-            id: deacon_core::progress::ProgressTracker::next_event_id(),
-            timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
-            phase: phase_name.clone(),
-            duration_ms: per_phase_ms, // Approximate duration per phase
-            success: lifecycle_success,
-        })?;
-    }
 
     // Record metrics
     if let Ok(tracker_guard) = args.progress_tracker.lock() {
