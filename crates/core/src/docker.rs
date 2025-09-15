@@ -1059,7 +1059,7 @@ impl Default for DockerClient {
 }
 
 /// Mock Docker runtime for testing
-#[cfg(test)]
+#[cfg(feature = "docker")]
 pub mod mock {
     //! Mock Docker runtime for testing exec and lifecycle flows
     //!
