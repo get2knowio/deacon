@@ -43,10 +43,37 @@ pub async fn execute_container_lifecycle(
     commands: &ContainerLifecycleCommands,
     substitution_context: &SubstitutionContext,
 ) -> Result<ContainerLifecycleResult> {
-    execute_container_lifecycle_with_progress_callback(
+    execute_container_lifecycle_with_docker(
         config,
         commands,
         substitution_context,
+        &CliDocker::new(),
+    )
+    .await
+}
+
+/// Execute lifecycle commands in a container with custom Docker implementation
+///
+/// This function executes lifecycle commands in the specified order:
+/// 1. onCreate
+/// 2. postCreate (if not skipped)
+/// 3. postStart (if not skipped by skip_non_blocking_commands)
+/// 4. postAttach (if not skipped by skip_non_blocking_commands)
+#[instrument(skip(config, commands, substitution_context, docker))]
+pub async fn execute_container_lifecycle_with_docker<D>(
+    config: &ContainerLifecycleConfig,
+    commands: &ContainerLifecycleCommands,
+    substitution_context: &SubstitutionContext,
+    docker: &D,
+) -> Result<ContainerLifecycleResult>
+where
+    D: Docker,
+{
+    execute_container_lifecycle_with_progress_callback_and_docker(
+        config,
+        commands,
+        substitution_context,
+        docker,
         None::<fn(ProgressEvent) -> anyhow::Result<()>>,
     )
     .await
@@ -74,13 +101,43 @@ pub async fn execute_container_lifecycle_with_progress_callback<F>(
 where
     F: Fn(ProgressEvent) -> anyhow::Result<()>,
 {
+    execute_container_lifecycle_with_progress_callback_and_docker(
+        config,
+        commands,
+        substitution_context,
+        &CliDocker::new(),
+        progress_callback,
+    )
+    .await
+}
+
+/// Execute lifecycle commands in a container with optional progress event callback and custom Docker implementation
+///
+/// This function executes lifecycle commands in the specified order:
+/// 1. onCreate
+/// 2. postCreate (if not skipped)
+/// 3. postStart (if not skipped by skip_non_blocking_commands)
+/// 4. postAttach (if not skipped by skip_non_blocking_commands)
+///
+/// Emits per-command progress events via the callback if provided.
+#[instrument(skip(config, commands, substitution_context, docker, progress_callback))]
+pub async fn execute_container_lifecycle_with_progress_callback_and_docker<D, F>(
+    config: &ContainerLifecycleConfig,
+    commands: &ContainerLifecycleCommands,
+    substitution_context: &SubstitutionContext,
+    docker: &D,
+    progress_callback: Option<F>,
+) -> Result<ContainerLifecycleResult>
+where
+    D: Docker,
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
     info!(
         "Starting container lifecycle execution in container: {}",
         config.container_id
     );
 
     let mut result = ContainerLifecycleResult::new();
-    let docker = CliDocker::new();
 
     // Create substitution context with container information
     let container_context = substitution_context
@@ -166,15 +223,16 @@ where
 
 /// Execute a single lifecycle phase in the container
 #[instrument(skip(commands, config, docker, context, progress_callback))]
-async fn execute_lifecycle_phase<F>(
+async fn execute_lifecycle_phase<D, F>(
     phase: LifecyclePhase,
     commands: &[String],
     config: &ContainerLifecycleConfig,
-    docker: &CliDocker,
+    docker: &D,
     context: &SubstitutionContext,
     progress_callback: Option<&F>,
 ) -> Result<PhaseResult>
 where
+    D: Docker,
     F: Fn(ProgressEvent) -> anyhow::Result<()>,
 {
     info!("Executing lifecycle phase: {}", phase.as_str());
@@ -315,36 +373,15 @@ where
 
                 phase_result.commands.push(command_result);
 
-                // If command failed, halt execution and return error with phase context
+                // If command failed, mark phase as failed but continue with next command
                 if exec_result.exit_code != 0 {
                     phase_result.success = false;
-                    phase_result.total_duration = phase_start.elapsed();
-
-                    // Emit phase end event before returning error
-                    if let Some(callback) = progress_callback {
-                        let event = ProgressEvent::LifecyclePhaseEnd {
-                            id: ProgressTracker::next_event_id(),
-                            timestamp: ProgressTracker::current_timestamp(),
-                            phase: phase.as_str().to_string(),
-                            duration_ms: phase_result.total_duration.as_millis() as u64,
-                            success: false,
-                        };
-                        if let Err(e) = callback(event) {
-                            debug!("Failed to emit phase end event: {}", e);
-                        }
-                    }
-
                     error!(
-                        "Container command failed in phase {} with exit code {}",
-                        phase.as_str(),
-                        exec_result.exit_code
-                    );
-                    return Err(DeaconError::Lifecycle(format!(
-                        "Container command failed in phase {} with exit code {}: Command: {}",
+                        "Container command failed in phase {} with exit code {}: {}",
                         phase.as_str(),
                         exec_result.exit_code,
                         substituted_command
-                    )));
+                    );
                 }
             }
             Err(e) => {

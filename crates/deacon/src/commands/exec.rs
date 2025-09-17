@@ -32,11 +32,14 @@ pub struct ExecArgs {
 
 /// Resolve the target container for the current workspace/config
 #[instrument(skip(docker_client))]
-pub async fn resolve_target_container(
-    docker_client: &CliDocker,
+pub async fn resolve_target_container<D>(
+    docker_client: &D,
     workspace_folder: &Path,
     config: &DevContainerConfig,
-) -> Result<String> {
+) -> Result<String>
+where
+    D: Docker,
+{
     debug!("Resolving target container for workspace");
 
     // Create container identity for this workspace/config
@@ -114,13 +117,22 @@ pub fn determine_container_working_dir(
 /// Execute the exec command
 #[instrument(skip(args))]
 pub async fn execute_exec(args: ExecArgs) -> Result<()> {
+    execute_exec_with_docker(args, &CliDocker::new()).await
+}
+
+/// Execute the exec command with a custom Docker implementation
+#[instrument(skip(args, docker_client))]
+pub async fn execute_exec_with_docker<D>(args: ExecArgs, docker_client: &D) -> Result<()>
+where
+    D: Docker,
+{
     if args.command.is_empty() {
         return Err(anyhow::anyhow!("No command specified for exec"));
     }
 
     #[cfg(feature = "docker")]
     {
-        use deacon_core::docker::{Docker, ExecConfig};
+        use deacon_core::docker::ExecConfig;
 
         tracing::info!("Executing command in container: {:?}", args.command);
 
@@ -155,14 +167,12 @@ pub async fn execute_exec(args: ExecArgs) -> Result<()> {
 
         debug!("Loaded configuration: {:?}", config.name);
 
-        let docker_client = CliDocker::new();
-
         // Check Docker availability
         docker_client.ping().await?;
 
         // Resolve target container
         let container_id =
-            resolve_target_container(&docker_client, workspace_folder, &config).await?;
+            resolve_target_container(docker_client, workspace_folder, &config).await?;
 
         // Determine TTY allocation
         let should_use_tty = !args.no_tty && CliDocker::is_tty();
