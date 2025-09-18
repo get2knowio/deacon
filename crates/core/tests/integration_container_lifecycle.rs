@@ -113,7 +113,6 @@ async fn test_container_lifecycle_with_skip_flags() {
         Err(_) => {
             // An error is also acceptable when Docker is unavailable
         }
-        }
     }
 }
 
