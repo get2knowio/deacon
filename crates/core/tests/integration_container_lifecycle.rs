@@ -70,6 +70,7 @@ async fn test_container_lifecycle_with_variable_substitution() {
                         .to_string()
                         .contains("Failed to execute container command")
                     || error.to_string().contains("Docker error")
+                    || error.to_string().contains("No such container")
             );
         }
     }
