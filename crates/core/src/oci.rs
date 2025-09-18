@@ -309,13 +309,19 @@ impl ReqwestClient {
         Ok(Self { client, auth })
     }
 
-    /// Create a new ReqwestClient with custom authentication
-    pub fn with_auth(
+    /// Create a new ReqwestClient with custom authentication configuration
+    pub fn with_auth_config(
         auth: RegistryAuth,
     ) -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let mut instance = Self::new()?;
-        instance.auth = auth;
-        Ok(instance)
+        let client_builder = reqwest::Client::builder();
+
+        // Note: We don't load custom CA certificates here since this method is for explicit config
+        // If CA certificates are needed, they should be handled by the caller
+
+        // Build the client
+        let client = client_builder.build()?;
+
+        Ok(Self { client, auth })
     }
 
     /// Load authentication from environment variables

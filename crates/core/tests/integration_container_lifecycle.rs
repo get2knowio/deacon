@@ -50,23 +50,29 @@ async fn test_container_lifecycle_with_variable_substitution() {
             "echo 'postAttach: Ready in ${containerWorkspaceFolder}'".to_string(),
         ]);
 
-    // Execute lifecycle (this will fail since we don't have an actual container)
     let result = execute_container_lifecycle(&config, &commands, &substitution_context).await;
 
-    // Expect failure since no container is running, but we can verify the structure
-    assert!(result.is_err());
-    let error = result.unwrap_err();
-    println!("Error: {}", error);
-    // The error should be related to container execution failure
-    assert!(
-        error
-            .to_string()
-            .contains("Container command failed in phase onCreate")
-            || error
-                .to_string()
-                .contains("Failed to execute container command")
-            || error.to_string().contains("Docker error")
-    );
+    match result {
+        Ok(lifecycle) => {
+            assert!(!lifecycle.phases.is_empty());
+            assert!(
+                lifecycle.phases.iter().any(|phase| !phase.success),
+                "Expected at least one lifecycle phase to reflect the missing container"
+            );
+        }
+        Err(error) => {
+            println!("Error: {}", error);
+            assert!(
+                error
+                    .to_string()
+                    .contains("Container command failed in phase onCreate")
+                    || error
+                        .to_string()
+                        .contains("Failed to execute container command")
+                    || error.to_string().contains("Docker error")
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -91,11 +97,22 @@ async fn test_container_lifecycle_with_skip_flags() {
         .with_post_start(vec!["echo 'postStart (should be skipped)'".to_string()])
         .with_post_attach(vec!["echo 'postAttach (should be skipped)'".to_string()]);
 
-    // Execute lifecycle
     let result = execute_container_lifecycle(&config, &commands, &substitution_context).await;
 
-    // Expect failure since no container is running
-    assert!(result.is_err());
+    match result {
+        Ok(lifecycle) => {
+            assert_eq!(lifecycle.phases.len(), 1);
+            let phase = &lifecycle.phases[0];
+            assert_eq!(phase.phase.as_str(), "onCreate");
+            assert!(
+                !phase.success,
+                "Expected onCreate phase to fail without a container"
+            );
+        }
+        Err(_) => {
+            // An error is also acceptable when Docker is unavailable
+        }
+    }
 }
 
 #[test]

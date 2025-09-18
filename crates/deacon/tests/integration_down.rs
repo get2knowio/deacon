@@ -12,14 +12,24 @@ fn test_down_command_basic() {
     // Create a temp directory for testing
     let temp_dir = TempDir::new().unwrap();
 
-    cmd.arg("down")
+    let assert = cmd
+        .arg("down")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "No running containers or compose projects found for workspace",
-        ));
+        .success();
+
+    let output = assert.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stdout.contains("No running containers or compose projects found for workspace")
+            || stderr.contains("No running containers or compose projects found for workspace"),
+        "Unexpected stdout, failed var.contains(No running containers or compose projects found for workspace)\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        stdout,
+        stderr
+    );
 }
 
 /// Test that down command accepts remove flag
@@ -30,15 +40,25 @@ fn test_down_command_with_remove() {
     // Create a temp directory for testing
     let temp_dir = TempDir::new().unwrap();
 
-    cmd.arg("down")
+    let assert = cmd
+        .arg("down")
         .arg("--remove")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "No running containers or compose projects found for workspace",
-        ));
+        .success();
+
+    let output = assert.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stdout.contains("No running containers or compose projects found for workspace")
+            || stderr.contains("No running containers or compose projects found for workspace"),
+        "Unexpected stdout, failed var.contains(No running containers or compose projects found for workspace)\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        stdout,
+        stderr
+    );
 }
 
 /// Test that down command shows help when run with --help

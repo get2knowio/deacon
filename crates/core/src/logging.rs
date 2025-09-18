@@ -6,7 +6,7 @@
 
 use crate::redaction::RedactionConfig;
 use anyhow::Result;
-use std::sync::Once;
+use std::{io, sync::Once};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 static INIT: Once = Once::new();
@@ -67,9 +67,13 @@ pub fn init_with_redaction(
             Some("json") => {
                 tracing_subscriber::registry()
                     .with(
-                        fmt::layer().json().with_target(true).with_span_events(
-                            fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE,
-                        ),
+                        fmt::layer()
+                            .json()
+                            .with_target(true)
+                            .with_span_events(
+                                fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE,
+                            )
+                            .with_writer(io::stderr),
                     )
                     .with(filter)
                     .init();
@@ -78,9 +82,12 @@ pub fn init_with_redaction(
                 // Default to text format (including None, "text", or any other value)
                 tracing_subscriber::registry()
                     .with(
-                        fmt::layer().with_target(true).with_span_events(
-                            fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE,
-                        ),
+                        fmt::layer()
+                            .with_target(true)
+                            .with_span_events(
+                                fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE,
+                            )
+                            .with_writer(io::stderr),
                     )
                     .with(filter)
                     .init();

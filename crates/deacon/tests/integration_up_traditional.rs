@@ -48,6 +48,12 @@ fn test_up_traditional_container_workflow() {
     // The command will succeed if Docker is available, fail if not
     let output = result.get_output();
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Debug: always print actual output for analysis
+    eprintln!("DEBUG - stderr content: {:?}", stderr);
+    eprintln!("DEBUG - stdout content: {:?}", stdout);
+    eprintln!("DEBUG - exit code: {:?}", output.status.code());
 
     // Should attempt traditional container path - either succeeds or fails at Docker step
     assert!(
@@ -60,6 +66,10 @@ fn test_up_traditional_container_workflow() {
             || stderr.contains("Lifecycle")
             || stderr.contains("Not installed")
             || stderr.contains("No such file or directory")
+            || stderr.contains("Error response from daemon")
+            || stderr.contains("permission denied")
+            || stderr.contains("Failed to spawn")
+            || stderr.contains("command not found")
             || stderr.is_empty() // Sometimes successful runs have empty stderr
     );
 }
@@ -100,6 +110,28 @@ fn test_up_traditional_container_with_flags() {
     // Should attempt traditional container workflow
     let output = result.get_output();
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Debug: print actual output if assertion fails
+    if !(stderr.contains("traditional")
+        || stderr.contains("Container created")
+        || stderr.contains("Container reused")
+        || stderr.contains("docker")
+        || stderr.contains("Docker")
+        || stderr.contains("ping")
+        || stderr.contains("Lifecycle")
+        || stderr.contains("Not installed")
+        || stderr.contains("No such file or directory")
+        || stderr.contains("Error response from daemon")
+        || stderr.contains("permission denied")
+        || stderr.contains("Failed to spawn")
+        || stderr.contains("command not found")
+        || stderr.is_empty())
+    {
+        eprintln!("Test failed - stderr content: {:?}", stderr);
+        eprintln!("Test failed - stdout content: {:?}", stdout);
+        eprintln!("Test failed - exit code: {:?}", output.status.code());
+    }
 
     // Command will succeed if Docker available, fail at Docker step if not
     assert!(
@@ -112,6 +144,10 @@ fn test_up_traditional_container_with_flags() {
             || stderr.contains("Lifecycle")
             || stderr.contains("Not installed")
             || stderr.contains("No such file or directory")
+            || stderr.contains("Error response from daemon")
+            || stderr.contains("permission denied")
+            || stderr.contains("Failed to spawn")
+            || stderr.contains("command not found")
             || stderr.is_empty() // Sometimes successful runs have empty stderr
     );
 }

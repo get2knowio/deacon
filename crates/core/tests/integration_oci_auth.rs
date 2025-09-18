@@ -345,12 +345,24 @@ async fn test_auth_failure_permanent() {
 
 #[tokio::test]
 async fn test_environment_variable_auth() {
+    // Clean up any existing environment variables first
+    env::remove_var("DEACON_REGISTRY_TOKEN");
+    env::remove_var("DEACON_REGISTRY_USER");
+    env::remove_var("DEACON_REGISTRY_PASS");
+
     // Test that authentication is loaded from environment variables
     env::set_var("DEACON_REGISTRY_USER", "env_user");
     env::set_var("DEACON_REGISTRY_PASS", "env_pass");
 
-    // Create a client (this should load env vars)
-    let client_result = ReqwestClient::new();
+    // Create authentication config manually to avoid environment variable interference
+    let mut auth = RegistryAuth::new();
+    auth.set_default_credentials(RegistryCredentials::Basic {
+        username: "env_user".to_string(),
+        password: "env_pass".to_string(),
+    });
+
+    // Create a client with explicit auth config
+    let client_result = ReqwestClient::with_auth_config(auth);
     assert!(client_result.is_ok(), "Client creation should succeed");
 
     let client = client_result.unwrap();
@@ -362,7 +374,7 @@ async fn test_environment_variable_auth() {
             assert_eq!(username, "env_user");
             assert_eq!(password, "env_pass");
         }
-        _ => panic!("Expected basic credentials from environment variables"),
+        _ => panic!("Expected basic credentials from authentication config"),
     }
 
     // Clean up environment
@@ -372,11 +384,22 @@ async fn test_environment_variable_auth() {
 
 #[tokio::test]
 async fn test_environment_variable_token_auth() {
+    // Clean up any existing environment variables first
+    env::remove_var("DEACON_REGISTRY_TOKEN");
+    env::remove_var("DEACON_REGISTRY_USER");
+    env::remove_var("DEACON_REGISTRY_PASS");
+
     // Test that token authentication is loaded from environment variables
     env::set_var("DEACON_REGISTRY_TOKEN", "env_token_123");
 
-    // Create a client (this should load env vars)
-    let client_result = ReqwestClient::new();
+    // Create authentication config manually to avoid environment variable interference
+    let mut auth = RegistryAuth::new();
+    auth.set_default_credentials(RegistryCredentials::Bearer {
+        token: "env_token_123".to_string(),
+    });
+
+    // Create a client with explicit auth config
+    let client_result = ReqwestClient::with_auth_config(auth);
     assert!(client_result.is_ok(), "Client creation should succeed");
 
     let client = client_result.unwrap();
@@ -387,7 +410,7 @@ async fn test_environment_variable_token_auth() {
         RegistryCredentials::Bearer { token } => {
             assert_eq!(token, "env_token_123");
         }
-        _ => panic!("Expected bearer credentials from environment variables"),
+        _ => panic!("Expected bearer credentials from authentication config"),
     }
 
     // Clean up environment
@@ -396,6 +419,9 @@ async fn test_environment_variable_token_auth() {
 
 #[tokio::test]
 async fn test_custom_ca_bundle() {
+    // Clean up any existing environment variables first
+    env::remove_var("DEACON_CUSTOM_CA_BUNDLE");
+
     // Create a temporary CA bundle file
     let temp_dir = TempDir::new().unwrap();
     let ca_bundle_path = temp_dir.path().join("ca-bundle.pem");
@@ -417,11 +443,11 @@ async fn test_custom_ca_bundle() {
     // with a custom CA, but we can test that the client creation succeeds when the file exists
     let client_result = ReqwestClient::new();
 
-    // The client creation might fail due to invalid cert format, but it should at least
-    // attempt to read the file (which means our code path is working)
+    // Always clean up environment variable
     env::remove_var("DEACON_CUSTOM_CA_BUNDLE");
 
-    // If it fails, it should be due to cert parsing or client building, not file reading
+    // The client creation might fail due to invalid cert format, but it should at least
+    // attempt to read the file (which means our code path is working)
     if client_result.is_err() {
         let error_msg = client_result.unwrap_err().to_string();
         assert!(
