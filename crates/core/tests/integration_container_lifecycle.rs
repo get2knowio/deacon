@@ -50,20 +50,18 @@ async fn test_container_lifecycle_with_variable_substitution() {
             "echo 'postAttach: Ready in ${containerWorkspaceFolder}'".to_string(),
         ]);
 
-    // Execute lifecycle (this will fail since we don't have an actual container)
     let result = execute_container_lifecycle(&config, &commands, &substitution_context).await;
 
-    // The test primarily verifies variable substitution in container commands.
-    // In environments where Docker is available, we expect failure since no container is running.
-    // In environments where Docker commands might be mocked, the test could succeed.
     match result {
-        Ok(_) => {
-            println!("Lifecycle succeeded (possible in test environment)");
-            // Variable substitution logic was tested during command preparation
+        Ok(lifecycle) => {
+            assert!(!lifecycle.phases.is_empty());
+            assert!(
+                lifecycle.phases.iter().any(|phase| !phase.success),
+                "Expected at least one lifecycle phase to reflect the missing container"
+            );
         }
         Err(error) => {
             println!("Error: {}", error);
-            // The error should be related to container execution failure
             assert!(
                 error
                     .to_string()
@@ -100,23 +98,21 @@ async fn test_container_lifecycle_with_skip_flags() {
         .with_post_start(vec!["echo 'postStart (should be skipped)'".to_string()])
         .with_post_attach(vec!["echo 'postAttach (should be skipped)'".to_string()]);
 
-    // Execute lifecycle
     let result = execute_container_lifecycle(&config, &commands, &substitution_context).await;
 
-    // The test primarily verifies skip flag behavior. In environments where Docker is available,
-    // we expect failure since no container is running. In environments where Docker commands
-    // might be mocked or the execution path is different, the test could succeed.
-    // Both cases are acceptable for testing the skip flag logic.
     match result {
-        Ok(_lifecycle_result) => {
-            // If successful, verify that only onCreate phase was executed (due to skip flags)
-            println!("Lifecycle succeeded (possible in test environment)");
-            // We can't easily check which phases were executed without modifying the result structure
-            // but the fact that skip flags didn't cause a panic is good
+        Ok(lifecycle) => {
+            assert_eq!(lifecycle.phases.len(), 1);
+            let phase = &lifecycle.phases[0];
+            assert_eq!(phase.phase.as_str(), "onCreate");
+            assert!(
+                !phase.success,
+                "Expected onCreate phase to fail without a container"
+            );
         }
-        Err(error) => {
-            // Expected failure since no container is running
-            println!("Lifecycle failed as expected: {}", error);
+        Err(_) => {
+            // An error is also acceptable when Docker is unavailable
+        }
         }
     }
 }

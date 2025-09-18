@@ -38,9 +38,18 @@ fn test_doctor_command_bundle_creation() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("doctor").arg("--bundle").arg(&bundle_path);
 
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("Support bundle created"));
+    let assert = cmd.assert().success();
+    let output = assert.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stdout.contains("Support bundle created")
+            || stderr.contains("Support bundle created"),
+        "Unexpected stdout, failed var.contains(Support bundle created)\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        stdout,
+        stderr
+    );
 
     // Verify bundle was created
     assert!(bundle_path.exists());

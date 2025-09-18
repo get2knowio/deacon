@@ -818,14 +818,22 @@ impl ContainerOps for CliDocker {
                 .map_err(|e| DockerError::CLIError(format!("Invalid workspaceMount: {}", e)))?;
             args.extend(mount.to_docker_args());
         } else {
-            // Use default workspace mount
+            // Use default workspace mount - respect workspaceFolder from config if specified
+            let target_path = if let Some(ref workspace_folder) = config.workspace_folder {
+                workspace_folder.clone()
+            } else {
+                format!(
+                    "/workspaces/{}",
+                    workspace_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("workspace")
+                )
+            };
             let workspace_mount = format!(
-                "type=bind,source={},target=/workspaces/{}",
+                "type=bind,source={},target={}",
                 workspace_path.display(),
-                workspace_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("workspace")
+                target_path
             );
             args.push("--mount".to_string());
             args.push(workspace_mount);

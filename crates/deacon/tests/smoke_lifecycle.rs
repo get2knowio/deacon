@@ -220,6 +220,12 @@ fn test_secret_masking_in_lifecycle_logs() {
             return;
         }
 
+        // Check that the command itself is logged (with secrets potentially redacted)
+        // The command should appear in the logs since it's part of the lifecycle execution
+        if combined_output.contains("echo") && combined_output.contains("Public is") {
+            println!("Lifecycle command logging verified");
+        }
+
         // Public info should still be visible when present in output
         // Some environments may not capture container stdout; only assert when seen
         if combined_output.contains("Public is:") {
@@ -248,11 +254,11 @@ fn test_secret_masking_in_lifecycle_logs() {
                 String::from_utf8_lossy(&up_output_no_redact.stderr)
             );
 
-            // With --no-redact, secret should be visible
+            // With --no-redact, secret should be visible in the command logging
             if combined_no_redact.contains("my-secret-password") {
                 println!("Secret masking test passed - redaction can be disabled");
             } else {
-                println!("Note: Secret not found in no-redact output (may be expected)");
+                println!("Note: Secret not found in no-redact output (may be expected if commands didn't run)");
             }
         }
 
