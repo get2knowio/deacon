@@ -7,6 +7,7 @@
 //! References: CLI-SPEC.md "Security and Compliance"
 
 use std::collections::HashSet;
+use std::io::{self, Write};
 use std::sync::{Arc, RwLock};
 
 /// Minimum length for a value to be considered for redaction
@@ -228,6 +229,152 @@ where
     I: IntoIterator<Item = String>,
 {
     global_registry().add_secrets(secrets);
+}
+
+/// A writer that applies redaction to all output at line boundaries
+///
+/// `RedactingWriter` wraps any `Write`/`BufWrite` sink and applies redaction
+/// line-by-line before forwarding output to the underlying writer. It buffers
+/// partial lines until a newline is encountered to ensure secrets spanning
+/// multiple write calls are properly redacted.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Write;
+/// use deacon_core::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
+///
+/// let registry = SecretRegistry::new();
+/// registry.add_secret("my-secret-123");
+/// let config = RedactionConfig::with_custom_registry(registry.clone());
+///
+/// let mut output = Vec::new();
+/// let mut writer = RedactingWriter::new(&mut output, config, &registry);
+///
+/// write!(writer, "This contains my-secret-123 data\n").unwrap();
+/// writer.flush().unwrap();
+///
+/// let result = String::from_utf8(output).unwrap();
+/// assert_eq!(result, "This contains **** data\n");
+/// ```
+#[derive(Debug)]
+pub struct RedactingWriter<W> {
+    inner: W,
+    buffer: Vec<u8>,
+    config: RedactionConfig,
+    registry: SecretRegistry,
+}
+
+impl<W: Write> RedactingWriter<W> {
+    /// Create a new RedactingWriter
+    ///
+    /// # Arguments
+    /// * `writer` - The underlying writer to forward redacted output to
+    /// * `config` - Configuration controlling redaction behavior  
+    /// * `registry` - Registry containing secrets to redact
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deacon_core::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
+    ///
+    /// let mut output = Vec::new();
+    /// let config = RedactionConfig::default();
+    /// let registry = SecretRegistry::new();
+    /// let writer = RedactingWriter::new(&mut output, config, &registry);
+    /// ```
+    pub fn new(writer: W, config: RedactionConfig, registry: &SecretRegistry) -> Self {
+        Self {
+            inner: writer,
+            buffer: Vec::new(),
+            config,
+            registry: registry.clone(),
+        }
+    }
+
+    /// Write a complete line with redaction applied
+    ///
+    /// This is a convenience method that adds a newline and immediately
+    /// applies redaction and flushes the output.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deacon_core::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
+    ///
+    /// let registry = SecretRegistry::new();
+    /// registry.add_secret("secret123");
+    /// let config = RedactionConfig::with_custom_registry(registry.clone());
+    ///
+    /// let mut output = Vec::new();
+    /// let mut writer = RedactingWriter::new(&mut output, config, &registry);
+    ///
+    /// writer.write_line("This contains secret123 data").unwrap();
+    ///
+    /// let result = String::from_utf8(output).unwrap();
+    /// assert_eq!(result, "This contains **** data\n");
+    /// ```
+    pub fn write_line(&mut self, line: &str) -> io::Result<()> {
+        self.write_all(line.as_bytes())?;
+        self.write_all(b"\n")?;
+        self.flush()
+    }
+
+    /// Process complete lines from the buffer
+    fn process_complete_lines(&mut self) -> io::Result<()> {
+        while let Some(newline_pos) = self.buffer.iter().position(|&b| b == b'\n') {
+            // Extract line including newline
+            let line_bytes: Vec<u8> = self.buffer.drain(..=newline_pos).collect();
+
+            // Convert to string for redaction (best effort for non-UTF8)
+            match String::from_utf8(line_bytes.clone()) {
+                Ok(line_str) => {
+                    // Apply redaction to the line
+                    let redacted = redact_with_registry(&line_str, &self.config, &self.registry);
+                    self.inner.write_all(redacted.as_bytes())?;
+                }
+                Err(_) => {
+                    // If not valid UTF-8, pass through as-is
+                    // TODO: Could do best-effort redaction on UTF-8 substrings
+                    self.inner.write_all(&line_bytes)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<W: Write> Write for RedactingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // Add to buffer
+        self.buffer.extend_from_slice(buf);
+
+        // Process any complete lines
+        self.process_complete_lines()?;
+
+        // Return the full buffer size to indicate all bytes were "written"
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        // Process any remaining buffered content as a final line
+        if !self.buffer.is_empty() {
+            let remaining: Vec<u8> = self.buffer.drain(..).collect();
+
+            match String::from_utf8(remaining.clone()) {
+                Ok(remaining_str) => {
+                    let redacted =
+                        redact_with_registry(&remaining_str, &self.config, &self.registry);
+                    self.inner.write_all(redacted.as_bytes())?;
+                }
+                Err(_) => {
+                    self.inner.write_all(&remaining)?;
+                }
+            }
+        }
+
+        self.inner.flush()
+    }
 }
 
 /// Simple SHA-256 hash function
@@ -454,5 +601,163 @@ mod tests {
         // Different input should produce different hash
         let hash3 = sha256_hash("different-string");
         assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn test_redacting_writer_enabled() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        writer.write_all(b"This contains secret123 data\n").unwrap();
+        writer.flush().unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert_eq!(result, "This contains **** data\n");
+    }
+
+    #[test]
+    fn test_redacting_writer_disabled() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::disabled();
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        writer.write_all(b"This contains secret123 data\n").unwrap();
+        writer.flush().unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert_eq!(result, "This contains secret123 data\n");
+    }
+
+    #[test]
+    fn test_redacting_writer_multiple_secrets_single_line() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        registry.add_secret("password456");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        writer
+            .write_all(b"User secret123 has password456\n")
+            .unwrap();
+        writer.flush().unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert_eq!(result, "User **** has ****\n");
+    }
+
+    #[test]
+    fn test_redacting_writer_secrets_across_writes() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        // Write secret across multiple calls but within same line
+        writer.write_all(b"This contains sec").unwrap();
+        writer.write_all(b"ret123 data\n").unwrap();
+        writer.flush().unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert_eq!(result, "This contains **** data\n");
+    }
+
+    #[test]
+    fn test_redacting_writer_multiple_lines() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        writer
+            .write_all(b"Line 1 has secret123\nLine 2 is clean\nLine 3 has secret123 again\n")
+            .unwrap();
+        writer.flush().unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert_eq!(
+            result,
+            "Line 1 has ****\nLine 2 is clean\nLine 3 has **** again\n"
+        );
+    }
+
+    #[test]
+    fn test_redacting_writer_non_utf8_passthrough() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        // Write invalid UTF-8 bytes
+        let invalid_utf8 = vec![0xFF, 0xFE, 0xFD, b'\n'];
+        writer.write_all(&invalid_utf8).unwrap();
+        writer.flush().unwrap();
+
+        // Should pass through unchanged
+        assert_eq!(output, invalid_utf8);
+    }
+
+    #[test]
+    fn test_redacting_writer_write_line_convenience() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        writer.write_line("This contains secret123 data").unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert_eq!(result, "This contains **** data\n");
+    }
+
+    #[test]
+    fn test_redacting_writer_flush_partial_line() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        // Write without newline and flush
+        writer.write_all(b"This contains secret123 data").unwrap();
+        writer.flush().unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert_eq!(result, "This contains **** data");
+    }
+
+    #[test]
+    fn test_redacting_writer_custom_placeholder() {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_placeholder_and_registry(
+            "[HIDDEN]".to_string(),
+            registry.clone(),
+        );
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        writer.write_line("This contains secret123 data").unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert_eq!(result, "This contains [HIDDEN] data\n");
     }
 }
