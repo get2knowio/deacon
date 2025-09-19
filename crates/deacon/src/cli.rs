@@ -555,6 +555,8 @@ impl Cli {
                     feature_install_order,
                     ignore_host_requirements,
                     progress_tracker: progress_tracker.clone(),
+                    redaction_config: redaction_config.clone(),
+                    secret_registry: secret_registry.clone(),
                 };
 
                 execute_build(args).await?;

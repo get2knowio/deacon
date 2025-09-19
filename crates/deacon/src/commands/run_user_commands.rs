@@ -264,7 +264,8 @@ mod tests {
 
     #[test]
     fn test_run_user_commands_args_defaults() {
-        let progress_tracker = create_progress_tracker_no_redaction(&ProgressFormat::None, None, None).unwrap();
+        let progress_tracker =
+            create_progress_tracker_no_redaction(&ProgressFormat::None, None, None).unwrap();
         let progress_tracker = std::sync::Arc::new(std::sync::Mutex::new(progress_tracker));
 
         let args = RunUserCommandsArgs {

@@ -190,7 +190,9 @@ fn test_progress_silent_mode() {
 
 #[test]
 fn test_audit_log_creation() {
-    use deacon_core::progress::{create_progress_tracker_no_redaction, get_cache_dir, ProgressFormat};
+    use deacon_core::progress::{
+        create_progress_tracker_no_redaction, get_cache_dir, ProgressFormat,
+    };
 
     // Test that audit log is created when using progress tracker
     let cache_dir = get_cache_dir().unwrap();

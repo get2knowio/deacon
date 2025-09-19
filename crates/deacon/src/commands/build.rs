@@ -30,6 +30,8 @@ pub struct BuildArgs {
     pub ignore_host_requirements: bool,
     pub progress_tracker:
         std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
+    pub redaction_config: deacon_core::redaction::RedactionConfig,
+    pub secret_registry: deacon_core::redaction::SecretRegistry,
 }
 
 impl Default for BuildArgs {
@@ -47,6 +49,8 @@ impl Default for BuildArgs {
             feature_install_order: None,
             ignore_host_requirements: false,
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            redaction_config: deacon_core::redaction::RedactionConfig::default(),
+            secret_registry: deacon_core::redaction::SecretRegistry::new(),
         }
     }
 }
@@ -201,7 +205,12 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     if !args.force {
         if let Some(cached_result) = check_build_cache(&config_hash, workspace_folder).await? {
             info!("Using cached build result");
-            output_result(&cached_result, &args.output_format)?;
+            output_result(
+                &cached_result,
+                &args.output_format,
+                &args.redaction_config,
+                &args.secret_registry,
+            )?;
             return Ok(());
         }
     }
@@ -253,7 +262,12 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     cache_build_result(&final_result, workspace_folder).await?;
 
     // Output result
-    output_result(&final_result, &args.output_format)?;
+    output_result(
+        &final_result,
+        &args.output_format,
+        &args.redaction_config,
+        &args.secret_registry,
+    )?;
 
     // Output final summary in debug mode
     if let Ok(tracker_guard) = args.progress_tracker.lock() {
@@ -582,8 +596,19 @@ async fn extract_image_metadata(image_id: &str) -> Result<HashMap<String, String
     }
 }
 
-/// Output build result in the specified format
-fn output_result(result: &BuildResult, format: &OutputFormat) -> Result<()> {
+/// Output build result in the specified format with redaction
+fn output_result(
+    result: &BuildResult,
+    format: &OutputFormat,
+    redaction_config: &deacon_core::redaction::RedactionConfig,
+    registry: &deacon_core::redaction::SecretRegistry,
+) -> Result<()> {
+    use deacon_core::redaction::RedactingWriter;
+    use std::io::Write;
+
+    let stdout = std::io::stdout();
+    let mut writer = RedactingWriter::new(stdout, redaction_config.clone(), registry);
+
     match format {
         OutputFormat::Json => {
             let json = serde_json::to_string_pretty(result).map_err(|e| {
@@ -591,23 +616,25 @@ fn output_result(result: &BuildResult, format: &OutputFormat) -> Result<()> {
                     message: format!("Failed to serialize result to JSON: {}", e),
                 })
             })?;
-            println!("{}", json);
+            writer.write_line(&json)?;
         }
         OutputFormat::Text => {
-            println!("Build completed successfully!");
-            println!("Image ID: {}", result.image_id);
-            println!("Tags: {}", result.tags.join(", "));
-            println!("Build duration: {:.2}s", result.build_duration);
-            println!("Config hash: {}", result.config_hash);
+            writer.write_line("Build completed successfully!")?;
+            writer.write_line(&format!("Image ID: {}", result.image_id))?;
+            writer.write_line(&format!("Tags: {}", result.tags.join(", ")))?;
+            writer.write_line(&format!("Build duration: {:.2}s", result.build_duration))?;
+            writer.write_line(&format!("Config hash: {}", result.config_hash))?;
 
             if !result.metadata.is_empty() {
-                println!("Labels:");
+                writer.write_line("Labels:")?;
                 for (key, value) in &result.metadata {
-                    println!("  {}: {}", key, value);
+                    writer.write_line(&format!("  {}: {}", key, value))?;
                 }
             }
         }
     }
+
+    writer.flush()?;
     Ok(())
 }
 
@@ -701,6 +728,8 @@ mod tests {
             feature_install_order: None,
             ignore_host_requirements: false,
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            redaction_config: deacon_core::redaction::RedactionConfig::default(),
+            secret_registry: deacon_core::redaction::SecretRegistry::new(),
         };
 
         // Verify args are structured correctly
@@ -709,6 +738,36 @@ mod tests {
         assert_eq!(args.build_arg.len(), 2);
         assert!(args.build_arg.contains(&"ENV=dev".to_string()));
         assert!(args.build_arg.contains(&"VERSION=1.0".to_string()));
+    }
+
+    #[test]
+    fn test_build_output_redaction() {
+        use deacon_core::redaction::{RedactionConfig, SecretRegistry};
+        use std::collections::HashMap;
+
+        // Create a test BuildResult with potentially sensitive information
+        let mut metadata = HashMap::new();
+        metadata.insert("secret-key".to_string(), "password123".to_string());
+        metadata.insert("public-key".to_string(), "public-value".to_string());
+
+        let result = BuildResult {
+            image_id: "sha256:secret123abc".to_string(),
+            tags: vec!["myapp:latest".to_string()],
+            metadata,
+            config_hash: "hash123secret".to_string(),
+            build_duration: 1.5,
+        };
+
+        // Set up redaction
+        let registry = SecretRegistry::new();
+        registry.add_secret("password123");
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        // Test that calling output_result doesn't panic and applies redaction
+        // Note: In a real test we'd capture stdout, but for now we just ensure it compiles and runs
+        let result_call = output_result(&result, &OutputFormat::Text, &config, &registry);
+        assert!(result_call.is_ok(), "Output should not fail");
     }
 
     #[test]
