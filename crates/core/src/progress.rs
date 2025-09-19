@@ -15,6 +15,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, instrument, warn};
 
+use crate::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
+
 /// Global event ID counter for deterministic ordering
 pub static EVENT_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -931,6 +933,101 @@ impl ProgressEmitter for SilentEmitter {
     }
 }
 
+/// Redacting JSON file emitter that writes to a file with secrets redacted
+#[derive(Debug)]
+pub struct RedactingJsonFileEmitter {
+    writer: RedactingWriter<BufWriter<File>>,
+}
+
+impl RedactingJsonFileEmitter {
+    /// Create a new RedactingJsonFileEmitter that writes redacted JSONL events to `file_path`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// use deacon_core::progress::RedactingJsonFileEmitter;
+    /// use deacon_core::redaction::{RedactionConfig, SecretRegistry};
+    ///
+    /// let config = RedactionConfig::default();
+    /// let registry = SecretRegistry::new();
+    /// let emitter = RedactingJsonFileEmitter::new(
+    ///     Path::new("/tmp/myapp/progress.jsonl"),
+    ///     config,
+    ///     &registry
+    /// ).unwrap();
+    /// ```
+    pub fn new(
+        file_path: &Path,
+        config: RedactionConfig,
+        registry: &SecretRegistry,
+    ) -> Result<Self> {
+        // Ensure the parent directory exists
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file_path)?;
+
+        let buf_writer = BufWriter::new(file);
+        let redacting_writer = RedactingWriter::new(buf_writer, config, registry);
+
+        Ok(Self {
+            writer: redacting_writer,
+        })
+    }
+}
+
+impl ProgressEmitter for RedactingJsonFileEmitter {
+    /// Writes a ProgressEvent as a redacted JSON line to the emitter's file.
+    fn emit(&mut self, event: &ProgressEvent) -> Result<()> {
+        let line = serde_json::to_string(event)?;
+        self.writer.write_line(&line)?;
+        Ok(())
+    }
+}
+
+/// Redacting standard output emitter for JSON events
+#[derive(Debug)]
+pub struct RedactingStdoutEmitter {
+    writer: RedactingWriter<std::io::Stdout>,
+}
+
+impl RedactingStdoutEmitter {
+    /// Create a new RedactingStdoutEmitter
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deacon_core::progress::RedactingStdoutEmitter;
+    /// use deacon_core::redaction::{RedactionConfig, SecretRegistry};
+    ///
+    /// let config = RedactionConfig::default();
+    /// let registry = SecretRegistry::new();
+    /// let emitter = RedactingStdoutEmitter::new(config, &registry);
+    /// ```
+    pub fn new(config: RedactionConfig, registry: &SecretRegistry) -> Self {
+        let stdout = std::io::stdout();
+        let redacting_writer = RedactingWriter::new(stdout, config, registry);
+
+        Self {
+            writer: redacting_writer,
+        }
+    }
+}
+
+impl ProgressEmitter for RedactingStdoutEmitter {
+    /// Emits a ProgressEvent to standard output as a redacted JSON line.
+    fn emit(&mut self, event: &ProgressEvent) -> Result<()> {
+        let line = serde_json::to_string(event)?;
+        self.writer.write_line(&line)?;
+        Ok(())
+    }
+}
+
 /// Helper for tracking phase durations
 #[derive(Debug)]
 pub struct PhaseTracker {
@@ -1153,6 +1250,123 @@ mod tests {
         emitter.emit(&event)?;
         Ok(())
     }
+
+    #[test]
+    fn test_redacting_stdout_emitter() -> Result<()> {
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        // Note: Can't easily test stdout redaction in unit tests since it writes to stdout
+        // This test mainly verifies the emitter can be created and doesn't panic
+        let mut emitter = RedactingStdoutEmitter::new(config, &registry);
+
+        let event = ProgressEvent::LifecycleCommandBegin {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: "postCreate".to_string(),
+            command_id: "cmd-1".to_string(),
+            command: "echo secret123".to_string(),
+        };
+
+        // Should not fail
+        emitter.emit(&event)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_redacting_json_file_emitter() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.path().join("progress.jsonl");
+
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let mut emitter = RedactingJsonFileEmitter::new(&file_path, config, &registry)?;
+
+        let event = ProgressEvent::LifecycleCommandBegin {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: "postCreate".to_string(),
+            command_id: "cmd-1".to_string(),
+            command: "echo secret123 in command".to_string(),
+        };
+
+        emitter.emit(&event)?;
+        drop(emitter); // Ensure file is flushed and closed
+
+        // Read the file and verify redaction occurred
+        let content = std::fs::read_to_string(&file_path)?;
+        assert!(
+            content.contains("****"),
+            "Secret should be redacted in file output"
+        );
+        assert!(
+            !content.contains("secret123"),
+            "Original secret should not appear in file"
+        );
+        assert!(content.contains("echo"), "Non-secret content should remain");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_redacting_json_file_emitter_disabled() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.path().join("progress.jsonl");
+
+        let registry = SecretRegistry::new();
+        registry.add_secret("secret123");
+        let config = RedactionConfig::disabled();
+
+        let mut emitter = RedactingJsonFileEmitter::new(&file_path, config, &registry)?;
+
+        let event = ProgressEvent::LifecycleCommandBegin {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: "postCreate".to_string(),
+            command_id: "cmd-1".to_string(),
+            command: "echo secret123 in command".to_string(),
+        };
+
+        emitter.emit(&event)?;
+        drop(emitter); // Ensure file is flushed and closed
+
+        // Read the file and verify redaction was disabled
+        let content = std::fs::read_to_string(&file_path)?;
+        assert!(
+            content.contains("secret123"),
+            "Secret should not be redacted when disabled"
+        );
+        assert!(
+            !content.contains("****"),
+            "Redaction placeholder should not appear"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_progress_tracker_with_redaction() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.path().join("progress.jsonl");
+
+        let registry = SecretRegistry::new();
+        registry.add_secret("tracker_secret");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let tracker = create_progress_tracker(
+            &ProgressFormat::Json,
+            Some(&file_path),
+            None,
+            &config,
+            &registry,
+        )?;
+
+        assert!(tracker.is_some());
+        Ok(())
+    }
 }
 
 /// Returns the default cache directory for Deacon, creating it if necessary.
@@ -1218,13 +1432,18 @@ pub enum ProgressFormat {
 /// ```
 /// # use std::path::Path;
 /// # use deacon_core::progress::{create_progress_tracker, ProgressFormat};
-/// let tracker = create_progress_tracker(&ProgressFormat::Json, Some(Path::new("progress.jsonl")), None).unwrap();
+/// # use deacon_core::redaction::{RedactionConfig, SecretRegistry};
+/// let config = RedactionConfig::default();
+/// let registry = SecretRegistry::new();
+/// let tracker = create_progress_tracker(&ProgressFormat::Json, Some(Path::new("progress.jsonl")), None, &config, &registry).unwrap();
 /// assert!(tracker.is_some());
 /// ```
 pub fn create_progress_tracker(
     format: &ProgressFormat,
     progress_file: Option<&Path>,
     _workspace_folder: Option<&Path>,
+    redaction_config: &RedactionConfig,
+    registry: &SecretRegistry,
 ) -> Result<Option<ProgressTracker>> {
     let cache_dir = get_cache_dir()?;
 
@@ -1232,16 +1451,27 @@ pub fn create_progress_tracker(
         ProgressFormat::None => None,
         ProgressFormat::Json => {
             if let Some(file_path) = progress_file {
-                Some(Box::new(JsonFileEmitter::new(file_path)?))
+                Some(Box::new(RedactingJsonFileEmitter::new(
+                    file_path,
+                    redaction_config.clone(),
+                    registry,
+                )?))
             } else {
-                Some(Box::new(StdoutEmitter))
+                Some(Box::new(RedactingStdoutEmitter::new(
+                    redaction_config.clone(),
+                    registry,
+                )))
             }
         }
         ProgressFormat::Auto => {
             // In auto mode, if progress_file is specified, write JSON to file
             // If terminal is TTY, could also display spinner/text (future enhancement)
             if let Some(file_path) = progress_file {
-                Some(Box::new(JsonFileEmitter::new(file_path)?))
+                Some(Box::new(RedactingJsonFileEmitter::new(
+                    file_path,
+                    redaction_config.clone(),
+                    registry,
+                )?))
             } else {
                 // For now, silent in auto mode without file
                 // TODO: Add TTY spinner/text output
@@ -1252,4 +1482,33 @@ pub fn create_progress_tracker(
 
     let tracker = ProgressTracker::new(emitter, Some(&cache_dir))?;
     Ok(Some(tracker))
+}
+
+/// Create a ProgressTracker without redaction (for backward compatibility).
+///
+/// This is a convenience wrapper around the main `create_progress_tracker` function
+/// that uses a disabled redaction config.
+///
+/// # Examples
+///
+/// ```
+/// # use std::path::Path;
+/// # use deacon_core::progress::{create_progress_tracker_no_redaction, ProgressFormat};
+/// let tracker = create_progress_tracker_no_redaction(&ProgressFormat::Json, Some(Path::new("progress.jsonl")), None).unwrap();
+/// assert!(tracker.is_some());
+/// ```
+pub fn create_progress_tracker_no_redaction(
+    format: &ProgressFormat,
+    progress_file: Option<&Path>,
+    workspace_folder: Option<&Path>,
+) -> Result<Option<ProgressTracker>> {
+    let redaction_config = RedactionConfig::disabled();
+    let registry = SecretRegistry::new();
+    create_progress_tracker(
+        format,
+        progress_file,
+        workspace_folder,
+        &redaction_config,
+        &registry,
+    )
 }
