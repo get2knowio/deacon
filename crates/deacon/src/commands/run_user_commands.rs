@@ -239,7 +239,7 @@ fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deacon_core::progress::{create_progress_tracker, ProgressFormat};
+    use deacon_core::progress::{create_progress_tracker_no_redaction, ProgressFormat};
 
     #[test]
     fn test_commands_from_json_value_string() {
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_run_user_commands_args_defaults() {
-        let progress_tracker = create_progress_tracker(&ProgressFormat::None, None, None).unwrap();
+        let progress_tracker = create_progress_tracker_no_redaction(&ProgressFormat::None, None, None).unwrap();
         let progress_tracker = std::sync::Arc::new(std::sync::Mutex::new(progress_tracker));
 
         let args = RunUserCommandsArgs {
