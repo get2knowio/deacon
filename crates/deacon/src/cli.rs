@@ -463,12 +463,24 @@ impl Cli {
             tracing::warn!("Secret redaction is DISABLED via --no-redact flag. This may expose sensitive information in logs and output. Use only for debugging purposes!");
         }
 
+        // Create redaction configuration from CLI flags
+        let redaction_config = if self.no_redact {
+            deacon_core::redaction::RedactionConfig::disabled()
+        } else {
+            deacon_core::redaction::RedactionConfig::default()
+        };
+
+        // Get global secret registry
+        let secret_registry = deacon_core::redaction::global_registry();
+
         // Initialize progress tracking
         let progress_format: deacon_core::progress::ProgressFormat = self.progress.clone().into();
         let progress_tracker = deacon_core::progress::create_progress_tracker(
             &progress_format,
             self.progress_file.as_deref(),
             self.workspace_folder.as_deref(),
+            &redaction_config,
+            secret_registry,
         )?;
 
         // Convert to Arc<Mutex<Option<_>>> for sharing between operations
@@ -543,6 +555,8 @@ impl Cli {
                     feature_install_order,
                     ignore_host_requirements,
                     progress_tracker: progress_tracker.clone(),
+                    redaction_config: redaction_config.clone(),
+                    secret_registry: secret_registry.clone(),
                 };
 
                 execute_build(args).await?;

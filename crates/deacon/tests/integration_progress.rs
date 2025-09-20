@@ -190,13 +190,15 @@ fn test_progress_silent_mode() {
 
 #[test]
 fn test_audit_log_creation() {
-    use deacon_core::progress::{create_progress_tracker, get_cache_dir, ProgressFormat};
+    use deacon_core::progress::{
+        create_progress_tracker_no_redaction, get_cache_dir, ProgressFormat,
+    };
 
     // Test that audit log is created when using progress tracker
     let cache_dir = get_cache_dir().unwrap();
     let format = ProgressFormat::Json;
 
-    let _tracker = create_progress_tracker(&format, None, None).unwrap();
+    let _tracker = create_progress_tracker_no_redaction(&format, None, None).unwrap();
 
     // The audit log should be created in the cache directory
     let _audit_log_path = cache_dir.join("audit.jsonl");
