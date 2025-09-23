@@ -179,6 +179,13 @@ pub enum Commands {
         include_merged_configuration: bool,
     },
 
+    /// Configuration management commands
+    Config {
+        /// Config subcommand
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+
     /// Feature management commands
     Features {
         /// Feature subcommand
@@ -318,6 +325,29 @@ pub enum TemplateCommands {
         /// Output directory for generated documentation
         #[arg(long)]
         output: String,
+    },
+}
+
+/// Configuration management subcommands
+#[derive(Debug, Clone, Subcommand)]
+pub enum ConfigCommands {
+    /// Apply variable substitution to configuration and preview results
+    Substitute {
+        /// Preview substitution without applying changes (dry-run mode)
+        #[arg(long)]
+        dry_run: bool,
+        /// Use strict substitution mode (fail on unresolved variables)
+        #[arg(long)]
+        strict_substitution: bool,
+        /// Maximum recursion depth for nested variable substitution
+        #[arg(long, default_value = "5")]
+        max_depth: usize,
+        /// Enable multi-pass nested variable resolution
+        #[arg(long = "nested", default_value_t = true, action = clap::ArgAction::Set)]
+        nested: bool,
+        /// Output format (text or json)
+        #[arg(long, value_enum, default_value = "json")]
+        output_format: OutputFormat,
     },
 }
 
@@ -600,6 +630,20 @@ impl Cli {
 
                 execute_read_configuration(args).await?;
                 Ok(())
+            }
+            Some(Commands::Config { command }) => {
+                use crate::commands::config::{execute_config, ConfigArgs};
+
+                let args = ConfigArgs {
+                    command,
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                    override_config_path: self.override_config,
+                    secrets_files: self.secrets_file,
+                    redaction_config: redaction_config.clone(),
+                };
+
+                execute_config(args).await
             }
             Some(Commands::Features { command }) => {
                 use crate::commands::features::{execute_features, FeaturesArgs};
