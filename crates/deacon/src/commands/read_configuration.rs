@@ -38,16 +38,63 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         None
     };
 
-    // Load configuration with override and secrets support
-    let (config, substitution_report) = if let Some(config_path) = args.config_path.as_ref() {
-        if args.include_merged_configuration {
-            ConfigLoader::load_with_overrides_and_substitution(
-                config_path,
-                args.override_config_path.as_deref(),
-                secrets.as_ref(),
-                workspace_folder,
-            )?
-        } else {
+    if args.include_merged_configuration {
+        // Use enhanced resolution with metadata tracking
+        let (merged_config, substitution_report) =
+            if let Some(config_path) = args.config_path.as_ref() {
+                ConfigLoader::load_with_full_resolution(
+                    config_path,
+                    args.override_config_path.as_deref(),
+                    secrets.as_ref(),
+                    workspace_folder,
+                    true, // include metadata
+                )?
+            } else {
+                // Discover configuration
+                let config_location = ConfigLoader::discover_config(workspace_folder)?;
+                if !config_location.exists() {
+                    return Err(DeaconError::Config(ConfigError::NotFound {
+                        path: config_location.path().to_string_lossy().to_string(),
+                    })
+                    .into());
+                }
+
+                ConfigLoader::load_with_full_resolution(
+                    config_location.path(),
+                    args.override_config_path.as_deref(),
+                    secrets.as_ref(),
+                    workspace_folder,
+                    true, // include metadata
+                )?
+            };
+
+        debug!(
+            "Loaded merged configuration with metadata: {:?}",
+            merged_config.config.name
+        );
+        debug!(
+            "Applied variable substitution: {} replacements made",
+            substitution_report.replacements.len()
+        );
+
+        // Output the merged configuration with metadata as JSON
+        let json_output = serde_json::to_string_pretty(&merged_config)?;
+        println!("{}", json_output);
+
+        // Single concise completion info line (keep info noise low)
+        info!(
+            "Completed read-configuration: name={} merged=true layers={} replacements={}",
+            merged_config.config.name.as_deref().unwrap_or("unknown"),
+            merged_config
+                .meta
+                .as_ref()
+                .map(|m| m.layers.len())
+                .unwrap_or(0),
+            substitution_report.replacements.len()
+        );
+    } else {
+        // Use standard resolution without metadata
+        let (config, substitution_report) = if let Some(config_path) = args.config_path.as_ref() {
             // For non-merged config, still apply overrides and substitution
             let base_config = ConfigLoader::load_from_path(config_path)?;
             let mut configs = vec![base_config];
@@ -71,25 +118,16 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             }
 
             merged.apply_variable_substitution(&substitution_context)
-        }
-    } else {
-        // Discover configuration
-        let config_location = ConfigLoader::discover_config(workspace_folder)?;
-        if !config_location.exists() {
-            return Err(DeaconError::Config(ConfigError::NotFound {
-                path: config_location.path().to_string_lossy().to_string(),
-            })
-            .into());
-        }
-
-        if args.include_merged_configuration {
-            ConfigLoader::load_with_overrides_and_substitution(
-                config_location.path(),
-                args.override_config_path.as_deref(),
-                secrets.as_ref(),
-                workspace_folder,
-            )?
         } else {
+            // Discover configuration
+            let config_location = ConfigLoader::discover_config(workspace_folder)?;
+            if !config_location.exists() {
+                return Err(DeaconError::Config(ConfigError::NotFound {
+                    path: config_location.path().to_string_lossy().to_string(),
+                })
+                .into());
+            }
+
             // For non-merged config, still apply overrides and substitution
             let base_config = ConfigLoader::load_from_path(config_location.path())?;
             let mut configs = vec![base_config];
@@ -113,26 +151,25 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             }
 
             merged.apply_variable_substitution(&substitution_context)
-        }
-    };
+        };
 
-    debug!("Loaded configuration: {:?}", config.name);
-    debug!(
-        "Applied variable substitution: {} replacements made",
-        substitution_report.replacements.len()
-    );
+        debug!("Loaded configuration: {:?}", config.name);
+        debug!(
+            "Applied variable substitution: {} replacements made",
+            substitution_report.replacements.len()
+        );
 
-    // Output the configuration as JSON
-    let json_output = serde_json::to_string_pretty(&config)?;
-    println!("{}", json_output);
+        // Output the configuration as JSON
+        let json_output = serde_json::to_string_pretty(&config)?;
+        println!("{}", json_output);
 
-    // Single concise completion info line (keep info noise low)
-    info!(
-        "Completed read-configuration: name={} merged={} replacements={}",
-        config.name.as_deref().unwrap_or("unknown"),
-        args.include_merged_configuration,
-        substitution_report.replacements.len()
-    );
+        // Single concise completion info line (keep info noise low)
+        info!(
+            "Completed read-configuration: name={} merged=false replacements={}",
+            config.name.as_deref().unwrap_or("unknown"),
+            substitution_report.replacements.len()
+        );
+    }
 
     Ok(())
 }

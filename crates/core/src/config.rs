@@ -1321,6 +1321,241 @@ impl ConfigLoader {
         Ok(all_configs)
     }
 
+    /// Load configuration with extends resolution and metadata tracking
+    ///
+    /// This method enhances the standard extends resolution by tracking the source
+    /// and metadata of each configuration layer for debugging purposes.
+    ///
+    /// ## Arguments
+    ///
+    /// * `path` - Path to the base configuration file
+    /// * `include_metadata` - Whether to include layer metadata in the result
+    ///
+    /// ## Returns
+    ///
+    /// Returns the merged configuration with optional metadata about the layers.
+    #[instrument(skip_all, fields(path = %path.display()))]
+    pub fn load_with_extends_and_metadata(
+        path: &Path,
+        include_metadata: bool,
+    ) -> Result<crate::config::merge::MergedDevContainerConfig> {
+        debug!(
+            "Loading configuration with extends resolution and metadata from {}",
+            path.display()
+        );
+
+        let mut visited = HashSet::new();
+        let configs_with_paths = Self::resolve_extends_chain_with_paths(path, &mut visited)?;
+
+        debug!(
+            "Resolved extends chain with {} configurations",
+            configs_with_paths.len()
+        );
+
+        // Use the layered merger with provenance tracking
+        let result = crate::config::merge::LayeredConfigMerger::merge_with_provenance(
+            &configs_with_paths
+                .iter()
+                .map(|(config, path)| (config.clone(), path.as_path()))
+                .collect::<Vec<_>>(),
+            include_metadata,
+        );
+
+        debug!("Configuration loading with extends and metadata complete");
+        Ok(result)
+    }
+
+    /// Recursively resolve the extends chain for a configuration with path tracking
+    ///
+    /// This method loads a configuration and recursively resolves all configurations
+    /// in its extends chain, performing cycle detection while preserving path information.
+    ///
+    /// ## Arguments
+    ///
+    /// * `config_path` - Path to the configuration file to resolve
+    /// * `visited` - Set of already visited paths for cycle detection
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector of configurations with their source paths in merge order (base first, overlay last).
+    #[instrument(skip_all, fields(path = %config_path.display()))]
+    fn resolve_extends_chain_with_paths(
+        config_path: &Path,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<Vec<(DevContainerConfig, PathBuf)>> {
+        let canonical_path = config_path.canonicalize().map_err(|e| {
+            debug!(
+                "Failed to canonicalize path {}: {}",
+                config_path.display(),
+                e
+            );
+            DeaconError::Config(ConfigError::NotFound {
+                path: config_path.display().to_string(),
+            })
+        })?;
+
+        // Check for cycles
+        if visited.contains(&canonical_path) {
+            let chain = visited
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            let cycle_chain = format!("{} -> {}", chain, canonical_path.display());
+
+            return Err(DeaconError::Config(ConfigError::ExtendsCycle {
+                chain: cycle_chain,
+            }));
+        }
+
+        visited.insert(canonical_path.clone());
+
+        // Load the current configuration
+        let config = Self::load_from_path(&canonical_path)?;
+
+        let mut all_configs = Vec::new();
+
+        // Recursively resolve extends
+        if let Some(extends_paths) = &config.extends {
+            debug!("Resolving {} extends paths", extends_paths.len());
+
+            for extend_path in extends_paths {
+                // Check for OCI references (not yet implemented)
+                if extend_path.contains("://")
+                    || extend_path.starts_with("ghcr.io/")
+                    || extend_path.starts_with("mcr.microsoft.com/")
+                {
+                    warn!(
+                        "OCI extends reference detected but not yet implemented: {}",
+                        extend_path
+                    );
+                    return Err(DeaconError::Config(ConfigError::NotImplemented {
+                        feature: format!("OCI extends reference: {}", extend_path),
+                    }));
+                }
+
+                // Resolve relative path
+                let base_dir = canonical_path.parent().unwrap_or(&canonical_path);
+                let resolved_path = base_dir.join(extend_path);
+
+                debug!(
+                    "Resolving extends path: {} -> {}",
+                    extend_path,
+                    resolved_path.display()
+                );
+
+                // Recursively resolve the extended configuration
+                let mut extended_configs =
+                    Self::resolve_extends_chain_with_paths(&resolved_path, visited)?;
+                all_configs.append(&mut extended_configs);
+            }
+        }
+
+        // Add the current config last (highest precedence)
+        let mut config_without_extends = config.clone();
+        config_without_extends.extends = None; // Remove extends from final config
+        all_configs.push((config_without_extends, canonical_path.clone()));
+
+        visited.remove(&canonical_path);
+
+        debug!(
+            "Resolved extends chain for {}: {} total configs",
+            canonical_path.display(),
+            all_configs.len()
+        );
+
+        Ok(all_configs)
+    }
+
+    /// Enhanced load with overrides, substitution, and metadata tracking
+    ///
+    /// This method combines the full layered configuration resolution with metadata tracking.
+    /// It loads the base configuration, resolves extends chain, applies overrides, performs
+    /// variable substitution, and optionally includes layer metadata for debugging.
+    ///
+    /// ## Arguments
+    ///
+    /// * `path` - Path to the base configuration file
+    /// * `override_config_path` - Optional path to override configuration file  
+    /// * `secrets` - Optional secrets collection for variable substitution
+    /// * `workspace_path` - Workspace path for variable substitution context
+    /// * `include_metadata` - Whether to include layer metadata in the result
+    ///
+    /// ## Returns
+    ///
+    /// Returns the merged configuration with optional metadata and substitution report.
+    #[instrument(skip_all, fields(path = %path.display(), override_path = ?override_config_path.as_ref().map(|p| p.display())))]
+    pub fn load_with_full_resolution(
+        path: &Path,
+        override_config_path: Option<&Path>,
+        secrets: Option<&crate::secrets::SecretsCollection>,
+        workspace_path: &Path,
+        include_metadata: bool,
+    ) -> Result<(
+        crate::config::merge::MergedDevContainerConfig,
+        crate::variable::SubstitutionReport,
+    )> {
+        debug!(
+            "Loading configuration with full resolution from {}",
+            path.display()
+        );
+
+        // Load base config with extends resolution and path tracking
+        let mut configs_with_paths = {
+            let mut visited = HashSet::new();
+            Self::resolve_extends_chain_with_paths(path, &mut visited)?
+        };
+
+        // Add override config if provided
+        if let Some(override_path) = override_config_path {
+            debug!(
+                "Loading override configuration from {}",
+                override_path.display()
+            );
+            let override_config = Self::load_from_path(override_path)?;
+            configs_with_paths.push((override_config, override_path.to_path_buf()));
+        }
+
+        debug!(
+            "Resolved configuration chain with {} configs (including override)",
+            configs_with_paths.len()
+        );
+
+        // Use the layered merger with provenance tracking
+        let merged_result = crate::config::merge::LayeredConfigMerger::merge_with_provenance(
+            &configs_with_paths
+                .iter()
+                .map(|(config, path)| (config.clone(), path.as_path()))
+                .collect::<Vec<_>>(),
+            include_metadata,
+        );
+
+        // Apply variable substitution with secrets
+        let mut substitution_context = crate::variable::SubstitutionContext::new(workspace_path)?;
+
+        // Add secrets to local environment for substitution
+        if let Some(secrets) = secrets {
+            for (key, value) in secrets.as_env_vars() {
+                substitution_context
+                    .local_env
+                    .insert(key.clone(), value.clone());
+            }
+        }
+
+        let (substituted_config, substitution_report) = merged_result
+            .config
+            .apply_variable_substitution(&substitution_context);
+
+        // Reconstruct the result with the substituted config
+        let final_result = crate::config::merge::MergedDevContainerConfig {
+            config: substituted_config,
+            meta: merged_result.meta,
+        };
+
+        debug!("Configuration loading with full resolution complete");
+        Ok((final_result, substitution_report))
+    }
+
     /// Load configuration with extends resolution and optional override config
     ///
     /// This method loads the base configuration, resolves extends chain,
@@ -2251,5 +2486,321 @@ mod tests {
         assert_eq!(merged.container_user, Some("root".to_string())); // From base
         assert_eq!(merged.remote_user, Some("vscode".to_string())); // From overlay
         assert_eq!(merged.update_remote_user_uid, Some(true)); // From overlay
+    }
+}
+
+pub mod merge {
+    //! Configuration merge engine with layered provenance tracking
+    //!
+    //! This module implements the full layered configuration resolution as specified
+    //! in the CLI specification: defaults → base → extends chain(s) → workspace overrides
+    //! → runtime substitutions.
+    //!
+    //! The merge engine tracks the source and hash of each configuration layer to provide
+    //! full debugging provenance when requested via `--include-merged-configuration`.
+
+    use super::DevContainerConfig;
+    use serde::{Deserialize, Serialize};
+    use std::path::Path;
+    use tracing::{debug, instrument};
+
+    /// Metadata about a configuration layer for debugging and provenance tracking
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub struct ConfigLayer {
+        /// Source path or identifier for this configuration layer
+        pub source: String,
+        /// SHA-256 hash of the configuration content for integrity checking
+        pub hash: String,
+        /// Order in the merge chain (0 = lowest precedence, higher = higher precedence)
+        pub precedence: u32,
+    }
+
+    /// Extended configuration that includes merge metadata
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub struct MergedDevContainerConfig {
+        /// The merged configuration data
+        #[serde(flatten)]
+        pub config: DevContainerConfig,
+        /// Metadata about the configuration layers
+        #[serde(rename = "__meta")]
+        pub meta: Option<ConfigMeta>,
+    }
+
+    /// Metadata container for merged configurations
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub struct ConfigMeta {
+        /// List of configuration layers in merge order
+        pub layers: Vec<ConfigLayer>,
+    }
+
+    /// Enhanced configuration merger that tracks layer provenance
+    pub struct LayeredConfigMerger;
+
+    impl LayeredConfigMerger {
+        /// Merge multiple configurations with full provenance tracking
+        ///
+        /// ## Arguments
+        ///
+        /// * `configs_with_sources` - Configurations with their source information in merge order
+        /// * `include_metadata` - Whether to include layer metadata in the result
+        ///
+        /// ## Returns
+        ///
+        /// Returns the merged configuration with optional metadata about the layers.
+        #[instrument(skip_all)]
+        pub fn merge_with_provenance(
+            configs_with_sources: &[(DevContainerConfig, &Path)],
+            include_metadata: bool,
+        ) -> MergedDevContainerConfig {
+            debug!(
+                "Merging {} configurations with metadata={}",
+                configs_with_sources.len(),
+                include_metadata
+            );
+
+            if configs_with_sources.is_empty() {
+                return MergedDevContainerConfig {
+                    config: DevContainerConfig::default(),
+                    meta: if include_metadata {
+                        Some(ConfigMeta { layers: vec![] })
+                    } else {
+                        None
+                    },
+                };
+            }
+
+            // Extract just the configs for the existing merge logic
+            let configs: Vec<&DevContainerConfig> = configs_with_sources
+                .iter()
+                .map(|(config, _)| config)
+                .collect();
+
+            // Use existing merge logic
+            let merged_config = super::ConfigMerger::merge_configs(
+                &configs.into_iter().cloned().collect::<Vec<_>>(),
+            );
+
+            // Build metadata if requested
+            let meta = if include_metadata {
+                let layers: Vec<ConfigLayer> = configs_with_sources
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (config, source))| {
+                        let config_json = serde_json::to_string(config).unwrap_or_default();
+                        let hash = Self::calculate_hash(&config_json);
+
+                        ConfigLayer {
+                            source: source.display().to_string(),
+                            hash,
+                            precedence: index as u32,
+                        }
+                    })
+                    .collect();
+
+                Some(ConfigMeta { layers })
+            } else {
+                None
+            };
+
+            MergedDevContainerConfig {
+                config: merged_config,
+                meta,
+            }
+        }
+
+        /// Calculate SHA-256 hash of configuration content
+        fn calculate_hash(content: &str) -> String {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(content.as_bytes());
+            format!("{:x}", hasher.finalize())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use tempfile::TempDir;
+
+        fn create_test_config(name: &str, image: &str) -> DevContainerConfig {
+            DevContainerConfig {
+                name: Some(name.to_string()),
+                image: Some(image.to_string()),
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn test_merge_empty_configs() {
+            let result = LayeredConfigMerger::merge_with_provenance(&[], false);
+            assert_eq!(result.config, DevContainerConfig::default());
+            assert!(result.meta.is_none());
+        }
+
+        #[test]
+        fn test_merge_empty_configs_with_metadata() {
+            let result = LayeredConfigMerger::merge_with_provenance(&[], true);
+            assert_eq!(result.config, DevContainerConfig::default());
+            assert!(result.meta.is_some());
+            assert_eq!(result.meta.unwrap().layers.len(), 0);
+        }
+
+        #[test]
+        fn test_merge_single_config() {
+            let temp_dir = TempDir::new().unwrap();
+            let config_path = temp_dir.path().join("devcontainer.json");
+            let config = create_test_config("test", "ubuntu:20.04");
+
+            let result = LayeredConfigMerger::merge_with_provenance(
+                &[(config.clone(), &config_path)],
+                false,
+            );
+            assert_eq!(result.config, config);
+            assert!(result.meta.is_none());
+        }
+
+        #[test]
+        fn test_merge_single_config_with_metadata() {
+            let temp_dir = TempDir::new().unwrap();
+            let config_path = temp_dir.path().join("devcontainer.json");
+            let config = create_test_config("test", "ubuntu:20.04");
+
+            let result =
+                LayeredConfigMerger::merge_with_provenance(&[(config.clone(), &config_path)], true);
+            assert_eq!(result.config, config);
+            assert!(result.meta.is_some());
+
+            let meta = result.meta.unwrap();
+            assert_eq!(meta.layers.len(), 1);
+            assert_eq!(meta.layers[0].source, config_path.display().to_string());
+            assert_eq!(meta.layers[0].precedence, 0);
+            assert!(!meta.layers[0].hash.is_empty());
+        }
+
+        #[test]
+        fn test_merge_multiple_configs_with_metadata() {
+            let temp_dir = TempDir::new().unwrap();
+            let base_path = temp_dir.path().join("base/devcontainer.json");
+            let app_path = temp_dir.path().join("app/devcontainer.json");
+
+            let base_config = DevContainerConfig {
+                name: Some("Base".to_string()),
+                image: Some("ubuntu:20.04".to_string()),
+                container_env: [("BASE_VAR".to_string(), "base_value".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                ..Default::default()
+            };
+
+            let app_config = DevContainerConfig {
+                name: Some("App".to_string()),
+                container_env: [("APP_VAR".to_string(), "app_value".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                ..Default::default()
+            };
+
+            let configs_with_sources = vec![
+                (base_config, base_path.as_path()),
+                (app_config, app_path.as_path()),
+            ];
+
+            let result = LayeredConfigMerger::merge_with_provenance(&configs_with_sources, true);
+
+            // Check merged config
+            assert_eq!(result.config.name, Some("App".to_string())); // Override
+            assert_eq!(result.config.image, Some("ubuntu:20.04".to_string())); // From base
+            assert_eq!(
+                result.config.container_env.get("BASE_VAR"),
+                Some(&"base_value".to_string())
+            );
+            assert_eq!(
+                result.config.container_env.get("APP_VAR"),
+                Some(&"app_value".to_string())
+            );
+
+            // Check metadata
+            assert!(result.meta.is_some());
+            let meta = result.meta.unwrap();
+            assert_eq!(meta.layers.len(), 2);
+
+            // Check layer metadata
+            assert_eq!(meta.layers[0].source, base_path.display().to_string());
+            assert_eq!(meta.layers[0].precedence, 0);
+            assert_eq!(meta.layers[1].source, app_path.display().to_string());
+            assert_eq!(meta.layers[1].precedence, 1);
+
+            // Verify hashes are different
+            assert_ne!(meta.layers[0].hash, meta.layers[1].hash);
+        }
+
+        #[test]
+        fn test_hash_calculation() {
+            let hash1 = LayeredConfigMerger::calculate_hash("test content");
+            let hash2 = LayeredConfigMerger::calculate_hash("test content");
+            let hash3 = LayeredConfigMerger::calculate_hash("different content");
+
+            // Same content should produce same hash
+            assert_eq!(hash1, hash2);
+            // Different content should produce different hash
+            assert_ne!(hash1, hash3);
+            // Hash should be 64 characters (SHA-256 in hex)
+            assert_eq!(hash1.len(), 64);
+        }
+
+        #[test]
+        fn test_merge_precedence_order() {
+            let temp_dir = TempDir::new().unwrap();
+            let path1 = temp_dir.path().join("config1.json");
+            let path2 = temp_dir.path().join("config2.json");
+            let path3 = temp_dir.path().join("config3.json");
+
+            let config1 = DevContainerConfig {
+                name: Some("Config1".to_string()),
+                container_env: [("VAR".to_string(), "value1".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                ..Default::default()
+            };
+
+            let config2 = DevContainerConfig {
+                name: Some("Config2".to_string()),
+                container_env: [("VAR".to_string(), "value2".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                ..Default::default()
+            };
+
+            let config3 = DevContainerConfig {
+                name: Some("Config3".to_string()),
+                ..Default::default()
+            };
+
+            let configs_with_sources = vec![
+                (config1, path1.as_path()),
+                (config2, path2.as_path()),
+                (config3, path3.as_path()),
+            ];
+
+            let result = LayeredConfigMerger::merge_with_provenance(&configs_with_sources, true);
+
+            // Config3 should have highest precedence (last in chain)
+            assert_eq!(result.config.name, Some("Config3".to_string()));
+            // VAR should be from Config2 (Config3 doesn't override it)
+            assert_eq!(
+                result.config.container_env.get("VAR"),
+                Some(&"value2".to_string())
+            );
+
+            // Check metadata precedence
+            let meta = result.meta.unwrap();
+            assert_eq!(meta.layers[0].precedence, 0);
+            assert_eq!(meta.layers[1].precedence, 1);
+            assert_eq!(meta.layers[2].precedence, 2);
+        }
     }
 }
