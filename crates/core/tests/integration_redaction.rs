@@ -272,23 +272,31 @@ fn test_secret_length_threshold() {
 
 #[test]
 fn test_thread_safety() {
+    use std::sync::Barrier;
     use std::thread;
 
     // Clear any existing secrets
     global_registry().clear();
 
+    // Create a barrier to synchronize thread execution
+    let barrier = std::sync::Arc::new(Barrier::new(10));
+
     // Test concurrent access to the global registry
     let handles: Vec<_> = (0..10)
         .map(|i| {
+            let barrier = barrier.clone();
             thread::spawn(move || {
                 // Each thread adds its own secret
                 add_global_secret(&format!("thread-secret-{}", i));
 
-                // Each thread tries to redact text
+                // Wait for all threads to finish adding secrets
+                barrier.wait();
+
+                // Now each thread tries to redact text
                 let config = RedactionConfig::default();
                 let text = format!("This contains thread-secret-{}", i);
 
-                // Should eventually be redacted (might not be immediate due to race conditions)
+                // Should be redacted since all secrets are now added
                 redact_if_enabled(&text, &config)
             })
         })
@@ -297,12 +305,15 @@ fn test_thread_safety() {
     // Wait for all threads to complete
     let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
-    // At least some results should show redaction occurred
+    // All results should show redaction occurred since we synchronized
     let redacted_count = results.iter().filter(|r| r.contains("****")).count();
-    assert!(redacted_count > 0, "No redaction occurred in threaded test");
+    assert_eq!(
+        redacted_count, 10,
+        "All threads should have had their secrets redacted"
+    );
 
-    // Registry should have secrets from multiple threads
-    assert!(global_registry().secret_count() > 0);
+    // Registry should have secrets from all threads
+    assert_eq!(global_registry().secret_count(), 10);
 
     // Clean up
     global_registry().clear();
@@ -538,12 +549,14 @@ fn test_structured_secret_basic() {
     let registry = SecretRegistry::new();
 
     // Add a structured secret that only redacts in key-value context
-    registry.add_structured_secret(StructuredSecret {
-        value: "commonword".to_string(),
-        key: Some("password".to_string()),
-        context_pattern: None,
-        require_key_context: true,
-    });
+    let structured_secret = StructuredSecret::new(
+        "commonword".to_string(),
+        Some("password".to_string()),
+        None,
+        true,
+    )
+    .unwrap();
+    registry.add_structured_secret(structured_secret);
 
     let config = RedactionConfig::with_custom_registry(registry);
 
@@ -569,12 +582,14 @@ fn test_structured_secret_with_context_pattern() {
     let registry = SecretRegistry::new();
 
     // Add a structured secret that only redacts when a context pattern is present
-    registry.add_structured_secret(StructuredSecret {
-        value: "testvalue123".to_string(),
-        key: None,
-        context_pattern: Some("login".to_string()),
-        require_key_context: false,
-    });
+    let structured_secret = StructuredSecret::new(
+        "testvalue123".to_string(),
+        None,
+        Some("login".to_string()),
+        false,
+    )
+    .unwrap();
+    registry.add_structured_secret(structured_secret);
 
     let config = RedactionConfig::with_custom_registry(registry);
 
@@ -630,12 +645,14 @@ fn test_mixed_redaction_types() {
     registry.add_secret("alwayssecret");
 
     // Add structured secret (only in context)
-    registry.add_structured_secret(StructuredSecret {
-        value: "contextsecret".to_string(),
-        key: Some("password".to_string()),
-        context_pattern: None,
-        require_key_context: true,
-    });
+    let structured_secret = StructuredSecret::new(
+        "contextsecret".to_string(),
+        Some("password".to_string()),
+        None,
+        true,
+    )
+    .unwrap();
+    registry.add_structured_secret(structured_secret);
 
     let config = RedactionConfig::with_custom_registry(registry);
 

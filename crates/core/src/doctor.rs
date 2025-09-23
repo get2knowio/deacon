@@ -12,6 +12,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
+/// Macro for printing redacted output
+macro_rules! println_redacted {
+    ($config:expr, $fmt:expr) => {
+        let output = format!($fmt);
+        let redacted = crate::redaction::redact_if_enabled(&output, $config);
+        println!("{}", redacted);
+    };
+    ($config:expr, $fmt:expr, $($arg:tt)*) => {
+        let output = format!($fmt, $($arg)*);
+        let redacted = crate::redaction::redact_if_enabled(&output, $config);
+        println!("{}", redacted);
+    };
+}
+
 /// Simple context for doctor command
 #[derive(Debug, Clone)]
 pub struct DoctorContext {
@@ -339,75 +353,87 @@ fn print_text_output_with_redaction(
     info: &DoctorInfo,
     redaction_config: &crate::redaction::RedactionConfig,
 ) {
-    // Create a macro to print with redaction applied
-    macro_rules! println_redacted {
-        ($fmt:expr) => {
-            let output = format!($fmt);
-            let redacted = crate::redaction::redact_if_enabled(&output, redaction_config);
-            println!("{}", redacted);
-        };
-        ($fmt:expr, $($arg:tt)*) => {
-            let output = format!($fmt, $($arg)*);
-            let redacted = crate::redaction::redact_if_enabled(&output, redaction_config);
-            println!("{}", redacted);
-        };
-    }
-
-    println_redacted!("Deacon Doctor Diagnostics");
-    println_redacted!("========================");
+    println_redacted!(redaction_config, "Deacon Doctor Diagnostics");
+    println_redacted!(redaction_config, "========================");
     println!();
 
-    println_redacted!("CLI Version: {}", info.cli_version);
+    println_redacted!(redaction_config, "CLI Version: {}", info.cli_version);
     println!();
 
-    println_redacted!("Host OS:");
-    println_redacted!("  Name: {}", info.host_os.name);
-    println_redacted!("  Version: {}", info.host_os.version);
-    println_redacted!("  Architecture: {}", info.host_os.arch);
+    println_redacted!(redaction_config, "Host OS:");
+    println_redacted!(redaction_config, "  Name: {}", info.host_os.name);
+    println_redacted!(redaction_config, "  Version: {}", info.host_os.version);
+    println_redacted!(redaction_config, "  Architecture: {}", info.host_os.arch);
     println!();
 
-    println_redacted!("Docker:");
-    println_redacted!("  Installed: {}", info.docker_info.installed);
+    println_redacted!(redaction_config, "Docker:");
+    println_redacted!(
+        redaction_config,
+        "  Installed: {}",
+        info.docker_info.installed
+    );
     if let Some(version) = &info.docker_info.version {
-        println_redacted!("  Version: {}", version);
+        println_redacted!(redaction_config, "  Version: {}", version);
     }
-    println_redacted!("  Daemon Running: {}", info.docker_info.daemon_running);
+    println_redacted!(
+        redaction_config,
+        "  Daemon Running: {}",
+        info.docker_info.daemon_running
+    );
     if let Some(summary) = &info.docker_info.info_summary {
         println_redacted!(
+            redaction_config,
             "  Containers Running: {}",
             summary.containers_running.unwrap_or(0)
         );
-        println_redacted!("  Images: {}", summary.images.unwrap_or(0));
+        println_redacted!(
+            redaction_config,
+            "  Images: {}",
+            summary.images.unwrap_or(0)
+        );
         if let Some(storage) = &summary.storage_driver {
-            println_redacted!("  Storage Driver: {}", storage);
+            println_redacted!(redaction_config, "  Storage Driver: {}", storage);
         }
     }
     println!();
 
-    println_redacted!("Disk Space:");
-    println_redacted!("  Total: {}", ByteSize(info.disk_space.total_bytes));
-    println_redacted!("  Available: {}", ByteSize(info.disk_space.available_bytes));
-    println_redacted!("  Used: {}", ByteSize(info.disk_space.used_bytes));
+    println_redacted!(redaction_config, "Disk Space:");
+    println_redacted!(
+        redaction_config,
+        "  Total: {}",
+        ByteSize(info.disk_space.total_bytes)
+    );
+    println_redacted!(
+        redaction_config,
+        "  Available: {}",
+        ByteSize(info.disk_space.available_bytes)
+    );
+    println_redacted!(
+        redaction_config,
+        "  Used: {}",
+        ByteSize(info.disk_space.used_bytes)
+    );
     println!();
 
-    println_redacted!("Configuration Discovery:");
+    println_redacted!(redaction_config, "Configuration Discovery:");
     if let Some(workspace) = &info.config_discovery.workspace_folder {
-        println_redacted!("  Workspace: {}", workspace);
+        println_redacted!(redaction_config, "  Workspace: {}", workspace);
     }
     if let Some(primary) = &info.config_discovery.primary_config {
-        println_redacted!("  Primary Config: {}", primary);
+        println_redacted!(redaction_config, "  Primary Config: {}", primary);
     }
     println_redacted!(
+        redaction_config,
         "  Config Files Found: {:?}",
         info.config_discovery.config_files_found
     );
     println!();
 
-    println_redacted!("Available Features: {:?}", info.features);
+    println_redacted!(redaction_config, "Available Features: {:?}", info.features);
     println!();
 
     if let Some(hash) = &info.last_build_hash {
-        println_redacted!("Last Build Hash: {}", hash);
+        println_redacted!(redaction_config, "Last Build Hash: {}", hash);
         println!();
     }
 }

@@ -34,16 +34,57 @@ struct SecretRegistryInner {
 }
 
 /// A structured secret with context information to reduce false positives
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StructuredSecret {
     /// The secret value to redact
-    pub value: String,
+    value: String,
     /// Optional key/field name that provides context (e.g., "password", "token", "api_key")
-    pub key: Option<String>,
+    key: Option<String>,
     /// Optional pattern that must appear near the secret for it to be redacted
-    pub context_pattern: Option<String>,
+    context_pattern: Option<String>,
     /// Whether this secret should only be redacted when found in key-value pairs
-    pub require_key_context: bool,
+    require_key_context: bool,
+}
+
+impl StructuredSecret {
+    /// Create a new StructuredSecret with validation
+    pub fn new(
+        value: String,
+        key: Option<String>,
+        context_pattern: Option<String>,
+        require_key_context: bool,
+    ) -> Option<Self> {
+        if value.len() < MIN_REDACTION_LENGTH {
+            return None;
+        }
+
+        Some(Self {
+            value,
+            key,
+            context_pattern,
+            require_key_context,
+        })
+    }
+
+    /// Get the secret value
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    /// Get the key context
+    pub fn key(&self) -> Option<&str> {
+        self.key.as_deref()
+    }
+
+    /// Get the context pattern
+    pub fn context_pattern(&self) -> Option<&str> {
+        self.context_pattern.as_deref()
+    }
+
+    /// Check if key context is required
+    pub fn require_key_context(&self) -> bool {
+        self.require_key_context
+    }
 }
 
 impl SecretRegistry {
@@ -88,13 +129,23 @@ impl SecretRegistry {
     /// This allows for more sophisticated redaction that can consider context
     /// to reduce false positives. For example, the word "secret" might only
     /// be redacted when it appears in a key-value context like "password=secret123".
-    pub fn add_structured_secret(&self, structured_secret: StructuredSecret) {
-        if structured_secret.value.len() < MIN_REDACTION_LENGTH {
-            return;
-        }
-
+    /// Add a structured secret with contextual information
+    ///
+    /// This allows for more sophisticated redaction that can consider context
+    /// to reduce false positives. For example, the word "secret" might only
+    /// be redacted when it appears in a key-value context like "password=secret".
+    /// Returns true if the secret was added, false if it was invalid or duplicate.
+    pub fn add_structured_secret(&self, structured_secret: StructuredSecret) -> bool {
         if let Ok(mut inner) = self.inner.write() {
-            inner.structured_secrets.push(structured_secret);
+            // Check if this structured secret already exists
+            if !inner.structured_secrets.contains(&structured_secret) {
+                inner.structured_secrets.push(structured_secret);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
         }
     }
 
@@ -103,14 +154,18 @@ impl SecretRegistry {
     /// This will only redact the secret when it appears after one of the specified keys.
     /// Useful for values that might appear in normal text but should only be redacted
     /// when they're actually secret values.
+    /// Add a secret with key context for key-value pair redaction
+    ///
+    /// This will only redact the secret when it appears after one of the specified keys.
+    /// Useful for values that might appear in normal text but should only be redacted
+    /// when they're actually secret values.
     pub fn add_secret_with_key_context(&self, secret: &str, keys: Vec<String>) {
         for key in keys {
-            self.add_structured_secret(StructuredSecret {
-                value: secret.to_string(),
-                key: Some(key),
-                context_pattern: None,
-                require_key_context: true,
-            });
+            if let Some(structured_secret) =
+                StructuredSecret::new(secret.to_string(), Some(key), None, true)
+            {
+                self.add_structured_secret(structured_secret);
+            }
         }
     }
 
@@ -277,32 +332,32 @@ pub fn redact_with_registry(
 /// provided in the StructuredSecret. It can handle key-value pairs and context patterns.
 fn redact_structured_secret(text: &str, structured_secret: &StructuredSecret) -> String {
     // If no special context is required, do simple replacement
-    if !structured_secret.require_key_context && structured_secret.context_pattern.is_none() {
-        return text.replace(&structured_secret.value, REDACTION_PLACEHOLDER);
+    if !structured_secret.require_key_context() && structured_secret.context_pattern().is_none() {
+        return text.replace(structured_secret.value(), REDACTION_PLACEHOLDER);
     }
 
     let mut result = text.to_string();
 
     // Handle key-value context redaction
-    if structured_secret.require_key_context {
-        if let Some(key) = &structured_secret.key {
+    if structured_secret.require_key_context() {
+        if let Some(key) = structured_secret.key() {
             // Look for patterns like "key=value", "key: value", "key": "value", etc.
             let patterns = [
-                format!("{}={}", key, &structured_secret.value),
-                format!("{}:{}", key, &structured_secret.value),
-                format!("{}: {}", key, &structured_secret.value),
-                format!("\"{}\":\"{}", key, &structured_secret.value),
-                format!("\"{}\":\"{}\"", key, &structured_secret.value),
-                format!("\"{}\" : \"{}\"", key, &structured_secret.value),
-                format!("{}=\"{}\"", key, &structured_secret.value),
-                format!("{} = \"{}\"", key, &structured_secret.value),
-                format!("{} = {}", key, &structured_secret.value),
+                format!("{}={}", key, structured_secret.value()),
+                format!("{}:{}", key, structured_secret.value()),
+                format!("{}: {}", key, structured_secret.value()),
+                format!("\"{}\":\"{}", key, structured_secret.value()),
+                format!("\"{}\":\"{}\"", key, structured_secret.value()),
+                format!("\"{}\" : \"{}\"", key, structured_secret.value()),
+                format!("{}=\"{}\"", key, structured_secret.value()),
+                format!("{} = \"{}\"", key, structured_secret.value()),
+                format!("{} = {}", key, structured_secret.value()),
             ];
 
             for pattern in &patterns {
                 if result.contains(pattern) {
                     let redacted_pattern =
-                        pattern.replace(&structured_secret.value, REDACTION_PLACEHOLDER);
+                        pattern.replace(structured_secret.value(), REDACTION_PLACEHOLDER);
                     result = result.replace(pattern, &redacted_pattern);
                 }
             }
@@ -310,10 +365,10 @@ fn redact_structured_secret(text: &str, structured_secret: &StructuredSecret) ->
     }
 
     // Handle context pattern matching
-    if let Some(context_pattern) = &structured_secret.context_pattern {
+    if let Some(context_pattern) = structured_secret.context_pattern() {
         // Only redact the secret if the context pattern is found nearby
         if result.contains(context_pattern) {
-            result = result.replace(&structured_secret.value, REDACTION_PLACEHOLDER);
+            result = result.replace(structured_secret.value(), REDACTION_PLACEHOLDER);
         }
     }
 
