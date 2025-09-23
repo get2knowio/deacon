@@ -107,7 +107,7 @@ pub fn init_with_redaction(
 
         tracing::info!(
             "Logging initialized with format: {}",
-            format.unwrap_or("text")
+            effective_format
         );
     });
 

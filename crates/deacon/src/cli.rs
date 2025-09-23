@@ -329,9 +329,9 @@ pub enum TemplateCommands {
     long_about = "Development container CLI (Rust reimplementation)\n\nImplements the Development Containers specification for creating and managing development environments."
 )]
 pub struct Cli {
-    /// Log format (text or json)
-    #[arg(long, global = true, value_enum, default_value = "text")]
-    pub log_format: LogFormat,
+    /// Log format (text or json, defaults to text, can be set via DEACON_LOG_FORMAT env var)
+    #[arg(long, global = true, value_enum)]
+    pub log_format: Option<LogFormat>,
 
     /// Log level
     #[arg(long, global = true, value_enum, default_value = "info")]
@@ -395,7 +395,7 @@ impl Cli {
     /// ```
     pub fn context(&self) -> CliContext {
         CliContext {
-            log_format: self.log_format.clone(),
+            log_format: self.log_format.clone().unwrap_or(LogFormat::Text), // Default to Text if not specified
             log_level: self.log_level.clone(),
             progress_format: self.progress.clone(),
             progress_file: self.progress_file.clone(),
@@ -435,8 +435,9 @@ impl Cli {
 
         // Initialize logging based on global options
         let log_format = match self.log_format {
-            LogFormat::Text => None,
-            LogFormat::Json => Some("json".to_string()),
+            Some(LogFormat::Text) => Some("text"),
+            Some(LogFormat::Json) => Some("json"),
+            None => None, // Let logging module check environment variable
         };
 
         let log_level = match self.log_level {
