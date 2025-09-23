@@ -147,7 +147,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     // Validate host requirements if specified in configuration
     if let Some(host_requirements) = &config.host_requirements {
-        info!("Validating host requirements");
+        debug!("Validating host requirements");
         let mut evaluator = deacon_core::host_requirements::HostRequirementsEvaluator::new();
 
         match evaluator.validate_requirements(
@@ -157,7 +157,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
         ) {
             Ok(evaluation) => {
                 if evaluation.requirements_met {
-                    info!("Host requirements validation passed");
+                    debug!("Host requirements validation passed");
                 } else if args.ignore_host_requirements {
                     warn!("Host requirements not met, but proceeding due to --ignore-host-requirements flag");
                 }
@@ -444,7 +444,7 @@ async fn execute_docker_build(
         docker.check_docker_installed()?;
         docker.ping().await?;
 
-        info!("Building Docker image");
+        debug!("Building Docker image");
 
         // Prepare build context
         let context_path = workspace_folder.join(&build_config.context);
@@ -546,7 +546,7 @@ async fn execute_docker_build(
             config_hash: config_hash.to_string(),
         };
 
-        info!("Docker build completed successfully");
+        debug!("Docker build completed successfully");
         Ok(result)
     }
 

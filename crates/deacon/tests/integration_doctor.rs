@@ -36,7 +36,12 @@ fn test_doctor_command_bundle_creation() {
     let bundle_path = temp_dir.path().join("test-bundle.zip");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.arg("doctor").arg("--bundle").arg(&bundle_path);
+    // Explicitly enable info logging so the support bundle log message is emitted
+    cmd.arg("--log-level")
+        .arg("info")
+        .arg("doctor")
+        .arg("--bundle")
+        .arg(&bundle_path);
 
     let assert = cmd.assert().success();
     let output = assert.get_output();

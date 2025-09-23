@@ -16,6 +16,7 @@ fn test_down_command_basic() {
         .arg("down")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
+        // .env("DEACON_LOG", "info") // Removed unnecessary env override
         .assert()
         .success();
 
@@ -45,6 +46,7 @@ fn test_down_command_with_remove() {
         .arg("--remove")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
+        // .env("DEACON_LOG", "info") // Removed unnecessary env override
         .assert()
         .success();
 

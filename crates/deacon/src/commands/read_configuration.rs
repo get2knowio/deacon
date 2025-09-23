@@ -126,6 +126,14 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     let json_output = serde_json::to_string_pretty(&config)?;
     println!("{}", json_output);
 
+    // Single concise completion info line (keep info noise low)
+    info!(
+        "Completed read-configuration: name={} merged={} replacements={}",
+        config.name.as_deref().unwrap_or("unknown"),
+        args.include_merged_configuration,
+        substitution_report.replacements.len()
+    );
+
     Ok(())
 }
 

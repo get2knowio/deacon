@@ -122,7 +122,7 @@ fn create_env_filter(_logging_spec: Option<&str>) -> EnvFilter {
             EnvFilter::new("info")
         })
     } else {
-        // Fall back to standard RUST_LOG or default
+        // Fall back to standard RUST_LOG or default (info)
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
     }
 }

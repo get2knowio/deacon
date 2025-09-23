@@ -147,7 +147,7 @@ async fn execute_templates_publish(
     );
 
     if dry_run {
-        info!("Dry run mode - would publish to registry: {}", registry);
+        debug!("Dry run mode - would publish to registry: {}", registry);
 
         let result = TemplatesResult {
             command: "publish".to_string(),
@@ -188,7 +188,7 @@ async fn execute_templates_publish(
     let fetcher =
         default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
 
-    info!("Publishing to OCI registry: {}", template_ref.reference());
+    debug!("Publishing to OCI registry: {}", template_ref.reference());
     let publish_result = fetcher
         .publish_template(&template_ref, tar_data.into(), &metadata)
         .await
@@ -264,7 +264,7 @@ async fn execute_templates_apply(template: &str, force: bool) -> Result<()> {
     let fetcher =
         default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
 
-    info!("Fetching template from: {}", template_ref.reference());
+    debug!("Fetching template from: {}", template_ref.reference());
 
     let downloaded_template = fetcher
         .fetch_template(&template_ref)
@@ -273,7 +273,7 @@ async fn execute_templates_apply(template: &str, force: bool) -> Result<()> {
 
     // Apply template files to the current directory
     let current_dir = std::env::current_dir()?;
-    info!(
+    debug!(
         "Applying template to current directory: {}",
         current_dir.display()
     );
@@ -327,7 +327,7 @@ fn copy_template_files(
                 }
             }
             fs::copy(&source_path, &target_path)?;
-            info!("Applied file: {}", target_path.display());
+            debug!("Applied file: {}", target_path.display());
         }
     }
 

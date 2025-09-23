@@ -109,7 +109,7 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
 
     // Validate host requirements if specified in configuration
     if let Some(host_requirements) = &config.host_requirements {
-        info!("Validating host requirements");
+        debug!("Validating host requirements");
         let mut evaluator = deacon_core::host_requirements::HostRequirementsEvaluator::new();
 
         match evaluator.validate_requirements(
@@ -119,7 +119,7 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
         ) {
             Ok(evaluation) => {
                 if evaluation.requirements_met {
-                    info!("Host requirements validation passed");
+                    debug!("Host requirements validation passed");
                 } else if args.ignore_host_requirements {
                     warn!("Host requirements not met, but proceeding due to --ignore-host-requirements flag");
                 }
@@ -204,7 +204,7 @@ async fn execute_compose_up(
     state_manager: &mut StateManager,
     workspace_hash: &str,
 ) -> Result<()> {
-    info!("Starting Docker Compose project");
+    debug!("Starting Docker Compose project");
 
     let compose_manager = ComposeManager::new();
     let project = compose_manager.create_project(config, workspace_folder)?;
@@ -213,11 +213,11 @@ async fn execute_compose_up(
 
     // Check if project is already running
     if !args.remove_existing_container && compose_manager.is_project_running(&project)? {
-        info!("Compose project {} is already running", project.name);
+        debug!("Compose project {} is already running", project.name);
 
         // Get the primary container ID for potential exec operations
         if let Some(container_id) = compose_manager.get_primary_container_id(&project)? {
-            info!("Primary service container ID: {}", container_id);
+            debug!("Primary service container ID: {}", container_id);
         }
 
         return Ok(());
@@ -225,7 +225,7 @@ async fn execute_compose_up(
 
     // Stop existing containers if requested
     if args.remove_existing_container {
-        info!("Stopping existing compose project");
+        debug!("Stopping existing compose project");
         if let Err(e) = compose_manager.stop_project(&project) {
             warn!("Failed to stop existing project: {}", e);
         }
@@ -303,7 +303,7 @@ async fn execute_container_up(
     state_manager: &mut StateManager,
     workspace_hash: &str,
 ) -> Result<()> {
-    info!("Starting traditional development container");
+    debug!("Starting traditional development container");
 
     // Initialize progress tracking
     let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
@@ -381,7 +381,7 @@ async fn execute_container_up(
 
     let container_result = container_result?;
 
-    info!(
+    debug!(
         "Container {} {} (image: {})",
         if container_result.reused {
             "reused"
@@ -446,7 +446,7 @@ async fn execute_compose_post_create(
     project: &ComposeProject,
     config: &DevContainerConfig,
 ) -> Result<()> {
-    info!("Executing post-create lifecycle for compose project");
+    debug!("Executing post-create lifecycle for compose project");
 
     // Get the primary container ID
     let compose_manager = ComposeManager::new();
@@ -466,7 +466,7 @@ async fn execute_compose_post_create(
     // Execute postCreateCommand if specified
     if let Some(post_create_cmd) = &config.post_create_command {
         if let Some(cmd_str) = post_create_cmd.as_str() {
-            info!("Executing postCreateCommand: {}", cmd_str);
+            debug!("Executing postCreateCommand: {}", cmd_str);
 
             let docker = CliDocker::new();
             let result = docker
@@ -485,7 +485,7 @@ async fn execute_compose_post_create(
                 .await;
 
             match result {
-                Ok(_) => info!("postCreateCommand completed successfully"),
+                Ok(_) => debug!("postCreateCommand completed successfully"),
                 Err(e) => warn!("postCreateCommand failed: {}", e),
             }
         }
@@ -497,7 +497,7 @@ async fn execute_compose_post_create(
 /// Handle port events for compose projects
 #[instrument(skip(config, project))]
 async fn handle_port_events(config: &DevContainerConfig, project: &ComposeProject) -> Result<()> {
-    info!("Processing port events for compose project");
+    debug!("Processing port events for compose project");
 
     let compose_manager = ComposeManager::new();
     let container_id = match compose_manager.get_primary_container_id(project)? {
@@ -532,7 +532,7 @@ async fn handle_port_events(config: &DevContainerConfig, project: &ComposeProjec
         true, // emit_events = true
     );
 
-    info!("Emitted {} port events", events.len());
+    debug!("Emitted {} port events", events.len());
 
     Ok(())
 }
@@ -546,7 +546,7 @@ async fn apply_user_mapping(
 ) -> Result<()> {
     use deacon_core::user_mapping::{get_host_user_info, UserMappingConfig};
 
-    info!("Applying user mapping configuration");
+    debug!("Applying user mapping configuration");
 
     // Create user mapping configuration
     let mut user_config = UserMappingConfig::new(
@@ -586,7 +586,7 @@ async fn apply_user_mapping(
 
         // TODO: Implement user mapping application using UserMappingService
         // For now, log that user mapping would be applied
-        info!(
+        debug!(
             "User mapping configured: remote_user={:?}, container_user={:?}, update_uid={}",
             user_config.remote_user, user_config.container_user, user_config.update_remote_user_uid
         );
@@ -642,7 +642,7 @@ async fn execute_lifecycle_commands(
     };
     use deacon_core::variable::SubstitutionContext;
 
-    info!("Executing lifecycle commands in container");
+    debug!("Executing lifecycle commands in container");
 
     // Create substitution context
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
@@ -731,7 +731,7 @@ async fn execute_lifecycle_commands(
 
     let result = result?;
 
-    info!(
+    debug!(
         "Lifecycle execution completed: {} phases executed",
         result.phases.len()
     );
@@ -780,7 +780,7 @@ async fn handle_container_port_events(
     container_id: &str,
     config: &DevContainerConfig,
 ) -> Result<()> {
-    info!("Processing port events for container");
+    debug!("Processing port events for container");
 
     // Inspect the container to get port information
     let docker = CliDocker::new();
@@ -806,7 +806,7 @@ async fn handle_container_port_events(
         true, // emit_events = true
     );
 
-    info!("Emitted {} port events", events.len());
+    debug!("Emitted {} port events", events.len());
 
     Ok(())
 }
@@ -819,16 +819,16 @@ async fn handle_container_shutdown(
     state_manager: &mut StateManager,
     workspace_hash: &str,
 ) -> Result<()> {
-    info!("Handling shutdown for container: {}", container_id);
+    debug!("Handling shutdown for container: {}", container_id);
 
     let shutdown_action = config.shutdown_action.as_deref().unwrap_or("stopContainer");
 
     match shutdown_action {
         "none" => {
-            info!("Shutdown action is 'none', leaving container running");
+            debug!("Shutdown action is 'none', leaving container running");
         }
         "stopContainer" => {
-            info!("Stopping container due to shutdown action");
+            debug!("Stopping container due to shutdown action");
             let docker = CliDocker::new();
             docker.stop_container(container_id, Some(30)).await?;
             state_manager.remove_workspace_state(workspace_hash);
@@ -853,16 +853,16 @@ async fn handle_compose_shutdown(
     state_manager: &mut StateManager,
     workspace_hash: &str,
 ) -> Result<()> {
-    info!("Handling shutdown for compose project: {}", project.name);
+    debug!("Handling shutdown for compose project: {}", project.name);
 
     let shutdown_action = config.shutdown_action.as_deref().unwrap_or("stopCompose");
 
     match shutdown_action {
         "none" => {
-            info!("Shutdown action is 'none', leaving compose project running");
+            debug!("Shutdown action is 'none', leaving compose project running");
         }
         "stopCompose" => {
-            info!("Stopping compose project due to shutdown action");
+            debug!("Stopping compose project due to shutdown action");
             let compose_manager = ComposeManager::new();
             compose_manager.stop_project(project)?;
             state_manager.remove_workspace_state(workspace_hash);

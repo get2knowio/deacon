@@ -105,7 +105,7 @@ async fn execute_container_down(
     state_manager: &mut StateManager,
     workspace_hash: &str,
 ) -> Result<()> {
-    info!("Shutting down container: {}", container_state.container_id);
+    debug!("Shutting down container: {}", container_state.container_id);
 
     let docker = CliDocker::new();
 
@@ -114,7 +114,7 @@ async fn execute_container_down(
         .inspect_container(&container_state.container_id)
         .await?;
     if container_info.is_none() {
-        info!(
+        debug!(
             "Container {} not found, removing from state",
             container_state.container_id
         );
@@ -124,12 +124,12 @@ async fn execute_container_down(
 
     let container_info = container_info.unwrap();
     if container_info.state != "running" {
-        info!(
+        debug!(
             "Container {} is already stopped",
             container_state.container_id
         );
         if force_remove || should_remove_container(config, container_state) {
-            info!("Removing stopped container");
+            debug!("Removing stopped container");
             docker
                 .remove_container(&container_state.container_id)
                 .await?;
@@ -147,17 +147,17 @@ async fn execute_container_down(
 
     match shutdown_action {
         "none" => {
-            info!("Shutdown action is 'none', leaving container running");
+            debug!("Shutdown action is 'none', leaving container running");
             // Don't remove from state since container is still running
         }
         "stopContainer" => {
-            info!("Stopping container with timeout");
+            debug!("Stopping container with timeout");
             docker
                 .stop_container(&container_state.container_id, Some(30))
                 .await?;
 
             if force_remove || should_remove_container(config, container_state) {
-                info!("Removing stopped container");
+                debug!("Removing stopped container");
                 docker
                     .remove_container(&container_state.container_id)
                     .await?;
@@ -177,7 +177,7 @@ async fn execute_container_down(
                 .await?;
 
             if force_remove {
-                info!("Removing stopped container");
+                debug!("Removing stopped container");
                 docker
                     .remove_container(&container_state.container_id)
                     .await?;
@@ -199,7 +199,7 @@ async fn execute_compose_down(
     state_manager: &mut StateManager,
     workspace_hash: &str,
 ) -> Result<()> {
-    info!(
+    debug!(
         "Shutting down compose project: {}",
         compose_state.project_name
     );
@@ -221,7 +221,7 @@ async fn execute_compose_down(
 
     // Check if project is still running
     if !compose_manager.is_project_running(&project)? {
-        info!(
+        debug!(
             "Compose project {} is not running, removing from state",
             project.name
         );
@@ -238,15 +238,15 @@ async fn execute_compose_down(
 
     match shutdown_action {
         "none" => {
-            info!("Shutdown action is 'none', leaving compose project running");
+            debug!("Shutdown action is 'none', leaving compose project running");
             // Don't remove from state since project is still running
         }
         "stopCompose" => {
             if force_remove {
-                info!("Stopping and removing compose project");
+                debug!("Stopping and removing compose project");
                 compose_manager.down_project(&project)?;
             } else {
-                info!("Stopping compose project");
+                debug!("Stopping compose project");
                 compose_manager.stop_project(&project)?;
             }
 
@@ -273,7 +273,7 @@ async fn execute_down_with_auto_discovery(
     workspace_folder: &Path,
     force_remove: bool,
 ) -> Result<()> {
-    info!("Attempting auto-discovery of running containers/projects");
+    debug!("Attempting auto-discovery of running containers/projects");
 
     // Create a minimal identity just for workspace hash generation
     let config = DevContainerConfig::default();

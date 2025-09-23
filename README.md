@@ -188,6 +188,40 @@ becomes:
 }
 ```
 
+### Logging
+
+Deacon uses the `tracing` ecosystem for structured logging.
+
+- Default log level: `info`
+- Default log format: text (human-readable)
+- CLI flag overrides: `--log-level` (`error|warn|info|debug|trace`), `--log-format` (`text|json`)
+- Environment overrides (take precedence before CLI flag processing sets `RUST_LOG`):
+  - `DEACON_LOG`: Full filter specification (e.g. `DEACON_LOG=deacon=debug,deacon_core=debug`)
+  - `RUST_LOG`: Standard Rust filter fallback if `DEACON_LOG` unset
+
+When you specify `--log-level`, the CLI sets `RUST_LOG` internally to `deacon=<level>,deacon_core=<level>` prior to initializing the subscriber. Use `DEACON_LOG` for advanced per-module filtering; it will be honored as-is (and will emit a warning and fall back to `info` if invalid).
+
+Guidance on levels:
+- `info`: High-level milestones and user‑visible state changes (container start/stop, template application summary, configuration load boundaries)
+- `debug`: Detailed decision points (config discovery paths, feature resolution steps, variable substitution reports)
+- `trace`: Very fine‑grained internals (iteration over collections, per-file copy decisions) – typically for deep troubleshooting only
+- `warn`: Recoverable issues or unexpected states deviating from normal expectations
+- `error`: Failures causing command termination or skipped critical workflow phases
+
+Examples:
+```bash
+# Increase verbosity for troubleshooting configuration issues
+deacon read-configuration --log-level debug
+
+# Use JSON logs (machine parsing / CI ingestion)
+deacon up --log-format json
+
+# Advanced module filtering (show trace for config, keep others at info)
+DEACON_LOG=deacon_core::config=trace,deacon=info deacon read-configuration
+```
+
+If you disable secret redaction (`--no-redact`), secret values may appear in logs—avoid in shared terminals or CI unless strictly necessary.
+
 ### Development Build
 ```bash
 cargo run -- --help
