@@ -4,12 +4,13 @@
 //! for the exec command, targeting the correct workspace container.
 
 use anyhow::Result;
-use deacon_core::config::{ConfigLoader, DevContainerConfig};
-use deacon_core::container::ContainerIdentity;
-use deacon_core::docker::CliDocker;
-use deacon_core::docker::Docker;
+use deacon_core::config::DevContainerConfig;
+#[cfg(feature = "docker")] use deacon_core::config::ConfigLoader;
+#[cfg(feature = "docker")] use deacon_core::container::ContainerIdentity;
+#[cfg(feature = "docker")] use deacon_core::docker::CliDocker;
+#[cfg(feature = "docker")] use deacon_core::docker::Docker;
 use deacon_core::errors::{ConfigError, DeaconError};
-use std::collections::HashMap;
+#[cfg(feature = "docker")] use std::collections::HashMap;
 use std::path::Path;
 use tracing::{debug, instrument};
 
@@ -31,6 +32,7 @@ pub struct ExecArgs {
 }
 
 /// Resolve the target container for the current workspace/config
+#[cfg(feature = "docker")]
 #[instrument(skip(docker_client))]
 pub async fn resolve_target_container<D>(
     docker_client: &D,
@@ -115,13 +117,20 @@ pub fn determine_container_working_dir(
 }
 
 /// Execute the exec command
-#[instrument(skip(args))]
-pub async fn execute_exec(args: ExecArgs) -> Result<()> {
-    execute_exec_with_docker(args, &CliDocker::new()).await
+#[instrument]
+pub async fn execute_exec(_args: ExecArgs) -> Result<()> {
+    #[cfg(feature = "docker")] {
+        return execute_exec_with_docker(_args, &CliDocker::new()).await;
+    }
+    #[cfg(not(feature = "docker"))]
+    {
+        return Err(DeaconError::Config(ConfigError::NotImplemented { feature: "exec command (docker support disabled)".to_string() }).into());
+    }
 }
 
 /// Execute the exec command with a custom Docker implementation
-#[instrument(skip(args, docker_client))]
+#[instrument(skip(docker_client))]
+#[cfg(feature = "docker")]
 pub async fn execute_exec_with_docker<D>(args: ExecArgs, docker_client: &D) -> Result<()>
 where
     D: Docker,
@@ -137,7 +146,7 @@ where
         tracing::info!("Executing command in container: {:?}", args.command);
 
         // Parse environment variables early to catch format errors
-        let mut env_map = HashMap::new();
+    let mut env_map = HashMap::new();
         for env_var in &args.env {
             if let Some((key, value)) = env_var.split_once('=') {
                 env_map.insert(key.to_string(), value.to_string());
@@ -171,8 +180,7 @@ where
         docker_client.ping().await?;
 
         // Resolve target container
-        let container_id =
-            resolve_target_container(docker_client, workspace_folder, &config).await?;
+        let container_id = resolve_target_container(docker_client, workspace_folder, &config).await?;
 
         // Determine TTY allocation
         let should_use_tty = !args.no_tty && CliDocker::is_tty();
@@ -190,10 +198,7 @@ where
             detach: false,
         };
 
-        match docker_client
-            .exec(&container_id, &args.command, exec_config)
-            .await
-        {
+        match docker_client.exec(&container_id, &args.command, exec_config).await {
             Ok(result) => {
                 tracing::info!("Command completed with exit code: {}", result.exit_code);
                 std::process::exit(result.exit_code);
@@ -206,13 +211,7 @@ where
     }
 
     #[cfg(not(feature = "docker"))]
-    {
-        tracing::warn!("Docker support is disabled (compiled without 'docker' feature)");
-        Err(DeaconError::Config(ConfigError::NotImplemented {
-            feature: "exec command (docker support disabled)".to_string(),
-        })
-        .into())
-    }
+    unreachable!("Function should not be called when docker feature is disabled");
 }
 
 #[cfg(test)]
