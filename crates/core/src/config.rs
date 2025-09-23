@@ -651,6 +651,176 @@ impl DevContainerConfig {
         (config, report)
     }
 
+    /// Apply variable substitution to the configuration with advanced options
+    ///
+    /// This method applies variable substitution to all string fields in the configuration
+    /// using advanced substitution features including multi-pass resolution, cycle detection,
+    /// and strict mode.
+    ///
+    /// ## Arguments
+    ///
+    /// * `context` - Substitution context containing variable values
+    /// * `options` - Advanced substitution options
+    /// * `report` - Mutable report to track substitutions
+    ///
+    /// ## Returns
+    ///
+    /// Returns the substituted configuration.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use deacon_core::config::DevContainerConfig;
+    /// use deacon_core::variable::{SubstitutionContext, SubstitutionOptions, SubstitutionReport};
+    /// use std::path::Path;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let mut config = DevContainerConfig::default();
+    /// config.workspace_folder = Some("${localWorkspaceFolder}/src".to_string());
+    ///
+    /// let context = SubstitutionContext::new(Path::new("/workspace"))?;
+    /// let options = SubstitutionOptions::default();
+    /// let mut report = SubstitutionReport::new();
+    ///
+    /// let substituted_config = config.apply_variable_substitution_advanced(&context, &options, &mut report)?;
+    ///
+    /// println!("Substituted workspace folder: {:?}", substituted_config.workspace_folder);
+    /// println!("Substitutions made: {}", report.replacements.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip_all)]
+    pub fn apply_variable_substitution_advanced(
+        &self,
+        context: &SubstitutionContext,
+        options: &crate::variable::SubstitutionOptions,
+        report: &mut SubstitutionReport,
+    ) -> crate::errors::Result<Self> {
+        let mut config = self.clone();
+
+        debug!("Applying advanced variable substitution to DevContainer configuration");
+
+        // Substitute workspace_folder
+        if let Some(ref workspace_folder) = config.workspace_folder {
+            config.workspace_folder = Some(VariableSubstitution::substitute_string_advanced(
+                workspace_folder,
+                context,
+                options,
+                report,
+            )?);
+        }
+
+        // Substitute workspace_mount
+        if let Some(ref workspace_mount) = config.workspace_mount {
+            config.workspace_mount = Some(VariableSubstitution::substitute_string_advanced(
+                workspace_mount,
+                context,
+                options,
+                report,
+            )?);
+        }
+
+        // Substitute mounts (JSON values that may contain strings)
+        let mut substituted_mounts = Vec::new();
+        for mount in &config.mounts {
+            substituted_mounts.push(VariableSubstitution::substitute_json_value_with_options(
+                mount, context, options, report,
+            )?);
+        }
+        config.mounts = substituted_mounts;
+
+        // Substitute run_args
+        let mut substituted_run_args = Vec::new();
+        for arg in &config.run_args {
+            substituted_run_args.push(VariableSubstitution::substitute_string_advanced(
+                arg, context, options, report,
+            )?);
+        }
+        config.run_args = substituted_run_args;
+
+        // Substitute container environment variables
+        let mut substituted_container_env = HashMap::new();
+        for (key, value) in &config.container_env {
+            let substituted_value =
+                VariableSubstitution::substitute_string_advanced(value, context, options, report)?;
+            substituted_container_env.insert(key.clone(), substituted_value);
+        }
+        config.container_env = substituted_container_env;
+
+        // Substitute remote environment variables
+        let mut substituted_remote_env = HashMap::new();
+        for (key, value) in &config.remote_env {
+            if let Some(val) = value {
+                let substituted_value = VariableSubstitution::substitute_string_advanced(
+                    val, context, options, report,
+                )?;
+                substituted_remote_env.insert(key.clone(), Some(substituted_value));
+            } else {
+                substituted_remote_env.insert(key.clone(), None);
+            }
+        }
+        config.remote_env = substituted_remote_env;
+
+        // Substitute lifecycle commands
+        if let Some(ref on_create_command) = config.on_create_command {
+            config.on_create_command =
+                Some(VariableSubstitution::substitute_json_value_with_options(
+                    on_create_command,
+                    context,
+                    options,
+                    report,
+                )?);
+        }
+
+        if let Some(ref update_content_command) = config.update_content_command {
+            config.update_content_command =
+                Some(VariableSubstitution::substitute_json_value_with_options(
+                    update_content_command,
+                    context,
+                    options,
+                    report,
+                )?);
+        }
+
+        if let Some(ref post_create_command) = config.post_create_command {
+            config.post_create_command =
+                Some(VariableSubstitution::substitute_json_value_with_options(
+                    post_create_command,
+                    context,
+                    options,
+                    report,
+                )?);
+        }
+
+        if let Some(ref post_start_command) = config.post_start_command {
+            config.post_start_command =
+                Some(VariableSubstitution::substitute_json_value_with_options(
+                    post_start_command,
+                    context,
+                    options,
+                    report,
+                )?);
+        }
+
+        if let Some(ref post_attach_command) = config.post_attach_command {
+            config.post_attach_command =
+                Some(VariableSubstitution::substitute_json_value_with_options(
+                    post_attach_command,
+                    context,
+                    options,
+                    report,
+                )?);
+        }
+
+        debug!(
+            "Advanced variable substitution completed: {} substitutions, {} unknown variables",
+            report.replacements.len(),
+            report.unknown_variables.len()
+        );
+
+        Ok(config)
+    }
+
     /// Get Docker Compose files as a vector of strings
     ///
     /// Parses the `docker_compose_file` field which can be either a string or an array of strings.

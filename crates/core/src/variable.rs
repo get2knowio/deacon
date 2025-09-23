@@ -37,6 +37,30 @@ use tracing::{debug, instrument};
 /// Regular expression pattern for variable substitution tokens
 const VARIABLE_PATTERN: &str = r"\$\{([^}]+)\}";
 
+/// Maximum recursion depth for nested variable substitution
+const MAX_SUBSTITUTION_DEPTH: usize = 5;
+
+/// Substitution options for controlling behavior
+#[derive(Debug, Clone)]
+pub struct SubstitutionOptions {
+    /// Maximum recursion depth for nested substitution
+    pub max_depth: usize,
+    /// Whether to fail on unresolved variables (strict mode)
+    pub strict: bool,
+    /// Enable multi-pass resolution for nested variables
+    pub enable_nested: bool,
+}
+
+impl Default for SubstitutionOptions {
+    fn default() -> Self {
+        Self {
+            max_depth: MAX_SUBSTITUTION_DEPTH,
+            strict: false,
+            enable_nested: true,
+        }
+    }
+}
+
 /// Substitution context containing values for variable resolution
 #[derive(Debug, Clone)]
 pub struct SubstitutionContext {
@@ -50,6 +74,8 @@ pub struct SubstitutionContext {
     pub container_workspace_folder: Option<String>,
     /// Container environment variables (for in-container execution)
     pub container_env: Option<HashMap<String, String>>,
+    /// Feature-provided variables (for advanced substitution)
+    pub feature_vars: HashMap<String, String>,
 }
 
 impl SubstitutionContext {
@@ -119,6 +145,7 @@ impl SubstitutionContext {
             devcontainer_id,
             container_workspace_folder: None,
             container_env: None,
+            feature_vars: HashMap::new(),
         })
     }
 
@@ -149,15 +176,32 @@ impl SubstitutionContext {
         self.container_env = Some(container_env);
         self
     }
+
+    /// Set feature-provided variables for advanced substitution
+    pub fn with_feature_vars(mut self, feature_vars: HashMap<String, String>) -> Self {
+        self.feature_vars = feature_vars;
+        self
+    }
+
+    /// Add a single feature variable
+    pub fn add_feature_var(&mut self, key: String, value: String) {
+        self.feature_vars.insert(key, value);
+    }
 }
 
 /// Report of variable substitutions performed
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct SubstitutionReport {
     /// Map of variable names to their resolved values
     pub replacements: HashMap<String, String>,
     /// List of unknown variables that were left unchanged
     pub unknown_variables: Vec<String>,
+    /// Variables that failed to resolve in strict mode
+    pub failed_variables: Vec<String>,
+    /// Cycle detection warnings
+    pub cycle_warnings: Vec<String>,
+    /// Number of substitution passes performed
+    pub passes: usize,
 }
 
 impl SubstitutionReport {
@@ -176,9 +220,34 @@ impl SubstitutionReport {
         self.unknown_variables.push(variable);
     }
 
+    /// Record a variable that failed to resolve in strict mode
+    pub fn add_failed_variable(&mut self, variable: String) {
+        self.failed_variables.push(variable);
+    }
+
+    /// Record a cycle detection warning
+    pub fn add_cycle_warning(&mut self, warning: String) {
+        self.cycle_warnings.push(warning);
+    }
+
+    /// Increment the pass counter
+    pub fn increment_passes(&mut self) {
+        self.passes += 1;
+    }
+
     /// Check if any substitutions were performed
     pub fn has_substitutions(&self) -> bool {
         !self.replacements.is_empty() || !self.unknown_variables.is_empty()
+    }
+
+    /// Check if there were any errors in strict mode
+    pub fn has_errors(&self) -> bool {
+        !self.failed_variables.is_empty()
+    }
+
+    /// Check if there were any cycle warnings
+    pub fn has_cycles(&self) -> bool {
+        !self.cycle_warnings.is_empty()
     }
 }
 
@@ -186,7 +255,93 @@ impl SubstitutionReport {
 pub struct VariableSubstitution;
 
 impl VariableSubstitution {
-    /// Apply variable substitution to a string value
+    /// Apply variable substitution to a string value with advanced options
+    ///
+    /// This method supports:
+    /// 1. Multi-pass nested variable resolution
+    /// 2. Cycle detection and prevention
+    /// 3. Strict mode for failing on unresolved variables
+    ///
+    /// ## Arguments
+    ///
+    /// * `input` - Input string that may contain variable tokens
+    /// * `context` - Substitution context with variable values
+    /// * `options` - Options controlling substitution behavior
+    /// * `report` - Mutable report to track substitutions
+    ///
+    /// ## Returns
+    ///
+    /// Returns the input string with variable tokens replaced by their resolved values.
+    #[instrument(skip_all, fields(input_length = input.len(), max_depth = options.max_depth, strict = options.strict))]
+    pub fn substitute_string_advanced(
+        input: &str,
+        context: &SubstitutionContext,
+        options: &SubstitutionOptions,
+        report: &mut SubstitutionReport,
+    ) -> Result<String> {
+        if !options.enable_nested {
+            // Single-pass mode for backward compatibility
+            report.increment_passes();
+            return Ok(Self::substitute_string_single_pass(input, context, report));
+        }
+
+        let mut result = input.to_string();
+        let mut depth = 0;
+        let mut previous_results = Vec::new();
+
+        while depth < options.max_depth {
+            let new_result = Self::substitute_string_single_pass(&result, context, report);
+            report.increment_passes();
+
+            // Check for cycle detection
+            if previous_results.contains(&new_result) {
+                let cycle_warning = format!(
+                    "Cycle detected in variable substitution at depth {}: '{}'",
+                    depth, new_result
+                );
+                debug!("{}", cycle_warning);
+                report.add_cycle_warning(cycle_warning);
+                break;
+            }
+
+            // If no changes were made, we're done
+            if new_result == result {
+                break;
+            }
+
+            previous_results.push(result.clone());
+            result = new_result;
+            depth += 1;
+        }
+
+        // Check if we hit max depth without resolution
+        if depth >= options.max_depth {
+            let warning = format!(
+                "Variable substitution reached maximum depth {} without full resolution: '{}'",
+                options.max_depth, result
+            );
+            debug!("{}", warning);
+            report.add_cycle_warning(warning);
+        }
+
+        // In strict mode, fail if there are unresolved variables
+        if options.strict && Self::has_unresolved_variables(&result) {
+            let unresolved = Self::extract_unresolved_variables(&result);
+            for var in &unresolved {
+                report.add_failed_variable(var.clone());
+            }
+            return Err(DeaconError::Config(ConfigError::Validation {
+                message: format!(
+                    "Unresolved variables in strict mode: {}",
+                    unresolved.join(", ")
+                ),
+            }));
+        }
+
+        Ok(result)
+    }
+
+    /// Apply variable substitution to a string value (backward compatible)
     ///
     /// This method:
     /// 1. Finds all variable tokens using regex pattern matching
@@ -231,6 +386,15 @@ impl VariableSubstitution {
         context: &SubstitutionContext,
         report: &mut SubstitutionReport,
     ) -> String {
+        Self::substitute_string_single_pass(input, context, report)
+    }
+
+    /// Single-pass variable substitution implementation
+    fn substitute_string_single_pass(
+        input: &str,
+        context: &SubstitutionContext,
+        report: &mut SubstitutionReport,
+    ) -> String {
         let regex = regex::Regex::new(VARIABLE_PATTERN)
             .expect("Variable substitution regex should be valid");
 
@@ -256,6 +420,23 @@ impl VariableSubstitution {
         result.to_string()
     }
 
+    /// Check if a string contains unresolved variable tokens
+    fn has_unresolved_variables(input: &str) -> bool {
+        let regex = regex::Regex::new(VARIABLE_PATTERN)
+            .expect("Variable substitution regex should be valid");
+        regex.is_match(input)
+    }
+
+    /// Extract unresolved variable names from a string
+    fn extract_unresolved_variables(input: &str) -> Vec<String> {
+        let regex = regex::Regex::new(VARIABLE_PATTERN)
+            .expect("Variable substitution regex should be valid");
+        regex
+            .captures_iter(input)
+            .map(|caps| caps[1].to_string())
+            .collect()
+    }
+
     /// Resolve a variable expression to its value
     ///
     /// Handles the supported variable types:
@@ -264,6 +445,7 @@ impl VariableSubstitution {
     /// - `devcontainerId` - Returns deterministic container ID
     /// - `containerWorkspaceFolder` - Returns container workspace path (if available)
     /// - `containerEnv:VAR` - Returns container environment variable (if available)
+    /// - `feature:VAR` - Returns feature-provided variable (if available)
     fn resolve_variable(variable_expr: &str, context: &SubstitutionContext) -> Option<String> {
         match variable_expr {
             "localWorkspaceFolder" => Some(context.local_workspace_folder.clone()),
@@ -280,6 +462,10 @@ impl VariableSubstitution {
                     .as_ref()
                     .and_then(|env| env.get(env_var).cloned())
                     .or_else(|| Some(String::new())) // Return empty string if container env not available or var not found
+            }
+            expr if expr.starts_with("feature:") => {
+                let feature_var = &expr[8..]; // Remove "feature:" prefix
+                context.feature_vars.get(feature_var).cloned()
             }
             _ => None, // Unknown variable
         }
@@ -305,24 +491,64 @@ impl VariableSubstitution {
         context: &SubstitutionContext,
         report: &mut SubstitutionReport,
     ) -> Value {
+        Self::substitute_json_value_with_options(
+            value,
+            context,
+            &SubstitutionOptions::default(),
+            report,
+        )
+        .unwrap_or_else(|_| value.clone())
+    }
+
+    /// Apply substitution to a JSON value recursively with advanced options
+    ///
+    /// This method supports advanced substitution features including:
+    /// - Multi-pass nested variable resolution
+    /// - Strict mode error handling
+    /// - Cycle detection
+    ///
+    /// ## Arguments
+    ///
+    /// * `value` - JSON value to process
+    /// * `context` - Substitution context with variable values
+    /// * `options` - Options controlling substitution behavior
+    /// * `report` - Mutable report to track substitutions
+    ///
+    /// ## Returns
+    ///
+    /// Returns the JSON value with variable substitutions applied to string values.
+    pub fn substitute_json_value_with_options(
+        value: &Value,
+        context: &SubstitutionContext,
+        options: &SubstitutionOptions,
+        report: &mut SubstitutionReport,
+    ) -> Result<Value> {
         match value {
-            Value::String(s) => Value::String(Self::substitute_string(s, context, report)),
+            Value::String(s) => {
+                let substituted = Self::substitute_string_advanced(s, context, options, report)?;
+                Ok(Value::String(substituted))
+            }
             Value::Array(arr) => {
-                let substituted: Vec<Value> = arr
-                    .iter()
-                    .map(|v| Self::substitute_json_value(v, context, report))
-                    .collect();
-                Value::Array(substituted)
+                let mut substituted = Vec::new();
+                for v in arr {
+                    substituted.push(Self::substitute_json_value_with_options(
+                        v, context, options, report,
+                    )?);
+                }
+                Ok(Value::Array(substituted))
             }
             Value::Object(obj) => {
-                let substituted: serde_json::Map<String, Value> = obj
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Self::substitute_json_value(v, context, report)))
-                    .collect();
-                Value::Object(substituted)
+                let mut substituted = serde_json::Map::new();
+                for (k, v) in obj {
+                    substituted.insert(
+                        k.clone(),
+                        Self::substitute_json_value_with_options(v, context, options, report)?,
+                    );
+                }
+                Ok(Value::Object(substituted))
             }
             // For non-string values, return as-is
-            _ => value.clone(),
+            _ => Ok(value.clone()),
         }
     }
 }
@@ -670,5 +896,324 @@ mod tests {
 
         env::remove_var("TEST_LOCAL");
         Ok(())
+    }
+
+    #[test]
+    fn test_advanced_substitution_with_options() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?;
+        let mut report = SubstitutionReport::new();
+
+        let options = SubstitutionOptions {
+            max_depth: 3,
+            strict: false,
+            enable_nested: true,
+        };
+
+        let input = "${localWorkspaceFolder}/src";
+        let result = VariableSubstitution::substitute_string_advanced(
+            input,
+            &context,
+            &options,
+            &mut report,
+        )?;
+
+        assert!(result.starts_with(&context.local_workspace_folder));
+        assert!(result.ends_with("/src"));
+        assert!(report.replacements.contains_key("localWorkspaceFolder"));
+        assert!(report.passes >= 1); // Could be 1 or 2 depending on nested resolution logic
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_single_pass_mode() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?;
+        let mut report = SubstitutionReport::new();
+
+        let options = SubstitutionOptions {
+            max_depth: 3,
+            strict: false,
+            enable_nested: false, // Single-pass mode
+        };
+
+        let input = "${localWorkspaceFolder}/src";
+        let result = VariableSubstitution::substitute_string_advanced(
+            input,
+            &context,
+            &options,
+            &mut report,
+        )?;
+
+        assert!(result.starts_with(&context.local_workspace_folder));
+        assert!(result.ends_with("/src"));
+        assert!(report.replacements.contains_key("localWorkspaceFolder"));
+        assert_eq!(report.passes, 1); // Single pass mode should always be 1
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_nested_variable_substitution() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        env::set_var("NESTED_TEST_VAR", "localWorkspaceFolder");
+
+        let mut context = SubstitutionContext::new(temp_dir.path())?;
+        context.add_feature_var(
+            "dynamicVar".to_string(),
+            "${localEnv:NESTED_TEST_VAR}".to_string(),
+        );
+
+        let mut report = SubstitutionReport::new();
+        let options = SubstitutionOptions::default();
+
+        // This should resolve ${feature:dynamicVar} -> ${localEnv:NESTED_TEST_VAR} -> localWorkspaceFolder -> actual path
+        let input = "${feature:dynamicVar}/src";
+        let result = VariableSubstitution::substitute_string_advanced(
+            input,
+            &context,
+            &options,
+            &mut report,
+        )?;
+
+        // Should resolve to the literal string "localWorkspaceFolder/src" since the nested resolution
+        // would resolve to the variable name, not the value
+        assert_eq!(result, "localWorkspaceFolder/src");
+        assert!(report.passes > 1);
+
+        env::remove_var("NESTED_TEST_VAR");
+        Ok(())
+    }
+
+    #[test]
+    fn test_cycle_detection() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let mut context = SubstitutionContext::new(temp_dir.path())?;
+
+        // Create a circular reference: var1 -> var2 -> var1
+        context.add_feature_var("var1".to_string(), "${feature:var2}".to_string());
+        context.add_feature_var("var2".to_string(), "${feature:var1}".to_string());
+
+        let mut report = SubstitutionReport::new();
+        let options = SubstitutionOptions::default();
+
+        let input = "${feature:var1}";
+        let _result = VariableSubstitution::substitute_string_advanced(
+            input,
+            &context,
+            &options,
+            &mut report,
+        )?;
+
+        // Should detect cycle and stop
+        assert!(report.has_cycles());
+        assert!(!report.cycle_warnings.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_strict_mode_failure() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?;
+        let mut report = SubstitutionReport::new();
+
+        let options = SubstitutionOptions {
+            max_depth: 3,
+            strict: true,
+            enable_nested: true,
+        };
+
+        let input = "${unknownVariable}";
+        let result = VariableSubstitution::substitute_string_advanced(
+            input,
+            &context,
+            &options,
+            &mut report,
+        );
+
+        assert!(result.is_err());
+        assert!(report.has_errors());
+        assert!(!report.failed_variables.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_strict_mode_success() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?;
+        let mut report = SubstitutionReport::new();
+
+        let options = SubstitutionOptions {
+            max_depth: 3,
+            strict: true,
+            enable_nested: true,
+        };
+
+        let input = "${localWorkspaceFolder}/src";
+        let result = VariableSubstitution::substitute_string_advanced(
+            input,
+            &context,
+            &options,
+            &mut report,
+        )?;
+
+        assert!(result.starts_with(&context.local_workspace_folder));
+        assert!(result.ends_with("/src"));
+        assert!(!report.has_errors());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_feature_variable_substitution() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let mut context = SubstitutionContext::new(temp_dir.path())?;
+        context.add_feature_var("customPath".to_string(), "/custom/feature/path".to_string());
+
+        let mut report = SubstitutionReport::new();
+
+        let input = "Path: ${feature:customPath}";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        assert_eq!(result, "Path: /custom/feature/path");
+        assert!(report.replacements.contains_key("feature:customPath"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_unknown_feature_variable() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?;
+        let mut report = SubstitutionReport::new();
+
+        let input = "Path: ${feature:unknownVar}";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        assert_eq!(result, "Path: ${feature:unknownVar}");
+        assert!(report
+            .unknown_variables
+            .contains(&"feature:unknownVar".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_advanced_json_substitution() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let mut context = SubstitutionContext::new(temp_dir.path())?;
+        context.add_feature_var("version".to_string(), "1.0.0".to_string());
+
+        let mut report = SubstitutionReport::new();
+        let options = SubstitutionOptions::default();
+
+        // Test complex JSON structure with various variable types
+        let json_value = serde_json::json!({
+            "workspace": "${localWorkspaceFolder}",
+            "container_id": "${devcontainerId}",
+            "feature_version": "${feature:version}",
+            "paths": [
+                "${localWorkspaceFolder}/src",
+                "${localWorkspaceFolder}/tests"
+            ],
+            "config": {
+                "base_path": "${localWorkspaceFolder}",
+                "version": "${feature:version}"
+            }
+        });
+
+        let result = VariableSubstitution::substitute_json_value_with_options(
+            &json_value,
+            &context,
+            &options,
+            &mut report,
+        )?;
+
+        // Verify substitutions were applied
+        assert_eq!(result["workspace"], context.local_workspace_folder);
+        assert_eq!(result["container_id"], context.devcontainer_id);
+        assert_eq!(result["feature_version"], "1.0.0");
+
+        if let Some(paths) = result["paths"].as_array() {
+            assert_eq!(paths.len(), 2);
+            assert!(paths[0]
+                .as_str()
+                .unwrap()
+                .starts_with(&context.local_workspace_folder));
+        }
+
+        if let Some(config) = result["config"].as_object() {
+            assert_eq!(config["base_path"], context.local_workspace_folder);
+            assert_eq!(config["version"], "1.0.0");
+        }
+
+        assert!(report.has_substitutions());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_max_depth_reached() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let mut context = SubstitutionContext::new(temp_dir.path())?;
+
+        // Create a chain that exceeds max depth
+        context.add_feature_var("var1".to_string(), "${feature:var2}".to_string());
+        context.add_feature_var("var2".to_string(), "${feature:var3}".to_string());
+        context.add_feature_var("var3".to_string(), "${feature:var4}".to_string());
+        context.add_feature_var("var4".to_string(), "final_value".to_string());
+
+        let mut report = SubstitutionReport::new();
+        let options = SubstitutionOptions {
+            max_depth: 2, // Set low depth to trigger warning
+            strict: false,
+            enable_nested: true,
+        };
+
+        let input = "${feature:var1}";
+        let _result = VariableSubstitution::substitute_string_advanced(
+            input,
+            &context,
+            &options,
+            &mut report,
+        )?;
+
+        // Should hit max depth and generate warning
+        assert!(report.has_cycles());
+        assert!(report
+            .cycle_warnings
+            .iter()
+            .any(|w| w.contains("maximum depth")));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_substitution_report_enhanced() {
+        let mut report = SubstitutionReport::new();
+
+        assert!(!report.has_substitutions());
+        assert!(!report.has_errors());
+        assert!(!report.has_cycles());
+        assert_eq!(report.passes, 0);
+
+        report.add_replacement("var1".to_string(), "value1".to_string());
+        report.add_unknown_variable("var2".to_string());
+        report.add_failed_variable("var3".to_string());
+        report.add_cycle_warning("Cycle detected".to_string());
+        report.increment_passes();
+
+        assert!(report.has_substitutions());
+        assert!(report.has_errors());
+        assert!(report.has_cycles());
+        assert_eq!(report.passes, 1);
+
+        assert_eq!(report.replacements.len(), 1);
+        assert_eq!(report.unknown_variables.len(), 1);
+        assert_eq!(report.failed_variables.len(), 1);
+        assert_eq!(report.cycle_warnings.len(), 1);
     }
 }
