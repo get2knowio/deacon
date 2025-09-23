@@ -11,6 +11,7 @@ use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
 
@@ -433,7 +434,6 @@ async fn execute_docker_build(
     config_hash: &str,
     workspace_folder: &Path,
 ) -> Result<BuildResult> {
-    #[cfg(feature = "docker")]
     {
         use deacon_core::docker::{CliDocker, Docker};
         use std::process::Command;
@@ -447,8 +447,8 @@ async fn execute_docker_build(
         debug!("Building Docker image");
 
         // Prepare build context
-    let context_path = workspace_folder.join(&build_config.context);
-    let dockerfile_path = context_path.join(&build_config.dockerfile);
+        let context_path = workspace_folder.join(&build_config.context);
+        let dockerfile_path = context_path.join(&build_config.dockerfile);
 
         // Prepare docker build arguments
         let mut build_args = vec!["build".to_string()];
@@ -488,31 +488,31 @@ async fn execute_docker_build(
         }
 
         // Add target
-    if let Some(target) = &build_config.target {
+        if let Some(target) = &build_config.target {
             build_args.push("--target".to_string());
             build_args.push(target.clone());
         }
 
         // Add build args from config
-    for (key, value) in &build_config.options {
+        for (key, value) in &build_config.options {
             let build_arg_str = format!("{}={}", key, value);
             build_args.push("--build-arg".to_string());
             build_args.push(build_arg_str);
         }
 
         // Add build args from CLI
-    for build_arg in &args.build_arg {
+        for build_arg in &args.build_arg {
             build_args.push("--build-arg".to_string());
             build_args.push(build_arg.clone());
         }
 
         // Add deterministic tag with config hash
-    let tag = format!("deacon-build:{}", &config_hash[..12]);
+        let tag = format!("deacon-build:{}", &config_hash[..12]);
         build_args.push("-t".to_string());
         build_args.push(tag.clone());
 
         // Add label with config hash
-    let label = format!("org.deacon.configHash={}", config_hash);
+        let label = format!("org.deacon.configHash={}", config_hash);
         build_args.push("--label".to_string());
         build_args.push(label);
 
@@ -536,7 +536,7 @@ async fn execute_docker_build(
         let image_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         // Extract image metadata
-    let metadata = extract_image_metadata(&image_id).await?;
+        let metadata = extract_image_metadata(&image_id).await?;
 
         let result = BuildResult {
             image_id,
@@ -549,52 +549,33 @@ async fn execute_docker_build(
         debug!("Docker build completed successfully");
         Ok(result)
     }
-
-    #[cfg(not(feature = "docker"))]
-    {
-        Err(DeaconError::Docker(DockerError::CLIError(
-            "Docker support not available (compiled without 'docker' feature)".to_string(),
-        ))
-        .into())
-    }
 }
 
 /// Extract image metadata using docker inspect
 #[allow(dead_code)]
 async fn extract_image_metadata(image_id: &str) -> Result<HashMap<String, String>> {
-    #[cfg(feature = "docker")]
-    {
-        use std::process::Command;
+    debug!("Extracting metadata for image: {}", image_id);
 
-        debug!("Extracting metadata for image: {}", image_id);
+    let output = Command::new("docker")
+        .args(["inspect", "--format={{json .Config.Labels}}", image_id])
+        .output()
+        .map_err(|e| DockerError::CLIError(format!("Failed to inspect image: {}", e)))?;
 
-        let output = Command::new("docker")
-            .args(["inspect", "--format={{json .Config.Labels}}", image_id])
-            .output()
-            .map_err(|e| DockerError::CLIError(format!("Failed to inspect image: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(DockerError::CLIError(format!("Docker inspect failed: {}", stderr)).into());
-        }
-
-        let labels_json = String::from_utf8_lossy(&output.stdout);
-        let labels: HashMap<String, String> = if labels_json.trim() == "null" {
-            HashMap::new()
-        } else {
-            serde_json::from_str(&labels_json).map_err(|e| {
-                DockerError::CLIError(format!("Failed to parse image labels: {}", e))
-            })?
-        };
-
-        debug!("Extracted {} labels from image", labels.len());
-        Ok(labels)
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DockerError::CLIError(format!("Docker inspect failed: {}", stderr)).into());
     }
 
-    #[cfg(not(feature = "docker"))]
-    {
-        Ok(HashMap::new())
-    }
+    let labels_json = String::from_utf8_lossy(&output.stdout);
+    let labels: HashMap<String, String> = if labels_json.trim() == "null" {
+        HashMap::new()
+    } else {
+        serde_json::from_str(&labels_json)
+            .map_err(|e| DockerError::CLIError(format!("Failed to parse image labels: {}", e)))?
+    };
+
+    debug!("Extracted {} labels from image", labels.len());
+    Ok(labels)
 }
 
 /// Output build result in the specified format with redaction

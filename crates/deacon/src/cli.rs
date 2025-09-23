@@ -89,7 +89,6 @@ pub struct CliContext {
     /// Whether secret redaction is disabled
     pub no_redact: bool,
     /// Enabled plugins
-    #[cfg(feature = "plugins")]
     pub plugins: Vec<String>,
 }
 
@@ -367,7 +366,7 @@ pub struct Cli {
     pub progress_file: Option<PathBuf>,
 
     /// Enable specific plugins
-    #[cfg(feature = "plugins")]
+
     #[arg(long, global = true, value_name = "NAME")]
     pub plugin: Vec<String>,
 
@@ -405,7 +404,7 @@ impl Cli {
             override_config: self.override_config.clone(),
             secrets_files: self.secrets_file.clone(),
             no_redact: self.no_redact,
-            #[cfg(feature = "plugins")]
+
             plugins: self.plugin.clone(),
         }
     }

@@ -3,25 +3,17 @@
 //! This module handles Docker client abstraction, container lifecycle management,
 //! image building, and container execution.
 
-#[cfg(feature = "docker")]
 use crate::config::DevContainerConfig;
-#[cfg(feature = "docker")]
 use crate::container::{ContainerIdentity, ContainerOps, ContainerResult};
-#[cfg(feature = "docker")]
 use crate::errors::{DockerError, Result};
-#[cfg(feature = "docker")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "docker")]
 use std::collections::HashMap;
-#[cfg(feature = "docker")]
 use std::path::Path;
-#[cfg(feature = "docker")]
 use std::process::Command;
-#[cfg(feature = "docker")]
 use tracing::{debug, instrument};
 
 /// Container information returned by Docker operations
-#[cfg(feature = "docker")]
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContainerInfo {
     /// Container ID
@@ -41,7 +33,7 @@ pub struct ContainerInfo {
 }
 
 /// Represents an exposed port from a container
-#[cfg(feature = "docker")]
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExposedPort {
     /// Port number
@@ -51,7 +43,7 @@ pub struct ExposedPort {
 }
 
 /// Represents a port mapping from host to container
-#[cfg(feature = "docker")]
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortMapping {
     /// Host port
@@ -65,7 +57,7 @@ pub struct PortMapping {
 }
 
 /// Configuration for executing commands in containers
-#[cfg(feature = "docker")]
+
 #[derive(Debug, Clone)]
 pub struct ExecConfig {
     /// User to run command as
@@ -83,7 +75,7 @@ pub struct ExecConfig {
 }
 
 /// Result of executing a command in a container
-#[cfg(feature = "docker")]
+
 #[derive(Debug)]
 pub struct ExecResult {
     /// Exit code of the command
@@ -93,7 +85,6 @@ pub struct ExecResult {
 }
 
 /// Docker client abstraction trait
-#[cfg(feature = "docker")]
 #[allow(async_fn_in_trait)]
 pub trait Docker {
     /// Health check for Docker daemon availability
@@ -118,7 +109,6 @@ pub trait Docker {
 }
 
 /// Docker client abstraction trait extended with container lifecycle operations
-#[cfg(feature = "docker")]
 #[allow(async_fn_in_trait)]
 pub trait DockerLifecycle: Docker + ContainerOps {
     /// Execute the complete `up` workflow: find existing containers, reuse or create new
@@ -132,7 +122,7 @@ pub trait DockerLifecycle: Docker + ContainerOps {
 }
 
 // Implement Docker trait for references to types that implement Docker
-#[cfg(feature = "docker")]
+
 impl<T: Docker> Docker for &T {
     async fn ping(&self) -> Result<()> {
         (*self).ping().await
@@ -161,14 +151,13 @@ impl<T: Docker> Docker for &T {
 }
 
 /// CLI-based Docker implementation using docker command
-#[cfg(feature = "docker")]
+
 #[derive(Debug, Default)]
 pub struct CliDocker {
     /// Docker CLI binary path
     docker_path: String,
 }
 
-#[cfg(feature = "docker")]
 impl CliDocker {
     /// Create a new CliDocker instance
     pub fn new() -> Self {
@@ -355,7 +344,6 @@ impl CliDocker {
     }
 
     /// Check if we're running in a TTY
-    #[cfg(feature = "docker")]
     pub fn is_tty() -> bool {
         use std::io::IsTerminal;
         std::io::stdin().is_terminal()
@@ -434,7 +422,6 @@ impl CliDocker {
     }
 }
 
-#[cfg(feature = "docker")]
 impl Docker for CliDocker {
     #[instrument(skip(self))]
     async fn ping(&self) -> Result<()> {
@@ -771,7 +758,6 @@ impl Docker for CliDocker {
     }
 }
 
-#[cfg(feature = "docker")]
 impl ContainerOps for CliDocker {
     #[instrument(skip(self))]
     async fn find_matching_containers(&self, identity: &ContainerIdentity) -> Result<Vec<String>> {
@@ -986,7 +972,6 @@ impl ContainerOps for CliDocker {
     }
 }
 
-#[cfg(feature = "docker")]
 impl DockerLifecycle for CliDocker {
     #[instrument(skip(self, config))]
     async fn up(
@@ -1048,25 +1033,7 @@ impl DockerLifecycle for CliDocker {
         })
     }
 }
-// Non-docker feature fallback
-#[cfg(not(feature = "docker"))]
-pub struct DockerClient;
 
-#[cfg(not(feature = "docker"))]
-impl DockerClient {
-    pub fn new() -> anyhow::Result<Self> {
-        Ok(DockerClient)
-    }
-}
-
-#[cfg(not(feature = "docker"))]
-impl Default for DockerClient {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default Docker client")
-    }
-}
-
-#[cfg(feature = "docker")]
 pub mod mock {
     //! Mock Docker runtime for testing exec and lifecycle flows
     //!
@@ -1666,14 +1633,12 @@ pub mod mock {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_cli_docker_new() {
         let docker = CliDocker::new();
         assert_eq!(docker.docker_path, "docker");
     }
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_cli_docker_with_path() {
         let custom_path = "/usr/local/bin/docker";
@@ -1681,7 +1646,6 @@ mod tests {
         assert_eq!(docker.docker_path, custom_path);
     }
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_parse_container_list_empty() {
         let docker = CliDocker::new();
@@ -1689,7 +1653,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_parse_container_list_single_container() {
         let docker = CliDocker::new();
@@ -1704,7 +1667,6 @@ mod tests {
         assert_eq!(result[0].state, "running");
     }
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_parse_container_list_multiple_containers() {
         let docker = CliDocker::new();
@@ -1717,7 +1679,6 @@ mod tests {
         assert_eq!(result[1].id, "def456");
     }
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_parse_container_inspect_empty() {
         let docker = CliDocker::new();
@@ -1725,7 +1686,6 @@ mod tests {
         assert!(result.is_none());
     }
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_parse_container_inspect_single_container() {
         let docker = CliDocker::new();
@@ -1743,7 +1703,6 @@ mod tests {
         assert_eq!(container.port_mappings.len(), 0); // No port mappings in this test data
     }
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_parse_container_inspect_empty_array() {
         let docker = CliDocker::new();
@@ -1751,7 +1710,6 @@ mod tests {
         assert!(result.is_none());
     }
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_container_info_serialization() {
         let container = ContainerInfo {
@@ -1782,7 +1740,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "docker")]
     #[test]
     fn test_parse_container_with_ports() {
         let docker = CliDocker::new();
@@ -1835,13 +1792,6 @@ mod tests {
             && p.container_port == 8080
             && p.protocol == "tcp"
             && p.host_ip == "127.0.0.1"));
-    }
-
-    #[cfg(not(feature = "docker"))]
-    #[test]
-    fn test_docker_client_without_feature() {
-        let _client = DockerClient::new().unwrap();
-        let _default_client = DockerClient::default();
     }
 
     // Mock Docker tests

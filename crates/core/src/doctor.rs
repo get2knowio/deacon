@@ -3,6 +3,7 @@
 //! This module provides functionality to collect system information, Docker details,
 //! configuration discovery results, and create support bundles for troubleshooting.
 
+use crate::docker::{CliDocker, Docker};
 use crate::errors::{DeaconError, Result};
 use bytesize::ByteSize;
 use regex::Regex;
@@ -188,54 +189,38 @@ fn collect_host_os_info() -> HostOsInfo {
 async fn collect_docker_info() -> DockerDiagnostics {
     debug!("Collecting Docker information");
 
-    #[cfg(feature = "docker")]
-    {
-        use crate::docker::{CliDocker, Docker};
+    let docker_client = CliDocker::new();
 
-        let docker_client = CliDocker::new();
+    // Check if Docker is installed
+    let installed = docker_client.check_docker_installed().is_ok();
 
-        // Check if Docker is installed
-        let installed = docker_client.check_docker_installed().is_ok();
-
-        if !installed {
-            return DockerDiagnostics {
-                installed: false,
-                version: None,
-                daemon_running: false,
-                info_summary: None,
-            };
-        }
-
-        // Get Docker version
-        let version = docker_client.get_version().await.ok();
-
-        // Check if daemon is running
-        let daemon_running = docker_client.ping().await.is_ok();
-
-        // Get Docker info summary if daemon is running
-        let info_summary = if daemon_running {
-            docker_client.get_info_summary().await.ok()
-        } else {
-            None
-        };
-
-        DockerDiagnostics {
-            installed,
-            version,
-            daemon_running,
-            info_summary,
-        }
-    }
-
-    #[cfg(not(feature = "docker"))]
-    {
-        warn!("Docker support disabled at compile time");
-        DockerDiagnostics {
+    if !installed {
+        return DockerDiagnostics {
             installed: false,
             version: None,
             daemon_running: false,
             info_summary: None,
-        }
+        };
+    }
+
+    // Get Docker version
+    let version = docker_client.get_version().await.ok();
+
+    // Check if daemon is running
+    let daemon_running = docker_client.ping().await.is_ok();
+
+    // Get Docker info summary if daemon is running
+    let info_summary = if daemon_running {
+        docker_client.get_info_summary().await.ok()
+    } else {
+        None
+    };
+
+    DockerDiagnostics {
+        installed,
+        version,
+        daemon_running,
+        info_summary,
     }
 }
 
@@ -467,7 +452,6 @@ async fn create_support_bundle(
     }
 
     // Add truncated docker info if available
-    #[cfg(feature = "docker")]
     if doctor_info.docker_info.daemon_running {
         zip.start_file("docker-info-summary.json", options)
             .map_err(|e| {
@@ -535,7 +519,6 @@ pub fn sanitize_secrets(content: &str) -> Result<String> {
     Ok(sanitized)
 }
 
-#[cfg(feature = "docker")]
 impl crate::docker::CliDocker {
     /// Get Docker version information
     pub async fn get_version(&self) -> Result<String> {
