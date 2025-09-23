@@ -55,7 +55,7 @@ docs/
 | Task | Command |
 |------|---------|
 | Build | `cargo build` |
-| Build (full release feature set) | `cargo build --release --no-default-features --features "docker,config,plugins,json-logs"` |
+| Build (full release feature set) | `cargo build --release` |
 | Test | `cargo test` |
 | Format code | `cargo fmt --all` |
 | Lint (clippy) | `cargo clippy --all-targets -- -D warnings` |
@@ -147,20 +147,17 @@ RUST_LOG=debug cargo run -- --help
 
 ### Production (Distribution) Build Guidance
 
-Homebrew / packaged distribution binaries should expose all implemented functionality so downstream users are not surprised by missing subcommands or logging modes. Use this canonical build command locally to reproduce the release artifact feature set:
+All deacon binaries are built with full functionality enabled by default. Use this simple build command for any distribution:
 
 ```bash
-cargo build --release --no-default-features --features "docker,config,plugins,json-logs"
+cargo build --release
 ```
 
-Explanation of flags:
-- `--no-default-features`: Start from a clean slate (otherwise `docker` is implicitly on) for deterministic feature selection.
-- `docker`: Enables container lifecycle & Docker integration code paths.
-- `config`: Includes extended configuration support (optional deps like `toml`).
-- `plugins`: Enables (experimental) plugin scaffolding so early adopters can test; safe to omit if stabilizing a minimal distribution.
-- `json-logs`: Adds structured JSON logging output for CI / machine parsing.
-
-If a future stable distribution needs a leaner variant, document the difference explicitly (e.g., omit `plugins` for an LTS channel). For now, treat the full set above as the “production” profile.
+All capabilities are always available:
+- Docker integration and container lifecycle operations
+- Configuration format support (including TOML)
+- Plugin system scaffolding (experimental)
+- JSON logging (via `DEACON_LOG_FORMAT=json` environment variable)
 
 ## Getting Help
 - **Issues**: Open a GitHub issue for bugs or feature requests

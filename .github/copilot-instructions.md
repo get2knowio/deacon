@@ -263,7 +263,7 @@ Failure to update examples when altering user‑facing behavior increases drift 
 ## Testing Strategy
 - Favor deterministic tests; isolate environment-dependent logic behind trait abstractions with mock implementations.
 - Use `assert_cmd` for end-to-end CLI invocation tests.
-- Avoid network in unit tests; gate true integration (e.g., Docker) tests behind feature flags or CI-only markers later.
+- Avoid network in unit tests; gate true integration (e.g., Docker) tests behind CI-only markers or environment variables if needed.
 
 ## Adherence to `CLI-SPEC.md`
 > IMPORTANT: All generated code, designs, and refactors MUST remain consistent with `docs/CLI-SPEC.md`. If a requested change deviates (e.g., new command semantics, altered lifecycle order, renamed workflow), respond with a clarification prompt and do not implement until resolved.
