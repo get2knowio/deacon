@@ -654,3 +654,63 @@ fn test_mixed_redaction_types() {
     let result4 = redact_if_enabled("alwayssecret and password=contextsecret", &config);
     assert_eq!(result4, "**** and password=****");
 }
+
+#[test]
+fn test_doctor_output_redaction() {
+    use deacon_core::doctor::DoctorContext;
+    use tempfile::TempDir;
+
+    // Create a temporary directory for the test
+    let temp_dir = TempDir::new().unwrap();
+    let workspace_path = temp_dir.path().to_path_buf();
+
+    // Create a test doctor context (for completeness, though not used in this test)
+    let _context = DoctorContext {
+        workspace_folder: Some(workspace_path),
+        config: None,
+    };
+
+    // Add some secrets to test redaction
+    let registry = SecretRegistry::new();
+    registry.add_secret("secret-api-key-123");
+    registry.add_secret("docker-secret-token");
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Note: This test verifies that doctor output would be redacted if it contained secrets
+    // Since we can't easily run the full doctor command in a unit test, we test the
+    // redaction of sample output that could contain secrets
+    let sample_doctor_output = r#"
+Deacon Doctor Diagnostics
+========================
+
+CLI Version: 1.0.0
+
+Host OS:
+  Name: Linux
+  Version: Ubuntu 20.04
+  Architecture: x86_64
+
+Docker:
+  Installed: true
+  Version: Docker version 20.10.12 with secret-api-key-123
+  Daemon Running: true
+  Storage Driver: overlay2 with docker-secret-token
+
+Configuration Discovery:
+  Workspace: /workspace
+  Primary Config: /workspace/.devcontainer/devcontainer.json
+"#;
+
+    let redacted_output = redact_if_enabled(sample_doctor_output, &config);
+
+    // Verify that secrets are redacted
+    assert!(redacted_output.contains("****"));
+    assert!(!redacted_output.contains("secret-api-key-123"));
+    assert!(!redacted_output.contains("docker-secret-token"));
+
+    // Verify that normal content is preserved
+    assert!(redacted_output.contains("Deacon Doctor Diagnostics"));
+    assert!(redacted_output.contains("CLI Version: 1.0.0"));
+    assert!(redacted_output.contains("Ubuntu 20.04"));
+}

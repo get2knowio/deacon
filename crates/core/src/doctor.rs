@@ -98,22 +98,25 @@ pub async fn run_doctor(
     json_output: bool,
     bundle_path: Option<PathBuf>,
     context: DoctorContext,
+    redaction_config: crate::redaction::RedactionConfig,
 ) -> Result<()> {
     info!("Running diagnostics...");
 
     // Collect all diagnostic information
     let doctor_info = collect_diagnostics(&context).await?;
 
-    // Output results
+    // Output results with redaction applied
     if json_output {
         let json_output = serde_json::to_string_pretty(&doctor_info).map_err(|e| {
             DeaconError::Internal(crate::errors::InternalError::Generic {
                 message: format!("Failed to serialize doctor info to JSON: {}", e),
             })
         })?;
-        println!("{}", json_output);
+        // Apply redaction to JSON output
+        let redacted_output = crate::redaction::redact_if_enabled(&json_output, &redaction_config);
+        println!("{}", redacted_output);
     } else {
-        print_text_output(&doctor_info);
+        print_text_output_with_redaction(&doctor_info, &redaction_config);
     }
 
     // Create bundle if requested
@@ -331,63 +334,80 @@ async fn collect_cache_stats() -> CacheStats {
     }
 }
 
-/// Print diagnostic information in human-readable text format
-fn print_text_output(info: &DoctorInfo) {
-    println!("Deacon Doctor Diagnostics");
-    println!("========================");
-    println!();
-
-    println!("CLI Version: {}", info.cli_version);
-    println!();
-
-    println!("Host OS:");
-    println!("  Name: {}", info.host_os.name);
-    println!("  Version: {}", info.host_os.version);
-    println!("  Architecture: {}", info.host_os.arch);
-    println!();
-
-    println!("Docker:");
-    println!("  Installed: {}", info.docker_info.installed);
-    if let Some(version) = &info.docker_info.version {
-        println!("  Version: {}", version);
+/// Print diagnostic information in human-readable text format with redaction applied
+fn print_text_output_with_redaction(
+    info: &DoctorInfo,
+    redaction_config: &crate::redaction::RedactionConfig,
+) {
+    // Create a macro to print with redaction applied
+    macro_rules! println_redacted {
+        ($fmt:expr) => {
+            let output = format!($fmt);
+            let redacted = crate::redaction::redact_if_enabled(&output, redaction_config);
+            println!("{}", redacted);
+        };
+        ($fmt:expr, $($arg:tt)*) => {
+            let output = format!($fmt, $($arg)*);
+            let redacted = crate::redaction::redact_if_enabled(&output, redaction_config);
+            println!("{}", redacted);
+        };
     }
-    println!("  Daemon Running: {}", info.docker_info.daemon_running);
+
+    println_redacted!("Deacon Doctor Diagnostics");
+    println_redacted!("========================");
+    println!();
+
+    println_redacted!("CLI Version: {}", info.cli_version);
+    println!();
+
+    println_redacted!("Host OS:");
+    println_redacted!("  Name: {}", info.host_os.name);
+    println_redacted!("  Version: {}", info.host_os.version);
+    println_redacted!("  Architecture: {}", info.host_os.arch);
+    println!();
+
+    println_redacted!("Docker:");
+    println_redacted!("  Installed: {}", info.docker_info.installed);
+    if let Some(version) = &info.docker_info.version {
+        println_redacted!("  Version: {}", version);
+    }
+    println_redacted!("  Daemon Running: {}", info.docker_info.daemon_running);
     if let Some(summary) = &info.docker_info.info_summary {
-        println!(
+        println_redacted!(
             "  Containers Running: {}",
             summary.containers_running.unwrap_or(0)
         );
-        println!("  Images: {}", summary.images.unwrap_or(0));
+        println_redacted!("  Images: {}", summary.images.unwrap_or(0));
         if let Some(storage) = &summary.storage_driver {
-            println!("  Storage Driver: {}", storage);
+            println_redacted!("  Storage Driver: {}", storage);
         }
     }
     println!();
 
-    println!("Disk Space:");
-    println!("  Total: {}", ByteSize(info.disk_space.total_bytes));
-    println!("  Available: {}", ByteSize(info.disk_space.available_bytes));
-    println!("  Used: {}", ByteSize(info.disk_space.used_bytes));
+    println_redacted!("Disk Space:");
+    println_redacted!("  Total: {}", ByteSize(info.disk_space.total_bytes));
+    println_redacted!("  Available: {}", ByteSize(info.disk_space.available_bytes));
+    println_redacted!("  Used: {}", ByteSize(info.disk_space.used_bytes));
     println!();
 
-    println!("Configuration Discovery:");
+    println_redacted!("Configuration Discovery:");
     if let Some(workspace) = &info.config_discovery.workspace_folder {
-        println!("  Workspace: {}", workspace);
+        println_redacted!("  Workspace: {}", workspace);
     }
     if let Some(primary) = &info.config_discovery.primary_config {
-        println!("  Primary Config: {}", primary);
+        println_redacted!("  Primary Config: {}", primary);
     }
-    println!(
+    println_redacted!(
         "  Config Files Found: {:?}",
         info.config_discovery.config_files_found
     );
     println!();
 
-    println!("Available Features: {:?}", info.features);
+    println_redacted!("Available Features: {:?}", info.features);
     println!();
 
     if let Some(hash) = &info.last_build_hash {
-        println!("Last Build Hash: {}", hash);
+        println_redacted!("Last Build Hash: {}", hash);
         println!();
     }
 }
