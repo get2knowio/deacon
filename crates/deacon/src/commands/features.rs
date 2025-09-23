@@ -693,14 +693,10 @@ mod tests {
         };
 
         let graph = build_graph_representation(&[feature]);
-        let expected = serde_json::json!({
-            "feature-b": ["feature-a", "feature-a"] // Should appear twice (installsAfter + dependsOn)
-        });
-
         // Check that feature-b has dependencies
         if let Some(deps) = graph.get("feature-b") {
             if let Some(deps_array) = deps.as_array() {
-                assert!(deps_array.len() >= 1);
+                assert!(!deps_array.is_empty());
                 assert!(deps_array.contains(&serde_json::Value::String("feature-a".to_string())));
             } else {
                 panic!("Dependencies should be an array");
@@ -819,7 +815,7 @@ mod tests {
         assert!(order.contains(&"feature-a".to_string()));
         assert!(order.contains(&"feature-m".to_string()));
         assert!(order.contains(&"feature-z".to_string()));
-        
+
         // The important thing is that the resolver doesn't fail with independent features
         // The exact order may be non-deterministic due to HashMap iteration order
         // but the important behavior is that it completes successfully
