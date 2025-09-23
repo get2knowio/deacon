@@ -714,3 +714,45 @@ Configuration Discovery:
     assert!(redacted_output.contains("CLI Version: 1.0.0"));
     assert!(redacted_output.contains("Ubuntu 20.04"));
 }
+
+#[test]
+fn test_audit_log_redaction() {
+    use deacon_core::progress::{AuditLog, ProgressEvent, ProgressTracker};
+    use tempfile::TempDir;
+
+    // Create a temporary directory for the test
+    let temp_dir = TempDir::new().unwrap();
+
+    // Add some secrets to test redaction
+    let registry = SecretRegistry::new();
+    registry.add_secret("audit-secret-123");
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Create an audit log with redaction enabled
+    let mut audit_log = AuditLog::new(temp_dir.path(), 1024, config).unwrap();
+
+    // Create an event that contains a secret
+    let event = ProgressEvent::LifecycleCommandBegin {
+        id: 1,
+        timestamp: ProgressTracker::current_timestamp(),
+        phase: "postCreate".to_string(),
+        command_id: "cmd-1".to_string(),
+        command: "echo 'Running audit-secret-123 in command'".to_string(),
+    };
+
+    // Log the event
+    audit_log.log_event(&event).unwrap();
+
+    // Read the log content
+    let log_content = std::fs::read_to_string(temp_dir.path().join("audit.jsonl")).unwrap();
+
+    // Verify that the secret was redacted in the audit log
+    assert!(log_content.contains("****"));
+    assert!(!log_content.contains("audit-secret-123"));
+
+    // Verify that other content is preserved
+    assert!(log_content.contains("lifecycle.command.begin"));
+    assert!(log_content.contains("postCreate"));
+    assert!(log_content.contains("echo"));
+}
