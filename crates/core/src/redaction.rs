@@ -377,16 +377,14 @@ impl<W: Write> Write for RedactingWriter<W> {
     }
 }
 
-/// Simple SHA-256 hash function
+/// Cryptographic SHA-256 hash function for secure secret hashing
 fn sha256_hash(input: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use sha2::{Digest, Sha256};
 
-    // Note: Using DefaultHasher for simplicity. In production, should use
-    // a proper cryptographic hash like SHA-256 from a crate like `sha2`
-    let mut hasher = DefaultHasher::new();
-    input.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    format!("{:x}", result)
 }
 
 #[cfg(test)]

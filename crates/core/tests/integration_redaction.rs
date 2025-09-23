@@ -307,3 +307,226 @@ fn test_thread_safety() {
     // Clean up
     global_registry().clear();
 }
+
+#[test]
+fn test_overlapping_secrets() {
+    // Create a custom registry for this test
+    let registry = SecretRegistry::new();
+
+    // Add overlapping secrets where one is a substring of another
+    registry.add_secret("secret123");
+    registry.add_secret("mysecret123data");
+    registry.add_secret("123dataXXX"); // Make this longer to meet minimum length
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Test with the longer secret that contains the shorter ones
+    let result1 = redact_if_enabled("Found mysecret123data here", &config);
+    assert!(result1.contains("****"));
+    assert!(!result1.contains("mysecret123data"));
+
+    // Test with the shorter secret alone
+    let result2 = redact_if_enabled("Found secret123 here", &config);
+    assert!(result2.contains("****"));
+    assert!(!result2.contains("secret123"));
+
+    // Test with the other secret (now long enough)
+    let result3 = redact_if_enabled("Found 123dataXXX here", &config);
+    assert!(result3.contains("****"));
+    assert!(!result3.contains("123dataXXX"));
+
+    // Test with text containing multiple overlapping secrets
+    let result4 = redact_if_enabled("secret123 and mysecret123data", &config);
+    // Both should be redacted
+    assert_eq!(result4.matches("****").count(), 2);
+    assert!(!result4.contains("secret123"));
+    assert!(!result4.contains("mysecret123data"));
+}
+
+#[test]
+fn test_multiline_output_redaction() {
+    // Create a custom registry for this test
+    let registry = SecretRegistry::new();
+    registry.add_secret("multiline-secret");
+    registry.add_secret("another-secret");
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Test multiline text with secrets on different lines
+    let multiline_text = "Line 1: This is normal text\n\
+                          Line 2: Contains multiline-secret here\n\
+                          Line 3: Normal text again\n\
+                          Line 4: Has another-secret in it\n\
+                          Line 5: Final line";
+
+    let result = redact_if_enabled(multiline_text, &config);
+
+    // Verify secrets are redacted but structure is preserved
+    assert!(result.contains("Line 1: This is normal text"));
+    assert!(result.contains("Line 2: Contains **** here"));
+    assert!(result.contains("Line 3: Normal text again"));
+    assert!(result.contains("Line 4: Has **** in it"));
+    assert!(result.contains("Line 5: Final line"));
+    assert!(!result.contains("multiline-secret"));
+    assert!(!result.contains("another-secret"));
+}
+
+#[test]
+fn test_secret_at_string_boundaries() {
+    // Create a custom registry for this test
+    let registry = SecretRegistry::new();
+    registry.add_secret("boundary-secret");
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Test secret at start of string
+    let result1 = redact_if_enabled("boundary-secret is at start", &config);
+    assert_eq!(result1, "**** is at start");
+
+    // Test secret at end of string
+    let result2 = redact_if_enabled("This ends with boundary-secret", &config);
+    assert_eq!(result2, "This ends with ****");
+
+    // Test secret as entire string
+    let result3 = redact_if_enabled("boundary-secret", &config);
+    assert_eq!(result3, "****");
+}
+
+#[test]
+fn test_repeated_secrets_in_same_line() {
+    // Create a custom registry for this test
+    let registry = SecretRegistry::new();
+    registry.add_secret("repeated-secret");
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Test multiple occurrences of same secret in one line
+    let result = redact_if_enabled(
+        "repeated-secret and repeated-secret and repeated-secret",
+        &config,
+    );
+
+    // All occurrences should be redacted
+    assert_eq!(result, "**** and **** and ****");
+    assert!(!result.contains("repeated-secret"));
+    assert_eq!(result.matches("****").count(), 3);
+}
+
+#[test]
+fn test_secrets_with_special_characters() {
+    // Create a custom registry for this test
+    let registry = SecretRegistry::new();
+    registry.add_secret("secret@#$%^&*()");
+    registry.add_secret("secret-with-dashes");
+    registry.add_secret("secret_with_underscores");
+    registry.add_secret("secret.with.dots");
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Test secrets with various special characters
+    let result1 = redact_if_enabled("Found secret@#$%^&*() here", &config);
+    assert_eq!(result1, "Found **** here");
+
+    let result2 = redact_if_enabled("Found secret-with-dashes here", &config);
+    assert_eq!(result2, "Found **** here");
+
+    let result3 = redact_if_enabled("Found secret_with_underscores here", &config);
+    assert_eq!(result3, "Found **** here");
+
+    let result4 = redact_if_enabled("Found secret.with.dots here", &config);
+    assert_eq!(result4, "Found **** here");
+}
+
+#[test]
+fn test_secrets_with_unicode() {
+    // Create a custom registry for this test
+    let registry = SecretRegistry::new();
+    registry.add_secret("秘密パスワード123"); // Japanese secret
+    registry.add_secret("пароль456"); // Russian secret
+    registry.add_secret("🔐secret789"); // Emoji secret
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Test Unicode secrets
+    let result1 = redact_if_enabled("Found 秘密パスワード123 in log", &config);
+    assert_eq!(result1, "Found **** in log");
+
+    let result2 = redact_if_enabled("Found пароль456 in log", &config);
+    assert_eq!(result2, "Found **** in log");
+
+    let result3 = redact_if_enabled("Found 🔐secret789 in log", &config);
+    assert_eq!(result3, "Found **** in log");
+}
+
+#[test]
+fn test_port_event_redaction() {
+    // Test that PORT_EVENT lines are also redacted
+    let registry = SecretRegistry::new();
+    registry.add_secret("port-secret-token");
+
+    // Create commands that simulate PORT_EVENT output with secrets
+    let commands_json =
+        json!(["echo 'PORT_EVENT: {\"port\": 3000, \"token\": \"port-secret-token\"}'"]);
+    let env = HashMap::new();
+    let commands = LifecycleCommands::from_json_value(&commands_json, &env).unwrap();
+
+    // Create execution context with redaction enabled using custom registry
+    let ctx = ExecutionContext::new()
+        .with_redaction_config(RedactionConfig::with_custom_registry(registry));
+
+    // Execute the lifecycle phase
+    let result = run_phase(LifecyclePhase::PostCreate, &commands, &ctx).unwrap();
+
+    // Check that secrets in PORT_EVENT are redacted
+    assert!(result.stdout.contains("PORT_EVENT"));
+    assert!(result.stdout.contains("****"));
+    assert!(!result.stdout.contains("port-secret-token"));
+}
+
+#[test]
+fn test_very_long_lines_with_secrets() {
+    // Create a custom registry for this test
+    let registry = SecretRegistry::new();
+    registry.add_secret("long-line-secret");
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Create a very long line with secret buried in it
+    let mut long_line = "START ".to_string();
+    long_line.push_str(&"normal-text ".repeat(1000));
+    long_line.push_str("long-line-secret ");
+    long_line.push_str(&"more-normal-text ".repeat(1000));
+    long_line.push_str("END");
+
+    let result = redact_if_enabled(&long_line, &config);
+
+    // Secret should be redacted even in very long lines
+    assert!(result.contains("****"));
+    assert!(!result.contains("long-line-secret"));
+    assert!(result.contains("START"));
+    assert!(result.contains("END"));
+}
+
+#[test]
+fn test_empty_and_whitespace_handling() {
+    // Create a custom registry for this test
+    let registry = SecretRegistry::new();
+    registry.add_secret("whitespace-secret");
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Test empty string
+    let result1 = redact_if_enabled("", &config);
+    assert_eq!(result1, "");
+
+    // Test whitespace-only strings
+    let result2 = redact_if_enabled("   ", &config);
+    assert_eq!(result2, "   ");
+
+    let result3 = redact_if_enabled("\n\t\r", &config);
+    assert_eq!(result3, "\n\t\r");
+
+    // Test secret with surrounding whitespace
+    let result4 = redact_if_enabled("  whitespace-secret  ", &config);
+    assert_eq!(result4, "  ****  ");
+}
