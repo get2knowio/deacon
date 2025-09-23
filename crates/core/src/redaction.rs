@@ -29,6 +29,62 @@ struct SecretRegistryInner {
     exact_secrets: HashSet<String>,
     /// SHA-256 hashes of secrets for additional detection
     secret_hashes: HashSet<String>,
+    /// Structured secrets with context information to reduce false positives
+    structured_secrets: Vec<StructuredSecret>,
+}
+
+/// A structured secret with context information to reduce false positives
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructuredSecret {
+    /// The secret value to redact
+    value: String,
+    /// Optional key/field name that provides context (e.g., "password", "token", "api_key")
+    key: Option<String>,
+    /// Optional pattern that must appear near the secret for it to be redacted
+    context_pattern: Option<String>,
+    /// Whether this secret should only be redacted when found in key-value pairs
+    require_key_context: bool,
+}
+
+impl StructuredSecret {
+    /// Create a new StructuredSecret with validation
+    pub fn new(
+        value: String,
+        key: Option<String>,
+        context_pattern: Option<String>,
+        require_key_context: bool,
+    ) -> Option<Self> {
+        if value.len() < MIN_REDACTION_LENGTH {
+            return None;
+        }
+
+        Some(Self {
+            value,
+            key,
+            context_pattern,
+            require_key_context,
+        })
+    }
+
+    /// Get the secret value
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    /// Get the key context
+    pub fn key(&self) -> Option<&str> {
+        self.key.as_deref()
+    }
+
+    /// Get the context pattern
+    pub fn context_pattern(&self) -> Option<&str> {
+        self.context_pattern.as_deref()
+    }
+
+    /// Check if key context is required
+    pub fn require_key_context(&self) -> bool {
+        self.require_key_context
+    }
 }
 
 impl SecretRegistry {
@@ -68,9 +124,55 @@ impl SecretRegistry {
         }
     }
 
+    /// Add a structured secret with contextual information
+    ///
+    /// This allows for more sophisticated redaction that can consider context
+    /// to reduce false positives. For example, the word "secret" might only
+    /// be redacted when it appears in a key-value context like "password=secret123".
+    /// Add a structured secret with contextual information
+    ///
+    /// This allows for more sophisticated redaction that can consider context
+    /// to reduce false positives. For example, the word "secret" might only
+    /// be redacted when it appears in a key-value context like "password=secret".
+    /// Returns true if the secret was added, false if it was invalid or duplicate.
+    pub fn add_structured_secret(&self, structured_secret: StructuredSecret) -> bool {
+        if let Ok(mut inner) = self.inner.write() {
+            // Check if this structured secret already exists
+            if !inner.structured_secrets.contains(&structured_secret) {
+                inner.structured_secrets.push(structured_secret);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Add a secret with key context for key-value pair redaction
+    ///
+    /// This will only redact the secret when it appears after one of the specified keys.
+    /// Useful for values that might appear in normal text but should only be redacted
+    /// when they're actually secret values.
+    /// Add a secret with key context for key-value pair redaction
+    ///
+    /// This will only redact the secret when it appears after one of the specified keys.
+    /// Useful for values that might appear in normal text but should only be redacted
+    /// when they're actually secret values.
+    pub fn add_secret_with_key_context(&self, secret: &str, keys: Vec<String>) {
+        for key in keys {
+            if let Some(structured_secret) =
+                StructuredSecret::new(secret.to_string(), Some(key), None, true)
+            {
+                self.add_structured_secret(structured_secret);
+            }
+        }
+    }
+
     /// Check if a value contains any registered secrets and return redacted version
     ///
-    /// This performs naive substring scanning for both exact secrets and their hashes.
+    /// This performs both simple substring scanning for exact secrets and their hashes,
+    /// as well as contextual redaction for structured secrets.
     /// If any secrets are found, they are replaced with the redaction placeholder.
     pub fn redact_text(&self, text: &str) -> String {
         if let Ok(inner) = self.inner.read() {
@@ -90,6 +192,11 @@ impl SecretRegistry {
                 }
             }
 
+            // Redact structured secrets with context
+            for structured_secret in &inner.structured_secrets {
+                result = redact_structured_secret(&result, structured_secret);
+            }
+
             result
         } else {
             // If we can't acquire the lock, return original text
@@ -100,7 +207,7 @@ impl SecretRegistry {
     /// Get the count of registered secrets (for testing/debugging)
     pub fn secret_count(&self) -> usize {
         if let Ok(inner) = self.inner.read() {
-            inner.exact_secrets.len()
+            inner.exact_secrets.len() + inner.structured_secrets.len()
         } else {
             0
         }
@@ -111,6 +218,7 @@ impl SecretRegistry {
         if let Ok(mut inner) = self.inner.write() {
             inner.exact_secrets.clear();
             inner.secret_hashes.clear();
+            inner.structured_secrets.clear();
         }
     }
 }
@@ -216,6 +324,55 @@ pub fn redact_with_registry(
     } else {
         redacted
     }
+}
+
+/// Redact a structured secret with contextual information
+///
+/// This function applies more sophisticated redaction logic based on the context
+/// provided in the StructuredSecret. It can handle key-value pairs and context patterns.
+fn redact_structured_secret(text: &str, structured_secret: &StructuredSecret) -> String {
+    // If no special context is required, do simple replacement
+    if !structured_secret.require_key_context() && structured_secret.context_pattern().is_none() {
+        return text.replace(structured_secret.value(), REDACTION_PLACEHOLDER);
+    }
+
+    let mut result = text.to_string();
+
+    // Handle key-value context redaction
+    if structured_secret.require_key_context() {
+        if let Some(key) = structured_secret.key() {
+            // Look for patterns like "key=value", "key: value", "key": "value", etc.
+            let patterns = [
+                format!("{}={}", key, structured_secret.value()),
+                format!("{}:{}", key, structured_secret.value()),
+                format!("{}: {}", key, structured_secret.value()),
+                format!("\"{}\":\"{}", key, structured_secret.value()),
+                format!("\"{}\":\"{}\"", key, structured_secret.value()),
+                format!("\"{}\" : \"{}\"", key, structured_secret.value()),
+                format!("{}=\"{}\"", key, structured_secret.value()),
+                format!("{} = \"{}\"", key, structured_secret.value()),
+                format!("{} = {}", key, structured_secret.value()),
+            ];
+
+            for pattern in &patterns {
+                if result.contains(pattern) {
+                    let redacted_pattern =
+                        pattern.replace(structured_secret.value(), REDACTION_PLACEHOLDER);
+                    result = result.replace(pattern, &redacted_pattern);
+                }
+            }
+        }
+    }
+
+    // Handle context pattern matching
+    if let Some(context_pattern) = structured_secret.context_pattern() {
+        // Only redact the secret if the context pattern is found nearby
+        if result.contains(context_pattern) {
+            result = result.replace(structured_secret.value(), REDACTION_PLACEHOLDER);
+        }
+    }
+
+    result
 }
 
 /// Add a secret to the global registry
@@ -377,16 +534,14 @@ impl<W: Write> Write for RedactingWriter<W> {
     }
 }
 
-/// Simple SHA-256 hash function
+/// Cryptographic SHA-256 hash function for secure secret hashing
 fn sha256_hash(input: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use sha2::{Digest, Sha256};
 
-    // Note: Using DefaultHasher for simplicity. In production, should use
-    // a proper cryptographic hash like SHA-256 from a crate like `sha2`
-    let mut hasher = DefaultHasher::new();
-    input.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    format!("{:x}", result)
 }
 
 #[cfg(test)]

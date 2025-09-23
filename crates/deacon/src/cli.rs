@@ -711,8 +711,9 @@ impl Cli {
                     config: self.config.clone(),
                 };
 
-                // Execute doctor command
-                match deacon_core::doctor::run_doctor(json, bundle, context).await {
+                // Execute doctor command with redaction config
+                match deacon_core::doctor::run_doctor(json, bundle, context, redaction_config).await
+                {
                     Ok(()) => Ok(()),
                     Err(e) => Err(e.into()),
                 }

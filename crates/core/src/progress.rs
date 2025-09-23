@@ -491,7 +491,7 @@ pub struct MetricsSummary {
     pub histograms: HashMap<String, HistogramSummary>,
 }
 
-/// Audit log writer with file rotation
+/// Audit log writer with file rotation and redaction support
 #[derive(Debug)]
 pub struct AuditLog {
     file: BufWriter<File>,
@@ -499,10 +499,11 @@ pub struct AuditLog {
     max_size: u64,
     log_path: PathBuf,
     rotation_count: u32,
+    redaction_config: crate::redaction::RedactionConfig,
 }
 
 impl AuditLog {
-    /// Create a new audit log backed by `cache_dir/audit.jsonl`, prepared for size-based rotation.
+    /// Creates a new audit log backed by `cache_dir/audit.jsonl`, prepared for size-based rotation.
     ///
     /// Ensures the cache directory exists, opens (or creates) `audit.jsonl` in append mode, and
     /// initializes the writer and current file size. The returned AuditLog will rotate the file
@@ -511,6 +512,7 @@ impl AuditLog {
     /// # Parameters
     /// - `cache_dir`: directory under which `audit.jsonl` will be created (parent directories are created if missing).
     /// - `max_size`: rotation threshold in bytes; when `current_size` reaches or exceeds this value the log will be rotated.
+    /// - `redaction_config`: configuration for redacting sensitive information from log entries.
     ///
     /// # Returns
     /// Returns `Ok(AuditLog)` on success or an I/O error if directory creation or file operations fail.
@@ -520,10 +522,16 @@ impl AuditLog {
     /// ```
     /// use std::path::Path;
     /// use deacon_core::progress::AuditLog;
+    /// use deacon_core::redaction::RedactionConfig;
     /// let cache_dir = Path::new("/tmp");
-    /// let mut audit = AuditLog::new(cache_dir, 1024 * 1024).unwrap(); // 1 MiB rotation threshold
+    /// let redaction_config = RedactionConfig::default();
+    /// let mut audit = AuditLog::new(cache_dir, 1024 * 1024, redaction_config).unwrap(); // 1 MiB rotation threshold
     /// ```
-    pub fn new(cache_dir: &Path, max_size: u64) -> Result<Self> {
+    pub fn new(
+        cache_dir: &Path,
+        max_size: u64,
+        redaction_config: crate::redaction::RedactionConfig,
+    ) -> Result<Self> {
         let log_path = cache_dir.join("audit.jsonl");
 
         // Ensure the cache directory exists
@@ -545,6 +553,7 @@ impl AuditLog {
             max_size,
             log_path,
             rotation_count: 0,
+            redaction_config,
         })
     }
 
@@ -566,10 +575,12 @@ impl AuditLog {
     /// ```
     /// use std::path::Path;
     /// use deacon_core::progress::{AuditLog, ProgressEvent};
+    /// use deacon_core::redaction::RedactionConfig;
     ///
     /// // Create an AuditLog in a temp directory (error handling omitted for brevity)
     /// let tmp = tempfile::tempdir().unwrap();
-    /// let mut audit = AuditLog::new(tmp.path(), 1024).unwrap();
+    /// let redaction_config = RedactionConfig::default();
+    /// let mut audit = AuditLog::new(tmp.path(), 1024, redaction_config).unwrap();
     ///
     /// let event = ProgressEvent::BuildBegin {
     ///     id: 1,
@@ -583,10 +594,12 @@ impl AuditLog {
     #[instrument(skip(self))]
     pub fn log_event(&mut self, event: &ProgressEvent) -> Result<()> {
         let line = serde_json::to_string(event)?;
-        writeln!(self.file, "{}", line)?;
+        // Apply redaction to the serialized event
+        let redacted_line = crate::redaction::redact_if_enabled(&line, &self.redaction_config);
+        writeln!(self.file, "{}", redacted_line)?;
         self.file.flush()?;
 
-        self.current_size += line.len() as u64 + 1; // +1 for newline
+        self.current_size += redacted_line.len() as u64 + 1; // +1 for newline
         debug!(
             "Logged audit event {} to {}",
             event.id(),
@@ -661,7 +674,7 @@ impl ProgressTracker {
     /// If `cache_dir` is `Some`, an AuditLog is created at `<cache_dir>/audit.jsonl` with a 10 MiB
     /// rotation threshold; otherwise no audit logging is enabled. Passing `None` for `emitter`
     /// disables external event emission (events will still be recorded to metrics and the audit log
-    /// if present).
+    /// if present). The `redaction_config` controls how sensitive information is handled in audit logs.
     ///
     /// Returns an error if constructing the AuditLog fails (propagates IO/serialization errors).
     ///
@@ -669,15 +682,22 @@ impl ProgressTracker {
     ///
     /// ```
     /// use deacon_core::progress::ProgressTracker;
+    /// use deacon_core::redaction::RedactionConfig;
     /// // Create a tracker with no emitter and no audit log.
-    /// let tracker = ProgressTracker::new(None, None).unwrap();
+    /// let redaction_config = RedactionConfig::default();
+    /// let tracker = ProgressTracker::new(None, None, redaction_config).unwrap();
     /// ```
     pub fn new(
         emitter: Option<Box<dyn ProgressEmitter>>,
         cache_dir: Option<&Path>,
+        redaction_config: crate::redaction::RedactionConfig,
     ) -> Result<Self> {
         let audit_log = if let Some(cache_dir) = cache_dir {
-            Some(AuditLog::new(cache_dir, 10 * 1024 * 1024)?) // 10MB max size
+            Some(AuditLog::new(
+                cache_dir,
+                10 * 1024 * 1024,
+                redaction_config,
+            )?) // 10MB max size
         } else {
             None
         };
@@ -700,8 +720,10 @@ impl ProgressTracker {
     /// ```
     /// # use std::path::Path;
     /// # use deacon_core::progress::{ProgressTracker, ProgressEvent, SilentEmitter};
+    /// # use deacon_core::redaction::RedactionConfig;
     /// // Construct a tracker with a silent emitter and no audit log.
-    /// let mut tracker = ProgressTracker::new(Some(Box::new(SilentEmitter {})), None).unwrap();
+    /// let redaction_config = RedactionConfig::default();
+    /// let mut tracker = ProgressTracker::new(Some(Box::new(SilentEmitter {})), None, redaction_config).unwrap();
     ///
     /// let event = ProgressEvent::BuildBegin {
     ///     id: ProgressTracker::next_event_id(),
@@ -749,7 +771,9 @@ impl ProgressTracker {
     ///
     /// ```
     /// use deacon_core::progress::ProgressTracker;
-    /// let tracker = ProgressTracker::new(None, None).unwrap();
+    /// use deacon_core::redaction::RedactionConfig;
+    /// let redaction_config = RedactionConfig::default();
+    /// let tracker = ProgressTracker::new(None, None, redaction_config).unwrap();
     /// if let Some(summary) = tracker.metrics_summary() {
     ///     for (op, hist) in summary.histograms.iter() {
     ///         println!("operation: {}, count: {}", op, hist.count);
@@ -1219,7 +1243,8 @@ mod tests {
     #[test]
     fn test_audit_log() -> Result<()> {
         let temp_dir = TempDir::new()?;
-        let mut audit_log = AuditLog::new(temp_dir.path(), 1024)?;
+        let redaction_config = crate::redaction::RedactionConfig::default();
+        let mut audit_log = AuditLog::new(temp_dir.path(), 1024, redaction_config)?;
 
         let event = ProgressEvent::BuildBegin {
             id: 1,
@@ -1480,7 +1505,7 @@ pub fn create_progress_tracker(
         }
     };
 
-    let tracker = ProgressTracker::new(emitter, Some(&cache_dir))?;
+    let tracker = ProgressTracker::new(emitter, Some(&cache_dir), redaction_config.clone())?;
     Ok(Some(tracker))
 }
 

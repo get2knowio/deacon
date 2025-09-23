@@ -12,6 +12,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
+/// Macro for printing redacted output
+macro_rules! println_redacted {
+    ($config:expr, $fmt:expr) => {
+        let output = format!($fmt);
+        let redacted = crate::redaction::redact_if_enabled(&output, $config);
+        println!("{}", redacted);
+    };
+    ($config:expr, $fmt:expr, $($arg:tt)*) => {
+        let output = format!($fmt, $($arg)*);
+        let redacted = crate::redaction::redact_if_enabled(&output, $config);
+        println!("{}", redacted);
+    };
+}
+
 /// Simple context for doctor command
 #[derive(Debug, Clone)]
 pub struct DoctorContext {
@@ -98,22 +112,25 @@ pub async fn run_doctor(
     json_output: bool,
     bundle_path: Option<PathBuf>,
     context: DoctorContext,
+    redaction_config: crate::redaction::RedactionConfig,
 ) -> Result<()> {
     info!("Running diagnostics...");
 
     // Collect all diagnostic information
     let doctor_info = collect_diagnostics(&context).await?;
 
-    // Output results
+    // Output results with redaction applied
     if json_output {
         let json_output = serde_json::to_string_pretty(&doctor_info).map_err(|e| {
             DeaconError::Internal(crate::errors::InternalError::Generic {
                 message: format!("Failed to serialize doctor info to JSON: {}", e),
             })
         })?;
-        println!("{}", json_output);
+        // Apply redaction to JSON output
+        let redacted_output = crate::redaction::redact_if_enabled(&json_output, &redaction_config);
+        println!("{}", redacted_output);
     } else {
-        print_text_output(&doctor_info);
+        print_text_output_with_redaction(&doctor_info, &redaction_config);
     }
 
     // Create bundle if requested
@@ -331,63 +348,92 @@ async fn collect_cache_stats() -> CacheStats {
     }
 }
 
-/// Print diagnostic information in human-readable text format
-fn print_text_output(info: &DoctorInfo) {
-    println!("Deacon Doctor Diagnostics");
-    println!("========================");
+/// Print diagnostic information in human-readable text format with redaction applied
+fn print_text_output_with_redaction(
+    info: &DoctorInfo,
+    redaction_config: &crate::redaction::RedactionConfig,
+) {
+    println_redacted!(redaction_config, "Deacon Doctor Diagnostics");
+    println_redacted!(redaction_config, "========================");
     println!();
 
-    println!("CLI Version: {}", info.cli_version);
+    println_redacted!(redaction_config, "CLI Version: {}", info.cli_version);
     println!();
 
-    println!("Host OS:");
-    println!("  Name: {}", info.host_os.name);
-    println!("  Version: {}", info.host_os.version);
-    println!("  Architecture: {}", info.host_os.arch);
+    println_redacted!(redaction_config, "Host OS:");
+    println_redacted!(redaction_config, "  Name: {}", info.host_os.name);
+    println_redacted!(redaction_config, "  Version: {}", info.host_os.version);
+    println_redacted!(redaction_config, "  Architecture: {}", info.host_os.arch);
     println!();
 
-    println!("Docker:");
-    println!("  Installed: {}", info.docker_info.installed);
+    println_redacted!(redaction_config, "Docker:");
+    println_redacted!(
+        redaction_config,
+        "  Installed: {}",
+        info.docker_info.installed
+    );
     if let Some(version) = &info.docker_info.version {
-        println!("  Version: {}", version);
+        println_redacted!(redaction_config, "  Version: {}", version);
     }
-    println!("  Daemon Running: {}", info.docker_info.daemon_running);
+    println_redacted!(
+        redaction_config,
+        "  Daemon Running: {}",
+        info.docker_info.daemon_running
+    );
     if let Some(summary) = &info.docker_info.info_summary {
-        println!(
+        println_redacted!(
+            redaction_config,
             "  Containers Running: {}",
             summary.containers_running.unwrap_or(0)
         );
-        println!("  Images: {}", summary.images.unwrap_or(0));
+        println_redacted!(
+            redaction_config,
+            "  Images: {}",
+            summary.images.unwrap_or(0)
+        );
         if let Some(storage) = &summary.storage_driver {
-            println!("  Storage Driver: {}", storage);
+            println_redacted!(redaction_config, "  Storage Driver: {}", storage);
         }
     }
     println!();
 
-    println!("Disk Space:");
-    println!("  Total: {}", ByteSize(info.disk_space.total_bytes));
-    println!("  Available: {}", ByteSize(info.disk_space.available_bytes));
-    println!("  Used: {}", ByteSize(info.disk_space.used_bytes));
+    println_redacted!(redaction_config, "Disk Space:");
+    println_redacted!(
+        redaction_config,
+        "  Total: {}",
+        ByteSize(info.disk_space.total_bytes)
+    );
+    println_redacted!(
+        redaction_config,
+        "  Available: {}",
+        ByteSize(info.disk_space.available_bytes)
+    );
+    println_redacted!(
+        redaction_config,
+        "  Used: {}",
+        ByteSize(info.disk_space.used_bytes)
+    );
     println!();
 
-    println!("Configuration Discovery:");
+    println_redacted!(redaction_config, "Configuration Discovery:");
     if let Some(workspace) = &info.config_discovery.workspace_folder {
-        println!("  Workspace: {}", workspace);
+        println_redacted!(redaction_config, "  Workspace: {}", workspace);
     }
     if let Some(primary) = &info.config_discovery.primary_config {
-        println!("  Primary Config: {}", primary);
+        println_redacted!(redaction_config, "  Primary Config: {}", primary);
     }
-    println!(
+    println_redacted!(
+        redaction_config,
         "  Config Files Found: {:?}",
         info.config_discovery.config_files_found
     );
     println!();
 
-    println!("Available Features: {:?}", info.features);
+    println_redacted!(redaction_config, "Available Features: {:?}", info.features);
     println!();
 
     if let Some(hash) = &info.last_build_hash {
-        println!("Last Build Hash: {}", hash);
+        println_redacted!(redaction_config, "Last Build Hash: {}", hash);
         println!();
     }
 }
