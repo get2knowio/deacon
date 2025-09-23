@@ -2586,8 +2586,13 @@ pub mod merge {
                     .iter()
                     .enumerate()
                     .map(|(index, (config, source))| {
-                        let config_json = serde_json::to_string(config).unwrap_or_default();
-                        let hash = Self::calculate_hash(&config_json);
+                        // Prefer hashing raw source file bytes for deterministic provenance.
+                        // Fallback to hashing canonicalized JSON if reading the file fails
+                        // (e.g., the file was removed between discovery and hashing).
+                        let hash = Self::calculate_file_hash(source).unwrap_or_else(|_| {
+                            let config_json = serde_json::to_string(config).unwrap_or_default();
+                            Self::calculate_hash(&config_json)
+                        });
 
                         ConfigLayer {
                             source: source.display().to_string(),
@@ -2614,6 +2619,15 @@ pub mod merge {
             let mut hasher = Sha256::new();
             hasher.update(content.as_bytes());
             format!("{:x}", hasher.finalize())
+        }
+
+        /// Calculate SHA-256 hash of a file's raw bytes. Returns io::Error on failure.
+        fn calculate_file_hash(path: &Path) -> std::io::Result<String> {
+            use sha2::{Digest, Sha256};
+            let bytes = std::fs::read(path)?;
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            Ok(format!("{:x}", hasher.finalize()))
         }
     }
 
