@@ -15,7 +15,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, instrument};
 
-#[cfg(feature = "docker")]
 use crate::commands::exec::resolve_target_container;
 
 /// Arguments for the run-user-commands command
@@ -83,7 +82,6 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
 
     debug!("Loaded configuration with overrides and secrets support");
 
-    #[cfg(feature = "docker")]
     let container_id = {
         let docker_client = deacon_core::docker::CliDocker::new();
         match resolve_target_container(&docker_client, &workspace_folder, &config).await {
@@ -95,12 +93,6 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
                 ));
             }
         }
-    };
-    #[cfg(not(feature = "docker"))]
-    let container_id = {
-        return Err(anyhow::anyhow!(
-            "Docker support disabled. Recompile with 'docker' feature to run lifecycle commands"
-        ));
     };
 
     info!("Found target container: {}", container_id);

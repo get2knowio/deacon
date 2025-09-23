@@ -72,12 +72,11 @@ cargo build --release
 ./target/release/deacon --help
 ```
 
-#### Install from Source (Full Feature Set)
-For a distribution-quality binary with all current capabilities (docker, extended config, plugins scaffolding, JSON logs):
+#### Install from Source (Standard Build)
 ```bash
 git clone https://github.com/get2knowio/deacon.git
 cd deacon
-cargo build --release --no-default-features --features "docker,config,plugins,json-logs"
+cargo build --release
 ./target/release/deacon --version
 ```
 
@@ -109,37 +108,26 @@ deacon features test . --json
 
 See the full details and additional commands in `examples/README.md`.
 
-## Feature Flags & Build Variants
+## Runtime Configuration
 
-The workspace uses Cargo feature flags to keep the default binary lean while enabling advanced capabilities on demand.
+### Logging
+Deacon supports both human-readable text and structured JSON logging formats.
 
-| Feature (crate) | Default | Purpose | When to Enable |
-|-----------------|---------|---------|----------------|
-| `docker` (`deacon`, `deacon-core`) | ON (default) | Docker / container lifecycle integration | Disable only for pure config or analysis builds without Docker present |
-| `config` (`deacon`) | OFF | Additional configuration format support (reserves optional `toml` dep) | Building a full “all capabilities” release or future extended config workflows |
-| `json-logs` (`deacon-core`) | OFF | Structured JSON logging output via `tracing-subscriber` | CI ingestion / machine parsing of logs |
-| `plugins` (`deacon`, `deacon-core`) | OFF | Experimental plugin / extension hooks (scaffolding) | Evaluating or developing plugin system (unstable) |
-
-### Common Build Profiles
-
+**Text Logging (Default):**
 ```bash
-# Default (docker only)
-cargo build --release
-
-# Minimal (no Docker; config & plugins omitted)
-cargo build --release --no-default-features
-
-# Full feature set (intended production / Homebrew style release)
-cargo build --release --no-default-features --features "docker,config,plugins"
-
-# Full + JSON logs (for structured logging distributions)
-cargo build --release --no-default-features --features "docker,config,plugins,json-logs"
+deacon --help  # Standard text output
 ```
 
-If you built without `config` and examples referencing `read-configuration` fail unexpectedly, rebuild with the appropriate feature set (see above).
+**JSON Logging:**
+```bash
+export DEACON_LOG_FORMAT=json
+deacon doctor  # Structured JSON logs for machine parsing
+```
 
-To inspect enabled features at runtime you can compare output sizes or run `cargo tree -F deacon/config` for dependency changes.
+The JSON format is useful for CI/CD systems and log aggregation tools that need structured data.
 
+### Docker Integration
+All Docker functionality is always available. If Docker daemon is not running or not installed, deacon will provide clear runtime error messages guiding you to install or start Docker.
 
 ## Usage
 

@@ -89,7 +89,6 @@ pub struct CliContext {
     /// Whether secret redaction is disabled
     pub no_redact: bool,
     /// Enabled plugins
-    #[cfg(feature = "plugins")]
     pub plugins: Vec<String>,
 }
 
@@ -330,9 +329,9 @@ pub enum TemplateCommands {
     long_about = "Development container CLI (Rust reimplementation)\n\nImplements the Development Containers specification for creating and managing development environments."
 )]
 pub struct Cli {
-    /// Log format (text or json)
-    #[arg(long, global = true, value_enum, default_value = "text")]
-    pub log_format: LogFormat,
+    /// Log format (text or json, defaults to text, can be set via DEACON_LOG_FORMAT env var)
+    #[arg(long, global = true, value_enum)]
+    pub log_format: Option<LogFormat>,
 
     /// Log level
     #[arg(long, global = true, value_enum, default_value = "info")]
@@ -367,7 +366,7 @@ pub struct Cli {
     pub progress_file: Option<PathBuf>,
 
     /// Enable specific plugins
-    #[cfg(feature = "plugins")]
+
     #[arg(long, global = true, value_name = "NAME")]
     pub plugin: Vec<String>,
 
@@ -396,7 +395,7 @@ impl Cli {
     /// ```
     pub fn context(&self) -> CliContext {
         CliContext {
-            log_format: self.log_format.clone(),
+            log_format: self.log_format.clone().unwrap_or(LogFormat::Text), // Default to Text if not specified
             log_level: self.log_level.clone(),
             progress_format: self.progress.clone(),
             progress_file: self.progress_file.clone(),
@@ -405,7 +404,7 @@ impl Cli {
             override_config: self.override_config.clone(),
             secrets_files: self.secrets_file.clone(),
             no_redact: self.no_redact,
-            #[cfg(feature = "plugins")]
+
             plugins: self.plugin.clone(),
         }
     }
@@ -436,8 +435,9 @@ impl Cli {
 
         // Initialize logging based on global options
         let log_format = match self.log_format {
-            LogFormat::Text => None,
-            LogFormat::Json => Some("json".to_string()),
+            Some(LogFormat::Text) => Some("text"),
+            Some(LogFormat::Json) => Some("json"),
+            None => None, // Let logging module check environment variable
         };
 
         let log_level = match self.log_level {
@@ -449,11 +449,13 @@ impl Cli {
         };
 
         // Set environment variable for log level before initializing logging
-        std::env::set_var(
-            "RUST_LOG",
-            format!("deacon={},deacon_core={}", log_level, log_level),
-        );
-        deacon_core::logging::init(log_format.as_deref())?;
+        if std::env::var_os("DEACON_LOG").is_none() && std::env::var_os("RUST_LOG").is_none() {
+            std::env::set_var(
+                "RUST_LOG",
+                format!("deacon={},deacon_core={}", log_level, log_level),
+            );
+        }
+        deacon_core::logging::init(log_format)?;
 
         // Emit a debug log to help with testing
         tracing::debug!("CLI initialized with log level: {}", log_level);

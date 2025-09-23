@@ -403,7 +403,8 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
     }
 
     let hash = hasher.finish();
-    Ok(format!("{:x}", hash))
+    // Zero-pad to ensure stable length (16 hex chars) so downstream slicing is safe
+    Ok(format!("{:016x}", hash))
 }
 
 /// Check for cached build result
@@ -426,17 +427,15 @@ async fn cache_build_result(_result: &BuildResult, _workspace_folder: &Path) -> 
 }
 
 /// Execute Docker build
-#[instrument(skip(_build_config, _args, _workspace_folder))]
+#[instrument(skip(build_config, args, workspace_folder))]
 async fn execute_docker_build(
-    _build_config: &BuildConfig,
-    _args: &BuildArgs,
-    _config_hash: &str,
-    _workspace_folder: &Path,
+    build_config: &BuildConfig,
+    args: &BuildArgs,
+    config_hash: &str,
+    workspace_folder: &Path,
 ) -> Result<BuildResult> {
-    #[cfg(feature = "docker")]
     {
         use deacon_core::docker::{CliDocker, Docker};
-        use std::process::Command;
 
         let docker = CliDocker::new();
 
@@ -447,21 +446,13 @@ async fn execute_docker_build(
         debug!("Building Docker image");
 
         // Prepare build context
-    let context_path = _workspace_folder.join(&_build_config.context);
-    let dockerfile_path = context_path.join(&_build_config.dockerfile);
+        let context_path = workspace_folder.join(&build_config.context);
+        let dockerfile_path = context_path.join(&build_config.dockerfile);
 
         // Prepare docker build arguments
         let mut build_args = vec!["build".to_string()];
 
-        // Add context
-        build_args.push(
-            context_path
-                .to_str()
-                .ok_or_else(|| {
-                    DeaconError::Docker(DockerError::CLIError("Invalid context path".to_string()))
-                })?
-                .to_string(),
-        );
+        // Defer adding context until after all flags (Docker expects PATH last)
 
         // Add dockerfile
         build_args.push("-f".to_string());
@@ -488,44 +479,55 @@ async fn execute_docker_build(
         }
 
         // Add target
-    if let Some(target) = &_build_config.target {
+        if let Some(target) = &build_config.target {
             build_args.push("--target".to_string());
             build_args.push(target.clone());
         }
 
         // Add build args from config
-    for (key, value) in &_build_config.options {
+        for (key, value) in &build_config.options {
             let build_arg_str = format!("{}={}", key, value);
             build_args.push("--build-arg".to_string());
             build_args.push(build_arg_str);
         }
 
         // Add build args from CLI
-    for build_arg in &_args.build_arg {
+        for build_arg in &args.build_arg {
             build_args.push("--build-arg".to_string());
             build_args.push(build_arg.clone());
         }
 
         // Add deterministic tag with config hash
-    let tag = format!("deacon-build:{}", &_config_hash[..12]);
+        let tag = format!("deacon-build:{}", &config_hash[..12]);
         build_args.push("-t".to_string());
         build_args.push(tag.clone());
 
         // Add label with config hash
-    let label = format!("org.deacon.configHash={}", _config_hash);
+        let label = format!("org.deacon.configHash={}", config_hash);
         build_args.push("--label".to_string());
         build_args.push(label);
 
         // Add quiet flag to reduce output noise
         build_args.push("-q".to_string());
 
+        // Finally add build context (must be last)
+        build_args.push(
+            context_path
+                .to_str()
+                .ok_or_else(|| {
+                    DeaconError::Docker(DockerError::CLIError("Invalid context path".to_string()))
+                })?
+                .to_string(),
+        );
+
         debug!("Docker build command: docker {}", build_args.join(" "));
 
-        // Execute docker build
-        let output = Command::new("docker")
+        // Execute docker build (async)
+        let output = tokio::process::Command::new("docker")
             .args(&build_args) // Pass all args including "build" subcommand
             .current_dir(workspace_folder)
             .output()
+            .await
             .map_err(|e| DockerError::CLIError(format!("Failed to execute docker build: {}", e)))?;
 
         if !output.status.success() {
@@ -536,65 +538,47 @@ async fn execute_docker_build(
         let image_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         // Extract image metadata
-    let metadata = extract_image_metadata(&image_id).await?;
+        let metadata = extract_image_metadata(&image_id).await?;
 
         let result = BuildResult {
             image_id,
             tags: vec![tag],
             build_duration: 0.0, // Will be set by caller
             metadata,
-            config_hash: _config_hash.to_string(),
+            config_hash: config_hash.to_string(),
         };
 
         debug!("Docker build completed successfully");
         Ok(result)
-    }
-
-    #[cfg(not(feature = "docker"))]
-    {
-        Err(DeaconError::Docker(DockerError::CLIError(
-            "Docker support not available (compiled without 'docker' feature)".to_string(),
-        ))
-        .into())
     }
 }
 
 /// Extract image metadata using docker inspect
 #[allow(dead_code)]
 async fn extract_image_metadata(image_id: &str) -> Result<HashMap<String, String>> {
-    #[cfg(feature = "docker")]
-    {
-        use std::process::Command;
+    debug!("Extracting metadata for image: {}", image_id);
 
-        debug!("Extracting metadata for image: {}", image_id);
+    let output = tokio::process::Command::new("docker")
+        .args(["inspect", "--format={{json .Config.Labels}}", image_id])
+        .output()
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Failed to inspect image: {}", e)))?;
 
-        let output = Command::new("docker")
-            .args(["inspect", "--format={{json .Config.Labels}}", image_id])
-            .output()
-            .map_err(|e| DockerError::CLIError(format!("Failed to inspect image: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(DockerError::CLIError(format!("Docker inspect failed: {}", stderr)).into());
-        }
-
-        let labels_json = String::from_utf8_lossy(&output.stdout);
-        let labels: HashMap<String, String> = if labels_json.trim() == "null" {
-            HashMap::new()
-        } else {
-            serde_json::from_str(&labels_json).map_err(|e| {
-                DockerError::CLIError(format!("Failed to parse image labels: {}", e))
-            })?
-        };
-
-        debug!("Extracted {} labels from image", labels.len());
-        Ok(labels)
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DockerError::CLIError(format!("Docker inspect failed: {}", stderr)).into());
     }
 
-    #[cfg(not(feature = "docker"))]
-    {
-        Ok(HashMap::new())
-    }
+    let labels_json = String::from_utf8_lossy(&output.stdout);
+    let labels: HashMap<String, String> = if labels_json.trim() == "null" {
+        HashMap::new()
+    } else {
+        serde_json::from_str(&labels_json)
+            .map_err(|e| DockerError::CLIError(format!("Failed to parse image labels: {}", e)))?
+    };
+
+    debug!("Extracted {} labels from image", labels.len());
+    Ok(labels)
 }
 
 /// Output build result in the specified format with redaction
@@ -785,8 +769,7 @@ mod tests {
         // Simulate the build_args construction from execute_docker_build
         let mut build_args = vec!["build".to_string()];
 
-        // Add context
-        build_args.push(context_path.to_str().unwrap().to_string());
+        // Defer adding context until after all flags (Docker expects PATH last)
 
         // Add dockerfile
         build_args.push("-f".to_string());
@@ -816,21 +799,24 @@ mod tests {
         // Add quiet flag
         build_args.push("-q".to_string());
 
+        // Finally add context (PATH last)
+        build_args.push(context_path.to_str().unwrap().to_string());
+
         // Verify the ordering: should start with "build" subcommand
         assert_eq!(build_args[0], "build");
-        assert_eq!(build_args[1], context_path.to_str().unwrap());
-        assert_eq!(build_args[2], "-f");
-        assert_eq!(build_args[3], dockerfile_path.to_str().unwrap());
-        assert_eq!(build_args[4], "--no-cache");
-        assert_eq!(build_args[5], "--platform");
-        assert_eq!(build_args[6], "linux/amd64");
-        assert_eq!(build_args[7], "--build-arg");
-        assert_eq!(build_args[8], "ENV=test");
-        assert_eq!(build_args[9], "-t");
-        assert_eq!(build_args[10], "deacon-build:abcd12345678");
-        assert_eq!(build_args[11], "--label");
-        assert_eq!(build_args[12], "org.deacon.configHash=abcd1234567890");
-        assert_eq!(build_args[13], "-q");
+        assert_eq!(build_args[1], "-f");
+        assert_eq!(build_args[2], dockerfile_path.to_str().unwrap());
+        assert_eq!(build_args[3], "--no-cache");
+        assert_eq!(build_args[4], "--platform");
+        assert_eq!(build_args[5], "linux/amd64");
+        assert_eq!(build_args[6], "--build-arg");
+        assert_eq!(build_args[7], "ENV=test");
+        assert_eq!(build_args[8], "-t");
+        assert_eq!(build_args[9], "deacon-build:abcd12345678");
+        assert_eq!(build_args[10], "--label");
+        assert_eq!(build_args[11], "org.deacon.configHash=abcd1234567890");
+        assert_eq!(build_args[12], "-q");
+        assert_eq!(build_args[13], context_path.to_str().unwrap());
 
         // Verify that when passed to Command::new("docker").args(&build_args),
         // it will correctly execute "docker build ..." not "docker -f ..."

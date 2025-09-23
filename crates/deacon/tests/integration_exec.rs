@@ -100,7 +100,6 @@ fn test_exec_invalid_env_format() {
         ));
 }
 
-#[cfg(feature = "docker")]
 #[test]
 fn test_exec_working_directory_config() {
     // This test would require a running Docker container, so we'll just verify

@@ -1776,7 +1776,7 @@ interface Plugin {
 #### Future Compatibility
 - **Extensible Design**: Design for future extensibility
 - **Deprecation Policy**: Clear deprecation and removal policies
-- **Feature Flags**: Feature flags for experimental functionality
+- **Experimental Features**: Runtime flags or environment variables for experimental functionality
 - **Version Detection**: Automatic version detection and adaptation
 
 This comprehensive specification provides the complete architectural and functional definition of the DevContainer CLI, enabling reconstruction in any programming language while maintaining full compatibility with the Development Containers Specification. The specification covers all major components, data structures, workflows, and implementation details necessary for a complete reimplementation.

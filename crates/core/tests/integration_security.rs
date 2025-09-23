@@ -123,7 +123,6 @@ fn test_security_options_docker_args_format() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "docker")]
 #[test]
 fn test_security_options_warning_for_existing_container() -> anyhow::Result<()> {
     let security = SecurityOptions {

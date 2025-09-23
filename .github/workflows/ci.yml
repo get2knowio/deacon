@@ -18,7 +18,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        feature_profile: [default, minimal, full]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -38,35 +37,23 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
-          
-    - name: Select feature profile
-      id: feat
-      run: |
-        case "${{ matrix.feature_profile }}" in
-          default)
-            echo 'args=' >> $GITHUB_OUTPUT ;;
-          minimal)
-            echo 'args=--no-default-features' >> $GITHUB_OUTPUT ;;
-          full)
-            echo 'args=--no-default-features --features "docker,config,plugins,json-logs"' >> $GITHUB_OUTPUT ;;
-        esac
 
-    - name: Build (${{ matrix.feature_profile }})
-      run: cargo build --verbose ${{ steps.feat.outputs.args }}
+    - name: Build
+      run: cargo build --verbose
       
-    - name: Run unit/integration tests (exclude smoke on macOS) (${{ matrix.feature_profile }})
+    - name: Run unit/integration tests (exclude smoke on macOS)
       run: |
         if [[ "${{ runner.os }}" == "macOS" ]]; then
-          cargo test --verbose ${{ steps.feat.outputs.args }} -- --test-threads=1 --skip smoke_basic
+          cargo test --verbose -- --test-threads=1 --skip smoke_basic
         else
-          cargo test --verbose ${{ steps.feat.outputs.args }} -- --test-threads=1 --skip smoke_basic
+          cargo test --verbose -- --test-threads=1 --skip smoke_basic
         fi
       
     - name: Check formatting
       run: cargo fmt --all -- --check
       
-    - name: Run clippy (${{ matrix.feature_profile }})
-      run: cargo clippy ${{ steps.feat.outputs.args }} --all-targets -- -D warnings
+    - name: Run clippy
+      run: cargo clippy --all-targets -- -D warnings
 
   smoke:
     name: Smoke tests (ubuntu)
@@ -89,7 +76,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Build (default features)
+    - name: Build
       run: cargo build --verbose
 
     - name: Run smoke tests only
@@ -129,7 +116,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-llvmcov-
 
-    - name: Generate coverage (default feature set; fail under ${{ env.MIN_COVERAGE }}%)
+    - name: Generate coverage (fail under ${{ env.MIN_COVERAGE }}%)
       run: |
         mkdir -p coverage
         cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info --text --fail-under-lines ${{ env.MIN_COVERAGE }} -- --test-threads=1 | tee -a "$GITHUB_STEP_SUMMARY"

@@ -20,6 +20,7 @@ pub mod lifecycle;
 pub mod logging;
 pub mod mount;
 pub mod oci;
+pub mod plugins;
 pub mod ports;
 pub mod progress;
 pub mod redaction;
@@ -28,9 +29,6 @@ pub mod retry;
 pub mod secrets;
 pub mod security;
 pub mod state;
-
-#[cfg(feature = "plugins")]
-pub mod plugins;
 pub mod templates;
 pub mod user_mapping;
 pub mod variable;

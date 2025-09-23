@@ -1,8 +1,8 @@
 //! Logging and observability
 //!
 //! This module provides structured logging, tracing, and observability utilities.
-//! It supports both traditional text-based logging and optional JSON formatting
-//! controlled by feature flags and environment variables.
+//! It supports both traditional text-based logging and optional JSON formatting,
+//! controlled at runtime via environment variables and CLI flags (no feature flags).
 
 use crate::redaction::RedactionConfig;
 use anyhow::Result;
@@ -26,6 +26,7 @@ static INIT: Once = Once::new();
 ///
 /// ## Environment Variables
 ///
+/// * `DEACON_LOG_FORMAT` - Controls the log output format ("json" for JSON, any other value for text)
 /// * `DEACON_LOG` - Controls the logging filter level
 /// * `RUST_LOG` - Standard Rust logging environment variable (used as fallback)
 ///
@@ -54,6 +55,10 @@ static INIT: Once = Once::new();
 ///
 /// // Initialize with JSON format and disabled redaction
 /// logging::init_with_redaction(Some("json"), Some(RedactionConfig::disabled())).expect("Failed to initialize logging");
+///
+/// // Environment variable usage:
+/// // export DEACON_LOG_FORMAT=json  # Enables JSON logging
+/// // Then call: logging::init(None)  # Will use JSON format from env
 /// ```
 pub fn init_with_redaction(
     format: Option<&str>,
@@ -63,8 +68,12 @@ pub fn init_with_redaction(
     INIT.call_once(|| {
         let filter = create_env_filter(None);
 
-        match format {
-            Some("json") => {
+        // Determine format from parameter or environment variable
+        let env_format = std::env::var("DEACON_LOG_FORMAT").ok();
+        let effective_format = format.or(env_format.as_deref()).unwrap_or("text");
+
+        match effective_format {
+            "json" => {
                 tracing_subscriber::registry()
                     .with(
                         fmt::layer()
@@ -94,10 +103,7 @@ pub fn init_with_redaction(
             }
         }
 
-        tracing::info!(
-            "Logging initialized with format: {}",
-            format.unwrap_or("text")
-        );
+        tracing::info!("Logging initialized with format: {}", effective_format);
     });
 
     Ok(())

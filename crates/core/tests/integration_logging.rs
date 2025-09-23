@@ -79,7 +79,6 @@ fn test_logging_initialization_safety() {
     assert!(logging::is_initialized());
 }
 
-#[cfg(feature = "json-logs")]
 #[test]
 fn test_json_logging_integration() {
     // Test that JSON logging feature works when enabled
