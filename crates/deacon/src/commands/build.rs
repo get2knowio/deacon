@@ -426,12 +426,12 @@ async fn cache_build_result(_result: &BuildResult, _workspace_folder: &Path) -> 
 }
 
 /// Execute Docker build
-#[instrument(skip(_build_config, _args, _workspace_folder))]
+#[instrument(skip(build_config, args, workspace_folder))]
 async fn execute_docker_build(
-    _build_config: &BuildConfig,
-    _args: &BuildArgs,
-    _config_hash: &str,
-    _workspace_folder: &Path,
+    build_config: &BuildConfig,
+    args: &BuildArgs,
+    config_hash: &str,
+    workspace_folder: &Path,
 ) -> Result<BuildResult> {
     #[cfg(feature = "docker")]
     {
@@ -447,8 +447,8 @@ async fn execute_docker_build(
         debug!("Building Docker image");
 
         // Prepare build context
-    let context_path = _workspace_folder.join(&_build_config.context);
-    let dockerfile_path = context_path.join(&_build_config.dockerfile);
+    let context_path = workspace_folder.join(&build_config.context);
+    let dockerfile_path = context_path.join(&build_config.dockerfile);
 
         // Prepare docker build arguments
         let mut build_args = vec!["build".to_string()];
@@ -488,31 +488,31 @@ async fn execute_docker_build(
         }
 
         // Add target
-    if let Some(target) = &_build_config.target {
+    if let Some(target) = &build_config.target {
             build_args.push("--target".to_string());
             build_args.push(target.clone());
         }
 
         // Add build args from config
-    for (key, value) in &_build_config.options {
+    for (key, value) in &build_config.options {
             let build_arg_str = format!("{}={}", key, value);
             build_args.push("--build-arg".to_string());
             build_args.push(build_arg_str);
         }
 
         // Add build args from CLI
-    for build_arg in &_args.build_arg {
+    for build_arg in &args.build_arg {
             build_args.push("--build-arg".to_string());
             build_args.push(build_arg.clone());
         }
 
         // Add deterministic tag with config hash
-    let tag = format!("deacon-build:{}", &_config_hash[..12]);
+    let tag = format!("deacon-build:{}", &config_hash[..12]);
         build_args.push("-t".to_string());
         build_args.push(tag.clone());
 
         // Add label with config hash
-    let label = format!("org.deacon.configHash={}", _config_hash);
+    let label = format!("org.deacon.configHash={}", config_hash);
         build_args.push("--label".to_string());
         build_args.push(label);
 
@@ -543,7 +543,7 @@ async fn execute_docker_build(
             tags: vec![tag],
             build_duration: 0.0, // Will be set by caller
             metadata,
-            config_hash: _config_hash.to_string(),
+            config_hash: config_hash.to_string(),
         };
 
         debug!("Docker build completed successfully");
