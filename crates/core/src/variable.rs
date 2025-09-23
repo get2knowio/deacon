@@ -287,7 +287,7 @@ impl VariableSubstitution {
 
         let mut result = input.to_string();
         let mut depth = 0;
-        let mut previous_results = Vec::new();
+        let mut previous_results = std::collections::HashSet::new();
 
         while depth < options.max_depth {
             let new_result = Self::substitute_string_single_pass(&result, context, report);
@@ -309,7 +309,7 @@ impl VariableSubstitution {
                 break;
             }
 
-            previous_results.push(result.clone());
+            previous_results.insert(result.clone());
             result = new_result;
             depth += 1;
         }
@@ -497,7 +497,14 @@ impl VariableSubstitution {
             &SubstitutionOptions::default(),
             report,
         )
-        .unwrap_or_else(|_| value.clone())
+        .unwrap_or_else(|err| {
+            // Log warning when advanced substitution fails in strict mode
+            tracing::warn!(
+                "Advanced substitution failed, falling back to original value: {}",
+                err
+            );
+            value.clone()
+        })
     }
 
     /// Apply substitution to a JSON value recursively with advanced options

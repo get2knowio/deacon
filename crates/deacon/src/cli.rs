@@ -343,8 +343,8 @@ pub enum ConfigCommands {
         #[arg(long, default_value = "5")]
         max_depth: usize,
         /// Enable multi-pass nested variable resolution
-        #[arg(long, default_value = "true")]
-        enable_nested: bool,
+        #[arg(long = "nested", default_value_t = true, action = clap::ArgAction::Set)]
+        nested: bool,
         /// Output format (text or json)
         #[arg(long, value_enum, default_value = "json")]
         output_format: OutputFormat,
@@ -640,6 +640,7 @@ impl Cli {
                     config_path: self.config,
                     override_config_path: self.override_config,
                     secrets_files: self.secrets_file,
+                    redaction_config: redaction_config.clone(),
                 };
 
                 execute_config(args).await

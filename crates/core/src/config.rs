@@ -653,7 +653,7 @@ impl DevContainerConfig {
 
     /// Apply variable substitution to the configuration with advanced options
     ///
-    /// This method applies variable substitution to all string fields in the configuration
+    /// This method applies variable substitution to selected string and JSON fields in the configuration
     /// using advanced substitution features including multi-pass resolution, cycle detection,
     /// and strict mode.
     ///
@@ -806,6 +806,16 @@ impl DevContainerConfig {
             config.post_attach_command =
                 Some(VariableSubstitution::substitute_json_value_with_options(
                     post_attach_command,
+                    context,
+                    options,
+                    report,
+                )?);
+        }
+
+        if let Some(ref initialize_command) = config.initialize_command {
+            config.initialize_command =
+                Some(VariableSubstitution::substitute_json_value_with_options(
+                    initialize_command,
                     context,
                     options,
                     report,

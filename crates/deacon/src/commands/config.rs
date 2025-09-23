@@ -8,6 +8,7 @@ use deacon_core::config::ConfigLoader;
 use deacon_core::errors::{ConfigError, DeaconError};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::variable::{SubstitutionContext, SubstitutionOptions};
+use deacon_core::redaction::{redact_if_enabled, RedactionConfig};
 use serde_json;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument};
@@ -22,6 +23,7 @@ pub struct ConfigArgs {
     pub config_path: Option<PathBuf>,
     pub override_config_path: Option<PathBuf>,
     pub secrets_files: Vec<PathBuf>,
+    pub redaction_config: RedactionConfig,
 }
 
 /// Execute the config command
@@ -35,19 +37,20 @@ pub async fn execute_config(args: ConfigArgs) -> Result<()> {
             dry_run,
             strict_substitution,
             max_depth,
-            enable_nested,
+            nested,
             output_format,
         } => {
             let substitute_args = ConfigSubstituteArgs {
                 dry_run,
                 strict_substitution,
                 max_depth,
-                enable_nested,
+                enable_nested: nested,
                 output_format,
                 workspace_folder: args.workspace_folder,
                 config_path: args.config_path,
                 override_config_path: args.override_config_path,
                 secrets_files: args.secrets_files,
+                redaction_config: args.redaction_config.clone(),
             };
             execute_config_substitute(substitute_args).await
         }
@@ -66,6 +69,7 @@ struct ConfigSubstituteArgs {
     config_path: Option<PathBuf>,
     override_config_path: Option<PathBuf>,
     secrets_files: Vec<PathBuf>,
+    redaction_config: RedactionConfig,
 }
 
 /// Execute the config substitute command
@@ -108,8 +112,8 @@ async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
         }
 
         let substitution_options = SubstitutionOptions {
-            max_depth,
-            strict: strict_substitution,
+            max_depth: args.max_depth,
+            strict: args.strict_substitution,
             enable_nested: args.enable_nested,
         };
 
@@ -157,7 +161,7 @@ async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
         let substitution_options = SubstitutionOptions {
             max_depth: args.max_depth,
             strict: args.strict_substitution,
-            enable_nested,
+            enable_nested: args.enable_nested,
         };
 
         // Use advanced substitution with specified options
@@ -186,11 +190,13 @@ async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
     // Output results based on format
     match args.output_format {
         OutputFormat::Json => {
-            let json_output = serde_json::to_string_pretty(&output_data)?;
+            let mut json_output = serde_json::to_string_pretty(&output_data)?;
+            // Apply redaction to JSON output
+            json_output = redact_if_enabled(&json_output, &args.redaction_config);
             println!("{}", json_output);
         }
         OutputFormat::Text => {
-            print_text_output(&output_data);
+            print_text_output(&output_data, &args.redaction_config);
         }
     }
 
@@ -225,7 +231,7 @@ struct ConfigSubstituteOptions {
 }
 
 /// Print text format output
-fn print_text_output(output: &ConfigSubstituteOutput) {
+fn print_text_output(output: &ConfigSubstituteOutput, redaction_config: &RedactionConfig) {
     println!("Configuration Substitution Results");
     println!("=================================");
     println!();
@@ -267,11 +273,13 @@ fn print_text_output(output: &ConfigSubstituteOutput) {
             output.substitution_report.replacements.len()
         );
         for (var, value) in &output.substitution_report.replacements {
+            // Apply redaction to sensitive values
+            let redacted_value = redact_if_enabled(value, redaction_config);
             // Truncate long values for readability
-            let display_value = if value.len() > 50 {
-                format!("{}...", &value[..47])
+            let display_value = if redacted_value.len() > 50 {
+                format!("{}...", &redacted_value[..47])
             } else {
-                value.clone()
+                redacted_value
             };
             println!("    {} -> {}", var, display_value);
         }
@@ -355,6 +363,7 @@ mod tests {
             config_path: Some(config_path),
             override_config_path: None,
             secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
         };
 
         let result = execute_config_substitute(args).await;
@@ -385,6 +394,7 @@ mod tests {
             config_path: Some(config_path),
             override_config_path: None,
             secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
         };
 
         let result = execute_config_substitute(args).await;
