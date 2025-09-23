@@ -22,6 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-error = "0.2"
 color-eyre = "0.6"
 once_cell = "1.21"
+toml = "0.8"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

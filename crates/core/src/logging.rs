@@ -1,8 +1,8 @@
 //! Logging and observability
 //!
 //! This module provides structured logging, tracing, and observability utilities.
-//! It supports both traditional text-based logging and optional JSON formatting
-//! controlled by feature flags and environment variables.
+//! It supports both traditional text-based logging and optional JSON formatting,
+//! controlled at runtime via environment variables and CLI flags (no feature flags).
 
 use crate::redaction::RedactionConfig;
 use anyhow::Result;
@@ -71,7 +71,7 @@ pub fn init_with_redaction(
         // Determine format from parameter or environment variable
         let env_format = std::env::var("DEACON_LOG_FORMAT").ok();
         let effective_format = format
-            .or_else(|| env_format.as_deref())
+            .or(env_format.as_deref())
             .unwrap_or("text");
 
         match effective_format {

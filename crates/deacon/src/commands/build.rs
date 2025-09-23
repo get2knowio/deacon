@@ -11,7 +11,6 @@ use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
 
@@ -404,7 +403,8 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
     }
 
     let hash = hasher.finish();
-    Ok(format!("{:x}", hash))
+    // Zero-pad to ensure stable length (16 hex chars) so downstream slicing is safe
+    Ok(format!("{:016x}", hash))
 }
 
 /// Check for cached build result
@@ -436,7 +436,6 @@ async fn execute_docker_build(
 ) -> Result<BuildResult> {
     {
         use deacon_core::docker::{CliDocker, Docker};
-        use std::process::Command;
 
         let docker = CliDocker::new();
 
@@ -453,15 +452,7 @@ async fn execute_docker_build(
         // Prepare docker build arguments
         let mut build_args = vec!["build".to_string()];
 
-        // Add context
-        build_args.push(
-            context_path
-                .to_str()
-                .ok_or_else(|| {
-                    DeaconError::Docker(DockerError::CLIError("Invalid context path".to_string()))
-                })?
-                .to_string(),
-        );
+        // Defer adding context until after all flags (Docker expects PATH last)
 
         // Add dockerfile
         build_args.push("-f".to_string());
@@ -519,13 +510,24 @@ async fn execute_docker_build(
         // Add quiet flag to reduce output noise
         build_args.push("-q".to_string());
 
+        // Finally add build context (must be last)
+        build_args.push(
+            context_path
+                .to_str()
+                .ok_or_else(|| {
+                    DeaconError::Docker(DockerError::CLIError("Invalid context path".to_string()))
+                })?
+                .to_string(),
+        );
+
         debug!("Docker build command: docker {}", build_args.join(" "));
 
-        // Execute docker build
-        let output = Command::new("docker")
+        // Execute docker build (async)
+        let output = tokio::process::Command::new("docker")
             .args(&build_args) // Pass all args including "build" subcommand
             .current_dir(workspace_folder)
             .output()
+            .await
             .map_err(|e| DockerError::CLIError(format!("Failed to execute docker build: {}", e)))?;
 
         if !output.status.success() {
@@ -556,9 +558,10 @@ async fn execute_docker_build(
 async fn extract_image_metadata(image_id: &str) -> Result<HashMap<String, String>> {
     debug!("Extracting metadata for image: {}", image_id);
 
-    let output = Command::new("docker")
+    let output = tokio::process::Command::new("docker")
         .args(["inspect", "--format={{json .Config.Labels}}", image_id])
         .output()
+        .await
         .map_err(|e| DockerError::CLIError(format!("Failed to inspect image: {}", e)))?;
 
     if !output.status.success() {
@@ -766,8 +769,7 @@ mod tests {
         // Simulate the build_args construction from execute_docker_build
         let mut build_args = vec!["build".to_string()];
 
-        // Add context
-        build_args.push(context_path.to_str().unwrap().to_string());
+        // Defer adding context until after all flags (Docker expects PATH last)
 
         // Add dockerfile
         build_args.push("-f".to_string());
@@ -797,21 +799,24 @@ mod tests {
         // Add quiet flag
         build_args.push("-q".to_string());
 
+        // Finally add context (PATH last)
+        build_args.push(context_path.to_str().unwrap().to_string());
+
         // Verify the ordering: should start with "build" subcommand
         assert_eq!(build_args[0], "build");
-        assert_eq!(build_args[1], context_path.to_str().unwrap());
-        assert_eq!(build_args[2], "-f");
-        assert_eq!(build_args[3], dockerfile_path.to_str().unwrap());
-        assert_eq!(build_args[4], "--no-cache");
-        assert_eq!(build_args[5], "--platform");
-        assert_eq!(build_args[6], "linux/amd64");
-        assert_eq!(build_args[7], "--build-arg");
-        assert_eq!(build_args[8], "ENV=test");
-        assert_eq!(build_args[9], "-t");
-        assert_eq!(build_args[10], "deacon-build:abcd12345678");
-        assert_eq!(build_args[11], "--label");
-        assert_eq!(build_args[12], "org.deacon.configHash=abcd1234567890");
-        assert_eq!(build_args[13], "-q");
+        assert_eq!(build_args[1], "-f");
+        assert_eq!(build_args[2], dockerfile_path.to_str().unwrap());
+        assert_eq!(build_args[3], "--no-cache");
+        assert_eq!(build_args[4], "--platform");
+        assert_eq!(build_args[5], "linux/amd64");
+        assert_eq!(build_args[6], "--build-arg");
+        assert_eq!(build_args[7], "ENV=test");
+        assert_eq!(build_args[8], "-t");
+        assert_eq!(build_args[9], "deacon-build:abcd12345678");
+        assert_eq!(build_args[10], "--label");
+        assert_eq!(build_args[11], "org.deacon.configHash=abcd1234567890");
+        assert_eq!(build_args[12], "-q");
+        assert_eq!(build_args[13], context_path.to_str().unwrap());
 
         // Verify that when passed to Command::new("docker").args(&build_args),
         // it will correctly execute "docker build ..." not "docker -f ..."

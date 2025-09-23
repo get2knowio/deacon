@@ -449,11 +449,13 @@ impl Cli {
         };
 
         // Set environment variable for log level before initializing logging
-        std::env::set_var(
-            "RUST_LOG",
-            format!("deacon={},deacon_core={}", log_level, log_level),
-        );
-        deacon_core::logging::init(log_format.as_deref())?;
+        if std::env::var_os("DEACON_LOG").is_none() && std::env::var_os("RUST_LOG").is_none() {
+            std::env::set_var(
+                "RUST_LOG",
+                format!("deacon={},deacon_core={}", log_level, log_level),
+            );
+        }
+        deacon_core::logging::init(log_format)?;
 
         // Emit a debug log to help with testing
         tracing::debug!("CLI initialized with log level: {}", log_level);
