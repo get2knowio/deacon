@@ -470,11 +470,10 @@ impl Docker for CliDocker {
         let label_selector = label_selector.map(|s| s.to_string());
 
         tokio::task::spawn_blocking(move || {
-            let mut args: Vec<String> =
-                vec!["ps", "--all", "--format", "{{json .}}"]
-                    .into_iter()
-                    .map(|s| s.to_string())
-                    .collect();
+            let mut args: Vec<String> = vec!["ps", "--all", "--format", "{{json .}}"]
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
 
             // Support multiple label filters; Docker expects one --filter per label
             if let Some(label) = &label_selector {

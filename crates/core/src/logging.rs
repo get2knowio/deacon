@@ -70,9 +70,7 @@ pub fn init_with_redaction(
 
         // Determine format from parameter or environment variable
         let env_format = std::env::var("DEACON_LOG_FORMAT").ok();
-        let effective_format = format
-            .or(env_format.as_deref())
-            .unwrap_or("text");
+        let effective_format = format.or(env_format.as_deref()).unwrap_or("text");
 
         match effective_format {
             "json" => {
@@ -105,10 +103,7 @@ pub fn init_with_redaction(
             }
         }
 
-        tracing::info!(
-            "Logging initialized with format: {}",
-            effective_format
-        );
+        tracing::info!("Logging initialized with format: {}", effective_format);
     });
 
     Ok(())
