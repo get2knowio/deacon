@@ -55,6 +55,7 @@ docs/
 | Task | Command |
 |------|---------|
 | Build | `cargo build` |
+| Build (full release feature set) | `cargo build --release --no-default-features --features "docker,config,plugins,json-logs"` |
 | Test | `cargo test` |
 | Format code | `cargo fmt --all` |
 | Lint (clippy) | `cargo clippy --all-targets -- -D warnings` |
@@ -143,6 +144,23 @@ RUST_LOG=debug cargo run -- --help
 2. Update `CHANGELOG.md` (when created)
 3. Create and push a git tag: `git tag v0.1.0 && git push origin v0.1.0`
 4. GitHub Actions will automatically build and release binaries
+
+### Production (Distribution) Build Guidance
+
+Homebrew / packaged distribution binaries should expose all implemented functionality so downstream users are not surprised by missing subcommands or logging modes. Use this canonical build command locally to reproduce the release artifact feature set:
+
+```bash
+cargo build --release --no-default-features --features "docker,config,plugins,json-logs"
+```
+
+Explanation of flags:
+- `--no-default-features`: Start from a clean slate (otherwise `docker` is implicitly on) for deterministic feature selection.
+- `docker`: Enables container lifecycle & Docker integration code paths.
+- `config`: Includes extended configuration support (optional deps like `toml`).
+- `plugins`: Enables (experimental) plugin scaffolding so early adopters can test; safe to omit if stabilizing a minimal distribution.
+- `json-logs`: Adds structured JSON logging output for CI / machine parsing.
+
+If a future stable distribution needs a leaner variant, document the difference explicitly (e.g., omit `plugins` for an LTS channel). For now, treat the full set above as the “production” profile.
 
 ## Getting Help
 - **Issues**: Open a GitHub issue for bugs or feature requests

@@ -72,6 +72,15 @@ cargo build --release
 ./target/release/deacon --help
 ```
 
+#### Install from Source (Full Feature Set)
+For a distribution-quality binary with all current capabilities (docker, extended config, plugins scaffolding, JSON logs):
+```bash
+git clone https://github.com/get2knowio/deacon.git
+cd deacon
+cargo build --release --no-default-features --features "docker,config,plugins,json-logs"
+./target/release/deacon --version
+```
+
 ### Install from Cargo (Future)
 *Note: Publishing to crates.io is planned for a future release.*
 ```bash

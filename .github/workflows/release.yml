@@ -76,8 +76,10 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-${{ matrix.target }}-cargo-
           
-    - name: Build release binary
-      run: cargo build --release --target ${{ matrix.target }}
+    - name: Build release binary (full feature set)
+      run: >
+        cargo build --release --target ${{ matrix.target }}
+        --no-default-features --features "docker,config,plugins,json-logs"
       
     - name: Create archive (Unix)
       if: runner.os != 'Windows'
