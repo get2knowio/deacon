@@ -84,6 +84,54 @@ cargo install deacon
 deacon --help
 ```
 
+## Examples
+
+Self-contained categorized examples live under [`examples/`](examples/README.md):
+
+- Configuration: variable substitution, lifecycle commands basics (`examples/configuration/`)
+- Feature Management: minimal & with-options feature manifests (`examples/feature-management/`)
+- Template Management: minimal & with-options templates including Dockerfile and assets (`examples/template-management/`)
+
+Try one:
+```bash
+cd examples/feature-management/minimal-feature
+deacon features test . --json
+```
+
+See the full details and additional commands in `examples/README.md`.
+
+## Feature Flags & Build Variants
+
+The workspace uses Cargo feature flags to keep the default binary lean while enabling advanced capabilities on demand.
+
+| Feature (crate) | Default | Purpose | When to Enable |
+|-----------------|---------|---------|----------------|
+| `docker` (`deacon`, `deacon-core`) | ON (default) | Docker / container lifecycle integration | Disable only for pure config or analysis builds without Docker present |
+| `config` (`deacon`) | OFF | Additional configuration format support (reserves optional `toml` dep) | Building a full “all capabilities” release or future extended config workflows |
+| `json-logs` (`deacon-core`) | OFF | Structured JSON logging output via `tracing-subscriber` | CI ingestion / machine parsing of logs |
+| `plugins` (`deacon`, `deacon-core`) | OFF | Experimental plugin / extension hooks (scaffolding) | Evaluating or developing plugin system (unstable) |
+
+### Common Build Profiles
+
+```bash
+# Default (docker only)
+cargo build --release
+
+# Minimal (no Docker; config & plugins omitted)
+cargo build --release --no-default-features
+
+# Full feature set (intended production / Homebrew style release)
+cargo build --release --no-default-features --features "docker,config,plugins"
+
+# Full + JSON logs (for structured logging distributions)
+cargo build --release --no-default-features --features "docker,config,plugins,json-logs"
+```
+
+If you built without `config` and examples referencing `read-configuration` fail unexpectedly, rebuild with the appropriate feature set (see above).
+
+To inspect enabled features at runtime you can compare output sizes or run `cargo tree -F deacon/config` for dependency changes.
+
+
 ## Usage
 
 ### Reading DevContainer Configuration

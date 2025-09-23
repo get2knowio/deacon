@@ -233,6 +233,33 @@ Each error enum variant should carry minimal, actionable context. Prefer convert
 - Keep README & CONTRIBUTING authoritative for dev workflow; avoid duplicating extended rationale (link to spec sections instead).
 - When adding a feature touching spec semantics, include a short `docs/` note referencing the relevant workflow diagram.
 
+## Examples Maintenance
+The `examples/` directory and configuration/feature/template fixtures under `examples/` and `fixtures/` are living documentation and MUST reflect current CLI behavior defined in `docs/CLI-SPEC.md`.
+
+Guidelines:
+- Prefer minimal, focused examples that each illustrate one primary concept: configuration resolution, variable substitution, feature options, template options, lifecycle commands, etc.
+- When introducing or modifying a user‑visible flag, subcommand, feature schema field, or template option, update (or add) an example demonstrating the change in `examples/` and, where parsing/validation is exercised, a corresponding lightweight fixture in `fixtures/` for tests.
+- Keep `examples/README.md` curated: add a short entry (one sentence + relative path) for each new example so discoverability stays high.
+- Align example names and inline comments with spec terminology ("feature", "template", "lifecycle command", "workspace"). Avoid ad‑hoc synonyms.
+- If an example becomes redundant due to broader one covering the same concept, remove it in the same PR (explicitly call this out in the PR body) to avoid drift and noise.
+- Ensure examples are lint‑clean: they should compile / pass parsing when invoked via the CLI (add or extend a smoke/integration test if newly cover behavior not previously tested).
+- For variable usage examples, prefer deterministic placeholders over secrets (e.g. `MY_TOKEN` with a comment rather than a fabricated value).
+- Keep example JSON/TOML/YAML consistently formatted (run through `rustfmt` for Rust snippets; rely on editor/formatter for structured files) and free of trailing whitespace.
+
+Validation Flow (recommended when adding/modifying examples):
+1. Add or update the example content.
+2. Run the CLI against the example (`cargo run -- read-configuration --path examples/...`) to confirm parsing success.
+3. If it highlights new behavior, add/adjust an integration test referencing the matching fixture.
+4. Update `examples/README.md` index section.
+5. Re-run full checklist (build, tests, fmt, clippy).
+
+PR Body Expectations (when examples change):
+- Brief rationale for new/updated/removed examples.
+- Mapping to spec section(s) demonstrating relevance.
+- Note any added/adjusted tests ensuring coverage.
+
+Failure to update examples when altering user‑facing behavior increases drift risk; treat missing updates as a review blocker.
+
 ## Testing Strategy
 - Favor deterministic tests; isolate environment-dependent logic behind trait abstractions with mock implementations.
 - Use `assert_cmd` for end-to-end CLI invocation tests.
@@ -252,6 +279,7 @@ Checklist before submitting AI-generated PR suggestions:
 - [ ] Errors mapped to domain taxonomy (or TODO noted)
 - [ ] Added or updated tests for new logic paths
 - [ ] Documentation (rustdoc / README / docs/) updated
+ - [ ] Examples & fixtures updated (or explicitly confirmed not needed) and `examples/README.md` index maintained
 
 ## Future Refactors (Do Not Prematurely Implement)
 - Introduce `crates/core` with domain models & runtime abstraction.

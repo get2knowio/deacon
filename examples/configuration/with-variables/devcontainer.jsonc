@@ -1,0 +1,31 @@
+{
+  "name": "Variable Substitution Test Container",
+  "image": "ubuntu:20.04",
+  "workspaceFolder": "${localWorkspaceFolder}/src",
+  "containerEnv": {
+    "WORKSPACE_ROOT": "${localWorkspaceFolder}",
+    "CONTAINER_ID": "${devcontainerId}",
+    "HOST_USER": "${localEnv:USER}",
+    "MISSING_VAR": "${localEnv:NONEXISTENT_VAR}",
+    "PROJECT_NAME": "project-${devcontainerId}"
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/.cargo,target=/usr/local/cargo,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/target,target=/workspace/target,type=bind",
+    "${localWorkspaceFolder}/data:/data:rw"
+  ],
+  "runArgs": [
+    "--name","devcontainer-${devcontainerId}","--label","workspace=${localWorkspaceFolder}","--init"
+  ],
+  "onCreateCommand": "echo 'Container created for workspace: ${localWorkspaceFolder}'",
+  "postCreateCommand": [
+    "echo","Setting up workspace in ${localWorkspaceFolder}","mkdir -p ${localWorkspaceFolder}/logs"
+  ],
+  "postStartCommand": "echo 'Container ${devcontainerId} started'",
+  "postAttachCommand": {"setup": "echo 'Attached to ${devcontainerId}'"},
+  "forwardPorts": [3000,8080],
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:1": {"installZsh": true, "username": "vscode"}
+  },
+  "customizations": {"vscode": {"extensions": ["rust-lang.rust-analyzer"],"settings": {"terminal.integrated.cwd": "${localWorkspaceFolder}/src"}}}
+}
