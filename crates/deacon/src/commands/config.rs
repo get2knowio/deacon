@@ -4,14 +4,15 @@
 //! including advanced variable substitution preview and validation.
 
 use anyhow::Result;
-use deacon_core::config::ConfigLoader;
-use deacon_core::errors::{ConfigError, DeaconError};
-use deacon_core::secrets::SecretsCollection;
-use deacon_core::variable::{SubstitutionContext, SubstitutionOptions};
-use deacon_core::redaction::{redact_if_enabled, RedactionConfig};
 use serde_json;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument};
+
+use deacon_core::config::ConfigLoader;
+use deacon_core::errors::{ConfigError, DeaconError};
+use deacon_core::redaction::{redact_if_enabled, RedactionConfig};
+use deacon_core::secrets::SecretsCollection;
+use deacon_core::variable::{SubstitutionContext, SubstitutionOptions};
 
 use crate::cli::{ConfigCommands, OutputFormat};
 
