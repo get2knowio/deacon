@@ -530,3 +530,127 @@ fn test_empty_and_whitespace_handling() {
     let result4 = redact_if_enabled("  whitespace-secret  ", &config);
     assert_eq!(result4, "  ****  ");
 }
+
+#[test]
+fn test_structured_secret_basic() {
+    use deacon_core::redaction::StructuredSecret;
+
+    let registry = SecretRegistry::new();
+
+    // Add a structured secret that only redacts in key-value context
+    registry.add_structured_secret(StructuredSecret {
+        value: "commonword".to_string(),
+        key: Some("password".to_string()),
+        context_pattern: None,
+        require_key_context: true,
+    });
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Should NOT redact when appearing in normal text
+    let result1 = redact_if_enabled("This is a commonword in normal text", &config);
+    assert_eq!(result1, "This is a commonword in normal text");
+
+    // Should redact when appearing in key-value context
+    let result2 = redact_if_enabled("password=commonword", &config);
+    assert_eq!(result2, "password=****");
+
+    let result3 = redact_if_enabled("password: commonword", &config);
+    assert_eq!(result3, "password: ****");
+
+    let result4 = redact_if_enabled("\"password\":\"commonword\"", &config);
+    assert_eq!(result4, "\"password\":\"****\"");
+}
+
+#[test]
+fn test_structured_secret_with_context_pattern() {
+    use deacon_core::redaction::StructuredSecret;
+
+    let registry = SecretRegistry::new();
+
+    // Add a structured secret that only redacts when a context pattern is present
+    registry.add_structured_secret(StructuredSecret {
+        value: "testvalue123".to_string(),
+        key: None,
+        context_pattern: Some("login".to_string()),
+        require_key_context: false,
+    });
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Should NOT redact when context pattern is absent
+    let result1 = redact_if_enabled("Found testvalue123 in logs", &config);
+    assert_eq!(result1, "Found testvalue123 in logs");
+
+    // Should redact when context pattern is present
+    let result2 = redact_if_enabled("login attempt with testvalue123", &config);
+    assert_eq!(result2, "login attempt with ****");
+}
+
+#[test]
+fn test_add_secret_with_key_context() {
+    let registry = SecretRegistry::new();
+
+    // Add a secret that should only be redacted in specific key contexts
+    registry.add_secret_with_key_context(
+        "secretvalue",
+        vec![
+            "password".to_string(),
+            "token".to_string(),
+            "api_key".to_string(),
+        ],
+    );
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Should NOT redact in normal text
+    let result1 = redact_if_enabled("The secretvalue is mentioned here", &config);
+    assert_eq!(result1, "The secretvalue is mentioned here");
+
+    // Should redact in password context
+    let result2 = redact_if_enabled("password=secretvalue", &config);
+    assert_eq!(result2, "password=****");
+
+    // Should redact in token context
+    let result3 = redact_if_enabled("token: secretvalue", &config);
+    assert_eq!(result3, "token: ****");
+
+    // Should redact in api_key context
+    let result4 = redact_if_enabled("\"api_key\":\"secretvalue\"", &config);
+    assert_eq!(result4, "\"api_key\":\"****\"");
+}
+
+#[test]
+fn test_mixed_redaction_types() {
+    use deacon_core::redaction::StructuredSecret;
+
+    let registry = SecretRegistry::new();
+
+    // Add regular secret (always redacted)
+    registry.add_secret("alwayssecret");
+
+    // Add structured secret (only in context)
+    registry.add_structured_secret(StructuredSecret {
+        value: "contextsecret".to_string(),
+        key: Some("password".to_string()),
+        context_pattern: None,
+        require_key_context: true,
+    });
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Regular secret should always be redacted
+    let result1 = redact_if_enabled("Found alwayssecret here", &config);
+    assert_eq!(result1, "Found **** here");
+
+    // Structured secret should only be redacted in context
+    let result2 = redact_if_enabled("Found contextsecret here", &config);
+    assert_eq!(result2, "Found contextsecret here");
+
+    let result3 = redact_if_enabled("password=contextsecret", &config);
+    assert_eq!(result3, "password=****");
+
+    // Both in same text with different behaviors
+    let result4 = redact_if_enabled("alwayssecret and password=contextsecret", &config);
+    assert_eq!(result4, "**** and password=****");
+}

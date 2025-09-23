@@ -29,6 +29,21 @@ struct SecretRegistryInner {
     exact_secrets: HashSet<String>,
     /// SHA-256 hashes of secrets for additional detection
     secret_hashes: HashSet<String>,
+    /// Structured secrets with context information to reduce false positives
+    structured_secrets: Vec<StructuredSecret>,
+}
+
+/// A structured secret with context information to reduce false positives
+#[derive(Debug, Clone)]
+pub struct StructuredSecret {
+    /// The secret value to redact
+    pub value: String,
+    /// Optional key/field name that provides context (e.g., "password", "token", "api_key")
+    pub key: Option<String>,
+    /// Optional pattern that must appear near the secret for it to be redacted
+    pub context_pattern: Option<String>,
+    /// Whether this secret should only be redacted when found in key-value pairs
+    pub require_key_context: bool,
 }
 
 impl SecretRegistry {
@@ -68,9 +83,41 @@ impl SecretRegistry {
         }
     }
 
+    /// Add a structured secret with contextual information
+    ///
+    /// This allows for more sophisticated redaction that can consider context
+    /// to reduce false positives. For example, the word "secret" might only
+    /// be redacted when it appears in a key-value context like "password=secret123".
+    pub fn add_structured_secret(&self, structured_secret: StructuredSecret) {
+        if structured_secret.value.len() < MIN_REDACTION_LENGTH {
+            return;
+        }
+
+        if let Ok(mut inner) = self.inner.write() {
+            inner.structured_secrets.push(structured_secret);
+        }
+    }
+
+    /// Add a secret with key context for key-value pair redaction
+    ///
+    /// This will only redact the secret when it appears after one of the specified keys.
+    /// Useful for values that might appear in normal text but should only be redacted
+    /// when they're actually secret values.
+    pub fn add_secret_with_key_context(&self, secret: &str, keys: Vec<String>) {
+        for key in keys {
+            self.add_structured_secret(StructuredSecret {
+                value: secret.to_string(),
+                key: Some(key),
+                context_pattern: None,
+                require_key_context: true,
+            });
+        }
+    }
+
     /// Check if a value contains any registered secrets and return redacted version
     ///
-    /// This performs naive substring scanning for both exact secrets and their hashes.
+    /// This performs both simple substring scanning for exact secrets and their hashes,
+    /// as well as contextual redaction for structured secrets.
     /// If any secrets are found, they are replaced with the redaction placeholder.
     pub fn redact_text(&self, text: &str) -> String {
         if let Ok(inner) = self.inner.read() {
@@ -90,6 +137,11 @@ impl SecretRegistry {
                 }
             }
 
+            // Redact structured secrets with context
+            for structured_secret in &inner.structured_secrets {
+                result = redact_structured_secret(&result, structured_secret);
+            }
+
             result
         } else {
             // If we can't acquire the lock, return original text
@@ -100,7 +152,7 @@ impl SecretRegistry {
     /// Get the count of registered secrets (for testing/debugging)
     pub fn secret_count(&self) -> usize {
         if let Ok(inner) = self.inner.read() {
-            inner.exact_secrets.len()
+            inner.exact_secrets.len() + inner.structured_secrets.len()
         } else {
             0
         }
@@ -111,6 +163,7 @@ impl SecretRegistry {
         if let Ok(mut inner) = self.inner.write() {
             inner.exact_secrets.clear();
             inner.secret_hashes.clear();
+            inner.structured_secrets.clear();
         }
     }
 }
@@ -216,6 +269,55 @@ pub fn redact_with_registry(
     } else {
         redacted
     }
+}
+
+/// Redact a structured secret with contextual information
+///
+/// This function applies more sophisticated redaction logic based on the context
+/// provided in the StructuredSecret. It can handle key-value pairs and context patterns.
+fn redact_structured_secret(text: &str, structured_secret: &StructuredSecret) -> String {
+    // If no special context is required, do simple replacement
+    if !structured_secret.require_key_context && structured_secret.context_pattern.is_none() {
+        return text.replace(&structured_secret.value, REDACTION_PLACEHOLDER);
+    }
+
+    let mut result = text.to_string();
+
+    // Handle key-value context redaction
+    if structured_secret.require_key_context {
+        if let Some(key) = &structured_secret.key {
+            // Look for patterns like "key=value", "key: value", "key": "value", etc.
+            let patterns = [
+                format!("{}={}", key, &structured_secret.value),
+                format!("{}:{}", key, &structured_secret.value),
+                format!("{}: {}", key, &structured_secret.value),
+                format!("\"{}\":\"{}", key, &structured_secret.value),
+                format!("\"{}\":\"{}\"", key, &structured_secret.value),
+                format!("\"{}\" : \"{}\"", key, &structured_secret.value),
+                format!("{}=\"{}\"", key, &structured_secret.value),
+                format!("{} = \"{}\"", key, &structured_secret.value),
+                format!("{} = {}", key, &structured_secret.value),
+            ];
+
+            for pattern in &patterns {
+                if result.contains(pattern) {
+                    let redacted_pattern =
+                        pattern.replace(&structured_secret.value, REDACTION_PLACEHOLDER);
+                    result = result.replace(pattern, &redacted_pattern);
+                }
+            }
+        }
+    }
+
+    // Handle context pattern matching
+    if let Some(context_pattern) = &structured_secret.context_pattern {
+        // Only redact the secret if the context pattern is found nearby
+        if result.contains(context_pattern) {
+            result = result.replace(&structured_secret.value, REDACTION_PLACEHOLDER);
+        }
+    }
+
+    result
 }
 
 /// Add a secret to the global registry
