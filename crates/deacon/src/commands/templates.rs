@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use tempfile;
 use tracing::{debug, info, instrument, warn};
 
-
 /// Templates command arguments
 #[derive(Debug, Clone)]
 pub struct TemplatesArgs {
