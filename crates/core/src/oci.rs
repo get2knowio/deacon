@@ -580,10 +580,41 @@ fn classify_network_error(error: &FeatureError) -> RetryDecision {
     }
 }
 
+/// Get the default cache directory for features
+///
+/// Uses the standard cache directory with a 'features' subdirectory for persistent
+/// feature caching across workspace sessions.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::oci::get_features_cache_dir;
+/// let cache_dir = get_features_cache_dir().expect("failed to get features cache dir");
+/// assert!(cache_dir.ends_with("features"));
+/// ```
+pub fn get_features_cache_dir() -> Result<PathBuf> {
+    let base_cache = crate::progress::get_cache_dir().map_err(|e| FeatureError::Oci {
+        message: format!("Failed to get cache directory: {}", e),
+    })?;
+    let features_cache = base_cache.join("features");
+
+    // Ensure features cache directory exists
+    if !features_cache.exists() {
+        std::fs::create_dir_all(&features_cache).map_err(|e| FeatureError::Oci {
+            message: format!("Failed to create features cache directory: {}", e),
+        })?;
+    }
+
+    Ok(features_cache)
+}
+
 impl<C: HttpClient> FeatureFetcher<C> {
     /// Create a new FeatureFetcher with custom HTTP client
     pub fn new(client: C) -> Self {
-        let cache_dir = std::env::temp_dir().join("deacon-features");
+        let cache_dir = get_features_cache_dir().unwrap_or_else(|_| {
+            // Fallback to temp directory if persistent cache fails
+            std::env::temp_dir().join("deacon-features")
+        });
         Self {
             client,
             cache_dir,
@@ -1923,5 +1954,32 @@ mod tests {
             classify_network_error(&validation_error),
             crate::retry::RetryDecision::Stop
         );
+    }
+
+    #[test]
+    fn test_get_features_cache_dir() {
+        let cache_dir = get_features_cache_dir().expect("should get features cache dir");
+
+        // Verify the cache directory is created and has the right structure
+        assert!(cache_dir.exists());
+        assert!(cache_dir.is_dir());
+        assert!(cache_dir.ends_with("features"));
+
+        // Verify it's using the persistent cache base directory
+        let expected_base = crate::progress::get_cache_dir().expect("should get cache dir");
+        let expected_features_cache = expected_base.join("features");
+        assert_eq!(cache_dir, expected_features_cache);
+    }
+
+    #[test]
+    fn test_feature_fetcher_uses_persistent_cache() {
+        let mock_client = MockHttpClient::new();
+        let fetcher = FeatureFetcher::new(mock_client);
+
+        // The fetcher should use the persistent cache directory
+        let expected_cache = get_features_cache_dir()
+            .unwrap_or_else(|_| std::env::temp_dir().join("deacon-features"));
+
+        assert_eq!(fetcher.cache_dir, expected_cache);
     }
 }
