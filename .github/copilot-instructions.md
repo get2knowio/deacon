@@ -13,6 +13,10 @@ These instructions guide AI assistance (e.g. GitHub Copilot / Chat) when proposi
    - `cargo fmt --all` (format code immediately after changes)
    - `cargo fmt --all -- --check` (verify no formatting changes needed)
    - `cargo clippy --all-targets -- -D warnings` (no clippy warnings allowed)
+6. **No Silent Fallbacks / Stubbed Behavior**: Production (non-test) code MUST NOT transparently downgrade, noop, or silently substitute mock/stub implementations when a capability (e.g., OCI / registry resolution, container runtime, feature install backend) is unavailable or unimplemented. Either:
+  - Provide a fully working implementation, OR
+  - Emit a clear, user-facing error (e.g., `Not implemented yet: OCI resolution`) and abort the workflow.
+  Mocks and fakes are permitted ONLY inside tests. Do not wire mocks into runtime code paths or auto-detect-and-skip behavior; explicit failure is required to prevent hidden divergence from the spec.
 
 ## Scope & Architecture Alignment
 The long-term goal is a Rust implementation of a DevContainer-like CLI. Align concepts with the spec's domains (configuration resolution, feature system, template system, Docker/OCI integration, lifecycle execution). For any new major subsystem:
@@ -33,6 +37,7 @@ The long-term goal is a Rust implementation of a DevContainer-like CLI. Align co
 - Logging: Use `tracing` spans for multi-step workflows (configuration load, feature install, container build) and structured fields instead of string concatenation.
 - Configuration Parsing: Plan for layered merges (defaults -> base -> extends -> overrides -> runtime). Keep parsing pure & testable.
 - Dependency Injection: Pass traits (e.g., `ContainerRuntime`, `RegistryClient`) rather than concrete types to enable test doubles.
+  - Production code MUST bind only to real implementations; test doubles (mocks/fakes) stay confined to test modules. If a real implementation is not yet ready, fail fast with a clear `Not implemented yet` error rather than silently substituting a placeholder.
 - Asynchronicity: Introduce async only when IO-bound (network, filesystem, process execution). Keep pure logic synchronous.
 - Testing: For each new module add: (a) unit tests for pure logic, (b) integration test if it crosses process/container boundary stubs.
 - Benchmarks: Add Criterion benchmarks only for performance-critical paths (parsing, resolution) and guard with `#[cfg(feature = "bench")]` if noise becomes an issue.
@@ -264,6 +269,7 @@ Failure to update examples when altering user‑facing behavior increases drift 
 - Favor deterministic tests; isolate environment-dependent logic behind trait abstractions with mock implementations.
 - Use `assert_cmd` for end-to-end CLI invocation tests.
 - Avoid network in unit tests; gate true integration (e.g., Docker) tests behind CI-only markers or environment variables if needed.
+- Never rely on production fallback logic to skip unimplemented features; tests should assert explicit error variants/messages for not-yet-implemented functionality. Mocks/fakes are tools for isolation in tests only and must not leak into shipped execution paths.
 
 ## Adherence to `CLI-SPEC.md`
 > IMPORTANT: All generated code, designs, and refactors MUST remain consistent with `docs/CLI-SPEC.md`. If a requested change deviates (e.g., new command semantics, altered lifecycle order, renamed workflow), respond with a clarification prompt and do not implement until resolved.
