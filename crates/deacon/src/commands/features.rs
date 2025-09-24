@@ -139,76 +139,46 @@ async fn execute_features_plan(
     let features_map = features_map_opt.unwrap();
 
     // Resolve features from registries to obtain metadata (deps, installsAfter, etc.)
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
     let mut resolved_features = Vec::with_capacity(features_map.len());
     for (feature_id, feature_value) in features_map {
-        // Try to resolve feature from OCI registry first, fallback to mock for testing
-        let resolved_feature = if let Ok(fetcher) = default_fetcher() {
-            match parse_registry_reference(feature_id) {
-                Ok((registry_url, namespace, name, tag)) => {
-                    let feature_ref = FeatureRef::new(
-                        registry_url.clone(),
-                        namespace.clone(),
-                        name.clone(),
-                        tag.clone(),
-                    );
-                    match fetcher.fetch_feature(&feature_ref).await {
-                        Ok(downloaded) => {
-                            // Extract per-feature options from config entry if present
-                            let options: std::collections::HashMap<String, OptionValue> =
-                                match feature_value {
-                                    serde_json::Value::Object(map) => map
-                                        .clone()
-                                        .into_iter()
-                                        .filter_map(|(k, v)| {
-                                            // Convert serde_json::Value to OptionValue
-                                            let option_value = match v {
-                                                serde_json::Value::Bool(b) => {
-                                                    Some(OptionValue::Boolean(b))
-                                                }
-                                                serde_json::Value::String(s) => {
-                                                    Some(OptionValue::String(s))
-                                                }
-                                                _ => None, // Skip other types
-                                            };
-                                            option_value.map(|ov| (k, ov))
-                                        })
-                                        .collect(),
-                                    _ => std::collections::HashMap::new(),
-                                };
+        let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
+        let feature_ref = FeatureRef::new(
+            registry_url.clone(),
+            namespace.clone(),
+            name.clone(),
+            tag.clone(),
+        );
+        let downloaded = fetcher
+            .fetch_feature(&feature_ref)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch feature '{}': {}", feature_id, e))?;
 
-                            ResolvedFeature {
-                                id: downloaded.metadata.id.clone(),
-                                source: feature_ref.reference(),
-                                options,
-                                metadata: downloaded.metadata,
-                            }
-                        }
-                        Err(e) => {
-                            debug!(
-                                "Failed to fetch feature '{}': {}, using mock",
-                                feature_id, e
-                            );
-                            create_mock_resolved_feature(feature_id)
-                        }
-                    }
-                }
-                Err(e) => {
-                    debug!(
-                        "Failed to parse registry reference '{}': {}, using mock",
-                        feature_id, e
-                    );
-                    create_mock_resolved_feature(feature_id)
-                }
-            }
-        } else {
-            debug!(
-                "Failed to create OCI client, using mock for feature '{}'",
-                feature_id
-            );
-            create_mock_resolved_feature(feature_id)
+        // Extract per-feature options from config entry if present
+        let options: std::collections::HashMap<String, OptionValue> = match feature_value {
+            serde_json::Value::Object(map) => map
+                .clone()
+                .into_iter()
+                .filter_map(|(k, v)| {
+                    // Convert serde_json::Value to OptionValue
+                    let option_value = match v {
+                        serde_json::Value::Bool(b) => Some(OptionValue::Boolean(b)),
+                        serde_json::Value::String(s) => Some(OptionValue::String(s)),
+                        _ => None, // Skip other types
+                    };
+                    option_value.map(|ov| (k, ov))
+                })
+                .collect(),
+            _ => std::collections::HashMap::new(),
         };
 
-        resolved_features.push(resolved_feature);
+        resolved_features.push(ResolvedFeature {
+            id: downloaded.metadata.id.clone(),
+            source: feature_ref.reference(),
+            options,
+            metadata: downloaded.metadata,
+        });
     }
 
     // Create dependency resolver with override order from config
@@ -231,11 +201,13 @@ async fn execute_features_plan(
 
 /// Create a mock resolved feature for demonstration (temporary)
 /// In a real implementation, this would fetch the actual feature metadata
+#[cfg(test)]
 fn create_mock_resolved_feature(feature_id: &str) -> ResolvedFeature {
     create_mock_resolved_feature_with_deps(feature_id, &[], &[])
 }
 
 /// Create a mock resolved feature with specified dependencies
+#[cfg(test)]
 fn create_mock_resolved_feature_with_deps(
     feature_id: &str,
     installs_after: &[&str],
@@ -919,10 +891,10 @@ mod tests {
             config_path: None,
         };
 
-        // Should succeed and create plan with both features
+        // Should fail because "node" and "docker" are not valid OCI feature references
         let result =
             execute_features_plan(true, Some(r#"{"node": true, "docker": true}"#), &args).await;
-        assert!(result.is_ok());
+        assert!(result.is_err());
     }
 
     #[test]
