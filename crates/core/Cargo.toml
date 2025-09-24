@@ -27,6 +27,7 @@ zip = "2.1"
 fastrand = "2.3.0"
 base64 = "0.22"
 sysinfo = "0.37.0"
+num_cpus = "1.0"
 directories-next = "2.0"
 bytesize = "2.0.1"
 

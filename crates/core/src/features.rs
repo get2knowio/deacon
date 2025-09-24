@@ -651,16 +651,16 @@ impl FeatureDependencyResolver {
     ) -> std::result::Result<Vec<String>, FeatureError> {
         // For independent features (no dependencies), we can apply the override order directly
         // For this initial implementation, we'll use the override order if all features are independent
-        
+
         // Create a set of all feature IDs for quick lookup
         let sorted_set: HashSet<String> = sorted_ids.iter().cloned().collect();
-        
+
         // If override order contains all features and they're all present, use override order
         let override_set: HashSet<String> = override_order.iter().cloned().collect();
         if override_set == sorted_set {
             return Ok(override_order.to_vec());
         }
-        
+
         // Otherwise, keep the topological order as a fallback
         let result = sorted_ids.to_vec();
         debug!("Applied override order, final result: {:?}", result);

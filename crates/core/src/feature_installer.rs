@@ -93,11 +93,7 @@ impl FeatureInstaller {
 
     /// Calculate default concurrency limit (logical CPUs / 2, min 1)
     fn default_concurrency_limit() -> usize {
-        let system = sysinfo::System::new_all();
-        let logical_cpus = system
-            .cpus()
-            .len()
-            .max(1);
+        let logical_cpus = num_cpus::get().max(1);
         (logical_cpus / 2).max(1)
     }
 
@@ -107,27 +103,14 @@ impl FeatureInstaller {
 
         for feature in features {
             for mount_spec in &feature.metadata.mounts {
-                // For basic conflict detection, we'll assume simple volume syntax "/host:/container"
-                // or just extract the target path from mount specifications
-                let target = if mount_spec.contains(':') {
-                    // Handle volume syntax: "/host:/container" -> "/container"
-                    let parts: Vec<&str> = mount_spec.split(':').collect();
-                    if parts.len() >= 2 {
-                        parts[1].to_string()
+                // Use the existing mount parser to extract target paths robustly
+                let target =
+                    if let Ok(parsed_mount) = crate::mount::MountParser::parse_mount(mount_spec) {
+                        parsed_mount.target
                     } else {
+                        // Fallback to raw spec to avoid false negatives
                         mount_spec.clone()
-                    }
-                } else if mount_spec.contains("target=") {
-                    // Handle Docker mount syntax: "type=bind,source=/host,target=/container"
-                    mount_spec
-                        .split(',')
-                        .find(|part| part.starts_with("target="))
-                        .map(|part| part.strip_prefix("target=").unwrap_or("").to_string())
-                        .unwrap_or_else(|| mount_spec.clone())
-                } else {
-                    // Fallback: use the whole string as target
-                    mount_spec.clone()
-                };
+                    };
 
                 mount_paths
                     .entry(target)
@@ -173,10 +156,8 @@ impl FeatureInstaller {
             info!("Installing level {}: {} features", level_idx, level.len());
 
             // Check for resource conflicts within this level
-            let level_features: Vec<&ResolvedFeature> = level
-                .iter()
-                .filter_map(|id| plan.get_feature(id))
-                .collect();
+            let level_features: Vec<&ResolvedFeature> =
+                level.iter().filter_map(|id| plan.get_feature(id)).collect();
             self.check_resource_conflicts(&level_features);
 
             // Create semaphore to limit concurrency
@@ -197,7 +178,8 @@ impl FeatureInstaller {
                     None => {
                         return Err(FeatureError::NotFound {
                             path: format!("Downloaded feature {}", feature.id),
-                        }.into());
+                        }
+                        .into());
                     }
                 };
 
@@ -207,15 +189,20 @@ impl FeatureInstaller {
                 let config = config.clone();
                 let semaphore = Arc::clone(&semaphore);
 
-                // Create Docker client clone for this task  
+                // Create Docker client clone for this task
                 let docker = self.docker.clone();
 
                 let handle = tokio::spawn(async move {
                     // Acquire semaphore permit
-                    let _permit = semaphore.acquire().await.expect("Failed to acquire semaphore");
+                    let _permit = semaphore.clone().acquire_owned().await.map_err(|e| {
+                        FeatureError::InstallationFailed {
+                            feature_id: feature.id.clone(),
+                            message: format!("Semaphore closed: {}", e),
+                        }
+                    })?;
 
                     info!("[feature:{}] Starting installation", feature.id);
-                    
+
                     // Create temporary installer for this task
                     let installer = FeatureInstaller::new(docker);
                     let result = installer
@@ -232,7 +219,10 @@ impl FeatureInstaller {
                             );
                         }
                         Err(e) => {
-                            warn!("[feature:{}] Installation failed with error: {}", feature.id, e);
+                            warn!(
+                                "[feature:{}] Installation failed with error: {}",
+                                feature.id, e
+                            );
                         }
                     }
 
@@ -266,7 +256,8 @@ impl FeatureInstaller {
                         return Err(FeatureError::InstallationFailed {
                             feature_id: "unknown".to_string(),
                             message: format!("Task join error: {}", e),
-                        }.into());
+                        }
+                        .into());
                     }
                 }
             }

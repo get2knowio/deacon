@@ -7,7 +7,7 @@ use deacon_core::features::{FeatureDependencyResolver, FeatureMetadata, Resolved
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
-fn create_test_feature_with_sleep(id: &str, sleep_duration: u64, dependencies: Vec<String>) -> ResolvedFeature {
+fn create_test_feature(id: &str, dependencies: Vec<String>) -> ResolvedFeature {
     let depends_on = dependencies
         .into_iter()
         .map(|dep| (dep, JsonValue::Bool(true)))
@@ -17,7 +17,7 @@ fn create_test_feature_with_sleep(id: &str, sleep_duration: u64, dependencies: V
         id: id.to_string(),
         version: Some("1.0.0".to_string()),
         name: Some(format!("Test Feature {}", id)),
-        description: Some(format!("Test feature {} with {} second delay", id, sleep_duration)),
+        description: Some(format!("Test feature {}", id)),
         documentation_url: None,
         license_url: None,
         options: HashMap::new(),
@@ -43,7 +43,6 @@ fn create_test_feature_with_sleep(id: &str, sleep_duration: u64, dependencies: V
         metadata,
     }
 }
-
 
 fn create_test_feature_with_mount(id: &str, mounts: Vec<String>) -> ResolvedFeature {
     let metadata = FeatureMetadata {
@@ -84,10 +83,13 @@ fn test_parallel_levels_computation() {
     // Level 1: feature-b, feature-c (depend on feature-a)
     // Level 2: feature-d (depends on feature-b and feature-c)
     let features = vec![
-        create_test_feature_with_sleep("feature-a", 1, vec![]),
-        create_test_feature_with_sleep("feature-b", 1, vec!["feature-a".to_string()]),
-        create_test_feature_with_sleep("feature-c", 1, vec!["feature-a".to_string()]),
-        create_test_feature_with_sleep("feature-d", 1, vec!["feature-b".to_string(), "feature-c".to_string()]),
+        create_test_feature("feature-a", vec![]),
+        create_test_feature("feature-b", vec!["feature-a".to_string()]),
+        create_test_feature("feature-c", vec!["feature-a".to_string()]),
+        create_test_feature(
+            "feature-d",
+            vec!["feature-b".to_string(), "feature-c".to_string()],
+        ),
     ];
 
     let resolver = FeatureDependencyResolver::new(None);
@@ -95,15 +97,15 @@ fn test_parallel_levels_computation() {
 
     // Verify parallel levels are computed correctly
     assert_eq!(plan.levels.len(), 3, "Should have 3 execution levels");
-    
+
     // Level 0: feature-a
     assert_eq!(plan.levels[0], vec!["feature-a"]);
-    
+
     // Level 1: feature-b, feature-c (can run in parallel)
     let mut level1 = plan.levels[1].clone();
     level1.sort();
     assert_eq!(level1, vec!["feature-b", "feature-c"]);
-    
+
     // Level 2: feature-d
     assert_eq!(plan.levels[2], vec!["feature-d"]);
 }
@@ -112,10 +114,10 @@ fn test_parallel_levels_computation() {
 fn test_parallel_execution_with_independent_features() {
     // Create 4 independent features that can all run in parallel
     let features = vec![
-        create_test_feature_with_sleep("independent-1", 2, vec![]),
-        create_test_feature_with_sleep("independent-2", 2, vec![]),
-        create_test_feature_with_sleep("independent-3", 2, vec![]),
-        create_test_feature_with_sleep("independent-4", 2, vec![]),
+        create_test_feature("independent-1", vec![]),
+        create_test_feature("independent-2", vec![]),
+        create_test_feature("independent-3", vec![]),
+        create_test_feature("independent-4", vec![]),
     ];
 
     let resolver = FeatureDependencyResolver::new(None);
@@ -124,10 +126,18 @@ fn test_parallel_execution_with_independent_features() {
     // All features should be in one level (can run in parallel)
     assert_eq!(plan.levels.len(), 1, "Should have 1 execution level");
     assert_eq!(plan.levels[0].len(), 4, "Level 0 should have 4 features");
-    
+
     let mut level0 = plan.levels[0].clone();
     level0.sort();
-    assert_eq!(level0, vec!["independent-1", "independent-2", "independent-3", "independent-4"]);
+    assert_eq!(
+        level0,
+        vec![
+            "independent-1",
+            "independent-2",
+            "independent-3",
+            "independent-4"
+        ]
+    );
 }
 
 #[test]
@@ -151,20 +161,20 @@ fn test_resource_conflict_detection() {
 fn test_concurrency_limit_env_var() {
     // Test that environment variable is respected
     std::env::set_var("DEACON_FEATURE_INSTALL_CONCURRENCY", "4");
-    
+
     // Create features that would use the concurrency limit
     let features = vec![
-        create_test_feature_with_sleep("feature-1", 1, vec![]),
-        create_test_feature_with_sleep("feature-2", 1, vec![]),
+        create_test_feature("feature-1", vec![]),
+        create_test_feature("feature-2", vec![]),
     ];
-    
+
     let resolver = FeatureDependencyResolver::new(None);
     let plan = resolver.resolve(&features).unwrap();
-    
+
     // Features should be able to run in parallel (same level)
     assert_eq!(plan.levels.len(), 1);
     assert_eq!(plan.levels[0].len(), 2);
-    
+
     std::env::remove_var("DEACON_FEATURE_INSTALL_CONCURRENCY");
 }
 
@@ -173,11 +183,14 @@ fn test_complex_dependency_chain_with_levels() {
     // Create a complex dependency chain:
     // base -> middleware -> [frontend, backend] -> integration
     let features = vec![
-        create_test_feature_with_sleep("base", 1, vec![]),
-        create_test_feature_with_sleep("middleware", 1, vec!["base".to_string()]),
-        create_test_feature_with_sleep("frontend", 1, vec!["middleware".to_string()]),
-        create_test_feature_with_sleep("backend", 1, vec!["middleware".to_string()]),
-        create_test_feature_with_sleep("integration", 1, vec!["frontend".to_string(), "backend".to_string()]),
+        create_test_feature("base", vec![]),
+        create_test_feature("middleware", vec!["base".to_string()]),
+        create_test_feature("frontend", vec!["middleware".to_string()]),
+        create_test_feature("backend", vec!["middleware".to_string()]),
+        create_test_feature(
+            "integration",
+            vec!["frontend".to_string(), "backend".to_string()],
+        ),
     ];
 
     let resolver = FeatureDependencyResolver::new(None);
@@ -189,27 +202,31 @@ fn test_complex_dependency_chain_with_levels() {
     // Level 2: frontend, backend
     // Level 3: integration
     assert_eq!(plan.levels.len(), 4);
-    
+
     assert_eq!(plan.levels[0], vec!["base"]);
     assert_eq!(plan.levels[1], vec!["middleware"]);
-    
+
     let mut level2 = plan.levels[2].clone();
     level2.sort();
     assert_eq!(level2, vec!["backend", "frontend"]);
-    
+
     assert_eq!(plan.levels[3], vec!["integration"]);
 }
 
-#[test] 
+#[test]
 fn test_override_order_falls_back_to_sequential() {
     // With override order, should fall back to sequential execution
     let features = vec![
-        create_test_feature_with_sleep("feature-a", 1, vec![]),
-        create_test_feature_with_sleep("feature-b", 1, vec![]),
-        create_test_feature_with_sleep("feature-c", 1, vec![]),
+        create_test_feature("feature-a", vec![]),
+        create_test_feature("feature-b", vec![]),
+        create_test_feature("feature-c", vec![]),
     ];
 
-    let override_order = vec!["feature-c".to_string(), "feature-a".to_string(), "feature-b".to_string()];
+    let override_order = vec![
+        "feature-c".to_string(),
+        "feature-a".to_string(),
+        "feature-b".to_string(),
+    ];
     let resolver = FeatureDependencyResolver::new(Some(override_order));
     let plan = resolver.resolve(&features).unwrap();
 

@@ -118,16 +118,17 @@ pub enum FeatureError {
     #[error("Feature extraction error: {message}")]
     Extraction { message: String },
 
-    /// Feature installation error
+    /// Feature installation error (generic installation failure)
     #[error("Feature installation error: {message}")]
     Installation { message: String },
 
-    /// Feature installation failed
+    /// Feature installation failed for a specific feature (per-feature failure reporting)
+    ///
+    /// This variant is used when a specific feature installation fails and provides
+    /// the feature ID for better error reporting and debugging. Use this instead of
+    /// `Installation` when you have context about which specific feature failed.
     #[error("Feature installation failed for {feature_id}: {message}")]
-    InstallationFailed {
-        feature_id: String,
-        message: String,
-    },
+    InstallationFailed { feature_id: String, message: String },
 
     /// Feature dependency cycle detected
     #[error("Dependency cycle detected in features: {cycle_path}")]
