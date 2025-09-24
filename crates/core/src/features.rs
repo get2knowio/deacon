@@ -441,12 +441,16 @@ impl FeatureDependencyResolver {
             }
         }
 
-        // Initialize queue with nodes having no dependencies
+        // Initialize queue with nodes having no dependencies (sorted for determinism)
         let mut queue: VecDeque<String> = VecDeque::new();
-        for (node, &degree) in &in_degree {
-            if degree == 0 {
-                queue.push_back(node.clone());
-            }
+        let mut zero_degree_nodes: Vec<String> = in_degree
+            .iter()
+            .filter(|(_, &degree)| degree == 0)
+            .map(|(node, _)| node.clone())
+            .collect();
+        zero_degree_nodes.sort(); // Lexicographic ordering for determinism
+        for node in zero_degree_nodes {
+            queue.push_back(node);
         }
 
         let mut result = Vec::new();
@@ -456,12 +460,14 @@ impl FeatureDependencyResolver {
             result.push(current.clone());
             processed += 1;
 
-            // Process all nodes that depend on current
-            for neighbor in &adj_list[&current] {
-                let degree = in_degree.get_mut(neighbor).unwrap();
+            // Process all nodes that depend on current (sorted for determinism)
+            let mut neighbors: Vec<String> = adj_list[&current].iter().cloned().collect();
+            neighbors.sort(); // Lexicographic ordering for determinism
+            for neighbor in neighbors {
+                let degree = in_degree.get_mut(&neighbor).unwrap();
                 *degree -= 1;
                 if *degree == 0 {
-                    queue.push_back(neighbor.clone());
+                    queue.push_back(neighbor);
                 }
             }
         }

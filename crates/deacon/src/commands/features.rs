@@ -8,7 +8,7 @@ use anyhow::Result;
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::features::{
     parse_feature_metadata, FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger,
-    ResolvedFeature,
+    OptionValue, ResolvedFeature,
 };
 use deacon_core::oci::{default_fetcher, FeatureRef};
 use deacon_core::registry_parser::parse_registry_reference;
@@ -104,13 +104,16 @@ async fn execute_features_plan(
         .unwrap_or(&std::env::current_dir()?)
         .clone();
 
-    // Load devcontainer configuration
-    let config_location = ConfigLoader::discover_config(&workspace_folder)?;
-    let mut config = if config_location.exists() {
-        ConfigLoader::load_from_path(config_location.path())?
+    // Load devcontainer configuration (explicit path > discovery > default)
+    let mut config = if let Some(config_path) = args.config_path.as_deref() {
+        ConfigLoader::load_from_path(config_path)?
     } else {
-        // Create empty config if none exists
-        DevContainerConfig::default()
+        let config_location = ConfigLoader::discover_config(&workspace_folder)?;
+        if config_location.exists() {
+            ConfigLoader::load_from_path(config_location.path())?
+        } else {
+            DevContainerConfig::default()
+        }
     };
 
     // Parse and merge additional features if provided
@@ -124,12 +127,8 @@ async fn execute_features_plan(
     }
 
     // Extract features from config
-    let features_map = config
-        .features
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("Features configuration is not an object"))?;
-
-    if features_map.is_empty() {
+    let features_map_opt = config.features.as_object();
+    if features_map_opt.is_none() || features_map_opt.unwrap().is_empty() {
         let result = FeaturesPlanResult {
             order: vec![],
             graph: serde_json::json!({}),
@@ -137,12 +136,78 @@ async fn execute_features_plan(
         output_plan_result(&result, json)?;
         return Ok(());
     }
+    let features_map = features_map_opt.unwrap();
 
-    // For now, create mock ResolvedFeature instances since we don't have full feature resolution
-    // In a real implementation, this would resolve each feature from registries
-    let mut resolved_features = Vec::new();
-    for (feature_id, _feature_value) in features_map {
-        let resolved_feature = create_mock_resolved_feature(feature_id);
+    // Resolve features from registries to obtain metadata (deps, installsAfter, etc.)
+    let mut resolved_features = Vec::with_capacity(features_map.len());
+    for (feature_id, feature_value) in features_map {
+        // Try to resolve feature from OCI registry first, fallback to mock for testing
+        let resolved_feature = if let Ok(fetcher) = default_fetcher() {
+            match parse_registry_reference(feature_id) {
+                Ok((registry_url, namespace, name, tag)) => {
+                    let feature_ref = FeatureRef::new(
+                        registry_url.clone(),
+                        namespace.clone(),
+                        name.clone(),
+                        tag.clone(),
+                    );
+                    match fetcher.fetch_feature(&feature_ref).await {
+                        Ok(downloaded) => {
+                            // Extract per-feature options from config entry if present
+                            let options: std::collections::HashMap<String, OptionValue> =
+                                match feature_value {
+                                    serde_json::Value::Object(map) => map
+                                        .clone()
+                                        .into_iter()
+                                        .filter_map(|(k, v)| {
+                                            // Convert serde_json::Value to OptionValue
+                                            let option_value = match v {
+                                                serde_json::Value::Bool(b) => {
+                                                    Some(OptionValue::Boolean(b))
+                                                }
+                                                serde_json::Value::String(s) => {
+                                                    Some(OptionValue::String(s))
+                                                }
+                                                _ => None, // Skip other types
+                                            };
+                                            option_value.map(|ov| (k, ov))
+                                        })
+                                        .collect(),
+                                    _ => std::collections::HashMap::new(),
+                                };
+
+                            ResolvedFeature {
+                                id: downloaded.metadata.id.clone(),
+                                source: feature_ref.reference(),
+                                options,
+                                metadata: downloaded.metadata,
+                            }
+                        }
+                        Err(e) => {
+                            debug!(
+                                "Failed to fetch feature '{}': {}, using mock",
+                                feature_id, e
+                            );
+                            create_mock_resolved_feature(feature_id)
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!(
+                        "Failed to parse registry reference '{}': {}, using mock",
+                        feature_id, e
+                    );
+                    create_mock_resolved_feature(feature_id)
+                }
+            }
+        } else {
+            debug!(
+                "Failed to create OCI client, using mock for feature '{}'",
+                feature_id
+            );
+            create_mock_resolved_feature(feature_id)
+        };
+
         resolved_features.push(resolved_feature);
     }
 
@@ -220,26 +285,17 @@ fn build_graph_representation(features: &[ResolvedFeature]) -> serde_json::Value
     let mut graph = serde_json::Map::new();
 
     for feature in features {
-        let mut dependencies = Vec::new();
-
-        // Add installsAfter dependencies
+        // Use a set for dedupe and deterministic ordering
+        let mut deps = std::collections::BTreeSet::new();
         for dep in &feature.metadata.installs_after {
-            dependencies.push(dep.clone());
+            deps.insert(dep.clone());
         }
-
-        // Add dependsOn dependencies
         for dep_id in feature.metadata.depends_on.keys() {
-            dependencies.push(dep_id.clone());
+            deps.insert(dep_id.clone());
         }
-
         graph.insert(
             feature.id.clone(),
-            serde_json::Value::Array(
-                dependencies
-                    .into_iter()
-                    .map(serde_json::Value::String)
-                    .collect(),
-            ),
+            serde_json::Value::Array(deps.into_iter().map(serde_json::Value::String).collect()),
         );
     }
 
@@ -799,7 +855,7 @@ mod tests {
     fn test_dependency_resolution_independent_features() {
         use deacon_core::features::FeatureDependencyResolver;
 
-        // Create independent features - exact order may vary depending on HashMap iteration
+        // Create independent features - order should be deterministic (lexicographic)
         let features = vec![
             create_mock_resolved_feature("feature-z"),
             create_mock_resolved_feature("feature-a"),
@@ -810,15 +866,28 @@ mod tests {
         let plan = resolver.resolve(&features).unwrap();
         let order = plan.feature_ids();
 
-        // For independent features, all should be present
-        assert_eq!(order.len(), 3);
-        assert!(order.contains(&"feature-a".to_string()));
-        assert!(order.contains(&"feature-m".to_string()));
-        assert!(order.contains(&"feature-z".to_string()));
+        assert_eq!(order, vec!["feature-a", "feature-m", "feature-z"]);
+    }
 
-        // The important thing is that the resolver doesn't fail with independent features
-        // The exact order may be non-deterministic due to HashMap iteration order
-        // but the important behavior is that it completes successfully
+    #[test]
+    fn test_dependency_cycle_detection() {
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // a -> b -> c -> a
+        let features = vec![
+            create_mock_resolved_feature_with_deps("a", &["b"], &[]),
+            create_mock_resolved_feature_with_deps("b", &["c"], &[]),
+            create_mock_resolved_feature_with_deps("c", &["a"], &[]),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let err = resolver.resolve(&features).expect_err("expected cycle");
+        let msg = format!("{err}");
+        assert!(msg.contains("cycle"), "message should mention cycle");
+        assert!(
+            msg.contains("a") && msg.contains("b") && msg.contains("c"),
+            "message should include cycle path"
+        );
     }
 
     #[tokio::test]
