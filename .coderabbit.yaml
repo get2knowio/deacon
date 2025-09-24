@@ -5,6 +5,11 @@ language: "en-US"
 early_access: false
 enable_free_tier: true
 
+# Instruct CodeRabbit to always append a call for Copilot to act on feedback.
+# This leverages global tone instructions to influence the final actionable
+# comment it posts. (No dedicated footer key exists in current schema.)
+tone_instructions: "After listing actionable suggestions, append a final line exactly: '@copilot please address this feedback'"
+
 reviews:
   profile: "chill"
   high_level_summary: true
