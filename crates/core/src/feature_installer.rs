@@ -256,16 +256,12 @@ impl FeatureInstaller {
                             feature_results.push(feature_result);
                         }
                         Err(e) => {
-                            level_failed = true;
-                            overall_success = false;
                             warn!("Feature installation error: {}", e);
                             // Still need to return the error for proper error handling
                             return Err(e);
                         }
                     },
                     Err(e) => {
-                        level_failed = true;
-                        overall_success = false;
                         warn!("Task join error: {}", e);
                         return Err(FeatureError::InstallationFailed {
                             feature_id: "unknown".to_string(),

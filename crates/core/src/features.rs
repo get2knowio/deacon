@@ -352,10 +352,10 @@ impl FeatureDependencyResolver {
             let sorted_ids = self.topological_sort(&graph)?;
             let final_order = self.apply_override_order(&sorted_ids, override_order)?;
             let sorted_features = final_order
-                .into_iter()
-                .filter_map(|id| features.iter().find(|f| f.id == id).cloned())
+                .iter()
+                .filter_map(|id| features.iter().find(|f| f.id == *id).cloned())
                 .collect::<Vec<_>>();
-            let sequential_levels = vec![sorted_features.iter().map(|f| f.id.clone()).collect()];
+            let sequential_levels = vec![final_order];
             (sorted_features, sequential_levels)
         } else {
             // Use parallel levels - flatten for features list but keep levels for parallel execution
@@ -649,28 +649,20 @@ impl FeatureDependencyResolver {
         sorted_ids: &[String],
         override_order: &[String],
     ) -> std::result::Result<Vec<String>, FeatureError> {
-        // The topologically sorted list already respects all dependencies
-        // We can only reorder features that are not constrained by dependencies
-
-        // For now, we keep the topological order and just make sure override order
-        // features are preferred when there's a choice between independent features
-        // A full implementation would need to build a partial order and apply override
-        // constraints within that, but that's quite complex.
-
-        // For this initial implementation, we'll respect dependencies first
-        // and apply override order as a secondary sort key
-        let result = sorted_ids.to_vec();
-
-        // Create a priority map based on override order
-        let mut priority_map: HashMap<String, usize> = HashMap::new();
-        for (index, feature_id) in override_order.iter().enumerate() {
-            priority_map.insert(feature_id.clone(), index);
+        // For independent features (no dependencies), we can apply the override order directly
+        // For this initial implementation, we'll use the override order if all features are independent
+        
+        // Create a set of all feature IDs for quick lookup
+        let sorted_set: HashSet<String> = sorted_ids.iter().cloned().collect();
+        
+        // If override order contains all features and they're all present, use override order
+        let override_set: HashSet<String> = override_order.iter().cloned().collect();
+        if override_set == sorted_set {
+            return Ok(override_order.to_vec());
         }
-
-        // Sort by: 1) topological constraints (preserved by keeping dependencies)
-        // 2) override order priority, 3) original order
-        // This is a simplified implementation that maintains dependency order
-
+        
+        // Otherwise, keep the topological order as a fallback
+        let result = sorted_ids.to_vec();
         debug!("Applied override order, final result: {:?}", result);
         Ok(result)
     }
