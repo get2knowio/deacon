@@ -152,7 +152,7 @@ impl<T: Docker> Docker for &T {
 
 /// CLI-based Docker implementation using docker command
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CliDocker {
     /// Docker CLI binary path
     docker_path: String,

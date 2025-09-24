@@ -274,12 +274,22 @@ pub struct ResolvedFeature {
 pub struct InstallationPlan {
     /// Features in installation order
     pub features: Vec<ResolvedFeature>,
+    /// Parallel execution levels - each level contains features that can be installed concurrently
+    pub levels: Vec<Vec<String>>,
 }
 
 impl InstallationPlan {
     /// Create a new installation plan
     pub fn new(features: Vec<ResolvedFeature>) -> Self {
-        Self { features }
+        Self {
+            levels: vec![features.iter().map(|f| f.id.clone()).collect()],
+            features,
+        }
+    }
+
+    /// Create a new installation plan with parallel levels
+    pub fn new_with_levels(features: Vec<ResolvedFeature>, levels: Vec<Vec<String>>) -> Self {
+        Self { features, levels }
     }
 
     /// Get feature IDs in installation order
@@ -332,23 +342,38 @@ impl FeatureDependencyResolver {
         // Build dependency graph
         let graph = self.build_dependency_graph(features)?;
 
-        // Perform topological sort with cycle detection
-        let sorted_ids = self.topological_sort(&graph)?;
+        // Compute parallel execution levels
+        let levels = self.compute_parallel_levels(&graph)?;
 
         // Apply override order constraints if present
-        let final_order = if let Some(ref override_order) = self.override_order {
-            self.apply_override_order(&sorted_ids, override_order)?
+        let (sorted_features, final_levels) = if let Some(ref override_order) = self.override_order
+        {
+            // For override order, fall back to sequential execution
+            let sorted_ids = self.topological_sort(&graph)?;
+            let final_order = self.apply_override_order(&sorted_ids, override_order)?;
+            let sorted_features = final_order
+                .into_iter()
+                .filter_map(|id| features.iter().find(|f| f.id == id).cloned())
+                .collect::<Vec<_>>();
+            let sequential_levels = vec![sorted_features.iter().map(|f| f.id.clone()).collect()];
+            (sorted_features, sequential_levels)
         } else {
-            sorted_ids
+            // Use parallel levels - flatten for features list but keep levels for parallel execution
+            let mut all_features = Vec::new();
+            for level in &levels {
+                for feature_id in level {
+                    if let Some(feature) = features.iter().find(|f| f.id == *feature_id) {
+                        all_features.push(feature.clone());
+                    }
+                }
+            }
+            (all_features, levels)
         };
 
-        // Build final installation plan
-        let sorted_features = final_order
-            .into_iter()
-            .filter_map(|id| features.iter().find(|f| f.id == id).cloned())
-            .collect();
-
-        Ok(InstallationPlan::new(sorted_features))
+        Ok(InstallationPlan::new_with_levels(
+            sorted_features,
+            final_levels,
+        ))
     }
 
     /// Validate that all features in override order exist
@@ -486,6 +511,77 @@ impl FeatureDependencyResolver {
 
         debug!("Topological sort result: {:?}", result);
         Ok(result)
+    }
+
+    /// Compute parallel execution levels using Kahn's algorithm
+    /// Returns levels where features in the same level can be executed concurrently
+    fn compute_parallel_levels(
+        &self,
+        graph: &HashMap<String, HashSet<String>>,
+    ) -> std::result::Result<Vec<Vec<String>>, FeatureError> {
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        let mut adj_list: HashMap<String, HashSet<String>> = HashMap::new();
+
+        // Initialize in-degree and adjacency list
+        for node in graph.keys() {
+            in_degree.insert(node.clone(), 0);
+            adj_list.insert(node.clone(), HashSet::new());
+        }
+
+        // Build adjacency list and calculate in-degrees
+        for (node, dependencies) in graph {
+            for dep in dependencies {
+                adj_list.get_mut(dep).unwrap().insert(node.clone());
+                *in_degree.get_mut(node).unwrap() += 1;
+            }
+        }
+
+        let mut levels: Vec<Vec<String>> = Vec::new();
+        let mut processed = 0;
+
+        while processed < graph.len() {
+            // Find all nodes with zero in-degree (can be processed in parallel)
+            let mut current_level: Vec<String> = in_degree
+                .iter()
+                .filter(|(_, &degree)| degree == 0)
+                .map(|(node, _)| node.clone())
+                .collect();
+
+            if current_level.is_empty() {
+                // No nodes with zero in-degree means there's a cycle
+                let remaining: Vec<String> = in_degree
+                    .keys()
+                    .filter(|k| in_degree[*k] > 0)
+                    .cloned()
+                    .collect();
+
+                let cycle_path = self.find_cycle_path(graph, &remaining)?;
+                return Err(FeatureError::DependencyCycle { cycle_path });
+            }
+
+            current_level.sort(); // Deterministic ordering
+            processed += current_level.len();
+
+            // Process all nodes in the current level
+            for node in &current_level {
+                // Mark as processed (remove from in_degree)
+                in_degree.remove(node);
+
+                // Update in-degrees for dependent nodes
+                let mut neighbors: Vec<String> = adj_list[node].iter().cloned().collect();
+                neighbors.sort(); // Deterministic ordering
+                for neighbor in neighbors {
+                    if let Some(degree) = in_degree.get_mut(&neighbor) {
+                        *degree -= 1;
+                    }
+                }
+            }
+
+            levels.push(current_level);
+        }
+
+        debug!("Computed parallel levels: {:?}", levels);
+        Ok(levels)
     }
 
     /// Find and format a cycle path for error reporting

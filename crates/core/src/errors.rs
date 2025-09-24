@@ -122,6 +122,13 @@ pub enum FeatureError {
     #[error("Feature installation error: {message}")]
     Installation { message: String },
 
+    /// Feature installation failed
+    #[error("Feature installation failed for {feature_id}: {message}")]
+    InstallationFailed {
+        feature_id: String,
+        message: String,
+    },
+
     /// Feature dependency cycle detected
     #[error("Dependency cycle detected in features: {cycle_path}")]
     DependencyCycle { cycle_path: String },
