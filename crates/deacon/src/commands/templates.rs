@@ -386,6 +386,12 @@ async fn execute_templates_apply(
         if !option_values.contains_key(option_name) {
             if let Some(default_value) = option_def.default_value() {
                 option_values.insert(option_name.clone(), default_value);
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Missing required option '{}'. Provide a value with --option {}=<value> or define a default.",
+                    option_name,
+                    option_name,
+                ));
             }
         }
     }

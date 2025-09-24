@@ -215,3 +215,63 @@ async fn test_template_apply_option_validation() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_template_apply_missing_required_option() -> anyhow::Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    // Create template with required option (no default)
+    let template_dir = temp_dir.path().join("test_template");
+    fs::create_dir_all(&template_dir)?;
+
+    let metadata = serde_json::json!({
+        "id": "test-template",
+        "name": "Test Template",
+        "options": {
+            "requiredOption": {
+                "type": "string",
+                "description": "This is required"
+                // No default value
+            },
+            "optionalOption": {
+                "type": "string",
+                "default": "default-value",
+                "description": "This is optional"
+            }
+        }
+    });
+    fs::write(
+        template_dir.join("devcontainer-template.json"),
+        serde_json::to_string_pretty(&metadata)?,
+    )?;
+
+    fs::write(
+        template_dir.join("config.txt"),
+        "required: ${templateOption:requiredOption}",
+    )?;
+
+    let workspace_dir = temp_dir.path().join("workspace");
+    fs::create_dir_all(&workspace_dir)?;
+
+    // Test missing required option
+    let mut cmd = Command::cargo_bin("deacon")?;
+    cmd.args([
+        "templates",
+        "apply",
+        template_dir.to_str().unwrap(),
+        "--output",
+        workspace_dir.to_str().unwrap(),
+        // Not providing requiredOption
+        "--option",
+        "optionalOption=custom-value",
+    ]);
+
+    let output = cmd.output()?;
+    assert!(!output.status.success());
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Missing required option"));
+    assert!(stderr.contains("requiredOption"));
+
+    Ok(())
+}
