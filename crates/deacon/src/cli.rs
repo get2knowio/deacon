@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 /// Output format options
@@ -284,6 +284,15 @@ pub enum FeatureCommands {
     },
     /// Get feature information
     Info { mode: String, feature: String },
+    /// Generate feature installation plan
+    Plan {
+        /// Output in JSON format
+        #[arg(long, default_value_t = true, action = ArgAction::Set)]
+        json: bool,
+        /// Additional features to install (JSON map of id -> value/options)
+        #[arg(long)]
+        additional_features: Option<String>,
+    },
 }
 
 /// Template management subcommands
