@@ -34,6 +34,15 @@ impl OptionValue {
     }
 }
 
+impl std::fmt::Display for OptionValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OptionValue::Boolean(b) => write!(f, "{}", b),
+            OptionValue::String(s) => write!(f, "{}", s),
+        }
+    }
+}
+
 /// Feature option definition
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]

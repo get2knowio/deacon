@@ -76,6 +76,8 @@ pub struct SubstitutionContext {
     pub container_env: Option<HashMap<String, String>>,
     /// Feature-provided variables (for advanced substitution)
     pub feature_vars: HashMap<String, String>,
+    /// Template option values (for template variable substitution)
+    pub template_options: Option<HashMap<String, String>>,
 }
 
 impl SubstitutionContext {
@@ -146,6 +148,7 @@ impl SubstitutionContext {
             container_workspace_folder: None,
             container_env: None,
             feature_vars: HashMap::new(),
+            template_options: None,
         })
     }
 
@@ -466,6 +469,13 @@ impl VariableSubstitution {
             expr if expr.starts_with("feature:") => {
                 let feature_var = &expr[8..]; // Remove "feature:" prefix
                 context.feature_vars.get(feature_var).cloned()
+            }
+            expr if expr.starts_with("templateOption:") => {
+                let option_name = &expr[15..]; // Remove "templateOption:" prefix
+                context
+                    .template_options
+                    .as_ref()
+                    .and_then(|options| options.get(option_name).cloned())
             }
             _ => None, // Unknown variable
         }

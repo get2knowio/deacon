@@ -199,7 +199,18 @@ pub fn apply_template(
     }
 
     // Create substitution context for the destination workspace
-    let context = SubstitutionContext::new(dest_workspace)?;
+    let mut context = SubstitutionContext::new(dest_workspace)?;
+
+    // Add template options to substitution context
+    if !apply_options.options.is_empty() {
+        let template_options: HashMap<String, String> = apply_options
+            .options
+            .iter()
+            .map(|(key, value)| (key.clone(), value.to_string()))
+            .collect();
+        context.template_options = Some(template_options);
+    }
+
     let mut substitution_report = SubstitutionReport::new();
 
     // Plan actions by walking source directory

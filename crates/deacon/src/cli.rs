@@ -300,10 +300,20 @@ pub enum FeatureCommands {
 pub enum TemplateCommands {
     /// Apply template to current project
     Apply {
+        /// Template path (local directory) or registry reference
         template: String,
+        /// Template option in key=value format
+        #[arg(long)]
+        option: Vec<String>,
+        /// Output directory for applied template (default: current directory)
+        #[arg(long)]
+        output: Option<String>,
         /// Force overwrite existing files
         #[arg(long)]
         force: bool,
+        /// Dry run mode - preview operations without making changes
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Publish templates to registry
     Publish {
