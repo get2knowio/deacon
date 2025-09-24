@@ -1959,12 +1959,12 @@ mod tests {
     #[test]
     fn test_get_features_cache_dir() {
         let cache_dir = get_features_cache_dir().expect("should get features cache dir");
-        
+
         // Verify the cache directory is created and has the right structure
         assert!(cache_dir.exists());
         assert!(cache_dir.is_dir());
         assert!(cache_dir.ends_with("features"));
-        
+
         // Verify it's using the persistent cache base directory
         let expected_base = crate::progress::get_cache_dir().expect("should get cache dir");
         let expected_features_cache = expected_base.join("features");
@@ -1975,12 +1975,11 @@ mod tests {
     fn test_feature_fetcher_uses_persistent_cache() {
         let mock_client = MockHttpClient::new();
         let fetcher = FeatureFetcher::new(mock_client);
-        
+
         // The fetcher should use the persistent cache directory
-        let expected_cache = get_features_cache_dir().unwrap_or_else(|_| {
-            std::env::temp_dir().join("deacon-features")
-        });
-        
+        let expected_cache = get_features_cache_dir()
+            .unwrap_or_else(|_| std::env::temp_dir().join("deacon-features"));
+
         assert_eq!(fetcher.cache_dir, expected_cache);
     }
 }
