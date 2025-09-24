@@ -9,6 +9,9 @@ use crate::errors::{FeatureError, Result};
 use crate::features::{InstallationPlan, ResolvedFeature};
 use crate::oci::DownloadedFeature;
 use std::collections::HashMap;
+use std::env;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tracing::{debug, info, instrument, warn};
 
 /// Configuration for feature installation process
@@ -71,6 +74,62 @@ impl FeatureInstaller {
         Self { docker }
     }
 
+    /// Get the concurrency limit for feature installation
+    fn get_concurrency_limit() -> usize {
+        match env::var("DEACON_FEATURE_INSTALL_CONCURRENCY") {
+            Ok(val) => match val.parse::<usize>() {
+                Ok(n) if n > 0 => n,
+                _ => {
+                    warn!(
+                        "Invalid DEACON_FEATURE_INSTALL_CONCURRENCY value '{}', using default",
+                        val
+                    );
+                    Self::default_concurrency_limit()
+                }
+            },
+            Err(_) => Self::default_concurrency_limit(),
+        }
+    }
+
+    /// Calculate default concurrency limit (logical CPUs / 2, min 1)
+    fn default_concurrency_limit() -> usize {
+        let logical_cpus = num_cpus::get().max(1);
+        (logical_cpus / 2).max(1)
+    }
+
+    /// Check for resource conflicts between features
+    fn check_resource_conflicts(&self, features: &[&ResolvedFeature]) {
+        let mut mount_paths: HashMap<String, Vec<String>> = HashMap::new();
+
+        for feature in features {
+            for mount_spec in &feature.metadata.mounts {
+                // Use the existing mount parser to extract target paths robustly
+                let target =
+                    if let Ok(parsed_mount) = crate::mount::MountParser::parse_mount(mount_spec) {
+                        parsed_mount.target
+                    } else {
+                        // Fallback to raw spec to avoid false negatives
+                        mount_spec.clone()
+                    };
+
+                mount_paths
+                    .entry(target)
+                    .or_default()
+                    .push(feature.id.clone());
+            }
+        }
+
+        for (path, feature_ids) in mount_paths {
+            if feature_ids.len() > 1 {
+                warn!(
+                    "Potential resource conflict: features {} request same mount path '{}'",
+                    feature_ids.join(", "),
+                    path
+                );
+            }
+        }
+    }
+
     /// Install all features from an installation plan in dependency order
     #[instrument(level = "info", skip(self, downloaded_features))]
     pub async fn install_features(
@@ -85,39 +144,131 @@ impl FeatureInstaller {
             config.container_id
         );
 
+        let concurrency_limit = Self::get_concurrency_limit();
+        info!("Using concurrency limit: {}", concurrency_limit);
+
         let mut feature_results = Vec::new();
         let mut combined_env = HashMap::new();
         let mut overall_success = true;
 
-        // Install features sequentially in dependency order
-        for feature in &plan.features {
-            let downloaded_feature =
-                downloaded_features
-                    .get(&feature.id)
-                    .ok_or_else(|| FeatureError::NotFound {
-                        path: format!("Downloaded feature {}", feature.id),
+        // Install features level by level to respect dependencies
+        for (level_idx, level) in plan.levels.iter().enumerate() {
+            info!("Installing level {}: {} features", level_idx, level.len());
+
+            // Check for resource conflicts within this level
+            let level_features: Vec<&ResolvedFeature> =
+                level.iter().filter_map(|id| plan.get_feature(id)).collect();
+            self.check_resource_conflicts(&level_features);
+
+            // Create semaphore to limit concurrency
+            let semaphore = Arc::new(Semaphore::new(concurrency_limit));
+            let mut level_handles = Vec::new();
+
+            for feature_id in level {
+                let feature = match plan.get_feature(feature_id) {
+                    Some(f) => f,
+                    None => {
+                        warn!("Feature '{}' not found in plan", feature_id);
+                        continue;
+                    }
+                };
+
+                let downloaded_feature = match downloaded_features.get(&feature.id) {
+                    Some(df) => df,
+                    None => {
+                        return Err(FeatureError::NotFound {
+                            path: format!("Downloaded feature {}", feature.id),
+                        }
+                        .into());
+                    }
+                };
+
+                // Clone necessary data for the async task
+                let feature = feature.clone();
+                let downloaded_feature = downloaded_feature.clone();
+                let config = config.clone();
+                let semaphore = Arc::clone(&semaphore);
+
+                // Create Docker client clone for this task
+                let docker = self.docker.clone();
+
+                let handle = tokio::spawn(async move {
+                    // Acquire semaphore permit
+                    let _permit = semaphore.clone().acquire_owned().await.map_err(|e| {
+                        FeatureError::InstallationFailed {
+                            feature_id: feature.id.clone(),
+                            message: format!("Semaphore closed: {}", e),
+                        }
                     })?;
 
-            info!("Installing feature: {}", feature.id);
+                    info!("[feature:{}] Starting installation", feature.id);
 
-            let result = self
-                .install_single_feature(feature, downloaded_feature, config)
-                .await?;
+                    // Create temporary installer for this task
+                    let installer = FeatureInstaller::new(docker);
+                    let result = installer
+                        .install_single_feature(&feature, &downloaded_feature, &config)
+                        .await;
 
-            // Check for failure and stop if fail-fast is needed
-            if !result.success {
-                overall_success = false;
-                feature_results.push(result);
-                warn!(
-                    "Feature {} installation failed, stopping installation process",
-                    feature.id
-                );
+                    match &result {
+                        Ok(res) => {
+                            info!(
+                                "[feature:{}] Installation {} (exit code: {})",
+                                feature.id,
+                                if res.success { "completed" } else { "failed" },
+                                res.exit_code
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                "[feature:{}] Installation failed with error: {}",
+                                feature.id, e
+                            );
+                        }
+                    }
+
+                    result
+                });
+
+                level_handles.push(handle);
+            }
+
+            // Wait for all features in this level to complete
+            let mut level_failed = false;
+            for handle in level_handles {
+                match handle.await {
+                    Ok(result) => match result {
+                        Ok(feature_result) => {
+                            if !feature_result.success {
+                                level_failed = true;
+                                overall_success = false;
+                            }
+                            combined_env.extend(feature_result.container_env.clone());
+                            feature_results.push(feature_result);
+                        }
+                        Err(e) => {
+                            warn!("Feature installation error: {}", e);
+                            // Still need to return the error for proper error handling
+                            return Err(e);
+                        }
+                    },
+                    Err(e) => {
+                        warn!("Task join error: {}", e);
+                        return Err(FeatureError::InstallationFailed {
+                            feature_id: "unknown".to_string(),
+                            message: format!("Task join error: {}", e),
+                        }
+                        .into());
+                    }
+                }
+            }
+
+            // Stop on first level failure (fail-fast behavior)
+            if level_failed {
+                warn!("Level {} had failures, stopping installation", level_idx);
                 break;
             }
 
-            // Aggregate environment variables
-            combined_env.extend(result.container_env.clone());
-            feature_results.push(result);
+            info!("Level {} completed successfully", level_idx);
         }
 
         // Apply combined environment variables

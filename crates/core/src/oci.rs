@@ -187,7 +187,7 @@ struct DockerConfig {
 }
 
 /// Downloaded and extracted feature data
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DownloadedFeature {
     /// Extracted feature directory
     pub path: PathBuf,
@@ -568,6 +568,7 @@ fn classify_network_error(error: &FeatureError) -> RetryDecision {
         | FeatureError::Validation { .. }
         | FeatureError::Extraction { .. }
         | FeatureError::Installation { .. }
+        | FeatureError::InstallationFailed { .. }
         | FeatureError::NotFound { .. }
         | FeatureError::DependencyCycle { .. }
         | FeatureError::InvalidDependency { .. }
