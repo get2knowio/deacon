@@ -95,10 +95,14 @@ async fn test_template_apply_with_options() -> anyhow::Result<()> {
 
     // Verify template option substitution
     let readme_content = fs::read_to_string(workspace_dir.join("README.md"))?;
+
     assert!(readme_content.contains("# awesome-app"));
     assert!(readme_content.contains("Debug: true"));
     assert!(readme_content.contains("Version: v3"));
-    assert!(readme_content.contains(&format!("Workspace: {}", workspace_dir.display())));
+
+    // Use canonicalized path for comparison since that's what the variable substitution uses
+    let canonical_workspace = workspace_dir.canonicalize()?;
+    assert!(readme_content.contains(&format!("Workspace: {}", canonical_workspace.display())));
 
     let config_content = fs::read_to_string(workspace_dir.join("src").join("config.json"))?;
     assert!(config_content.contains(r#""name": "awesome-app""#));
