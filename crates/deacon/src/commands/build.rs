@@ -444,36 +444,61 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
         let mut build_affecting_files = Vec::new();
 
         // Collect files that affect the build, excluding non-affecting ones like README
-        if let Ok(entries) = std::fs::read_dir(&context_path) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                        // Skip files that don't affect builds
-                        if !is_non_build_affecting_file(file_name) {
-                            if let Ok(metadata) = std::fs::metadata(&path) {
-                                build_affecting_files.push((
-                                    path.strip_prefix(workspace_folder)
-                                        .unwrap_or(&path)
-                                        .to_string_lossy()
-                                        .to_string(),
-                                    metadata.len(),
-                                    metadata
-                                        .modified()
-                                        .unwrap_or(std::time::UNIX_EPOCH)
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_secs(),
-                                ));
+        // Use a breadth-first, deterministic traversal
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(context_path.clone());
+
+        while let Some(dir) = queue.pop_front() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                let mut entries: Vec<_> = entries.flatten().collect();
+                entries.sort_by_key(|e| e.path());
+
+                // Process files first for this directory level
+                for entry in &entries {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                            if !is_non_build_affecting_file(file_name) {
+                                if let Ok(metadata) = std::fs::metadata(&path) {
+                                    build_affecting_files.push((
+                                        path.strip_prefix(workspace_folder)
+                                            .unwrap_or(&path)
+                                            .to_string_lossy()
+                                            .to_string(),
+                                        metadata.len(),
+                                        metadata
+                                            .modified()
+                                            .unwrap_or(std::time::UNIX_EPOCH)
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if build_affecting_files.len() >= 50 {
+                        break;
+                    }
+                }
+
+                // Then add directories to queue for next level processing
+                if build_affecting_files.len() < 50 {
+                    for entry in &entries {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            // Skip cache directories and other non-build-affecting directories
+                            if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                                if !is_non_build_affecting_directory(dir_name) {
+                                    queue.push_back(path);
+                                }
                             }
                         }
                     }
                 }
-
-                // Limit file count to avoid excessive hash computation
-                if build_affecting_files.len() >= 50 {
-                    break;
-                }
+            }
+            if build_affecting_files.len() >= 50 {
+                break;
             }
         }
 
@@ -519,6 +544,28 @@ fn is_non_build_affecting_file(filename: &str) -> bool {
             | ".idea"
             | ".git"
     ) || filename_lower.ends_with(".md") && !filename_lower.contains("dockerfile")
+}
+
+/// Check if a directory is unlikely to affect the build
+fn is_non_build_affecting_directory(dirname: &str) -> bool {
+    let dirname_lower = dirname.to_lowercase();
+    matches!(
+        dirname_lower.as_str(),
+        ".git"
+            | ".vscode" 
+            | ".idea"
+            | ".devcontainer"  // DevContainer config and cache directory
+            | "node_modules"
+            | ".pytest_cache"
+            | "__pycache__"
+            | ".mypy_cache"
+            | "build-cache"  // Our own build cache directory
+            | ".next"
+            | ".nuxt"
+            | "target"  // Rust build directory
+            | "dist"
+            | "coverage"
+    )
 }
 
 /// Check for cached build result
@@ -1430,6 +1477,77 @@ mod tests {
         assert_ne!(
             hash1, hash3,
             "Hash should change when build-affecting files change"
+        );
+    }
+
+    #[test]
+    fn test_config_hash_recursive_directory_traversal() {
+        let build_config = BuildConfig {
+            dockerfile: "Dockerfile".to_string(),
+            context: ".".to_string(),
+            target: None,
+            options: HashMap::new(),
+        };
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create Dockerfile
+        std::fs::write(temp_dir.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+
+        // Create nested directory structure
+        let src_dir = temp_dir.path().join("src");
+        let utils_dir = src_dir.join("utils");
+        std::fs::create_dir_all(&utils_dir).unwrap();
+
+        // Create files in nested directories
+        std::fs::write(src_dir.join("main.py"), "print('hello')").unwrap();
+        std::fs::write(utils_dir.join("helper.py"), "def help(): pass").unwrap();
+
+        let hash1 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+
+        // Modify nested file should change hash
+        std::fs::write(utils_dir.join("helper.py"), "def help(): return 'updated'").unwrap();
+        let hash2 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+        assert_ne!(hash1, hash2, "Hash should change when nested file changes");
+
+        // Add non-affecting file in nested directory should not change hash
+        std::fs::write(utils_dir.join("README.md"), "# Utils module").unwrap();
+        let hash3 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+        assert_eq!(
+            hash2, hash3,
+            "Hash should not change when non-affecting nested file is added"
+        );
+    }
+
+    #[test]
+    fn test_config_hash_excludes_devcontainer_directory() {
+        let build_config = BuildConfig {
+            dockerfile: "Dockerfile".to_string(),
+            context: ".".to_string(),
+            target: None,
+            options: HashMap::new(),
+        };
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create Dockerfile
+        std::fs::write(temp_dir.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+
+        // Create .devcontainer directory with cache
+        let devcontainer_dir = temp_dir.path().join(".devcontainer");
+        let cache_dir = devcontainer_dir.join("build-cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(devcontainer_dir.join("devcontainer.json"), "{}").unwrap();
+
+        let hash1 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+
+        // Add/modify files in .devcontainer should not change hash
+        std::fs::write(cache_dir.join("somecache.json"), "{}").unwrap();
+        std::fs::write(devcontainer_dir.join("another_file.json"), "{}").unwrap();
+        let hash2 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+        assert_eq!(
+            hash1, hash2,
+            "Hash should not change when .devcontainer directory contents change"
         );
     }
 

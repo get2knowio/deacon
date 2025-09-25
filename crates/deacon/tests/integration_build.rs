@@ -313,6 +313,53 @@ RUN echo "Building with cache test"
             !cache_files.is_empty(),
             "At least one cache file should be created"
         );
+
+        // Second build - should be a cache hit
+        let mut cmd2 = Command::cargo_bin("deacon").unwrap();
+        let second_assert = cmd2
+            .current_dir(&temp_dir)
+            .arg("build")
+            .arg("--output-format")
+            .arg("json")
+            .assert();
+
+        let second_output = second_assert.get_output();
+        assert!(
+            second_output.status.success(),
+            "Second build should succeed: {}",
+            String::from_utf8_lossy(&second_output.stderr)
+        );
+
+        let second_stdout = String::from_utf8_lossy(&second_output.stdout);
+
+        // Check that the second build used cache by verifying "Using cached build result" in stderr
+        let second_stderr = String::from_utf8_lossy(&second_output.stderr);
+        assert!(
+            second_stderr.contains("Using cached build result"),
+            "Second build should use cached result. Stderr: {}",
+            second_stderr
+        );
+
+        // Verify same image_id and config_hash
+        assert!(second_stdout.contains("image_id"));
+        assert!(second_stdout.contains("config_hash"));
+
+        // Parse both JSON outputs to verify they match
+        if let (Ok(first_json), Ok(second_json)) = (
+            serde_json::from_str::<serde_json::Value>(&stdout),
+            serde_json::from_str::<serde_json::Value>(&second_stdout),
+        ) {
+            assert_eq!(
+                first_json.get("image_id"),
+                second_json.get("image_id"),
+                "Image IDs should match between cache miss and cache hit"
+            );
+            assert_eq!(
+                first_json.get("config_hash"),
+                second_json.get("config_hash"),
+                "Config hashes should match between cache miss and cache hit"
+            );
+        }
     } else {
         // Docker not available - expected in CI
         let stderr = String::from_utf8_lossy(&first_output.stderr);
@@ -529,10 +576,11 @@ RUN echo "Testing affecting changes"
     if first_success {
         // If Docker is available and first build succeeded
         // Second build should also succeed (though it won't hit cache due to file change)
-        if !output2.status.success() {
-            let stderr = String::from_utf8_lossy(&output2.stderr);
-            println!("Second build failed: {}", stderr);
-        }
+        assert!(
+            output2.status.success(),
+            "Second build should succeed after file change: {}",
+            String::from_utf8_lossy(&output2.stderr)
+        );
         // We can't easily test that cache was invalidated in integration tests,
         // but both builds should work
     } else {
