@@ -177,3 +177,69 @@ fn test_build_command_flags() {
         );
     }
 }
+
+#[test]
+fn test_build_command_advanced_flags() {
+    let temp_dir = TempDir::new().unwrap();
+    let dockerfile_content = "FROM alpine:3.19\nLABEL test=1\n";
+
+    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+
+    let devcontainer_config = r#"{
+    "name": "Test Build Container Advanced",
+    "dockerFile": "Dockerfile"
+}
+"#;
+
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    // Test with advanced flags including BuildKit, secrets, SSH, and cache options
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let assert = cmd
+        .current_dir(&temp_dir)
+        .arg("build")
+        .arg("--no-cache")
+        .arg("--platform")
+        .arg("linux/amd64")
+        .arg("--cache-from")
+        .arg("registry://example.com/cache:latest")
+        .arg("--cache-from")
+        .arg("type=local,src=/tmp/cache")
+        .arg("--cache-to")
+        .arg("registry://example.com/cache:build")
+        .arg("--buildkit")
+        .arg("auto")
+        .arg("--secret")
+        .arg("id=mytoken,src=/dev/null")
+        .arg("--ssh")
+        .arg("default")
+        .arg("--build-arg")
+        .arg("ENV=test")
+        .arg("--force")
+        .arg("--output-format")
+        .arg("text")
+        .assert();
+
+    // The command should either succeed or fail gracefully
+    let output = assert.get_output();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Should fail because Docker is not available or because of permissions
+        assert!(
+            stderr.contains("Docker is not installed")
+                || stderr.contains("Docker daemon is not")
+                || stderr.contains("Docker build failed")
+                || stderr.contains("permission denied")
+                // Advanced BuildKit features might not be available
+                || stderr.contains("buildkit")
+                || stderr.contains("BuildKit"),
+            "Unexpected error: {}",
+            stderr
+        );
+    }
+}
