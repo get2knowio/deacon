@@ -46,6 +46,15 @@ pub enum ProgressFormat {
     Auto,
 }
 
+/// BuildKit usage control options
+#[derive(Debug, Clone, ValueEnum, PartialEq)]
+pub enum BuildKitOption {
+    /// Automatically detect and use BuildKit if available (respects DOCKER_BUILDKIT)
+    Auto,
+    /// Never use BuildKit, force legacy docker build
+    Never,
+}
+
 impl From<ProgressFormat> for deacon_core::progress::ProgressFormat {
     /// Convert this crate's `ProgressFormat` into the corresponding
     /// `deacon_core::progress::ProgressFormat`.
@@ -143,6 +152,21 @@ pub enum Commands {
         /// Output format (text or json)
         #[arg(long, value_enum, default_value = "text")]
         output_format: OutputFormat,
+        /// Cache source images (external cache sources like registry://<ref>)
+        #[arg(long)]
+        cache_from: Vec<String>,
+        /// Cache destination (external cache destinations like registry://<ref>)
+        #[arg(long)]
+        cache_to: Vec<String>,
+        /// BuildKit usage control (auto respects DOCKER_BUILDKIT, never disables)
+        #[arg(long, value_enum)]
+        buildkit: Option<BuildKitOption>,
+        /// Secret to expose to the build (format: id=secretname[,src=path])
+        #[arg(long)]
+        secret: Vec<String>,
+        /// SSH agent socket or keys to expose to the build
+        #[arg(long)]
+        ssh: Vec<String>,
         /// Additional features to install (JSON map of id -> value/options)
         #[arg(long)]
         additional_features: Option<String>,
@@ -586,6 +610,11 @@ impl Cli {
                 build_arg,
                 force,
                 output_format,
+                cache_from,
+                cache_to,
+                buildkit,
+                secret,
+                ssh,
                 additional_features,
                 prefer_cli_features,
                 feature_install_order,
@@ -599,6 +628,11 @@ impl Cli {
                     build_arg,
                     force,
                     output_format,
+                    cache_from,
+                    cache_to,
+                    buildkit,
+                    secret,
+                    ssh,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     additional_features,

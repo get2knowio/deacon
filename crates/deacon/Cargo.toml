@@ -25,3 +25,4 @@ workspace = true
 assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3.12"
+serial_test = "3"
