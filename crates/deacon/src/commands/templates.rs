@@ -13,12 +13,6 @@ use std::path::{Path, PathBuf};
 use tempfile;
 use tracing::{debug, info, instrument, warn};
 
-#[derive(Debug, Clone, Copy)]
-enum ConflictStrategy {
-    Skip,
-    Overwrite,
-}
-
 /// Templates command arguments
 #[derive(Debug, Clone)]
 pub struct TemplatesArgs {
@@ -71,9 +65,13 @@ pub async fn execute_templates(args: TemplatesArgs) -> Result<()> {
         TemplateCommands::GenerateDocs { path, output } => {
             execute_templates_generate_docs(&path, &output).await
         }
-        TemplateCommands::Apply { template, force } => {
-            execute_templates_apply(&template, force).await
-        }
+        TemplateCommands::Apply {
+            template,
+            option,
+            output,
+            force,
+            dry_run,
+        } => execute_templates_apply(&template, &option, output.as_deref(), force, dry_run).await,
     }
 }
 
@@ -247,89 +245,264 @@ async fn execute_templates_generate_docs(path: &str, output_dir: &str) -> Result
 
 /// Execute templates apply command
 #[instrument(level = "debug")]
-async fn execute_templates_apply(template: &str, force: bool) -> Result<()> {
-    debug!("Applying template: {}", template);
-
-    // Parse the template reference
-    let (registry_url, namespace, name, tag) = parse_registry_reference(template)?;
-
-    let template_ref = TemplateRef::new(
-        registry_url.clone(),
-        namespace.clone(),
-        name.clone(),
-        tag.clone(),
-    );
-
-    // Create OCI client and fetch template
-    let fetcher =
-        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
-
-    debug!("Fetching template from: {}", template_ref.reference());
-
-    let downloaded_template = fetcher
-        .fetch_template(&template_ref)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to fetch template: {}", e))?;
-
-    // Apply template files to the current directory
-    let current_dir = std::env::current_dir()?;
-    debug!(
-        "Applying template to current directory: {}",
-        current_dir.display()
-    );
-
-    // Copy template files to current directory
-    let strategy = if force {
-        ConflictStrategy::Overwrite
-    } else {
-        ConflictStrategy::Skip
-    };
-    copy_template_files(&downloaded_template.path, &current_dir, strategy)?;
-
-    info!(
-        "Successfully applied template {} to {}",
-        template_ref.reference(),
-        current_dir.display()
-    );
-
-    Ok(())
-}
-
-/// Copy template files to the target directory
-fn copy_template_files(
-    source_dir: &Path,
-    target_dir: &Path,
-    strategy: ConflictStrategy,
+async fn execute_templates_apply(
+    template: &str,
+    options: &[String],
+    output: Option<&str>,
+    force: bool,
+    dry_run: bool,
 ) -> Result<()> {
+    use deacon_core::features::OptionValue;
+    use deacon_core::templates::{apply_template, parse_template_metadata, ApplyOptions};
+    use std::collections::HashMap;
     use std::fs;
+    use std::path::Path;
 
-    for entry in fs::read_dir(source_dir)? {
-        let entry = entry?;
-        let source_path = entry.path();
-        let file_name = entry.file_name();
-        let target_path = target_dir.join(&file_name);
+    debug!(
+        "Applying template: {} with {} options, output: {:?}, force: {}, dry_run: {}",
+        template,
+        options.len(),
+        output,
+        force,
+        dry_run
+    );
 
-        if source_path.is_dir() {
-            // Recursively copy directories
-            fs::create_dir_all(&target_path)?;
-            copy_template_files(&source_path, &target_path, strategy)?;
-        } else {
-            // Copy files, but handle conflicts
-            if target_path.exists() {
-                match strategy {
-                    ConflictStrategy::Skip => {
-                        warn!("File already exists, skipping: {}", target_path.display());
-                        continue;
-                    }
-                    ConflictStrategy::Overwrite => {
-                        warn!("Overwriting existing file: {}", target_path.display());
+    // Determine output directory (default to current directory)
+    let output_dir = match output {
+        Some(dir) => PathBuf::from(dir),
+        None => std::env::current_dir()?,
+    };
+
+    debug!("Output directory: {}", output_dir.display());
+
+    // Create output directory if it doesn't exist (except in dry-run mode)
+    if !output_dir.exists() && !dry_run {
+        fs::create_dir_all(&output_dir)?;
+        info!("Created output directory: {}", output_dir.display());
+    }
+
+    // Check if template is a local path or registry reference
+    let template_path = Path::new(template);
+    let (template_dir, metadata) = if template_path.exists() && template_path.is_dir() {
+        // Local template directory
+        debug!(
+            "Using local template directory: {}",
+            template_path.display()
+        );
+        let metadata_file = template_path.join("devcontainer-template.json");
+        let metadata = parse_template_metadata(&metadata_file)
+            .map_err(|e| anyhow::anyhow!("Failed to parse template metadata: {}", e))?;
+        (template_path.to_path_buf(), metadata)
+    } else {
+        // Registry reference - fetch template first
+        debug!("Fetching template from registry: {}", template);
+
+        let (registry_url, namespace, name, tag) = parse_registry_reference(template)?;
+        let template_ref = TemplateRef::new(registry_url, namespace, name, tag);
+
+        let fetcher =
+            default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+        let downloaded_template = fetcher
+            .fetch_template(&template_ref)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch template: {}", e))?;
+
+        let metadata_file = downloaded_template.path.join("devcontainer-template.json");
+        let metadata = parse_template_metadata(&metadata_file)
+            .map_err(|e| anyhow::anyhow!("Failed to parse template metadata: {}", e))?;
+
+        (downloaded_template.path, metadata)
+    };
+
+    // Parse and validate template options
+    let mut option_values = HashMap::new();
+    for option_str in options {
+        let parts: Vec<&str> = option_str.splitn(2, '=').collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!(
+                "Invalid option format '{}'. Use key=value format.",
+                option_str
+            ));
+        }
+
+        let key = parts[0].trim();
+        let value = parts[1].trim();
+
+        // Check if option is defined in template metadata
+        if let Some(option_def) = metadata.options.get(key) {
+            // Parse value according to option type
+            let parsed_value = match option_def {
+                deacon_core::features::FeatureOption::Boolean { .. } => {
+                    match value.to_lowercase().as_str() {
+                        "true" => OptionValue::Boolean(true),
+                        "false" => OptionValue::Boolean(false),
+                        _ => {
+                            return Err(anyhow::anyhow!(
+                            "Invalid boolean value '{}' for option '{}'. Use 'true' or 'false'.",
+                            value, key
+                        ))
+                        }
                     }
                 }
+                deacon_core::features::FeatureOption::String { r#enum, .. } => {
+                    // Validate against enum choices if specified
+                    if let Some(enum_choices) = r#enum {
+                        if !enum_choices.contains(&value.to_string()) {
+                            return Err(anyhow::anyhow!(
+                                "Invalid value '{}' for option '{}'. Valid choices: {:?}",
+                                value,
+                                key,
+                                enum_choices
+                            ));
+                        }
+                    }
+                    OptionValue::String(value.to_string())
+                }
+            };
+
+            // Validate the parsed value
+            if let Err(err) = option_def.validate_value(&parsed_value) {
+                return Err(anyhow::anyhow!(
+                    "Invalid value '{}' for option '{}': {}",
+                    value,
+                    key,
+                    err
+                ));
             }
-            fs::copy(&source_path, &target_path)?;
-            debug!("Applied file: {}", target_path.display());
+
+            option_values.insert(key.to_string(), parsed_value);
+        } else {
+            return Err(anyhow::anyhow!(
+                "Unknown template option '{}'. Available options: {:?}",
+                key,
+                metadata.options.keys().collect::<Vec<_>>()
+            ));
         }
     }
+
+    // Add default values for unspecified options
+    for (option_name, option_def) in &metadata.options {
+        if !option_values.contains_key(option_name) {
+            if let Some(default_value) = option_def.default_value() {
+                option_values.insert(option_name.clone(), default_value);
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Missing required option '{}'. Provide a value with --option {}=<value> or define a default.",
+                    option_name,
+                    option_name,
+                ));
+            }
+        }
+    }
+
+    // Log resolved options
+    info!(
+        "Template: {} ({})",
+        metadata.id,
+        metadata.name.as_deref().unwrap_or("No name")
+    );
+    for (key, value) in &option_values {
+        debug!("Option '{}' = {:?}", key, value);
+    }
+
+    // Configure apply options
+    let apply_options = ApplyOptions {
+        options: option_values,
+        overwrite: force,
+        dry_run,
+    };
+
+    // Apply the template
+    let result = apply_template(&template_dir, &output_dir, &apply_options)?;
+
+    // Report results
+    if dry_run {
+        info!("DRY RUN: Would process {} files", result.files_processed);
+    } else {
+        info!("Successfully processed {} files", result.files_processed);
+    }
+
+    if result.files_skipped > 0 {
+        info!(
+            "Skipped {} existing files (use --force to overwrite)",
+            result.files_skipped
+        );
+    }
+
+    // Show actions taken/planned
+    for action in &result.actions {
+        match action {
+            deacon_core::templates::PlannedAction::CopyFile {
+                src,
+                dest,
+                has_substitutions,
+            } => {
+                let action_str = if dry_run { "Would copy" } else { "Copied" };
+                let subst_str = if *has_substitutions {
+                    " (with variable substitution)"
+                } else {
+                    ""
+                };
+                info!(
+                    "{} {} -> {}{}",
+                    action_str,
+                    src.display(),
+                    dest.display(),
+                    subst_str
+                );
+            }
+            deacon_core::templates::PlannedAction::SkipExistingFile { dest } => {
+                info!("Skipped existing file: {}", dest.display());
+            }
+            deacon_core::templates::PlannedAction::OverwriteFile {
+                src,
+                dest,
+                has_substitutions,
+            } => {
+                let action_str = if dry_run {
+                    "Would overwrite"
+                } else {
+                    "Overwritten"
+                };
+                let subst_str = if *has_substitutions {
+                    " (with variable substitution)"
+                } else {
+                    ""
+                };
+                info!(
+                    "{} {} -> {}{}",
+                    action_str,
+                    src.display(),
+                    dest.display(),
+                    subst_str
+                );
+            }
+        }
+    }
+
+    // Show substitution summary
+    if !result.substitution_report.replacements.is_empty() {
+        debug!(
+            "Variable substitutions made: {}",
+            result.substitution_report.replacements.len()
+        );
+        for (var, value) in &result.substitution_report.replacements {
+            debug!("  ${{{}}}: {}", var, value);
+        }
+    }
+
+    if !result.substitution_report.unknown_variables.is_empty() {
+        warn!(
+            "Unknown variables found: {:?}",
+            result.substitution_report.unknown_variables
+        );
+    }
+
+    info!(
+        "Template application completed. Files processed: {}, skipped: {}",
+        result.files_processed, result.files_skipped
+    );
 
     Ok(())
 }
