@@ -292,23 +292,27 @@ RUN echo "Building with cache test"
         let stdout = String::from_utf8_lossy(&first_output.stdout);
         assert!(stdout.contains("image_id"));
         assert!(stdout.contains("config_hash"));
-        
+
         // Check that cache directory was created
-        let cache_dir = temp_dir
-            .path()
-            .join(".devcontainer")
-            .join("build-cache");
+        let cache_dir = temp_dir.path().join(".devcontainer").join("build-cache");
         assert!(cache_dir.exists(), "Cache directory should be created");
-        
+
         // Check that a cache file was created
         let cache_files: Vec<_> = fs::read_dir(&cache_dir)
             .unwrap()
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
-                entry.path().extension().map(|ext| ext == "json").unwrap_or(false)
+                entry
+                    .path()
+                    .extension()
+                    .map(|ext| ext == "json")
+                    .unwrap_or(false)
             })
             .collect();
-        assert!(!cache_files.is_empty(), "At least one cache file should be created");
+        assert!(
+            !cache_files.is_empty(),
+            "At least one cache file should be created"
+        );
     } else {
         // Docker not available - expected in CI
         let stderr = String::from_utf8_lossy(&first_output.stderr);
@@ -344,12 +348,9 @@ RUN echo "Testing force flag"
     .unwrap();
 
     // Create a dummy cache file to simulate existing cache
-    let cache_dir = temp_dir
-        .path()
-        .join(".devcontainer")
-        .join("build-cache");
+    let cache_dir = temp_dir.path().join(".devcontainer").join("build-cache");
     fs::create_dir_all(&cache_dir).unwrap();
-    
+
     // Create a dummy cache file
     let cache_content = r#"{
     "config_hash": "dummy_hash",
@@ -391,7 +392,10 @@ RUN echo "Testing force flag"
         // With Docker: verify actual build happened, not cache hit
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("image_id"));
-        assert!(!stdout.contains("sha256:dummy"), "Should not use dummy cache");
+        assert!(
+            !stdout.contains("sha256:dummy"),
+            "Should not use dummy cache"
+        );
     } else {
         // Without Docker: expect failure
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -442,7 +446,11 @@ RUN echo "Testing non-affecting changes"
     let first_success = output1.status.success();
 
     // Modify README.md (should not affect build cache)
-    fs::write(temp_dir.path().join("README.md"), "# Updated README\n\nThis change should not affect the build cache.").unwrap();
+    fs::write(
+        temp_dir.path().join("README.md"),
+        "# Updated README\n\nThis change should not affect the build cache.",
+    )
+    .unwrap();
 
     // Second attempt - in a real environment with Docker, this would hit cache
     let mut cmd2 = Command::cargo_bin("deacon").unwrap();
@@ -454,7 +462,7 @@ RUN echo "Testing non-affecting changes"
         .assert();
 
     let output2 = assert2.get_output();
-    
+
     if first_success && output2.status.success() {
         // Both builds succeeded - verify the second one used cache or was similarly fast
         // In practice, we can't easily test cache hit behavior in integration tests
@@ -465,8 +473,8 @@ RUN echo "Testing non-affecting changes"
         let stderr1 = String::from_utf8_lossy(&output1.stderr);
         let stderr2 = String::from_utf8_lossy(&output2.stderr);
         assert!(
-            (stderr1.contains("Docker") || stderr1.contains("docker")) ||
-            (stderr2.contains("Docker") || stderr2.contains("docker")),
+            (stderr1.contains("Docker") || stderr1.contains("docker"))
+                || (stderr2.contains("Docker") || stderr2.contains("docker")),
             "Expected Docker-related errors"
         );
     }
@@ -500,26 +508,24 @@ RUN echo "Testing affecting changes"
 
     // First attempt
     let mut cmd1 = Command::cargo_bin("deacon").unwrap();
-    let assert1 = cmd1
-        .current_dir(&temp_dir)
-        .arg("build")
-        .assert();
+    let assert1 = cmd1.current_dir(&temp_dir).arg("build").assert();
 
     let output1 = assert1.get_output();
     let first_success = output1.status.success();
 
     // Modify main.py (should affect build and invalidate cache)
-    fs::write(temp_dir.path().join("main.py"), "print('hello updated world')").unwrap();
+    fs::write(
+        temp_dir.path().join("main.py"),
+        "print('hello updated world')",
+    )
+    .unwrap();
 
     // Second attempt - in a real environment, this would miss cache and rebuild
     let mut cmd2 = Command::cargo_bin("deacon").unwrap();
-    let assert2 = cmd2
-        .current_dir(&temp_dir)
-        .arg("build")
-        .assert();
+    let assert2 = cmd2.current_dir(&temp_dir).arg("build").assert();
 
     let output2 = assert2.get_output();
-    
+
     if first_success {
         // If Docker is available and first build succeeded
         // Second build should also succeed (though it won't hit cache due to file change)
@@ -534,8 +540,8 @@ RUN echo "Testing affecting changes"
         let stderr1 = String::from_utf8_lossy(&output1.stderr);
         let stderr2 = String::from_utf8_lossy(&output2.stderr);
         assert!(
-            (stderr1.contains("Docker") || stderr1.contains("docker")) ||
-            (stderr2.contains("Docker") || stderr2.contains("docker")),
+            (stderr1.contains("Docker") || stderr1.contains("docker"))
+                || (stderr2.contains("Docker") || stderr2.contains("docker")),
             "Expected Docker-related errors"
         );
     }
