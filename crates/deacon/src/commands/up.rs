@@ -13,6 +13,7 @@ use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::ports::PortForwardingManager;
 use deacon_core::state::{ComposeState, ContainerState, StateManager};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
 
 /// Up command arguments
@@ -669,6 +670,7 @@ async fn execute_lifecycle_commands(
         container_env: config.container_env.clone(),
         skip_post_create: args.skip_post_create,
         skip_non_blocking_commands: args.skip_non_blocking_commands,
+        non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout
     };
 
     // Build lifecycle commands from configuration
@@ -732,9 +734,13 @@ async fn execute_lifecycle_commands(
     let result = result?;
 
     debug!(
-        "Lifecycle execution completed: {} phases executed",
-        result.phases.len()
+        "Lifecycle execution completed: {} blocking phases executed, {} non-blocking phases to execute",
+        result.phases.len(),
+        result.non_blocking_phases.len()
     );
+
+    // Log what non-blocking phases would be executed; do not block CLI
+    result.log_non_blocking_phases();
 
     Ok(())
 }

@@ -327,6 +327,7 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
         },
         skip_post_create: false,
         skip_non_blocking_commands: false,
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Create lifecycle commands
@@ -352,23 +353,53 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
     .await?;
     let elapsed = start_time.elapsed();
 
-    // Verify result
-    assert_eq!(result.phases.len(), 4); // onCreate, postCreate, postStart, postAttach
+    // Verify result - only blocking phases should be completed immediately
+    assert_eq!(result.phases.len(), 2); // onCreate, postCreate (blocking phases)
     assert!(result.success());
 
-    // Verify timing - should have at least the configured delays
-    assert!(elapsed >= Duration::from_millis(300)); // 100ms + 200ms + 1ms + 1ms + processing time
+    // Verify non-blocking phases are scheduled for later execution
+    assert_eq!(result.non_blocking_phases.len(), 2);
+    let mut deferred: Vec<_> = result
+        .non_blocking_phases
+        .iter()
+        .map(|p| p.phase.as_str())
+        .collect();
+    deferred.sort_unstable();
+    assert_eq!(deferred, vec!["postAttach", "postStart"]);
 
-    // Verify exec history
+    // Verify timing - should have at least the delays for blocking commands only
+    assert!(elapsed >= Duration::from_millis(300)); // 100ms + 200ms + processing time
+
+    // Verify exec history - only blocking phases should have been executed
     let history = mock_docker.get_exec_history();
-    assert_eq!(history.len(), 4);
+    assert_eq!(history.len(), 2); // Only onCreate and postCreate
 
-    // Check specific commands were executed
+    // Check specific commands were executed (blocking phases only)
     let command_strings: Vec<String> = history.iter().map(|h| h.command.join(" ")).collect();
     assert!(command_strings.contains(&"sh -c npm install".to_string()));
     assert!(command_strings.contains(&"sh -c npm run build".to_string()));
-    assert!(command_strings.contains(&"sh -c echo 'container started'".to_string()));
-    assert!(command_strings.contains(&"sh -c echo 'container attached'".to_string()));
+
+    // Execute non-blocking phases synchronously to complete the test
+    let final_result = result
+        .execute_non_blocking_phases_sync(&mock_docker)
+        .await?;
+    assert_eq!(final_result.phases.len(), 4); // All phases should now be complete
+    assert_eq!(final_result.non_blocking_phases.len(), 0); // Should be empty after sync execution
+
+    // Verify final exec history includes all commands and order
+    let final_history = mock_docker.get_exec_history();
+    assert_eq!(final_history.len(), 4); // All commands should have been executed
+    assert_eq!(final_result.phases[0].phase.as_str(), "onCreate");
+    assert_eq!(final_result.phases[1].phase.as_str(), "postCreate");
+    assert_eq!(final_result.phases[2].phase.as_str(), "postStart");
+    assert_eq!(final_result.phases[3].phase.as_str(), "postAttach");
+
+    let final_command_strings: Vec<String> =
+        final_history.iter().map(|h| h.command.join(" ")).collect();
+    assert!(final_command_strings.contains(&"sh -c npm install".to_string()));
+    assert!(final_command_strings.contains(&"sh -c npm run build".to_string()));
+    assert!(final_command_strings.contains(&"sh -c echo 'container started'".to_string()));
+    assert!(final_command_strings.contains(&"sh -c echo 'container attached'".to_string()));
 
     Ok(())
 }
@@ -385,6 +416,7 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
         container_env: HashMap::new(),
         skip_post_create: true,           // Skip postCreate
         skip_non_blocking_commands: true, // Skip postStart and postAttach
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Create lifecycle commands
@@ -411,6 +443,8 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
     // Verify result - only onCreate should have executed
     assert_eq!(result.phases.len(), 1);
     assert!(result.success());
+    // Ensure no non-blocking phases are scheduled
+    assert_eq!(result.non_blocking_phases.len(), 0);
 
     // Verify exec history - only onCreate command should be present
     let history = mock_docker.get_exec_history();
@@ -444,6 +478,7 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: true, // Skip postStart/postAttach to focus on failure
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Create lifecycle commands with a failing command
@@ -529,6 +564,7 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: true, // This should skip postStart and postAttach
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Create lifecycle commands

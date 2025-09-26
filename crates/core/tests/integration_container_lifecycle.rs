@@ -5,6 +5,7 @@ use deacon_core::container_lifecycle::{
 };
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
+use std::time::Duration;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -31,6 +32,7 @@ async fn test_container_lifecycle_with_variable_substitution() {
         container_env,
         skip_post_create: false,
         skip_non_blocking_commands: false,
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Define lifecycle commands with variable substitution
@@ -55,6 +57,11 @@ async fn test_container_lifecycle_with_variable_substitution() {
     match result {
         Ok(lifecycle) => {
             assert!(!lifecycle.phases.is_empty());
+            // Non-blocking phases should be deferred when not skipped
+            assert!(
+                !lifecycle.non_blocking_phases.is_empty(),
+                "Expected non-blocking phases to be scheduled"
+            );
             assert!(
                 lifecycle.phases.iter().any(|phase| !phase.success),
                 "Expected at least one lifecycle phase to reflect the missing container"
@@ -90,6 +97,7 @@ async fn test_container_lifecycle_with_skip_flags() {
         container_env: HashMap::new(),
         skip_post_create: true,
         skip_non_blocking_commands: true,
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     let commands = ContainerLifecycleCommands::new()
@@ -103,6 +111,10 @@ async fn test_container_lifecycle_with_skip_flags() {
     match result {
         Ok(lifecycle) => {
             assert_eq!(lifecycle.phases.len(), 1);
+            assert!(
+                lifecycle.non_blocking_phases.is_empty(),
+                "Non-blocking phases should be empty when skipped"
+            );
             let phase = &lifecycle.phases[0];
             assert_eq!(phase.phase.as_str(), "onCreate");
             assert!(
@@ -129,6 +141,7 @@ fn test_container_lifecycle_config_validation() {
         container_env: container_env.clone(),
         skip_post_create: false,
         skip_non_blocking_commands: true,
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     assert_eq!(config.container_id, "test-container");
@@ -140,6 +153,7 @@ fn test_container_lifecycle_config_validation() {
     );
     assert!(!config.skip_post_create);
     assert!(config.skip_non_blocking_commands);
+    assert_eq!(config.non_blocking_timeout, Duration::from_secs(300));
 }
 
 #[test]

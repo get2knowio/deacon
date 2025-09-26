@@ -13,6 +13,7 @@ use deacon_core::secrets::SecretsCollection;
 use deacon_core::variable::SubstitutionContext;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tracing::{debug, info, instrument};
 
 use crate::commands::exec::resolve_target_container;
@@ -139,6 +140,7 @@ async fn execute_lifecycle_commands(
         container_env: config.container_env.clone(),
         skip_post_create: args.skip_post_create,
         skip_non_blocking_commands: args.skip_non_blocking_commands,
+        non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout
     };
 
     // Build lifecycle commands from configuration
@@ -196,7 +198,16 @@ async fn execute_lifecycle_commands(
     .await;
 
     // Return result
-    result?;
+    let result = result?;
+
+    debug!(
+        "User commands execution completed: {} blocking phases executed, {} non-blocking phases to execute",
+        result.phases.len(),
+        result.non_blocking_phases.len()
+    );
+
+    // Log what non-blocking phases would be executed; do not block CLI
+    result.log_non_blocking_phases();
 
     info!("Lifecycle commands execution completed");
     Ok(())

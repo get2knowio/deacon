@@ -11,6 +11,7 @@ use deacon_core::progress::{ProgressEvent, ProgressTracker};
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tempfile::TempDir;
 
 /// Mock progress event collector that stores events for verification
@@ -67,6 +68,7 @@ async fn test_per_command_events_emitted() {
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: false,
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Create lifecycle commands with multiple commands in a phase

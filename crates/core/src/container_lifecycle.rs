@@ -10,7 +10,8 @@ use crate::progress::{ProgressEvent, ProgressTracker};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio::time::timeout;
 use tracing::{debug, error, info, instrument};
 
 /// Configuration for container lifecycle execution
@@ -28,6 +29,8 @@ pub struct ContainerLifecycleConfig {
     pub skip_post_create: bool,
     /// Skip non-blocking commands (postStart & postAttach phases)
     pub skip_non_blocking_commands: bool,
+    /// Timeout for non-blocking commands (default: 5 minutes)
+    pub non_blocking_timeout: Duration,
 }
 
 /// Execute lifecycle commands in a container with full variable substitution
@@ -182,17 +185,15 @@ where
     // Execute postStart phase (if not skipped by non-blocking commands flag)
     if !config.skip_non_blocking_commands {
         if let Some(post_start_commands) = &commands.post_start {
-            result.phases.push(
-                execute_lifecycle_phase(
-                    LifecyclePhase::PostStart,
-                    post_start_commands,
-                    config,
-                    &docker,
-                    &container_context,
-                    progress_callback.as_ref(),
-                )
-                .await?,
-            );
+            // Add postStart phase to non-blocking specs for later execution
+            result.non_blocking_phases.push(NonBlockingPhaseSpec {
+                phase: LifecyclePhase::PostStart,
+                commands: post_start_commands.clone(),
+                config: config.clone(),
+                context: container_context.clone(),
+                timeout: config.non_blocking_timeout,
+            });
+            info!("Added postStart phase for non-blocking execution");
         }
     } else {
         info!("Skipping postStart phase (non-blocking commands disabled)");
@@ -201,17 +202,15 @@ where
     // Execute postAttach phase (if not skipped by non-blocking commands flag)
     if !config.skip_non_blocking_commands {
         if let Some(post_attach_commands) = &commands.post_attach {
-            result.phases.push(
-                execute_lifecycle_phase(
-                    LifecyclePhase::PostAttach,
-                    post_attach_commands,
-                    config,
-                    &docker,
-                    &container_context,
-                    progress_callback.as_ref(),
-                )
-                .await?,
-            );
+            // Add postAttach phase to non-blocking specs for later execution
+            result.non_blocking_phases.push(NonBlockingPhaseSpec {
+                phase: LifecyclePhase::PostAttach,
+                commands: post_attach_commands.clone(),
+                config: config.clone(),
+                context: container_context.clone(),
+                timeout: config.non_blocking_timeout,
+            });
+            info!("Added postAttach phase for non-blocking execution");
         }
     } else {
         info!("Skipping postAttach phase (non-blocking commands disabled)");
@@ -224,6 +223,24 @@ where
 /// Execute a single lifecycle phase in the container
 #[instrument(skip(commands, config, docker, context, progress_callback))]
 async fn execute_lifecycle_phase<D, F>(
+    phase: LifecyclePhase,
+    commands: &[String],
+    config: &ContainerLifecycleConfig,
+    docker: &D,
+    context: &SubstitutionContext,
+    progress_callback: Option<&F>,
+) -> Result<PhaseResult>
+where
+    D: Docker,
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
+    execute_lifecycle_phase_impl(phase, commands, config, docker, context, progress_callback).await
+}
+
+/// Execute a single lifecycle phase in the container (implementation detail)
+/// This is the actual implementation extracted to support both blocking and non-blocking execution
+#[instrument(skip(commands, config, docker, context, progress_callback))]
+async fn execute_lifecycle_phase_impl<D, F>(
     phase: LifecyclePhase,
     commands: &[String],
     config: &ContainerLifecycleConfig,
@@ -531,10 +548,29 @@ pub struct PhaseResult {
 }
 
 /// Result of executing container lifecycle
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ContainerLifecycleResult {
     /// Results of individual phases
     pub phases: Vec<PhaseResult>,
+    /// Non-blocking phases that should be executed in background
+    pub non_blocking_phases: Vec<NonBlockingPhaseSpec>,
+    /// Errors from background phase failures for structured aggregation
+    pub background_errors: Vec<String>,
+}
+
+/// Specification for a non-blocking phase to be executed later
+#[derive(Debug, Clone)]
+pub struct NonBlockingPhaseSpec {
+    /// Phase to execute
+    pub phase: LifecyclePhase,
+    /// Commands to execute
+    pub commands: Vec<String>,
+    /// Configuration for execution
+    pub config: ContainerLifecycleConfig,
+    /// Substitution context
+    pub context: SubstitutionContext,
+    /// Timeout for execution
+    pub timeout: Duration,
 }
 
 impl Default for ContainerLifecycleResult {
@@ -546,7 +582,11 @@ impl Default for ContainerLifecycleResult {
 impl ContainerLifecycleResult {
     /// Create new empty result
     pub fn new() -> Self {
-        Self { phases: Vec::new() }
+        Self {
+            phases: Vec::new(),
+            non_blocking_phases: Vec::new(),
+            background_errors: Vec::new(),
+        }
     }
 
     /// Check if all phases succeeded
@@ -557,6 +597,78 @@ impl ContainerLifecycleResult {
     /// Get total duration across all phases
     pub fn total_duration(&self) -> std::time::Duration {
         self.phases.iter().map(|phase| phase.total_duration).sum()
+    }
+
+    /// Execute non-blocking phases in the background if supported
+    /// For now, just logs that they would be executed non-blockingly
+    pub fn log_non_blocking_phases(&self) {
+        for phase_spec in &self.non_blocking_phases {
+            info!(
+                "Non-blocking phase {} would execute {} commands in background with timeout {:?} (container: {})",
+                phase_spec.phase.as_str(),
+                phase_spec.commands.len(),
+                phase_spec.timeout,
+                phase_spec.config.container_id
+            );
+        }
+    }
+
+    /// Execute non-blocking phases synchronously (for testing or fallback)
+    pub async fn execute_non_blocking_phases_sync<D>(mut self, docker: &D) -> Result<Self>
+    where
+        D: Docker,
+    {
+        let non_blocking_phases = std::mem::take(&mut self.non_blocking_phases);
+
+        for spec in non_blocking_phases {
+            info!(
+                "Executing non-blocking phase {} synchronously",
+                spec.phase.as_str()
+            );
+
+            // Enforce per-phase timeout
+            match timeout(
+                spec.timeout,
+                execute_lifecycle_phase_impl::<D, fn(ProgressEvent) -> anyhow::Result<()>>(
+                    spec.phase,
+                    &spec.commands,
+                    &spec.config,
+                    docker,
+                    &spec.context,
+                    None,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(phase_result)) => {
+                    info!(
+                        "Non-blocking phase {} completed successfully",
+                        spec.phase.as_str()
+                    );
+                    self.phases.push(phase_result);
+                }
+                Ok(Err(e)) => {
+                    let error_msg =
+                        format!("Non-blocking phase {} failed: {}", spec.phase.as_str(), e);
+                    error!("{}", error_msg);
+                    self.background_errors.push(error_msg);
+                    // Continue with other phases - non-blocking phases should not fail the main flow
+                }
+                Err(elapsed) => {
+                    let error_msg = format!(
+                        "Non-blocking phase {} timed out after {:?}: {}",
+                        spec.phase.as_str(),
+                        spec.timeout,
+                        elapsed
+                    );
+                    error!("{}", error_msg);
+                    self.background_errors.push(error_msg);
+                    // Continue to next phase
+                }
+            }
+        }
+
+        Ok(self)
     }
 }
 
@@ -573,6 +685,7 @@ mod tests {
             container_env: HashMap::new(),
             skip_post_create: false,
             skip_non_blocking_commands: false,
+            non_blocking_timeout: Duration::from_secs(300), // 5 minutes default
         };
 
         assert_eq!(config.container_id, "test-container");
@@ -580,6 +693,7 @@ mod tests {
         assert_eq!(config.container_workspace_folder, "/workspaces/test");
         assert!(!config.skip_post_create);
         assert!(!config.skip_non_blocking_commands);
+        assert_eq!(config.non_blocking_timeout, Duration::from_secs(300));
     }
 
     #[test]
