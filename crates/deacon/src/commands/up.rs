@@ -7,7 +7,7 @@ use anyhow::Result;
 use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::container::ContainerIdentity;
-use deacon_core::docker::{CliDocker, Docker, ExecConfig};
+use deacon_core::docker::{CliDocker, Docker, DockerLifecycle, ExecConfig};
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::ports::PortForwardingManager;
@@ -346,7 +346,6 @@ async fn execute_container_up(
     let container_start_time = std::time::Instant::now();
 
     // Create container using DockerLifecycle trait
-    use deacon_core::docker::DockerLifecycle;
     let container_result = docker
         .up(
             &identity,

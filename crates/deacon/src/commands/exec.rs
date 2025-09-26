@@ -4,9 +4,10 @@
 //! for the exec command, targeting the correct workspace container.
 
 use anyhow::Result;
+use deacon_core::compose::ComposeManager;
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::container::ContainerIdentity;
-use deacon_core::docker::{CliDocker, Docker};
+use deacon_core::docker::{CliDocker, Docker, ExecConfig};
 use deacon_core::errors::{ConfigError, DeaconError};
 use std::collections::HashMap;
 use std::path::Path;
@@ -100,8 +101,6 @@ async fn resolve_compose_target_container(
     workspace_folder: &Path,
     config: &DevContainerConfig,
 ) -> Result<String> {
-    use deacon_core::compose::ComposeManager;
-
     debug!("Resolving compose target container");
 
     let compose_manager = ComposeManager::new();
@@ -175,8 +174,6 @@ where
     }
 
     {
-        use deacon_core::docker::ExecConfig;
-
         tracing::info!("Executing command in container: {:?}", args.command);
 
         // Parse environment variables early to catch format errors

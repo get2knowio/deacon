@@ -5,6 +5,7 @@
 
 use crate::config::DevContainerConfig;
 use crate::errors::{ConfigError, DockerError, Result};
+use crate::security::SecurityOptions;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -150,7 +151,6 @@ impl ComposeCommand {
     /// Warn about security options that cannot be applied dynamically in Docker Compose
     pub fn warn_security_options_for_compose(config: &DevContainerConfig) {
         // TODO: In the future, this should accept features parameter to check feature-derived options too
-        use crate::security::SecurityOptions;
 
         // For now, only check config options. Features would require access to resolved features.
         let security = SecurityOptions {
