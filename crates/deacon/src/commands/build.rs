@@ -93,6 +93,43 @@ pub struct BuildResult {
     pub config_hash: String,
 }
 
+/// Build metadata stored in cache
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildMetadata {
+    /// Configuration hash
+    pub config_hash: String,
+    /// Build result
+    pub result: BuildResult,
+    /// Build inputs summary
+    pub inputs: BuildInputs,
+    /// When the build was created
+    pub created_at: u64,
+}
+
+/// Build inputs tracked for cache invalidation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildInputs {
+    /// Dockerfile content hash
+    pub dockerfile_hash: String,
+    /// Build context files that affect the build
+    pub context_files: Vec<ContextFile>,
+    /// Feature set digest (if applicable)
+    pub feature_set_digest: Option<String>,
+    /// Build configuration
+    pub build_config: BuildConfig,
+}
+
+/// A file in the build context that affects the build
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextFile {
+    /// Relative path from workspace root
+    pub path: String,
+    /// File size in bytes
+    pub size: u64,
+    /// Last modified time (seconds since UNIX epoch)
+    pub mtime: u64,
+}
+
 /// Execute the build command.
 ///
 /// Loads the DevContainer configuration (from the provided path or by discovery),
@@ -401,14 +438,76 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
         dockerfile_content.hash(&mut hasher);
     }
 
-    // Hash context directory mtime (simple approach)
+    // Hash selected build context files (limit count for performance)
     let context_path = workspace_folder.join(&build_config.context);
     if context_path.exists() {
-        let metadata = std::fs::metadata(&context_path)?;
-        if let Ok(modified) = metadata.modified() {
-            if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
-                duration.as_secs().hash(&mut hasher);
+        let mut build_affecting_files = Vec::new();
+
+        // Collect files that affect the build, excluding non-affecting ones like README
+        // Use a breadth-first, deterministic traversal
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(context_path.clone());
+
+        while let Some(dir) = queue.pop_front() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                let mut entries: Vec<_> = entries.flatten().collect();
+                entries.sort_by_key(|e| e.path());
+
+                // Process files first for this directory level
+                for entry in &entries {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                            if !is_non_build_affecting_file(file_name) {
+                                if let Ok(metadata) = std::fs::metadata(&path) {
+                                    build_affecting_files.push((
+                                        path.strip_prefix(workspace_folder)
+                                            .unwrap_or(&path)
+                                            .to_string_lossy()
+                                            .to_string(),
+                                        metadata.len(),
+                                        metadata
+                                            .modified()
+                                            .unwrap_or(std::time::UNIX_EPOCH)
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if build_affecting_files.len() >= 50 {
+                        break;
+                    }
+                }
+
+                // Then add directories to queue for next level processing
+                if build_affecting_files.len() < 50 {
+                    for entry in &entries {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            // Skip cache directories and other non-build-affecting directories
+                            if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                                if !is_non_build_affecting_directory(dir_name) {
+                                    queue.push_back(path);
+                                }
+                            }
+                        }
+                    }
+                }
             }
+            if build_affecting_files.len() >= 50 {
+                break;
+            }
+        }
+
+        // Sort for deterministic hashing
+        build_affecting_files.sort();
+        for (path, size, mtime) in build_affecting_files {
+            path.hash(&mut hasher);
+            size.hash(&mut hasher);
+            mtime.hash(&mut hasher);
         }
     }
 
@@ -417,23 +516,189 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
     Ok(format!("{:016x}", hash))
 }
 
+/// Check if a file is unlikely to affect the build
+fn is_non_build_affecting_file(filename: &str) -> bool {
+    let filename_lower = filename.to_lowercase();
+    matches!(
+        filename_lower.as_str(),
+        "readme"
+            | "readme.md"
+            | "readme.txt"
+            | "readme.rst"
+            | "changelog"
+            | "changelog.md"
+            | "changelog.txt"
+            | "license"
+            | "license.md"
+            | "license.txt"
+            | "authors"
+            | "authors.md"
+            | "authors.txt"
+            | "contributors"
+            | "contributors.md"
+            | "contributors.txt"
+            | ".gitignore"
+            | ".gitattributes"
+            | ".editorconfig"
+            | ".vscode"
+            | ".idea"
+            | ".git"
+    ) || filename_lower.ends_with(".md") && !filename_lower.contains("dockerfile")
+}
+
+/// Check if a directory is unlikely to affect the build
+fn is_non_build_affecting_directory(dirname: &str) -> bool {
+    let dirname_lower = dirname.to_lowercase();
+    matches!(
+        dirname_lower.as_str(),
+        ".git"
+            | ".vscode" 
+            | ".idea"
+            | ".devcontainer"  // DevContainer config and cache directory
+            | "node_modules"
+            | ".pytest_cache"
+            | "__pycache__"
+            | ".mypy_cache"
+            | "build-cache"  // Our own build cache directory
+            | ".next"
+            | ".nuxt"
+            | "target"  // Rust build directory
+            | "dist"
+            | "coverage"
+    )
+}
+
 /// Check for cached build result
 async fn check_build_cache(
-    _config_hash: &str,
-    _workspace_folder: &Path,
+    config_hash: &str,
+    workspace_folder: &Path,
 ) -> Result<Option<BuildResult>> {
-    // For now, always return None (no cache hit)
-    // TODO: Implement proper cache storage and retrieval
-    debug!("Cache check not implemented yet");
-    Ok(None)
+    let cache_file = get_build_cache_path(workspace_folder, config_hash);
+
+    if !cache_file.exists() {
+        debug!("No cache file found at {}", cache_file.display());
+        return Ok(None);
+    }
+
+    // Read and deserialize cache file
+    match std::fs::read_to_string(&cache_file) {
+        Ok(contents) => {
+            match serde_json::from_str::<BuildMetadata>(&contents) {
+                Ok(metadata) => {
+                    // Validate that the image still exists
+                    if is_image_available(&metadata.result.image_id).await? {
+                        debug!("Cache hit for config hash {}", config_hash);
+                        Ok(Some(metadata.result))
+                    } else {
+                        debug!(
+                            "Cached image {} no longer available, invalidating cache",
+                            metadata.result.image_id
+                        );
+                        // Remove invalid cache file
+                        let _ = std::fs::remove_file(&cache_file);
+                        Ok(None)
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to deserialize cache metadata: {}", e);
+                    // Remove corrupted cache file
+                    let _ = std::fs::remove_file(&cache_file);
+                    Ok(None)
+                }
+            }
+        }
+        Err(e) => {
+            debug!("Failed to read cache file: {}", e);
+            Ok(None)
+        }
+    }
 }
 
 /// Cache build result
-async fn cache_build_result(_result: &BuildResult, _workspace_folder: &Path) -> Result<()> {
-    // For now, do nothing
-    // TODO: Implement proper cache storage
-    debug!("Cache storage not implemented yet");
+async fn cache_build_result(result: &BuildResult, workspace_folder: &Path) -> Result<()> {
+    let cache_dir = get_build_cache_dir(workspace_folder);
+
+    // Ensure cache directory exists
+    if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+        debug!("Failed to create cache directory: {}", e);
+        return Ok(()); // Don't fail the build if caching fails
+    }
+
+    // Create build inputs for metadata
+    let inputs = create_build_inputs(result, workspace_folder)?;
+
+    let metadata = BuildMetadata {
+        config_hash: result.config_hash.clone(),
+        result: result.clone(),
+        inputs,
+        created_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    };
+
+    let cache_file = get_build_cache_path(workspace_folder, &result.config_hash);
+
+    match serde_json::to_string_pretty(&metadata) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&cache_file, json) {
+                debug!("Failed to write cache file: {}", e);
+            } else {
+                debug!("Cached build result to {}", cache_file.display());
+            }
+        }
+        Err(e) => {
+            debug!("Failed to serialize cache metadata: {}", e);
+        }
+    }
+
     Ok(())
+}
+
+/// Get the cache directory for builds
+fn get_build_cache_dir(workspace_folder: &Path) -> PathBuf {
+    workspace_folder.join(".devcontainer").join("build-cache")
+}
+
+/// Get the cache file path for a specific config hash
+fn get_build_cache_path(workspace_folder: &Path, config_hash: &str) -> PathBuf {
+    get_build_cache_dir(workspace_folder).join(format!("{}.json", config_hash))
+}
+
+/// Create build inputs for cache metadata
+fn create_build_inputs(result: &BuildResult, _workspace_folder: &Path) -> Result<BuildInputs> {
+    // For now, create a simplified version - full implementation would track more details
+    let dockerfile_hash = result.config_hash.clone(); // Simplified
+    let context_files = Vec::new(); // Would be populated from actual context scanning
+
+    Ok(BuildInputs {
+        dockerfile_hash,
+        context_files,
+        feature_set_digest: None, // TODO: Implement when features are integrated
+        build_config: BuildConfig {
+            dockerfile: "Dockerfile".to_string(), // Would be extracted from actual config
+            context: ".".to_string(),
+            target: None,
+            options: HashMap::new(),
+        },
+    })
+}
+
+/// Check if a Docker image is available locally
+async fn is_image_available(image_id: &str) -> Result<bool> {
+    // Use docker inspect to check if image exists
+    let output = std::process::Command::new("docker")
+        .args(["inspect", "--type=image", image_id])
+        .output();
+
+    match output {
+        Ok(output) => Ok(output.status.success()),
+        Err(_) => {
+            // If docker command fails, assume image is not available
+            debug!("Failed to check image availability for {}", image_id);
+            Ok(false)
+        }
+    }
 }
 
 /// Detect if BuildKit should be used based on CLI flag and environment
@@ -1153,5 +1418,202 @@ mod tests {
         let use_buildkit = should_use_buildkit(args_with_ssh.buildkit.as_ref());
         assert!(!use_buildkit);
         assert!(!args_with_ssh.ssh.is_empty());
+    }
+
+    #[test]
+    fn test_is_non_build_affecting_file() {
+        // Files that should not affect builds
+        assert!(is_non_build_affecting_file("README.md"));
+        assert!(is_non_build_affecting_file("readme"));
+        assert!(is_non_build_affecting_file("CHANGELOG.md"));
+        assert!(is_non_build_affecting_file("LICENSE"));
+        assert!(is_non_build_affecting_file(".gitignore"));
+        assert!(is_non_build_affecting_file("docs.md"));
+
+        // Files that should affect builds
+        assert!(!is_non_build_affecting_file("Dockerfile"));
+        assert!(!is_non_build_affecting_file("main.py"));
+        assert!(!is_non_build_affecting_file("package.json"));
+        assert!(!is_non_build_affecting_file("requirements.txt"));
+        assert!(!is_non_build_affecting_file("docker-compose.yml"));
+        assert!(!is_non_build_affecting_file("dockerfile.dev"));
+    }
+
+    #[test]
+    fn test_config_hash_with_context_files() {
+        let build_config = BuildConfig {
+            dockerfile: "Dockerfile".to_string(),
+            context: ".".to_string(),
+            target: None,
+            options: HashMap::new(),
+        };
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create Dockerfile
+        std::fs::write(temp_dir.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+
+        // Create files that affect build
+        std::fs::write(temp_dir.path().join("main.py"), "print('hello')").unwrap();
+        std::fs::write(temp_dir.path().join("requirements.txt"), "flask==2.0.0").unwrap();
+
+        // Create files that don't affect build
+        std::fs::write(temp_dir.path().join("README.md"), "# Project").unwrap();
+        std::fs::write(temp_dir.path().join(".gitignore"), "*.pyc").unwrap();
+
+        let hash1 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+
+        // Modifying non-build-affecting file should not change hash
+        std::fs::write(temp_dir.path().join("README.md"), "# Updated Project").unwrap();
+        let hash2 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+        assert_eq!(
+            hash1, hash2,
+            "Hash should not change when non-build-affecting files change"
+        );
+
+        // Modifying build-affecting file should change hash
+        std::fs::write(temp_dir.path().join("main.py"), "print('updated')").unwrap();
+        let hash3 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+        assert_ne!(
+            hash1, hash3,
+            "Hash should change when build-affecting files change"
+        );
+    }
+
+    #[test]
+    fn test_config_hash_recursive_directory_traversal() {
+        let build_config = BuildConfig {
+            dockerfile: "Dockerfile".to_string(),
+            context: ".".to_string(),
+            target: None,
+            options: HashMap::new(),
+        };
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create Dockerfile
+        std::fs::write(temp_dir.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+
+        // Create nested directory structure
+        let src_dir = temp_dir.path().join("src");
+        let utils_dir = src_dir.join("utils");
+        std::fs::create_dir_all(&utils_dir).unwrap();
+
+        // Create files in nested directories
+        std::fs::write(src_dir.join("main.py"), "print('hello')").unwrap();
+        std::fs::write(utils_dir.join("helper.py"), "def help(): pass").unwrap();
+
+        let hash1 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+
+        // Modify nested file should change hash
+        std::fs::write(utils_dir.join("helper.py"), "def help(): return 'updated'").unwrap();
+        let hash2 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+        assert_ne!(hash1, hash2, "Hash should change when nested file changes");
+
+        // Add non-affecting file in nested directory should not change hash
+        std::fs::write(utils_dir.join("README.md"), "# Utils module").unwrap();
+        let hash3 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+        assert_eq!(
+            hash2, hash3,
+            "Hash should not change when non-affecting nested file is added"
+        );
+    }
+
+    #[test]
+    fn test_config_hash_excludes_devcontainer_directory() {
+        let build_config = BuildConfig {
+            dockerfile: "Dockerfile".to_string(),
+            context: ".".to_string(),
+            target: None,
+            options: HashMap::new(),
+        };
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create Dockerfile
+        std::fs::write(temp_dir.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+
+        // Create .devcontainer directory with cache
+        let devcontainer_dir = temp_dir.path().join(".devcontainer");
+        let cache_dir = devcontainer_dir.join("build-cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(devcontainer_dir.join("devcontainer.json"), "{}").unwrap();
+
+        let hash1 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+
+        // Add/modify files in .devcontainer should not change hash
+        std::fs::write(cache_dir.join("somecache.json"), "{}").unwrap();
+        std::fs::write(devcontainer_dir.join("another_file.json"), "{}").unwrap();
+        let hash2 = calculate_config_hash(&build_config, temp_dir.path()).unwrap();
+        assert_eq!(
+            hash1, hash2,
+            "Hash should not change when .devcontainer directory contents change"
+        );
+    }
+
+    #[test]
+    fn test_cache_paths() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let workspace = temp_dir.path();
+        let config_hash = "abcd1234efgh5678";
+
+        let cache_dir = get_build_cache_dir(workspace);
+        let expected_cache_dir = workspace.join(".devcontainer").join("build-cache");
+        assert_eq!(cache_dir, expected_cache_dir);
+
+        let cache_file = get_build_cache_path(workspace, config_hash);
+        let expected_cache_file = expected_cache_dir.join("abcd1234efgh5678.json");
+        assert_eq!(cache_file, expected_cache_file);
+    }
+
+    #[test]
+    fn test_build_metadata_serialization() {
+        let build_result = BuildResult {
+            image_id: "sha256:abcd1234".to_string(),
+            tags: vec!["myapp:latest".to_string()],
+            build_duration: 123.45,
+            metadata: {
+                let mut map = HashMap::new();
+                map.insert("test".to_string(), "value".to_string());
+                map
+            },
+            config_hash: "hash123".to_string(),
+        };
+
+        let inputs = BuildInputs {
+            dockerfile_hash: "dockerfile_hash".to_string(),
+            context_files: vec![ContextFile {
+                path: "main.py".to_string(),
+                size: 100,
+                mtime: 1234567890,
+            }],
+            feature_set_digest: Some("features_hash".to_string()),
+            build_config: BuildConfig {
+                dockerfile: "Dockerfile".to_string(),
+                context: ".".to_string(),
+                target: None,
+                options: HashMap::new(),
+            },
+        };
+
+        let metadata = BuildMetadata {
+            config_hash: "hash123".to_string(),
+            result: build_result,
+            inputs,
+            created_at: 1234567890,
+        };
+
+        // Test serialization
+        let json = serde_json::to_string(&metadata).unwrap();
+        assert!(!json.is_empty());
+
+        // Test deserialization
+        let deserialized: BuildMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.config_hash, metadata.config_hash);
+        assert_eq!(deserialized.result.image_id, metadata.result.image_id);
+        assert_eq!(
+            deserialized.inputs.dockerfile_hash,
+            metadata.inputs.dockerfile_hash
+        );
     }
 }
