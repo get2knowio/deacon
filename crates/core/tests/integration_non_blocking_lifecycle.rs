@@ -58,17 +58,17 @@ async fn test_non_blocking_phases_are_deferred() {
     assert_eq!(result.phases.len(), 2); // onCreate and postCreate
     assert_eq!(result.phases[0].phase.as_str(), "onCreate");
     assert_eq!(result.phases[1].phase.as_str(), "postCreate");
-    
+
     // Verify that non-blocking phases are marked for later execution
     assert_eq!(result.non_blocking_phases.len(), 2); // postStart and postAttach
     assert_eq!(result.non_blocking_phases[0].phase.as_str(), "postStart");
     assert_eq!(result.non_blocking_phases[1].phase.as_str(), "postAttach");
-    
+
     // Verify non-blocking phase specifications
     let post_start_spec = &result.non_blocking_phases[0];
     assert_eq!(post_start_spec.commands, vec!["echo 'postStart'"]);
     assert_eq!(post_start_spec.timeout, Duration::from_secs(30));
-    
+
     let post_attach_spec = &result.non_blocking_phases[1];
     assert_eq!(post_attach_spec.commands, vec!["echo 'postAttach'"]);
     assert_eq!(post_attach_spec.timeout, Duration::from_secs(30));
@@ -76,14 +76,17 @@ async fn test_non_blocking_phases_are_deferred() {
     // Verify that the MockDocker received exec calls for blocking phases only
     let exec_history = docker.get_exec_history();
     assert_eq!(exec_history.len(), 2); // Only onCreate and postCreate should have been executed
-    
+
     println!("✓ Non-blocking phases are properly deferred for later execution");
-    println!("✓ Blocking phases (onCreate, postCreate) execute immediately"); 
+    println!("✓ Blocking phases (onCreate, postCreate) execute immediately");
     println!("✓ Non-blocking phases (postStart, postAttach) are marked for background execution");
-    println!("✓ MockDocker confirms only {} exec calls were made for blocking phases", exec_history.len());
+    println!(
+        "✓ MockDocker confirms only {} exec calls were made for blocking phases",
+        exec_history.len()
+    );
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn test_skip_non_blocking_commands_behavior() {
     let temp_dir = TempDir::new().unwrap();
     let workspace_path = temp_dir.path();
@@ -132,7 +135,7 @@ async fn test_skip_non_blocking_commands_behavior() {
     assert_eq!(result.phases.len(), 2); // onCreate and postCreate only
     assert_eq!(result.phases[0].phase.as_str(), "onCreate");
     assert_eq!(result.phases[1].phase.as_str(), "postCreate");
-    
+
     // Verify that no non-blocking phases are scheduled
     assert_eq!(result.non_blocking_phases.len(), 0); // postStart and postAttach should be skipped
 
@@ -142,7 +145,10 @@ async fn test_skip_non_blocking_commands_behavior() {
 
     println!("✓ --skip-non-blocking-commands properly excludes postStart and postAttach");
     println!("✓ Blocking phases still execute normally when non-blocking commands are skipped");
-    println!("✓ MockDocker confirms only {} exec calls were made", exec_history.len());
+    println!(
+        "✓ MockDocker confirms only {} exec calls were made",
+        exec_history.len()
+    );
 }
 
 #[tokio::test]
@@ -195,12 +201,15 @@ async fn test_non_blocking_phases_sync_execution() {
     assert_eq!(result.non_blocking_phases.len(), 2); // postStart and postAttach deferred
 
     // Now execute the non-blocking phases synchronously for testing
-    let final_result = result.execute_non_blocking_phases_sync(&docker).await.unwrap();
-    
+    let final_result = result
+        .execute_non_blocking_phases_sync(&docker)
+        .await
+        .unwrap();
+
     // Verify that now all phases have been executed
     assert_eq!(final_result.phases.len(), 4); // All phases should now be complete
     assert_eq!(final_result.non_blocking_phases.len(), 0); // Should be empty after sync execution
-    
+
     // Check that all phases are in the correct order
     assert_eq!(final_result.phases[0].phase.as_str(), "onCreate");
     assert_eq!(final_result.phases[1].phase.as_str(), "postCreate");
@@ -213,5 +222,8 @@ async fn test_non_blocking_phases_sync_execution() {
 
     println!("✓ Non-blocking phases can be executed synchronously for testing");
     println!("✓ All phases execute in correct order when sync execution is used");
-    println!("✓ MockDocker confirms all {} phases were executed", exec_history.len());
+    println!(
+        "✓ MockDocker confirms all {} phases were executed",
+        exec_history.len()
+    );
 }

@@ -356,7 +356,7 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
     // Verify result - only blocking phases should be completed immediately
     assert_eq!(result.phases.len(), 2); // onCreate, postCreate (blocking phases)
     assert!(result.success());
-    
+
     // Verify non-blocking phases are scheduled for later execution
     assert_eq!(result.non_blocking_phases.len(), 2); // postStart, postAttach (non-blocking)
     assert_eq!(result.non_blocking_phases[0].phase.as_str(), "postStart");
@@ -373,17 +373,20 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
     let command_strings: Vec<String> = history.iter().map(|h| h.command.join(" ")).collect();
     assert!(command_strings.contains(&"sh -c npm install".to_string()));
     assert!(command_strings.contains(&"sh -c npm run build".to_string()));
-    
+
     // Execute non-blocking phases synchronously to complete the test
-    let final_result = result.execute_non_blocking_phases_sync(&mock_docker).await?;
+    let final_result = result
+        .execute_non_blocking_phases_sync(&mock_docker)
+        .await?;
     assert_eq!(final_result.phases.len(), 4); // All phases should now be complete
     assert_eq!(final_result.non_blocking_phases.len(), 0); // Should be empty after sync execution
-    
+
     // Verify final exec history includes all commands
     let final_history = mock_docker.get_exec_history();
     assert_eq!(final_history.len(), 4); // All commands should have been executed
-    
-    let final_command_strings: Vec<String> = final_history.iter().map(|h| h.command.join(" ")).collect();
+
+    let final_command_strings: Vec<String> =
+        final_history.iter().map(|h| h.command.join(" ")).collect();
     assert!(final_command_strings.contains(&"sh -c npm install".to_string()));
     assert!(final_command_strings.contains(&"sh -c npm run build".to_string()));
     assert!(final_command_strings.contains(&"sh -c echo 'container started'".to_string()));
