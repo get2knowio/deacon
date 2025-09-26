@@ -327,6 +327,7 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
         },
         skip_post_create: false,
         skip_non_blocking_commands: false,
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Create lifecycle commands
@@ -385,6 +386,7 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
         container_env: HashMap::new(),
         skip_post_create: true,           // Skip postCreate
         skip_non_blocking_commands: true, // Skip postStart and postAttach
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Create lifecycle commands
@@ -444,6 +446,7 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: true, // Skip postStart/postAttach to focus on failure
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Create lifecycle commands with a failing command
@@ -529,6 +532,7 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: true, // This should skip postStart and postAttach
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Create lifecycle commands

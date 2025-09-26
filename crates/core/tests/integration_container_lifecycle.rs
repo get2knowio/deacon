@@ -5,6 +5,7 @@ use deacon_core::container_lifecycle::{
 };
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
+use std::time::Duration;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -31,6 +32,7 @@ async fn test_container_lifecycle_with_variable_substitution() {
         container_env,
         skip_post_create: false,
         skip_non_blocking_commands: false,
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     // Define lifecycle commands with variable substitution
@@ -90,6 +92,7 @@ async fn test_container_lifecycle_with_skip_flags() {
         container_env: HashMap::new(),
         skip_post_create: true,
         skip_non_blocking_commands: true,
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     let commands = ContainerLifecycleCommands::new()
@@ -129,6 +132,7 @@ fn test_container_lifecycle_config_validation() {
         container_env: container_env.clone(),
         skip_post_create: false,
         skip_non_blocking_commands: true,
+        non_blocking_timeout: Duration::from_secs(300),
     };
 
     assert_eq!(config.container_id, "test-container");

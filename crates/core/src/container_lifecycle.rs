@@ -10,8 +10,12 @@ use crate::progress::{ProgressEvent, ProgressTracker};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use std::collections::HashMap;
-use std::time::Instant;
-use tracing::{debug, error, info, instrument};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use tokio::time::timeout;
+use tracing::{debug, error, info, instrument, warn};
 
 /// Configuration for container lifecycle execution
 #[derive(Debug, Clone)]
@@ -28,6 +32,8 @@ pub struct ContainerLifecycleConfig {
     pub skip_post_create: bool,
     /// Skip non-blocking commands (postStart & postAttach phases)
     pub skip_non_blocking_commands: bool,
+    /// Timeout for non-blocking commands (default: 5 minutes)
+    pub non_blocking_timeout: Duration,
 }
 
 /// Execute lifecycle commands in a container with full variable substitution
@@ -182,17 +188,19 @@ where
     // Execute postStart phase (if not skipped by non-blocking commands flag)
     if !config.skip_non_blocking_commands {
         if let Some(post_start_commands) = &commands.post_start {
-            result.phases.push(
-                execute_lifecycle_phase(
-                    LifecyclePhase::PostStart,
-                    post_start_commands,
-                    config,
-                    &docker,
-                    &container_context,
-                    progress_callback.as_ref(),
-                )
-                .await?,
-            );
+            // Execute postStart phase as non-blocking background task
+            let background_task = spawn_non_blocking_phase(
+                LifecyclePhase::PostStart,
+                post_start_commands.clone(),
+                config.clone(),
+                Arc::new(CliDocker::new()), // Clone docker implementation
+                container_context.clone(),
+                progress_callback.as_ref().map(|_| ()), // TODO: Handle progress callback in background task
+                config.non_blocking_timeout,
+            ).await?;
+            
+            result.background_tasks.push(background_task);
+            info!("Started non-blocking postStart phase in background");
         }
     } else {
         info!("Skipping postStart phase (non-blocking commands disabled)");
@@ -201,17 +209,19 @@ where
     // Execute postAttach phase (if not skipped by non-blocking commands flag)
     if !config.skip_non_blocking_commands {
         if let Some(post_attach_commands) = &commands.post_attach {
-            result.phases.push(
-                execute_lifecycle_phase(
-                    LifecyclePhase::PostAttach,
-                    post_attach_commands,
-                    config,
-                    &docker,
-                    &container_context,
-                    progress_callback.as_ref(),
-                )
-                .await?,
-            );
+            // Execute postAttach phase as non-blocking background task
+            let background_task = spawn_non_blocking_phase(
+                LifecyclePhase::PostAttach,
+                post_attach_commands.clone(),
+                config.clone(),
+                Arc::new(CliDocker::new()), // Clone docker implementation
+                container_context.clone(),
+                progress_callback.as_ref().map(|_| ()), // TODO: Handle progress callback in background task
+                config.non_blocking_timeout,
+            ).await?;
+            
+            result.background_tasks.push(background_task);
+            info!("Started non-blocking postAttach phase in background");
         }
     } else {
         info!("Skipping postAttach phase (non-blocking commands disabled)");
@@ -224,6 +234,87 @@ where
 /// Execute a single lifecycle phase in the container
 #[instrument(skip(commands, config, docker, context, progress_callback))]
 async fn execute_lifecycle_phase<D, F>(
+    phase: LifecyclePhase,
+    commands: &[String],
+    config: &ContainerLifecycleConfig,
+    docker: &D,
+    context: &SubstitutionContext,
+    progress_callback: Option<&F>,
+) -> Result<PhaseResult>
+where
+    D: Docker,
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
+    execute_lifecycle_phase_impl(phase, commands, config, docker, context, progress_callback).await
+}
+
+/// Spawn a non-blocking lifecycle phase as a background task
+#[instrument(skip(commands, config, docker, context, _progress_callback))]
+async fn spawn_non_blocking_phase<D>(
+    phase: LifecyclePhase,
+    commands: Vec<String>,
+    config: ContainerLifecycleConfig,
+    docker: Arc<D>,
+    context: SubstitutionContext,
+    _progress_callback: Option<()>, // TODO: Implement progress callback forwarding
+    timeout_duration: Duration,
+) -> Result<BackgroundTaskHandle>
+where
+    D: Docker + Send + Sync + 'static,
+{
+    info!("Spawning non-blocking lifecycle phase: {}", phase.as_str());
+
+    let (cancellation_tx, mut cancellation_rx) = mpsc::unbounded_channel::<()>();
+
+    let handle = tokio::spawn(async move {
+        // Execute the phase with timeout and cancellation support
+        let phase_future = execute_lifecycle_phase_impl::<D, fn(ProgressEvent) -> anyhow::Result<()>>(
+            phase,
+            &commands,
+            &config,
+            docker.as_ref(),
+            &context,
+            None, // TODO: Pass progress callback
+        );
+
+        tokio::select! {
+            result = timeout(timeout_duration, phase_future) => {
+                match result {
+                    Ok(phase_result) => {
+                        info!("Non-blocking phase {} completed within timeout", phase.as_str());
+                        phase_result
+                    }
+                    Err(_) => {
+                        error!("Non-blocking phase {} timed out after {:?}", phase.as_str(), timeout_duration);
+                        Err(DeaconError::Lifecycle(format!(
+                            "Non-blocking phase {} timed out after {:?}",
+                            phase.as_str(),
+                            timeout_duration
+                        )))
+                    }
+                }
+            }
+            _ = cancellation_rx.recv() => {
+                warn!("Non-blocking phase {} was cancelled", phase.as_str());
+                Err(DeaconError::Lifecycle(format!(
+                    "Non-blocking phase {} was cancelled",
+                    phase.as_str()
+                )))
+            }
+        }
+    });
+
+    Ok(BackgroundTaskHandle {
+        phase,
+        handle,
+        cancellation_tx: Some(cancellation_tx),
+    })
+}
+
+/// Execute a single lifecycle phase in the container (implementation detail)
+/// This is the actual implementation extracted to support both blocking and non-blocking execution
+#[instrument(skip(commands, config, docker, context, progress_callback))]
+async fn execute_lifecycle_phase_impl<D, F>(
     phase: LifecyclePhase,
     commands: &[String],
     config: &ContainerLifecycleConfig,
@@ -531,10 +622,23 @@ pub struct PhaseResult {
 }
 
 /// Result of executing container lifecycle
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ContainerLifecycleResult {
     /// Results of individual phases
     pub phases: Vec<PhaseResult>,
+    /// Background tasks for non-blocking phases
+    pub background_tasks: Vec<BackgroundTaskHandle>,
+}
+
+/// Handle for a background non-blocking task
+#[derive(Debug)]
+pub struct BackgroundTaskHandle {
+    /// Phase being executed in the background
+    pub phase: LifecyclePhase,
+    /// Task handle for the background execution
+    pub handle: JoinHandle<Result<PhaseResult>>,
+    /// Channel sender for cancellation (if needed)
+    pub cancellation_tx: Option<mpsc::UnboundedSender<()>>,
 }
 
 impl Default for ContainerLifecycleResult {
@@ -546,7 +650,10 @@ impl Default for ContainerLifecycleResult {
 impl ContainerLifecycleResult {
     /// Create new empty result
     pub fn new() -> Self {
-        Self { phases: Vec::new() }
+        Self {
+            phases: Vec::new(),
+            background_tasks: Vec::new(),
+        }
     }
 
     /// Check if all phases succeeded
@@ -557,6 +664,68 @@ impl ContainerLifecycleResult {
     /// Get total duration across all phases
     pub fn total_duration(&self) -> std::time::Duration {
         self.phases.iter().map(|phase| phase.total_duration).sum()
+    }
+
+    /// Wait for all background tasks to complete or timeout
+    pub async fn await_background_tasks(mut self, timeout_duration: Option<Duration>) -> Self {
+        let tasks = std::mem::take(&mut self.background_tasks);
+        
+        for task in tasks {
+            let result = if let Some(timeout_duration) = timeout_duration {
+                match timeout(timeout_duration, task.handle).await {
+                    Ok(Ok(Ok(phase_result))) => {
+                        info!("Background phase {} completed successfully", task.phase.as_str());
+                        Some(phase_result)
+                    }
+                    Ok(Ok(Err(e))) => {
+                        error!("Background phase {} failed: {}", task.phase.as_str(), e);
+                        None
+                    }
+                    Ok(Err(e)) => {
+                        error!("Background phase {} panicked: {}", task.phase.as_str(), e);
+                        None
+                    }
+                    Err(_) => {
+                        warn!("Background phase {} timed out after {:?}", task.phase.as_str(), timeout_duration);
+                        None
+                    }
+                }
+            } else {
+                match task.handle.await {
+                    Ok(Ok(phase_result)) => {
+                        info!("Background phase {} completed successfully", task.phase.as_str());
+                        Some(phase_result)
+                    }
+                    Ok(Err(e)) => {
+                        error!("Background phase {} failed: {}", task.phase.as_str(), e);
+                        None
+                    }
+                    Err(e) => {
+                        error!("Background phase {} panicked: {}", task.phase.as_str(), e);
+                        None
+                    }
+                }
+            };
+
+            if let Some(phase_result) = result {
+                self.phases.push(phase_result);
+            }
+        }
+
+        self
+    }
+
+    /// Cancel all background tasks
+    pub async fn cancel_background_tasks(mut self) {
+        let tasks = std::mem::take(&mut self.background_tasks);
+        
+        for task in tasks {
+            if let Some(cancellation_tx) = task.cancellation_tx {
+                let _ = cancellation_tx.send(());
+            }
+            task.handle.abort();
+            let _ = task.handle.await;
+        }
     }
 }
 
@@ -573,6 +742,7 @@ mod tests {
             container_env: HashMap::new(),
             skip_post_create: false,
             skip_non_blocking_commands: false,
+            non_blocking_timeout: Duration::from_secs(300), // 5 minutes default
         };
 
         assert_eq!(config.container_id, "test-container");
@@ -580,6 +750,7 @@ mod tests {
         assert_eq!(config.container_workspace_folder, "/workspaces/test");
         assert!(!config.skip_post_create);
         assert!(!config.skip_non_blocking_commands);
+        assert_eq!(config.non_blocking_timeout, Duration::from_secs(300));
     }
 
     #[test]
