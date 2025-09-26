@@ -4,7 +4,7 @@
 //! Supports both traditional container workflows and Docker Compose workflows.
 
 use anyhow::Result;
-use deacon_core::compose::{ComposeManager, ComposeProject};
+use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::{CliDocker, Docker, ExecConfig};
@@ -233,6 +233,9 @@ async fn execute_compose_up(
     }
 
     // Start the compose project
+    // First, warn about security options that cannot be applied dynamically
+    ComposeCommand::warn_security_options_for_compose(config);
+
     compose_manager.start_project(&project)?;
 
     info!("Compose project {} started successfully", project.name);
@@ -501,40 +504,67 @@ async fn handle_port_events(config: &DevContainerConfig, project: &ComposeProjec
     debug!("Processing port events for compose project");
 
     let compose_manager = ComposeManager::new();
-    let container_id = match compose_manager.get_primary_container_id(project)? {
-        Some(id) => id,
-        None => {
-            warn!("Primary service container not found, skipping port events");
+    let docker = CliDocker::new();
+
+    // Get all services in the project
+    let command = compose_manager.get_command(project);
+    let services = match command.ps() {
+        Ok(services) => services,
+        Err(e) => {
+            warn!("Failed to list compose services: {}", e);
             return Ok(());
         }
     };
 
-    // Inspect the container to get port information
-    let docker = CliDocker::new();
-    let container_info = match docker.inspect_container(&container_id).await? {
-        Some(info) => info,
-        None => {
-            warn!("Container {} not found, skipping port events", container_id);
-            return Ok(());
+    // Process port events for all running services
+    let mut total_events = 0;
+    for service in services.iter().filter(|s| s.state == "running") {
+        if let Some(ref container_id) = service.container_id {
+            debug!(
+                "Processing port events for service '{}' (container: {})",
+                service.name, container_id
+            );
+
+            // Inspect the container to get port information
+            let container_info = match docker.inspect_container(container_id).await? {
+                Some(info) => info,
+                None => {
+                    warn!(
+                        "Container {} not found for service '{}', skipping",
+                        container_id, service.name
+                    );
+                    continue;
+                }
+            };
+
+            debug!(
+                "Service '{}' container {} has {} exposed ports and {} port mappings",
+                service.name,
+                container_id,
+                container_info.exposed_ports.len(),
+                container_info.port_mappings.len()
+            );
+
+            // Process ports and emit events for this service
+            let events = PortForwardingManager::process_container_ports(
+                config,
+                &container_info,
+                true, // emit_events = true
+            );
+
+            debug!(
+                "Emitted {} port events for service '{}'",
+                events.len(),
+                service.name
+            );
+            total_events += events.len();
         }
-    };
+    }
 
     debug!(
-        "Container {} has {} exposed ports and {} port mappings",
-        container_id,
-        container_info.exposed_ports.len(),
-        container_info.port_mappings.len()
+        "Emitted {} total port events across all services",
+        total_events
     );
-
-    // Process ports and emit events
-    let events = PortForwardingManager::process_container_ports(
-        config,
-        &container_info,
-        true, // emit_events = true
-    );
-
-    debug!("Emitted {} port events", events.len());
-
     Ok(())
 }
 
