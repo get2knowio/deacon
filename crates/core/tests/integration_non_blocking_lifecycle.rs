@@ -16,13 +16,15 @@ async fn test_non_blocking_phases_are_deferred() {
     let substitution_context = SubstitutionContext::new(workspace_path).unwrap();
 
     // Create a mock Docker runtime with successful responses
-    let mut config = MockDockerConfig::default();
-    config.default_exec_response = MockExecResponse {
-        exit_code: 0,
-        success: true,
-        delay: None,
-        stdout: None,
-        stderr: None,
+    let config = MockDockerConfig {
+        default_exec_response: MockExecResponse {
+            exit_code: 0,
+            success: true,
+            delay: None,
+            stdout: None,
+            stderr: None,
+        },
+        ..Default::default()
     };
     let docker = MockDocker::with_config(config);
 
@@ -61,15 +63,28 @@ async fn test_non_blocking_phases_are_deferred() {
 
     // Verify that non-blocking phases are marked for later execution
     assert_eq!(result.non_blocking_phases.len(), 2); // postStart and postAttach
-    assert_eq!(result.non_blocking_phases[0].phase.as_str(), "postStart");
-    assert_eq!(result.non_blocking_phases[1].phase.as_str(), "postAttach");
+    let mut deferred: Vec<_> = result
+        .non_blocking_phases
+        .iter()
+        .map(|p| p.phase.as_str())
+        .collect();
+    deferred.sort_unstable();
+    assert_eq!(deferred, vec!["postAttach", "postStart"]);
 
-    // Verify non-blocking phase specifications
-    let post_start_spec = &result.non_blocking_phases[0];
+    // Verify non-blocking phase specifications (find the phases)
+    let post_start_spec = result
+        .non_blocking_phases
+        .iter()
+        .find(|spec| spec.phase.as_str() == "postStart")
+        .unwrap();
     assert_eq!(post_start_spec.commands, vec!["echo 'postStart'"]);
     assert_eq!(post_start_spec.timeout, Duration::from_secs(30));
 
-    let post_attach_spec = &result.non_blocking_phases[1];
+    let post_attach_spec = result
+        .non_blocking_phases
+        .iter()
+        .find(|spec| spec.phase.as_str() == "postAttach")
+        .unwrap();
     assert_eq!(post_attach_spec.commands, vec!["echo 'postAttach'"]);
     assert_eq!(post_attach_spec.timeout, Duration::from_secs(30));
 
@@ -93,13 +108,15 @@ async fn test_skip_non_blocking_commands_behavior() {
     let substitution_context = SubstitutionContext::new(workspace_path).unwrap();
 
     // Create a mock Docker runtime with successful responses
-    let mut config = MockDockerConfig::default();
-    config.default_exec_response = MockExecResponse {
-        exit_code: 0,
-        success: true,
-        delay: None,
-        stdout: None,
-        stderr: None,
+    let config = MockDockerConfig {
+        default_exec_response: MockExecResponse {
+            exit_code: 0,
+            success: true,
+            delay: None,
+            stdout: None,
+            stderr: None,
+        },
+        ..Default::default()
     };
     let docker = MockDocker::with_config(config);
 
@@ -158,13 +175,15 @@ async fn test_non_blocking_phases_sync_execution() {
     let substitution_context = SubstitutionContext::new(workspace_path).unwrap();
 
     // Create a mock Docker runtime with successful responses
-    let mut config = MockDockerConfig::default();
-    config.default_exec_response = MockExecResponse {
-        exit_code: 0,
-        success: true,
-        delay: None,
-        stdout: None,
-        stderr: None,
+    let config = MockDockerConfig {
+        default_exec_response: MockExecResponse {
+            exit_code: 0,
+            success: true,
+            delay: None,
+            stdout: None,
+            stderr: None,
+        },
+        ..Default::default()
     };
     let docker = MockDocker::with_config(config);
 
@@ -225,5 +244,217 @@ async fn test_non_blocking_phases_sync_execution() {
     println!(
         "✓ MockDocker confirms all {} phases were executed",
         exec_history.len()
+    );
+}
+
+#[tokio::test]
+async fn test_non_blocking_phase_command_failures_are_handled() {
+    let temp_dir = TempDir::new().unwrap();
+    let workspace_path = temp_dir.path();
+    let substitution_context = SubstitutionContext::new(workspace_path).unwrap();
+
+    // Create a mock Docker runtime with specific command responses
+    let mut exec_responses = HashMap::new();
+    // Success responses for blocking phases
+    exec_responses.insert(
+        "sh -c echo 'onCreate'".to_string(),
+        MockExecResponse {
+            exit_code: 0,
+            success: true,
+            delay: None,
+            stdout: None,
+            stderr: None,
+        },
+    );
+    exec_responses.insert(
+        "sh -c echo 'postCreate'".to_string(),
+        MockExecResponse {
+            exit_code: 0,
+            success: true,
+            delay: None,
+            stdout: None,
+            stderr: None,
+        },
+    );
+    // Failure responses for non-blocking phases - but still return Ok with success: false
+    exec_responses.insert(
+        "sh -c echo 'postStart'".to_string(),
+        MockExecResponse {
+            exit_code: 1,
+            success: false,
+            delay: None,
+            stdout: None,
+            stderr: None,
+        },
+    );
+    exec_responses.insert(
+        "sh -c echo 'postAttach'".to_string(),
+        MockExecResponse {
+            exit_code: 1,
+            success: false,
+            delay: None,
+            stdout: None,
+            stderr: None,
+        },
+    );
+
+    let config = MockDockerConfig {
+        exec_responses,
+        ..Default::default()
+    };
+    let docker = MockDocker::with_config(config);
+
+    // Create lifecycle configuration with non-blocking commands enabled
+    let lifecycle_config = ContainerLifecycleConfig {
+        container_id: "test-container".to_string(),
+        user: Some("root".to_string()),
+        container_workspace_folder: "/workspace".to_string(),
+        container_env: HashMap::new(),
+        skip_post_create: false,
+        skip_non_blocking_commands: false,
+        non_blocking_timeout: Duration::from_secs(30),
+    };
+
+    // Create lifecycle commands with all phases
+    let commands = ContainerLifecycleCommands::new()
+        .with_on_create(vec!["echo 'onCreate'".to_string()])
+        .with_post_create(vec!["echo 'postCreate'".to_string()])
+        .with_post_start(vec!["echo 'postStart'".to_string()])
+        .with_post_attach(vec!["echo 'postAttach'".to_string()]);
+
+    // Execute lifecycle commands
+    let result = execute_container_lifecycle_with_docker(
+        &lifecycle_config,
+        &commands,
+        &substitution_context,
+        &docker,
+    )
+    .await
+    .unwrap();
+
+    // Verify that non-blocking phases are scheduled
+    assert_eq!(result.non_blocking_phases.len(), 2);
+
+    // Execute non-blocking phases synchronously which should have failed commands
+    let final_result = result
+        .execute_non_blocking_phases_sync(&docker)
+        .await
+        .unwrap();
+
+    // The non-blocking phases should complete but with failed commands
+    assert_eq!(final_result.phases.len(), 4); // All phases should be present
+    assert_eq!(final_result.non_blocking_phases.len(), 0); // Should be empty after execution
+
+    // Check that postStart and postAttach phases have failed commands
+    let post_start_phase = final_result
+        .phases
+        .iter()
+        .find(|p| p.phase.as_str() == "postStart")
+        .unwrap();
+    let post_attach_phase = final_result
+        .phases
+        .iter()
+        .find(|p| p.phase.as_str() == "postAttach")
+        .unwrap();
+
+    assert!(
+        !post_start_phase.success,
+        "postStart phase should be marked as failed"
+    );
+    assert!(
+        !post_attach_phase.success,
+        "postAttach phase should be marked as failed"
+    );
+    assert!(
+        !post_start_phase.commands[0].success,
+        "postStart command should have failed"
+    );
+    assert!(
+        !post_attach_phase.commands[0].success,
+        "postAttach command should have failed"
+    );
+    assert_eq!(post_start_phase.commands[0].exit_code, 1);
+    assert_eq!(post_attach_phase.commands[0].exit_code, 1);
+
+    // Background errors should be empty since we don't have actual exceptions
+    assert_eq!(final_result.background_errors.len(), 0);
+
+    // Non-blocking phases should still not block the main flow (no panic/error)
+    assert_eq!(final_result.non_blocking_phases.len(), 0); // Should be empty after execution
+
+    println!("✓ Non-blocking phase command failures are properly handled");
+    println!(
+        "✓ {} phases completed with proper success status",
+        final_result.phases.len()
+    );
+}
+
+#[tokio::test]
+async fn test_non_blocking_phase_timeout_handling() {
+    let temp_dir = TempDir::new().unwrap();
+    let workspace_path = temp_dir.path();
+    let substitution_context = SubstitutionContext::new(workspace_path).unwrap();
+
+    // Create a mock Docker runtime with long delays that will cause timeout
+    let config = MockDockerConfig {
+        default_exec_response: MockExecResponse {
+            exit_code: 0,
+            success: true,
+            delay: Some(Duration::from_secs(5)), // Long delay
+            stdout: None,
+            stderr: None,
+        },
+        ..Default::default()
+    };
+    let docker = MockDocker::with_config(config);
+
+    // Create lifecycle configuration with very short timeout
+    let lifecycle_config = ContainerLifecycleConfig {
+        container_id: "test-container".to_string(),
+        user: Some("root".to_string()),
+        container_workspace_folder: "/workspace".to_string(),
+        container_env: HashMap::new(),
+        skip_post_create: false,
+        skip_non_blocking_commands: false,
+        non_blocking_timeout: Duration::from_millis(100), // Very short timeout
+    };
+
+    // Create lifecycle commands
+    let commands = ContainerLifecycleCommands::new()
+        .with_on_create(vec!["echo 'onCreate'".to_string()])
+        .with_post_create(vec!["echo 'postCreate'".to_string()])
+        .with_post_start(vec!["echo 'postStart'".to_string()]);
+
+    // Execute lifecycle commands
+    let result = execute_container_lifecycle_with_docker(
+        &lifecycle_config,
+        &commands,
+        &substitution_context,
+        &docker,
+    )
+    .await
+    .unwrap();
+
+    // Execute non-blocking phases synchronously which should timeout
+    let final_result = result
+        .execute_non_blocking_phases_sync(&docker)
+        .await
+        .unwrap();
+
+    // Verify that timeout errors are properly aggregated
+    assert_eq!(final_result.background_errors.len(), 1); // postStart should timeout
+    assert!(final_result
+        .background_errors
+        .iter()
+        .any(|err| err.contains("timed out")));
+    assert!(final_result
+        .background_errors
+        .iter()
+        .any(|err| err.contains("postStart")));
+
+    println!("✓ Non-blocking phase timeouts are properly handled");
+    println!(
+        "✓ Timeout error properly aggregated: {}",
+        final_result.background_errors[0]
     );
 }

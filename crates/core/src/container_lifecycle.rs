@@ -11,6 +11,7 @@ use crate::redaction::{redact_if_enabled, RedactionConfig};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use tokio::time::timeout;
 use tracing::{debug, error, info, instrument};
 
 /// Configuration for container lifecycle execution
@@ -553,6 +554,8 @@ pub struct ContainerLifecycleResult {
     pub phases: Vec<PhaseResult>,
     /// Non-blocking phases that should be executed in background
     pub non_blocking_phases: Vec<NonBlockingPhaseSpec>,
+    /// Errors from background phase failures for structured aggregation
+    pub background_errors: Vec<String>,
 }
 
 /// Specification for a non-blocking phase to be executed later
@@ -582,6 +585,7 @@ impl ContainerLifecycleResult {
         Self {
             phases: Vec::new(),
             non_blocking_phases: Vec::new(),
+            background_errors: Vec::new(),
         }
     }
 
@@ -600,10 +604,11 @@ impl ContainerLifecycleResult {
     pub fn log_non_blocking_phases(&self) {
         for phase_spec in &self.non_blocking_phases {
             info!(
-                "Non-blocking phase {} would execute {} commands in background with timeout {:?}",
+                "Non-blocking phase {} would execute {} commands in background with timeout {:?} (container: {})",
                 phase_spec.phase.as_str(),
                 phase_spec.commands.len(),
-                phase_spec.timeout
+                phase_spec.timeout,
+                phase_spec.config.container_id
             );
         }
     }
@@ -621,26 +626,44 @@ impl ContainerLifecycleResult {
                 spec.phase.as_str()
             );
 
-            match execute_lifecycle_phase_impl::<D, fn(ProgressEvent) -> anyhow::Result<()>>(
-                spec.phase,
-                &spec.commands,
-                &spec.config,
-                docker,
-                &spec.context,
-                None,
+            // Enforce per-phase timeout
+            match timeout(
+                spec.timeout,
+                execute_lifecycle_phase_impl::<D, fn(ProgressEvent) -> anyhow::Result<()>>(
+                    spec.phase,
+                    &spec.commands,
+                    &spec.config,
+                    docker,
+                    &spec.context,
+                    None,
+                ),
             )
             .await
             {
-                Ok(phase_result) => {
+                Ok(Ok(phase_result)) => {
                     info!(
                         "Non-blocking phase {} completed successfully",
                         spec.phase.as_str()
                     );
                     self.phases.push(phase_result);
                 }
-                Err(e) => {
-                    error!("Non-blocking phase {} failed: {}", spec.phase.as_str(), e);
+                Ok(Err(e)) => {
+                    let error_msg =
+                        format!("Non-blocking phase {} failed: {}", spec.phase.as_str(), e);
+                    error!("{}", error_msg);
+                    self.background_errors.push(error_msg);
                     // Continue with other phases - non-blocking phases should not fail the main flow
+                }
+                Err(elapsed) => {
+                    let error_msg = format!(
+                        "Non-blocking phase {} timed out after {:?}: {}",
+                        spec.phase.as_str(),
+                        spec.timeout,
+                        elapsed
+                    );
+                    error!("{}", error_msg);
+                    self.background_errors.push(error_msg);
+                    // Continue to next phase
                 }
             }
         }

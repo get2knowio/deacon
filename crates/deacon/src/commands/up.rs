@@ -739,18 +739,8 @@ async fn execute_lifecycle_commands(
         result.non_blocking_phases.len()
     );
 
-    // For now, just log what non-blocking phases would be executed
-    // In a full implementation, these would be spawned as background tasks
+    // Log what non-blocking phases would be executed; do not block CLI
     result.log_non_blocking_phases();
-
-    // For testing purposes, execute non-blocking phases synchronously if there are any
-    // This ensures the current behavior is maintained while demonstrating the new structure
-    if !result.non_blocking_phases.is_empty() {
-        info!("Executing non-blocking phases synchronously for demonstration");
-        let docker = deacon_core::docker::CliDocker::new();
-        let _final_result = result.execute_non_blocking_phases_sync(&docker).await?;
-        info!("Non-blocking phases execution completed");
-    }
 
     Ok(())
 }

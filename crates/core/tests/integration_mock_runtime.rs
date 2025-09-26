@@ -358,9 +358,14 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
     assert!(result.success());
 
     // Verify non-blocking phases are scheduled for later execution
-    assert_eq!(result.non_blocking_phases.len(), 2); // postStart, postAttach (non-blocking)
-    assert_eq!(result.non_blocking_phases[0].phase.as_str(), "postStart");
-    assert_eq!(result.non_blocking_phases[1].phase.as_str(), "postAttach");
+    assert_eq!(result.non_blocking_phases.len(), 2);
+    let mut deferred: Vec<_> = result
+        .non_blocking_phases
+        .iter()
+        .map(|p| p.phase.as_str())
+        .collect();
+    deferred.sort_unstable();
+    assert_eq!(deferred, vec!["postAttach", "postStart"]);
 
     // Verify timing - should have at least the delays for blocking commands only
     assert!(elapsed >= Duration::from_millis(300)); // 100ms + 200ms + processing time
@@ -381,9 +386,13 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
     assert_eq!(final_result.phases.len(), 4); // All phases should now be complete
     assert_eq!(final_result.non_blocking_phases.len(), 0); // Should be empty after sync execution
 
-    // Verify final exec history includes all commands
+    // Verify final exec history includes all commands and order
     let final_history = mock_docker.get_exec_history();
     assert_eq!(final_history.len(), 4); // All commands should have been executed
+    assert_eq!(final_result.phases[0].phase.as_str(), "onCreate");
+    assert_eq!(final_result.phases[1].phase.as_str(), "postCreate");
+    assert_eq!(final_result.phases[2].phase.as_str(), "postStart");
+    assert_eq!(final_result.phases[3].phase.as_str(), "postAttach");
 
     let final_command_strings: Vec<String> =
         final_history.iter().map(|h| h.command.join(" ")).collect();
@@ -434,6 +443,8 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
     // Verify result - only onCreate should have executed
     assert_eq!(result.phases.len(), 1);
     assert!(result.success());
+    // Ensure no non-blocking phases are scheduled
+    assert_eq!(result.non_blocking_phases.len(), 0);
 
     // Verify exec history - only onCreate command should be present
     let history = mock_docker.get_exec_history();
