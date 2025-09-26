@@ -65,7 +65,8 @@ fn test_compose_security_options_detection() {
 #[test]
 fn test_multiservice_fixture_loading() {
     // Test loading the multi-service fixture we created
-    let fixture_path = PathBuf::from("fixtures/config/compose-multiservice/devcontainer.json");
+    let fixture_path =
+        PathBuf::from("fixtures/config/compose-multiservice/.devcontainer/devcontainer.json");
 
     // Only run if fixture exists (in case tests run in different environments)
     if fixture_path.exists() {
