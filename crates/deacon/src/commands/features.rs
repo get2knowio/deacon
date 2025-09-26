@@ -43,6 +43,9 @@ pub struct FeaturesResult {
     /// Optional message with additional details
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Optional cache path for pulled artifacts
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_path: Option<String>,
 }
 
 /// Execute the features command
@@ -325,6 +328,7 @@ async fn execute_features_test(path: &str, json: bool) -> Result<()> {
         } else {
             Some("Feature test failed".to_string())
         },
+        cache_path: None,
     };
 
     output_result(&result, json)?;
@@ -370,6 +374,7 @@ async fn execute_features_package(path: &str, output_dir: &str, json: bool) -> R
         digest: Some(digest),
         size: Some(size),
         message: Some(format!("Feature packaged successfully to {}", output_dir)),
+        cache_path: None,
     };
 
     output_result(&result, json)?;
@@ -409,6 +414,7 @@ async fn execute_features_pull(registry_ref: &str, json: bool) -> Result<()> {
             feature_ref.reference(),
             downloaded_feature.path.display()
         )),
+        cache_path: Some(downloaded_feature.path.to_string_lossy().into_owned()),
     };
 
     output_result(&result, json)?;
@@ -465,6 +471,7 @@ async fn execute_features_publish(
             ),
             size: None,
             message: Some(format!("Dry run completed - would publish to {}", registry)),
+            cache_path: None,
         };
 
         output_result(&result, json)?;
@@ -511,6 +518,7 @@ async fn execute_features_publish(
             feature_ref.reference(),
             registry_url
         )),
+        cache_path: None,
     };
 
     output_result(&result, json)?;
@@ -679,6 +687,9 @@ fn output_result(result: &FeaturesResult, json: bool) -> Result<()> {
         if let Some(size) = result.size {
             println!("Size: {} bytes", size);
         }
+        if let Some(ref cache_path) = result.cache_path {
+            println!("Cache Path: {}", cache_path);
+        }
         if let Some(ref message) = result.message {
             println!("Message: {}", message);
         }
@@ -700,6 +711,7 @@ mod tests {
             digest: Some("sha256:abc123".to_string()),
             size: Some(1024),
             message: Some("Test completed".to_string()),
+            cache_path: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();

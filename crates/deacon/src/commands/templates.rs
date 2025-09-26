@@ -39,6 +39,9 @@ pub struct TemplatesResult {
     /// Optional message with additional details
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Optional cache path for pulled artifacts
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_path: Option<String>,
 }
 
 /// Execute the templates command
@@ -142,6 +145,7 @@ async fn execute_templates_pull(registry_ref: &str, json: bool) -> Result<()> {
             template_ref.reference(),
             downloaded_template.path.display()
         )),
+        cache_path: Some(downloaded_template.path.to_string_lossy().into_owned()),
     };
 
     output_result(&result, json)?;
@@ -197,6 +201,7 @@ async fn execute_templates_publish(
             ),
             size: Some(1024), // Mock size
             message: Some(format!("Dry run completed - would publish to {}", registry)),
+            cache_path: None,
         };
 
         output_result(&result, true)?; // Always output as JSON for programmatic use
@@ -243,6 +248,7 @@ async fn execute_templates_publish(
             template_ref.reference(),
             registry_url
         )),
+        cache_path: None,
     };
 
     output_result(&result, true)?; // Always output as JSON for programmatic use
@@ -725,9 +731,26 @@ fn generate_readme_fragment(metadata: &deacon_core::templates::TemplateMetadata)
 }
 
 /// Output result in JSON format
-fn output_result(result: &TemplatesResult, _json: bool) -> Result<()> {
-    let json_output = serde_json::to_string_pretty(result)?;
-    println!("{}", json_output);
+fn output_result(result: &TemplatesResult, json: bool) -> Result<()> {
+    if json {
+        let json_output = serde_json::to_string_pretty(result)?;
+        println!("{}", json_output);
+    } else {
+        println!("Command: {}", result.command);
+        println!("Status: {}", result.status);
+        if let Some(ref digest) = result.digest {
+            println!("Digest: {}", digest);
+        }
+        if let Some(size) = result.size {
+            println!("Size: {} bytes", size);
+        }
+        if let Some(ref cache_path) = result.cache_path {
+            println!("Cache Path: {}", cache_path);
+        }
+        if let Some(ref message) = result.message {
+            println!("Message: {}", message);
+        }
+    }
     Ok(())
 }
 
@@ -745,6 +768,7 @@ mod tests {
             digest: Some("sha256:abc123".to_string()),
             size: Some(1024),
             message: Some("Published successfully".to_string()),
+            cache_path: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
