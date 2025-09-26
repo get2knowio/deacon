@@ -171,7 +171,7 @@ pub enum Commands {
         #[arg(long)]
         scan_image: bool,
         /// Fail build if vulnerability scan returns non-zero exit code
-        #[arg(long)]
+        #[arg(long, requires = "scan_image")]
         fail_on_scan: bool,
         /// Additional features to install (JSON map of id -> value/options)
         #[arg(long)]

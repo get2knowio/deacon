@@ -17,6 +17,7 @@ tempfile = "3.12"
 sha2 = "0.10"
 tar = "0.4"
 toml.workspace = true
+shell-words.workspace = true
 
 [lints]
 workspace = true

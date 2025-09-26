@@ -1077,18 +1077,15 @@ pub fn substitute_tokens(template: &str, image_id: &str) -> Result<String> {
 async fn execute_scan_command(command: &str, args: &BuildArgs) -> Result<i32> {
     use std::process::Stdio;
 
-    // Parse command into program and arguments
-    let parts: Vec<&str> = command.split_whitespace().collect();
+    // Parse command into program and arguments using shell-aware splitting
+    let parts = shell_words::split(command)
+        .map_err(|e| anyhow::anyhow!("Failed to parse scan command '{}': {}", command, e))?;
     if parts.is_empty() {
         return Err(anyhow::anyhow!("Empty scan command"));
     }
 
-    let program = parts[0];
-    let command_args: Vec<&str> = if parts.len() > 1 {
-        parts[1..].to_vec()
-    } else {
-        Vec::new()
-    };
+    let program = &parts[0];
+    let command_args = &parts[1..];
 
     debug!(
         "Executing scan command: {} with args: {:?}",
@@ -1853,5 +1850,38 @@ mod tests {
         let args = BuildArgs::default();
         assert!(!args.scan_image);
         assert!(!args.fail_on_scan);
+    }
+
+    #[test]
+    fn test_shell_command_parsing() {
+        // Test that shell command parsing handles quoted arguments correctly
+        let command_simple = "trivy image my-image";
+        let parts_simple = shell_words::split(command_simple).unwrap();
+        assert_eq!(parts_simple, vec!["trivy", "image", "my-image"]);
+
+        // Test with quoted arguments
+        let command_quoted = r#"sh -c "trivy image --severity 'CRITICAL,HIGH' my-image""#;
+        let parts_quoted = shell_words::split(command_quoted).unwrap();
+        assert_eq!(
+            parts_quoted,
+            vec![
+                "sh",
+                "-c",
+                "trivy image --severity 'CRITICAL,HIGH' my-image"
+            ]
+        );
+
+        // Test with spaces in arguments
+        let command_spaces = r#"scanner --output "/path with spaces/scan.json" my-image"#;
+        let parts_spaces = shell_words::split(command_spaces).unwrap();
+        assert_eq!(
+            parts_spaces,
+            vec![
+                "scanner",
+                "--output",
+                "/path with spaces/scan.json",
+                "my-image"
+            ]
+        );
     }
 }
