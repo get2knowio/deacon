@@ -53,6 +53,9 @@ pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
         FeatureCommands::Package { path, output, json } => {
             execute_features_package(&path, &output, json).await
         }
+        FeatureCommands::Pull { registry_ref, json } => {
+            execute_features_pull(&registry_ref, json).await
+        }
         FeatureCommands::Publish {
             path,
             registry,
@@ -371,6 +374,44 @@ async fn execute_features_package(path: &str, output_dir: &str, json: bool) -> R
 
     output_result(&result, json)?;
 
+    Ok(())
+}
+
+/// Execute features pull command
+#[instrument(level = "debug")]
+async fn execute_features_pull(registry_ref: &str, json: bool) -> Result<()> {
+    debug!("Pulling feature from registry reference: {}", registry_ref);
+
+    // Parse registry reference
+    let (registry_url, namespace, name, tag) = parse_registry_reference(registry_ref)?;
+    let tag = tag.unwrap_or_else(|| "latest".to_string());
+
+    let feature_ref = FeatureRef::new(registry_url, namespace, name, Some(tag));
+
+    info!("Pulling feature: {}", feature_ref.reference());
+
+    // Create OCI client and fetch from registry
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+    let downloaded_feature = fetcher
+        .fetch_feature(&feature_ref)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to pull feature: {}", e))?;
+
+    let result = FeaturesResult {
+        command: "pull".to_string(),
+        status: "success".to_string(),
+        digest: Some(downloaded_feature.digest),
+        size: None, // Size not available in DownloadedFeature
+        message: Some(format!(
+            "Successfully pulled {} to {}",
+            feature_ref.reference(),
+            downloaded_feature.path.display()
+        )),
+    };
+
+    output_result(&result, json)?;
     Ok(())
 }
 

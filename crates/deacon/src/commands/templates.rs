@@ -46,6 +46,9 @@ pub struct TemplatesResult {
 pub async fn execute_templates(args: TemplatesArgs) -> Result<()> {
     match args.command {
         TemplateCommands::Metadata { path } => execute_templates_metadata(&path).await,
+        TemplateCommands::Pull { registry_ref, json } => {
+            execute_templates_pull(&registry_ref, json).await
+        }
         TemplateCommands::Publish {
             path,
             registry,
@@ -104,6 +107,44 @@ async fn execute_templates_metadata(path: &str) -> Result<()> {
     // Print JSON summary to stdout
     println!("{}", serde_json::to_string_pretty(&summary)?);
 
+    Ok(())
+}
+
+/// Execute templates pull command
+#[instrument(level = "debug")]
+async fn execute_templates_pull(registry_ref: &str, json: bool) -> Result<()> {
+    debug!("Pulling template from registry reference: {}", registry_ref);
+
+    // Parse registry reference
+    let (registry_url, namespace, name, tag) = parse_registry_reference(registry_ref)?;
+    let tag = tag.unwrap_or_else(|| "latest".to_string());
+
+    let template_ref = TemplateRef::new(registry_url, namespace, name, Some(tag));
+
+    info!("Pulling template: {}", template_ref.reference());
+
+    // Create OCI client and fetch from registry
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+    let downloaded_template = fetcher
+        .fetch_template(&template_ref)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to pull template: {}", e))?;
+
+    let result = TemplatesResult {
+        command: "pull".to_string(),
+        status: "success".to_string(),
+        digest: Some(downloaded_template.digest),
+        size: None, // Size not available in DownloadedTemplate
+        message: Some(format!(
+            "Successfully pulled {} to {}",
+            template_ref.reference(),
+            downloaded_template.path.display()
+        )),
+    };
+
+    output_result(&result, json)?;
     Ok(())
 }
 
