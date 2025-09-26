@@ -167,6 +167,12 @@ pub enum Commands {
         /// SSH agent socket or keys to expose to the build
         #[arg(long)]
         ssh: Vec<String>,
+        /// Run vulnerability scan on built image
+        #[arg(long)]
+        scan_image: bool,
+        /// Fail build if vulnerability scan returns non-zero exit code
+        #[arg(long)]
+        fail_on_scan: bool,
         /// Additional features to install (JSON map of id -> value/options)
         #[arg(long)]
         additional_features: Option<String>,
@@ -615,6 +621,8 @@ impl Cli {
                 buildkit,
                 secret,
                 ssh,
+                scan_image,
+                fail_on_scan,
                 additional_features,
                 prefer_cli_features,
                 feature_install_order,
@@ -633,6 +641,8 @@ impl Cli {
                     buildkit,
                     secret,
                     ssh,
+                    scan_image,
+                    fail_on_scan,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     additional_features,

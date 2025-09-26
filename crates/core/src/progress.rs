@@ -114,6 +114,24 @@ pub enum ProgressEvent {
         exit_code: Option<i32>,
     },
 
+    /// Image scanning events
+    #[serde(rename = "scan.begin")]
+    ScanBegin {
+        id: u64,
+        timestamp: u64,
+        image_id: String,
+        command: String,
+    },
+    #[serde(rename = "scan.end")]
+    ScanEnd {
+        id: u64,
+        timestamp: u64,
+        image_id: String,
+        duration_ms: u64,
+        success: bool,
+        exit_code: Option<i32>,
+    },
+
     /// OCI registry operation events
     #[serde(rename = "oci.publish.begin")]
     OciPublishBegin {
@@ -179,6 +197,8 @@ impl ProgressEvent {
             ProgressEvent::LifecyclePhaseEnd { id, .. } => *id,
             ProgressEvent::LifecycleCommandBegin { id, .. } => *id,
             ProgressEvent::LifecycleCommandEnd { id, .. } => *id,
+            ProgressEvent::ScanBegin { id, .. } => *id,
+            ProgressEvent::ScanEnd { id, .. } => *id,
             ProgressEvent::OciPublishBegin { id, .. } => *id,
             ProgressEvent::OciPublishEnd { id, .. } => *id,
             ProgressEvent::OciFetchBegin { id, .. } => *id,
@@ -215,6 +235,8 @@ impl ProgressEvent {
             ProgressEvent::LifecyclePhaseEnd { timestamp, .. } => *timestamp,
             ProgressEvent::LifecycleCommandBegin { timestamp, .. } => *timestamp,
             ProgressEvent::LifecycleCommandEnd { timestamp, .. } => *timestamp,
+            ProgressEvent::ScanBegin { timestamp, .. } => *timestamp,
+            ProgressEvent::ScanEnd { timestamp, .. } => *timestamp,
             ProgressEvent::OciPublishBegin { timestamp, .. } => *timestamp,
             ProgressEvent::OciPublishEnd { timestamp, .. } => *timestamp,
             ProgressEvent::OciFetchBegin { timestamp, .. } => *timestamp,

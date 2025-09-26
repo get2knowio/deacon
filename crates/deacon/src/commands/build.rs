@@ -27,6 +27,8 @@ pub struct BuildArgs {
     pub buildkit: Option<BuildKitOption>,
     pub secret: Vec<String>,
     pub ssh: Vec<String>,
+    pub scan_image: bool,
+    pub fail_on_scan: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub additional_features: Option<String>,
@@ -52,6 +54,8 @@ impl Default for BuildArgs {
             buildkit: None,
             secret: Vec::new(),
             ssh: Vec::new(),
+            scan_image: false,
+            fail_on_scan: false,
             workspace_folder: None,
             config_path: None,
             additional_features: None,
@@ -307,6 +311,17 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     // Cache the result
     cache_build_result(&final_result, workspace_folder).await?;
+
+    // Execute vulnerability scan if requested
+    if args.scan_image {
+        let scan_success =
+            execute_vulnerability_scan(&args, &final_result.image_id, &emit_progress_event).await?;
+        if !scan_success && args.fail_on_scan {
+            return Err(anyhow::anyhow!(
+                "Vulnerability scan failed and --fail-on-scan was set"
+            ));
+        }
+    }
 
     // Output result
     output_result(
@@ -976,6 +991,185 @@ fn output_result(
     Ok(())
 }
 
+/// Execute vulnerability scan on the built image
+#[instrument(skip(args, emit_progress_event))]
+async fn execute_vulnerability_scan<F>(
+    args: &BuildArgs,
+    image_id: &str,
+    emit_progress_event: F,
+) -> Result<bool>
+where
+    F: Fn(deacon_core::progress::ProgressEvent) -> Result<()>,
+{
+    // Get scan command from environment variable
+    let scan_cmd_template = match std::env::var("DEACON_SCAN_CMD") {
+        Ok(template) => template,
+        Err(_) => {
+            warn!("DEACON_SCAN_CMD environment variable not set, skipping vulnerability scan");
+            return Ok(true); // Consider no scan command as success
+        }
+    };
+
+    // Perform token substitution
+    let scan_command = substitute_tokens(&scan_cmd_template, image_id)?;
+
+    info!("Executing vulnerability scan: {}", scan_command);
+
+    let scan_start_time = std::time::Instant::now();
+
+    // Emit scan begin event
+    emit_progress_event(deacon_core::progress::ProgressEvent::ScanBegin {
+        id: deacon_core::progress::ProgressTracker::next_event_id(),
+        timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+        image_id: image_id.to_string(),
+        command: scan_command.clone(),
+    })?;
+
+    // Parse and execute the scan command
+    let scan_result = execute_scan_command(&scan_command, args).await;
+    let scan_duration = scan_start_time.elapsed();
+
+    let (success, exit_code) = match scan_result {
+        Ok(exit_code) => {
+            let success = exit_code == 0;
+            if success {
+                info!("Vulnerability scan completed successfully");
+            } else if args.fail_on_scan {
+                warn!(
+                    "Vulnerability scan failed with exit code {} (will fail build)",
+                    exit_code
+                );
+            } else {
+                warn!(
+                    "Vulnerability scan failed with exit code {} (continuing build)",
+                    exit_code
+                );
+            }
+            (success, Some(exit_code))
+        }
+        Err(e) => {
+            warn!("Failed to execute vulnerability scan: {}", e);
+            (false, None)
+        }
+    };
+
+    // Emit scan end event
+    emit_progress_event(deacon_core::progress::ProgressEvent::ScanEnd {
+        id: deacon_core::progress::ProgressTracker::next_event_id(),
+        timestamp: deacon_core::progress::ProgressTracker::current_timestamp(),
+        image_id: image_id.to_string(),
+        duration_ms: scan_duration.as_millis() as u64,
+        success,
+        exit_code,
+    })?;
+
+    Ok(success)
+}
+
+/// Substitute tokens in the scan command template
+pub fn substitute_tokens(template: &str, image_id: &str) -> Result<String> {
+    let substituted = template.replace("{image}", image_id);
+    debug!("Substituted scan command: {} -> {}", template, substituted);
+    Ok(substituted)
+}
+
+/// Execute the scan command and return exit code
+async fn execute_scan_command(command: &str, args: &BuildArgs) -> Result<i32> {
+    use std::process::Stdio;
+
+    // Parse command into program and arguments
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err(anyhow::anyhow!("Empty scan command"));
+    }
+
+    let program = parts[0];
+    let command_args: Vec<&str> = if parts.len() > 1 {
+        parts[1..].to_vec()
+    } else {
+        Vec::new()
+    };
+
+    debug!(
+        "Executing scan command: {} with args: {:?}",
+        program, command_args
+    );
+
+    // Create redacting writer for scan output
+    use deacon_core::redaction::RedactingWriter;
+    use std::io::Write;
+    let stdout = std::io::stdout();
+    let mut writer =
+        RedactingWriter::new(stdout, args.redaction_config.clone(), &args.secret_registry);
+
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(command_args);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to spawn scan command '{}': {}", program, e))?;
+
+    // Read stdout and stderr in parallel
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let stdout_task = tokio::spawn(async move {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let reader = BufReader::new(stdout);
+        let mut lines = reader.lines();
+        let mut output = Vec::new();
+        while let Some(line) = lines.next_line().await.unwrap_or(None) {
+            output.push(line);
+        }
+        output
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let reader = BufReader::new(stderr);
+        let mut lines = reader.lines();
+        let mut output = Vec::new();
+        while let Some(line) = lines.next_line().await.unwrap_or(None) {
+            output.push(line);
+        }
+        output
+    });
+
+    // Wait for command to complete
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to wait for scan command: {}", e))?;
+
+    // Collect output
+    let stdout_lines = stdout_task.await.unwrap_or_default();
+    let stderr_lines = stderr_task.await.unwrap_or_default();
+
+    // Write output through redacting writer
+    if !stdout_lines.is_empty() {
+        writer.write_line("Scan stdout:")?;
+        for line in &stdout_lines {
+            writer.write_line(&format!("  {}", line))?;
+        }
+    }
+
+    if !stderr_lines.is_empty() {
+        writer.write_line("Scan stderr:")?;
+        for line in &stderr_lines {
+            writer.write_line(&format!("  {}", line))?;
+        }
+    }
+
+    writer.flush()?;
+
+    let exit_code = status.code().unwrap_or(-1);
+    debug!("Scan command completed with exit code: {}", exit_code);
+
+    Ok(exit_code)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1065,6 +1259,8 @@ mod tests {
             buildkit: None,
             secret: Vec::new(),
             ssh: Vec::new(),
+            scan_image: false,
+            fail_on_scan: false,
             workspace_folder: None,
             config_path: None,
             additional_features: None,
@@ -1103,6 +1299,8 @@ mod tests {
                 "id=mytoken".to_string(),
             ],
             ssh: vec!["default".to_string(), "mykey=/path/to/key".to_string()],
+            scan_image: false,
+            fail_on_scan: false,
             workspace_folder: None,
             config_path: None,
             additional_features: None,
@@ -1615,5 +1813,45 @@ mod tests {
             deserialized.inputs.dockerfile_hash,
             metadata.inputs.dockerfile_hash
         );
+    }
+
+    #[test]
+    fn test_token_substitution() {
+        let template = "trivy image {image}";
+        let image_id = "sha256:abc123def456";
+        let result = substitute_tokens(template, image_id).unwrap();
+        assert_eq!(result, "trivy image sha256:abc123def456");
+
+        // Test with multiple occurrences
+        let template = "scanner --image {image} --output /tmp/{image}.json";
+        let result = substitute_tokens(template, image_id).unwrap();
+        assert_eq!(
+            result,
+            "scanner --image sha256:abc123def456 --output /tmp/sha256:abc123def456.json"
+        );
+
+        // Test with no tokens
+        let template = "trivy image latest";
+        let result = substitute_tokens(template, image_id).unwrap();
+        assert_eq!(result, "trivy image latest");
+    }
+
+    #[test]
+    fn test_build_args_with_scan_options() {
+        let args = BuildArgs {
+            scan_image: true,
+            fail_on_scan: true,
+            ..BuildArgs::default()
+        };
+
+        assert!(args.scan_image);
+        assert!(args.fail_on_scan);
+    }
+
+    #[test]
+    fn test_build_args_default_scan_options() {
+        let args = BuildArgs::default();
+        assert!(!args.scan_image);
+        assert!(!args.fail_on_scan);
     }
 }
