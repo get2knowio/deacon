@@ -5,6 +5,7 @@
 
 use crate::config::DevContainerConfig;
 use crate::errors::{ConfigError, DockerError, Result};
+use crate::security::SecurityOptions;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -150,7 +151,6 @@ impl ComposeCommand {
     /// Warn about security options that cannot be applied dynamically in Docker Compose
     pub fn warn_security_options_for_compose(config: &DevContainerConfig) {
         // TODO: In the future, this should accept features parameter to check feature-derived options too
-        use crate::security::SecurityOptions;
 
         // For now, only check config options. Features would require access to resolved features.
         let security = SecurityOptions {
@@ -350,17 +350,26 @@ impl ComposeManager {
         let command = self.get_command(project);
         let services = command.ps()?;
 
-        // Check if the primary service is running
-        let primary_running = services
+        // Get all services that should be running (primary + run_services)
+        let all_services = project.get_all_services();
+
+        // Check if all required services are running
+        let running_services: Vec<String> = services
             .iter()
-            .any(|s| s.name == project.service && s.state == "running");
+            .filter(|s| s.state == "running")
+            .map(|s| s.name.clone())
+            .collect();
+
+        let all_running = all_services
+            .iter()
+            .all(|service| running_services.contains(service));
 
         debug!(
-            "Project {} primary service {} running: {}",
-            project.name, project.service, primary_running
+            "Project {} all services {:?} running: {} (running services: {:?})",
+            project.name, all_services, all_running, running_services
         );
 
-        Ok(primary_running)
+        Ok(all_running)
     }
 
     /// Start compose project
@@ -434,6 +443,31 @@ impl ComposeManager {
                 Ok(None)
             }
         }
+    }
+
+    /// Get container IDs for all services in the project
+    #[instrument(skip(self))]
+    pub fn get_all_container_ids(
+        &self,
+        project: &ComposeProject,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let command = self.get_command(project);
+        let services = command.ps()?;
+
+        let mut container_ids = std::collections::HashMap::new();
+
+        for service in services.iter() {
+            if let Some(ref container_id) = service.container_id {
+                container_ids.insert(service.name.clone(), container_id.clone());
+                debug!(
+                    "Found service container: {} -> {}",
+                    service.name, container_id
+                );
+            }
+        }
+
+        debug!("Found {} service containers total", container_ids.len());
+        Ok(container_ids)
     }
 }
 
@@ -547,5 +581,43 @@ mod tests {
 
         // This should not log any warnings
         ComposeCommand::warn_security_options_for_compose(&empty_config);
+    }
+
+    #[test]
+    fn test_compose_project_all_services_coverage() {
+        // Test that get_all_services includes primary service and run_services
+        let project = ComposeProject {
+            name: "multi-service".to_string(),
+            base_path: PathBuf::from("/workspace"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "web".to_string(),
+            run_services: vec![
+                "database".to_string(),
+                "cache".to_string(),
+                "queue".to_string(),
+            ],
+        };
+
+        let all_services = project.get_all_services();
+        assert_eq!(all_services.len(), 4);
+        assert_eq!(all_services[0], "web"); // Primary service first
+        assert!(all_services.contains(&"database".to_string()));
+        assert!(all_services.contains(&"cache".to_string()));
+        assert!(all_services.contains(&"queue".to_string()));
+    }
+
+    #[test]
+    fn test_compose_project_single_service_only() {
+        // Test project with only primary service, no run_services
+        let project = ComposeProject {
+            name: "single-service".to_string(),
+            base_path: PathBuf::from("/workspace"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: vec![],
+        };
+
+        let all_services = project.get_all_services();
+        assert_eq!(all_services, vec!["app"]);
     }
 }

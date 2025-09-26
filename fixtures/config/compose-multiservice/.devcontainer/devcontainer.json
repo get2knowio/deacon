@@ -1,0 +1,25 @@
+{
+    "name": "Multi-service Compose Test",
+    "dockerComposeFile": "../docker-compose.yml",
+    "service": "app",
+    "runServices": ["db", "redis"],
+    "workspaceFolder": "/workspace",
+    "forwardPorts": [3000, 5432, 6379],
+    "portsAttributes": {
+        "3000": {
+            "label": "Web App",
+            "onAutoForward": "notify"
+        },
+        "5432": {
+            "label": "PostgreSQL",
+            "onAutoForward": "silent"
+        },
+        "6379": {
+            "label": "Redis",
+            "onAutoForward": "ignore"
+        }
+    },
+    "privileged": true,
+    "capAdd": ["SYS_PTRACE"],
+    "securityOpt": ["seccomp=unconfined"]
+}
