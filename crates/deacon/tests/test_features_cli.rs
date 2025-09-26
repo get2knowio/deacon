@@ -337,3 +337,59 @@ fn test_features_package_text_output() {
         .stdout(predicate::str::contains("Size:"))
         .stdout(predicate::str::contains("bytes"));
 }
+
+/// Test features pull command help output
+#[test]
+fn test_features_pull_help() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args(["features", "pull", "--help"]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Pull features from registry"))
+        .stdout(predicate::str::contains("REGISTRY_REF"))
+        .stdout(predicate::str::contains(
+            "Registry reference (registry/namespace/name:version)",
+        ))
+        .stdout(predicate::str::contains("--json"));
+}
+
+/// Test features pull command with invalid registry (should fail with clear error)
+#[test]
+fn test_features_pull_invalid_registry() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "pull",
+        "invalid.example.com/nonexistent/feature:latest",
+        "--json",
+    ]);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to pull feature"));
+}
+
+/// Test features pull command with missing arguments  
+#[test]
+fn test_features_pull_missing_args() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args(["features", "pull"]);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("required").and(predicate::str::contains("REGISTRY_REF")));
+}
+
+/// Test that features help shows the pull command
+#[test]
+fn test_features_help_shows_pull() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args(["features", "--help"]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Feature management commands"))
+        .stdout(predicate::str::contains("pull"))
+        .stdout(predicate::str::contains("Pull features from registry"));
+}

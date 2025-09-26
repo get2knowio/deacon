@@ -292,6 +292,14 @@ pub enum FeatureCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Pull features from registry
+    Pull {
+        /// Registry reference (registry/namespace/name:version)
+        registry_ref: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
     /// Publish features to registry
     Publish {
         /// Path to feature directory to publish
@@ -344,6 +352,14 @@ pub enum TemplateCommands {
         /// Dry run mode - preview operations without making changes
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Pull templates from registry
+    Pull {
+        /// Registry reference (registry/namespace/name:version)
+        registry_ref: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
     /// Publish templates to registry
     Publish {
