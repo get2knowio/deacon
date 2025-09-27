@@ -6,10 +6,11 @@
 use anyhow::Result;
 use serde_json;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, instrument};
+use tracing::{debug, info};
 
 use deacon_core::config::ConfigLoader;
 use deacon_core::errors::{ConfigError, DeaconError};
+use deacon_core::observability::{config_resolve_span, TimedSpan};
 use deacon_core::redaction::{redact_if_enabled, RedactionConfig};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::variable::{SubstitutionContext, SubstitutionOptions};
@@ -28,34 +29,46 @@ pub struct ConfigArgs {
 }
 
 /// Execute the config command
-#[instrument(skip(args))]
 pub async fn execute_config(args: ConfigArgs) -> Result<()> {
-    info!("Starting config command execution");
-    debug!("Config args: {:?}", args);
+    // Start standardized span for configuration resolution
+    let timed_span = TimedSpan::new(config_resolve_span(
+        args.workspace_folder.as_deref().unwrap_or(Path::new(".")),
+    ));
 
-    match args.command {
-        ConfigCommands::Substitute {
-            dry_run,
-            strict_substitution,
-            max_depth,
-            nested,
-            output_format,
-        } => {
-            let substitute_args = ConfigSubstituteArgs {
+    let result = {
+        let _guard = timed_span.span().enter();
+
+        info!("Starting config command execution");
+        debug!("Config args: {:?}", args);
+
+        match args.command {
+            ConfigCommands::Substitute {
                 dry_run,
                 strict_substitution,
                 max_depth,
-                enable_nested: nested,
+                nested,
                 output_format,
-                workspace_folder: args.workspace_folder,
-                config_path: args.config_path,
-                override_config_path: args.override_config_path,
-                secrets_files: args.secrets_files,
-                redaction_config: args.redaction_config.clone(),
-            };
-            execute_config_substitute(substitute_args).await
+            } => {
+                let substitute_args = ConfigSubstituteArgs {
+                    dry_run,
+                    strict_substitution,
+                    max_depth,
+                    enable_nested: nested,
+                    output_format,
+                    workspace_folder: args.workspace_folder,
+                    config_path: args.config_path,
+                    override_config_path: args.override_config_path,
+                    secrets_files: args.secrets_files,
+                    redaction_config: args.redaction_config.clone(),
+                };
+                execute_config_substitute(substitute_args).await
+            }
         }
-    }
+    };
+
+    // Complete the timed span with duration
+    timed_span.complete();
+    result
 }
 
 /// Execute the config substitute command
@@ -74,7 +87,6 @@ struct ConfigSubstituteArgs {
 }
 
 /// Execute the config substitute command
-#[instrument(skip_all)]
 async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
     info!("Starting config substitute command");
 
