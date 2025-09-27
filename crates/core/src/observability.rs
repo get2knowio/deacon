@@ -182,10 +182,10 @@ impl TimedSpan {
     /// Create a new timed span from an existing span
     pub fn new(span: Span) -> Self {
         let entered = span.clone().entered();
-        Self { 
-            span, 
-            start_time: Instant::now(), 
-            _entered: entered 
+        Self {
+            span,
+            start_time: Instant::now(),
+            _entered: entered,
         }
     }
 
