@@ -27,7 +27,13 @@ The long-term goal is a Rust implementation of a DevContainer-like CLI. Align co
 ## Code Style & Patterns
 - **Formatting & Quality**: Code MUST be properly formatted and pass all checks:
   - **CRITICAL**: Run `cargo fmt --all` after EVERY code change, not just before committing
+  - **CRITICAL**: Always verify formatting with `cargo fmt --all -- --check` before any commit
   - Remove ALL trailing whitespace from source files (check with `cargo fmt --all -- --check`)
+  - **Common formatting failures that cause CI to fail:**
+    - Trailing spaces in struct field definitions (e.g., `field: value, ` vs `field: value,`)
+    - Missing trailing commas in multi-line struct literals
+    - Inconsistent spacing in struct initialization blocks
+    - Manual line breaking that conflicts with rustfmt preferences
   - Follow standard Rust import ordering:
     1. Standard library (`use std::...`) 
     2. External crates (`use serde::...`)
@@ -200,12 +206,37 @@ If any command fails, fix the issues before submitting. The CI will run these ex
    - Markdown files (.md) 
    - YAML files (.yml)
 
-### Prevention Workflow
+4. **Struct literal formatting**: Common CI failure patterns
+   ```rust
+   // ❌ BAD - trailing spaces and inconsistent formatting
+   Self { 
+       field1: value1, 
+       field2: value2, 
+       field3: value3 
+   }
+   
+   // ✅ GOOD - consistent formatting with trailing comma
+   Self {
+       field1: value1,
+       field2: value2,
+       field3: value3,
+   }
+   ```
+
+### Prevention Workflow - MANDATORY for Every Code Change
 1. Write code naturally, don't worry about formatting while coding
 2. **Immediately** run `cargo fmt --all` after any change
-3. Verify with `cargo fmt --all -- --check`  
+3. **ALWAYS** verify with `cargo fmt --all -- --check`  
 4. If it shows changes needed, run `cargo fmt --all` again
 5. Only proceed when `--check` shows "no changes required"
+6. **CRITICAL**: Never commit code that fails `cargo fmt --all -- --check`
+
+### Emergency Formatting Fix Process
+If CI formatting checks are failing:
+1. Run `cargo fmt --all` to fix formatting
+2. Verify with `cargo fmt --all -- --check` 
+3. Commit the formatting fix immediately
+4. Update instruction file if new formatting patterns emerge
 
 ## Logging & Observability
 - Provide consistent span names aligned with spec workflows: `config.resolve`, `container.create`, `feature.install`, `template.apply`, `lifecycle.run`.
