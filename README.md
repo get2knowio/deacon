@@ -30,6 +30,37 @@ A Rust reimplementation of the Development Containers CLI, following the [contai
 - **Integration Tests**: CLI commands and basic workflows
 - **End-to-End Tests**: Complete workflow validation (7 scenarios, runtime < 30s)
 
+## Runtime Selection
+
+Deacon supports multiple container runtimes. You can choose between Docker (default) and Podman:
+
+### Via CLI Flag
+```bash
+# Use Docker (default)
+deacon --runtime docker up
+
+# Use Podman (future support)
+deacon --runtime podman up
+```
+
+### Via Environment Variable
+```bash
+# Set runtime via environment variable
+export DEACON_RUNTIME=podman
+deacon up
+
+# One-time override
+DEACON_RUNTIME=podman deacon up
+```
+
+### Precedence
+Runtime selection follows this precedence:
+1. CLI flag (`--runtime`)
+2. Environment variable (`DEACON_RUNTIME`)  
+3. Default (docker)
+
+**Note**: Podman support is currently in development. Using `--runtime podman` will show a "Not implemented yet" error with clear next steps.
+
 ## Quick Start
 
 ### Install with Script (Recommended)
