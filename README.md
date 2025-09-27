@@ -13,6 +13,7 @@ A Rust reimplementation of the Development Containers CLI, following the [contai
 - **Read Configuration Command**: `deacon read-configuration` outputs processed JSON
 - **CLI Framework**: Complete command structure with help and logging
 - **Error Handling**: Proper error messages for missing files and invalid JSON
+- **Container Lifecycle**: Command execution framework and variable substitution
 
 ### 🚧 In Progress
 - **Feature System**: Basic parsing implemented, installation simulation in tests
@@ -20,8 +21,7 @@ A Rust reimplementation of the Development Containers CLI, following the [contai
 - **Extends Resolution**: Configuration inheritance partially implemented
 
 ### 📋 Planned Features
-- **Container Lifecycle**: Building and running containers
-- **Docker Integration**: Real Docker operations (currently simulated)
+- **Container Runtime Integration**: Real Docker operations and container management
 - **Template System**: DevContainer template management
 - **OCI Registry Support**: Pulling features and templates from registries
 
@@ -97,6 +97,7 @@ deacon --help
 Self-contained categorized examples live under [`examples/`](examples/README.md):
 
 - Configuration: variable substitution, lifecycle commands basics (`examples/configuration/`)
+- Container Lifecycle: lifecycle command execution, ordering, and variables (`examples/container-lifecycle/`)
 - Feature Management: minimal & with-options feature manifests (`examples/feature-management/`)
 - Template Management: minimal & with-options templates including Dockerfile and assets (`examples/template-management/`)
 

@@ -1,0 +1,32 @@
+{
+  "name": "Lifecycle Execution Order Demo",
+  "image": "alpine:3.18",
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "DEMO_START_TIME": "$(date +%s)"
+  },
+  "onCreateCommand": [
+    "echo 'STEP 1: onCreate - $(date)' | tee /tmp/lifecycle-sequence.log",
+    "echo 'onCreate: Container is being created for the first time'",
+    "sleep 1"
+  ],
+  "postCreateCommand": [
+    "echo 'STEP 2: postCreate - $(date)' | tee -a /tmp/lifecycle-sequence.log", 
+    "echo 'postCreate: Container created, features installed'",
+    "echo 'postCreate: This runs after features but before container starts'",
+    "sleep 1"
+  ],
+  "postStartCommand": [
+    "echo 'STEP 3: postStart - $(date)' | tee -a /tmp/lifecycle-sequence.log",
+    "echo 'postStart: Container has started and is running'", 
+    "echo 'postStart: This runs every time the container starts'",
+    "sleep 1"
+  ],
+  "postAttachCommand": [
+    "echo 'STEP 4: postAttach - $(date)' | tee -a /tmp/lifecycle-sequence.log",
+    "echo 'postAttach: Ready to attach/connect to the container'",
+    "echo '=== LIFECYCLE SEQUENCE COMPLETE ==='",
+    "echo 'Full execution log:' && cat /tmp/lifecycle-sequence.log 2>/dev/null || echo 'Log file not found'",
+    "echo 'Current time: $(date)'"
+  ]
+}

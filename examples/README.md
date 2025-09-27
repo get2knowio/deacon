@@ -4,6 +4,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 
 ### Index
 - Configuration: basic & variable substitution examples (`configuration/`)
+- Container Lifecycle: lifecycle command execution, ordering, and variables (`container-lifecycle/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
@@ -40,5 +41,22 @@ ls -1
 cat devcontainer-template.json | jq '.id, .options'
 ```
 
+Test container lifecycle commands:
+```sh
+cd examples/container-lifecycle/basic
+deacon read-configuration --config devcontainer.json | jq '.onCreateCommand, .postCreateCommand, .postStartCommand, .postAttachCommand'
+```
+
+Explore lifecycle execution order:
+```sh
+cd examples/container-lifecycle/execution-order
+deacon read-configuration --config devcontainer.json | jq -r '
+  "1. onCreate: " + (.onCreateCommand | tostring),
+  "2. postCreate: " + (.postCreateCommand | tostring),
+  "3. postStart: " + (.postStartCommand | tostring),
+  "4. postAttach: " + (.postAttachCommand | tostring)
+'
+```
+
 ### Notes
-- Container lifecycle scenario examples will be added once the corresponding CLI workflows (see `docs/CLI-SPEC.md` Lifecycle Execution Workflow) are stabilized.
+Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/CLI-SPEC.md` Lifecycle Execution Workflow.
