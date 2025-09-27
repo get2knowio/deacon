@@ -230,6 +230,10 @@ pub enum DeaconError {
     #[error("Lifecycle error: {0}")]
     Lifecycle(String),
 
+    /// Container runtime errors (Docker, Podman, etc.)
+    #[error("Runtime error: {0}")]
+    Runtime(String),
+
     /// Feature not implemented
     #[error("Feature not implemented: {feature}")]
     NotImplemented { feature: String },

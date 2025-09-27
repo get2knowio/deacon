@@ -2,6 +2,24 @@ use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+/// Runtime selection options
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq)]
+pub enum RuntimeOption {
+    /// Docker runtime
+    Docker,
+    /// Podman runtime
+    Podman,
+}
+
+impl From<RuntimeOption> for deacon_core::runtime::RuntimeKind {
+    fn from(runtime: RuntimeOption) -> Self {
+        match runtime {
+            RuntimeOption::Docker => deacon_core::runtime::RuntimeKind::Docker,
+            RuntimeOption::Podman => deacon_core::runtime::RuntimeKind::Podman,
+        }
+    }
+}
+
 /// Output format options
 #[derive(Debug, Clone, ValueEnum)]
 pub enum OutputFormat {
@@ -99,6 +117,8 @@ pub struct CliContext {
     pub no_redact: bool,
     /// Enabled plugins
     pub plugins: Vec<String>,
+    /// Container runtime selection
+    pub runtime: Option<deacon_core::runtime::RuntimeKind>,
 }
 
 /// DevContainer CLI subcommands
@@ -465,6 +485,10 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     pub plugin: Vec<String>,
 
+    /// Container runtime to use (docker or podman, can be set via DEACON_RUNTIME env var)
+    #[arg(long, global = true, value_enum)]
+    pub runtime: Option<RuntimeOption>,
+
     /// Subcommand to execute
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -501,6 +525,7 @@ impl Cli {
             no_redact: self.no_redact,
 
             plugins: self.plugin.clone(),
+            runtime: self.runtime.map(|r| r.into()),
         }
     }
 
@@ -610,6 +635,7 @@ impl Cli {
                     feature_install_order,
                     ignore_host_requirements,
                     progress_tracker: progress_tracker.clone(),
+                    runtime: self.runtime.map(|r| r.into()),
                 };
 
                 match execute_up(args).await {
