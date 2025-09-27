@@ -47,8 +47,9 @@ pub fn workspace_id(workspace_path: &Path) -> String {
     canonical_path.hash(&mut hasher);
     let hash = hasher.finish();
 
-    // Use first 8 characters for short hash
-    format!("{:x}", hash)[..8].to_string()
+    // Use first 8 characters for short, zero-padded hex
+    let hex = format!("{:016x}", hash);
+    hex[..8].to_string()
 }
 
 /// Start a span for configuration resolution workflow
@@ -59,6 +60,7 @@ pub fn config_resolve_span(workspace_path: &Path) -> Span {
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::CONFIG_RESOLVE,
+        duration_ms = tracing::field::Empty,
         workspace_id = %workspace_id
     )
 }
@@ -71,6 +73,7 @@ pub fn feature_plan_span(workspace_path: &Path) -> Span {
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::FEATURE_PLAN,
+        duration_ms = tracing::field::Empty,
         workspace_id = %workspace_id
     )
 }
@@ -83,6 +86,7 @@ pub fn feature_install_span(workspace_path: &Path, feature_id: &str) -> Span {
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::FEATURE_INSTALL,
+        duration_ms = tracing::field::Empty,
         workspace_id = %workspace_id,
         feature_id = %feature_id
     )
@@ -96,6 +100,7 @@ pub fn template_apply_span(template_id: &str, workspace_path: Option<&Path>) -> 
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::TEMPLATE_APPLY,
+        duration_ms = tracing::field::Empty,
         template_id = %template_id,
         workspace_id = %workspace_id
     )
@@ -109,6 +114,7 @@ pub fn container_build_span(workspace_path: &Path, image_id: Option<&str>) -> Sp
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::CONTAINER_BUILD,
+        duration_ms = tracing::field::Empty,
         workspace_id = %workspace_id,
         image_id = image_id.unwrap_or("")
     )
@@ -122,6 +128,7 @@ pub fn container_create_span(workspace_path: &Path, container_id: Option<&str>) 
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::CONTAINER_CREATE,
+        duration_ms = tracing::field::Empty,
         workspace_id = %workspace_id,
         container_id = container_id.unwrap_or("")
     )
@@ -135,6 +142,7 @@ pub fn lifecycle_run_span(workspace_path: &Path, command_type: &str) -> Span {
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::LIFECYCLE_RUN,
+        duration_ms = tracing::field::Empty,
         workspace_id = %workspace_id,
         command_type = %command_type
     )
@@ -146,7 +154,8 @@ pub fn registry_pull_span(registry_ref: &str) -> Span {
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::REGISTRY_PULL,
-        ref = %registry_ref
+        duration_ms = tracing::field::Empty,
+        r#ref = %registry_ref
     )
 }
 
@@ -156,7 +165,8 @@ pub fn registry_publish_span(registry_ref: &str) -> Span {
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::REGISTRY_PUBLISH,
-        ref = %registry_ref
+        duration_ms = tracing::field::Empty,
+        r#ref = %registry_ref
     )
 }
 
@@ -164,14 +174,18 @@ pub fn registry_publish_span(registry_ref: &str) -> Span {
 pub struct TimedSpan {
     span: Span,
     start_time: Instant,
+    // Keep the span entered for the lifetime of TimedSpan
+    _entered: tracing::span::EnteredSpan,
 }
 
 impl TimedSpan {
     /// Create a new timed span from an existing span
     pub fn new(span: Span) -> Self {
-        Self {
-            span,
-            start_time: Instant::now(),
+        let entered = span.clone().entered();
+        Self { 
+            span, 
+            start_time: Instant::now(), 
+            _entered: entered 
         }
     }
 
@@ -192,7 +206,6 @@ impl TimedSpan {
 macro_rules! timed_span {
     ($span_fn:expr) => {{
         let span = $span_fn;
-        let _guard = span.enter();
         $crate::observability::TimedSpan::new(span)
     }};
 }

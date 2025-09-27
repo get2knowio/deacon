@@ -89,11 +89,11 @@ fn test_config_resolve_span_json_logging() {
     let has_duration = config_resolve_spans.iter().any(|entry| {
         entry
             .get("fields")
-            .and_then(|fields| fields.get("time.busy"))
+            .and_then(|f| f.get("time.busy"))
             .is_some()
             || entry
                 .get("fields")
-                .and_then(|fields| fields.get(fields::DURATION_MS))
+                .and_then(|f| f.get(fields::DURATION_MS))
                 .is_some()
     });
 
