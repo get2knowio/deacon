@@ -1,0 +1,9 @@
+{
+  "name": "Non-blocking Lifecycle Example",
+  "image": "ubuntu:22.04",
+  "workspaceFolder": "/workspace",
+  "onCreateCommand": "bash -lc 'echo onCreate > /tmp/nb_log'",
+  "postStartCommand": ["bash", "-lc", "(sleep 1; echo postStart >> /tmp/nb_log) & disown"],
+  "postAttachCommand": ["bash", "-lc", "(sleep 1; echo postAttach >> /tmp/nb_log) & disown"],
+  "containerEnv": {"NB_DEMO": "true"}
+}

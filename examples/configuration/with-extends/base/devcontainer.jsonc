@@ -1,0 +1,8 @@
+{
+  "name": "Base Container",
+  "image": "ubuntu:20.04",
+  "containerEnv": {
+    "BASE_VAR": "base_value"
+  },
+  "runArgs": ["--base-arg"]
+}

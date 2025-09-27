@@ -1,0 +1,9 @@
+{
+  "name": "base-container",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "containerEnv": {
+    "BASE_VAR": "base-value",
+    "DB_PASSWORD": "${localEnv:DB_PASSWORD}",
+    "API_URL": "${localEnv:API_URL}"
+  }
+}

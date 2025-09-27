@@ -1,0 +1,8 @@
+{
+  "extends": "../middle/devcontainer.jsonc",
+  "name": "App Container",
+  "containerEnv": {
+    "APP_VAR": "app_value"
+  },
+  "runArgs": ["--app-arg"]
+}

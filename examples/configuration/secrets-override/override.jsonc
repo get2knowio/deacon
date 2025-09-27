@@ -1,0 +1,7 @@
+{
+  "name": "override-container",
+  "containerEnv": {
+    "OVERRIDE_VAR": "override-value",
+    "SECRET_TOKEN": "${localEnv:SECRET_TOKEN}"
+  }
+}

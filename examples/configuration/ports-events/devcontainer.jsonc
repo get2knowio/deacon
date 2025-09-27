@@ -1,0 +1,10 @@
+{
+  "name": "Ports Events Example",
+  "dockerFile": "Dockerfile",
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "Demo Server", "onAutoForward": "notify" }
+  },
+  "postStartCommand": ["bash", "-lc", "node server.js & disown"]
+}

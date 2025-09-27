@@ -1,0 +1,19 @@
+{
+  "name": "Lifecycle Commands Showcase",
+  "image": "ubuntu:22.04",
+  "workspaceFolder": "/workspace",
+  "initializeCommand": "echo init > /tmp/lifecycle_init",
+  "onCreateCommand": ["bash", "-lc", "echo onCreate >> /tmp/lifecycle_log"],
+  "postCreateCommand": [
+    "bash",
+    "-lc",
+    "echo postCreate >> /tmp/lifecycle_log && mkdir -p /workspace/.deacon && echo ready > /workspace/.deacon/status"
+  ],
+  "postStartCommand": "bash -lc 'echo postStart >> /tmp/lifecycle_log'",
+  "postAttachCommand": "bash -lc 'echo postAttach >> /tmp/lifecycle_log'",
+  "waitFor": "postCreateCommand",
+  "containerEnv": {
+    "DEACON_LIFECYCLE": "true"
+  },
+  "forwardPorts": [8080]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Dockerfile Build Example",
+  "dockerFile": "Dockerfile",
+  "build": {
+    "context": ".",
+    "args": { "VARIANT": "1.21" }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:1": { "installZsh": true }
+  },
+  "workspaceFolder": "/workspace",
+  "postCreateCommand": "node -v && npm -v",
+  "forwardPorts": [3000]
+}

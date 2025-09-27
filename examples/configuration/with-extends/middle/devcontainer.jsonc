@@ -1,0 +1,9 @@
+{
+  "extends": "../base/devcontainer.jsonc",
+  "name": "Middle Container",
+  "containerEnv": {
+    "MIDDLE_VAR": "middle_value",
+    "BASE_VAR": "overridden_base_value"
+  },
+  "runArgs": ["--middle-arg"]
+}

@@ -3,7 +3,16 @@
 Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into it and run the shown commands without referencing assets elsewhere in the repo.
 
 ### Index
-- Configuration: basic & variable substitution examples (`configuration/`)
+- Configuration (`configuration/`):
+  - basic
+  - with-variables
+  - compose-multiservice
+  - with-lifecycle
+  - with-dockerfile
+  - with-extends
+  - secrets-override
+  - non-blocking-lifecycle
+  - ports-events
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
@@ -41,4 +50,4 @@ cat devcontainer-template.json | jq '.id, .options'
 ```
 
 ### Notes
-- Container lifecycle scenario examples will be added once the corresponding CLI workflows (see `docs/CLI-SPEC.md` Lifecycle Execution Workflow) are stabilized.
+- Each example is self-contained; Docker is required for compose and build flows.
