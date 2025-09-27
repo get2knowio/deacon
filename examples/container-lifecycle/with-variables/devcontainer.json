@@ -1,0 +1,57 @@
+{
+  "name": "Lifecycle Variable Substitution",
+  "image": "python:3.11",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "containerEnv": {
+    "PROJECT_ROOT": "${containerWorkspaceFolder}",
+    "LOCAL_PROJECT_ROOT": "${localWorkspaceFolder}",
+    "PROJECT_NAME": "${localWorkspaceFolderBasename}",
+    "PYTHON_ENV": "development",
+    "USER_HOME": "${containerWorkspaceFolder}/.devcontainer",
+    "SETUP_TIMESTAMP": "$(date +%Y%m%d-%H%M%S)"
+  },
+  "remoteEnv": {
+    "PYTHONPATH": "${containerEnv:PROJECT_ROOT}/src:${containerEnv:PROJECT_ROOT}/lib",
+    "PATH": "${containerEnv:PATH}:${containerEnv:PROJECT_ROOT}/bin"
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/.vscode,target=${containerWorkspaceFolder}/.vscode,type=bind,consistency=cached"
+  ],
+  "onCreateCommand": [
+    "echo 'onCreate: Setting up ${PROJECT_NAME} project'",
+    "echo 'Container workspace: ${PROJECT_ROOT}'", 
+    "echo 'Local workspace: ${LOCAL_PROJECT_ROOT}'",
+    "mkdir -p ${PROJECT_ROOT}/{src,tests,docs,bin}",
+    "echo 'PROJECT=${PROJECT_NAME}' > ${PROJECT_ROOT}/.env",
+    "echo 'WORKSPACE=${PROJECT_ROOT}' >> ${PROJECT_ROOT}/.env",
+    "echo 'SETUP_DATE=${SETUP_TIMESTAMP}' >> ${PROJECT_ROOT}/.env"
+  ],
+  "postCreateCommand": [
+    "echo 'postCreate: Installing Python dependencies for ${PROJECT_NAME}'",
+    "cd ${PROJECT_ROOT} && python -m venv .venv",
+    "cd ${PROJECT_ROOT} && . .venv/bin/activate && pip install --upgrade pip pytest black flake8",
+    "echo 'Virtual environment created in ${PROJECT_ROOT}/.venv'",
+    "echo 'export VIRTUAL_ENV=${PROJECT_ROOT}/.venv' >> ${USER_HOME}/env.sh",
+    "echo 'export PATH=${PROJECT_ROOT}/.venv/bin:$PATH' >> ${USER_HOME}/env.sh"
+  ],
+  "postStartCommand": {
+    "log-environment": "echo 'postStart: Environment variables for ${PROJECT_NAME}:' && env | grep -E '(PROJECT|PYTHON|WORKSPACE)' | sort",
+    "validate-paths": "echo 'postStart: Validating paths:' && echo 'PYTHONPATH=${PYTHONPATH}' && ls -la ${PROJECT_ROOT}/ 2>/dev/null || echo 'Project directory not ready'",
+    "source-env": "cd ${PROJECT_ROOT} && [ -f .env ] && echo 'Environment file contents:' && cat .env || echo 'No .env file found'"
+  },
+  "postAttachCommand": [
+    "echo '=== ${PROJECT_NAME} Development Environment ==='",
+    "echo 'Workspace: ${PROJECT_ROOT}'",
+    "echo 'Python: $(python --version)'",
+    "echo 'Virtual env: ${PROJECT_ROOT}/.venv'",
+    "cd ${PROJECT_ROOT} && [ -f .venv/bin/activate ] && echo 'Virtual environment ready' || echo 'Virtual environment not found'",
+    "echo 'To activate virtual environment: source ${PROJECT_ROOT}/.venv/bin/activate'",
+    "echo 'PYTHONPATH is set to: ${PYTHONPATH}'",
+    "echo 'Setup completed at: ${SETUP_TIMESTAMP}'"
+  ],
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "vscode"
+    }
+  }
+}

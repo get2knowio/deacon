@@ -1,0 +1,29 @@
+{
+  "name": "Basic Container Lifecycle",
+  "image": "ubuntu:22.04",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "username": "vscode"
+    }
+  },
+  "workspaceFolder": "/workspaces/project",
+  "containerEnv": {
+    "ENVIRONMENT": "development"
+  },
+  "onCreateCommand": [
+    "echo 'onCreate: Container created, setting up initial environment'",
+    "mkdir -p /tmp/setup-logs"
+  ],
+  "postCreateCommand": [
+    "echo 'postCreate: Installing development dependencies' | tee /tmp/setup-logs/post-create.log",
+    "apt-get update",
+    "apt-get install -y curl git"
+  ],
+  "postStartCommand": "echo 'postStart: Container started, ready for development' | tee /tmp/setup-logs/post-start.log",
+  "postAttachCommand": [
+    "echo 'postAttach: Welcome! Development environment is ready.'",
+    "echo 'Setup logs are available in /tmp/setup-logs/'",
+    "ls -la /tmp/setup-logs/ 2>/dev/null || echo 'No setup logs yet'"
+  ]
+}
