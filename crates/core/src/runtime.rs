@@ -351,15 +351,21 @@ impl Default for PodmanRuntime {
 #[allow(async_fn_in_trait)]
 impl Docker for PodmanRuntime {
     async fn ping(&self) -> Result<()> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 
     async fn list_containers(&self, _label_selector: Option<&str>) -> Result<Vec<ContainerInfo>> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 
     async fn inspect_container(&self, _id: &str) -> Result<Option<ContainerInfo>> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 
     async fn exec(
@@ -368,18 +374,24 @@ impl Docker for PodmanRuntime {
         _command: &[String],
         _config: ExecConfig,
     ) -> Result<ExecResult> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 
     async fn stop_container(&self, _container_id: &str, _timeout: Option<u32>) -> Result<()> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 }
 
 #[allow(async_fn_in_trait)]
 impl ContainerOps for PodmanRuntime {
     async fn find_matching_containers(&self, _identity: &ContainerIdentity) -> Result<Vec<String>> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 
     async fn create_container(
@@ -388,19 +400,27 @@ impl ContainerOps for PodmanRuntime {
         _config: &DevContainerConfig,
         _workspace_path: &Path,
     ) -> Result<String> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 
     async fn start_container(&self, _container_id: &str) -> Result<()> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 
     async fn remove_container(&self, _container_id: &str) -> Result<()> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 
     async fn get_container_image(&self, _container_id: &str) -> Result<String> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 }
 
@@ -413,7 +433,9 @@ impl DockerLifecycle for PodmanRuntime {
         _workspace_path: &Path,
         _remove_existing: bool,
     ) -> Result<ContainerResult> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
+        Err(DeaconError::Runtime(
+            "Not implemented yet: Podman support".to_string(),
+        ))
     }
 }
 
