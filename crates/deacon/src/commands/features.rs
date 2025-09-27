@@ -10,12 +10,13 @@ use deacon_core::features::{
     parse_feature_metadata, FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger,
     OptionValue, ResolvedFeature,
 };
+use deacon_core::observability::{feature_plan_span, TimedSpan};
 use deacon_core::oci::{default_fetcher, FeatureRef};
 use deacon_core::registry_parser::parse_registry_reference;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tempfile;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info};
 
 /// Features command arguments
 #[derive(Debug, Clone)]
@@ -49,7 +50,6 @@ pub struct FeaturesResult {
 }
 
 /// Execute the features command
-#[instrument(level = "debug")]
 pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
     match args.command {
         FeatureCommands::Test { path, json } => execute_features_test(&path, json).await,
@@ -95,14 +95,11 @@ pub struct FeaturesPlanResult {
 }
 
 /// Execute features plan command
-#[instrument(level = "debug")]
 async fn execute_features_plan(
     json: bool,
     additional_features: Option<&str>,
     args: &FeaturesArgs,
 ) -> Result<()> {
-    debug!("Generating feature installation plan");
-
     // Determine workspace folder - default to current directory if not provided
     let workspace_folder = args
         .workspace_folder
@@ -110,99 +107,112 @@ async fn execute_features_plan(
         .unwrap_or(&std::env::current_dir()?)
         .clone();
 
-    // Load devcontainer configuration (explicit path > discovery > default)
-    let mut config = if let Some(config_path) = args.config_path.as_deref() {
-        ConfigLoader::load_from_path(config_path)?
-    } else {
-        let config_location = ConfigLoader::discover_config(&workspace_folder)?;
-        if config_location.exists() {
-            ConfigLoader::load_from_path(config_location.path())?
+    // Start standardized span for feature planning
+    let timed_span = TimedSpan::new(feature_plan_span(&workspace_folder));
+
+    let result = {
+        let _guard = timed_span.span().enter();
+
+        debug!("Generating feature installation plan");
+
+        // Load devcontainer configuration (explicit path > discovery > default)
+        let mut config = if let Some(config_path) = args.config_path.as_deref() {
+            ConfigLoader::load_from_path(config_path)?
         } else {
-            DevContainerConfig::default()
+            let config_location = ConfigLoader::discover_config(&workspace_folder)?;
+            if config_location.exists() {
+                ConfigLoader::load_from_path(config_location.path())?
+            } else {
+                DevContainerConfig::default()
+            }
+        };
+
+        // Parse and merge additional features if provided
+        if let Some(additional_features_str) = additional_features {
+            let merge_config = FeatureMergeConfig::new(
+                Some(additional_features_str.to_string()),
+                false, // Don't prefer CLI features by default
+                None,  // No install order override in this context
+            );
+            config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
         }
+
+        // Extract features from config
+        let features_map_opt = config.features.as_object();
+        if features_map_opt.is_none() || features_map_opt.unwrap().is_empty() {
+            let result = FeaturesPlanResult {
+                order: vec![],
+                graph: serde_json::json!({}),
+            };
+            output_plan_result(&result, json)?;
+            return Ok(());
+        }
+        let features_map = features_map_opt.unwrap();
+
+        // Resolve features from registries to obtain metadata (deps, installsAfter, etc.)
+        let fetcher =
+            default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+        let mut resolved_features = Vec::with_capacity(features_map.len());
+        for (feature_id, feature_value) in features_map {
+            let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
+            let feature_ref = FeatureRef::new(
+                registry_url.clone(),
+                namespace.clone(),
+                name.clone(),
+                tag.clone(),
+            );
+            let downloaded = fetcher
+                .fetch_feature(&feature_ref)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to fetch feature '{}': {}", feature_id, e))?;
+
+            // Extract per-feature options from config entry if present
+            let options: std::collections::HashMap<String, OptionValue> = match feature_value {
+                serde_json::Value::Object(map) => map
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(k, v)| {
+                        // Convert serde_json::Value to OptionValue
+                        let option_value = match v {
+                            serde_json::Value::Bool(b) => Some(OptionValue::Boolean(b)),
+                            serde_json::Value::String(s) => Some(OptionValue::String(s)),
+                            _ => None, // Skip other types
+                        };
+                        option_value.map(|ov| (k, ov))
+                    })
+                    .collect(),
+                _ => std::collections::HashMap::new(),
+            };
+
+            resolved_features.push(ResolvedFeature {
+                id: downloaded.metadata.id.clone(),
+                source: feature_ref.reference(),
+                options,
+                metadata: downloaded.metadata,
+            });
+        }
+
+        // Create dependency resolver with override order from config
+        let override_order = config.override_feature_install_order.clone();
+        let resolver = FeatureDependencyResolver::new(override_order);
+
+        // Resolve dependencies and create installation plan
+        let installation_plan = resolver.resolve(&resolved_features)?;
+
+        // Extract order and create graph representation
+        let order = installation_plan.feature_ids();
+        let graph = build_graph_representation(&resolved_features);
+
+        let result = FeaturesPlanResult { order, graph };
+
+        output_plan_result(&result, json)?;
+
+        Ok(())
     };
 
-    // Parse and merge additional features if provided
-    if let Some(additional_features_str) = additional_features {
-        let merge_config = FeatureMergeConfig::new(
-            Some(additional_features_str.to_string()),
-            false, // Don't prefer CLI features by default
-            None,  // No install order override in this context
-        );
-        config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
-    }
-
-    // Extract features from config
-    let features_map_opt = config.features.as_object();
-    if features_map_opt.is_none() || features_map_opt.unwrap().is_empty() {
-        let result = FeaturesPlanResult {
-            order: vec![],
-            graph: serde_json::json!({}),
-        };
-        output_plan_result(&result, json)?;
-        return Ok(());
-    }
-    let features_map = features_map_opt.unwrap();
-
-    // Resolve features from registries to obtain metadata (deps, installsAfter, etc.)
-    let fetcher =
-        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
-    let mut resolved_features = Vec::with_capacity(features_map.len());
-    for (feature_id, feature_value) in features_map {
-        let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
-        let feature_ref = FeatureRef::new(
-            registry_url.clone(),
-            namespace.clone(),
-            name.clone(),
-            tag.clone(),
-        );
-        let downloaded = fetcher
-            .fetch_feature(&feature_ref)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to fetch feature '{}': {}", feature_id, e))?;
-
-        // Extract per-feature options from config entry if present
-        let options: std::collections::HashMap<String, OptionValue> = match feature_value {
-            serde_json::Value::Object(map) => map
-                .clone()
-                .into_iter()
-                .filter_map(|(k, v)| {
-                    // Convert serde_json::Value to OptionValue
-                    let option_value = match v {
-                        serde_json::Value::Bool(b) => Some(OptionValue::Boolean(b)),
-                        serde_json::Value::String(s) => Some(OptionValue::String(s)),
-                        _ => None, // Skip other types
-                    };
-                    option_value.map(|ov| (k, ov))
-                })
-                .collect(),
-            _ => std::collections::HashMap::new(),
-        };
-
-        resolved_features.push(ResolvedFeature {
-            id: downloaded.metadata.id.clone(),
-            source: feature_ref.reference(),
-            options,
-            metadata: downloaded.metadata,
-        });
-    }
-
-    // Create dependency resolver with override order from config
-    let override_order = config.override_feature_install_order.clone();
-    let resolver = FeatureDependencyResolver::new(override_order);
-
-    // Resolve dependencies and create installation plan
-    let installation_plan = resolver.resolve(&resolved_features)?;
-
-    // Extract order and create graph representation
-    let order = installation_plan.feature_ids();
-    let graph = build_graph_representation(&resolved_features);
-
-    let result = FeaturesPlanResult { order, graph };
-
-    output_plan_result(&result, json)?;
-
-    Ok(())
+    // Complete the timed span with duration
+    timed_span.complete();
+    result
 }
 
 /// Create a mock resolved feature for demonstration (temporary)
@@ -292,7 +302,7 @@ fn output_plan_result(result: &FeaturesPlanResult, json: bool) -> Result<()> {
     }
     Ok(())
 }
-#[instrument(level = "debug")]
+
 async fn execute_features_test(path: &str, json: bool) -> Result<()> {
     debug!("Testing feature at path: {}", path);
 
@@ -341,7 +351,6 @@ async fn execute_features_test(path: &str, json: bool) -> Result<()> {
 }
 
 /// Execute features package command
-#[instrument(level = "debug")]
 async fn execute_features_package(path: &str, output_dir: &str, json: bool) -> Result<()> {
     debug!(
         "Packaging feature at path: {} to output: {}",
@@ -383,7 +392,6 @@ async fn execute_features_package(path: &str, output_dir: &str, json: bool) -> R
 }
 
 /// Execute features pull command
-#[instrument(level = "debug")]
 async fn execute_features_pull(registry_ref: &str, json: bool) -> Result<()> {
     debug!("Pulling feature from registry reference: {}", registry_ref);
 
@@ -422,7 +430,6 @@ async fn execute_features_pull(registry_ref: &str, json: bool) -> Result<()> {
 }
 
 /// Execute features publish command
-#[instrument(level = "debug")]
 async fn execute_features_publish(
     path: &str,
     registry: &str,
@@ -526,7 +533,6 @@ async fn execute_features_publish(
 }
 
 /// Execute features info command
-#[instrument(level = "debug")]
 async fn execute_features_info(mode: &str, feature: &str) -> Result<()> {
     debug!("Getting feature info for: {} (mode: {})", feature, mode);
 

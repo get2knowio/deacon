@@ -19,6 +19,7 @@ pub mod host_requirements;
 pub mod lifecycle;
 pub mod logging;
 pub mod mount;
+pub mod observability;
 pub mod oci;
 pub mod plugins;
 pub mod ports;

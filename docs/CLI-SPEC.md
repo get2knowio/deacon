@@ -1637,7 +1637,7 @@ interface TestContext {
 
 ### Logging System
 
-The CLI implements structured logging with multiple outputs:
+The CLI implements structured logging with multiple outputs and standardized tracing spans:
 
 #### Log Structure
 ```typescript
@@ -1649,6 +1649,35 @@ interface LogEntry {
   error?: Error;
 }
 ```
+
+#### Standardized Tracing Spans
+
+Core workflows use standardized span names and fields for consistent observability:
+
+**Canonical Span Names:**
+- `config.resolve` - Configuration parsing and resolution
+- `feature.plan` - Feature dependency planning
+- `feature.install` - Feature installation execution
+- `template.apply` - Template application workflow
+- `container.build` - Container image building
+- `container.create` - Container creation
+- `lifecycle.run` - Lifecycle command execution
+- `registry.pull` - OCI registry pull operations
+- `registry.publish` - OCI registry publish operations
+
+**Common Fields:**
+- `workspace_id` - 8-character hash of workspace path
+- `feature_id` - Feature identifier
+- `template_id` - Template identifier
+- `container_id` - Container identifier
+- `image_id` - Container image identifier
+- `ref` - Registry reference
+- `duration_ms` - Operation duration (recorded on completion)
+
+**Log Format Selection:**
+Runtime format selection via `DEACON_LOG_FORMAT` environment variable:
+- `json` - Structured JSON format for machine processing
+- `text` - Human-readable text format (default)
 
 #### Log Destinations
 - **Console Output**: Formatted console output with colors
