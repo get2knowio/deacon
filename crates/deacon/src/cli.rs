@@ -635,6 +635,7 @@ impl Cli {
                     feature_install_order,
                     ignore_host_requirements,
                     progress_tracker: progress_tracker.clone(),
+                    runtime: self.runtime.map(|r| r.into()),
                 };
 
                 match execute_up(args).await {

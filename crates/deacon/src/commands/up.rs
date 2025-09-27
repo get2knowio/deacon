@@ -7,10 +7,11 @@ use anyhow::Result;
 use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::container::ContainerIdentity;
-use deacon_core::docker::{CliDocker, Docker, DockerLifecycle, ExecConfig};
+use deacon_core::docker::{Docker, DockerLifecycle, ExecConfig};
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::ports::PortForwardingManager;
+use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
 use deacon_core::state::{ComposeState, ContainerState, StateManager};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -33,6 +34,7 @@ pub struct UpArgs {
     pub ignore_host_requirements: bool,
     pub progress_tracker:
         std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
+    pub runtime: Option<deacon_core::runtime::RuntimeKind>,
 }
 
 impl Default for UpArgs {
@@ -50,6 +52,7 @@ impl Default for UpArgs {
             feature_install_order: None,
             ignore_host_requirements: false,
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            runtime: None,
         }
     }
 }
@@ -85,6 +88,20 @@ impl Default for UpArgs {
 /// ```
 #[instrument(skip(args))]
 pub async fn execute_up(args: UpArgs) -> Result<()> {
+    info!("Starting up command execution");
+    debug!("Up args: {:?}", args);
+
+    // Create runtime based on args
+    let runtime_kind = RuntimeFactory::detect_runtime(args.runtime);
+    let runtime = RuntimeFactory::create_runtime(runtime_kind)?;
+    debug!("Using container runtime: {}", runtime.runtime_name());
+
+    execute_up_with_runtime(args, runtime).await
+}
+
+/// Execute up command with a specific runtime implementation
+#[instrument(skip(args, runtime))]
+async fn execute_up_with_runtime(args: UpArgs, runtime: ContainerRuntimeImpl) -> Result<()> {
     info!("Starting up command execution");
     debug!("Up args: {:?}", args);
 
@@ -180,6 +197,7 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
             &args,
             &mut state_manager,
             &workspace_hash,
+            &runtime,
         )
         .await?;
     }
@@ -306,6 +324,7 @@ async fn execute_container_up(
     args: &UpArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
+    runtime: &ContainerRuntimeImpl,
 ) -> Result<()> {
     debug!("Starting traditional development container");
 
@@ -324,7 +343,7 @@ async fn execute_container_up(
     debug!("Container identity: {:?}", identity);
 
     // Initialize Docker client
-    let docker = CliDocker::new();
+    let docker = runtime;
 
     // Check Docker availability
     docker.ping().await?;
@@ -425,7 +444,7 @@ async fn execute_container_up(
 
     // Handle port events if requested
     if args.ports_events {
-        handle_container_port_events(&container_result.container_id, config).await?;
+        handle_container_port_events(&container_result.container_id, config, runtime).await?;
     }
 
     // Handle shutdown if requested
@@ -435,6 +454,7 @@ async fn execute_container_up(
             &container_result.container_id,
             state_manager,
             workspace_hash,
+            runtime,
         )
         .await?;
     }
@@ -471,7 +491,7 @@ async fn execute_compose_post_create(
         if let Some(cmd_str) = post_create_cmd.as_str() {
             debug!("Executing postCreateCommand: {}", cmd_str);
 
-            let docker = CliDocker::new();
+            let docker = deacon_core::docker::CliDocker::new();
             let result = docker
                 .exec(
                     &container_id,
@@ -503,7 +523,7 @@ async fn handle_port_events(config: &DevContainerConfig, project: &ComposeProjec
     debug!("Processing port events for compose project");
 
     let compose_manager = ComposeManager::new();
-    let docker = CliDocker::new();
+    let docker = deacon_core::docker::CliDocker::new();
 
     // Get all services in the project
     let command = compose_manager.get_command(project);
@@ -814,11 +834,12 @@ fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<String>> {
 async fn handle_container_port_events(
     container_id: &str,
     config: &DevContainerConfig,
+    runtime: &ContainerRuntimeImpl,
 ) -> Result<()> {
     debug!("Processing port events for container");
 
     // Inspect the container to get port information
-    let docker = CliDocker::new();
+    let docker = runtime;
     let container_info = match docker.inspect_container(container_id).await? {
         Some(info) => info,
         None => {
@@ -853,6 +874,7 @@ async fn handle_container_shutdown(
     container_id: &str,
     state_manager: &mut StateManager,
     workspace_hash: &str,
+    runtime: &ContainerRuntimeImpl,
 ) -> Result<()> {
     debug!("Handling shutdown for container: {}", container_id);
 
@@ -864,7 +886,7 @@ async fn handle_container_shutdown(
         }
         "stopContainer" => {
             debug!("Stopping container due to shutdown action");
-            let docker = CliDocker::new();
+            let docker = runtime;
             docker.stop_container(container_id, Some(30)).await?;
             state_manager.remove_workspace_state(workspace_hash);
             info!("Container stopped and removed from state");
@@ -935,6 +957,7 @@ mod tests {
             feature_install_order: None,
             ignore_host_requirements: false,
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            runtime: None,
         };
 
         assert!(args.remove_existing_container);
@@ -982,6 +1005,7 @@ mod tests {
             feature_install_order: None,
             ignore_host_requirements: false,
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            runtime: None,
         };
 
         assert!(args.remove_existing_container);

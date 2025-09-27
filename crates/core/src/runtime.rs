@@ -26,24 +26,26 @@ pub enum RuntimeKind {
 }
 
 impl RuntimeKind {
-    /// Parse runtime kind from string
-    pub fn from_str(s: &str) -> Result<Self> {
+    /// Get string representation
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Docker => "docker",
+            Self::Podman => "podman",
+        }
+    }
+}
+
+impl std::str::FromStr for RuntimeKind {
+    type Err = crate::errors::DeaconError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "docker" => Ok(Self::Docker),
             "podman" => Ok(Self::Podman),
             _ => Err(DeaconError::Runtime(format!(
                 "Unknown runtime: {}. Supported runtimes: docker, podman",
                 s
-            ))
-            .into()),
-        }
-    }
-
-    /// Get string representation
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Docker => "docker",
-            Self::Podman => "podman",
+            ))),
         }
     }
 }
@@ -59,7 +61,7 @@ pub struct RuntimeFactory;
 
 impl RuntimeFactory {
     /// Detect runtime from CLI flag, environment variable, or default
-    /// 
+    ///
     /// Precedence: CLI flag > DEACON_RUNTIME env var > default (docker)
     pub fn detect_runtime(cli_runtime: Option<RuntimeKind>) -> RuntimeKind {
         if let Some(runtime) = cli_runtime {
@@ -67,7 +69,7 @@ impl RuntimeFactory {
         }
 
         if let Ok(env_runtime) = std::env::var("DEACON_RUNTIME") {
-            if let Ok(runtime) = RuntimeKind::from_str(&env_runtime) {
+            if let Ok(runtime) = env_runtime.parse() {
                 return runtime;
             }
         }
@@ -90,7 +92,7 @@ impl RuntimeFactory {
 pub enum ContainerRuntimeImpl {
     /// Docker runtime
     Docker(DockerRuntime),
-    /// Podman runtime 
+    /// Podman runtime
     Podman(PodmanRuntime),
 }
 
@@ -349,15 +351,15 @@ impl Default for PodmanRuntime {
 #[allow(async_fn_in_trait)]
 impl Docker for PodmanRuntime {
     async fn ping(&self) -> Result<()> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 
     async fn list_containers(&self, _label_selector: Option<&str>) -> Result<Vec<ContainerInfo>> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 
     async fn inspect_container(&self, _id: &str) -> Result<Option<ContainerInfo>> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 
     async fn exec(
@@ -366,18 +368,18 @@ impl Docker for PodmanRuntime {
         _command: &[String],
         _config: ExecConfig,
     ) -> Result<ExecResult> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 
     async fn stop_container(&self, _container_id: &str, _timeout: Option<u32>) -> Result<()> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 }
 
 #[allow(async_fn_in_trait)]
 impl ContainerOps for PodmanRuntime {
     async fn find_matching_containers(&self, _identity: &ContainerIdentity) -> Result<Vec<String>> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 
     async fn create_container(
@@ -386,19 +388,19 @@ impl ContainerOps for PodmanRuntime {
         _config: &DevContainerConfig,
         _workspace_path: &Path,
     ) -> Result<String> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 
     async fn start_container(&self, _container_id: &str) -> Result<()> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 
     async fn remove_container(&self, _container_id: &str) -> Result<()> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 
     async fn get_container_image(&self, _container_id: &str) -> Result<String> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 }
 
@@ -411,7 +413,7 @@ impl DockerLifecycle for PodmanRuntime {
         _workspace_path: &Path,
         _remove_existing: bool,
     ) -> Result<ContainerResult> {
-        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()).into())
+        Err(DeaconError::Runtime("Not implemented yet: Podman support".to_string()))
     }
 }
 
@@ -427,15 +429,33 @@ mod tests {
 
     #[test]
     fn test_runtime_kind_from_str() {
-        assert_eq!(RuntimeKind::from_str("docker").unwrap(), RuntimeKind::Docker);
-        assert_eq!(RuntimeKind::from_str("Docker").unwrap(), RuntimeKind::Docker);
-        assert_eq!(RuntimeKind::from_str("DOCKER").unwrap(), RuntimeKind::Docker);
-        assert_eq!(RuntimeKind::from_str("podman").unwrap(), RuntimeKind::Podman);
-        assert_eq!(RuntimeKind::from_str("Podman").unwrap(), RuntimeKind::Podman);
-        assert_eq!(RuntimeKind::from_str("PODMAN").unwrap(), RuntimeKind::Podman);
+        assert_eq!(
+            "docker".parse::<RuntimeKind>().unwrap(),
+            RuntimeKind::Docker
+        );
+        assert_eq!(
+            "Docker".parse::<RuntimeKind>().unwrap(),
+            RuntimeKind::Docker
+        );
+        assert_eq!(
+            "DOCKER".parse::<RuntimeKind>().unwrap(),
+            RuntimeKind::Docker
+        );
+        assert_eq!(
+            "podman".parse::<RuntimeKind>().unwrap(),
+            RuntimeKind::Podman
+        );
+        assert_eq!(
+            "Podman".parse::<RuntimeKind>().unwrap(),
+            RuntimeKind::Podman
+        );
+        assert_eq!(
+            "PODMAN".parse::<RuntimeKind>().unwrap(),
+            RuntimeKind::Podman
+        );
 
-        assert!(RuntimeKind::from_str("invalid").is_err());
-        assert!(RuntimeKind::from_str("containerd").is_err());
+        assert!("invalid".parse::<RuntimeKind>().is_err());
+        assert!("containerd".parse::<RuntimeKind>().is_err());
     }
 
     #[test]
@@ -471,14 +491,14 @@ mod tests {
     fn test_detect_runtime_env_var() {
         std::env::set_var("DEACON_RUNTIME", "podman");
         assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Podman);
-        
+
         std::env::set_var("DEACON_RUNTIME", "docker");
         assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
-        
+
         // Invalid env var should fall back to default
         std::env::set_var("DEACON_RUNTIME", "invalid");
         assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
-        
+
         std::env::remove_var("DEACON_RUNTIME");
     }
 
@@ -494,9 +514,12 @@ mod tests {
     #[tokio::test]
     async fn test_podman_runtime_returns_not_implemented() {
         let runtime = ContainerRuntimeImpl::Podman(PodmanRuntime::new());
-        
+
         let result = runtime.ping().await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Not implemented yet: Podman support"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Not implemented yet: Podman support"));
     }
 }
