@@ -56,7 +56,7 @@ API_TOKEN=abc123xyz
     let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
 
     // Verify the override config took precedence
-    assert!(stdout.contains("\"name\": \"override-container\""));
+    assert!(stdout.contains("\"name\":\"override-container\""));
 
     // Verify base config fields are still present
     assert!(stdout.contains("mcr.microsoft.com/devcontainers/base:ubuntu"));
