@@ -30,7 +30,14 @@ pub struct ReadConfigurationArgs {
 pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<()> {
     // Keep startup message at debug to avoid noisy INFO output for simple queries
     debug!("Starting read-configuration command execution");
-    debug!("Read configuration args: {:?}", args);
+    debug!(
+        "Read configuration args: include_merged={}, workspace_folder={:?}, config_path={:?}, override_config_path={:?}, secrets_files_count={}",
+        args.include_merged_configuration,
+        args.workspace_folder,
+        args.config_path,
+        args.override_config_path,
+        args.secrets_files.len()
+    );
 
     // Create output helper with redaction support
     let mut output = Output::new(args.redaction_config.clone(), &args.secret_registry);

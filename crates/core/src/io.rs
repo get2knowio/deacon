@@ -85,7 +85,7 @@ impl Output {
     /// output.write_json(&result).unwrap();
     /// ```
     pub fn write_json<T: Serialize>(&mut self, value: &T) -> Result<()> {
-        let json_output = serde_json::to_string_pretty(value)?;
+        let json_output = serde_json::to_string(value)?;
         self.writer.write_line(&json_output)?;
         Ok(())
     }
@@ -245,9 +245,9 @@ mod tests {
         let result = mock_writer.get_output();
 
         // Should be valid JSON with newline
-        assert!(result.contains("\"command\": \"test\""));
-        assert!(result.contains("\"status\": \"success\""));
-        assert!(result.contains("\"count\": 42"));
+        assert!(result.contains("\"command\":\"test\""));
+        assert!(result.contains("\"status\":\"success\""));
+        assert!(result.contains("\"count\":42"));
         assert!(result.ends_with('\n'));
 
         // Should be parseable as JSON
@@ -354,7 +354,7 @@ mod tests {
 
         // Should contain all outputs in order
         assert!(result.contains("Starting operation...\n"));
-        assert!(result.contains("\"progress\": 50"));
+        assert!(result.contains("\"progress\":50"));
         assert!(result.contains("Operation completed.\n"));
     }
 
