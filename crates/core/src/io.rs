@@ -5,33 +5,33 @@
 //! instead of direct `println!` to prevent accidental mixing of logs with
 //! machine-readable output.
 
-use crate::redaction::{RedactionConfig, RedactingWriter, SecretRegistry};
+use crate::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
 use anyhow::Result;
 use serde::Serialize;
 use std::io::{self, Write};
 
 /// Output helper that enforces stdout/stderr separation contract
-/// 
+///
 /// This helper ensures that:
 /// - JSON modes write only JSON to stdout
 /// - Text modes write only user-facing results to stdout  
 /// - All logs and diagnostics go to stderr via tracing
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```
 /// use deacon_core::io::Output;
 /// use deacon_core::redaction::{RedactionConfig, SecretRegistry};
 /// use serde_json::json;
-/// 
+///
 /// let config = RedactionConfig::default();
 /// let registry = SecretRegistry::new();
 /// let mut output = Output::new(config, &registry);
-/// 
+///
 /// // JSON output
 /// let data = json!({"status": "success", "count": 42});
 /// output.write_json(&data).unwrap();
-/// 
+///
 /// // Text output  
 /// output.write_line("Build completed successfully!").unwrap();
 /// ```
@@ -41,13 +41,13 @@ pub struct Output {
 
 impl Output {
     /// Create a new Output helper with redaction support
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use deacon_core::io::Output;
     /// use deacon_core::redaction::{RedactionConfig, SecretRegistry};
-    /// 
+    ///
     /// let config = RedactionConfig::default();
     /// let registry = SecretRegistry::new();
     /// let output = Output::new(config, &registry);
@@ -55,33 +55,33 @@ impl Output {
     pub fn new(config: RedactionConfig, registry: &SecretRegistry) -> Self {
         let stdout = Box::new(io::stdout()) as Box<dyn Write>;
         let writer = RedactingWriter::new(stdout, config, registry);
-        
+
         Self { writer }
     }
 
     /// Write a JSON-serializable value to stdout
-    /// 
+    ///
     /// This method is intended for JSON output modes. It serializes the value
     /// as pretty-printed JSON and writes it to stdout with a trailing newline.
     /// Redaction is applied to the JSON string before output.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use deacon_core::io::Output;
     /// use deacon_core::redaction::{RedactionConfig, SecretRegistry};
     /// use serde_json::json;
-    /// 
+    ///
     /// let config = RedactionConfig::default();
     /// let registry = SecretRegistry::new();
     /// let mut output = Output::new(config, &registry);
-    /// 
+    ///
     /// let result = json!({
     ///     "status": "success",
     ///     "features": ["docker", "node"],
     ///     "count": 2
     /// });
-    /// 
+    ///
     /// output.write_json(&result).unwrap();
     /// ```
     pub fn write_json<T: Serialize>(&mut self, value: &T) -> Result<()> {
@@ -91,21 +91,21 @@ impl Output {
     }
 
     /// Write a text line to stdout
-    /// 
+    ///
     /// This method is intended for human-readable text output modes. It writes
     /// the provided text to stdout with a trailing newline. Redaction is applied
     /// to the text before output.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use deacon_core::io::Output;
     /// use deacon_core::redaction::{RedactionConfig, SecretRegistry};
-    /// 
+    ///
     /// let config = RedactionConfig::default();
     /// let registry = SecretRegistry::new();
     /// let mut output = Output::new(config, &registry);
-    /// 
+    ///
     /// output.write_line("Build completed successfully!").unwrap();
     /// output.write_line("Container ID: abc123def456").unwrap();
     /// ```
@@ -115,20 +115,20 @@ impl Output {
     }
 
     /// Write multiple text lines to stdout
-    /// 
+    ///
     /// Convenience method for writing multiple lines at once.
     /// Each line is written with a trailing newline.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use deacon_core::io::Output;
     /// use deacon_core::redaction::{RedactionConfig, SecretRegistry};
-    /// 
+    ///
     /// let config = RedactionConfig::default();
     /// let registry = SecretRegistry::new();
     /// let mut output = Output::new(config, &registry);
-    /// 
+    ///
     /// let lines = vec![
     ///     "Configuration Loaded Successfully",
     ///     "========================",
@@ -136,7 +136,7 @@ impl Output {
     ///     "Name: my-devcontainer",
     ///     "Image: mcr.microsoft.com/devcontainers/base:ubuntu",
     /// ];
-    /// 
+    ///
     /// output.write_lines(&lines).unwrap();
     /// ```
     pub fn write_lines(&mut self, lines: &[&str]) -> Result<()> {
@@ -147,21 +147,21 @@ impl Output {
     }
 
     /// Flush any buffered output
-    /// 
+    ///
     /// Ensures all buffered content is written to stdout immediately.
     /// This is automatically called when the Output is dropped, but can
     /// be called explicitly if needed.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use deacon_core::io::Output;
     /// use deacon_core::redaction::{RedactionConfig, SecretRegistry};
-    /// 
+    ///
     /// let config = RedactionConfig::default();
     /// let registry = SecretRegistry::new();
     /// let mut output = Output::new(config, &registry);
-    /// 
+    ///
     /// output.write_line("Important message").unwrap();
     /// output.flush().unwrap(); // Ensure it's written immediately
     /// ```
@@ -221,11 +221,11 @@ mod tests {
         let registry = SecretRegistry::new();
         let mock_writer = MockWriter::new();
         let writer = RedactingWriter::new(
-            Box::new(mock_writer.clone()) as Box<dyn Write>, 
-            config, 
-            &registry
+            Box::new(mock_writer.clone()) as Box<dyn Write>,
+            config,
+            &registry,
         );
-        
+
         let output = Output { writer };
         (output, mock_writer)
     }
@@ -241,15 +241,15 @@ mod tests {
         });
 
         output.write_json(&data).unwrap();
-        
+
         let result = mock_writer.get_output();
-        
+
         // Should be valid JSON with newline
         assert!(result.contains("\"command\": \"test\""));
         assert!(result.contains("\"status\": \"success\""));
         assert!(result.contains("\"count\": 42"));
         assert!(result.ends_with('\n'));
-        
+
         // Should be parseable as JSON
         let parsed: serde_json::Value = serde_json::from_str(result.trim()).unwrap();
         assert_eq!(parsed["status"], "success");
@@ -260,7 +260,7 @@ mod tests {
         let (mut output, mock_writer) = create_test_output();
 
         output.write_line("Build completed successfully!").unwrap();
-        
+
         let result = mock_writer.get_output();
         assert_eq!(result, "Build completed successfully!\n");
     }
@@ -277,7 +277,7 @@ mod tests {
         ];
 
         output.write_lines(&lines).unwrap();
-        
+
         let result = mock_writer.get_output();
         let expected = "Configuration Summary\n====================\n\nName: test-container\n";
         assert_eq!(result, expected);
@@ -291,9 +291,9 @@ mod tests {
 
         let mock_writer = MockWriter::new();
         let writer = RedactingWriter::new(
-            Box::new(mock_writer.clone()) as Box<dyn Write>, 
-            config, 
-            &registry
+            Box::new(mock_writer.clone()) as Box<dyn Write>,
+            config,
+            &registry,
         );
         let mut output = Output { writer };
 
@@ -303,9 +303,9 @@ mod tests {
         });
 
         output.write_json(&data).unwrap();
-        
+
         let result = mock_writer.get_output();
-        
+
         // Secret should be redacted
         assert!(result.contains("****"));
         assert!(!result.contains("secret123"));
@@ -320,16 +320,16 @@ mod tests {
 
         let mock_writer = MockWriter::new();
         let writer = RedactingWriter::new(
-            Box::new(mock_writer.clone()) as Box<dyn Write>, 
-            config, 
-            &registry
+            Box::new(mock_writer.clone()) as Box<dyn Write>,
+            config,
+            &registry,
         );
         let mut output = Output { writer };
 
         output.write_line("Database password: secret123").unwrap();
-        
+
         let result = mock_writer.get_output();
-        
+
         // Secret should be redacted
         assert!(result.contains("****"));
         assert!(!result.contains("secret123"));
@@ -342,16 +342,16 @@ mod tests {
 
         // Write some text lines
         output.write_line("Starting operation...").unwrap();
-        
+
         // Write JSON
         let data = json!({"progress": 50});
         output.write_json(&data).unwrap();
-        
+
         // Write more text
         output.write_line("Operation completed.").unwrap();
-        
+
         let result = mock_writer.get_output();
-        
+
         // Should contain all outputs in order
         assert!(result.contains("Starting operation...\n"));
         assert!(result.contains("\"progress\": 50"));
@@ -364,7 +364,7 @@ mod tests {
 
         output.write_line("Test message").unwrap();
         output.flush().unwrap();
-        
+
         let result = mock_writer.get_output();
         assert_eq!(result, "Test message\n");
     }

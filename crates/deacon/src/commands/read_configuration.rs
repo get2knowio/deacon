@@ -218,10 +218,10 @@ mod tests {
 
         let args = create_test_args(
             &temp_dir,
-            false,                              // include_merged_configuration
-            Some(config_path),                  // config_path
-            None,                               // override_config_path
-            vec![],                             // secrets_files
+            false,             // include_merged_configuration
+            Some(config_path), // config_path
+            None,              // override_config_path
+            vec![],            // secrets_files
         );
 
         let result = execute_read_configuration(args).await;
@@ -243,10 +243,10 @@ mod tests {
 
         let args = create_test_args(
             &temp_dir,
-            false,                              // include_merged_configuration
-            Some(config_path),                  // config_path
-            None,                               // override_config_path
-            vec![],                             // secrets_files
+            false,             // include_merged_configuration
+            Some(config_path), // config_path
+            None,              // override_config_path
+            vec![],            // secrets_files
         );
 
         let result = execute_read_configuration(args).await;
@@ -279,10 +279,10 @@ mod tests {
 
         let args = create_test_args(
             &temp_dir,
-            false,                              // include_merged_configuration
-            Some(base_config_path),             // config_path
-            Some(override_config_path),         // override_config_path
-            vec![],                             // secrets_files
+            false,                      // include_merged_configuration
+            Some(base_config_path),     // config_path
+            Some(override_config_path), // override_config_path
+            vec![],                     // secrets_files
         );
 
         let result = execute_read_configuration(args).await;
@@ -314,10 +314,10 @@ API_KEY=another-secret
 
         let args = create_test_args(
             &temp_dir,
-            false,                              // include_merged_configuration
-            Some(config_path),                  // config_path
-            None,                               // override_config_path
-            vec![secrets_path],                 // secrets_files
+            false,              // include_merged_configuration
+            Some(config_path),  // config_path
+            None,               // override_config_path
+            vec![secrets_path], // secrets_files
         );
 
         let result = execute_read_configuration(args).await;
@@ -330,10 +330,10 @@ API_KEY=another-secret
 
         let args = create_test_args(
             &temp_dir,
-            false,                              // include_merged_configuration
-            None,                               // config_path
-            None,                               // override_config_path
-            vec![],                             // secrets_files
+            false,  // include_merged_configuration
+            None,   // config_path
+            None,   // override_config_path
+            vec![], // secrets_files
         );
 
         let result = execute_read_configuration(args).await;
