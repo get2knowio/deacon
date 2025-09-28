@@ -72,6 +72,11 @@ pub fn init_with_redaction(
         let env_format = std::env::var("DEACON_LOG_FORMAT").ok();
         let effective_format = format.or(env_format.as_deref()).unwrap_or("text");
 
+    // Control span lifecycle event verbosity via env var; default depends on format
+    // - text: NONE (reduce noise)
+    // - json: NEW | CLOSE (preserve observability for tests/tools)
+    let span_events = span_events_for_format(effective_format);
+
         match effective_format {
             "json" => {
                 tracing_subscriber::registry()
@@ -79,9 +84,7 @@ pub fn init_with_redaction(
                         fmt::layer()
                             .json()
                             .with_target(true)
-                            .with_span_events(
-                                fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE,
-                            )
+                            .with_span_events(span_events)
                             .with_writer(io::stderr),
                     )
                     .with(filter)
@@ -93,9 +96,7 @@ pub fn init_with_redaction(
                     .with(
                         fmt::layer()
                             .with_target(true)
-                            .with_span_events(
-                                fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE,
-                            )
+                            .with_span_events(span_events)
                             .with_writer(io::stderr),
                     )
                     .with(filter)
@@ -103,7 +104,7 @@ pub fn init_with_redaction(
             }
         }
 
-        tracing::info!("Logging initialized with format: {}", effective_format);
+        tracing::debug!("Logging initialized with format: {}", effective_format);
     });
 
     Ok(())
@@ -130,6 +131,34 @@ fn create_env_filter(_logging_spec: Option<&str>) -> EnvFilter {
     } else {
         // Fall back to standard RUST_LOG or default (info)
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
+    }
+}
+
+/// Determine span lifecycle event configuration based on env var and format
+fn span_events_for_format(format: &str) -> fmt::format::FmtSpan {
+    use fmt::format::FmtSpan;
+
+    // If env var is set, it overrides defaults
+    if let Ok(raw) = std::env::var("DEACON_LOG_SPAN_EVENTS") {
+        let mut acc = FmtSpan::NONE;
+        for token in raw.split(&[',', '|'][..]).map(|t| t.trim().to_lowercase()) {
+            acc |= match token.as_str() {
+                "none" => FmtSpan::NONE,
+                "new" => FmtSpan::NEW,
+                "close" => FmtSpan::CLOSE,
+                "enter" => FmtSpan::ENTER,
+                "exit" => FmtSpan::EXIT,
+                "active" => FmtSpan::ACTIVE,
+                "full" => FmtSpan::FULL,
+                _ => FmtSpan::NONE,
+            };
+        }
+        return acc;
+    }
+
+    match format {
+        "json" => FmtSpan::NEW | FmtSpan::CLOSE,
+        _ => FmtSpan::NONE,
     }
 }
 

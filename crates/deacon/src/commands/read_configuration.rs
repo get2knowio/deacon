@@ -10,7 +10,7 @@ use deacon_core::secrets::SecretsCollection;
 use deacon_core::variable::SubstitutionContext;
 use serde_json;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 
 /// Read configuration command arguments
 #[derive(Debug, Clone)]
@@ -25,7 +25,8 @@ pub struct ReadConfigurationArgs {
 /// Execute the read-configuration command
 #[instrument(skip(args))]
 pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<()> {
-    info!("Starting read-configuration command execution");
+    // Keep startup message at debug to avoid noisy INFO output for simple queries
+    debug!("Starting read-configuration command execution");
     debug!("Read configuration args: {:?}", args);
 
     // Determine workspace folder
@@ -82,7 +83,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         println!("{}", json_output);
 
         // Single concise completion info line (keep info noise low)
-        info!(
+        debug!(
             "Completed read-configuration: name={} merged=true layers={} replacements={}",
             merged_config.config.name.as_deref().unwrap_or("unknown"),
             merged_config
@@ -164,7 +165,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         println!("{}", json_output);
 
         // Single concise completion info line (keep info noise low)
-        info!(
+        debug!(
             "Completed read-configuration: name={} merged=false replacements={}",
             config.name.as_deref().unwrap_or("unknown"),
             substitution_report.replacements.len()
