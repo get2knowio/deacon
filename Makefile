@@ -18,6 +18,16 @@ run: ## Run CLI
 test: ## Run all tests
 	cargo test -- --test-threads=1
 
+test-parity: ## Run parity tests (requires devcontainer CLI and Docker)
+	@set -euo pipefail; \
+	BIN="$${DEACON_PARITY_DEVCONTAINER:-$$(command -v devcontainer || true)}"; \
+	if [[ -z "$$BIN" ]]; then \
+	  echo "devcontainer CLI not found. Set DEACON_PARITY_DEVCONTAINER=/path/to/devcontainer or add to PATH."; \
+	  exit 1; \
+	fi; \
+	echo "Using devcontainer: $$BIN"; \
+	DEACON_PARITY_DEVCONTAINER="$$BIN" cargo test -p deacon --test parity_read_configuration --test parity_up_exec -- --nocapture
+
 fmt: ## Format all code
 	cargo fmt --all
 
@@ -35,6 +45,9 @@ release-check: ## Full quality gate
 	cargo clippy --all-targets -- -D warnings && \
 	cargo test -- --test-threads=1 && \
 	cargo build --release
+
+.PHONY: test-parity parity
+parity: test-parity ## Alias for test-parity
 
 .PHONY: clean-branches
 clean-branches: ## Delete local and remote branches fully merged into the default branch
