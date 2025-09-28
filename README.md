@@ -158,6 +158,46 @@ deacon doctor  # Structured JSON logs for machine parsing
 
 The JSON format is useful for CI/CD systems and log aggregation tools that need structured data.
 
+## Output Streams
+
+Deacon follows a strict stdout/stderr separation contract to ensure reliable machine-readable output:
+
+### Stream Usage Contract
+
+1. **JSON Output Modes** (`--output json`, `--json` flags):
+   - **stdout**: Single JSON document (newline terminated), nothing else
+   - **stderr**: All logs, diagnostics, and progress messages via `tracing`
+   - **Guarantee**: Scripts parsing stdout will receive only valid JSON
+
+2. **Text Output Modes** (default):
+   - **stdout**: User-facing result summaries and human-readable reports only
+   - **stderr**: All logs, diagnostics, and progress messages via `tracing`
+   - **Note**: Text format content may evolve; use JSON modes for stable parsing
+
+3. **Error Conditions**:
+   - **Non-zero exit**: stdout may be empty unless partial results are explicitly supported
+   - **All errors**: Logged to stderr, never stdout
+
+### Examples
+
+```bash
+# JSON mode - stdout contains only JSON, logs go to stderr
+deacon read-configuration --output json > config.json 2> logs.txt
+
+# Text mode - stdout contains human-readable results, logs to stderr  
+deacon doctor > diagnosis.txt 2> logs.txt
+
+# Parsing JSON output safely
+OUTPUT=$(deacon features plan --json 2>/dev/null)
+echo "$OUTPUT" | jq '.order'
+```
+
+### Integration Guidelines
+
+- **Automation/CI**: Always use JSON output modes (`--json`, `--output json`) for reliable parsing
+- **Human Use**: Default text modes provide better readability and context
+- **Logging**: Use `--log-level` and `--log-format` to control stderr verbosity and format
+
 ### Docker Integration
 All Docker functionality is always available. If Docker daemon is not running or not installed, deacon will provide clear runtime error messages guiding you to install or start Docker.
 
