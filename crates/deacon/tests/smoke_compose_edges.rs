@@ -6,26 +6,12 @@
 //! - Compose error handling when Docker is unavailable
 //! - Edge cases: missing compose files, invalid compose configs
 //!
-//! Tests are written to be resilient in environments without Docker: they
-//! accept specific error messages that indicate Docker is unavailable.
-//! Docker-dependent tests are gated by SMOKE_DOCKER environment variable.
+//! NOTE: These tests assume Docker is available and running. They will fail
+//! if Docker/Compose is not present or cannot start containers.
 
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
-
-fn docker_related_error(stderr: &str) -> bool {
-    stderr.contains("Docker is not installed")
-        || stderr.contains("Docker daemon is not")
-        || stderr.contains("permission denied")
-        || stderr.contains("Failed to spawn docker")
-        || stderr.contains("Docker CLI error")
-        || stderr.contains("Error response from daemon")
-        || stderr.contains("container") && stderr.contains("is not running")
-        || stderr.contains("Container command failed")
-        || stderr.contains("docker-compose") && stderr.contains("not found")
-        || stderr.contains("compose") && stderr.contains("not found")
-}
 
 /// Test compose-based configuration without Docker: should handle gracefully
 #[test]
@@ -73,28 +59,26 @@ services:
         .output()
         .unwrap();
 
-    let up_stderr = String::from_utf8_lossy(&up_output.stderr);
+    assert!(
+        up_output.status.success(),
+        "Compose up failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
 
-    if up_output.status.success() {
-        // Unexpected success without Docker, but accept it
-        println!("Compose up succeeded unexpectedly without Docker");
-    } else if docker_related_error(&up_stderr) {
-        println!("Compose up gracefully handled Docker unavailable error");
-    } else {
-        // Any other error is also acceptable for this test
-        println!("Compose up handled error as expected: {}", up_stderr);
-    }
+    // Cleanup
+    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let _ = down_cmd
+        .current_dir(&temp_dir)
+        .arg("down")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
 }
 
 /// Test compose-based up with subdirectory config (Docker-gated)
 #[test]
 fn test_compose_subfolder_config() {
-    // Only run if Docker is explicitly enabled
-    if std::env::var("SMOKE_DOCKER").is_err() {
-        eprintln!("Skipping Docker-dependent test (set SMOKE_DOCKER=1 to enable)");
-        return;
-    }
-
     let temp_dir = TempDir::new().unwrap();
 
     // Create subdirectory structure
@@ -140,27 +124,11 @@ services:
         .output()
         .unwrap();
 
-    let up_stderr = String::from_utf8_lossy(&up_output.stderr);
-
-    if up_output.status.success() {
-        println!("Compose subfolder up succeeded");
-    } else if docker_related_error(&up_stderr) {
-        eprintln!("Skipping Docker-dependent test (Docker not available)");
-        return;
-    } else {
-        // Some compose-related error is acceptable
-        if up_stderr.contains("compose")
-            || up_stderr.contains("service")
-            || up_stderr.contains("not found")
-        {
-            println!(
-                "Compose subfolder up failed with compose-related error (acceptable): {}",
-                up_stderr
-            );
-        } else {
-            panic!("Unexpected error in compose subfolder up: {}", up_stderr);
-        }
-    }
+    assert!(
+        up_output.status.success(),
+        "Unexpected error in compose subfolder up: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
 
     // Clean up: down command
     let mut down_cmd = Command::cargo_bin("deacon").unwrap();
@@ -209,24 +177,17 @@ fn test_compose_missing_file_edge_case() {
     let up_stderr = String::from_utf8_lossy(&up_output.stderr);
 
     // This should fail with a clear error message about missing compose file
-    if !up_output.status.success() {
-        if up_stderr.contains("not found")
+    assert!(
+        !up_output.status.success(),
+        "Compose missing file unexpectedly succeeded"
+    );
+    assert!(
+        up_stderr.contains("not found")
             || up_stderr.contains("nonexistent")
-            || up_stderr.contains("missing")
-        {
-            println!("Compose missing file handled gracefully with expected error");
-        } else if docker_related_error(&up_stderr) {
-            println!("Compose missing file handled with Docker unavailable error");
-        } else {
-            println!(
-                "Compose missing file failed with error (acceptable): {}",
-                up_stderr
-            );
-        }
-    } else {
-        // Unexpected success, but acceptable
-        println!("Compose missing file unexpectedly succeeded");
-    }
+            || up_stderr.contains("missing"),
+        "Expected missing compose file error, got: {}",
+        up_stderr
+    );
 }
 
 /// Test edge case: invalid compose file syntax
@@ -235,17 +196,12 @@ fn test_compose_invalid_syntax_edge_case() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create invalid docker-compose.yml with syntax errors
+    // Invalid syntax: missing closing quote on image value forces parser failure
     let invalid_compose_config = r#"version: '3.8'
 services:
-  app:
-    image: alpine:3.19
-    working_dir: /workspace
-    volumes:
-      - .:/workspace
-    # Invalid syntax: missing closing bracket
-    environment:
-      - KEY=value
-      - INVALID=[missing_bracket
+    app:
+        image: "alpine:3.19
+        working_dir: /workspace
 "#;
 
     fs::write(
@@ -281,25 +237,20 @@ services:
 
     let up_stderr = String::from_utf8_lossy(&up_output.stderr);
 
-    // This should fail with an error about invalid compose syntax or Docker unavailable
-    if !up_output.status.success() {
-        if up_stderr.contains("invalid")
+    // This should fail with an error about invalid compose syntax
+    assert!(
+        !up_output.status.success(),
+        "Compose invalid syntax unexpectedly succeeded"
+    );
+    assert!(
+        up_stderr.contains("invalid")
             || up_stderr.contains("syntax")
             || up_stderr.contains("parse")
-        {
-            println!("Compose invalid syntax handled gracefully with expected error");
-        } else if docker_related_error(&up_stderr) {
-            println!("Compose invalid syntax handled with Docker unavailable error");
-        } else {
-            println!(
-                "Compose invalid syntax failed with error (acceptable): {}",
-                up_stderr
-            );
-        }
-    } else {
-        // Unexpected success, but acceptable
-        println!("Compose invalid syntax unexpectedly succeeded");
-    }
+            || up_stderr.contains("yaml")
+            || up_stderr.contains("unexpected"),
+        "Expected compose invalid syntax error, got: {}",
+        up_stderr
+    );
 }
 
 /// Test multiple compose files configuration
@@ -362,17 +313,9 @@ services:
         .output()
         .unwrap();
 
-    let up_stderr = String::from_utf8_lossy(&up_output.stderr);
-
-    if up_output.status.success() {
-        println!("Compose multiple files up succeeded");
-    } else if docker_related_error(&up_stderr) {
-        println!("Compose multiple files handled Docker unavailable error");
-    } else {
-        // Some compose-related error is acceptable
-        println!(
-            "Compose multiple files failed with error (acceptable): {}",
-            up_stderr
-        );
-    }
+    assert!(
+        up_output.status.success(),
+        "Compose multiple files up failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
 }

@@ -221,12 +221,14 @@ where
         let working_dir = determine_container_working_dir(&config, workspace_folder);
 
         // Create exec config
+        // Always attach stdin (interactive) so piped/stdin data flows into the container,
+        // independent of TTY allocation. TTY only controls pseudo‑terminal behavior.
         let exec_config = ExecConfig {
             user: args.user.clone(),
             working_dir: Some(working_dir),
             env: env_map,
             tty: should_use_tty,
-            interactive: should_use_tty,
+            interactive: true,
             detach: false,
         };
 

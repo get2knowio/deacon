@@ -5,24 +5,12 @@
 //! - Secret masking in logs (while secrets available to hooks)
 //! - Features accessible in-container (Docker-gated)
 //!
-//! Tests are written to be resilient in environments without Docker: they
-//! accept specific error messages that indicate Docker is unavailable.
-//! Docker-dependent tests are gated by SMOKE_DOCKER environment variable.
+//! NOTE: These tests assume Docker is available and running. They will fail
+//! if Docker is not present or cannot start containers.
 
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
-
-fn docker_related_error(stderr: &str) -> bool {
-    stderr.contains("Docker is not installed")
-        || stderr.contains("Docker daemon is not")
-        || stderr.contains("permission denied")
-        || stderr.contains("Failed to spawn docker")
-        || stderr.contains("Docker CLI error")
-        || stderr.contains("Error response from daemon")
-        || stderr.contains("container") && stderr.contains("is not running")
-        || stderr.contains("Container command failed")
-}
 
 /// Test lifecycle phase order with marker files
 #[test]
@@ -58,28 +46,16 @@ fn test_lifecycle_hooks_stable_order() {
         .output()
         .unwrap();
 
-    let up_stderr = String::from_utf8_lossy(&up_output.stderr);
-
-    if up_output.status.success() {
-        // Test passed - markers should be created in order
-        // TODO: Once container exec is fully implemented, we could verify marker file contents
-        println!("Lifecycle up command succeeded");
-    } else if docker_related_error(&up_stderr) {
-        println!("Skipping Docker-dependent lifecycle test (Docker not available)");
-    } else {
-        panic!("Unexpected error in lifecycle up: {}", up_stderr);
-    }
+    assert!(
+        up_output.status.success(),
+        "Unexpected error in lifecycle up: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
 }
 
 /// Test lifecycle resume behavior (restart only re-runs postStart/postAttach)
 #[test]
 fn test_lifecycle_resume_markers() {
-    // Only run if Docker is explicitly enabled
-    if std::env::var("SMOKE_DOCKER").is_err() {
-        eprintln!("Skipping Docker-dependent test (set SMOKE_DOCKER=1 to enable)");
-        return;
-    }
-
     let temp_dir = TempDir::new().unwrap();
 
     // Create devcontainer with resume-testable lifecycle hooks
@@ -110,14 +86,11 @@ fn test_lifecycle_resume_markers() {
         .output()
         .unwrap();
 
-    if !up_output1.status.success() {
-        let stderr = String::from_utf8_lossy(&up_output1.stderr);
-        if docker_related_error(&stderr) {
-            eprintln!("Skipping Docker-dependent test (Docker not available)");
-            return;
-        }
-        panic!("First up failed: {}", stderr);
-    }
+    assert!(
+        up_output1.status.success(),
+        "First up failed: {}",
+        String::from_utf8_lossy(&up_output1.stderr)
+    );
 
     // TODO: Sleep and second up to test resume behavior
     // Second up should only re-run postStart/postAttach
@@ -156,18 +129,13 @@ fn test_lifecycle_skip_non_blocking_commands() {
         .unwrap();
 
     let up_stderr = String::from_utf8_lossy(&up_output.stderr);
-
-    if up_output.status.success() {
-        // TODO: Verify postAttach marker was not created but postStart was
-        println!("Skip non-blocking commands succeeded");
-    } else if docker_related_error(&up_stderr) {
-        println!("Skipping Docker-dependent skip-non-blocking-commands test");
-    } else {
-        panic!(
-            "Unexpected error in skip-non-blocking-commands up: {}",
-            up_stderr
-        );
-    }
+    assert!(
+        up_output.status.success(),
+        "Unexpected error in skip-non-blocking-commands up: {}",
+        up_stderr
+    );
+    // TODO: Verify postAttach marker was not created but postStart was
+    println!("Skip non-blocking commands succeeded");
 }
 
 /// Test secret masking in logs with --no-redact disabled (default behavior)
@@ -208,87 +176,53 @@ fn test_secret_masking_in_lifecycle_logs() {
         .unwrap();
 
     let up_stderr = String::from_utf8_lossy(&up_output.stderr);
-    let up_stdout = String::from_utf8_lossy(&up_output.stdout);
 
-    if up_output.status.success() {
-        let combined_output = format!("{}\n{}", up_stdout, up_stderr);
+    assert!(
+        up_output.status.success(),
+        "Unexpected error in secret masking up: {}",
+        up_stderr
+    );
+    // Intentionally not asserting on specific stdout content at this time
+    // For now, we don't assert on container stdout visibility; just ensure the command succeeded.
 
-        // If the command succeeded but we have docker-related errors in stderr,
-        // it means the container commands failed, so we should skip like in the docker error case
-        if docker_related_error(&up_stderr) {
-            println!("Skipping Docker-dependent secret masking test (command succeeded but container commands failed)");
-            return;
-        }
-
-        // Check that the command itself is logged (with secrets potentially redacted)
-        // The command should appear in the logs since it's part of the lifecycle execution
-        if combined_output.contains("echo") && combined_output.contains("Public is") {
-            println!("Lifecycle command logging verified");
-        }
-
-        // Public info should still be visible when present in output
-        // Some environments may not capture container stdout; only assert when seen
-        if combined_output.contains("Public is:") {
-            assert!(
-                combined_output.contains("public-info"),
-                "Public information should not be redacted"
-            );
-        }
-
-        // Test that we can disable redaction and see the secret
-        let mut up_cmd_no_redact = Command::cargo_bin("deacon").unwrap();
-        let up_output_no_redact = up_cmd_no_redact
-            .current_dir(&temp_dir)
-            .arg("up")
-            .arg("--no-redact")
-            .arg("--remove-existing-container")
-            .arg("--workspace-folder")
-            .arg(temp_dir.path())
-            .output()
-            .unwrap();
-
-        if up_output_no_redact.status.success() {
-            let combined_no_redact = format!(
-                "{}\n{}",
-                String::from_utf8_lossy(&up_output_no_redact.stdout),
-                String::from_utf8_lossy(&up_output_no_redact.stderr)
-            );
-
-            // With --no-redact, secret should be visible in the command logging
-            if combined_no_redact.contains("my-secret-password") {
-                println!("Secret masking test passed - redaction can be disabled");
-            } else {
-                println!("Note: Secret not found in no-redact output (may be expected if commands didn't run)");
-            }
-        }
-
-        println!("Secret masking test succeeded");
-    } else if docker_related_error(&up_stderr) {
-        println!("Skipping Docker-dependent secret masking test");
-    } else {
-        panic!("Unexpected error in secret masking up: {}", up_stderr);
-    }
+    // Test that we can disable redaction and see the secret
+    let mut up_cmd_no_redact = Command::cargo_bin("deacon").unwrap();
+    let up_output_no_redact = up_cmd_no_redact
+        .current_dir(&temp_dir)
+        .arg("up")
+        .arg("--no-redact")
+        .arg("--remove-existing-container")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        up_output_no_redact.status.success(),
+        "Unexpected error in no-redact up: {}",
+        String::from_utf8_lossy(&up_output_no_redact.stderr)
+    );
+    let combined_no_redact = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&up_output_no_redact.stdout),
+        String::from_utf8_lossy(&up_output_no_redact.stderr)
+    );
+    // Ensure the explicit warning about disabled redaction is emitted
+    assert!(
+        combined_no_redact.contains("Secret redaction is DISABLED"),
+        "Expected a warning about disabled redaction when --no-redact is used"
+    );
 }
 
-/// Test simple feature accessibility in container (Docker-gated)
+/// Test simple in-container exec after up
 #[test]
 fn test_features_accessible_in_container() {
-    // Only run if Docker is explicitly enabled
-    if std::env::var("SMOKE_DOCKER").is_err() {
-        eprintln!("Skipping Docker-dependent test (set SMOKE_DOCKER=1 to enable)");
-        return;
-    }
-
     let temp_dir = TempDir::new().unwrap();
 
-    // Create devcontainer with a simple feature
+    // Create devcontainer without external features to avoid network
     let devcontainer_config = r#"{
     "name": "Feature Access Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
-    "features": {
-        "ghcr.io/devcontainers/features/docker-in-docker:2": {}
-    },
     "postCreateCommand": "echo 'Container ready for feature test'"
 }"#;
 
@@ -309,14 +243,11 @@ fn test_features_accessible_in_container() {
         .output()
         .unwrap();
 
-    if !up_output.status.success() {
-        let stderr = String::from_utf8_lossy(&up_output.stderr);
-        if docker_related_error(&stderr) {
-            eprintln!("Skipping Docker-dependent test (Docker not available)");
-            return;
-        }
-        panic!("Feature up failed: {}", stderr);
-    }
+    assert!(
+        up_output.status.success(),
+        "Feature up failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
 
     // Test that docker command is available via exec
     let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
@@ -325,25 +256,21 @@ fn test_features_accessible_in_container() {
         .arg("exec")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
-        .arg("docker")
-        .arg("--version")
+        .arg("--")
+        .arg("sh")
+        .arg("-lc")
+        .arg("echo ready")
         .output()
         .unwrap();
 
-    let exec_stderr = String::from_utf8_lossy(&exec_output.stderr);
-
-    if exec_output.status.success() {
-        let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
-        assert!(
-            exec_stdout.contains("Docker version"),
-            "Docker feature should provide docker command"
-        );
-        println!("Feature accessibility test passed - docker command available");
-    } else {
-        // Could be normal if container isn't running or feature installation failed
-        println!(
-            "Feature exec test failed (expected in some environments): {}",
-            exec_stderr
-        );
-    }
+    assert!(
+        exec_output.status.success(),
+        "Exec failed unexpectedly: {}",
+        String::from_utf8_lossy(&exec_output.stderr)
+    );
+    let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
+    assert!(
+        exec_stdout.contains("ready"),
+        "Expected 'ready' in exec output"
+    );
 }

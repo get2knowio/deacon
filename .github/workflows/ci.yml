@@ -14,10 +14,7 @@ env:
 jobs:
   test:
     name: Test (unit + integration)
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -38,16 +35,16 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
+    - name: Ensure Docker is running
+      run: |
+        sudo service docker start
+        docker info
+
     - name: Build
       run: cargo build --verbose
       
-    - name: Run unit/integration tests (exclude smoke on macOS)
-      run: |
-        if [[ "${{ runner.os }}" == "macOS" ]]; then
-          cargo test --verbose -- --test-threads=1 --skip smoke_basic
-        else
-          cargo test --verbose -- --test-threads=1 --skip smoke_basic
-        fi
+    - name: Run unit/integration tests
+      run: cargo test --verbose -- --test-threads=1 --skip smoke_basic
       
     - name: Check formatting
       run: cargo fmt --all -- --check
@@ -75,6 +72,11 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
+
+    - name: Ensure Docker is running
+      run: |
+        sudo service docker start
+        docker info
 
     - name: Build
       run: cargo build --verbose
@@ -115,6 +117,11 @@ jobs:
         key: ${{ runner.os }}-llvmcov-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-llvmcov-
+
+    - name: Ensure Docker is running
+      run: |
+        sudo service docker start
+        docker info
 
     - name: Generate coverage (fail under ${{ env.MIN_COVERAGE }}%)
       run: |

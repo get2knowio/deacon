@@ -6,6 +6,7 @@
 use crate::config::DevContainerConfig;
 use crate::errors::Result;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::{debug, instrument};
@@ -103,7 +104,7 @@ impl ContainerIdentity {
         let hash = hasher.finish();
 
         // Use first 8 characters for short hash
-        format!("{:x}", hash)[..8].to_string()
+        format!("{:016x}", hash)[..8].to_string()
     }
 
     /// Generate a deterministic hash from the configuration
@@ -111,15 +112,17 @@ impl ContainerIdentity {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
-        // Create a normalized representation for hashing
-        let normalized = serde_json::to_string(config).unwrap_or_default();
+        // Create a normalized representation with deterministic key ordering for hashing
+        let mut value = serde_json::to_value(config).unwrap_or(Value::Null);
+        canonicalize_json(&mut value);
+        let normalized = serde_json::to_string(&value).unwrap_or_default();
 
         let mut hasher = DefaultHasher::new();
         normalized.hash(&mut hasher);
         let hash = hasher.finish();
 
         // Use first 8 characters for short hash
-        format!("{:x}", hash)[..8].to_string()
+        format!("{:016x}", hash)[..8].to_string()
     }
 
     /// Generate a deterministic container name
@@ -160,6 +163,29 @@ impl ContainerIdentity {
             LABEL_CONFIG_HASH,
             self.config_hash
         )
+    }
+}
+
+fn canonicalize_json(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(String, Value)> = map
+                .iter_mut()
+                .map(|(k, v)| (k.clone(), std::mem::take(v)))
+                .collect();
+            map.clear();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            for (key, mut val) in entries {
+                canonicalize_json(&mut val);
+                map.insert(key, val);
+            }
+        }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                canonicalize_json(item);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -306,5 +332,26 @@ mod tests {
         let identity2 = ContainerIdentity::new(temp_dir2.path(), &config);
 
         assert_ne!(identity1.workspace_hash, identity2.workspace_hash);
+    }
+
+    #[test]
+    fn test_hash_config_deterministic_with_maps() {
+        let mut config = DevContainerConfig {
+            name: Some("test".to_string()),
+            image: Some("ubuntu:20.04".to_string()),
+            ..Default::default()
+        };
+
+        config
+            .remote_env
+            .insert("ALPHA".to_string(), Some("1".to_string()));
+        config
+            .remote_env
+            .insert("BETA".to_string(), Some("2".to_string()));
+
+        let hash1 = ContainerIdentity::hash_config(&config);
+        let hash2 = ContainerIdentity::hash_config(&config);
+
+        assert_eq!(hash1, hash2);
     }
 }

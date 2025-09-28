@@ -321,12 +321,8 @@ impl ComposeManager {
             resolved_files.push(file_path);
         }
 
-        // Generate project name from directory name
-        let project_name = base_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("deacon-compose")
-            .to_string();
+        // Generate project name from directory name, ensuring it meets Docker Compose requirements
+        let project_name = derive_project_name(base_path);
 
         Ok(ComposeProject {
             name: project_name,
@@ -486,9 +482,65 @@ impl ComposeProject {
     }
 }
 
+fn derive_project_name(base_path: &Path) -> String {
+    // Docker Compose project name rules:
+    // - must start with a lowercase letter or number
+    // - may contain only lowercase alphanumeric characters, hyphens, and underscores
+    // - we also collapse runs of invalid characters into a single '-'
+    const FALLBACK: &str = "deacon-compose";
+
+    let original = base_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(FALLBACK);
+
+    // Fallback when directory name is empty or only dots (e.g., "...")
+    if original.is_empty() || original.chars().all(|c| c == '.') {
+        return FALLBACK.to_string();
+    }
+
+    // Sanitize: lowercase, keep [a-z0-9_-], convert other chars to '-'
+    let mut sanitized = String::with_capacity(original.len());
+    let mut last_was_dash = false;
+    for ch in original.chars() {
+        let lc = ch.to_ascii_lowercase();
+        if lc.is_ascii_alphanumeric() {
+            sanitized.push(lc);
+            last_was_dash = false;
+        } else if lc == '-' || lc == '_' {
+            // Preserve hyphen/underscore but avoid leading repetitions
+            if !(sanitized.is_empty() && (lc == '-' || lc == '_')) {
+                sanitized.push(lc);
+            }
+            last_was_dash = lc == '-';
+        } else {
+            // Replace invalid characters with a single '-'
+            if !last_was_dash {
+                sanitized.push('-');
+                last_was_dash = true;
+            }
+        }
+    }
+
+    // Trim leading/trailing dashes/underscores
+    let sanitized = sanitized
+        .trim_matches(|c: char| c == '-' || c == '_')
+        .to_string();
+
+    // Ensure first character is a lowercase letter or number
+    let final_name = match sanitized.chars().next() {
+        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => sanitized,
+        Some(_) => format!("d{}", sanitized),
+        None => FALLBACK.to_string(),
+    };
+
+    final_name
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
 
     #[test]
@@ -619,5 +671,25 @@ mod tests {
 
         let all_services = project.get_all_services();
         assert_eq!(all_services, vec!["app"]);
+    }
+
+    #[test]
+    fn test_derive_project_name_from_hidden_directory() {
+        let path = Path::new("/tmp/.tmpAbC123");
+        // Leading dot should be removed and name sanitized to valid compose project name
+        assert_eq!(derive_project_name(path), "tmpabc123");
+    }
+
+    #[test]
+    fn test_derive_project_name_replaces_invalid_characters() {
+        let path = Path::new("/tmp/My Project!");
+        // Sanitize spaces and punctuation, lowercase and replace with hyphen
+        assert_eq!(derive_project_name(path), "my-project");
+    }
+
+    #[test]
+    fn test_derive_project_name_fallback_for_all_invalid() {
+        let path = Path::new("/tmp/...");
+        assert_eq!(derive_project_name(path), "deacon-compose");
     }
 }

@@ -831,6 +831,22 @@ impl ContainerOps for CliDocker {
             args.extend(mount.to_docker_args());
         }
 
+        // Apply containerEnv variables from configuration
+        for (key, value) in &config.container_env {
+            args.push("--env".to_string());
+            args.push(format!("{}={}", key, value));
+        }
+
+        // Apply remoteEnv variables (Dev Container spec: remote env should be available during shell/exec sessions)
+        // `None` values indicate removal; emulate by setting an empty value to override defaults.
+        for (key, value) in &config.remote_env {
+            args.push("--env".to_string());
+            match value {
+                Some(val) => args.push(format!("{}={}", key, val)),
+                None => args.push(format!("{}=", key)),
+            }
+        }
+
         // Add security options from configuration (centralized)
         {
             use crate::security::SecurityOptions;
@@ -851,6 +867,19 @@ impl ContainerOps for CliDocker {
             DockerError::CLIError("No image specified in configuration".to_string())
         })?;
         args.push(image.clone());
+
+        // Respect overrideCommand semantics (default: true)
+        // When enabled, ensure the container stays running so lifecycle commands can execute.
+        // Use a minimal keep-alive command that is broadly available.
+        // Reference: DevContainer spec "overrideCommand".
+        let override_cmd = config.override_command.unwrap_or(true);
+        if override_cmd {
+            // Use a portable keep-alive: prefer 'sleep infinity' (GNU coreutils),
+            // fall back to 'tail -f /dev/null' for BusyBox/Alpine images.
+            args.push("/bin/sh".to_string());
+            args.push("-c".to_string());
+            args.push("sleep infinity || tail -f /dev/null".to_string());
+        }
 
         // Execute docker create command
         let docker_path = self.docker_path.clone();

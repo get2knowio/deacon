@@ -9,6 +9,47 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
+/// Helper to compute expected compose project name using same rules as core
+fn expected_project_name_for_path(base_path: &std::path::Path) -> String {
+    const FALLBACK: &str = "deacon-compose";
+    let original = base_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(FALLBACK);
+
+    if original.is_empty() || original.chars().all(|c| c == '.') {
+        return FALLBACK.to_string();
+    }
+
+    let mut sanitized = String::with_capacity(original.len());
+    let mut last_was_dash = false;
+    for ch in original.chars() {
+        let lc = ch.to_ascii_lowercase();
+        if lc.is_ascii_alphanumeric() {
+            sanitized.push(lc);
+            last_was_dash = false;
+        } else if lc == '-' || lc == '_' {
+            if !(sanitized.is_empty() && (lc == '-' || lc == '_')) {
+                sanitized.push(lc);
+            }
+            last_was_dash = lc == '-';
+        } else if !last_was_dash {
+            sanitized.push('-');
+            last_was_dash = true;
+        }
+    }
+
+    let sanitized = sanitized
+        .trim_matches(|c: char| c == '-' || c == '_')
+        .to_string();
+
+    match sanitized.chars().next() {
+        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => sanitized,
+        Some(_) => format!("d{}", sanitized),
+        None => FALLBACK.to_string(),
+    }
+}
+
 /// Create a minimal docker-compose.yml file for testing
 fn create_test_compose_file(dir: &std::path::Path) -> PathBuf {
     let compose_content = r#"
@@ -255,12 +296,8 @@ fn test_compose_project_name_generation() {
         .create_project(&config, &base_path)
         .expect("Failed to create compose project");
 
-    // Project name should be derived from directory name
-    let expected_name = base_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("deacon-compose");
-
+    // Project name should be derived from directory name and sanitized for compose
+    let expected_name = expected_project_name_for_path(&base_path);
     assert_eq!(project.name, expected_name);
 }
 
@@ -336,7 +373,11 @@ services:
         .create_project(&config, &devcontainer_dir)
         .expect("Failed to create compose project");
 
-    assert_eq!(project.name, ".devcontainer");
+    // Project name should be sanitized (leading dot removed)
+    assert_eq!(
+        project.name,
+        expected_project_name_for_path(&devcontainer_dir)
+    );
     assert_eq!(project.service, "app");
     assert_eq!(project.run_services, vec!["db", "redis"]);
     assert_eq!(project.get_all_services(), vec!["app", "db", "redis"]);

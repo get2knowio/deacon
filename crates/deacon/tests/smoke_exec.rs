@@ -6,23 +6,12 @@
 //! - remoteEnv and metadata interactions
 //! - Compose/subfolder config + markers
 //!
-//! Tests are written to be resilient in environments without Docker: they
-//! accept specific error messages that indicate Docker is unavailable.
+//! NOTE: These tests assume Docker is available and running. They will fail
+//! if Docker is not present or cannot start containers.
 
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
-
-fn docker_related_error(stderr: &str) -> bool {
-    stderr.contains("Docker is not installed")
-        || stderr.contains("Docker daemon is not")
-        || stderr.contains("permission denied")
-        || stderr.contains("Failed to spawn docker")
-        || stderr.contains("Docker CLI error")
-        || stderr.contains("Error response from daemon")
-        || stderr.contains("container") && stderr.contains("is not running")
-        || stderr.contains("Container command failed")
-}
 
 /// Test exec without TTY prints expected stdout
 #[test]
@@ -43,6 +32,23 @@ fn test_exec_stdout_without_tty() {
     )
     .unwrap();
 
+    // Ensure container is up
+    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let up_out = up_cmd
+        .current_dir(&temp_dir)
+        .arg("up")
+        .arg("--skip-post-create")
+        .arg("--skip-non-blocking-commands")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        up_out.status.success(),
+        "up failed: {}",
+        String::from_utf8_lossy(&up_out.stderr)
+    );
+
     // Test exec command without TTY
     let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
     let exec_output = exec_cmd
@@ -55,22 +61,26 @@ fn test_exec_stdout_without_tty() {
         .output()
         .unwrap();
 
-    let exec_stderr = String::from_utf8_lossy(&exec_output.stderr);
+    assert!(
+        exec_output.status.success(),
+        "Unexpected error in exec stdout test: {}",
+        String::from_utf8_lossy(&exec_output.stderr)
+    );
+    let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
+    assert!(
+        exec_stdout.contains("Hello from exec"),
+        "Exec should output command stdout"
+    );
 
-    if exec_output.status.success() {
-        let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
-        assert!(
-            exec_stdout.contains("Hello from exec"),
-            "Exec should output command stdout"
-        );
-        println!("Exec stdout test passed");
-    } else if docker_related_error(&exec_stderr)
-        || exec_stderr.contains("No running container found")
-    {
-        println!("Skipping Docker-dependent exec stdout test");
-    } else {
-        panic!("Unexpected error in exec stdout test: {}", exec_stderr);
-    }
+    // Cleanup
+    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let _ = down_cmd
+        .current_dir(&temp_dir)
+        .arg("down")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
 }
 
 /// Test exec exit code propagation
@@ -91,6 +101,23 @@ fn test_exec_exit_code_propagation() {
     )
     .unwrap();
 
+    // Ensure container is up for exit code test
+    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let up_out = up_cmd
+        .current_dir(&temp_dir)
+        .arg("up")
+        .arg("--skip-post-create")
+        .arg("--skip-non-blocking-commands")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        up_out.status.success(),
+        "up failed: {}",
+        String::from_utf8_lossy(&up_out.stderr)
+    );
+
     // Test exec command that exits with specific code
     let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
     let exec_output = exec_cmd
@@ -105,22 +132,23 @@ fn test_exec_exit_code_propagation() {
         .output()
         .unwrap();
 
-    let exec_stderr = String::from_utf8_lossy(&exec_output.stderr);
+    // Should propagate exit code 123
+    assert_eq!(
+        exec_output.status.code(),
+        Some(123),
+        "Exec should propagate exit code 123, stderr: {}",
+        String::from_utf8_lossy(&exec_output.stderr)
+    );
 
-    if docker_related_error(&exec_stderr) || exec_stderr.contains("No running container found") {
-        println!("Skipping Docker-dependent exec exit code test");
-    } else {
-        // Should propagate exit code 123, but might get different code if container setup failed
-        let actual_code = exec_output.status.code();
-        if actual_code == Some(123) {
-            println!("Exec exit code propagation test passed");
-        } else {
-            println!(
-                "Note: Got exit code {:?} instead of 123, possibly due to container state",
-                actual_code
-            );
-        }
-    }
+    // Cleanup
+    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let _ = down_cmd
+        .current_dir(&temp_dir)
+        .arg("down")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
 }
 
 /// Test exec working directory behavior
@@ -141,6 +169,23 @@ fn test_exec_working_directory() {
     )
     .unwrap();
 
+    // Ensure container is up
+    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let up_out = up_cmd
+        .current_dir(&temp_dir)
+        .arg("up")
+        .arg("--skip-post-create")
+        .arg("--skip-non-blocking-commands")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        up_out.status.success(),
+        "up failed: {}",
+        String::from_utf8_lossy(&up_out.stderr)
+    );
+
     // Test exec with working directory
     let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
     let exec_output = exec_cmd
@@ -152,27 +197,28 @@ fn test_exec_working_directory() {
         .output()
         .unwrap();
 
-    let exec_stderr = String::from_utf8_lossy(&exec_output.stderr);
+    assert!(
+        exec_output.status.success(),
+        "Unexpected error in exec working directory test: {}",
+        String::from_utf8_lossy(&exec_output.stderr)
+    );
+    let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
+    // Should be in workspace folder
+    assert!(
+        exec_stdout.trim().ends_with("workspace") || exec_stdout.contains("/workspace"),
+        "Exec should run in workspace directory, got: {}",
+        exec_stdout
+    );
 
-    if exec_output.status.success() {
-        let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
-        // Should be in workspace folder
-        assert!(
-            exec_stdout.trim().ends_with("workspace") || exec_stdout.contains("/workspace"),
-            "Exec should run in workspace directory, got: {}",
-            exec_stdout
-        );
-        println!("Exec working directory test passed");
-    } else if docker_related_error(&exec_stderr)
-        || exec_stderr.contains("No running container found")
-    {
-        println!("Skipping Docker-dependent exec working directory test");
-    } else {
-        panic!(
-            "Unexpected error in exec working directory test: {}",
-            exec_stderr
-        );
-    }
+    // Cleanup
+    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let _ = down_cmd
+        .current_dir(&temp_dir)
+        .arg("down")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
 }
 
 /// Test exec --env merges environment variables
@@ -193,6 +239,23 @@ fn test_exec_env_merges() {
     )
     .unwrap();
 
+    // Ensure container is up
+    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let up_out = up_cmd
+        .current_dir(&temp_dir)
+        .arg("up")
+        .arg("--skip-post-create")
+        .arg("--skip-non-blocking-commands")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        up_out.status.success(),
+        "up failed: {}",
+        String::from_utf8_lossy(&up_out.stderr)
+    );
+
     // Test exec with --env
     let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
     let exec_output = exec_cmd
@@ -211,27 +274,31 @@ fn test_exec_env_merges() {
         .output()
         .unwrap();
 
-    let exec_stderr = String::from_utf8_lossy(&exec_output.stderr);
+    assert!(
+        exec_output.status.success(),
+        "Unexpected error in exec --env test: {}",
+        String::from_utf8_lossy(&exec_output.stderr)
+    );
+    let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
+    // Should contain the env values
+    assert!(
+        exec_stdout.contains("FOO=BAR"),
+        "Should have FOO=BAR from --env"
+    );
+    assert!(
+        exec_stdout.contains("BAZ="),
+        "Should have empty BAZ from --env"
+    );
 
-    if exec_output.status.success() {
-        let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
-        // Should contain the env values
-        assert!(
-            exec_stdout.contains("FOO=BAR"),
-            "Should have FOO=BAR from --env"
-        );
-        assert!(
-            exec_stdout.contains("BAZ="),
-            "Should have empty BAZ from --env"
-        );
-        println!("Exec --env test passed");
-    } else if docker_related_error(&exec_stderr)
-        || exec_stderr.contains("No running container found")
-    {
-        println!("Skipping Docker-dependent exec --env test");
-    } else {
-        panic!("Unexpected error in exec --env test: {}", exec_stderr);
-    }
+    // Cleanup
+    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let _ = down_cmd
+        .current_dir(&temp_dir)
+        .arg("down")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
 }
 
 /// Test up with remoteEnv in config makes values available to lifecycle hooks
@@ -269,33 +336,34 @@ fn test_up_remote_env_in_config() {
 
     let up_stderr = String::from_utf8_lossy(&up_output.stderr);
 
-    if up_output.status.success() {
-        println!("Up with remoteEnv config test passed");
+    assert!(
+        up_output.status.success(),
+        "Unexpected error in up remoteEnv test: {}",
+        up_stderr
+    );
 
-        // Test that we can exec and see the environment
-        let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
-        let exec_output = exec_cmd
-            .current_dir(&temp_dir)
-            .arg("exec")
-            .arg("--workspace-folder")
-            .arg(temp_dir.path())
-            .arg("printenv")
-            .arg("CONFIG_VAR")
-            .output()
-            .unwrap();
+    // Test that we can exec and see the environment
+    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let exec_output = exec_cmd
+        .current_dir(&temp_dir)
+        .arg("exec")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .arg("printenv")
+        .arg("CONFIG_VAR")
+        .output()
+        .unwrap();
 
-        if exec_output.status.success() {
-            let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
-            assert!(
-                exec_stdout.contains("config_value"),
-                "remoteEnv should be available in exec"
-            );
-        }
-    } else if docker_related_error(&up_stderr) {
-        println!("Skipping Docker-dependent up remoteEnv test");
-    } else {
-        panic!("Unexpected error in up remoteEnv test: {}", up_stderr);
-    }
+    assert!(
+        exec_output.status.success(),
+        "Exec failed: {}",
+        String::from_utf8_lossy(&exec_output.stderr)
+    );
+    let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
+    assert!(
+        exec_stdout.contains("config_value"),
+        "remoteEnv should be available in exec"
+    );
 }
 
 /// Test exec with --config in subfolder works
@@ -335,43 +403,32 @@ fn test_exec_subfolder_config() {
 
     let up_stderr = String::from_utf8_lossy(&up_output.stderr);
 
-    if up_output.status.success() {
-        println!("Up with subfolder config succeeded");
+    assert!(
+        up_output.status.success(),
+        "Unexpected error in subfolder config test (up): {}",
+        up_stderr
+    );
 
-        // Test exec with --config in subfolder
-        let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
-        let exec_output = exec_cmd
-            .current_dir(&temp_dir)
-            .arg("exec")
-            .arg("--workspace-folder")
-            .arg(&subfolder)
-            .arg("--config")
-            .arg(subfolder.join(".devcontainer/devcontainer.json"))
-            .arg("echo")
-            .arg("subfolder exec works")
-            .output()
-            .unwrap();
+    // Test exec with --config in subfolder
+    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let exec_output = exec_cmd
+        .current_dir(&temp_dir)
+        .arg("exec")
+        .arg("--workspace-folder")
+        .arg(&subfolder)
+        .arg("--config")
+        .arg(subfolder.join(".devcontainer/devcontainer.json"))
+        .arg("echo")
+        .arg("subfolder exec works")
+        .output()
+        .unwrap();
 
-        let exec_stderr = String::from_utf8_lossy(&exec_output.stderr);
-
-        if exec_output.status.success() {
-            let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
-            assert!(
-                exec_stdout.contains("subfolder exec works"),
-                "Exec should work with subfolder config"
-            );
-            println!("Exec with subfolder config test passed");
-        } else if !docker_related_error(&exec_stderr) {
-            println!(
-                "Exec with subfolder config failed (expected in some environments): {}",
-                exec_stderr
-            );
-        }
-    } else if docker_related_error(&up_stderr) {
-        println!("Skipping Docker-dependent subfolder config test");
-    } else {
-        panic!("Unexpected error in subfolder config test: {}", up_stderr);
-    }
+    assert!(exec_output.status.success());
+    let exec_stdout = String::from_utf8_lossy(&exec_output.stdout);
+    assert!(
+        exec_stdout.contains("subfolder exec works"),
+        "Exec should work with subfolder config"
+    );
 }
 
 /// Test TTY detection behavior
@@ -392,6 +449,23 @@ fn test_exec_tty_detection() {
     )
     .unwrap();
 
+    // Ensure container is up
+    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let up_out = up_cmd
+        .current_dir(&temp_dir)
+        .arg("up")
+        .arg("--skip-post-create")
+        .arg("--skip-non-blocking-commands")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        up_out.status.success(),
+        "up failed: {}",
+        String::from_utf8_lossy(&up_out.stderr)
+    );
+
     // Test exec command that checks if running in TTY
     let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
     let exec_output = exec_cmd
@@ -405,16 +479,19 @@ fn test_exec_tty_detection() {
         .output()
         .unwrap();
 
-    let exec_stderr = String::from_utf8_lossy(&exec_output.stderr);
+    // Exit code depends on TTY state - both success and failure are valid, but the command must execute.
+    assert!(
+        exec_output.status.code().is_some(),
+        "TTY detection exec did not run"
+    );
 
-    if docker_related_error(&exec_stderr) || exec_stderr.contains("No running container found") {
-        println!("Skipping Docker-dependent TTY detection test");
-    } else {
-        // Exit code depends on TTY state - both success and failure are valid
-        // since we're testing that the command executes properly
-        println!(
-            "TTY detection test completed (exit code: {:?})",
-            exec_output.status.code()
-        );
-    }
+    // Cleanup
+    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let _ = down_cmd
+        .current_dir(&temp_dir)
+        .arg("down")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
 }

@@ -5,24 +5,12 @@
 //! - Down command after up: should successfully tear down (Docker-gated)
 //! - Idempotent down behavior: subsequent down calls should not error
 //!
-//! Tests are written to be resilient in environments without Docker: they
-//! accept specific error messages that indicate Docker is unavailable.
-//! Docker-dependent tests are gated by SMOKE_DOCKER environment variable.
+//! NOTE: These tests assume Docker is available and running. They will fail
+//! if Docker is not present or cannot start containers.
 
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
-
-fn docker_related_error(stderr: &str) -> bool {
-    stderr.contains("Docker is not installed")
-        || stderr.contains("Docker daemon is not")
-        || stderr.contains("permission denied")
-        || stderr.contains("Failed to spawn docker")
-        || stderr.contains("Docker CLI error")
-        || stderr.contains("Error response from daemon")
-        || stderr.contains("container") && stderr.contains("is not running")
-        || stderr.contains("Container command failed")
-}
 
 /// Test down command before any up: should succeed or gracefully handle "no container"
 #[test]
@@ -54,32 +42,22 @@ fn test_down_before_up() {
         .unwrap();
 
     let down_stderr = String::from_utf8_lossy(&down_output.stderr);
-
-    if down_output.status.success() {
-        // Expected: should succeed when no container to tear down
-        println!("Down before up succeeded as expected");
-    } else if docker_related_error(&down_stderr) {
-        println!("Skipping Docker-dependent test (Docker not available)");
-    } else if down_stderr.contains("No running containers")
-        || down_stderr.contains("no container")
-        || down_stderr.contains("not found")
-    {
-        // Also acceptable: explicit "no container" message
-        println!("Down before up handled gracefully with no-container message");
-    } else {
-        panic!("Unexpected error in down before up: {}", down_stderr);
+    // Expected: should succeed when no container to tear down
+    // If CLI chooses to report "no container" as non-zero, allow known message
+    if !down_output.status.success() {
+        assert!(
+            down_stderr.contains("No running containers")
+                || down_stderr.contains("no container")
+                || down_stderr.contains("not found"),
+            "Down before up failed unexpectedly: {}",
+            down_stderr
+        );
     }
 }
 
 /// Test down command after up and idempotent behavior (Docker-gated)
 #[test]
 fn test_down_after_up_idempotent() {
-    // Only run if Docker is explicitly enabled
-    if std::env::var("SMOKE_DOCKER").is_err() {
-        eprintln!("Skipping Docker-dependent test (set SMOKE_DOCKER=1 to enable)");
-        return;
-    }
-
     let temp_dir = TempDir::new().unwrap();
 
     // Create minimal devcontainer.json
@@ -108,14 +86,11 @@ fn test_down_after_up_idempotent() {
         .output()
         .unwrap();
 
-    if !up_output.status.success() {
-        let stderr = String::from_utf8_lossy(&up_output.stderr);
-        if docker_related_error(&stderr) {
-            eprintln!("Skipping Docker-dependent test (Docker not available)");
-            return;
-        }
-        panic!("Up command failed: {}", stderr);
-    }
+    assert!(
+        up_output.status.success(),
+        "Up command failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
 
     // Second: down command (should succeed)
     let mut down_cmd = Command::cargo_bin("deacon").unwrap();
@@ -129,13 +104,11 @@ fn test_down_after_up_idempotent() {
 
     let down_stderr = String::from_utf8_lossy(&down_output.stderr);
 
-    if !down_output.status.success() {
-        if docker_related_error(&down_stderr) {
-            eprintln!("Skipping Docker-dependent test (Docker not available)");
-            return;
-        }
-        panic!("Down command failed after up: {}", down_stderr);
-    }
+    assert!(
+        down_output.status.success(),
+        "Down command failed after up: {}",
+        down_stderr
+    );
 
     println!("Down after up succeeded");
 
@@ -151,17 +124,13 @@ fn test_down_after_up_idempotent() {
 
     let down_stderr2 = String::from_utf8_lossy(&down_output2.stderr);
 
-    if down_output2.status.success() {
-        println!("Second down command succeeded (idempotent behavior)");
-    } else if docker_related_error(&down_stderr2) {
-        println!("Skipping Docker-dependent test (Docker not available)");
-    } else if down_stderr2.contains("No running containers")
-        || down_stderr2.contains("no container")
-        || down_stderr2.contains("not found")
-    {
-        // Acceptable: explicit "no container" message on second down
-        println!("Second down handled gracefully with no-container message");
-    } else {
-        panic!("Unexpected error in second down: {}", down_stderr2);
+    if !down_output2.status.success() {
+        assert!(
+            down_stderr2.contains("No running containers")
+                || down_stderr2.contains("no container")
+                || down_stderr2.contains("not found"),
+            "Unexpected error in second down: {}",
+            down_stderr2
+        );
     }
 }

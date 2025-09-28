@@ -72,10 +72,10 @@ pub fn init_with_redaction(
         let env_format = std::env::var("DEACON_LOG_FORMAT").ok();
         let effective_format = format.or(env_format.as_deref()).unwrap_or("text");
 
-    // Control span lifecycle event verbosity via env var; default depends on format
-    // - text: NONE (reduce noise)
-    // - json: NEW | CLOSE (preserve observability for tests/tools)
-    let span_events = span_events_for_format(effective_format);
+        // Control span lifecycle event verbosity via env var; default depends on format
+        // - text: NONE (reduce noise)
+        // - json: NEW | CLOSE (preserve observability for tests/tools)
+        let span_events = span_events_for_format(effective_format);
 
         match effective_format {
             "json" => {

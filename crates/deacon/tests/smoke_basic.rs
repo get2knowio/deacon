@@ -9,8 +9,8 @@
 //! - build arg edge cases
 //! - doctor --json outputs structured diagnostics with logging noise tolerance
 //!
-//! Tests are written to be resilient in environments without Docker: they
-//! accept specific error messages that indicate Docker is unavailable.
+//! NOTE: These tests assume Docker is available and running. They will fail
+//! if Docker is not present or cannot start containers.
 
 use assert_cmd::Command;
 use predicates::str as pred_str;
@@ -19,13 +19,7 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-fn docker_related_error(stderr: &str) -> bool {
-    stderr.contains("Docker is not installed")
-        || stderr.contains("Docker daemon is not")
-        || stderr.contains("permission denied")
-        || stderr.contains("Failed to spawn docker")
-        || stderr.contains("Docker CLI error")
-}
+// No Docker error tolerance: smoke tests require Docker
 
 fn repo_root() -> PathBuf {
     // crates/deacon -> repo root is two levels up
@@ -116,23 +110,24 @@ fn smoke_build_json_then_text() {
         .assert();
 
     let out = json_run.get_output();
-    if out.status.success() {
-        let s = String::from_utf8_lossy(&out.stdout);
-        assert!(s.contains("image_id"));
-        assert!(s.contains("build_duration"));
-    } else {
-        let e = String::from_utf8_lossy(&out.stderr);
-        assert!(docker_related_error(&e), "Unexpected error: {}", e);
-    }
+    assert!(
+        out.status.success(),
+        "build --output-format json failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("image_id"));
+    assert!(s.contains("build_duration"));
 
     // Text output
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     let text_run = cmd.current_dir(tmp.path()).arg("build").assert();
     let out = text_run.get_output();
-    if !out.status.success() {
-        let e = String::from_utf8_lossy(&out.stderr);
-        assert!(docker_related_error(&e), "Unexpected error: {}", e);
-    }
+    assert!(
+        out.status.success(),
+        "build (text) failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
@@ -158,11 +153,11 @@ fn smoke_up_then_exec_traditional() {
         .assert();
 
     let up_out = up_assert.get_output();
-    if !up_out.status.success() {
-        let e = String::from_utf8_lossy(&up_out.stderr);
-        assert!(docker_related_error(&e), "Unexpected up error: {}", e);
-        return; // Skip exec if up failed due to missing Docker
-    }
+    assert!(
+        up_out.status.success(),
+        "up failed: {}",
+        String::from_utf8_lossy(&up_out.stderr)
+    );
 
     // deacon exec whoami
     let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
@@ -177,17 +172,23 @@ fn smoke_up_then_exec_traditional() {
         .assert();
 
     let exec_out = exec_assert.get_output();
-    if exec_out.status.success() {
-        let s = String::from_utf8_lossy(&exec_out.stdout);
-        assert!(s.contains("OK:"));
-    } else {
-        let e = String::from_utf8_lossy(&exec_out.stderr);
-        assert!(
-            docker_related_error(&e) || e.contains("No running container found") || e.is_empty(),
-            "Unexpected exec error: {}",
-            e
-        );
-    }
+    assert!(
+        exec_out.status.success(),
+        "exec failed: {}",
+        String::from_utf8_lossy(&exec_out.stderr)
+    );
+    let s = String::from_utf8_lossy(&exec_out.stdout);
+    assert!(s.contains("OK:"));
+
+    // Clean up container
+    let mut down = Command::cargo_bin("deacon").unwrap();
+    let _ = down
+        .current_dir(tmp.path())
+        .arg("down")
+        .assert()
+        .get_output()
+        .status
+        .success();
 }
 
 #[test]
@@ -197,28 +198,26 @@ fn smoke_doctor_json() {
 
     let out = assert.get_output();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    if out.status.success() {
-        // Extract the JSON object from mixed stdout (logging + JSON)
-        // Find the first '{' and the last '}' and attempt to parse that slice
-        let start = stdout.find('{');
-        let end = stdout.rfind('}');
-        let parsed = match (start, end) {
-            (Some(s), Some(e)) if e >= s => {
-                let slice = &stdout[s..=e];
-                serde_json::from_str::<serde_json::Value>(slice).is_ok()
-            }
-            _ => false,
-        };
-        assert!(
-            parsed,
-            "doctor --json should output JSON-like content, got: {}",
-            stdout
-        );
-    } else {
-        // doctor should usually succeed; still accept environments with odd constraints
-        let e = String::from_utf8_lossy(&out.stderr);
-        assert!(e.contains("Doctor") || !e.is_empty() || !stdout.is_empty());
-    }
+    assert!(
+        out.status.success(),
+        "doctor --json failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Extract the JSON object from mixed stdout (logging + JSON)
+    let start = stdout.find('{');
+    let end = stdout.rfind('}');
+    let parsed = match (start, end) {
+        (Some(s), Some(e)) if e >= s => {
+            let slice = &stdout[s..=e];
+            serde_json::from_str::<serde_json::Value>(slice).is_ok()
+        }
+        _ => false,
+    };
+    assert!(
+        parsed,
+        "doctor --json should output JSON-like content, got: {}",
+        stdout
+    );
 }
 
 // Additional smoke scenarios merged from main
@@ -262,23 +261,20 @@ services:
     let assert = cmd.current_dir(&temp_dir).arg("up").assert();
 
     let output = assert.get_output();
-
-    if output.status.success() {
-        // Success indicates compose configuration path processed
-    } else {
-        // If failed, should be due to Docker/Compose unavailable
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("Docker is not installed")
-                || stderr.contains("Docker daemon is not")
-                || stderr.contains("docker-compose")
-                || stderr.contains("compose")
-                || stderr.contains("permission denied")
-                || stderr.contains("not found"),
-            "Unexpected error for compose up: {}",
-            stderr
-        );
-    }
+    assert!(
+        output.status.success(),
+        "compose-based up failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Clean up
+    let mut down = Command::cargo_bin("deacon").unwrap();
+    let _ = down
+        .current_dir(&temp_dir)
+        .arg("down")
+        .assert()
+        .get_output()
+        .status
+        .success();
 }
 
 /// Test exec environment and working directory behavior
@@ -301,6 +297,20 @@ fn test_exec_environment_and_working_directory() {
     )
     .unwrap();
 
+    // Ensure container is up first
+    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let up_out = up_cmd
+        .current_dir(&temp_dir)
+        .arg("up")
+        .assert()
+        .get_output()
+        .to_owned();
+    assert!(
+        up_out.status.success(),
+        "up failed: {}",
+        String::from_utf8_lossy(&up_out.stderr)
+    );
+
     // Test exec command with environment variable
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     let assert = cmd
@@ -315,29 +325,26 @@ fn test_exec_environment_and_working_directory() {
         .assert();
 
     let output = assert.get_output();
+    assert!(
+        output.status.success(),
+        "exec failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // If successful, should return workspace dir and FOO value
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("/custom/workspace") && stdout.contains("bar"),
+        "Expected workspace path and FOO variable in output: {}",
+        stdout
+    );
 
-    if output.status.success() {
-        // If successful, should return workspace dir and FOO value
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.contains("/custom/workspace") && stdout.contains("bar"),
-            "Expected workspace path and FOO variable in output: {}",
-            stdout
-        );
-    } else {
-        // If failed, should be due to Docker unavailable or no running container
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("Docker is not installed")
-                || stderr.contains("Docker daemon is not")
-                || stderr.contains("No running container")
-                || stderr.contains("Container not found")
-                || stderr.contains("permission denied")
-                || stderr.contains("not found"),
-            "Unexpected error for exec: {}",
-            stderr
-        );
-    }
+    // Clean up
+    let mut down = Command::cargo_bin("deacon").unwrap();
+    let _ = down
+        .current_dir(&temp_dir)
+        .arg("down")
+        .assert()
+        .get_output();
 }
 
 /// Test build arg handling with simple Dockerfile
@@ -387,29 +394,19 @@ RUN echo "Building with version: $BUILD_VERSION, env: $BUILD_ENV"
         .assert();
 
     let output = assert.get_output();
+    assert!(
+        output.status.success(),
+        "build with args failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // If successful, check JSON output includes expected fields
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("image_id"));
+    assert!(stdout.contains("build_duration"));
 
-    if output.status.success() {
-        // If successful, check JSON output includes expected fields
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("image_id"));
-        assert!(stdout.contains("build_duration"));
-
-        // Try to parse as JSON to validate structure
-        if let Ok(json) = serde_json::from_str::<Value>(&stdout) {
-            assert!(json.get("image_id").is_some());
-        }
-    } else {
-        // If failed, should be due to Docker unavailable
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("Docker is not installed")
-                || stderr.contains("Docker daemon is not")
-                || stderr.contains("Docker build failed")
-                || stderr.contains("permission denied")
-                || stderr.contains("not found"),
-            "Unexpected error for build with args: {}",
-            stderr
-        );
+    // Try to parse as JSON to validate structure
+    if let Ok(json) = serde_json::from_str::<Value>(&stdout) {
+        assert!(json.get("image_id").is_some());
     }
 }
 
@@ -498,12 +495,6 @@ fn test_read_configuration_fixtures_breadth() {
 /// Optional: Full Docker workflow test (gated by environment variable)
 #[test]
 fn test_up_exec_happy_path() {
-    // Only run if explicitly enabled
-    if std::env::var("SMOKE_DOCKER").is_err() {
-        eprintln!("Skipping Docker-dependent test (set SMOKE_DOCKER=1 to enable)");
-        return;
-    }
-
     let temp_dir = TempDir::new().unwrap();
 
     // Create a simple devcontainer.json for long-running container
@@ -523,7 +514,12 @@ fn test_up_exec_happy_path() {
 
     // Test up command
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
-    up_cmd.current_dir(&temp_dir).arg("up").assert().success();
+    up_cmd
+        .current_dir(&temp_dir)
+        .arg("up")
+        .arg("--remove-existing-container")
+        .assert()
+        .success();
 
     // Test exec command
     let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
@@ -535,4 +531,12 @@ fn test_up_exec_happy_path() {
         .assert()
         .success()
         .stdout(pred_str::contains("hello from container"));
+
+    // Clean up
+    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let _ = down_cmd
+        .current_dir(&temp_dir)
+        .arg("down")
+        .assert()
+        .get_output();
 }
