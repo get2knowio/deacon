@@ -27,6 +27,14 @@ pub fn parity_enabled() -> bool {
     std::env::var(ENV_ENABLE).map(|v| v == "1").unwrap_or(false)
 }
 
+pub fn docker_available() -> bool {
+    std::process::Command::new("docker")
+        .arg("version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 pub fn upstream_available() -> bool {
     if !parity_enabled() {
         return false;
@@ -199,4 +207,44 @@ fn extract_core_config(v: &Value) -> Value {
     }
 
     Value::Object(out)
+}
+
+/// Write a devcontainer.json file to the .devcontainer directory
+pub fn write_devcontainer(ws: &Path, json: &str) -> anyhow::Result<()> {
+    let dc_dir = ws.join(".devcontainer");
+    std::fs::create_dir_all(&dc_dir)?;
+    std::fs::write(dc_dir.join("devcontainer.json"), json)?;
+    Ok(())
+}
+
+/// Run upstream devcontainer command and return output
+pub fn run_upstream(ws: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    let bin = std::env::var(ENV_UPSTREAM_BIN).unwrap_or_else(|_| "devcontainer".to_string());
+    let mut cmd = std::process::Command::new(bin);
+    cmd.current_dir(ws);
+    for arg in args {
+        cmd.arg(arg);
+    }
+    Ok(cmd.output()?)
+}
+
+/// Run deacon command and return output
+pub fn run_deacon(ws: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    use assert_cmd::Command;
+    let mut cmd = Command::cargo_bin("deacon")?;
+    cmd.current_dir(ws);
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let output = cmd.assert().get_output().to_owned();
+    Ok(std::process::Output {
+        status: output.status,
+        stdout: output.stdout.clone(),
+        stderr: output.stderr.clone(),
+    })
+}
+
+/// Extract stdout as trimmed string
+pub fn stdout_str(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }

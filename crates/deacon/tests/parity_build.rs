@@ -3,19 +3,25 @@
 //! These tests verify that deacon's build command behaves functionally equivalent to
 //! the upstream devcontainer CLI in terms of image creation and discoverability.
 
-use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
 mod parity_utils;
 
-fn upstream_bin() -> String {
-    std::env::var("DEACON_PARITY_DEVCONTAINER").unwrap_or_else(|_| "devcontainer".to_string())
-}
-
 /// Test build succeeds and creates discoverable image
 #[test]
 fn parity_build_creates_discoverable_image() {
+    if !parity_utils::parity_enabled() {
+        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
+        return;
+    }
+    if !parity_utils::docker_available() {
+        eprintln!(
+            "Skipping parity test (Docker unavailable): {}",
+            parity_utils::skip_reason()
+        );
+        return;
+    }
     if !parity_utils::upstream_available() {
         eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
         return;
@@ -25,15 +31,11 @@ fn parity_build_creates_discoverable_image() {
     let ws = tmp.path();
     let unique_token = format!("parity-build-{}", std::process::id());
 
-    fs::create_dir(ws.join(".devcontainer")).unwrap();
-
     // Create Dockerfile with unique label
     fs::write(
         ws.join("Dockerfile"),
         format!(
             r#"FROM alpine:3.19
-ARG FOO
-ENV FOO_ENV=$FOO
 LABEL parity.token={}
 "#,
             unique_token
@@ -42,13 +44,13 @@ LABEL parity.token={}
     .unwrap();
 
     // Create devcontainer.json with build context
-    fs::write(
-        ws.join(".devcontainer/devcontainer.json"),
+    parity_utils::write_devcontainer(
+        ws,
         r#"{
   "name": "ParityBuild",
-  "dockerFile": "../Dockerfile",
+  "dockerFile": "Dockerfile",
   "build": {
-    "context": ".."
+    "context": "."
   }
 }
 "#,
@@ -56,15 +58,13 @@ LABEL parity.token={}
     .unwrap();
 
     // upstream: build
-    let mut build1 = std::process::Command::new(upstream_bin());
-    build1.current_dir(ws);
-    build1.arg("build");
-    build1.arg("--workspace-folder");
-    build1.arg(ws);
-    let st1 = build1.output().unwrap();
+    let st1 =
+        parity_utils::run_upstream(ws, &["build", "--workspace-folder", &ws.to_string_lossy()])
+            .unwrap();
     assert!(
         st1.status.success(),
-        "upstream build failed: {}",
+        "upstream build failed (code {:?}): {}",
+        st1.status.code(),
         String::from_utf8_lossy(&st1.stderr)
     );
 
@@ -101,18 +101,12 @@ LABEL parity.token={}
     }
 
     // deacon: build
-    let mut build2 = Command::cargo_bin("deacon").unwrap();
-    let st2 = build2
-        .current_dir(ws)
-        .arg("build")
-        .arg("--workspace-folder")
-        .arg(ws)
-        .assert()
-        .get_output()
-        .to_owned();
+    let st2 = parity_utils::run_deacon(ws, &["build", "--workspace-folder", &ws.to_string_lossy()])
+        .unwrap();
     assert!(
         st2.status.success(),
-        "deacon build failed: {}",
+        "deacon build failed (code {:?}): {}",
+        st2.status.code(),
         String::from_utf8_lossy(&st2.stderr)
     );
 
@@ -157,6 +151,17 @@ LABEL parity.token={}
 /// Test build with build args
 #[test]
 fn parity_build_with_build_args() {
+    if !parity_utils::parity_enabled() {
+        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
+        return;
+    }
+    if !parity_utils::docker_available() {
+        eprintln!(
+            "Skipping parity test (Docker unavailable): {}",
+            parity_utils::skip_reason()
+        );
+        return;
+    }
     if !parity_utils::upstream_available() {
         eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
         return;
@@ -165,8 +170,6 @@ fn parity_build_with_build_args() {
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path();
     let unique_token = format!("parity-build-args-{}", std::process::id());
-
-    fs::create_dir(ws.join(".devcontainer")).unwrap();
 
     // Create Dockerfile that uses build arg
     fs::write(
@@ -184,13 +187,13 @@ LABEL build.arg.value=$BUILD_ARG_VALUE
     .unwrap();
 
     // Create devcontainer.json with build args
-    fs::write(
-        ws.join(".devcontainer/devcontainer.json"),
+    parity_utils::write_devcontainer(
+        ws,
         r#"{
   "name": "ParityBuildArgs",
-  "dockerFile": "../Dockerfile",
+  "dockerFile": "Dockerfile",
   "build": {
-    "context": "..",
+    "context": ".",
     "args": {
       "BUILD_ARG_VALUE": "parity-test"
     }
@@ -201,15 +204,13 @@ LABEL build.arg.value=$BUILD_ARG_VALUE
     .unwrap();
 
     // upstream: build
-    let mut build1 = std::process::Command::new(upstream_bin());
-    build1.current_dir(ws);
-    build1.arg("build");
-    build1.arg("--workspace-folder");
-    build1.arg(ws);
-    let st1 = build1.output().unwrap();
+    let st1 =
+        parity_utils::run_upstream(ws, &["build", "--workspace-folder", &ws.to_string_lossy()])
+            .unwrap();
     assert!(
         st1.status.success(),
-        "upstream build failed: {}",
+        "upstream build failed (code {:?}): {}",
+        st1.status.code(),
         String::from_utf8_lossy(&st1.stderr)
     );
 
@@ -247,18 +248,12 @@ LABEL build.arg.value=$BUILD_ARG_VALUE
     }
 
     // deacon: build
-    let mut build2 = Command::cargo_bin("deacon").unwrap();
-    let st2 = build2
-        .current_dir(ws)
-        .arg("build")
-        .arg("--workspace-folder")
-        .arg(ws)
-        .assert()
-        .get_output()
-        .to_owned();
+    let st2 = parity_utils::run_deacon(ws, &["build", "--workspace-folder", &ws.to_string_lossy()])
+        .unwrap();
     assert!(
         st2.status.success(),
-        "deacon build failed: {}",
+        "deacon build failed (code {:?}): {}",
+        st2.status.code(),
         String::from_utf8_lossy(&st2.stderr)
     );
 
