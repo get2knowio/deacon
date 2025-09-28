@@ -731,6 +731,8 @@ impl Cli {
                     config_path: self.config,
                     override_config_path: self.override_config,
                     secrets_files: self.secrets_file,
+                    redaction_config: redaction_config.clone(),
+                    secret_registry: secret_registry.clone(),
                 };
 
                 execute_read_configuration(args).await?;

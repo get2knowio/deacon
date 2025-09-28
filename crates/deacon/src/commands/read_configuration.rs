@@ -6,9 +6,10 @@
 use anyhow::Result;
 use deacon_core::config::ConfigLoader;
 use deacon_core::errors::{ConfigError, DeaconError};
+use deacon_core::io::Output;
+use deacon_core::redaction::{RedactionConfig, SecretRegistry};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::variable::SubstitutionContext;
-use serde_json;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
@@ -20,6 +21,8 @@ pub struct ReadConfigurationArgs {
     pub config_path: Option<PathBuf>,
     pub override_config_path: Option<PathBuf>,
     pub secrets_files: Vec<PathBuf>,
+    pub redaction_config: RedactionConfig,
+    pub secret_registry: SecretRegistry,
 }
 
 /// Execute the read-configuration command
@@ -27,7 +30,17 @@ pub struct ReadConfigurationArgs {
 pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<()> {
     // Keep startup message at debug to avoid noisy INFO output for simple queries
     debug!("Starting read-configuration command execution");
-    debug!("Read configuration args: {:?}", args);
+    debug!(
+        "Read configuration args: include_merged={}, workspace_folder={:?}, config_path={:?}, override_config_path={:?}, secrets_files_count={}",
+        args.include_merged_configuration,
+        args.workspace_folder,
+        args.config_path,
+        args.override_config_path,
+        args.secrets_files.len()
+    );
+
+    // Create output helper with redaction support
+    let mut output = Output::new(args.redaction_config.clone(), &args.secret_registry);
 
     // Determine workspace folder
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
@@ -79,8 +92,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         );
 
         // Output the merged configuration with metadata as JSON
-        let json_output = serde_json::to_string_pretty(&merged_config)?;
-        println!("{}", json_output);
+        output.write_json(&merged_config)?;
 
         // Single concise completion info line (keep info noise low)
         debug!(
@@ -161,8 +173,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         );
 
         // Output the configuration as JSON
-        let json_output = serde_json::to_string_pretty(&config)?;
-        println!("{}", json_output);
+        output.write_json(&config)?;
 
         // Single concise completion info line (keep info noise low)
         debug!(
@@ -178,8 +189,27 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use deacon_core::redaction::{RedactionConfig, SecretRegistry};
     use std::fs;
     use tempfile::TempDir;
+
+    fn create_test_args(
+        temp_dir: &TempDir,
+        include_merged: bool,
+        config_path: Option<PathBuf>,
+        override_path: Option<PathBuf>,
+        secrets_files: Vec<PathBuf>,
+    ) -> ReadConfigurationArgs {
+        ReadConfigurationArgs {
+            include_merged_configuration: include_merged,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path,
+            override_config_path: override_path,
+            secrets_files,
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        }
+    }
 
     #[tokio::test]
     async fn test_read_configuration_basic() {
@@ -193,13 +223,13 @@ mod tests {
 
         fs::write(&config_path, config_content).unwrap();
 
-        let args = ReadConfigurationArgs {
-            include_merged_configuration: false,
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: Some(config_path),
-            override_config_path: None,
-            secrets_files: vec![],
-        };
+        let args = create_test_args(
+            &temp_dir,
+            false,             // include_merged_configuration
+            Some(config_path), // config_path
+            None,              // override_config_path
+            vec![],            // secrets_files
+        );
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_ok());
@@ -218,13 +248,13 @@ mod tests {
 
         fs::write(&config_path, config_content).unwrap();
 
-        let args = ReadConfigurationArgs {
-            include_merged_configuration: false,
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: Some(config_path),
-            override_config_path: None,
-            secrets_files: vec![],
-        };
+        let args = create_test_args(
+            &temp_dir,
+            false,             // include_merged_configuration
+            Some(config_path), // config_path
+            None,              // override_config_path
+            vec![],            // secrets_files
+        );
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_ok());
@@ -254,13 +284,13 @@ mod tests {
         fs::write(&base_config_path, base_config_content).unwrap();
         fs::write(&override_config_path, override_config_content).unwrap();
 
-        let args = ReadConfigurationArgs {
-            include_merged_configuration: false,
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: Some(base_config_path),
-            override_config_path: Some(override_config_path),
-            secrets_files: vec![],
-        };
+        let args = create_test_args(
+            &temp_dir,
+            false,                      // include_merged_configuration
+            Some(base_config_path),     // config_path
+            Some(override_config_path), // override_config_path
+            vec![],                     // secrets_files
+        );
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_ok());
@@ -289,13 +319,13 @@ API_KEY=another-secret
         fs::write(&config_path, config_content).unwrap();
         fs::write(&secrets_path, secrets_content).unwrap();
 
-        let args = ReadConfigurationArgs {
-            include_merged_configuration: false,
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: Some(config_path),
-            override_config_path: None,
-            secrets_files: vec![secrets_path],
-        };
+        let args = create_test_args(
+            &temp_dir,
+            false,              // include_merged_configuration
+            Some(config_path),  // config_path
+            None,               // override_config_path
+            vec![secrets_path], // secrets_files
+        );
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_ok());
@@ -305,13 +335,13 @@ API_KEY=another-secret
     async fn test_read_configuration_not_found() {
         let temp_dir = TempDir::new().unwrap();
 
-        let args = ReadConfigurationArgs {
-            include_merged_configuration: false,
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-            override_config_path: None,
-            secrets_files: vec![],
-        };
+        let args = create_test_args(
+            &temp_dir,
+            false,  // include_merged_configuration
+            None,   // config_path
+            None,   // override_config_path
+            vec![], // secrets_files
+        );
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_err());

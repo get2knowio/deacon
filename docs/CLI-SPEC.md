@@ -1148,6 +1148,32 @@ The CLI implements structured logging with multiple output formats:
 - File logging for debugging
 - Progress indicators for long operations
 
+### Output & Logging Stream Contract
+
+The CLI enforces strict stdout/stderr separation to ensure reliable automation and machine parsing:
+
+**Stream Usage Rules**:
+
+1. **JSON Output Modes** (commands with `--json` or `--output json` flags):
+   - **stdout**: Contains only single JSON document (newline terminated)
+   - **stderr**: All tracing logs, progress indicators, and diagnostic messages
+   - **Guarantee**: stdout parses as valid JSON without filtering
+
+2. **Text Output Modes** (default human-readable output):
+   - **stdout**: User-facing results, summaries, and reports only
+   - **stderr**: All tracing logs, progress indicators, and diagnostic messages
+   - **Stability**: Text format may evolve; JSON modes provide parsing stability
+
+3. **Error Conditions**:
+   - **Non-zero exit**: stdout typically empty unless partial results explicitly supported
+   - **All errors**: Logged to stderr via tracing system, never stdout
+
+**Implementation Requirements**:
+- Commands use centralized output helpers preventing accidental log leakage to stdout
+- All progress tracking and diagnostics route through tracing subscriber to stderr  
+- JSON serialization errors fail fast rather than emit malformed stdout
+- Redaction system applies consistently across both stdout results and stderr logs
+
 ### Progress Tracking
 
 ```typescript
