@@ -398,6 +398,30 @@ fn print_text_output_with_redaction(
     println_redacted!(redaction_config, "  Architecture: {}", info.host_os.arch);
     println!();
 
+    println_redacted!(redaction_config, "Platform:");
+    println_redacted!(redaction_config, "  Type: {}", info.platform.platform_type);
+    println_redacted!(
+        redaction_config,
+        "  WSL Environment: {}",
+        info.platform.is_wsl
+    );
+    println_redacted!(
+        redaction_config,
+        "  Full Capabilities: {}",
+        info.platform.supports_full_capabilities
+    );
+    println_redacted!(
+        redaction_config,
+        "  Full User Remapping: {}",
+        info.platform.supports_full_user_remapping
+    );
+    println_redacted!(
+        redaction_config,
+        "  Docker Desktop Path Conversion: {}",
+        info.platform.needs_docker_desktop_path_conversion
+    );
+    println!();
+
     println_redacted!(redaction_config, "Docker:");
     println_redacted!(
         redaction_config,

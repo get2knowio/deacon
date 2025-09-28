@@ -1228,13 +1228,46 @@ The CLI includes comprehensive tests:
 
 ### Supported Platforms
 
-- **Linux**: Full native support
-- **macOS**: Native Docker Desktop integration
-- **Windows**: WSL2 and Docker Desktop support
+- **Linux**: Full native support with complete capabilities
+- **macOS**: Native Docker Desktop integration with full capabilities  
+- **Windows**: WSL2 and Docker Desktop support with limited capabilities
+- **WSL**: Windows Subsystem for Linux with Docker Desktop integration
 
 ### Platform-Specific Handling
 
-- Path resolution and conversion
+#### Path Resolution and Conversion
+
+**Windows and WSL Path Handling:**
+- Windows drive paths (`C:\path`) are automatically converted to Docker Desktop format (`/c/path`)
+- UNC paths are supported with appropriate conversion
+- Both absolute and relative paths work correctly across platforms
+- Path conversion is applied to workspace mounts and custom bind mounts
+
+**Platform Detection:**
+- Automatic WSL detection via `/proc/version` contents
+- Platform-appropriate path conversion applied automatically
+- No manual configuration required for path handling
+
+#### Container Capabilities
+
+**Full Support (Linux, macOS):**
+- Complete container security capabilities
+- Full user ID/group ID remapping
+- Native filesystem performance
+- All DevContainer features supported
+
+**Limited Support (Windows, WSL):**
+- Reduced container security capabilities due to platform limitations
+- Partial user remapping support (may not work with all configurations)
+- Docker Desktop filesystem performance considerations
+- Some advanced container features may be unavailable
+
+#### Script Execution
+
+**Cross-Platform Compatibility:**
+- Automatic line ending normalization (CRLF → LF) for lifecycle scripts
+- Platform-appropriate shell selection (`cmd` on Windows, `sh` on Unix)
+- Environment variable handling across different shell environments
 - File system permissions
 - Network configuration
 - Process management
