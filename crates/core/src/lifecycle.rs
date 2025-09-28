@@ -70,7 +70,7 @@ impl LifecycleCommands {
         let commands = match value {
             Value::String(cmd) => {
                 vec![CommandTemplate {
-                    command: cmd.clone(),
+                    command: crate::platform::normalize_line_endings(cmd),
                     env_vars: env_vars.clone(),
                 }]
             }
@@ -79,7 +79,7 @@ impl LifecycleCommands {
                 for cmd_value in cmds {
                     if let Value::String(cmd) = cmd_value {
                         commands.push(CommandTemplate {
-                            command: cmd.clone(),
+                            command: crate::platform::normalize_line_endings(cmd),
                             env_vars: env_vars.clone(),
                         });
                     } else {

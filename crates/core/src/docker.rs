@@ -816,11 +816,16 @@ impl ContainerOps for CliDocker {
                         .unwrap_or("workspace")
                 )
             };
-            let workspace_mount = format!(
-                "type=bind,source={},target={}",
-                workspace_path.display(),
-                target_path
-            );
+            let workspace_mount = {
+                // Use platform-aware path conversion for Docker Desktop compatibility
+                let platform = crate::platform::Platform::detect();
+                let source_path = if platform.needs_docker_desktop_path_conversion() {
+                    crate::platform::convert_path_for_docker_desktop(workspace_path)
+                } else {
+                    workspace_path.display().to_string()
+                };
+                format!("type=bind,source={},target={}", source_path, target_path)
+            };
             args.push("--mount".to_string());
             args.push(workspace_mount);
         }

@@ -191,7 +191,19 @@ impl Mount {
 
         // Add source for bind and volume mounts
         if let Some(ref source) = self.source {
-            mount_str.push_str(&format!(",source={}", source));
+            let source_path = if self.mount_type == MountType::Bind {
+                // Use platform-aware path conversion for bind mounts
+                let platform = crate::platform::Platform::detect();
+                if platform.needs_docker_desktop_path_conversion() {
+                    crate::platform::convert_path_for_docker_desktop(std::path::Path::new(source))
+                } else {
+                    source.clone()
+                }
+            } else {
+                // Volume and other mount types don't need path conversion
+                source.clone()
+            };
+            mount_str.push_str(&format!(",source={}", source_path));
         }
 
         // Add target

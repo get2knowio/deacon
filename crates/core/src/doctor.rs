@@ -42,6 +42,8 @@ pub struct DoctorInfo {
     pub cli_version: String,
     /// Host operating system details
     pub host_os: HostOsInfo,
+    /// Platform support information
+    pub platform: PlatformInfo,
     /// Docker version and status
     pub docker_info: DockerDiagnostics,
     /// Available disk space information
@@ -62,6 +64,16 @@ pub struct HostOsInfo {
     pub name: String,
     pub version: String,
     pub arch: String,
+}
+
+/// Platform support information
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlatformInfo {
+    pub platform_type: String,
+    pub is_wsl: bool,
+    pub supports_full_capabilities: bool,
+    pub supports_full_user_remapping: bool,
+    pub needs_docker_desktop_path_conversion: bool,
 }
 
 /// Docker diagnostics information
@@ -148,6 +160,7 @@ async fn collect_diagnostics(context: &DoctorContext) -> Result<DoctorInfo> {
 
     let cli_version = crate::version().to_string();
     let host_os = collect_host_os_info();
+    let platform = collect_platform_info();
     let docker_info = collect_docker_info().await;
     let disk_space = collect_disk_space_info();
     let config_discovery = collect_config_discovery_info(context);
@@ -158,6 +171,7 @@ async fn collect_diagnostics(context: &DoctorContext) -> Result<DoctorInfo> {
     Ok(DoctorInfo {
         cli_version,
         host_os,
+        platform,
         docker_info,
         disk_space,
         config_discovery,
@@ -199,6 +213,24 @@ fn collect_host_os_info() -> HostOsInfo {
         name,
         version,
         arch,
+    }
+}
+
+/// Collect platform support information
+fn collect_platform_info() -> PlatformInfo {
+    let platform = crate::platform::Platform::detect();
+
+    PlatformInfo {
+        platform_type: match platform {
+            crate::platform::Platform::Linux => "Linux".to_string(),
+            crate::platform::Platform::MacOS => "macOS".to_string(),
+            crate::platform::Platform::Windows => "Windows".to_string(),
+            crate::platform::Platform::WSL => "WSL".to_string(),
+        },
+        is_wsl: matches!(platform, crate::platform::Platform::WSL),
+        supports_full_capabilities: platform.supports_full_capabilities(),
+        supports_full_user_remapping: platform.supports_full_user_remapping(),
+        needs_docker_desktop_path_conversion: platform.needs_docker_desktop_path_conversion(),
     }
 }
 
