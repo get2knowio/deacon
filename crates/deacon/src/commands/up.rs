@@ -290,7 +290,8 @@ async fn execute_compose_up(
             &project,
             &args.redaction_config,
             &args.secret_registry,
-        ).await?;
+        )
+        .await?;
     }
 
     // Handle shutdown if requested
@@ -459,7 +460,8 @@ async fn execute_container_up(
             runtime,
             &args.redaction_config,
             &args.secret_registry,
-        ).await?;
+        )
+        .await?;
     }
 
     // Handle shutdown if requested

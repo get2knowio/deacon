@@ -8,6 +8,7 @@ use crate::docker::{ContainerInfo, ExposedPort, PortMapping};
 use crate::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[allow(unused_imports)] // Used by RedactingWriter.write_line() method
 use std::io::Write;
 use tracing::{info, warn};
 
@@ -265,11 +266,12 @@ impl PortForwardingManager {
         match serde_json::to_string(event) {
             Ok(json) => {
                 let output_line = format!("PORT_EVENT: {}", json);
-                
+
                 // Apply redaction if configuration is provided
                 if let (Some(config), Some(registry)) = (redaction_config, secret_registry) {
                     let mut stdout = std::io::stdout();
-                    let mut redacting_writer = RedactingWriter::new(&mut stdout, config.clone(), registry);
+                    let mut redacting_writer =
+                        RedactingWriter::new(&mut stdout, config.clone(), registry);
                     if let Err(e) = redacting_writer.write_line(&output_line) {
                         warn!("Failed to write redacted port event: {}", e);
                     }
@@ -485,8 +487,13 @@ mod tests {
         };
 
         // This should generate a warning for port 9999 which is not configured
-        let events =
-            PortForwardingManager::process_container_ports(&config, &container_info, false, None, None);
+        let events = PortForwardingManager::process_container_ports(
+            &config,
+            &container_info,
+            false,
+            None,
+            None,
+        );
 
         // Only the configured port (3000) should generate an event
         assert_eq!(events.len(), 1);

@@ -54,6 +54,8 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
         ignore_host_requirements: false,
         progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
         runtime: None,
+        redaction_config: deacon_core::redaction::RedactionConfig::default(),
+        secret_registry: deacon_core::redaction::global_registry().clone(),
     };
 
     // This should not fail due to host requirements
@@ -105,6 +107,8 @@ async fn test_host_requirements_validation_fails_with_unrealistic_requirements()
         ignore_host_requirements: false,
         progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
         runtime: None,
+        redaction_config: deacon_core::redaction::RedactionConfig::default(),
+        secret_registry: deacon_core::redaction::global_registry().clone(),
     };
 
     let result = execute_up(args).await;
@@ -156,6 +160,8 @@ async fn test_host_requirements_ignored_with_flag() {
         ignore_host_requirements: true, // This should make it not fail
         progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
         runtime: None,
+        redaction_config: deacon_core::redaction::RedactionConfig::default(),
+        secret_registry: deacon_core::redaction::global_registry().clone(),
     };
 
     let result = execute_up(args).await;

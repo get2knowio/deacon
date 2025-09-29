@@ -773,3 +773,61 @@ fn test_audit_log_redaction() {
     assert!(log_content.contains("postCreate"));
     assert!(log_content.contains("echo"));
 }
+
+#[test]
+fn test_redacting_writer_port_events() {
+    use deacon_core::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
+    #[allow(unused_imports)] // Used by RedactingWriter.write_line() method
+    use std::io::Write;
+
+    // Create a test secret registry
+    let registry = SecretRegistry::new();
+    registry.add_secret("port-secret-token");
+    let config = RedactionConfig::with_custom_registry(registry.clone());
+
+    // Test port event output with secrets
+    let mut output = Vec::new();
+    {
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        // Simulate port event output with secrets
+        let port_event_line = "PORT_EVENT: {\"port\":8080,\"label\":\"API with port-secret-token\",\"description\":\"Service containing port-secret-token data\"}";
+
+        writer.write_line(port_event_line).unwrap();
+    }
+
+    let result = String::from_utf8(output).unwrap();
+
+    // Verify that secrets are redacted
+    assert!(result.contains("****"));
+    assert!(!result.contains("port-secret-token"));
+
+    // Verify that other content is preserved
+    assert!(result.contains("PORT_EVENT"));
+    assert!(result.contains("8080"));
+    assert!(result.contains("API"));
+    assert!(result.contains("Service"));
+}
+
+#[test]
+fn test_redacting_writer_stdout_integration() {
+    use deacon_core::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
+    #[allow(unused_imports)] // Used by RedactingWriter.write_line() method
+    use std::io::Write;
+
+    // Test with stdout (though we can't easily capture it in tests)
+    let registry = SecretRegistry::new();
+    registry.add_secret("stdout-secret-456");
+    let config = RedactionConfig::with_custom_registry(registry.clone());
+
+    // This test mainly verifies that RedactingWriter can wrap stdout without panicking
+    {
+        let stdout = std::io::stdout();
+        let mut writer = RedactingWriter::new(stdout, config, &registry);
+
+        // This would normally print to stdout but be redacted
+        // We can't easily test the actual output without complex stdout capture
+        let _result = writer.write_line("Test output with stdout-secret-456");
+        // Don't actually write to stdout in tests - just verify it compiles and doesn't panic
+    }
+}
