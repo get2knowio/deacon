@@ -35,6 +35,8 @@ pub struct UpArgs {
     pub progress_tracker:
         std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
     pub runtime: Option<deacon_core::runtime::RuntimeKind>,
+    pub redaction_config: deacon_core::redaction::RedactionConfig,
+    pub secret_registry: deacon_core::redaction::SecretRegistry,
 }
 
 impl Default for UpArgs {
@@ -53,6 +55,8 @@ impl Default for UpArgs {
             ignore_host_requirements: false,
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
             runtime: None,
+            redaction_config: deacon_core::redaction::RedactionConfig::default(),
+            secret_registry: deacon_core::redaction::global_registry().clone(),
         }
     }
 }
@@ -281,7 +285,12 @@ async fn execute_compose_up(
 
     // Handle port forwarding and events
     if args.ports_events {
-        handle_port_events(config, &project).await?;
+        handle_port_events(
+            config,
+            &project,
+            &args.redaction_config,
+            &args.secret_registry,
+        ).await?;
     }
 
     // Handle shutdown if requested
@@ -444,7 +453,13 @@ async fn execute_container_up(
 
     // Handle port events if requested
     if args.ports_events {
-        handle_container_port_events(&container_result.container_id, config, runtime).await?;
+        handle_container_port_events(
+            &container_result.container_id,
+            config,
+            runtime,
+            &args.redaction_config,
+            &args.secret_registry,
+        ).await?;
     }
 
     // Handle shutdown if requested
@@ -518,8 +533,13 @@ async fn execute_compose_post_create(
 }
 
 /// Handle port events for compose projects
-#[instrument(skip(config, project))]
-async fn handle_port_events(config: &DevContainerConfig, project: &ComposeProject) -> Result<()> {
+#[instrument(skip(config, project, redaction_config, secret_registry))]
+async fn handle_port_events(
+    config: &DevContainerConfig,
+    project: &ComposeProject,
+    redaction_config: &deacon_core::redaction::RedactionConfig,
+    secret_registry: &deacon_core::redaction::SecretRegistry,
+) -> Result<()> {
     debug!("Processing port events for compose project");
 
     let compose_manager = ComposeManager::new();
@@ -569,6 +589,8 @@ async fn handle_port_events(config: &DevContainerConfig, project: &ComposeProjec
                 config,
                 &container_info,
                 true, // emit_events = true
+                Some(redaction_config),
+                Some(secret_registry),
             );
 
             debug!(
@@ -830,11 +852,13 @@ fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<String>> {
 }
 
 /// Handle port events for the container
-#[instrument(skip(config))]
+#[instrument(skip(config, redaction_config, secret_registry))]
 async fn handle_container_port_events(
     container_id: &str,
     config: &DevContainerConfig,
     runtime: &ContainerRuntimeImpl,
+    redaction_config: &deacon_core::redaction::RedactionConfig,
+    secret_registry: &deacon_core::redaction::SecretRegistry,
 ) -> Result<()> {
     debug!("Processing port events for container");
 
@@ -860,6 +884,8 @@ async fn handle_container_port_events(
         config,
         &container_info,
         true, // emit_events = true
+        Some(redaction_config),
+        Some(secret_registry),
     );
 
     debug!("Emitted {} port events", events.len());
@@ -958,6 +984,8 @@ mod tests {
             ignore_host_requirements: false,
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
             runtime: None,
+            redaction_config: deacon_core::redaction::RedactionConfig::default(),
+            secret_registry: deacon_core::redaction::global_registry().clone(),
         };
 
         assert!(args.remove_existing_container);
@@ -1006,6 +1034,8 @@ mod tests {
             ignore_host_requirements: false,
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
             runtime: None,
+            redaction_config: deacon_core::redaction::RedactionConfig::default(),
+            secret_registry: deacon_core::redaction::global_registry().clone(),
         };
 
         assert!(args.remove_existing_container);

@@ -636,6 +636,8 @@ impl Cli {
                     ignore_host_requirements,
                     progress_tracker: progress_tracker.clone(),
                     runtime: self.runtime.map(|r| r.into()),
+                    redaction_config: redaction_config.clone(),
+                    secret_registry: secret_registry.clone(),
                 };
 
                 match execute_up(args).await {

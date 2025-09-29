@@ -5,8 +5,10 @@
 
 use crate::config::{DevContainerConfig, OnAutoForward, PortAttributes, PortSpec};
 use crate::docker::{ContainerInfo, ExposedPort, PortMapping};
+use crate::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
 use tracing::{info, warn};
 
 /// A port event that represents the state of a forwarded port
@@ -44,6 +46,8 @@ impl PortForwardingManager {
         config: &DevContainerConfig,
         container_info: &ContainerInfo,
         emit_events: bool,
+        redaction_config: Option<&RedactionConfig>,
+        secret_registry: Option<&SecretRegistry>,
     ) -> Vec<PortEvent> {
         let mut events = Vec::new();
 
@@ -64,7 +68,7 @@ impl PortForwardingManager {
                     Self::create_port_event(exposed_port, port_mapping, port_config, config);
 
                 if emit_events {
-                    Self::emit_port_event(&event);
+                    Self::emit_port_event(&event, redaction_config, secret_registry);
                 }
 
                 events.push(event);
@@ -90,7 +94,7 @@ impl PortForwardingManager {
                     Self::create_port_event(&exposed_port, Some(port_mapping), port_config, config);
 
                 if emit_events {
-                    Self::emit_port_event(&event);
+                    Self::emit_port_event(&event, redaction_config, secret_registry);
                 }
 
                 events.push(event);
@@ -253,10 +257,26 @@ impl PortForwardingManager {
     }
 
     /// Emit a port event to stdout with PORT_EVENT prefix
-    fn emit_port_event(event: &PortEvent) {
+    fn emit_port_event(
+        event: &PortEvent,
+        redaction_config: Option<&RedactionConfig>,
+        secret_registry: Option<&SecretRegistry>,
+    ) {
         match serde_json::to_string(event) {
             Ok(json) => {
-                println!("PORT_EVENT: {}", json);
+                let output_line = format!("PORT_EVENT: {}", json);
+                
+                // Apply redaction if configuration is provided
+                if let (Some(config), Some(registry)) = (redaction_config, secret_registry) {
+                    let mut stdout = std::io::stdout();
+                    let mut redacting_writer = RedactingWriter::new(&mut stdout, config.clone(), registry);
+                    if let Err(e) = redacting_writer.write_line(&output_line) {
+                        warn!("Failed to write redacted port event: {}", e);
+                    }
+                } else {
+                    // Fall back to direct output when redaction is not configured
+                    println!("{}", output_line);
+                }
             }
             Err(e) => {
                 warn!("Failed to serialize port event: {}", e);
@@ -466,7 +486,7 @@ mod tests {
 
         // This should generate a warning for port 9999 which is not configured
         let events =
-            PortForwardingManager::process_container_ports(&config, &container_info, false);
+            PortForwardingManager::process_container_ports(&config, &container_info, false, None, None);
 
         // Only the configured port (3000) should generate an event
         assert_eq!(events.len(), 1);

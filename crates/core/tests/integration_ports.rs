@@ -99,7 +99,7 @@ fn test_port_event_generation_with_attributes() {
     };
 
     // Process container ports without emitting events (for testing)
-    let events = PortForwardingManager::process_container_ports(&config, &container_info, false);
+    let events = PortForwardingManager::process_container_ports(&config, &container_info, false, None, None);
 
     // Verify the correct number of events were generated
     assert_eq!(events.len(), 3); // 3000, 8080, 4000 are configured
@@ -213,7 +213,7 @@ fn test_port_attribute_fallback_behavior() {
         }],
     };
 
-    let events = PortForwardingManager::process_container_ports(&config, &container_info, false);
+    let events = PortForwardingManager::process_container_ports(&config, &container_info, false, None, None);
 
     assert_eq!(events.len(), 1);
     let event = &events[0];
@@ -248,7 +248,7 @@ fn test_exposed_ports_without_mappings() {
         port_mappings: vec![], // No port mappings - port is exposed but not forwarded
     };
 
-    let events = PortForwardingManager::process_container_ports(&config, &container_info, false);
+    let events = PortForwardingManager::process_container_ports(&config, &container_info, false, None, None);
 
     assert_eq!(events.len(), 1);
     let event = &events[0];
