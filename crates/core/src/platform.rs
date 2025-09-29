@@ -91,9 +91,13 @@ pub fn convert_path_for_docker_desktop(path: &Path) -> String {
         return path_str.to_string();
     }
 
-    // Handle Windows drive letters (e.g., C:\path -> /c/path)
+    // Handle Windows long path prefixes
     if let Some(rest) = path_str.strip_prefix(r"\\?\") {
-        // Handle long Windows paths
+        // Handle UNC paths: \\?\UNC\server\share\path -> //server/share/path
+        if let Some(unc_path) = rest.strip_prefix("UNC\\") {
+            return format!("//{}", unc_path.replace('\\', "/"));
+        }
+        // Handle long drive paths: \\?\C:\path -> /c/path
         return convert_windows_path_to_docker(rest);
     }
 
@@ -110,7 +114,7 @@ pub fn convert_path_for_docker_desktop(path: &Path) -> String {
 /// Convert a Windows path to Docker Desktop format
 fn convert_windows_path_to_docker(windows_path: &str) -> String {
     if windows_path.len() >= 2 && windows_path.chars().nth(1) == Some(':') {
-        let drive_letter = windows_path.chars().next().unwrap().to_lowercase();
+        let drive_letter = windows_path.chars().next().unwrap().to_ascii_lowercase();
         let rest = &windows_path[2..].replace('\\', "/");
 
         // Use /drive_letter/path format (Docker Desktop standard)
@@ -260,5 +264,28 @@ mod tests {
 
         // Test single character paths
         assert_eq!(convert_path_for_docker_desktop(Path::new(r"C:")), "/c");
+    }
+
+    #[test]
+    fn test_unc_path_handling() {
+        // Test UNC paths with \\?\UNC\ prefix
+        assert_eq!(
+            convert_path_for_docker_desktop(Path::new(r"\\?\UNC\server\share\folder")),
+            "//server/share/folder"
+        );
+
+        // Test UNC paths with nested folders
+        assert_eq!(
+            convert_path_for_docker_desktop(Path::new(
+                r"\\?\UNC\fileserver\documents\project\file.txt"
+            )),
+            "//fileserver/documents/project/file.txt"
+        );
+
+        // Test regular long paths (non-UNC)
+        assert_eq!(
+            convert_path_for_docker_desktop(Path::new(r"\\?\D:\very\long\path\to\file")),
+            "/d/very/long/path/to/file"
+        );
     }
 }
