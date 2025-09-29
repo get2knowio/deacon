@@ -22,6 +22,7 @@ pub mod logging;
 pub mod mount;
 pub mod observability;
 pub mod oci;
+pub mod platform;
 pub mod plugins;
 pub mod ports;
 pub mod progress;
