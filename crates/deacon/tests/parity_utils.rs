@@ -77,7 +77,7 @@ pub fn run_deacon_read_configuration(config_path: &Path) -> anyhow::Result<Strin
     let output = cmd
         .arg("read-configuration")
         .arg("--workspace-folder")
-    .arg(&workspace)
+        .arg(&workspace)
         .arg("--config")
         .arg(config_path)
         .assert()
@@ -283,9 +283,11 @@ fn replace_hex12(input: &str) -> String {
 }
 
 fn is_hex_slice(slice: &[u8]) -> bool {
-    slice.iter().all(|b| matches!(b,
-        b'0'..=b'9' | b'a'..=b'f'
-    ))
+    slice.iter().all(|b| {
+        matches!(b,
+            b'0'..=b'9' | b'a'..=b'f'
+        )
+    })
 }
 
 /// Run upstream devcontainer command and return output

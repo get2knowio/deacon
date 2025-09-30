@@ -106,8 +106,16 @@ fn parity_up_and_exec_traditional() {
     // Label parity checks
     // Upstream container: should be identifiable by devcontainer.local_folder and config_file labels
     fn docker_out(args: &[&str]) -> String {
-        let out = std::process::Command::new("docker").args(args).output().unwrap();
-        assert!(out.status.success(), "docker {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+        let out = std::process::Command::new("docker")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "docker {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
@@ -124,20 +132,36 @@ fn parity_up_and_exec_traditional() {
             "--format",
             format,
         ]);
-        assert!(!list.is_empty(), "no upstream container found with devcontainer.local_folder={}", ws_str);
+        assert!(
+            !list.is_empty(),
+            "no upstream container found with devcontainer.local_folder={}",
+            ws_str
+        );
         list.lines().next().unwrap().to_string()
     };
-    let upstream_labels_json = docker_out(&["inspect", "-f", "{{ json .Config.Labels }}", &upstream_id]);
+    let upstream_labels_json =
+        docker_out(&["inspect", "-f", "{{ json .Config.Labels }}", &upstream_id]);
     let upstream_labels: Value = serde_json::from_str(&upstream_labels_json).unwrap_or(Value::Null);
     let ul = upstream_labels.as_object().expect("upstream labels object");
     // Assert key upstream labels exist and match workspace
-    assert_eq!(ul.get("devcontainer.local_folder").and_then(|v| v.as_str()), Some(ws_str.as_str()), "upstream devcontainer.local_folder mismatch");
+    assert_eq!(
+        ul.get("devcontainer.local_folder").and_then(|v| v.as_str()),
+        Some(ws_str.as_str()),
+        "upstream devcontainer.local_folder mismatch"
+    );
     assert_eq!(
         ul.get("devcontainer.config_file").and_then(|v| v.as_str()),
-        Some(ws.join(".devcontainer/devcontainer.json").to_string_lossy().as_ref()),
+        Some(
+            ws.join(".devcontainer/devcontainer.json")
+                .to_string_lossy()
+                .as_ref()
+        ),
         "upstream devcontainer.config_file mismatch"
     );
-    assert!(ul.keys().any(|k| k.starts_with("devcontainer.")), "upstream labels missing devcontainer.* keys");
+    assert!(
+        ul.keys().any(|k| k.starts_with("devcontainer.")),
+        "upstream labels missing devcontainer.* keys"
+    );
 
     // Deacon container: identify by devcontainer.name and devcontainer.source=deacon
     let deacon_id = {
@@ -153,15 +177,30 @@ fn parity_up_and_exec_traditional() {
             "--format",
             format,
         ]);
-        assert!(!list.is_empty(), "no deacon container found with devcontainer.name=ParityUpExec");
+        assert!(
+            !list.is_empty(),
+            "no deacon container found with devcontainer.name=ParityUpExec"
+        );
         list.lines().next().unwrap().to_string()
     };
-    let deacon_labels_json = docker_out(&["inspect", "-f", "{{ json .Config.Labels }}", &deacon_id]);
+    let deacon_labels_json =
+        docker_out(&["inspect", "-f", "{{ json .Config.Labels }}", &deacon_id]);
     let deacon_labels: Value = serde_json::from_str(&deacon_labels_json).unwrap_or(Value::Null);
     let dl = deacon_labels.as_object().expect("deacon labels object");
-    assert_eq!(dl.get("devcontainer.name").and_then(|v| v.as_str()), Some("ParityUpExec"), "deacon devcontainer.name mismatch");
-    assert_eq!(dl.get("devcontainer.source").and_then(|v| v.as_str()), Some("deacon"), "deacon devcontainer.source mismatch");
-    assert!(dl.keys().any(|k| k.starts_with("devcontainer.")), "deacon labels missing devcontainer.* keys");
+    assert_eq!(
+        dl.get("devcontainer.name").and_then(|v| v.as_str()),
+        Some("ParityUpExec"),
+        "deacon devcontainer.name mismatch"
+    );
+    assert_eq!(
+        dl.get("devcontainer.source").and_then(|v| v.as_str()),
+        Some("deacon"),
+        "deacon devcontainer.source mismatch"
+    );
+    assert!(
+        dl.keys().any(|k| k.starts_with("devcontainer.")),
+        "deacon labels missing devcontainer.* keys"
+    );
 
     // Note: We don't assert exact label key equality across CLIs because upstream and deacon
     // use different labeling schemes. We verify that each assigns the expected, identifying
