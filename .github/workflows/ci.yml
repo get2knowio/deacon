@@ -12,15 +12,52 @@ env:
   MIN_COVERAGE: "80"
 
 jobs:
+  lint:
+    name: Lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Compile (fast check)
+    # Catch obvious compile errors quickly across workspace
+      run: cargo check --workspace --all-targets
+
+    - name: Run clippy
+      run: cargo clippy --all-targets -- -D warnings
+
+    - name: Run doctests
+      run: cargo test --doc --workspace
+
   test:
     name: Test (unit + integration) (${{ matrix.os }})
+    needs: lint
     runs-on: ${{ matrix.os }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-13]
+        os: [ubuntu-latest, macos-13, windows-latest]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -46,6 +83,35 @@ jobs:
       run: |
         sudo service docker start
         docker info
+
+    - name: Start Docker Desktop (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # Start Docker Desktop service and wait until responsive
+        Start-Service com.docker.service
+        $max_attempts = 30
+        $attempt = 0
+        while ($attempt -lt $max_attempts) {
+          try {
+            docker version | Out-Null
+            docker info
+            break
+          } catch {
+            Start-Sleep -Seconds 5
+            $attempt++
+          }
+        }
+        if ($attempt -ge $max_attempts) {
+          Write-Error "Docker did not become ready in time"
+          exit 1
+        }
+
+    - name: Verify Docker Compose (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        docker compose version
 
     - name: Install and start Docker (macOS via Colima)
       if: runner.os == 'macOS'
@@ -88,22 +154,17 @@ jobs:
       
     - name: Run unit/integration tests
       run: cargo test --verbose -- --test-threads=1 --skip smoke_basic
-      
-    - name: Check formatting
-      run: cargo fmt --all -- --check
-      
-    - name: Run clippy
-      run: cargo clippy --all-targets -- -D warnings
 
   smoke:
     name: Smoke tests (${{ matrix.os }})
+    needs: lint
     runs-on: ${{ matrix.os }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-13]
+        os: [ubuntu-latest, macos-13, windows-latest]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -129,6 +190,35 @@ jobs:
       run: |
         sudo service docker start
         docker info
+
+    - name: Start Docker Desktop (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # Start Docker Desktop service and wait until responsive
+        Start-Service com.docker.service
+        $max_attempts = 30
+        $attempt = 0
+        while ($attempt -lt $max_attempts) {
+          try {
+            docker version | Out-Null
+            docker info
+            break
+          } catch {
+            Start-Sleep -Seconds 5
+            $attempt++
+          }
+        }
+        if ($attempt -ge $max_attempts) {
+          Write-Error "Docker did not become ready in time"
+          exit 1
+        }
+
+    - name: Verify Docker Compose (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        docker compose version
 
     - name: Install and start Docker (macOS via Colima)
       if: runner.os == 'macOS'
@@ -172,14 +262,9 @@ jobs:
     - name: Run smoke tests only
       run: cargo test --verbose --test smoke_basic -- --test-threads=1
 
-    - name: Check formatting
-      run: cargo fmt --all -- --check
-
-    - name: Run clippy
-      run: cargo clippy --all-targets -- -D warnings
-
   coverage:
     name: Coverage (ubuntu)
+    needs: lint
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
