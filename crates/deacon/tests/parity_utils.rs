@@ -71,7 +71,7 @@ pub fn run_deacon_read_configuration(config_path: &Path) -> anyhow::Result<Strin
         .parent()
         .and_then(|p| p.parent())
         .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| repo_root());
+        .unwrap_or_else(repo_root);
 
     let mut cmd = Command::cargo_bin("deacon")?;
     let output = cmd
