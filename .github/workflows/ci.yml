@@ -56,6 +56,33 @@ jobs:
         docker context use colima
         docker info
 
+    - name: Install Docker Compose plugin (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        # Ensure Compose v2 is available as a Docker CLI plugin
+        set -euo pipefail
+        mkdir -p ~/.docker/cli-plugins
+        if ! docker compose version >/dev/null 2>&1; then
+          echo "Installing Docker Compose v2 plugin..."
+          COMPOSE_VERSION="v2.29.7"
+          curl -sSL -o ~/.docker/cli-plugins/docker-compose \
+            "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-darwin-x86_64"
+          chmod +x ~/.docker/cli-plugins/docker-compose
+        fi
+        docker compose version
+
+    - name: Set macOS TMPDIR for Colima mounts
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        # Use a temp directory under $HOME so Colima's VM can mount it
+        mkdir -p "$RUNNER_TEMP"
+        echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        echo "Using TMPDIR=$RUNNER_TEMP"
+
     - name: Build
       run: cargo build --verbose
       
@@ -111,6 +138,33 @@ jobs:
         colima start --runtime docker --cpu 2 --memory 4 --disk 60
         docker context use colima
         docker info
+
+    - name: Install Docker Compose plugin (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        # Ensure Compose v2 is available as a Docker CLI plugin
+        set -euo pipefail
+        mkdir -p ~/.docker/cli-plugins
+        if ! docker compose version >/dev/null 2>&1; then
+          echo "Installing Docker Compose v2 plugin..."
+          COMPOSE_VERSION="v2.29.7"
+          curl -sSL -o ~/.docker/cli-plugins/docker-compose \
+            "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-darwin-x86_64"
+          chmod +x ~/.docker/cli-plugins/docker-compose
+        fi
+        docker compose version
+
+    - name: Set macOS TMPDIR for Colima mounts
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        # Use a temp directory under $HOME so Colima's VM can mount it
+        mkdir -p "$RUNNER_TEMP"
+        echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        echo "Using TMPDIR=$RUNNER_TEMP"
 
     - name: Build
       run: cargo build --verbose
