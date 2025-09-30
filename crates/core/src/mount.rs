@@ -191,7 +191,30 @@ impl Mount {
 
         // Add source for bind and volume mounts
         if let Some(ref source) = self.source {
-            mount_str.push_str(&format!(",source={}", source));
+            let source_path = if self.mount_type == MountType::Bind {
+                // For bind mounts, resolve relative paths to absolute before platform conversion
+                let source_path = std::path::Path::new(source);
+                let absolute_path = if source_path.is_absolute() {
+                    source_path.to_path_buf()
+                } else {
+                    // Resolve relative path to absolute
+                    std::env::current_dir()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                        .join(source_path)
+                };
+
+                // Use platform-aware path conversion for bind mounts
+                let platform = crate::platform::Platform::detect();
+                if platform.needs_docker_desktop_path_conversion() {
+                    crate::platform::convert_path_for_docker_desktop(&absolute_path)
+                } else {
+                    absolute_path.display().to_string()
+                }
+            } else {
+                // Volume and other mount types don't need path conversion
+                source.clone()
+            };
+            mount_str.push_str(&format!(",source={}", source_path));
         }
 
         // Add target
@@ -658,5 +681,68 @@ mod tests {
 
         let mounts = MountParser::parse_mounts_from_json(&json_values);
         assert_eq!(mounts.len(), 2);
+    }
+
+    #[test]
+    fn test_relative_path_resolution_with_docker_desktop_conversion() {
+        use std::env;
+        use tempfile::TempDir;
+
+        // Create a temporary directory to serve as current_dir
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Save current directory and change to temp directory
+        let original_dir = env::current_dir().unwrap();
+        env::set_current_dir(temp_path).unwrap();
+
+        // Ensure we restore the directory at the end
+        struct DirRestorer {
+            original_dir: std::path::PathBuf,
+        }
+        impl Drop for DirRestorer {
+            fn drop(&mut self) {
+                let _ = env::set_current_dir(&self.original_dir);
+            }
+        }
+        let _restorer = DirRestorer { original_dir };
+
+        // Create a mount with a relative path
+        let mount = Mount {
+            mount_type: MountType::Bind,
+            source: Some("./data".to_string()),
+            target: "/container/data".to_string(),
+            mode: MountMode::ReadWrite,
+            consistency: None,
+            options: std::collections::HashMap::new(),
+        };
+
+        let args = mount.to_docker_args();
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "--mount");
+
+        // The mount string should contain the absolute path
+        let mount_string = &args[1];
+        assert!(mount_string.starts_with("type=bind,source="));
+        assert!(mount_string.contains("target=/container/data"));
+
+        // Extract the source path from the mount string
+        let source_part = mount_string
+            .split(',')
+            .find(|part| part.starts_with("source="))
+            .unwrap()
+            .strip_prefix("source=")
+            .unwrap();
+
+        // The source should be an absolute path, not a relative one
+        assert!(!source_part.starts_with("./"));
+        assert!(source_part.contains("data"));
+
+        // On current Linux platform, should not be converted for Docker Desktop
+        let platform = crate::platform::Platform::detect();
+        if !platform.needs_docker_desktop_path_conversion() {
+            // Should contain the absolute temp path
+            assert!(source_part.contains(temp_path.to_str().unwrap()));
+        }
     }
 }
