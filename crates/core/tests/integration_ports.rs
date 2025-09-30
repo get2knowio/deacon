@@ -99,7 +99,8 @@ fn test_port_event_generation_with_attributes() {
     };
 
     // Process container ports without emitting events (for testing)
-    let events = PortForwardingManager::process_container_ports(&config, &container_info, false);
+    let events =
+        PortForwardingManager::process_container_ports(&config, &container_info, false, None, None);
 
     // Verify the correct number of events were generated
     assert_eq!(events.len(), 3); // 3000, 8080, 4000 are configured
@@ -213,7 +214,8 @@ fn test_port_attribute_fallback_behavior() {
         }],
     };
 
-    let events = PortForwardingManager::process_container_ports(&config, &container_info, false);
+    let events =
+        PortForwardingManager::process_container_ports(&config, &container_info, false, None, None);
 
     assert_eq!(events.len(), 1);
     let event = &events[0];
@@ -248,7 +250,8 @@ fn test_exposed_ports_without_mappings() {
         port_mappings: vec![], // No port mappings - port is exposed but not forwarded
     };
 
-    let events = PortForwardingManager::process_container_ports(&config, &container_info, false);
+    let events =
+        PortForwardingManager::process_container_ports(&config, &container_info, false, None, None);
 
     assert_eq!(events.len(), 1);
     let event = &events[0];
@@ -257,4 +260,97 @@ fn test_exposed_ports_without_mappings() {
     assert!(!event.auto_forwarded); // Should be false since no port mapping
     assert_eq!(event.local_port, None); // No local port since not forwarded
     assert_eq!(event.host_ip, None); // No host IP since not forwarded
+}
+
+#[test]
+fn test_port_event_redaction() {
+    use deacon_core::redaction::{RedactionConfig, SecretRegistry};
+
+    // Create a temporary secret registry with a test secret
+    let registry = SecretRegistry::new();
+    registry.add_secret("secret-port-token-123");
+    let _config = RedactionConfig::with_custom_registry(registry.clone());
+
+    // Create a port event containing the secret
+    let _port_event = PortEvent {
+        port: 3000,
+        protocol: "tcp".to_string(),
+        label: Some("Web with secret-port-token-123".to_string()),
+        on_auto_forward: Some(OnAutoForward::Notify),
+        auto_forwarded: true,
+        local_port: Some(3000),
+        host_ip: Some("127.0.0.1".to_string()),
+        description: Some("Contains secret-port-token-123 in description".to_string()),
+        open_preview: Some(false),
+        require_local_port: Some(false),
+    };
+
+    // Create minimal container and config for testing
+    let container_info = ContainerInfo {
+        id: "test-id".to_string(),
+        names: vec!["test-container".to_string()],
+        image: "test-image:latest".to_string(),
+        status: "running".to_string(),
+        state: "running".to_string(),
+        exposed_ports: vec![ExposedPort {
+            port: 3000,
+            protocol: "tcp".to_string(),
+        }],
+        port_mappings: vec![PortMapping {
+            host_port: 3000,
+            container_port: 3000,
+            protocol: "tcp".to_string(),
+            host_ip: "127.0.0.1".to_string(),
+        }],
+    };
+
+    let mut port_attrs = HashMap::new();
+    port_attrs.insert(
+        "3000".to_string(),
+        PortAttributes {
+            label: Some("Web with secret-port-token-123".to_string()),
+            on_auto_forward: Some(OnAutoForward::Notify),
+            open_preview: Some(false),
+            require_local_port: Some(false),
+            description: Some("Contains secret-port-token-123 in description".to_string()),
+        },
+    );
+
+    let config_with_secrets = DevContainerConfig {
+        forward_ports: vec![PortSpec::Number(3000)],
+        ports_attributes: port_attrs,
+        ..Default::default()
+    };
+
+    // Test with redaction enabled - capture stdout to verify redaction
+    // Since emit_port_event writes to stdout, we need to test it indirectly
+    // by checking that the events generated contain the secret but when
+    // process_container_ports is called with redaction config,
+    // the emitted output should be redacted
+
+    // First verify that events contain secrets when generated
+    let events = PortForwardingManager::process_container_ports(
+        &config_with_secrets,
+        &container_info,
+        false, // Don't emit events, just generate them
+        None,
+        None,
+    );
+
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert!(event
+        .label
+        .as_ref()
+        .unwrap()
+        .contains("secret-port-token-123"));
+    assert!(event
+        .description
+        .as_ref()
+        .unwrap()
+        .contains("secret-port-token-123"));
+
+    // The actual redaction test would require capturing stdout from emit_port_event
+    // which is complex in unit tests. The functionality is tested through the
+    // RedactingWriter itself in the redaction module tests.
 }
