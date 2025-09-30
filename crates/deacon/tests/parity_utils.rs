@@ -65,11 +65,19 @@ pub fn skip_reason() -> String {
 
 /// Run our CLI and return stdout as String on success.
 pub fn run_deacon_read_configuration(config_path: &Path) -> anyhow::Result<String> {
+    // Align workspace with upstream: use the directory containing the devcontainer folder
+    // (i.e., parent of the config file's directory), falling back to repo_root if unknown.
+    let workspace: std::path::PathBuf = config_path
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| repo_root());
+
     let mut cmd = Command::cargo_bin("deacon")?;
     let output = cmd
         .arg("read-configuration")
         .arg("--workspace-folder")
-        .arg(repo_root())
+    .arg(&workspace)
         .arg("--config")
         .arg(config_path)
         .assert()
@@ -163,6 +171,15 @@ fn run_devcontainer<S: AsRef<str>>(args: &[S], cwd: &Path) -> anyhow::Result<Str
 /// Drops volatile fields and returns a pruned object with core keys.
 pub fn normalize_config_json(raw: &str) -> anyhow::Result<Value> {
     let v: Value = serde_json::from_str(raw.trim())?;
+    // Upstream devcontainer CLI returns an object with a top-level "configuration" object.
+    // Our CLI returns the effective configuration object directly. Handle both.
+    let obj = match v.as_object() {
+        Some(o) => o,
+        None => return Ok(v),
+    };
+    if let Some(conf) = obj.get("configuration") {
+        return Ok(extract_core_config(conf));
+    }
     Ok(extract_core_config(&v))
 }
 
@@ -189,8 +206,11 @@ fn extract_core_config(v: &Value) -> Value {
         "postStartCommand",
         "postAttachCommand",
     ] {
-        if let Some(val) = obj.get(k).cloned() {
-            out.insert(k.to_string(), val);
+        if let Some(val) = obj.get(k) {
+            // Skip nulls to avoid mismatches when one side omits null-valued keys
+            if !val.is_null() {
+                out.insert(k.to_string(), val.clone());
+            }
         }
     }
 
@@ -206,7 +226,9 @@ fn extract_core_config(v: &Value) -> Value {
         }
     }
 
-    Value::Object(out)
+    let mut core = Value::Object(out);
+    sanitize_dynamic_values(&mut core);
+    core
 }
 
 /// Write a devcontainer.json file to the .devcontainer directory
@@ -215,6 +237,55 @@ pub fn write_devcontainer(ws: &Path, json: &str) -> anyhow::Result<()> {
     std::fs::create_dir_all(&dc_dir)?;
     std::fs::write(dc_dir.join("devcontainer.json"), json)?;
     Ok(())
+}
+
+/// Recursively sanitize dynamic IDs and placeholders so outputs are comparable.
+fn sanitize_dynamic_values(v: &mut Value) {
+    match v {
+        Value::Object(map) => {
+            for (_k, val) in map.iter_mut() {
+                sanitize_dynamic_values(val);
+            }
+        }
+        Value::Array(arr) => {
+            for val in arr.iter_mut() {
+                sanitize_dynamic_values(val);
+            }
+        }
+        Value::String(s) => {
+            let mut replaced = s.replace("${devcontainerId}", "<ID>");
+            replaced = replace_hex12(&replaced);
+            *s = replaced;
+        }
+        _ => {}
+    }
+}
+
+/// Replace any 12-character contiguous lowercase hex sequences with <ID>.
+fn replace_hex12(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        // Attempt to match 12 hex chars starting at i
+        if i + 12 <= bytes.len() {
+            let slice = &bytes[i..i + 12];
+            if is_hex_slice(slice) {
+                out.push_str("<ID>");
+                i += 12;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn is_hex_slice(slice: &[u8]) -> bool {
+    slice.iter().all(|b| matches!(b,
+        b'0'..=b'9' | b'a'..=b'f'
+    ))
 }
 
 /// Run upstream devcontainer command and return output

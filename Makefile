@@ -26,7 +26,10 @@ test-parity: ## Run parity tests (requires devcontainer CLI and Docker)
 	  exit 1; \
 	fi; \
 	echo "Using devcontainer: $$BIN"; \
-	DEACON_PARITY_DEVCONTAINER="$$BIN" cargo test -p deacon --test parity_read_configuration --test parity_up_exec -- --nocapture
+	DEACON_PARITY=1 \
+	DEACON_PARITY_DEVCONTAINER="$$BIN" \
+	DEACON_PARITY_UPSTREAM_READ_CONFIGURATION='read-configuration --config {config} --workspace-folder {workspace}' \
+	cargo test -p deacon --test parity_read_configuration --test parity_up_exec -- --nocapture
 
 fmt: ## Format all code
 	cargo fmt --all
