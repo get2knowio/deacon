@@ -13,8 +13,14 @@ env:
 
 jobs:
   test:
-    name: Test (unit + integration)
-    runs-on: ubuntu-latest
+    name: Test (unit + integration) (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-13]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -35,9 +41,19 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Ensure Docker is running
+    - name: Ensure Docker is running (Ubuntu)
+      if: runner.os == 'Linux'
       run: |
         sudo service docker start
+        docker info
+
+    - name: Install and start Docker (macOS via Colima)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install docker colima
+        colima start --runtime docker --cpu 2 --memory 4 --disk 60
+        docker context use colima
         docker info
 
     - name: Build
@@ -53,14 +69,22 @@ jobs:
       run: cargo clippy --all-targets -- -D warnings
 
   smoke:
-    name: Smoke tests (ubuntu)
-    runs-on: ubuntu-latest
+    name: Smoke tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-13]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
 
     - name: Cache cargo registry and target
       uses: actions/cache@v4
@@ -73,9 +97,19 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Ensure Docker is running
+    - name: Ensure Docker is running (Ubuntu)
+      if: runner.os == 'Linux'
       run: |
         sudo service docker start
+        docker info
+
+    - name: Install and start Docker (macOS via Colima)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install docker colima
+        colima start --runtime docker --cpu 2 --memory 4 --disk 60
+        docker context use colima
         docker info
 
     - name: Build
