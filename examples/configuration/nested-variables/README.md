@@ -277,6 +277,7 @@ deacon config substitute --config devcontainer.json --max-depth 10
 - **Performance**: Deep nesting may require multiple passes - use `--max-depth` to limit
 - **Debugging**: Use `--dry-run` to preview substitutions without applying them
 - **Security**: Never hardcode secrets - use `${localEnv:SECRET_NAME}` with secrets files
+- **Current Limitation**: Nested `containerEnv` substitution (e.g., `${containerEnv:VAR1}` in `VAR2`) has partial support - simple variable references work but complex nested paths may not fully resolve in all contexts
 
 ## Spec References
 

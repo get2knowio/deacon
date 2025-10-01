@@ -94,14 +94,14 @@ After merging all three layers, the final configuration should have:
 - `ghcr.io/devcontainers/features/git:1`: `{"version": "latest"}` (from mid)
 - `ghcr.io/devcontainers/features/node:1`: `{"version": "18"}` (from leaf)
 
-**Run Args** (array replacement):
-- `["--privileged"]` (mid replaces base's `["--init"]`)
+**Run Args** (array concatenation):
+- `["--init", "--privileged"]` (base's `--init` + mid's `--privileged`)
   
 **Forward Ports** (array replacement):
 - `[5000]` (leaf replaces all previous port arrays)
 
 **Customizations** (deep object merge):
-- VSCode extensions: `["ms-vscode.vscode-typescript-next", "dbaeumer.vscode-eslint"]` (combined)
+- VSCode extensions: `["dbaeumer.vscode-eslint"]` (leaf replaces base array)
 - VSCode settings: `{"editor.formatOnSave": true}` (from leaf)
 
 **Lifecycle Commands**:
@@ -172,16 +172,19 @@ Error: Configuration cycle detected: cycle.json extends itself
 
 1. **Scalar Override**: Simple values like `name` and `SHARED_VAR` are replaced by the highest precedence layer
 2. **Object Deep Merge**: Maps like `features` and `customizations` merge deeply, combining keys from all layers
-3. **Array Replacement**: Arrays like `forwardPorts` and `runArgs` replace completely (last writer wins)
-4. **Feature Addition**: Each layer can add new features to the features map
-5. **Environment Accumulation**: Environment variables accumulate, with later layers overriding earlier ones for the same key
-6. **Lifecycle Commands**: Different layers can define different lifecycle commands; they don't override unless explicitly set
-7. **Cycle Prevention**: The loader detects and prevents circular extends chains
+3. **Array Replacement (most arrays)**: Most arrays like `forwardPorts` and `mounts` replace completely (last writer wins)
+4. **Array Concatenation (security arrays)**: Security-related arrays (`runArgs`, `capAdd`, `securityOpt`) concatenate from all layers
+5. **Arrays in Deep Objects**: Arrays within merged objects (like VSCode extensions) replace completely
+6. **Feature Addition**: Each layer can add new features to the features map
+7. **Environment Accumulation**: Environment variables accumulate, with later layers overriding earlier ones for the same key
+8. **Lifecycle Commands**: Different layers can define different lifecycle commands; they don't override unless explicitly set
+9. **Cycle Prevention**: The loader detects and prevents circular extends chains
 
 ## Notes
 
 - **Offline-friendly**: All configurations are local JSON files, no external dependencies
-- **Array Merge Future**: The spec includes future directives for append/prepend array merging (not yet implemented)
+- **Array Merge Semantics**: Most arrays replace (last writer wins), but security arrays (`runArgs`, `capAdd`, `securityOpt`) concatenate
+- **Array Merge Future**: The spec includes future directives for more flexible append/prepend array merging (not yet implemented)
 - **Path Resolution**: Extends paths are resolved relative to the file containing the extends field
 - **Multiple Extends**: A configuration can extend multiple files (array form), merged left-to-right
 - **Provenance Tracking**: Use `--include-merged-configuration` for debugging complex extends chains
