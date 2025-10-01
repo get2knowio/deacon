@@ -1,0 +1,10 @@
+{
+  "name": "Basic Dockerfile Build Example",
+  "dockerFile": "Dockerfile",
+  "build": {
+    "context": ".",
+    "args": {
+      "FOO": "example_value"
+    }
+  }
+}
