@@ -1,0 +1,30 @@
+{
+  "name": "Redaction Demo",
+  "image": "alpine:3.19",
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "PUBLIC_VALUE": "this-is-public-info",
+    "API_KEY": "secret-api-key-12345",
+    "DATABASE_PASSWORD": "super-secret-password"
+  },
+  "onCreateCommand": [
+    "echo 'onCreate: Setting up with public value: this-is-public-info'",
+    "echo 'onCreate: API_KEY is configured (value hidden)'",
+    "mkdir -p /tmp/logs"
+  ],
+  "postCreateCommand": [
+    "echo 'postCreate: Public configuration complete'",
+    "echo 'postCreate: Testing secret: secret-api-key-12345 should be redacted'",
+    "echo 'postCreate: Another secret: super-secret-password should also be redacted'"
+  ],
+  "postStartCommand": [
+    "echo 'postStart: Service starting with API_KEY'",
+    "echo 'postStart: Database connection using PASSWORD'"
+  ],
+  "postAttachCommand": [
+    "echo '=== Redaction Demo ==='",
+    "echo 'Public info: this-is-public-info (visible)'",
+    "echo 'Secret values are redacted by default'",
+    "echo 'Use --no-redact flag to see original values (debugging only)'"
+  ]
+}

@@ -4,7 +4,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 
 ### Index
 - Configuration: basic & variable substitution examples (`configuration/`)
-- Container Lifecycle: lifecycle command execution, ordering, and variables (`container-lifecycle/`)
+- Container Lifecycle: lifecycle command execution, ordering, variables, skip flags, progress events, and redaction (`container-lifecycle/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
@@ -56,6 +56,31 @@ deacon read-configuration --config devcontainer.json | jq -r '
   "3. postStart: " + (.postStartCommand | tostring),
   "4. postAttach: " + (.postAttachCommand | tostring)
 '
+```
+
+Test skip flags behavior:
+```sh
+cd examples/container-lifecycle/non-blocking-and-skip
+deacon read-configuration --config devcontainer.json | jq '{
+  onCreate: .onCreateCommand,
+  postCreate: .postCreateCommand,
+  postStart: .postStartCommand,
+  postAttach: .postAttachCommand
+}'
+```
+
+Analyze progress events structure:
+```sh
+cd examples/container-lifecycle/progress-events
+deacon read-configuration --config devcontainer.json | jq '.postCreateCommand'
+# Shows named commands that will generate stable command IDs
+```
+
+Verify redaction configuration:
+```sh
+cd examples/container-lifecycle/redaction
+deacon read-configuration --config devcontainer.json | jq '.containerEnv'
+# Shows environment variables (including sensitive ones that will be redacted)
 ```
 
 ### Notes
