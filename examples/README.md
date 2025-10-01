@@ -3,8 +3,9 @@
 Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into it and run the shown commands without referencing assets elsewhere in the repo.
 
 ### Index
+
 - Build: Dockerfile builds, platform targeting, build args, secrets & SSH (`build/`)
-- Configuration: basic & variable substitution examples (`configuration/`)
+- Configuration: basic, variable substitution, extends chain, and nested variables (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, variables, skip flags, progress events, and redaction (`container-lifecycle/`)
 - Docker Compose: multi-service orchestration and port events (`compose/`)
 - Exec: command execution semantics covering working directory, user, TTY, and environment (`exec/`)
@@ -79,6 +80,18 @@ deacon read-configuration --config devcontainer.json | jq -r '
   "3. postStart: " + (.postStartCommand | tostring),
   "4. postAttach: " + (.postAttachCommand | tostring)
 '
+```
+
+Test configuration extends chain:
+```sh
+cd examples/configuration/extends-chain/leaf
+deacon read-configuration --config devcontainer.json --include-merged-configuration | jq '.__meta.layers'
+```
+
+Test nested variable substitution:
+```sh
+cd examples/configuration/nested-variables
+deacon config substitute --config devcontainer.json --dry-run | jq '.configuration.containerEnv'
 ```
 
 Test skip flags behavior:

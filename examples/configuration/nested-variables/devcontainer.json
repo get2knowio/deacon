@@ -1,0 +1,28 @@
+{
+  "name": "Nested Variable Substitution Example",
+  "image": "ubuntu:22.04",
+  "workspaceFolder": "${localWorkspaceFolder}/src",
+  "containerEnv": {
+    "WORKSPACE_ROOT": "${localWorkspaceFolder}",
+    "PROJECT_DIR": "${containerEnv:WORKSPACE_ROOT}/project",
+    "LOG_PATH": "${containerEnv:PROJECT_DIR}/logs",
+    "CONFIG_PATH": "${localWorkspaceFolder}/config",
+    "USER_HOME": "${localEnv:HOME}",
+    "NESTED_PATH": "${containerEnv:WORKSPACE_ROOT}-${localEnv:USER}/data",
+    "MISSING_ENV": "${localEnv:NONEXISTENT_VARIABLE}",
+    "CHAIN_VAR_1": "${localWorkspaceFolder}",
+    "CHAIN_VAR_2": "${containerEnv:CHAIN_VAR_1}/nested",
+    "CHAIN_VAR_3": "${containerEnv:CHAIN_VAR_2}/deep"
+  },
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/custom/bin",
+    "PROJECT_ROOT": "${containerEnv:WORKSPACE_ROOT}",
+    "REMOTE_VAR": "${remoteEnv:HOME}/workspace"
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/data,target=${containerEnv:PROJECT_DIR}/data,type=bind"
+  ],
+  "forwardPorts": [3000],
+  "onCreateCommand": "mkdir -p ${containerEnv:LOG_PATH}",
+  "postCreateCommand": "echo 'Project at ${containerEnv:PROJECT_DIR}' > ${containerEnv:LOG_PATH}/setup.log"
+}
