@@ -11,6 +11,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 - Exec: command execution semantics covering working directory, user, TTY, and environment (`exec/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Feature System: dependencies, parallelism, and caching (`features/`)
+- Observability: JSON logs, standardized spans, and structured fields (`observability/`)
 - Registry: OCI registry operations including dry-run publish workflows (`registry/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
@@ -177,6 +178,14 @@ cd examples/features/cache-reuse-hint
 RUST_LOG=debug deacon read-configuration --config devcontainer.json
 ```
 
+Verify JSON logs with standardized spans:
+```sh
+cd examples/observability/json-logs
+export DEACON_LOG_FORMAT=json
+deacon config substitute --workspace-folder . --output-format json 2>&1 \
+  | jq 'select(.span.name == "config.resolve")'
+```
+
 ### Notes
 Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/CLI-SPEC.md` Container Build section.
 
@@ -185,5 +194,7 @@ Container lifecycle examples demonstrate the complete DevContainer lifecycle com
 Exec examples demonstrate command execution semantics including working directory, user context, TTY allocation, and environment variable handling as specified in `docs/CLI-SPEC.md` Exec Command section.
 
 Feature system examples demonstrate dependency resolution, parallel execution levels, and digest-based caching as specified in `docs/CLI-SPEC.md` Feature Installation Workflow and Distribution & Caching sections.
+
+Observability examples demonstrate JSON logging, standardized tracing spans, and structured fields as specified in `docs/CLI-SPEC.md` Monitoring and Observability section.
 
 Registry examples demonstrate OCI distribution workflows including offline-friendly dry-run publish operations for features and templates as specified in `docs/CLI-SPEC.md` Feature Distribution and Template Distribution sections.

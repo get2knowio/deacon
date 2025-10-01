@@ -1,0 +1,10 @@
+{
+  "name": "Observability JSON Logs Example",
+  "image": "ubuntu:22.04",
+  "workspaceFolder": "/workspace",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "devcontainer"
+    }
+  }
+}
