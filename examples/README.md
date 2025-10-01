@@ -68,6 +68,30 @@ ls -1
 cat devcontainer-template.json | jq '.id, .options'
 ```
 
+Apply a template with custom options:
+```sh
+cd examples/template-management/templates-apply
+mkdir -p /tmp/my-project
+deacon templates apply ../template-with-options \
+  --output /tmp/my-project \
+  --option customName=my-app \
+  --option debugMode=true
+```
+
+View template metadata:
+```sh
+cd examples/template-management/metadata-and-docs
+deacon templates metadata ../template-with-options | jq '.options | keys'
+```
+
+Generate template documentation:
+```sh
+cd examples/template-management/metadata-and-docs
+mkdir -p /tmp/docs
+deacon templates generate-docs ../template-with-options --output /tmp/docs
+cat /tmp/docs/README-template.md
+```
+
 Test dry-run publish workflows for features and templates:
 ```sh
 cd examples/registry/dry-run-publish
