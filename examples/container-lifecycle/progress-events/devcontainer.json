@@ -1,0 +1,24 @@
+{
+  "name": "Progress Events Demo",
+  "image": "alpine:3.19",
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "DEMO_PHASE": "progress-tracking"
+  },
+  "onCreateCommand": [
+    "echo 'onCreate: Step 1 - Creating directories'",
+    "mkdir -p /workspace/logs",
+    "echo 'onCreate: Step 2 - Setting up environment'",
+    "echo 'onCreate: Step 3 - Initializing workspace'"
+  ],
+  "postCreateCommand": {
+    "install-tools": "echo 'postCreate: Installing essential tools'",
+    "configure-env": "echo 'postCreate: Configuring environment variables'",
+    "setup-deps": "echo 'postCreate: Setting up dependencies'"
+  },
+  "postStartCommand": [
+    "echo 'postStart: Starting background services'",
+    "echo 'postStart: Checking service health'"
+  ],
+  "postAttachCommand": "echo 'postAttach: Welcome! Development environment is ready.'"
+}

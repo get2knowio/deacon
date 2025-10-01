@@ -1,0 +1,6 @@
+{
+	"id": "independent-1",
+	"version": "1.0.0",
+	"name": "Independent Feature 1",
+	"description": "Feature that can run in parallel with others - demonstrates concurrent installation"
+}

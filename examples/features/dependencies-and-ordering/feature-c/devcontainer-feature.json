@@ -1,0 +1,11 @@
+{
+	"id": "feature-c",
+	"version": "1.0.0",
+	"name": "Feature C (Dependent)",
+	"description": "A feature that depends on both A and B, and installs after A",
+	"dependsOn": {
+		"feature-a": true,
+		"feature-b": true
+	},
+	"installsAfter": ["feature-a"]
+}
