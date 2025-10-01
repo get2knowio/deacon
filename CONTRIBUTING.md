@@ -135,9 +135,21 @@ RUST_LOG=debug cargo run -- --help
 
 ## CI/CD
 - **GitHub Actions** runs tests on every PR and push to main
-- **Multi-platform testing** on Ubuntu and macOS
+- **Ubuntu checks on PR/merge**: Lint, unit/integration, smoke, and coverage run on `ubuntu-latest`
+- **macOS/Windows checks (manual)**: Trigger the "CI (Other OS)" workflow via "Run workflow" in GitHub Actions to run macOS and Windows jobs on demand
 - **Release builds** are automatically created on version tags (`v*.*.*`)
 - **Format and clippy checks** must pass for PR approval
+
+### Running macOS/Windows CI manually
+To validate on other operating systems without gating PRs:
+1. Navigate to the GitHub repository → Actions tab
+2. Select the workflow named "CI (Other OS)"
+3. Click "Run workflow" and optionally choose a branch
+4. Observe jobs for `macos-13` and `windows-latest`
+
+Notes:
+- macOS uses Colima to provide a Docker runtime for smoke tests
+- Windows smoke tests are allowed to continue on error to avoid flakiness when Docker is unavailable; unit/integration tests still run and must pass
 
 ## Release Process
 1. Update version in `Cargo.toml` files

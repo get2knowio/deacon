@@ -49,32 +49,19 @@ jobs:
       run: cargo test --doc --workspace
 
   test:
-    name: Test (unit + integration) (${{ matrix.os }})
+    name: Test (unit + integration) (ubuntu)
     needs: lint
-    runs-on: ${{ fromJSON(matrix.runs_on) }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: 1
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu
-            runs_on: '["ubuntu-latest"]'
-          - os: macos
-            runs_on: '["macos-13"]'
-          # TODO: Re-enable Windows when a self-hosted runner with Docker is available
-          # - os: windows
-          #   runs_on: '["self-hosted","Windows","X64","docker"]'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
-        
+
     - name: Cache cargo registry
       uses: actions/cache@v4
       with:
@@ -87,73 +74,21 @@ jobs:
           ${{ runner.os }}-cargo-
 
     - name: Ensure Docker is running (Ubuntu)
-      if: runner.os == 'Linux'
       run: |
         sudo service docker start
         docker info
 
-    # Windows steps are disabled until a self-hosted runner is configured
-
-    - name: Install and start Docker (macOS via Colima)
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        brew install docker colima
-        colima start --runtime docker --cpu 2 --memory 4 --disk 60
-        docker context use colima
-        docker info
-
-    - name: Install Docker Compose plugin (macOS)
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        # Ensure Compose v2 is available as a Docker CLI plugin
-        set -euo pipefail
-        mkdir -p ~/.docker/cli-plugins
-        if ! docker compose version >/dev/null 2>&1; then
-          echo "Installing Docker Compose v2 plugin..."
-          COMPOSE_VERSION="v2.29.7"
-          curl -sSL -o ~/.docker/cli-plugins/docker-compose \
-            "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-darwin-x86_64"
-          chmod +x ~/.docker/cli-plugins/docker-compose
-        fi
-        docker compose version
-
-    - name: Set macOS TMPDIR for Colima mounts
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        # Use a temp directory under $HOME so Colima's VM can mount it
-        mkdir -p "$RUNNER_TEMP"
-        echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
-        echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-        echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-        echo "Using TMPDIR=$RUNNER_TEMP"
-
     - name: Build
       run: cargo build --verbose
-      
+
     - name: Run unit/integration tests
       run: cargo test --verbose -- --test-threads=1 --skip smoke_basic
 
   smoke:
-    name: Smoke tests (${{ matrix.os }})
+    name: Smoke tests (ubuntu)
     needs: lint
-    runs-on: ${{ fromJSON(matrix.runs_on) }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: 1
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu
-            runs_on: '["ubuntu-latest"]'
-          - os: macos
-            runs_on: '["macos-13"]'
-          # TODO: Re-enable Windows when a self-hosted runner with Docker is available
-          # - os: windows
-          #   runs_on: '["self-hosted","Windows","X64","docker"]'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -174,49 +109,10 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Ensure Docker is running (Ubuntu)
-      if: runner.os == 'Linux'
+    - name: Ensure Docker is running
       run: |
         sudo service docker start
         docker info
-
-    # Windows steps are disabled until a self-hosted runner is configured
-
-    - name: Install and start Docker (macOS via Colima)
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        brew install docker colima
-        colima start --runtime docker --cpu 2 --memory 4 --disk 60
-        docker context use colima
-        docker info
-
-    - name: Install Docker Compose plugin (macOS)
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        # Ensure Compose v2 is available as a Docker CLI plugin
-        set -euo pipefail
-        mkdir -p ~/.docker/cli-plugins
-        if ! docker compose version >/dev/null 2>&1; then
-          echo "Installing Docker Compose v2 plugin..."
-          COMPOSE_VERSION="v2.29.7"
-          curl -sSL -o ~/.docker/cli-plugins/docker-compose \
-            "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-darwin-x86_64"
-          chmod +x ~/.docker/cli-plugins/docker-compose
-        fi
-        docker compose version
-
-    - name: Set macOS TMPDIR for Colima mounts
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        # Use a temp directory under $HOME so Colima's VM can mount it
-        mkdir -p "$RUNNER_TEMP"
-        echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
-        echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-        echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-        echo "Using TMPDIR=$RUNNER_TEMP"
 
     - name: Build
       run: cargo build --verbose
