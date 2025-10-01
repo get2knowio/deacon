@@ -52,6 +52,7 @@ jobs:
     name: Test (unit + integration) (${{ matrix.os }})
     needs: lint
     runs-on: ${{ fromJSON(matrix.runs_on) }}
+    timeout-minutes: 30
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
     strategy:
@@ -139,6 +140,7 @@ jobs:
     name: Smoke tests (${{ matrix.os }})
     needs: lint
     runs-on: ${{ fromJSON(matrix.runs_on) }}
+    timeout-minutes: 30
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
     strategy:
