@@ -7,10 +7,13 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 - Build: Dockerfile builds, platform targeting, build args, secrets & SSH (`build/`)
 - Configuration: basic, variable substitution, extends chain, and nested variables (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, variables, skip flags, progress events, and redaction (`container-lifecycle/`)
+- Doctor: environment diagnostics including host requirements and storage checks (`doctor/`)
 - Docker Compose: multi-service orchestration and port events (`compose/`)
 - Exec: command execution semantics covering working directory, user, TTY, and environment (`exec/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Feature System: dependencies, parallelism, and caching (`features/`)
+- Observability: JSON logs, standardized spans, and structured fields (`observability/`)
+- Registry: OCI registry operations including dry-run publish workflows (`registry/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
 ### Quick Start
@@ -87,6 +90,31 @@ cd examples/template-management/metadata-and-docs
 mkdir -p /tmp/docs
 deacon templates generate-docs ../template-with-options --output /tmp/docs
 cat /tmp/docs/README-template.md
+```
+
+Test dry-run publish workflows for features and templates:
+```sh
+cd examples/registry/dry-run-publish
+
+# Dry-run publish a feature
+cd feature
+deacon features publish . \
+  --registry ghcr.io/example/my-feature \
+  --dry-run --json 2>/dev/null | jq '.'
+
+# Dry-run publish a template
+cd ../template
+deacon templates publish . \
+  --registry ghcr.io/example/my-template \
+  --dry-run 2>/dev/null | jq '.'
+```
+
+Run doctor command for system diagnostics:
+```sh
+cd examples/doctor/host-requirements
+deacon doctor --workspace-folder .
+# Or for JSON output
+deacon doctor --workspace-folder . --json | jq '.disk_space'
 ```
 
 Test container lifecycle commands:
@@ -183,11 +211,25 @@ cd examples/features/cache-reuse-hint
 RUST_LOG=debug deacon read-configuration --config devcontainer.json
 ```
 
+Verify JSON logs with standardized spans:
+```sh
+cd examples/observability/json-logs
+export DEACON_LOG_FORMAT=json
+deacon config substitute --workspace-folder . --output-format json 2>&1 \
+  | jq 'select(.span.name == "config.resolve")'
+```
+
 ### Notes
 Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/CLI-SPEC.md` Container Build section.
 
 Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/CLI-SPEC.md` Lifecycle Execution Workflow.
 
+Doctor examples demonstrate environment diagnostics including host requirements validation (CPU, memory, storage) and real disk space checking using platform-specific APIs as specified in `docs/CLI-SPEC.md` Host Requirements section.
+
 Exec examples demonstrate command execution semantics including working directory, user context, TTY allocation, and environment variable handling as specified in `docs/CLI-SPEC.md` Exec Command section.
 
 Feature system examples demonstrate dependency resolution, parallel execution levels, and digest-based caching as specified in `docs/CLI-SPEC.md` Feature Installation Workflow and Distribution & Caching sections.
+
+Observability examples demonstrate JSON logging, standardized tracing spans, and structured fields as specified in `docs/CLI-SPEC.md` Monitoring and Observability section.
+
+Registry examples demonstrate OCI distribution workflows including offline-friendly dry-run publish operations for features and templates as specified in `docs/CLI-SPEC.md` Feature Distribution and Template Distribution sections.
