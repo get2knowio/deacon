@@ -51,13 +51,20 @@ jobs:
   test:
     name: Test (unit + integration) (${{ matrix.os }})
     needs: lint
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(matrix.runs_on) }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-13, windows-latest]
+        include:
+          - os: ubuntu
+            runs_on: '["ubuntu-latest"]'
+          - os: macos
+            runs_on: '["macos-13"]'
+          # TODO: Re-enable Windows when a self-hosted runner with Docker is available
+          # - os: windows
+          #   runs_on: '["self-hosted","Windows","X64","docker"]'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -84,34 +91,7 @@ jobs:
         sudo service docker start
         docker info
 
-    - name: Start Docker Desktop (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        # Start Docker Desktop service and wait until responsive
-        Start-Service com.docker.service
-        $max_attempts = 30
-        $attempt = 0
-        while ($attempt -lt $max_attempts) {
-          try {
-            docker version | Out-Null
-            docker info
-            break
-          } catch {
-            Start-Sleep -Seconds 5
-            $attempt++
-          }
-        }
-        if ($attempt -ge $max_attempts) {
-          Write-Error "Docker did not become ready in time"
-          exit 1
-        }
-
-    - name: Verify Docker Compose (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        docker compose version
+    # Windows steps are disabled until a self-hosted runner is configured
 
     - name: Install and start Docker (macOS via Colima)
       if: runner.os == 'macOS'
@@ -158,13 +138,20 @@ jobs:
   smoke:
     name: Smoke tests (${{ matrix.os }})
     needs: lint
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(matrix.runs_on) }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-13, windows-latest]
+        include:
+          - os: ubuntu
+            runs_on: '["ubuntu-latest"]'
+          - os: macos
+            runs_on: '["macos-13"]'
+          # TODO: Re-enable Windows when a self-hosted runner with Docker is available
+          # - os: windows
+          #   runs_on: '["self-hosted","Windows","X64","docker"]'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -191,34 +178,7 @@ jobs:
         sudo service docker start
         docker info
 
-    - name: Start Docker Desktop (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        # Start Docker Desktop service and wait until responsive
-        Start-Service com.docker.service
-        $max_attempts = 30
-        $attempt = 0
-        while ($attempt -lt $max_attempts) {
-          try {
-            docker version | Out-Null
-            docker info
-            break
-          } catch {
-            Start-Sleep -Seconds 5
-            $attempt++
-          }
-        }
-        if ($attempt -ge $max_attempts) {
-          Write-Error "Docker did not become ready in time"
-          exit 1
-        }
-
-    - name: Verify Docker Compose (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        docker compose version
+    # Windows steps are disabled until a self-hosted runner is configured
 
     - name: Install and start Docker (macOS via Colima)
       if: runner.os == 'macOS'
