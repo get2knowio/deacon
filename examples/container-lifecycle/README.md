@@ -37,6 +37,27 @@ Container lifecycle commands run at specific points during container creation an
 - Cross-references between containerEnv and remoteEnv
 - Path construction and validation
 
+### [Non-Blocking and Skip Flags](./non-blocking-and-skip/)
+**What it demonstrates:** Skip flags to control lifecycle command execution during development iteration.
+- `--skip-post-create` flag behavior
+- `--skip-non-blocking-commands` flag behavior
+- Combining skip flags for faster iteration
+- Marker files to verify which phases executed
+
+### [Progress Events](./progress-events/)
+**What it demonstrates:** Machine-readable progress tracking for automation and monitoring.
+- Per-command progress events with stable IDs
+- Event ordering and timing information
+- JSON structured logging with `--progress-file`
+- Using `jq` to analyze events and verify behavior
+
+### [Redaction](./redaction/)
+**What it demonstrates:** Automatic secret redaction in command output and progress files.
+- Default redaction of sensitive values (API_KEY, PASSWORD, SECRET, TOKEN)
+- `--no-redact` flag for debugging (use with caution)
+- Redaction in terminal output, progress files, and logs
+- Verification strategies with `jq`
+
 ## Lifecycle Command Reference
 
 Based on the [DevContainer specification](https://containers.dev/implementors/spec/#lifecycle-scripts) and [CLI-SPEC.md](../../docs/CLI-SPEC.md):
