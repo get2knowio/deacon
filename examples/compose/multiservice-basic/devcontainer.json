@@ -1,0 +1,10 @@
+{
+  "name": "Multiservice Compose Example",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "runServices": ["redis"],
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "postCreateCommand": "echo 'Multi-service environment ready!'",
+  "postStartCommand": "echo 'Services started: app + redis'"
+}
