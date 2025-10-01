@@ -3,12 +3,32 @@
 Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into it and run the shown commands without referencing assets elsewhere in the repo.
 
 ### Index
+- Build: Dockerfile builds, platform targeting, build args, secrets & SSH (`build/`)
 - Configuration: basic & variable substitution examples (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, and variables (`container-lifecycle/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
 ### Quick Start
+Build a basic Dockerfile with build args:
+```sh
+cd examples/build/basic-dockerfile
+deacon build --workspace-folder . --build-arg FOO=BAR --output-format json
+```
+
+Build with platform targeting and no cache:
+```sh
+cd examples/build/platform-and-cache
+deacon build --workspace-folder . --platform linux/amd64 --no-cache
+```
+
+Build with secrets (requires BuildKit):
+```sh
+cd examples/build/secrets-and-ssh
+echo "test-secret" > /tmp/secret.txt
+deacon build --workspace-folder . --secret id=foo,src=/tmp/secret.txt
+```
+
 Validate a configuration example:
 ```sh
 cd examples/configuration/basic
@@ -59,4 +79,6 @@ deacon read-configuration --config devcontainer.json | jq -r '
 ```
 
 ### Notes
+Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/CLI-SPEC.md` Container Build section.
+
 Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/CLI-SPEC.md` Lifecycle Execution Workflow.
