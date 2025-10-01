@@ -1,0 +1,6 @@
+{
+	"id": "cached-feature",
+	"version": "1.0.0",
+	"name": "Cached Feature",
+	"description": "Feature demonstrating digest-based cache reuse across multiple installations"
+}
