@@ -1,0 +1,7 @@
+{
+  "name": "Platform and Cache Build Example",
+  "dockerFile": "Dockerfile",
+  "build": {
+    "context": "."
+  }
+}
