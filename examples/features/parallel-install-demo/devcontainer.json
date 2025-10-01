@@ -1,0 +1,8 @@
+{
+	"name": "Parallel Installation Demo",
+	"image": "mcr.microsoft.com/devcontainers/base:alpine",
+	"features": {
+		"./independent-1": {},
+		"./independent-2": {}
+	}
+}

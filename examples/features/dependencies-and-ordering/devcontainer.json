@@ -1,0 +1,9 @@
+{
+	"name": "Dependencies and Ordering Example",
+	"image": "mcr.microsoft.com/devcontainers/base:alpine",
+	"features": {
+		"./feature-a": {},
+		"./feature-b": {},
+		"./feature-c": {}
+	}
+}

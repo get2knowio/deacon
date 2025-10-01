@@ -6,6 +6,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 - Configuration: basic & variable substitution examples (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, and variables (`container-lifecycle/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
+- Feature System: dependencies, parallelism, and caching (`features/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
 ### Quick Start
@@ -58,5 +59,25 @@ deacon read-configuration --config devcontainer.json | jq -r '
 '
 ```
 
+View feature dependency resolution and installation plan:
+```sh
+cd examples/features/dependencies-and-ordering
+deacon features plan --config devcontainer.json --json
+```
+
+Demonstrate parallel feature installation:
+```sh
+cd examples/features/parallel-install-demo
+deacon features plan --config devcontainer.json --json | jq '.levels'
+```
+
+Explore feature caching:
+```sh
+cd examples/features/cache-reuse-hint
+RUST_LOG=debug deacon read-configuration --config devcontainer.json
+```
+
 ### Notes
 Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/CLI-SPEC.md` Lifecycle Execution Workflow.
+
+Feature system examples demonstrate dependency resolution, parallel execution levels, and digest-based caching as specified in `docs/CLI-SPEC.md` Feature Installation Workflow and Distribution & Caching sections.
