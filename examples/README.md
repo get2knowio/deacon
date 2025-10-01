@@ -5,6 +5,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 ### Index
 - Configuration: basic & variable substitution examples (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, and variables (`container-lifecycle/`)
+- Docker Compose: multi-service orchestration and port events (`compose/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
@@ -56,6 +57,19 @@ deacon read-configuration --config devcontainer.json | jq -r '
   "3. postStart: " + (.postStartCommand | tostring),
   "4. postAttach: " + (.postAttachCommand | tostring)
 '
+```
+
+Start a multi-service compose environment:
+```sh
+cd examples/compose/multiservice-basic
+deacon up
+deacon exec sh -lc 'echo ok'
+```
+
+Capture port events from a compose service:
+```sh
+cd examples/compose/port-events
+deacon up --ports-events 2>&1 | grep "PORT_EVENT:"
 ```
 
 ### Notes
