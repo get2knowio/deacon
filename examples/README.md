@@ -11,6 +11,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 - Exec: command execution semantics covering working directory, user, TTY, and environment (`exec/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Feature System: dependencies, parallelism, and caching (`features/`)
+- Registry: OCI registry operations including dry-run publish workflows (`registry/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
 ### Quick Start
@@ -63,6 +64,23 @@ Explore template assets:
 cd examples/template-management/template-with-options
 ls -1
 cat devcontainer-template.json | jq '.id, .options'
+```
+
+Test dry-run publish workflows for features and templates:
+```sh
+cd examples/registry/dry-run-publish
+
+# Dry-run publish a feature
+cd feature
+deacon features publish . \
+  --registry ghcr.io/example/my-feature \
+  --dry-run --json 2>/dev/null | jq '.'
+
+# Dry-run publish a template
+cd ../template
+deacon templates publish . \
+  --registry ghcr.io/example/my-template \
+  --dry-run 2>/dev/null | jq '.'
 ```
 
 Test container lifecycle commands:
@@ -167,3 +185,5 @@ Container lifecycle examples demonstrate the complete DevContainer lifecycle com
 Exec examples demonstrate command execution semantics including working directory, user context, TTY allocation, and environment variable handling as specified in `docs/CLI-SPEC.md` Exec Command section.
 
 Feature system examples demonstrate dependency resolution, parallel execution levels, and digest-based caching as specified in `docs/CLI-SPEC.md` Feature Installation Workflow and Distribution & Caching sections.
+
+Registry examples demonstrate OCI distribution workflows including offline-friendly dry-run publish operations for features and templates as specified in `docs/CLI-SPEC.md` Feature Distribution and Template Distribution sections.
