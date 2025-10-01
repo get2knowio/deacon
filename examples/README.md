@@ -3,7 +3,11 @@
 Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into it and run the shown commands without referencing assets elsewhere in the repo.
 
 ### Index
-- Configuration: basic & variable substitution examples (`configuration/`)
+- Configuration: basic, variable substitution, extends chain, and nested variables (`configuration/`)
+  - `basic/` - Complete production-ready configuration
+  - `with-variables/` - Variable substitution patterns
+  - `extends-chain/` - Multi-level configuration inheritance (base → mid → leaf)
+  - `nested-variables/` - Advanced nested and chained variable substitution
 - Container Lifecycle: lifecycle command execution, ordering, and variables (`container-lifecycle/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Template Management: minimal & with-options templates (`template-management/`)
@@ -56,6 +60,18 @@ deacon read-configuration --config devcontainer.json | jq -r '
   "3. postStart: " + (.postStartCommand | tostring),
   "4. postAttach: " + (.postAttachCommand | tostring)
 '
+```
+
+Test configuration extends chain:
+```sh
+cd examples/configuration/extends-chain/leaf
+deacon read-configuration --config devcontainer.json --include-merged-configuration | jq '.__meta.layers'
+```
+
+Test nested variable substitution:
+```sh
+cd examples/configuration/nested-variables
+deacon config substitute --config devcontainer.json --dry-run | jq '.configuration.containerEnv'
 ```
 
 ### Notes

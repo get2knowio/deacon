@@ -1,0 +1,24 @@
+{
+  "extends": "../mid/devcontainer.json",
+  "name": "Leaf Container Configuration",
+  "workspaceFolder": "/workspace/project",
+  "containerEnv": {
+    "LEAF_VAR": "leaf_value",
+    "SHARED_VAR": "from_leaf"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "18"
+    }
+  },
+  "forwardPorts": [5000],
+  "postCreateCommand": "npm install",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint"],
+      "settings": {
+        "editor.formatOnSave": true
+      }
+    }
+  }
+}
