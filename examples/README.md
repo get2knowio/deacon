@@ -5,6 +5,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 ### Index
 - Configuration: basic & variable substitution examples (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, and variables (`container-lifecycle/`)
+- Exec: command execution semantics covering working directory, user, TTY, and environment (`exec/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
@@ -56,6 +57,15 @@ deacon read-configuration --config devcontainer.json | jq -r '
   "3. postStart: " + (.postStartCommand | tostring),
   "4. postAttach: " + (.postAttachCommand | tostring)
 '
+```
+
+Test exec command semantics:
+```sh
+cd examples/exec/semantics
+deacon up
+deacon exec sh -lc 'pwd'  # Should output /wsp
+deacon exec --env FOO=BAR sh -lc 'echo $FOO'  # Should output BAR
+deacon down
 ```
 
 ### Notes
