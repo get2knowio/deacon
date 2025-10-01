@@ -1,0 +1,10 @@
+{
+  "name": "Doctor Host Requirements Example",
+  "image": "alpine:3.19",
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "4GB",
+    "storage": "10GB"
+  },
+  "workspaceFolder": "/workspace"
+}

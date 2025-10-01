@@ -7,6 +7,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 - Build: Dockerfile builds, platform targeting, build args, secrets & SSH (`build/`)
 - Configuration: basic, variable substitution, extends chain, and nested variables (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, variables, skip flags, progress events, and redaction (`container-lifecycle/`)
+- Doctor: environment diagnostics including host requirements and storage checks (`doctor/`)
 - Docker Compose: multi-service orchestration and port events (`compose/`)
 - Exec: command execution semantics covering working directory, user, TTY, and environment (`exec/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
@@ -81,6 +82,14 @@ cd ../template
 deacon templates publish . \
   --registry ghcr.io/example/my-template \
   --dry-run 2>/dev/null | jq '.'
+```
+
+Run doctor command for system diagnostics:
+```sh
+cd examples/doctor/host-requirements
+deacon doctor --workspace-folder .
+# Or for JSON output
+deacon doctor --workspace-folder . --json | jq '.disk_space'
 ```
 
 Test container lifecycle commands:
@@ -181,6 +190,8 @@ RUST_LOG=debug deacon read-configuration --config devcontainer.json
 Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/CLI-SPEC.md` Container Build section.
 
 Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/CLI-SPEC.md` Lifecycle Execution Workflow.
+
+Doctor examples demonstrate environment diagnostics including host requirements validation (CPU, memory, storage) and real disk space checking using platform-specific APIs as specified in `docs/CLI-SPEC.md` Host Requirements section.
 
 Exec examples demonstrate command execution semantics including working directory, user context, TTY allocation, and environment variable handling as specified in `docs/CLI-SPEC.md` Exec Command section.
 
