@@ -122,8 +122,24 @@ jobs:
     - name: Build
       run: cargo build --verbose
 
-    - name: Run unit/integration tests
-      run: cargo test --verbose -- --test-threads=1 --skip smoke_basic
+    - name: Run unit tests and non-smoke integration tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Discover non-smoke integration tests across workspace (filenames under tests/ not starting with smoke_)
+        NON_SMOKE_TESTS=$(find crates -type f -path '*/tests/*.rs' -not -name 'smoke_*.rs' -printf '%f\n' | sed 's/\.rs$//' | sort -u)
+        echo "Including non-smoke integration tests:"
+        if [ -n "${NON_SMOKE_TESTS}" ]; then
+          printf '%s\n' ${NON_SMOKE_TESTS}
+        else
+          echo "(none found)"
+        fi
+        # Run unit tests (libs, bins, examples) first; docs are covered in lint job doctest step
+        cargo test --verbose --workspace --lib --bins --examples -- --test-threads=1
+        # Then only the non-smoke integration tests
+        if [ -n "${NON_SMOKE_TESTS}" ]; then
+          cargo test --verbose $(printf -- '--test %s ' ${NON_SMOKE_TESTS}) -- --test-threads=1
+        fi
 
   smoke:
     name: Smoke tests (${{ matrix.os }})
@@ -188,6 +204,17 @@ jobs:
     - name: Build
       run: cargo build --verbose
 
-    - name: Run smoke tests only (macOS/Windows)
-      run: cargo test --verbose --test smoke_basic -- --test-threads=1
+    - name: Run smoke tests (all smoke_*.rs)
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Discover smoke integration tests across workspace (filenames starting with smoke_)
+        SMOKE_TESTS=$(find crates -type f -path '*/tests/smoke_*.rs' -printf '%f\n' | sed 's/\.rs$//' | sort -u)
+        if [ -z "${SMOKE_TESTS}" ]; then
+          echo "No smoke tests found."
+          exit 1
+        fi
+        echo "Found smoke tests:"
+        printf '%s\n' ${SMOKE_TESTS}
+        cargo test --verbose $(printf -- '--test %s ' ${SMOKE_TESTS}) -- --test-threads=1
       # If Windows smoke becomes flaky due to Docker absence, we could gate it with continue-on-error for Windows only.
