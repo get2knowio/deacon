@@ -92,8 +92,12 @@ jobs:
         else
           echo "(none found)"
         fi
-        # Run unit tests (libs, bins, examples, docs) and only the non-smoke integration tests
-        cargo test --verbose --workspace --lib --bins --examples --doc $(printf -- '--test %s ' ${NON_SMOKE_TESTS}) -- --test-threads=1
+        # Run unit tests (libs, bins, examples) first; docs are covered in lint job doctest step
+        cargo test --verbose --workspace --lib --bins --examples -- --test-threads=1
+        # Then only the non-smoke integration tests
+        if [ -n "${NON_SMOKE_TESTS}" ]; then
+          cargo test --verbose $(printf -- '--test %s ' ${NON_SMOKE_TESTS}) -- --test-threads=1
+        fi
 
   smoke:
     name: Smoke tests (ubuntu)

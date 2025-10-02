@@ -18,6 +18,25 @@ run: ## Run CLI
 test: ## Run all tests
 	cargo test -- --test-threads=1
 
+test-non-smoke: ## Run unit tests + non-smoke integration tests (matches CI 'test' job)
+		@set -euo pipefail; \
+		NON_SMOKE_TESTS=$$(find crates -type f -path '*/tests/*.rs' -not -name 'smoke_*.rs' -printf '%f\n' | sed 's/\.rs$$//' | sort -u); \
+		echo "Including non-smoke integration tests:"; \
+		if [[ -n "$$NON_SMOKE_TESTS" ]]; then printf '%s\n' $$NON_SMOKE_TESTS; else echo "(none found)"; fi; \
+		# Run unit/bins/examples first (cannot combine --doc with --test selection)
+		cargo test --verbose --workspace --lib --bins --examples -- --test-threads=1; \
+		# Then run the non-smoke integration tests by filename stem if any discovered
+		if [[ -n "$$NON_SMOKE_TESTS" ]]; then \
+			cargo test --verbose $$(printf -- '--test %s ' $$NON_SMOKE_TESTS) -- --test-threads=1; \
+		fi
+
+test-smoke: ## Run smoke tests only (all files matching tests/smoke_*.rs) (matches CI 'smoke' job)
+	@set -euo pipefail; \
+	SMOKE_TESTS=$$(find crates -type f -path '*/tests/smoke_*.rs' -printf '%f\n' | sed 's/\.rs$$//' | sort -u); \
+	if [[ -z "$$SMOKE_TESTS" ]]; then echo "No smoke tests found."; exit 1; fi; \
+	echo "Found smoke tests:"; printf '%s\n' $$SMOKE_TESTS; \
+	cargo test --verbose $$(printf -- '--test %s ' $$SMOKE_TESTS) -- --test-threads=1
+
 test-parity: ## Run parity tests (requires devcontainer CLI and Docker)
 	@set -euo pipefail; \
 	BIN="$${DEACON_PARITY_DEVCONTAINER:-$$(command -v devcontainer || true)}"; \
@@ -92,3 +111,5 @@ clean-branches: ## Delete local and remote branches fully merged into the defaul
 	  done <<< "$${local_merged}"; \
 	fi; \
 	echo "Branch cleanup complete."
+
+.PHONY: test-non-smoke test-smoke
