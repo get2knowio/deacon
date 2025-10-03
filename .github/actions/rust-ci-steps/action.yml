@@ -1,0 +1,97 @@
+name: 'Rust CI Steps'
+description: 'Common Rust CI steps for deacon (checkout, toolchain, cache, lint, build, test)'
+
+inputs:
+  job-type:
+    description: 'Type of CI job to run: lint, test, or smoke'
+    required: true
+  os-name:
+    description: 'Operating system name for display (ubuntu, macos, windows)'
+    required: false
+    default: 'ubuntu'
+  rust-components:
+    description: 'Rust toolchain components to install (comma-separated)'
+    required: false
+    default: 'rustfmt,clippy'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: ${{ inputs.rust-components }}
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Check formatting
+      if: inputs.job-type == 'lint'
+      shell: bash
+      run: cargo fmt --all -- --check
+
+    - name: Compile (fast check)
+      if: inputs.job-type == 'lint'
+      shell: bash
+      run: cargo check --workspace --all-targets
+
+    - name: Run clippy
+      if: inputs.job-type == 'lint'
+      shell: bash
+      run: cargo clippy --all-targets -- -D warnings
+
+    - name: Run doctests
+      if: inputs.job-type == 'lint'
+      shell: bash
+      run: cargo test --doc --workspace
+
+    - name: Build
+      if: inputs.job-type == 'test' || inputs.job-type == 'smoke'
+      shell: bash
+      run: cargo build --verbose
+
+    - name: Run unit tests and non-smoke integration tests
+      if: inputs.job-type == 'test'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Discover non-smoke integration tests across workspace (filenames under tests/ not starting with smoke_)
+        NON_SMOKE_TESTS=$(find crates -type f -path '*/tests/*.rs' -not -name 'smoke_*.rs' -printf '%f\n' | sed 's/\.rs$//' | sort -u)
+        echo "Including non-smoke integration tests:"
+        if [ -n "${NON_SMOKE_TESTS}" ]; then
+          printf '%s\n' ${NON_SMOKE_TESTS}
+        else
+          echo "(none found)"
+        fi
+        # Run unit tests (libs, bins, examples) first; docs are covered in lint job doctest step
+        cargo test --verbose --workspace --lib --bins --examples -- --test-threads=1
+        # Then only the non-smoke integration tests
+        if [ -n "${NON_SMOKE_TESTS}" ]; then
+          cargo test --verbose $(printf -- '--test %s ' ${NON_SMOKE_TESTS}) -- --test-threads=1
+        fi
+
+    - name: Run smoke tests (all smoke_*.rs)
+      if: inputs.job-type == 'smoke'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Discover smoke integration tests across workspace (filenames starting with smoke_)
+        SMOKE_TESTS=$(find crates -type f -path '*/tests/smoke_*.rs' -printf '%f\n' | sed 's/\.rs$//' | sort -u)
+        if [ -z "${SMOKE_TESTS}" ]; then
+          echo "No smoke tests found."
+          exit 1
+        fi
+        echo "Found smoke tests:"
+        printf '%s\n' ${SMOKE_TESTS}
+        cargo test --verbose $(printf -- '--test %s ' ${SMOKE_TESTS}) -- --test-threads=1
