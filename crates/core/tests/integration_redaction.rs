@@ -7,7 +7,8 @@ use assert_cmd::Command;
 use deacon_core::{
     lifecycle::{run_phase, ExecutionContext, LifecycleCommands, LifecyclePhase},
     redaction::{
-        add_global_secret, global_registry, redact_if_enabled, RedactionConfig, SecretRegistry,
+        add_global_secret, global_registry, redact_if_enabled, RedactingWriter, RedactionConfig,
+        SecretRegistry,
     },
 };
 use serde_json::json;
@@ -830,4 +831,214 @@ fn test_redacting_writer_stdout_integration() {
         let _result = writer.write_line("Test output with stdout-secret-456");
         // Don't actually write to stdout in tests - just verify it compiles and doesn't panic
     }
+}
+
+#[test]
+fn test_hash_redaction_in_lifecycle() {
+    // Create a custom registry for this test
+    let registry = SecretRegistry::new();
+    let secret = "lifecycle-hash-secret";
+    registry.add_secret(secret);
+
+    // Get the hash of the secret
+    let hash = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(secret.as_bytes());
+        format!("{:x}", hasher.finalize())
+    };
+
+    // Create commands that will output both the secret and its hash
+    let commands_json = json!([
+        format!("echo 'Secret: {}'", secret),
+        format!("echo 'Hash: {}'", hash),
+    ]);
+    let env = HashMap::new();
+    let commands = LifecycleCommands::from_json_value(&commands_json, &env).unwrap();
+
+    // Create execution context with redaction enabled
+    let ctx = ExecutionContext::new()
+        .with_redaction_config(RedactionConfig::with_custom_registry(registry));
+
+    // Execute the lifecycle phase
+    let result = run_phase(LifecyclePhase::PostCreate, &commands, &ctx).unwrap();
+
+    // Check that both the secret and its hash were redacted
+    assert!(result.stdout.contains("****"));
+    assert!(!result.stdout.contains(secret));
+    assert!(!result.stdout.contains(&hash));
+}
+
+#[test]
+fn test_redaction_consistency_across_outputs() {
+    // This test verifies that redaction works consistently across all output types
+    let registry = SecretRegistry::new();
+    registry.add_secret("consistent-secret-123");
+    let config = RedactionConfig::with_custom_registry(registry.clone());
+
+    // Test 1: Direct text redaction
+    let text1 = "This contains consistent-secret-123";
+    let redacted1 = redact_if_enabled(text1, &config);
+    assert!(!redacted1.contains("consistent-secret-123"));
+    assert!(redacted1.contains("****"));
+
+    // Test 2: Writer-based redaction
+    let mut output2 = Vec::new();
+    {
+        let mut writer = RedactingWriter::new(&mut output2, config.clone(), &registry);
+        writer.write_line(text1).unwrap();
+    }
+    let redacted2 = String::from_utf8(output2).unwrap();
+    assert!(!redacted2.contains("consistent-secret-123"));
+    assert!(redacted2.contains("****"));
+
+    // Test 3: Redaction in JSON
+    let json_text = r#"{"secret": "consistent-secret-123"}"#;
+    let redacted3 = redact_if_enabled(json_text, &config);
+    assert!(!redacted3.contains("consistent-secret-123"));
+    assert!(redacted3.contains("****"));
+}
+
+#[test]
+fn test_no_redact_flag_honored() {
+    // Test that --no-redact flag properly disables redaction
+    let registry = SecretRegistry::new();
+    registry.add_secret("flag-test-secret");
+
+    // With redaction disabled
+    let config_disabled = RedactionConfig::disabled();
+    let text = "This contains flag-test-secret";
+    let result = redact_if_enabled(text, &config_disabled);
+    assert_eq!(result, text);
+
+    // With redaction enabled
+    let config_enabled = RedactionConfig::with_custom_registry(registry);
+    let result = redact_if_enabled(text, &config_enabled);
+    assert!(!result.contains("flag-test-secret"));
+    assert!(result.contains("****"));
+}
+
+#[test]
+fn test_hash_and_exact_redaction_coexist() {
+    use sha2::{Digest, Sha256};
+
+    let registry = SecretRegistry::new();
+    let secret = "coexist-secret";
+    registry.add_secret(secret);
+
+    // Compute hash manually
+    let mut hasher = Sha256::new();
+    hasher.update(secret.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Text with both secret and hash
+    let text = format!("Secret: {} Hash: {}", secret, hash);
+    let redacted = redact_if_enabled(&text, &config);
+
+    // Both should be redacted
+    assert_eq!(redacted.matches("****").count(), 2);
+    assert!(!redacted.contains(secret));
+    assert!(!redacted.contains(&hash));
+}
+
+#[test]
+fn test_structured_secret_redaction_with_hashes() {
+    use deacon_core::redaction::StructuredSecret;
+    use sha2::{Digest, Sha256};
+
+    let registry = SecretRegistry::new();
+
+    // Add a structured secret
+    let secret_value = "structured-value";
+    let structured = StructuredSecret::new(
+        secret_value.to_string(),
+        Some("password".to_string()),
+        None,
+        true,
+    )
+    .unwrap();
+    registry.add_structured_secret(structured);
+
+    // Also add a regular secret for its hash
+    let regular_secret = "regular-secret-123";
+    registry.add_secret(regular_secret);
+
+    let config = RedactionConfig::with_custom_registry(registry);
+
+    // Compute hash of regular secret
+    let mut hasher = Sha256::new();
+    hasher.update(regular_secret.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+
+    // Test structured secret in context
+    let text1 = format!("password={}", secret_value);
+    let redacted1 = redact_if_enabled(&text1, &config);
+    assert!(redacted1.contains("password=****"));
+
+    // Test regular secret and hash
+    let text2 = format!("Secret: {} Hash: {}", regular_secret, hash);
+    let redacted2 = redact_if_enabled(&text2, &config);
+    assert_eq!(redacted2.matches("****").count(), 2);
+}
+
+#[test]
+fn test_redaction_with_multiple_output_sinks() {
+    // Test that redaction works correctly when writing to multiple sinks
+    let registry = SecretRegistry::new();
+    registry.add_secret("multi-sink-secret");
+    let config = RedactionConfig::with_custom_registry(registry.clone());
+
+    let test_text = "This contains multi-sink-secret";
+
+    // Sink 1: Direct string redaction
+    let redacted_string = redact_if_enabled(test_text, &config);
+    assert!(!redacted_string.contains("multi-sink-secret"));
+
+    // Sink 2: Vec<u8> writer
+    let mut vec_output = Vec::new();
+    {
+        let mut writer = RedactingWriter::new(&mut vec_output, config.clone(), &registry);
+        writer.write_line(test_text).unwrap();
+    }
+    let vec_result = String::from_utf8(vec_output).unwrap();
+    assert!(!vec_result.contains("multi-sink-secret"));
+
+    // Both outputs should be redacted identically
+    assert!(redacted_string.contains("****"));
+    assert!(vec_result.contains("****"));
+}
+
+#[test]
+fn test_cryptographic_hash_security_properties() {
+    use sha2::{Digest, Sha256};
+
+    // Test that hashes are cryptographically secure and not reversible
+    let secret = "security-test-secret";
+
+    let mut hasher = Sha256::new();
+    hasher.update(secret.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+
+    // Hash should be 64 characters (256 bits in hex)
+    assert_eq!(hash.len(), 64);
+
+    // Hash should be alphanumeric hex
+    assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+
+    // Hash should not contain the original secret
+    assert!(!hash.contains(secret));
+
+    // Hash should be deterministic
+    let mut hasher2 = Sha256::new();
+    hasher2.update(secret.as_bytes());
+    let hash2 = format!("{:x}", hasher2.finalize());
+    assert_eq!(hash, hash2);
+
+    // Different input should produce different hash
+    let mut hasher3 = Sha256::new();
+    hasher3.update("different-secret".as_bytes());
+    let hash3 = format!("{:x}", hasher3.finalize());
+    assert_ne!(hash, hash3);
 }

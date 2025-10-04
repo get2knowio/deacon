@@ -915,4 +915,244 @@ mod tests {
         let result = String::from_utf8(output).unwrap();
         assert_eq!(result, "This contains [HIDDEN] data\n");
     }
+
+    #[test]
+    fn test_hash_based_redaction() {
+        let registry = SecretRegistry::new();
+        let secret = "test-secret-value";
+        registry.add_secret(secret);
+
+        // Get the SHA-256 hash of the secret
+        let hash = sha256_hash(secret);
+
+        // Create text containing the hash
+        let text_with_hash = format!("Log entry with hash: {}", hash);
+
+        // The hash should be redacted
+        let redacted = registry.redact_text(&text_with_hash);
+        assert!(redacted.contains("****"));
+        assert!(!redacted.contains(&hash));
+    }
+
+    #[test]
+    fn test_hash_based_redaction_with_config() {
+        let registry = SecretRegistry::new();
+        let secret = "my-api-key-12345";
+        registry.add_secret(secret);
+
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        // Get the SHA-256 hash
+        let hash = sha256_hash(secret);
+
+        // Text containing both secret and hash
+        let text = format!("Secret: {} Hash: {}", secret, hash);
+
+        let redacted = redact_if_enabled(&text, &config);
+
+        // Both secret and hash should be redacted
+        assert_eq!(redacted.matches("****").count(), 2);
+        assert!(!redacted.contains(secret));
+        assert!(!redacted.contains(&hash));
+    }
+
+    #[test]
+    fn test_hash_redaction_minimum_length() {
+        let registry = SecretRegistry::new();
+
+        // Add a short secret that won't be stored
+        registry.add_secret("short");
+
+        // The count should be 0 since it's too short
+        assert_eq!(registry.secret_count(), 0);
+
+        // Add a secret that meets minimum length
+        let long_secret = "long-secret-12345";
+        registry.add_secret(long_secret);
+
+        // This should be stored
+        assert_eq!(registry.secret_count(), 1);
+
+        // The hash should also be stored and redacted
+        let hash = sha256_hash(long_secret);
+        let text_with_hash = format!("Found hash: {}", hash);
+
+        let redacted = registry.redact_text(&text_with_hash);
+        assert!(redacted.contains("****"));
+        assert!(!redacted.contains(&hash));
+    }
+
+    #[test]
+    fn test_multiple_secrets_with_hashes() {
+        let registry = SecretRegistry::new();
+        let secret1 = "password123";
+        let secret2 = "api-key-xyz";
+        let secret3 = "token-abc-def";
+
+        registry.add_secret(secret1);
+        registry.add_secret(secret2);
+        registry.add_secret(secret3);
+
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        // Create text with secrets and their hashes
+        let hash1 = sha256_hash(secret1);
+        let hash2 = sha256_hash(secret2);
+        let hash3 = sha256_hash(secret3);
+
+        let text = format!(
+            "Secrets: {} {} {} Hashes: {} {} {}",
+            secret1, secret2, secret3, hash1, hash2, hash3
+        );
+
+        let redacted = redact_if_enabled(&text, &config);
+
+        // All secrets and hashes should be redacted (6 total)
+        assert_eq!(redacted.matches("****").count(), 6);
+        assert!(!redacted.contains(secret1));
+        assert!(!redacted.contains(secret2));
+        assert!(!redacted.contains(secret3));
+        assert!(!redacted.contains(&hash1));
+        assert!(!redacted.contains(&hash2));
+        assert!(!redacted.contains(&hash3));
+    }
+
+    #[test]
+    fn test_cryptographic_hash_determinism() {
+        // Verify that SHA-256 produces deterministic results
+        let input = "deterministic-test";
+
+        let hash1 = sha256_hash(input);
+        let hash2 = sha256_hash(input);
+        let hash3 = sha256_hash(input);
+
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash2, hash3);
+
+        // Verify it's a valid hex string of expected length (64 chars for SHA-256)
+        assert_eq!(hash1.len(), 64);
+        assert!(hash1.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_hash_collision_resistance() {
+        // Different inputs should produce different hashes
+        let inputs = vec!["secret1", "secret2", "password", "api-key", "token-xyz"];
+
+        let mut hashes = std::collections::HashSet::new();
+
+        for input in &inputs {
+            let hash = sha256_hash(input);
+            assert!(
+                hashes.insert(hash.clone()),
+                "Hash collision detected for input: {}",
+                input
+            );
+        }
+
+        // All hashes should be unique
+        assert_eq!(hashes.len(), inputs.len());
+    }
+
+    #[test]
+    fn test_redacting_writer_with_hashes() {
+        let registry = SecretRegistry::new();
+        let secret = "writer-secret-123";
+        registry.add_secret(secret);
+
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let mut output = Vec::new();
+        let mut writer = RedactingWriter::new(&mut output, config, &registry);
+
+        // Write both secret and its hash
+        let hash = sha256_hash(secret);
+        let line = format!("Secret: {} Hash: {}\n", secret, hash);
+
+        writer.write_all(line.as_bytes()).unwrap();
+        writer.flush().unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+
+        // Both should be redacted
+        assert_eq!(result.matches("****").count(), 2);
+        assert!(!result.contains(secret));
+        assert!(!result.contains(&hash));
+    }
+
+    #[test]
+    fn test_no_redact_preserves_hashes() {
+        let registry = SecretRegistry::new();
+        let secret = "test-no-redact";
+        registry.add_secret(secret);
+
+        // Redaction disabled
+        let config = RedactionConfig::disabled();
+
+        let hash = sha256_hash(secret);
+        let text = format!("Secret: {} Hash: {}", secret, hash);
+
+        let result = redact_if_enabled(&text, &config);
+
+        // Nothing should be redacted
+        assert!(!result.contains("****"));
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_hash_redaction_in_json() {
+        let registry = SecretRegistry::new();
+        let secret = "json-secret-value";
+        registry.add_secret(secret);
+
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        let hash = sha256_hash(secret);
+        let json = format!(
+            r#"{{"secret": "{}", "hash": "{}", "other": "data"}}"#,
+            secret, hash
+        );
+
+        let redacted = redact_if_enabled(&json, &config);
+
+        // Both secret and hash should be redacted in JSON
+        assert!(redacted.contains("****"));
+        assert!(!redacted.contains(secret));
+        assert!(!redacted.contains(&hash));
+        assert!(redacted.contains("other"));
+        assert!(redacted.contains("data"));
+    }
+
+    #[test]
+    fn test_hash_redaction_performance() {
+        use std::time::Instant;
+
+        let registry = SecretRegistry::new();
+
+        // Add 50 secrets
+        for i in 0..50 {
+            registry.add_secret(&format!("test-secret-{:03}", i));
+        }
+
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        // Create test text with some hashes
+        let hash1 = sha256_hash("test-secret-010");
+        let hash2 = sha256_hash("test-secret-020");
+        let test_text = format!("Hashes: {} and {} in logs", hash1, hash2);
+
+        // Measure performance
+        let start = Instant::now();
+        for _ in 0..100 {
+            let _result = redact_if_enabled(&test_text, &config);
+        }
+        let duration = start.elapsed();
+
+        // Should be fast - less than 50ms for 100 operations with 50 secrets
+        assert!(
+            duration.as_millis() < 50,
+            "Hash redaction took too long: {:?}",
+            duration
+        );
+    }
 }
