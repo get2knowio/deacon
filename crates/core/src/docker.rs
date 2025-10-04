@@ -150,27 +150,64 @@ impl<T: Docker> Docker for &T {
     }
 }
 
-/// CLI-based Docker implementation using docker command
-
-#[derive(Debug, Default, Clone)]
-pub struct CliDocker {
-    /// Docker CLI binary path
-    docker_path: String,
+/// Generic CLI-based container runtime implementation
+///
+/// This can be used for both Docker and Podman runtimes since they share
+/// a compatible CLI interface.
+#[derive(Debug, Clone)]
+pub struct CliRuntime {
+    /// Container runtime CLI binary path (e.g., "docker" or "podman")
+    runtime_path: String,
 }
 
+impl CliRuntime {
+    /// Create a new CliRuntime for Docker
+    pub fn docker() -> Self {
+        Self {
+            runtime_path: "docker".to_string(),
+        }
+    }
+
+    /// Create a new CliRuntime for Podman
+    pub fn podman() -> Self {
+        Self {
+            runtime_path: "podman".to_string(),
+        }
+    }
+
+    /// Create a new CliRuntime with custom runtime binary path
+    pub fn with_runtime_path(runtime_path: String) -> Self {
+        Self { runtime_path }
+    }
+}
+
+impl Default for CliRuntime {
+    fn default() -> Self {
+        Self::docker()
+    }
+}
+
+/// CLI-based Docker implementation using docker command
+///
+/// This is a type alias for CliRuntime configured for Docker.
+pub type CliDocker = CliRuntime;
+
+// Provide backward-compatible constructors for CliDocker
 impl CliDocker {
     /// Create a new CliDocker instance
     pub fn new() -> Self {
-        Self {
-            docker_path: "docker".to_string(),
-        }
+        Self::docker()
     }
 
     /// Create a new CliDocker instance with custom docker binary path
     pub fn with_path(docker_path: String) -> Self {
-        Self { docker_path }
+        Self {
+            runtime_path: docker_path,
+        }
     }
+}
 
+impl CliRuntime {
     /// Parse exposed ports from container Config.ExposedPorts
     fn parse_exposed_ports(config: &serde_json::Value) -> Vec<ExposedPort> {
         let mut exposed_ports = Vec::new();
@@ -232,47 +269,52 @@ impl CliDocker {
         port_mappings
     }
 
-    /// Check if docker binary is available
+    /// Check if container runtime binary is available
     #[instrument(skip(self))]
-    pub fn check_docker_installed(&self) -> Result<()> {
+    pub fn check_runtime_installed(&self) -> Result<()> {
         debug!(
-            "Checking if Docker binary is installed at: {}",
-            self.docker_path
+            "Checking if container runtime binary is installed at: {}",
+            self.runtime_path
         );
 
-        let output = Command::new(&self.docker_path).arg("--version").output();
+        let output = Command::new(&self.runtime_path).arg("--version").output();
 
         match output {
             Ok(output) => {
                 if output.status.success() {
-                    debug!("Docker binary found and working");
+                    debug!("Container runtime binary found and working");
                     Ok(())
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     Err(
-                        DockerError::CLIError(format!("Docker version check failed: {}", stderr))
+                        DockerError::CLIError(format!("Runtime version check failed: {}", stderr))
                             .into(),
                     )
                 }
             }
             Err(e) => {
-                debug!("Docker binary not found: {}", e);
+                debug!("Container runtime binary not found: {}", e);
                 Err(DockerError::NotInstalled.into())
             }
         }
     }
 
-    /// Execute docker command and return stdout
+    /// Alias for backward compatibility - check if docker is installed
+    pub fn check_docker_installed(&self) -> Result<()> {
+        self.check_runtime_installed()
+    }
+
+    /// Execute container runtime command and return stdout
     #[instrument(skip(self))]
     #[allow(dead_code)] // Used by future features
     fn execute_docker(&self, args: &[&str]) -> Result<String> {
         debug!(
-            "Executing docker command: {} {}",
-            self.docker_path,
+            "Executing runtime command: {} {}",
+            self.runtime_path,
             args.join(" ")
         );
 
-        let output = Command::new(&self.docker_path)
+        let output = Command::new(&self.runtime_path)
             .args(args)
             .output()
             .map_err(|e| {
@@ -422,34 +464,34 @@ impl CliDocker {
     }
 }
 
-impl Docker for CliDocker {
+impl Docker for CliRuntime {
     #[instrument(skip(self))]
     async fn ping(&self) -> Result<()> {
-        debug!("Pinging Docker daemon");
+        debug!("Pinging container runtime daemon");
 
         // Use blocking call as sync is acceptable per issue requirements
         tokio::task::spawn_blocking({
-            let docker_path = self.docker_path.clone();
+            let runtime_path = self.runtime_path.clone();
             move || {
-                let output = Command::new(&docker_path)
+                let output = Command::new(&runtime_path)
                     .args(["version", "--format", "json"])
                     .output();
 
                 match output {
                     Ok(output) => {
                         if output.status.success() {
-                            debug!("Docker daemon is available");
+                            debug!("Container runtime daemon is available");
                             Ok(())
                         } else {
                             let stderr = String::from_utf8_lossy(&output.stderr);
                             Err(
-                                DockerError::CLIError(format!("Docker ping failed: {}", stderr))
+                                DockerError::CLIError(format!("Runtime ping failed: {}", stderr))
                                     .into(),
                             )
                         }
                     }
                     Err(e) => {
-                        debug!("Docker ping failed: {}", e);
+                        debug!("Runtime ping failed: {}", e);
                         Err(DockerError::NotInstalled.into())
                     }
                 }
@@ -466,7 +508,7 @@ impl Docker for CliDocker {
             label_selector
         );
 
-        let docker_path = self.docker_path.clone();
+        let runtime_path = self.runtime_path.clone();
         let label_selector = label_selector.map(|s| s.to_string());
 
         tokio::task::spawn_blocking(move || {
@@ -487,7 +529,7 @@ impl Docker for CliDocker {
                 }
             }
 
-            let output = Command::new(&docker_path)
+            let output = Command::new(&runtime_path)
                 .args(&args)
                 .output()
                 .map_err(|e| DockerError::CLIError(format!("Failed to list containers: {}", e)))?;
@@ -554,11 +596,11 @@ impl Docker for CliDocker {
     async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>> {
         debug!("Inspecting container: {}", id);
 
-        let docker_path = self.docker_path.clone();
+        let runtime_path = self.runtime_path.clone();
         let container_id = id.to_string();
 
         tokio::task::spawn_blocking(move || {
-            let output = Command::new(&docker_path)
+            let output = Command::new(&runtime_path)
                 .args(["inspect", &container_id])
                 .output()
                 .map_err(|e| {
@@ -640,7 +682,7 @@ impl Docker for CliDocker {
     ) -> Result<ExecResult> {
         debug!("Executing command in container: {}", container_id);
 
-        let docker_path = self.docker_path.clone();
+        let runtime_path = self.runtime_path.clone();
         let container_id = container_id.to_string();
         let command = command.to_vec();
 
@@ -696,17 +738,17 @@ impl Docker for CliDocker {
                 args.push(cmd_part);
             }
 
-            debug!("Docker exec args: {:?}", args);
+            debug!("Runtime exec args: {:?}", args);
 
-            let mut child = std::process::Command::new(&docker_path)
+            let mut child = std::process::Command::new(&runtime_path)
                 .args(&args)
                 .spawn()
                 .map_err(|e| {
-                    DockerError::CLIError(format!("Failed to spawn docker exec: {}", e))
+                    DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e))
                 })?;
 
             let exit_status = child.wait().map_err(|e| {
-                DockerError::CLIError(format!("Failed to wait for docker exec: {}", e))
+                DockerError::CLIError(format!("Failed to wait for runtime exec: {}", e))
             })?;
 
             let exit_code = exit_status.code().unwrap_or(-1);
@@ -722,7 +764,7 @@ impl Docker for CliDocker {
     async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()> {
         debug!("Stopping container: {}", container_id);
 
-        let docker_path = self.docker_path.clone();
+        let runtime_path = self.runtime_path.clone();
         let container_id = container_id.to_string();
 
         tokio::task::spawn_blocking(move || {
@@ -736,15 +778,15 @@ impl Docker for CliDocker {
 
             args.push(&container_id);
 
-            let output = std::process::Command::new(&docker_path)
+            let output = std::process::Command::new(&runtime_path)
                 .args(&args)
                 .output()
-                .map_err(|e| DockerError::CLIError(format!("Failed to run docker stop: {}", e)))?;
+                .map_err(|e| DockerError::CLIError(format!("Failed to run stop command: {}", e)))?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(DockerError::CLIError(format!(
-                    "docker stop failed: {}",
+                    "stop command failed: {}",
                     stderr
                 )));
             }
@@ -758,7 +800,7 @@ impl Docker for CliDocker {
     }
 }
 
-impl ContainerOps for CliDocker {
+impl ContainerOps for CliRuntime {
     #[instrument(skip(self))]
     async fn find_matching_containers(&self, identity: &ContainerIdentity) -> Result<Vec<String>> {
         debug!("Finding containers with identity: {:?}", identity);
@@ -886,10 +928,10 @@ impl ContainerOps for CliDocker {
             args.push("sleep infinity || tail -f /dev/null".to_string());
         }
 
-        // Execute docker create command
-        let docker_path = self.docker_path.clone();
+        // Execute container create command
+        let runtime_path = self.runtime_path.clone();
         let container_id = tokio::task::spawn_blocking(move || {
-            let output = Command::new(&docker_path)
+            let output = Command::new(&runtime_path)
                 .args(&args)
                 .output()
                 .map_err(|e| DockerError::CLIError(format!("Failed to create container: {}", e)))?;
@@ -897,13 +939,13 @@ impl ContainerOps for CliDocker {
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(DockerError::CLIError(format!(
-                    "Docker create failed: {}",
+                    "Container create failed: {}",
                     stderr
                 )));
             }
 
             let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                DockerError::CLIError(format!("Invalid UTF-8 in docker output: {}", e))
+                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
             })?;
 
             Ok(stdout.trim().to_string())
@@ -919,11 +961,11 @@ impl ContainerOps for CliDocker {
     async fn start_container(&self, container_id: &str) -> Result<()> {
         debug!("Starting container: {}", container_id);
 
-        let docker_path = self.docker_path.clone();
+        let runtime_path = self.runtime_path.clone();
         let container_id = container_id.to_string();
 
         tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
-            let output = Command::new(&docker_path)
+            let output = Command::new(&runtime_path)
                 .args(["start", &container_id])
                 .output()
                 .map_err(|e| DockerError::CLIError(format!("Failed to start container: {}", e)))?;
@@ -931,7 +973,7 @@ impl ContainerOps for CliDocker {
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(DockerError::CLIError(format!(
-                    "Docker start failed: {}",
+                    "Start command failed: {}",
                     stderr
                 )));
             }
@@ -947,11 +989,11 @@ impl ContainerOps for CliDocker {
     async fn remove_container(&self, container_id: &str) -> Result<()> {
         debug!("Removing container: {}", container_id);
 
-        let docker_path = self.docker_path.clone();
+        let runtime_path = self.runtime_path.clone();
         let container_id = container_id.to_string();
 
         tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
-            let output = Command::new(&docker_path)
+            let output = Command::new(&runtime_path)
                 .args(["rm", "-f", &container_id])
                 .output()
                 .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
@@ -959,7 +1001,7 @@ impl ContainerOps for CliDocker {
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(DockerError::CLIError(format!(
-                    "Docker rm failed: {}",
+                    "Remove command failed: {}",
                     stderr
                 )));
             }
@@ -975,11 +1017,11 @@ impl ContainerOps for CliDocker {
     async fn get_container_image(&self, container_id: &str) -> Result<String> {
         debug!("Getting image for container: {}", container_id);
 
-        let docker_path = self.docker_path.clone();
+        let runtime_path = self.runtime_path.clone();
         let container_id = container_id.to_string();
 
         tokio::task::spawn_blocking(move || -> std::result::Result<String, DockerError> {
-            let output = Command::new(&docker_path)
+            let output = Command::new(&runtime_path)
                 .args(["inspect", "--format", "{{.Image}}", &container_id])
                 .output()
                 .map_err(|e| {
@@ -1006,7 +1048,7 @@ impl ContainerOps for CliDocker {
     }
 }
 
-impl DockerLifecycle for CliDocker {
+impl DockerLifecycle for CliRuntime {
     #[instrument(skip(self, config))]
     async fn up(
         &self,
@@ -1670,14 +1712,14 @@ mod tests {
     #[test]
     fn test_cli_docker_new() {
         let docker = CliDocker::new();
-        assert_eq!(docker.docker_path, "docker");
+        assert_eq!(docker.runtime_path, "docker");
     }
 
     #[test]
     fn test_cli_docker_with_path() {
         let custom_path = "/usr/local/bin/docker";
         let docker = CliDocker::with_path(custom_path.to_string());
-        assert_eq!(docker.docker_path, custom_path);
+        assert_eq!(docker.runtime_path, custom_path);
     }
 
     #[test]

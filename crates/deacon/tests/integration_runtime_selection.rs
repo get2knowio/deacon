@@ -81,9 +81,9 @@ fn test_runtime_selection_help_shows_options() -> Result<()> {
 }
 
 // This test demonstrates that runtime selection works for up command specifically
-// We expect a clear error when trying to use podman runtime
+// We expect either success (if podman is installed) or a clear error about podman not being installed
 #[test]
-fn test_up_command_with_podman_runtime_error() -> Result<()> {
+fn test_up_command_with_podman_runtime() -> Result<()> {
     use tempfile::TempDir;
 
     // Create a temporary directory with a basic devcontainer.json
@@ -103,10 +103,17 @@ fn test_up_command_with_podman_runtime_error() -> Result<()> {
         .env("DEACON_RUNTIME", "podman")
         .args(["up", "--skip-post-create", "--skip-non-blocking-commands"]);
 
-    // Should fail with clear Podman not implemented error
-    cmd.assert()
-        .failure()
-        .stderr(str::contains("Not implemented yet: Podman support"));
+    // The test can succeed if podman is installed, or fail with a clear error if not
+    // We just verify that it doesn't say "Not implemented yet"
+    let output = cmd.output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should NOT contain the old "Not implemented yet" message
+    assert!(
+        !stderr.contains("Not implemented yet: Podman support"),
+        "Podman runtime should be implemented, not stubbed. stderr: {}",
+        stderr
+    );
 
     Ok(())
 }
