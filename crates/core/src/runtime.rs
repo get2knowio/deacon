@@ -533,4 +533,25 @@ mod tests {
         let runtime = ContainerRuntimeImpl::Podman(PodmanRuntime::new());
         assert_eq!(runtime.runtime_name(), "podman");
     }
+
+    #[test]
+    fn test_podman_runtime_with_custom_path() {
+        let custom_path = "/usr/local/bin/podman";
+        let _runtime = PodmanRuntime::with_path(custom_path.to_string());
+        // Verify the PodmanRuntime was created successfully (no panic)
+    }
+
+    #[test]
+    fn test_podman_runtime_creation() {
+        let runtime = PodmanRuntime::new();
+        let wrapped = ContainerRuntimeImpl::Podman(runtime);
+        assert_eq!(wrapped.runtime_name(), "podman");
+    }
+
+    #[test]
+    fn test_docker_runtime_creation() {
+        let runtime = DockerRuntime::new();
+        let wrapped = ContainerRuntimeImpl::Docker(runtime);
+        assert_eq!(wrapped.runtime_name(), "docker");
+    }
 }
