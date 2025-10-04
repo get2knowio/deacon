@@ -139,6 +139,7 @@ RUST_LOG=debug cargo run -- --help
 - **macOS/Windows checks (manual)**: Trigger the "CI (Other OS)" workflow via "Run workflow" in GitHub Actions to run macOS and Windows jobs on demand
 - **Release builds** are automatically created on version tags (`v*.*.*`)
 - **Format and clippy checks** must pass for PR approval
+- **Composite action**: Common CI steps are extracted into `.github/actions/rust-ci-steps` to reduce duplication between workflows
 
 ### Running macOS/Windows CI manually
 To validate on other operating systems without gating PRs:
