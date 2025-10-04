@@ -2,64 +2,9 @@
 
 A Rust reimplementation of the Development Containers CLI, following the [containers.dev specification](https://containers.dev).
 
-**Status**: Early Development - Basic configuration reading and CLI framework implemented.
+ 
 
-## Current Implementation Status
 
-### ✅ Implemented Features
-- **Configuration Discovery**: Finds devcontainer.json in workspace
-- **Configuration Loading**: Parses JSON-with-comments (JSONC) format
-- **Variable Substitution**: Replaces workspace and environment variables
-- **Read Configuration Command**: `deacon read-configuration` outputs processed JSON
-- **CLI Framework**: Complete command structure with help and logging
-- **Error Handling**: Proper error messages for missing files and invalid JSON
-- **Container Lifecycle**: Command execution framework and variable substitution
-
-### 🚧 In Progress
-- **Feature System**: Basic parsing implemented, installation simulation in tests
-- **Plugin Support**: Configuration parsing ready, plugin execution framework needed
-- **Extends Resolution**: Configuration inheritance partially implemented
-
-### 📋 Planned Features
-- **Container Runtime Integration**: Real Docker operations and container management
-- **Template System**: DevContainer template management
-- **OCI Registry Support**: Pulling features and templates from registries
-
-### 🧪 Test Coverage
-- **Unit Tests**: Core functionality well-tested
-- **Integration Tests**: CLI commands and basic workflows
-- **End-to-End Tests**: Complete workflow validation (7 scenarios, runtime < 30s)
-
-## Runtime Selection
-
-Deacon supports multiple container runtimes. You can choose between Docker (default) and Podman:
-
-### Via CLI Flag
-```bash
-# Use Docker (default)
-deacon --runtime docker up
-
-# Use Podman (future support)
-deacon --runtime podman up
-```
-
-### Via Environment Variable
-```bash
-# Set runtime via environment variable
-export DEACON_RUNTIME=podman
-deacon up
-
-# One-time override
-DEACON_RUNTIME=podman deacon up
-```
-
-### Precedence
-Runtime selection follows this precedence:
-1. CLI flag (`--runtime`)
-2. Environment variable (`DEACON_RUNTIME`)  
-3. Default (docker)
-
-**Note**: Podman support is currently in development. Using `--runtime podman` will show a "Not implemented yet" error with clear next steps.
 
 ## Quick Start
 
@@ -140,6 +85,37 @@ deacon features test . --json
 
 See the full details and additional commands in `examples/README.md`.
 
+## Runtime Selection
+
+Deacon supports multiple container runtimes. You can choose between Docker (default) and Podman:
+
+### Via CLI Flag
+```bash
+# Use Docker (default)
+deacon --runtime docker up
+
+# Use Podman (future support)
+deacon --runtime podman up
+```
+
+### Via Environment Variable
+```bash
+# Set runtime via environment variable
+export DEACON_RUNTIME=podman
+deacon up
+
+# One-time override
+DEACON_RUNTIME=podman deacon up
+```
+
+### Precedence
+Runtime selection follows this precedence:
+1. CLI flag (`--runtime`)
+2. Environment variable (`DEACON_RUNTIME`)
+3. Default (docker)
+
+Note: Podman support is currently in development. Using `--runtime podman` will show a "Not implemented yet" error with clear next steps.
+
 ## Runtime Configuration
 
 ### Logging
@@ -199,7 +175,7 @@ echo "$OUTPUT" | jq '.order'
 - **Logging**: Use `--log-level` and `--log-format` to control stderr verbosity and format
 
 ### Docker Integration
-All Docker functionality is always available. If Docker daemon is not running or not installed, deacon will provide clear runtime error messages guiding you to install or start Docker.
+All Docker functionality is available when Docker is installed and running. If the Docker daemon isn’t available, deacon emits a clear runtime error with guidance to install or start Docker.
 
 ## Usage
 
@@ -299,7 +275,7 @@ cargo test
 
 ## Roadmap
 
-This CLI will implement the DevContainer specification including:
+This CLI implements the DevContainer specification domains below and continues to expand coverage:
 
 - Configuration resolution and parsing (`devcontainer.json`)
 - Feature system for reusable development environment components

@@ -3,7 +3,9 @@
   "image": "ghcr.io/get2knowio/devcontainer:latest",
   "remoteUser": "vscode",
   "features": {},
-//   "postCreateCommand": "npm install",
+  "remoteEnv": {
+    "GH_PAGER": ""
+  },
   "customizations": {
     "vscode": {
       "extensions": [
