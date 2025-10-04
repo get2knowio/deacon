@@ -17,6 +17,14 @@ use tracing::{debug, info, instrument, warn};
 pub struct DownArgs {
     /// Remove containers after stopping them
     pub remove: bool,
+    /// Include all containers matching labels (stale containers)
+    pub all: bool,
+    /// Remove associated anonymous volumes
+    pub volumes: bool,
+    /// Force removal of running containers
+    pub force: bool,
+    /// Timeout in seconds for stopping containers (default: 30)
+    pub timeout: Option<u32>,
     /// Workspace folder path
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
@@ -28,6 +36,16 @@ pub struct DownArgs {
 pub async fn execute_down(args: DownArgs) -> Result<()> {
     info!("Starting down command execution");
     debug!("Down args: {:?}", args);
+
+    // Add structured tracing for container lifecycle
+    let _span = tracing::info_span!(
+        "container.down",
+        all = args.all,
+        volumes = args.volumes,
+        force = args.force,
+        timeout = args.timeout,
+    )
+    .entered();
 
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
@@ -41,7 +59,7 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
         } else {
             // Config not found - we'll try to use saved state for auto-discovery
             debug!("No configuration found, attempting auto-discovery from state");
-            return execute_down_with_auto_discovery(workspace_folder, args.remove).await;
+            return execute_down_with_auto_discovery(workspace_folder, &args).await;
         }
     };
 
@@ -52,7 +70,7 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
                 "Failed to load configuration: {}, attempting auto-discovery",
                 e
             );
-            return execute_down_with_auto_discovery(workspace_folder, args.remove).await;
+            return execute_down_with_auto_discovery(workspace_folder, &args).await;
         }
     };
 
@@ -68,12 +86,25 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
     let mut state_manager = StateManager::new()?;
     let saved_state = state_manager.get_workspace_state(workspace_hash);
 
+    let container_count = match &saved_state {
+        Some(WorkspaceState::Container(_)) => 1,
+        Some(WorkspaceState::Compose(compose_state)) => {
+            // For compose, we count it as 1 project (could be multiple services)
+            debug!("Found compose project: {}", compose_state.project_name);
+            1
+        }
+        None => 0,
+    };
+
+    // Add container.count to span
+    tracing::Span::current().record("container.count", container_count);
+
     match saved_state {
         Some(WorkspaceState::Container(container_state)) => {
             execute_container_down(
                 &config,
                 &container_state,
-                args.remove,
+                &args,
                 &mut state_manager,
                 workspace_hash,
             )
@@ -83,7 +114,7 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
             execute_compose_down(
                 &config,
                 &compose_state,
-                args.remove,
+                &args,
                 &mut state_manager,
                 workspace_hash,
             )
@@ -97,17 +128,23 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
 }
 
 /// Execute down for single container configurations
-#[instrument(skip(config, container_state, state_manager))]
+#[instrument(skip(config, container_state, state_manager, args))]
 async fn execute_container_down(
     config: &DevContainerConfig,
     container_state: &deacon_core::state::ContainerState,
-    force_remove: bool,
+    args: &DownArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
 ) -> Result<()> {
     debug!("Shutting down container: {}", container_state.container_id);
 
     let docker = CliDocker::new();
+
+    // Determine if we should remove based on flags
+    let should_remove = args.remove || args.force;
+
+    // Get timeout value (use provided or default to 30)
+    let stop_timeout = args.timeout.or(Some(30));
 
     // Check if container is still running
     let container_info = docker
@@ -128,22 +165,24 @@ async fn execute_container_down(
             "Container {} is already stopped",
             container_state.container_id
         );
-        if force_remove || should_remove_container(config, container_state) {
+        if should_remove || should_remove_container(config, container_state) {
             debug!("Removing stopped container");
-            docker
-                .remove_container(&container_state.container_id)
-                .await?;
+            remove_container_with_options(&docker, &container_state.container_id, args).await?;
         }
         state_manager.remove_workspace_state(workspace_hash);
         return Ok(());
     }
 
-    // Determine shutdown action
-    let shutdown_action = container_state
-        .shutdown_action
-        .as_deref()
-        .or(config.shutdown_action.as_deref())
-        .unwrap_or("stopContainer");
+    // Determine shutdown action - force flag overrides configuration
+    let shutdown_action = if args.force {
+        "stopContainer"
+    } else {
+        container_state
+            .shutdown_action
+            .as_deref()
+            .or(config.shutdown_action.as_deref())
+            .unwrap_or("stopContainer")
+    };
 
     match shutdown_action {
         "none" => {
@@ -151,16 +190,14 @@ async fn execute_container_down(
             // Don't remove from state since container is still running
         }
         "stopContainer" => {
-            debug!("Stopping container with timeout");
+            debug!("Stopping container with timeout: {:?}", stop_timeout);
             docker
-                .stop_container(&container_state.container_id, Some(30))
+                .stop_container(&container_state.container_id, stop_timeout)
                 .await?;
 
-            if force_remove || should_remove_container(config, container_state) {
+            if should_remove || should_remove_container(config, container_state) {
                 debug!("Removing stopped container");
-                docker
-                    .remove_container(&container_state.container_id)
-                    .await?;
+                remove_container_with_options(&docker, &container_state.container_id, args).await?;
             }
 
             // Remove from state since container is stopped
@@ -173,14 +210,12 @@ async fn execute_container_down(
                 shutdown_action
             );
             docker
-                .stop_container(&container_state.container_id, Some(30))
+                .stop_container(&container_state.container_id, stop_timeout)
                 .await?;
 
-            if force_remove {
+            if should_remove {
                 debug!("Removing stopped container");
-                docker
-                    .remove_container(&container_state.container_id)
-                    .await?;
+                remove_container_with_options(&docker, &container_state.container_id, args).await?;
             }
 
             state_manager.remove_workspace_state(workspace_hash);
@@ -190,12 +225,57 @@ async fn execute_container_down(
     Ok(())
 }
 
+/// Remove a container with optional volume removal
+async fn remove_container_with_options(
+    docker: &CliDocker,
+    container_id: &str,
+    args: &DownArgs,
+) -> Result<()> {
+    if args.volumes {
+        debug!("Removing container with volumes");
+        remove_container_with_volumes(container_id).await?;
+    } else {
+        docker.remove_container(container_id).await?;
+    }
+    Ok(())
+}
+
+/// Remove a container including its volumes
+async fn remove_container_with_volumes(container_id: &str) -> Result<()> {
+    use deacon_core::errors::DockerError;
+    use std::process::Command;
+
+    debug!("Removing container with volumes: {}", container_id);
+
+    let container_id = container_id.to_string();
+
+    tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
+        let output = Command::new("docker")
+            .args(["rm", "-f", "-v", &container_id])
+            .output()
+            .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(DockerError::CLIError(format!(
+                "Remove command failed: {}",
+                stderr
+            )));
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?
+    .map_err(Into::into)
+}
+
 /// Execute down for compose configurations
-#[instrument(skip(config, compose_state, state_manager))]
+#[instrument(skip(config, compose_state, state_manager, args))]
 async fn execute_compose_down(
     config: &DevContainerConfig,
     compose_state: &deacon_core::state::ComposeState,
-    force_remove: bool,
+    args: &DownArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
 ) -> Result<()> {
@@ -229,12 +309,16 @@ async fn execute_compose_down(
         return Ok(());
     }
 
-    // Determine shutdown action
-    let shutdown_action = compose_state
-        .shutdown_action
-        .as_deref()
-        .or(config.shutdown_action.as_deref())
-        .unwrap_or("stopCompose");
+    // Determine shutdown action - force flag overrides configuration
+    let shutdown_action = if args.force {
+        "stopCompose"
+    } else {
+        compose_state
+            .shutdown_action
+            .as_deref()
+            .or(config.shutdown_action.as_deref())
+            .unwrap_or("stopCompose")
+    };
 
     match shutdown_action {
         "none" => {
@@ -242,9 +326,17 @@ async fn execute_compose_down(
             // Don't remove from state since project is still running
         }
         "stopCompose" => {
-            if force_remove {
+            // Use docker-compose down if remove or volumes flags are set
+            let should_remove = args.remove || args.force;
+
+            if should_remove {
                 debug!("Stopping and removing compose project");
-                compose_manager.down_project(&project)?;
+                if args.volumes {
+                    debug!("Removing compose project with volumes");
+                    compose_manager.down_project_with_volumes(&project)?;
+                } else {
+                    compose_manager.down_project(&project)?;
+                }
             } else {
                 debug!("Stopping compose project");
                 compose_manager.stop_project(&project)?;
@@ -269,10 +361,7 @@ async fn execute_compose_down(
 
 /// Execute down with auto-discovery when config is not available
 #[instrument]
-async fn execute_down_with_auto_discovery(
-    workspace_folder: &Path,
-    force_remove: bool,
-) -> Result<()> {
+async fn execute_down_with_auto_discovery(workspace_folder: &Path, args: &DownArgs) -> Result<()> {
     debug!("Attempting auto-discovery of running containers/projects");
 
     // Create a minimal identity just for workspace hash generation
@@ -292,7 +381,7 @@ async fn execute_down_with_auto_discovery(
             execute_container_down(
                 &default_config,
                 &container_state,
-                force_remove,
+                args,
                 &mut state_manager,
                 workspace_hash,
             )
@@ -304,7 +393,7 @@ async fn execute_down_with_auto_discovery(
             execute_compose_down(
                 &default_config,
                 &compose_state,
-                force_remove,
+                args,
                 &mut state_manager,
                 workspace_hash,
             )
@@ -336,11 +425,19 @@ mod tests {
     fn test_down_args_creation() {
         let args = DownArgs {
             remove: true,
+            all: false,
+            volumes: false,
+            force: false,
+            timeout: None,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
         };
 
         assert!(args.remove);
+        assert!(!args.all);
+        assert!(!args.volumes);
+        assert!(!args.force);
+        assert_eq!(args.timeout, None);
         assert_eq!(args.workspace_folder, Some(PathBuf::from("/test")));
         assert!(args.config_path.is_none());
     }
