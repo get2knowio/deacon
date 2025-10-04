@@ -19,6 +19,8 @@ jobs:
           - os: windows
             runs_on: windows-latest
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
     - name: Run Rust CI steps (lint)
       uses: ./.github/actions/rust-ci-steps
       with:
@@ -41,6 +43,8 @@ jobs:
           - os: windows
             runs_on: windows-latest
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
     - name: Run Rust CI steps (checkout + toolchain + cache)
       uses: ./.github/actions/rust-ci-steps
       with:
@@ -98,6 +102,8 @@ jobs:
           - os: windows
             runs_on: windows-latest
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
     - name: Run Rust CI steps (checkout + toolchain + cache)
       uses: ./.github/actions/rust-ci-steps
       with:
