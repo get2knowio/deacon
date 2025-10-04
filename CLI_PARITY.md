@@ -31,6 +31,13 @@
     - `--build-arg <KEY=VALUE>` (repeatable)
     - `--force`
     - `--output-format {text|json}`
+    - `--cache-from <CACHE_FROM>` (repeatable)
+    - `--cache-to <CACHE_TO>` (repeatable)
+    - `--buildkit {auto|never}`
+    - `--secret <SECRET>` (repeatable)
+    - `--ssh <SSH>` (repeatable)
+    - `--scan-image`
+    - `--fail-on-scan`
     - `--additional-features <JSON>`
     - `--prefer-cli-features`
     - `--feature-install-order <CSV>`
@@ -71,7 +78,7 @@
   - Shutdown behaviors and defaults — confirm parity.
   - Port event behavior and prefixes — confirm exact output contract.
 - `build`
-  - Additional build flags: cache-from/to, ssh, secrets, buildkit toggles — verify presence/names.
+  - ✅ **COMPLETE**: Additional build flags: cache-from/to, ssh, secrets, buildkit toggles are all implemented and tested.
   - Output format/verbosity flags — verify naming.
 - `exec`
   - TTY and stdin semantics — verify defaults and `--no-tty` naming.
@@ -150,7 +157,7 @@ Immediate parity tasks (no behavioral risk):
   - Compose: ensure multi-service port events and `exec` targeting across services are robust.
 
 6) Docker/Build options
-  - Add advanced build flags (cache-from/to, ssh, secrets) and BuildKit controls as separate, tested options.
+  - ✅ **COMPLETE**: Advanced build flags (cache-from/to, ssh, secrets) and BuildKit controls are implemented, tested, and validated.
 
 7) Security and redaction
   - Cryptographic hashing for secret registry; ensure redaction is applied to all outputs (progress, audit, PORT_EVENT) and respects `--no-redact`.
