@@ -240,4 +240,3 @@ fn test_down_command_with_combined_flags() {
         stderr
     );
 }
-

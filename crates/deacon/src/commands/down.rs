@@ -82,6 +82,11 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
 
     debug!("Workspace hash: {}", workspace_hash);
 
+    // If --all flag is set, find and remove all containers with matching labels
+    if args.all {
+        return execute_down_all(&identity, &args).await;
+    }
+
     // Load saved state
     let mut state_manager = StateManager::new()?;
     let saved_state = state_manager.get_workspace_state(workspace_hash);
@@ -125,6 +130,68 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Execute down for all containers with matching labels
+#[instrument(skip(identity, args))]
+async fn execute_down_all(identity: &ContainerIdentity, args: &DownArgs) -> Result<()> {
+    debug!("Finding all containers with matching labels");
+
+    let docker = CliDocker::new();
+
+    // Build label selector from identity
+    let label_selector = format!(
+        "devcontainer.local_folder={},devcontainer.config_file={}",
+        identity.workspace_hash, identity.config_hash
+    );
+
+    debug!("Label selector: {}", label_selector);
+
+    // List all containers with matching labels
+    let containers = docker.list_containers(Some(&label_selector)).await?;
+
+    if containers.is_empty() {
+        info!("No containers found with matching labels");
+        return Ok(());
+    }
+
+    let container_count = containers.len();
+    info!(
+        "Found {} container(s) with matching labels",
+        container_count
+    );
+    tracing::Span::current().record("container.count", container_count);
+
+    // Get timeout value (use provided or default to 30)
+    let stop_timeout = args.timeout.or(Some(30));
+
+    // Stop and optionally remove each container
+    for container in containers {
+        debug!("Processing container: {}", container.id);
+
+        // Only stop if container is running
+        if container.state == "running" {
+            debug!(
+                "Stopping container {} with timeout: {:?}",
+                container.id, stop_timeout
+            );
+            docker.stop_container(&container.id, stop_timeout).await?;
+        } else {
+            debug!(
+                "Container {} is not running (state: {})",
+                container.id, container.state
+            );
+        }
+
+        // Remove if requested
+        if args.remove || args.force {
+            debug!("Removing container {}", container.id);
+            remove_container_with_options(&docker, &container.id, args).await?;
+        }
+    }
+
+    info!("All matching containers processed successfully");
+    Ok(())
 }
 
 /// Execute down for single container configurations
