@@ -72,3 +72,63 @@ fn test_doctor_command_exits_successfully() {
 
     cmd.assert().success().code(0);
 }
+
+#[test]
+fn test_doctor_bundle_contains_enhanced_details() {
+    let temp_dir = TempDir::new().unwrap();
+    let bundle_path = temp_dir.path().join("enhanced-bundle.zip");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("--log-level")
+        .arg("info")
+        .arg("doctor")
+        .arg("--bundle")
+        .arg(&bundle_path);
+
+    cmd.assert().success();
+
+    // Verify bundle was created
+    assert!(bundle_path.exists());
+
+    // Verify it's a valid zip and contains expected files
+    let bundle_content = fs::read(&bundle_path).unwrap();
+    assert!(!bundle_content.is_empty());
+    assert_eq!(&bundle_content[0..2], b"PK"); // ZIP file signature
+
+    // Use zip crate to verify contents
+    let file = fs::File::open(&bundle_path).unwrap();
+    let mut archive = zip::ZipArchive::new(file).unwrap();
+
+    // Check that new files exist in the bundle
+    let file_names: Vec<String> = (0..archive.len())
+        .map(|i| archive.by_index(i).unwrap().name().to_string())
+        .collect();
+
+    assert!(
+        file_names.contains(&"doctor.json".to_string()),
+        "Bundle should contain doctor.json"
+    );
+    assert!(
+        file_names.contains(&"environment.json".to_string()),
+        "Bundle should contain environment.json"
+    );
+    assert!(
+        file_names.contains(&"runtime-config.json".to_string()),
+        "Bundle should contain runtime-config.json"
+    );
+    assert!(
+        file_names.contains(&"resources.json".to_string()),
+        "Bundle should contain resources.json"
+    );
+
+    // Verify environment.json contains expected structure
+    let mut env_file = archive.by_name("environment.json").unwrap();
+    let mut env_content = String::new();
+    std::io::Read::read_to_string(&mut env_file, &mut env_content).unwrap();
+
+    // Parse JSON to ensure it's valid
+    let env_json: serde_json::Value = serde_json::from_str(&env_content).unwrap();
+    assert!(env_json.get("variables").is_some());
+    assert!(env_json.get("shell").is_some());
+    assert!(env_json.get("home").is_some());
+}
