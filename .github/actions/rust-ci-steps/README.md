@@ -71,7 +71,7 @@ Comma-separated list of Rust toolchain components to install.
 - OS-specific setup (Docker, Colima, etc.) should be handled in the workflow file
 - Cache keys use `runner.os` and `Cargo.lock` hash for optimal cache hits
 - All shell commands use bash for cross-platform compatibility
-- Test discovery uses `find` commands that work on Linux and macOS (note: Windows uses bash in CI)
+- Test discovery uses portable `find` and `sed` commands that work on Linux, macOS, and Windows Git Bash
 
 ## Maintenance
 

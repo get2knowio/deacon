@@ -67,7 +67,8 @@ runs:
       run: |
         set -euo pipefail
         # Discover non-smoke integration tests across workspace (filenames under tests/ not starting with smoke_)
-        NON_SMOKE_TESTS=$(find crates -type f -path '*/tests/*.rs' -not -name 'smoke_*.rs' -printf '%f\n' | sed 's/\.rs$//' | sort -u)
+        # Use portable find command (works on Linux, macOS, Windows Git Bash)
+        NON_SMOKE_TESTS=$(find crates -type f -path '*/tests/*.rs' -not -name 'smoke_*.rs' | sed 's|.*/||; s|\.rs$||' | sort -u)
         echo "Including non-smoke integration tests:"
         if [ -n "${NON_SMOKE_TESTS}" ]; then
           printf '%s\n' ${NON_SMOKE_TESTS}
@@ -87,7 +88,8 @@ runs:
       run: |
         set -euo pipefail
         # Discover smoke integration tests across workspace (filenames starting with smoke_)
-        SMOKE_TESTS=$(find crates -type f -path '*/tests/smoke_*.rs' -printf '%f\n' | sed 's/\.rs$//' | sort -u)
+        # Use portable find command (works on Linux, macOS, Windows Git Bash)
+        SMOKE_TESTS=$(find crates -type f -path '*/tests/smoke_*.rs' | sed 's|.*/||; s|\.rs$||' | sort -u)
         if [ -z "${SMOKE_TESTS}" ]; then
           echo "No smoke tests found."
           exit 1
