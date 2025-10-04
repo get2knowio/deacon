@@ -318,16 +318,19 @@ impl CliRuntime {
             .args(args)
             .output()
             .map_err(|e| {
-                DockerError::CLIError(format!("Failed to execute docker command: {}", e))
+                DockerError::CLIError(format!("Failed to execute runtime command: {}", e))
             })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(DockerError::CLIError(format!("Docker command failed: {}", stderr)).into());
+            return Err(
+                DockerError::CLIError(format!("Runtime command failed: {}", stderr)).into(),
+            );
         }
 
-        let stdout = String::from_utf8(output.stdout)
-            .map_err(|e| DockerError::CLIError(format!("Invalid UTF-8 in docker output: {}", e)))?;
+        let stdout = String::from_utf8(output.stdout).map_err(|e| {
+            DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
+        })?;
 
         Ok(stdout)
     }
@@ -536,11 +539,13 @@ impl Docker for CliRuntime {
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(DockerError::CLIError(format!("Docker ps failed: {}", stderr)).into());
+                return Err(
+                    DockerError::CLIError(format!("Container list failed: {}", stderr)).into(),
+                );
             }
 
             let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                DockerError::CLIError(format!("Invalid UTF-8 in docker output: {}", e))
+                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
             })?;
 
             // Parse the JSON output
@@ -613,12 +618,12 @@ impl Docker for CliRuntime {
                     return Ok(None);
                 }
                 return Err(
-                    DockerError::CLIError(format!("Docker inspect failed: {}", stderr)).into(),
+                    DockerError::CLIError(format!("Inspect command failed: {}", stderr)).into(),
                 );
             }
 
             let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                DockerError::CLIError(format!("Invalid UTF-8 in docker output: {}", e))
+                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
             })?;
 
             let containers: Vec<serde_json::Value> =
@@ -786,7 +791,7 @@ impl Docker for CliRuntime {
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(DockerError::CLIError(format!(
-                    "stop command failed: {}",
+                    "Runtime stop command failed: {}",
                     stderr
                 )));
             }
@@ -1031,13 +1036,13 @@ impl ContainerOps for CliRuntime {
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(DockerError::CLIError(format!(
-                    "Docker inspect failed: {}",
+                    "Inspect command failed: {}",
                     stderr
                 )));
             }
 
             let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                DockerError::CLIError(format!("Invalid UTF-8 in docker output: {}", e))
+                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
             })?;
 
             Ok(stdout.trim().to_string())

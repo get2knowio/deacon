@@ -115,5 +115,26 @@ fn test_up_command_with_podman_runtime() -> Result<()> {
         stderr
     );
 
+    // If it succeeded, ensure there are no availability error hints
+    if output.status.success() {
+        assert!(
+            !stderr.to_ascii_lowercase().contains("not installed")
+                && !stderr.to_ascii_lowercase().contains("not found"),
+            "Successful run should not mention podman availability errors. stderr: {}",
+            stderr
+        );
+    }
+
+    // If it failed, it should be a clear runtime error (podman not found/available)
+    if !output.status.success() {
+        assert!(
+            stderr.to_ascii_lowercase().contains("podman")
+                || stderr.to_ascii_lowercase().contains("not found")
+                || stderr.to_ascii_lowercase().contains("not installed"),
+            "Expected clear podman availability error, got: {}",
+            stderr
+        );
+    }
+
     Ok(())
 }
