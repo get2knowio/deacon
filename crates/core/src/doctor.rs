@@ -56,6 +56,12 @@ pub struct DoctorInfo {
     pub last_build_hash: Option<String>,
     /// Cache statistics
     pub cache_stats: CacheStats,
+    /// Environment information
+    pub environment: EnvironmentInfo,
+    /// Runtime configuration details
+    pub runtime_config: RuntimeConfig,
+    /// System resource usage
+    pub resources: ResourceInfo,
 }
 
 /// Host operating system information
@@ -119,6 +125,45 @@ pub struct CacheStats {
     pub build_cache_size: Option<u64>,
 }
 
+/// Environment information
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EnvironmentInfo {
+    /// Selected environment variables (redacted values for sensitive ones)
+    pub variables: std::collections::HashMap<String, String>,
+    /// Shell information
+    pub shell: Option<String>,
+    /// User home directory
+    pub home: Option<String>,
+    /// Path environment variable
+    pub path: Option<String>,
+}
+
+/// Runtime configuration details
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RuntimeConfig {
+    /// Log level setting
+    pub log_level: String,
+    /// Log format (json or text)
+    pub log_format: String,
+    /// Redaction enabled status
+    pub redaction_enabled: bool,
+    /// Container runtime (docker, podman, etc)
+    pub container_runtime: String,
+}
+
+/// System resource usage information
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ResourceInfo {
+    /// Total system memory in bytes
+    pub total_memory: u64,
+    /// Available system memory in bytes
+    pub available_memory: u64,
+    /// CPU count
+    pub cpu_count: usize,
+    /// System load average (1, 5, 15 minutes) - Linux/macOS only
+    pub load_average: Option<(f64, f64, f64)>,
+}
+
 /// Run the doctor command to collect diagnostics and optionally create a bundle
 pub async fn run_doctor(
     json_output: bool,
@@ -167,6 +212,9 @@ async fn collect_diagnostics(context: &DoctorContext) -> Result<DoctorInfo> {
     let features = collect_features_info();
     let last_build_hash = collect_last_build_hash();
     let cache_stats = collect_cache_stats().await;
+    let environment = collect_environment_info();
+    let runtime_config = collect_runtime_config();
+    let resources = collect_resource_info();
 
     Ok(DoctorInfo {
         cli_version,
@@ -178,6 +226,9 @@ async fn collect_diagnostics(context: &DoctorContext) -> Result<DoctorInfo> {
         features,
         last_build_hash,
         cache_stats,
+        environment,
+        runtime_config,
+        resources,
     })
 }
 
@@ -380,6 +431,130 @@ async fn collect_cache_stats() -> CacheStats {
     }
 }
 
+/// Collect environment information
+fn collect_environment_info() -> EnvironmentInfo {
+    debug!("Collecting environment information");
+
+    let mut variables = std::collections::HashMap::new();
+
+    // Collect key environment variables relevant for diagnostics
+    // Only collect non-sensitive ones or mark sensitive ones for redaction
+    let env_vars_to_collect = [
+        "HOME",
+        "USER",
+        "SHELL",
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "TERM",
+        "DEACON_LOG_LEVEL",
+        "DEACON_LOG_FORMAT",
+        "DOCKER_HOST",
+        "DOCKER_CONFIG",
+        "DOCKER_CERT_PATH",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+    ];
+
+    for var_name in &env_vars_to_collect {
+        if let Ok(value) = std::env::var(var_name) {
+            // For PATH, only include first 200 chars to avoid overly long values
+            if *var_name == "PATH" && value.len() > 200 {
+                variables.insert(var_name.to_string(), format!("{}...", &value[..200]));
+            } else {
+                variables.insert(var_name.to_string(), value);
+            }
+        }
+    }
+
+    // Cross-platform shell detection: SHELL on Unix, COMSPEC on Windows
+    let shell = std::env::var("SHELL")
+        .ok()
+        .or_else(|| std::env::var("COMSPEC").ok());
+
+    // Cross-platform home directory detection
+    let home = std::env::var("HOME").ok().or_else(|| {
+        // Try USERPROFILE on Windows
+        std::env::var("USERPROFILE").ok().or_else(|| {
+            // Fall back to HOMEDRIVE + HOMEPATH on Windows
+            match (
+                std::env::var("HOMEDRIVE").ok(),
+                std::env::var("HOMEPATH").ok(),
+            ) {
+                (Some(drive), Some(path)) => Some(format!("{}{}", drive, path)),
+                _ => None,
+            }
+        })
+    });
+
+    let path = std::env::var("PATH").ok();
+
+    EnvironmentInfo {
+        variables,
+        shell,
+        home,
+        path,
+    }
+}
+
+/// Collect runtime configuration details
+fn collect_runtime_config() -> RuntimeConfig {
+    debug!("Collecting runtime configuration");
+
+    let log_level = std::env::var("DEACON_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+    let log_format = std::env::var("DEACON_LOG_FORMAT").unwrap_or_else(|_| "text".to_string());
+
+    // Redaction is enabled by default unless explicitly disabled
+    let redaction_enabled = std::env::var("DEACON_NO_REDACT")
+        .map(|v| v != "1" && v.to_lowercase() != "true")
+        .unwrap_or(true);
+
+    // Container runtime - default to docker
+    let container_runtime =
+        std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string());
+
+    RuntimeConfig {
+        log_level,
+        log_format,
+        redaction_enabled,
+        container_runtime,
+    }
+}
+
+/// Collect system resource information
+fn collect_resource_info() -> ResourceInfo {
+    debug!("Collecting system resource information");
+
+    use sysinfo::System;
+
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    let total_memory = sys.total_memory();
+    let available_memory = sys.available_memory();
+    let cpu_count = sys.cpus().len();
+
+    // Load average is only available on Unix-like systems
+    let load_average = if cfg!(unix) {
+        sysinfo::System::load_average();
+        let load_avg = sysinfo::System::load_average();
+        Some((load_avg.one, load_avg.five, load_avg.fifteen))
+    } else {
+        None
+    };
+
+    ResourceInfo {
+        total_memory,
+        available_memory,
+        cpu_count,
+        load_average,
+    }
+}
+
 /// Print diagnostic information in human-readable text format with redaction applied
 fn print_text_output_with_redaction(
     info: &DoctorInfo,
@@ -492,6 +667,70 @@ fn print_text_output_with_redaction(
         println_redacted!(redaction_config, "Last Build Hash: {}", hash);
         println!();
     }
+
+    println_redacted!(redaction_config, "Environment:");
+    if let Some(shell) = &info.environment.shell {
+        println_redacted!(redaction_config, "  Shell: {}", shell);
+    }
+    if let Some(home) = &info.environment.home {
+        println_redacted!(redaction_config, "  Home: {}", home);
+    }
+    println_redacted!(
+        redaction_config,
+        "  Key Variables: {} collected",
+        info.environment.variables.len()
+    );
+    println!();
+
+    println_redacted!(redaction_config, "Runtime Configuration:");
+    println_redacted!(
+        redaction_config,
+        "  Log Level: {}",
+        info.runtime_config.log_level
+    );
+    println_redacted!(
+        redaction_config,
+        "  Log Format: {}",
+        info.runtime_config.log_format
+    );
+    println_redacted!(
+        redaction_config,
+        "  Redaction Enabled: {}",
+        info.runtime_config.redaction_enabled
+    );
+    println_redacted!(
+        redaction_config,
+        "  Container Runtime: {}",
+        info.runtime_config.container_runtime
+    );
+    println!();
+
+    println_redacted!(redaction_config, "System Resources:");
+    println_redacted!(
+        redaction_config,
+        "  Total Memory: {}",
+        ByteSize(info.resources.total_memory)
+    );
+    println_redacted!(
+        redaction_config,
+        "  Available Memory: {}",
+        ByteSize(info.resources.available_memory)
+    );
+    println_redacted!(
+        redaction_config,
+        "  CPU Count: {}",
+        info.resources.cpu_count
+    );
+    if let Some((one, five, fifteen)) = info.resources.load_average {
+        println_redacted!(
+            redaction_config,
+            "  Load Average: {:.2}, {:.2}, {:.2}",
+            one,
+            five,
+            fifteen
+        );
+    }
+    println!();
 }
 
 /// Create a support bundle with diagnostic information and configuration files
@@ -574,6 +813,63 @@ async fn create_support_bundle(
             })?;
         }
     }
+
+    // Add environment information
+    zip.start_file("environment.json", options).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
+            message: format!("Failed to add environment info to bundle: {}", e),
+        })
+    })?;
+    let env_json = serde_json::to_string_pretty(&doctor_info.environment).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
+            message: format!("Failed to serialize environment info: {}", e),
+        })
+    })?;
+    // Apply redaction to environment variables
+    let redacted_env = crate::redaction::redact_if_enabled(
+        &env_json,
+        &crate::redaction::RedactionConfig::default(),
+    );
+    zip.write_all(redacted_env.as_bytes()).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
+            message: format!("Failed to write environment info: {}", e),
+        })
+    })?;
+
+    // Add runtime configuration
+    zip.start_file("runtime-config.json", options)
+        .map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to add runtime config to bundle: {}", e),
+            })
+        })?;
+    let runtime_json = serde_json::to_string_pretty(&doctor_info.runtime_config).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
+            message: format!("Failed to serialize runtime config: {}", e),
+        })
+    })?;
+    zip.write_all(runtime_json.as_bytes()).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
+            message: format!("Failed to write runtime config: {}", e),
+        })
+    })?;
+
+    // Add system resources information
+    zip.start_file("resources.json", options).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
+            message: format!("Failed to add resources info to bundle: {}", e),
+        })
+    })?;
+    let resources_json = serde_json::to_string_pretty(&doctor_info.resources).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
+            message: format!("Failed to serialize resources info: {}", e),
+        })
+    })?;
+    zip.write_all(resources_json.as_bytes()).map_err(|e| {
+        DeaconError::Internal(crate::errors::InternalError::Generic {
+            message: format!("Failed to write resources info: {}", e),
+        })
+    })?;
 
     zip.finish().map_err(|e| {
         DeaconError::Internal(crate::errors::InternalError::Generic {

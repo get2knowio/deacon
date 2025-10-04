@@ -436,6 +436,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "zip",
 ]
 
 [[package]]
