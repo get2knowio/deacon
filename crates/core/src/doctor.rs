@@ -471,8 +471,26 @@ fn collect_environment_info() -> EnvironmentInfo {
         }
     }
 
-    let shell = std::env::var("SHELL").ok();
-    let home = std::env::var("HOME").ok();
+    // Cross-platform shell detection: SHELL on Unix, COMSPEC on Windows
+    let shell = std::env::var("SHELL")
+        .ok()
+        .or_else(|| std::env::var("COMSPEC").ok());
+
+    // Cross-platform home directory detection
+    let home = std::env::var("HOME").ok().or_else(|| {
+        // Try USERPROFILE on Windows
+        std::env::var("USERPROFILE").ok().or_else(|| {
+            // Fall back to HOMEDRIVE + HOMEPATH on Windows
+            match (
+                std::env::var("HOMEDRIVE").ok(),
+                std::env::var("HOMEPATH").ok(),
+            ) {
+                (Some(drive), Some(path)) => Some(format!("{}{}", drive, path)),
+                _ => None,
+            }
+        })
+    });
+
     let path = std::env::var("PATH").ok();
 
     EnvironmentInfo {
