@@ -464,7 +464,21 @@ impl HttpClient for ReqwestClient {
             request = request.header(&key, &value);
         }
 
-        let response = request.send().await?;
+        let response = request.send().await.map_err(|e| {
+            // Improve error messages for common network issues
+            if e.is_timeout() {
+                format!("Request timeout for URL: {}. Check network connectivity.", url)
+            } else if e.is_connect() {
+                format!(
+                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
+                    url
+                )
+            } else if e.is_request() {
+                format!("Request error for URL: {}: {}", url, e)
+            } else {
+                format!("Network error for URL: {}: {}", url, e)
+            }
+        })?;
 
         // Handle 401 authentication errors
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
@@ -497,7 +511,21 @@ impl HttpClient for ReqwestClient {
             request = request.header(&key, &value);
         }
 
-        let response = request.send().await?;
+        let response = request.send().await.map_err(|e| {
+            // Improve error messages for common network issues
+            if e.is_timeout() {
+                format!("Request timeout for URL: {}. Check network connectivity.", url)
+            } else if e.is_connect() {
+                format!(
+                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
+                    url
+                )
+            } else if e.is_request() {
+                format!("Request error for URL: {}: {}", url, e)
+            } else {
+                format!("Network error for URL: {}: {}", url, e)
+            }
+        })?;
 
         // Handle 401 authentication errors
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
@@ -530,7 +558,21 @@ impl HttpClient for ReqwestClient {
             request = request.header(&key, &value);
         }
 
-        let response = request.send().await?;
+        let response = request.send().await.map_err(|e| {
+            // Improve error messages for common network issues
+            if e.is_timeout() {
+                format!("Request timeout for URL: {}. Check network connectivity.", url)
+            } else if e.is_connect() {
+                format!(
+                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
+                    url
+                )
+            } else if e.is_request() {
+                format!("Request error for URL: {}: {}", url, e)
+            } else {
+                format!("Network error for URL: {}: {}", url, e)
+            }
+        })?;
 
         // Handle 401 authentication errors
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
