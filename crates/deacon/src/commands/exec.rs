@@ -166,7 +166,7 @@ pub async fn execute_exec(_args: ExecArgs) -> Result<()> {
 }
 
 /// Execute the exec command with a custom Docker implementation
-#[instrument(skip(docker_client), fields(workdir))]
+#[instrument(skip(docker_client), fields(workdir, user))]
 pub async fn execute_exec_with_docker<D>(args: ExecArgs, docker_client: &D) -> Result<()>
 where
     D: Docker,
@@ -229,6 +229,11 @@ where
 
         // Add workdir to the current tracing span
         tracing::Span::current().record("workdir", &working_dir);
+
+        // Add user to the current tracing span if specified
+        if let Some(ref user) = args.user {
+            tracing::Span::current().record("user", user.as_str());
+        }
 
         // Create exec config
         // Always attach stdin (interactive) so piped/stdin data flows into the container,
