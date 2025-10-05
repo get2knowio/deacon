@@ -92,12 +92,16 @@ impl ContainerIdentity {
 
     /// Generate a deterministic hash from the workspace path
     fn hash_workspace_path(workspace_path: &Path) -> String {
+        use crate::workspace::resolve_workspace_root;
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
-        let canonical_path = workspace_path
-            .canonicalize()
-            .unwrap_or_else(|_| workspace_path.to_path_buf());
+        // Use worktree-aware resolution to get the canonical workspace root
+        let canonical_path = resolve_workspace_root(workspace_path).unwrap_or_else(|_| {
+            workspace_path
+                .canonicalize()
+                .unwrap_or_else(|_| workspace_path.to_path_buf())
+        });
 
         let mut hasher = DefaultHasher::new();
         canonical_path.hash(&mut hasher);

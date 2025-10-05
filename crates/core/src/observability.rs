@@ -39,9 +39,14 @@ pub mod fields {
 /// This creates an 8-character hex hash from the canonical path,
 /// computed only once per execution for performance.
 pub fn workspace_id(workspace_path: &Path) -> String {
-    let canonical_path = workspace_path
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_path.to_path_buf());
+    use crate::workspace::resolve_workspace_root;
+
+    // Use worktree-aware resolution to get the canonical workspace root
+    let canonical_path = resolve_workspace_root(workspace_path).unwrap_or_else(|_| {
+        workspace_path
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_path.to_path_buf())
+    });
 
     let mut hasher = DefaultHasher::new();
     canonical_path.hash(&mut hasher);
