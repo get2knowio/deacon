@@ -614,6 +614,26 @@ impl ContainerLifecycleResult {
     }
 
     /// Execute non-blocking phases synchronously (for testing or fallback)
+    ///
+    /// This method executes non-blocking phases (postStart, postAttach) synchronously
+    /// without progress event streaming. For progress event streaming, use
+    /// `execute_non_blocking_phases_sync_with_callback`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use deacon_core::container_lifecycle::*;
+    /// # use deacon_core::docker::CliDocker;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let docker = CliDocker::new();
+    /// let result = /* ... get ContainerLifecycleResult ... */
+    /// # ContainerLifecycleResult::new();
+    ///
+    /// // Execute non-blocking phases synchronously
+    /// let final_result = result.execute_non_blocking_phases_sync(&docker).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn execute_non_blocking_phases_sync<D>(self, docker: &D) -> Result<Self>
     where
         D: Docker,
@@ -626,7 +646,35 @@ impl ContainerLifecycleResult {
     }
 
     /// Execute non-blocking phases synchronously with optional progress callback
-    /// This allows streaming of progress events during non-blocking phase execution
+    ///
+    /// This method executes non-blocking phases (postStart, postAttach) synchronously
+    /// while emitting progress events via the provided callback. This enables log streaming
+    /// and real-time progress tracking during non-blocking phase execution.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use deacon_core::container_lifecycle::*;
+    /// # use deacon_core::docker::CliDocker;
+    /// # use deacon_core::progress::ProgressEvent;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let docker = CliDocker::new();
+    /// let result = /* ... get ContainerLifecycleResult ... */
+    /// # ContainerLifecycleResult::new();
+    ///
+    /// // Define progress callback for event streaming
+    /// let progress_callback = |event: ProgressEvent| {
+    ///     println!("Progress: {:?}", event);
+    ///     Ok(())
+    /// };
+    ///
+    /// // Execute non-blocking phases with progress streaming
+    /// let final_result = result
+    ///     .execute_non_blocking_phases_sync_with_callback(&docker, Some(progress_callback))
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn execute_non_blocking_phases_sync_with_callback<D, F>(
         mut self,
         docker: &D,
