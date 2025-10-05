@@ -614,9 +614,27 @@ impl ContainerLifecycleResult {
     }
 
     /// Execute non-blocking phases synchronously (for testing or fallback)
-    pub async fn execute_non_blocking_phases_sync<D>(mut self, docker: &D) -> Result<Self>
+    pub async fn execute_non_blocking_phases_sync<D>(self, docker: &D) -> Result<Self>
     where
         D: Docker,
+    {
+        self.execute_non_blocking_phases_sync_with_callback::<D, fn(ProgressEvent) -> anyhow::Result<()>>(
+            docker,
+            None,
+        )
+        .await
+    }
+
+    /// Execute non-blocking phases synchronously with optional progress callback
+    /// This allows streaming of progress events during non-blocking phase execution
+    pub async fn execute_non_blocking_phases_sync_with_callback<D, F>(
+        mut self,
+        docker: &D,
+        progress_callback: Option<F>,
+    ) -> Result<Self>
+    where
+        D: Docker,
+        F: Fn(ProgressEvent) -> anyhow::Result<()>,
     {
         let non_blocking_phases = std::mem::take(&mut self.non_blocking_phases);
 
@@ -629,13 +647,13 @@ impl ContainerLifecycleResult {
             // Enforce per-phase timeout
             match timeout(
                 spec.timeout,
-                execute_lifecycle_phase_impl::<D, fn(ProgressEvent) -> anyhow::Result<()>>(
+                execute_lifecycle_phase_impl(
                     spec.phase,
                     &spec.commands,
                     &spec.config,
                     docker,
                     &spec.context,
-                    None,
+                    progress_callback.as_ref(),
                 ),
             )
             .await
