@@ -405,11 +405,31 @@ impl ComposeManager {
 
         debug!("Stopping and removing compose project {}", project.name);
 
+        // Use down without --volumes to preserve volumes
+        command.down_with_flags(&[])?;
+
+        debug!(
+            "Compose project {} stopped and removed successfully",
+            project.name
+        );
+        Ok(())
+    }
+
+    /// Stop and remove compose project containers including volumes
+    #[instrument(skip(self))]
+    pub fn down_project_with_volumes(&self, project: &ComposeProject) -> Result<()> {
+        let command = self.get_command(project);
+
+        debug!(
+            "Stopping and removing compose project {} with volumes",
+            project.name
+        );
+
         // Use down with --volumes to remove named volumes as well
         command.down_with_flags(&["--volumes"])?;
 
         debug!(
-            "Compose project {} stopped and removed successfully",
+            "Compose project {} stopped and removed with volumes successfully",
             project.name
         );
         Ok(())

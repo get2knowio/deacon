@@ -275,6 +275,18 @@ pub enum Commands {
         /// Remove containers after stopping them
         #[arg(long)]
         remove: bool,
+        /// Include all containers matching labels (stale containers)
+        #[arg(long)]
+        all: bool,
+        /// Remove associated anonymous volumes
+        #[arg(long)]
+        volumes: bool,
+        /// Force removal of running containers
+        #[arg(long)]
+        force: bool,
+        /// Timeout in seconds for stopping containers (default: 30)
+        #[arg(long)]
+        timeout: Option<u32>,
     },
 
     /// Environment diagnostics and support bundle creation
@@ -802,11 +814,21 @@ impl Cli {
 
                 execute_run_user_commands(args).await
             }
-            Some(Commands::Down { remove }) => {
+            Some(Commands::Down {
+                remove,
+                all,
+                volumes,
+                force,
+                timeout,
+            }) => {
                 use crate::commands::down::{execute_down, DownArgs};
 
                 let args = DownArgs {
                     remove,
+                    all,
+                    volumes,
+                    force,
+                    timeout,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                 };
