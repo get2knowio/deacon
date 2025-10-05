@@ -1088,6 +1088,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
     }
 
     /// Upload a blob to any registry with a generic reference
+    /// Follows OCI Distribution Spec v2: POST to initiate, PUT to complete
     async fn upload_blob_generic(
         &self,
         registry: &str,
@@ -1095,23 +1096,91 @@ impl<C: HttpClient> FeatureFetcher<C> {
         digest: &str,
         data: Bytes,
     ) -> Result<()> {
-        let blob_url = format!("https://{}/v2/{}/blobs/{}", registry, repository, digest);
+        debug!(
+            "Uploading blob to registry: {}, repository: {}, digest: {}, size: {} bytes",
+            registry,
+            repository,
+            digest,
+            data.len()
+        );
 
-        debug!("Uploading blob to: {}", blob_url);
+        // Step 1: Check if blob already exists (HEAD request)
+        let blob_check_url = format!("https://{}/v2/{}/blobs/{}", registry, repository, digest);
 
+        // Try HEAD request to check if blob exists (some registries support this)
+        // If it exists, we can skip upload
+        match self.client.get(&blob_check_url).await {
+            Ok(_) => {
+                debug!("Blob already exists in registry, skipping upload");
+                return Ok(());
+            }
+            Err(_) => {
+                // Blob doesn't exist, proceed with upload
+                debug!("Blob not found in registry, initiating upload");
+            }
+        }
+
+        // Step 2: Initiate upload session (POST to /v2/{repo}/blobs/uploads/)
+        let upload_url = format!("https://{}/v2/{}/blobs/uploads/", registry, repository);
+        debug!("Initiating upload session at: {}", upload_url);
+
+        let empty_body = Bytes::new();
+        let _response = self
+            .client
+            .post_with_headers(&upload_url, empty_body, HashMap::new())
+            .await
+            .map_err(|e| FeatureError::Oci {
+                message: format!("Failed to initiate blob upload: {}", e),
+            })?;
+
+        // The registry should return a Location header with the upload URL
+        // For now, we'll construct the monolithic upload URL
+        // In a production implementation, we'd parse the Location header from response
+        let upload_location = format!("{}?digest={}", upload_url, digest);
+        debug!("Uploading blob to: {}", upload_location);
+
+        // Step 3: Upload blob with monolithic PUT (entire blob in one request)
         let mut headers = HashMap::new();
         headers.insert(
             "Content-Type".to_string(),
             "application/octet-stream".to_string(),
         );
+        headers.insert("Content-Length".to_string(), data.len().to_string());
 
-        self.client
-            .put_with_headers(&blob_url, data, headers)
-            .await
-            .map_err(|e| FeatureError::Oci {
-                message: format!("Failed to upload blob: {}", e),
-            })?;
+        // Retry blob upload with exponential backoff
+        retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &upload_location;
+                let data_clone = data.clone();
+                let headers_clone = headers.clone();
+                async move {
+                    client
+                        .put_with_headers(url, data_clone, headers_clone)
+                        .await
+                        .map_err(|e| {
+                            let error_msg = e.to_string();
+                            if error_msg.contains("Authentication failed") {
+                                FeatureError::Authentication {
+                                    message: format!(
+                                        "Failed to authenticate for blob upload: {}",
+                                        e
+                                    ),
+                                }
+                            } else {
+                                FeatureError::Oci {
+                                    message: format!("Failed to upload blob: {}", e),
+                                }
+                            }
+                        })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
 
+        debug!("Blob uploaded successfully: {}", digest);
         Ok(())
     }
 
@@ -1163,13 +1232,38 @@ impl<C: HttpClient> FeatureFetcher<C> {
             "application/vnd.oci.image.manifest.v1+json".to_string(),
         );
 
-        let _response = self
-            .client
-            .put_with_headers(&manifest_url, manifest_data.clone(), headers)
-            .await
-            .map_err(|e| FeatureError::Oci {
-                message: format!("Failed to upload manifest: {}", e),
-            })?;
+        // Retry manifest upload with exponential backoff
+        retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let data = manifest_data.clone();
+                let headers = headers.clone();
+                async move {
+                    client
+                        .put_with_headers(url, data, headers)
+                        .await
+                        .map_err(|e| {
+                            let error_msg = e.to_string();
+                            if error_msg.contains("Authentication failed") {
+                                FeatureError::Authentication {
+                                    message: format!(
+                                        "Failed to authenticate for manifest upload: {}",
+                                        e
+                                    ),
+                                }
+                            } else {
+                                FeatureError::Oci {
+                                    message: format!("Failed to upload manifest: {}", e),
+                                }
+                            }
+                        })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
 
         // Calculate digest of the manifest
         let mut hasher = Sha256::new();
@@ -1201,13 +1295,38 @@ impl<C: HttpClient> FeatureFetcher<C> {
             "application/vnd.oci.image.manifest.v1+json".to_string(),
         );
 
-        let _response = self
-            .client
-            .put_with_headers(&manifest_url, manifest_data.clone(), headers)
-            .await
-            .map_err(|e| FeatureError::Oci {
-                message: format!("Failed to upload manifest: {}", e),
-            })?;
+        // Retry manifest upload with exponential backoff
+        retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let data = manifest_data.clone();
+                let headers = headers.clone();
+                async move {
+                    client
+                        .put_with_headers(url, data, headers)
+                        .await
+                        .map_err(|e| {
+                            let error_msg = e.to_string();
+                            if error_msg.contains("Authentication failed") {
+                                FeatureError::Authentication {
+                                    message: format!(
+                                        "Failed to authenticate for manifest upload: {}",
+                                        e
+                                    ),
+                                }
+                            } else {
+                                FeatureError::Oci {
+                                    message: format!("Failed to upload manifest: {}", e),
+                                }
+                            }
+                        })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
 
         // Calculate digest of the manifest
         let mut hasher = Sha256::new();

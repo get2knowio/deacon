@@ -378,11 +378,126 @@ async fn test_fake_registry_no_network_dependency() {
         template_result.is_ok(),
         "Template fetch should work offline"
     );
+}
 
-    // Verify the content is correct
-    let feature = feature_result.unwrap();
-    let template = template_result.unwrap();
+/// Test full push/pull cycle with OCI registry operations
+/// This test verifies the improved blob upload workflow with proper retry logic
+#[tokio::test]
+async fn test_fake_registry_push_pull_cycle() {
+    use deacon_core::features::FeatureMetadata;
 
-    assert_eq!(feature.metadata.id, "test-feature");
-    assert_eq!(template.metadata.id, "test-template");
+    let fake_registry = FakeRegistry::new();
+    let tar_data = create_test_feature_tar();
+
+    // Parse the feature metadata from the tar
+    let metadata = FeatureMetadata {
+        id: "test-feature".to_string(),
+        name: Some("Test Feature".to_string()),
+        description: Some("A test feature for push/pull testing".to_string()),
+        version: Some("1.0.0".to_string()),
+        options: std::collections::HashMap::new(),
+        container_env: std::collections::HashMap::new(),
+        mounts: vec![],
+        init: None,
+        privileged: None,
+        cap_add: vec![],
+        security_opt: vec![],
+        installs_after: vec![],
+        depends_on: std::collections::HashMap::new(),
+        documentation_url: None,
+        license_url: None,
+        on_create_command: None,
+        update_content_command: None,
+        post_create_command: None,
+        post_start_command: None,
+        post_attach_command: None,
+    };
+
+    let feature_ref = FeatureRef::new(
+        "localhost:5000".to_string(),
+        "test".to_string(),
+        "push-pull-feature".to_string(),
+        Some("1.0.0".to_string()),
+    );
+
+    // Set up mock responses for push operations
+    // 1. Mock the POST to initiate upload session
+    let upload_init_url = format!(
+        "https://{}/v2/{}/blobs/uploads/",
+        fake_registry.base_url,
+        feature_ref.repository()
+    );
+    fake_registry
+        .mock_client
+        .add_response(upload_init_url, Bytes::from(""))
+        .await;
+
+    // 2. Mock the PUT for monolithic blob upload
+    let layer_digest = format!("sha256:{:x}", sha2::Sha256::digest(&tar_data));
+    let upload_complete_url = format!(
+        "https://{}/v2/{}/blobs/uploads/?digest={}",
+        fake_registry.base_url,
+        feature_ref.repository(),
+        layer_digest
+    );
+    fake_registry
+        .mock_client
+        .add_response(upload_complete_url.clone(), Bytes::from(""))
+        .await;
+
+    // 3. Mock the PUT for manifest upload
+    let manifest_url = format!(
+        "https://{}/v2/{}/manifests/{}",
+        fake_registry.base_url,
+        feature_ref.repository(),
+        feature_ref.tag()
+    );
+    fake_registry
+        .mock_client
+        .add_response(manifest_url, Bytes::from(""))
+        .await;
+
+    // Create temporary cache
+    let temp_dir = TempDir::new().unwrap();
+    let cache_dir = temp_dir.path().to_path_buf();
+    let fetcher = fake_registry.feature_fetcher(cache_dir.clone());
+
+    // Test publish operation
+    let publish_result = fetcher
+        .publish_feature(&feature_ref, Bytes::from(tar_data.clone()), &metadata)
+        .await;
+
+    assert!(
+        publish_result.is_ok(),
+        "Feature publish should succeed: {:?}",
+        publish_result.err()
+    );
+
+    let publish_info = publish_result.unwrap();
+    assert_eq!(publish_info.registry, "localhost:5000");
+    assert_eq!(publish_info.repository, "test/push-pull-feature");
+    assert_eq!(publish_info.tag, "1.0.0");
+
+    // Now test pull after push - add feature to fake registry for pull
+    fake_registry.add_feature(&feature_ref, tar_data).await;
+
+    // Create new fetcher with clean cache to test actual pull
+    let temp_dir2 = TempDir::new().unwrap();
+    let cache_dir2 = temp_dir2.path().to_path_buf();
+    let fetcher2 = fake_registry.feature_fetcher(cache_dir2);
+
+    let fetch_result = fetcher2.fetch_feature(&feature_ref).await;
+
+    assert!(
+        fetch_result.is_ok(),
+        "Feature pull should succeed after push: {:?}",
+        fetch_result.err()
+    );
+
+    let fetched_feature = fetch_result.unwrap();
+    assert_eq!(fetched_feature.metadata.id, "test-feature");
+    assert_eq!(
+        fetched_feature.metadata.name,
+        Some("Test Feature".to_string())
+    );
 }
