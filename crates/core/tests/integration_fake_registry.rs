@@ -5,7 +5,7 @@
 //! test stub mentioned in the acceptance criteria.
 
 use bytes::Bytes;
-use deacon_core::oci::{FeatureFetcher, FeatureRef, MockHttpClient, TemplateRef};
+use deacon_core::oci::{FeatureFetcher, FeatureRef, HttpResponse, MockHttpClient, TemplateRef};
 use sha2::Digest;
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
@@ -421,25 +421,40 @@ async fn test_fake_registry_push_pull_cycle() {
     );
 
     // Set up mock responses for push operations
-    // 1. Mock the POST to initiate upload session
+    // 1. Mock the POST to initiate upload session with Location header
     let upload_init_url = format!(
         "https://{}/v2/{}/blobs/uploads/",
         fake_registry.base_url,
         feature_ref.repository()
     );
+
+    // Generate a realistic upload session UUID
+    let upload_uuid = "550e8400-e29b-41d4-a716-446655440000";
+    let upload_location = format!(
+        "/v2/{}/blobs/uploads/{}",
+        feature_ref.repository(),
+        upload_uuid
+    );
+
+    let mut post_headers = std::collections::HashMap::new();
+    post_headers.insert("location".to_string(), upload_location.clone());
+    post_headers.insert("Location".to_string(), upload_location.clone());
+
     fake_registry
         .mock_client
-        .add_response(upload_init_url, Bytes::from(""))
+        .add_response_with_headers(
+            upload_init_url,
+            HttpResponse {
+                status: 202,
+                headers: post_headers,
+                body: bytes::Bytes::from(""),
+            },
+        )
         .await;
 
-    // 2. Mock the PUT for monolithic blob upload
+    // 2. Mock the PUT for monolithic blob upload using the Location from POST
     let layer_digest = format!("sha256:{:x}", sha2::Sha256::digest(&tar_data));
-    let upload_complete_url = format!(
-        "https://{}/v2/{}/blobs/uploads/?digest={}",
-        fake_registry.base_url,
-        feature_ref.repository(),
-        layer_digest
-    );
+    let upload_complete_url = format!("{}?digest={}", upload_location, layer_digest);
     fake_registry
         .mock_client
         .add_response(upload_complete_url.clone(), Bytes::from(""))

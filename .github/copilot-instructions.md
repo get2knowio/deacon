@@ -302,6 +302,83 @@ Failure to update examples when altering user‑facing behavior increases drift 
 - Avoid network in unit tests; gate true integration (e.g., Docker) tests behind CI-only markers or environment variables if needed.
 - Never rely on production fallback logic to skip unimplemented features; tests should assert explicit error variants/messages for not-yet-implemented functionality. Mocks/fakes are tools for isolation in tests only and must not leak into shipped execution paths.
 
+## OCI Registry & HTTP Client Implementation Guidelines
+
+### HTTP Client Trait Pattern
+When modifying `HttpClient` trait or implementing OCI registry operations:
+
+1. **HEAD Requests for Blob Existence**: Always use HEAD requests (not GET) to check if a blob exists before uploading:
+   ```rust
+   // ✓ CORRECT - Uses HEAD which doesn't download the body
+   match self.client.head(&blob_url, HashMap::new()).await {
+       Ok(status) if status == 200 => return Ok(()), // Blob exists
+       Ok(status) if status == 404 => { /* proceed with upload */ }
+       _ => { /* handle error */ }
+   }
+   
+   // ✗ WRONG - GET downloads entire blob unnecessarily
+   match self.client.get(&blob_url).await {
+       Ok(_) => return Ok(()),
+       ...
+   }
+   ```
+
+2. **Location Header Handling**: OCI Distribution Spec v2 requires using the Location header from POST responses:
+   ```rust
+   // ✓ CORRECT - Extract and use Location header
+   let response = self.client.post_with_headers(&upload_url, ...).await?;
+   let location = response.headers.get("location")
+       .ok_or_else(|| "Missing Location header")?;
+   let upload_location = format!("{}?digest={}", location, digest);
+   
+   // ✗ WRONG - Hardcoding upload URL construction
+   let upload_location = format!("{}?digest={}", upload_url, digest);
+   ```
+
+3. **POST Response Structure**: When changing `post_with_headers` to return headers:
+   - Update trait signature to return `HttpResponse` struct instead of `Bytes`
+   - Update ALL implementations including test mocks (MockHttpClient, AuthMockHttpClient, etc.)
+   - `HttpResponse` struct must include: status, headers (HashMap), body (Bytes)
+
+4. **Trait Method Additions Checklist**:
+   When adding new methods to `HttpClient` trait (or any public trait):
+   - [ ] Update trait definition with `#[async_trait::async_trait]` attribute
+   - [ ] Update production implementation (`ReqwestClient`)
+   - [ ] Update all test mock implementations:
+     - [ ] `MockHttpClient` in `crates/core/src/oci.rs`
+     - [ ] `AuthMockHttpClient` in `crates/core/tests/integration_oci_auth.rs`
+     - [ ] `MockAuthReqwestClient` in `crates/core/tests/integration_oci_auth.rs`
+     - [ ] Any test-specific mocks (e.g., `FailingMockClient`, `AlwaysFailingClient`)
+   - [ ] Run `cargo clippy` to catch missing implementations early
+   - [ ] Update integration tests to exercise new methods
+
+5. **Mock Response Setup for OCI Uploads**:
+   Tests should simulate realistic OCI upload flow with proper Location headers:
+   ```rust
+   // Set up POST response with Location header
+   let upload_uuid = "550e8400-e29b-41d4-a716-446655440000";
+   let location = format!("/v2/{}/blobs/uploads/{}", repo, upload_uuid);
+   let mut headers = HashMap::new();
+   headers.insert("location".to_string(), location.clone());
+   
+   fake_registry.mock_client.add_response_with_headers(
+       upload_init_url,
+       HttpResponse { status: 202, headers, body: Bytes::from("") }
+   ).await;
+   
+   // Mock PUT at the Location + digest
+   let upload_complete_url = format!("{}?digest={}", location, layer_digest);
+   fake_registry.mock_client.add_response(upload_complete_url, ...).await;
+   ```
+
+### Common Pitfalls to Avoid
+- **Don't** use GET requests to check blob existence (wastes bandwidth)
+- **Don't** ignore Location headers from POST /blobs/uploads/ responses
+- **Don't** forget to update test mocks when changing trait methods
+- **Don't** hardcode upload URLs instead of using Location header
+- **Do** test with realistic mock responses including proper status codes (202 for upload initiation, 201/204 for completion)
+- **Do** ensure error handling distinguishes 404 (not found), 401/403 (auth failure), and 5xx (server error)
+
 ## Adherence to `CLI-SPEC.md`
 > IMPORTANT: All generated code, designs, and refactors MUST remain consistent with `docs/CLI-SPEC.md`. If a requested change deviates (e.g., new command semantics, altered lifecycle order, renamed workflow), respond with a clarification prompt and do not implement until resolved.
 
