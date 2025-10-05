@@ -136,3 +136,97 @@ fn test_exec_working_directory_config() {
                 )),
         );
 }
+
+#[test]
+fn test_exec_with_workdir_flag() {
+    // Test that exec properly parses the -w/--workdir flag
+    let temp_dir = TempDir::new().unwrap();
+
+    // Create a basic devcontainer.json
+    let devcontainer_dir = temp_dir.path().join(".devcontainer");
+    fs::create_dir_all(&devcontainer_dir).unwrap();
+
+    let config_content = r#"{
+        "name": "test-container",
+        "image": "ubuntu:20.04"
+    }"#;
+
+    fs::write(devcontainer_dir.join("devcontainer.json"), config_content).unwrap();
+
+    // Test with -w flag - should fail to find container but parse successfully
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.current_dir(&temp_dir)
+        .arg("exec")
+        .arg("-w")
+        .arg("/tmp")
+        .arg("echo")
+        .arg("test")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(
+            predicate::str::contains("No running container found")
+                .or(predicate::str::contains("Failed to spawn docker"))
+                .or(predicate::str::contains("Docker CLI error"))
+                .or(predicate::str::contains(
+                    "Docker is not installed or not accessible",
+                )),
+        );
+
+    // Test with --workdir long form
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.current_dir(&temp_dir)
+        .arg("exec")
+        .arg("--workdir")
+        .arg("/usr/local")
+        .arg("pwd")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(
+            predicate::str::contains("No running container found")
+                .or(predicate::str::contains("Failed to spawn docker"))
+                .or(predicate::str::contains("Docker CLI error"))
+                .or(predicate::str::contains(
+                    "Docker is not installed or not accessible",
+                )),
+        );
+}
+
+#[test]
+fn test_exec_workdir_takes_precedence() {
+    // Test that CLI workdir flag takes precedence over config workspaceFolder
+    let temp_dir = TempDir::new().unwrap();
+
+    // Create a devcontainer.json with custom workspace folder
+    let devcontainer_dir = temp_dir.path().join(".devcontainer");
+    fs::create_dir_all(&devcontainer_dir).unwrap();
+
+    let config_content = r#"{
+        "name": "test-container",
+        "image": "ubuntu:20.04",
+        "workspaceFolder": "/config/workspace"
+    }"#;
+
+    fs::write(devcontainer_dir.join("devcontainer.json"), config_content).unwrap();
+
+    // Test with CLI workdir - should fail to find container but parse successfully
+    // The CLI workdir should override the config's workspaceFolder
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.current_dir(&temp_dir)
+        .arg("exec")
+        .arg("-w")
+        .arg("/cli/override")
+        .arg("ls")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(
+            predicate::str::contains("No running container found")
+                .or(predicate::str::contains("Failed to spawn docker"))
+                .or(predicate::str::contains("Docker CLI error"))
+                .or(predicate::str::contains(
+                    "Docker is not installed or not accessible",
+                )),
+        );
+}

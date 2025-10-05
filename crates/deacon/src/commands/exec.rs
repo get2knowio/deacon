@@ -22,6 +22,8 @@ pub struct ExecArgs {
     pub no_tty: bool,
     /// Environment variables to set (KEY=VALUE format)
     pub env: Vec<String>,
+    /// Working directory for command execution
+    pub workdir: Option<String>,
     /// Command to execute
     pub command: Vec<String>,
     /// Workspace folder path
@@ -164,7 +166,7 @@ pub async fn execute_exec(_args: ExecArgs) -> Result<()> {
 }
 
 /// Execute the exec command with a custom Docker implementation
-#[instrument(skip(docker_client))]
+#[instrument(skip(docker_client), fields(workdir))]
 pub async fn execute_exec_with_docker<D>(args: ExecArgs, docker_client: &D) -> Result<()>
 where
     D: Docker,
@@ -217,15 +219,23 @@ where
         // Determine TTY allocation
         let should_use_tty = !args.no_tty && CliDocker::is_tty();
 
-        // Determine working directory
-        let working_dir = determine_container_working_dir(&config, workspace_folder);
+        // Determine working directory - prioritize CLI argument over config
+        let working_dir = if let Some(ref cli_workdir) = args.workdir {
+            debug!("Using working directory from CLI: {}", cli_workdir);
+            cli_workdir.clone()
+        } else {
+            determine_container_working_dir(&config, workspace_folder)
+        };
+
+        // Add workdir to the current tracing span
+        tracing::Span::current().record("workdir", &working_dir);
 
         // Create exec config
         // Always attach stdin (interactive) so piped/stdin data flows into the container,
         // independent of TTY allocation. TTY only controls pseudo‑terminal behavior.
         let exec_config = ExecConfig {
             user: args.user.clone(),
-            working_dir: Some(working_dir),
+            working_dir: Some(working_dir.clone()),
             env: env_map,
             tty: should_use_tty,
             interactive: true,

@@ -218,6 +218,9 @@ pub enum Commands {
         /// Environment variables to set (KEY=VALUE format)
         #[arg(long, action = clap::ArgAction::Append)]
         env: Vec<String>,
+        /// Working directory for command execution
+        #[arg(short = 'w', long)]
+        workdir: Option<String>,
         /// Command to execute
         command: Vec<String>,
     },
@@ -717,6 +720,7 @@ impl Cli {
                 user,
                 no_tty,
                 env,
+                workdir,
                 command,
             }) => {
                 use crate::commands::exec::{execute_exec, ExecArgs};
@@ -725,6 +729,7 @@ impl Cli {
                     user,
                     no_tty,
                     env,
+                    workdir,
                     command,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
