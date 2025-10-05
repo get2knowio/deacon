@@ -184,7 +184,7 @@ async fn execute_down_all(identity: &ContainerIdentity, args: &DownArgs) -> Resu
         }
 
         // Remove if requested
-        if args.remove || args.force {
+        if args.remove || args.force || args.volumes {
             debug!("Removing container {}", container.id);
             remove_container_with_options(&docker, &container.id, args).await?;
         }
@@ -300,41 +300,11 @@ async fn remove_container_with_options(
 ) -> Result<()> {
     if args.volumes {
         debug!("Removing container with volumes");
-        remove_container_with_volumes(container_id).await?;
+        docker.remove_container_with_volumes(container_id).await?;
     } else {
         docker.remove_container(container_id).await?;
     }
     Ok(())
-}
-
-/// Remove a container including its volumes
-async fn remove_container_with_volumes(container_id: &str) -> Result<()> {
-    use deacon_core::errors::DockerError;
-    use std::process::Command;
-
-    debug!("Removing container with volumes: {}", container_id);
-
-    let container_id = container_id.to_string();
-
-    tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
-        let output = Command::new("docker")
-            .args(["rm", "-f", "-v", &container_id])
-            .output()
-            .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(DockerError::CLIError(format!(
-                "Remove command failed: {}",
-                stderr
-            )));
-        }
-
-        Ok(())
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?
-    .map_err(Into::into)
 }
 
 /// Execute down for compose configurations

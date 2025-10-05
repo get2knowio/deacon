@@ -1115,6 +1115,37 @@ impl DockerLifecycle for CliRuntime {
     }
 }
 
+impl CliRuntime {
+    /// Remove a container including its volumes
+    #[instrument(skip(self))]
+    pub async fn remove_container_with_volumes(&self, container_id: &str) -> Result<()> {
+        debug!("Removing container with volumes: {}", container_id);
+
+        let runtime_path = self.runtime_path.clone();
+        let container_id = container_id.to_string();
+
+        tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
+            let output = Command::new(&runtime_path)
+                .args(["rm", "-f", "-v", &container_id])
+                .output()
+                .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(DockerError::CLIError(format!(
+                    "Remove command failed: {}",
+                    stderr
+                )));
+            }
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        .map_err(Into::into)
+    }
+}
+
 pub mod mock {
     //! Mock Docker runtime for testing exec and lifecycle flows
     //!
