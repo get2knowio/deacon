@@ -349,4 +349,38 @@ mod tests {
         let all_services = compose_config.get_all_services();
         assert_eq!(all_services, vec!["web", "db", "redis"]);
     }
+
+    #[test]
+    fn test_exec_args_with_workdir() {
+        // Test that ExecArgs correctly stores workdir field
+        let args = ExecArgs {
+            user: Some("testuser".to_string()),
+            no_tty: false,
+            env: vec!["KEY=value".to_string()],
+            workdir: Some("/custom/path".to_string()),
+            command: vec!["ls".to_string(), "-la".to_string()],
+            workspace_folder: None,
+            config_path: None,
+        };
+
+        assert_eq!(args.workdir, Some("/custom/path".to_string()));
+        assert_eq!(args.command, vec!["ls", "-la"]);
+    }
+
+    #[test]
+    fn test_exec_args_without_workdir() {
+        // Test that ExecArgs works without workdir (should fall back to config)
+        let args = ExecArgs {
+            user: None,
+            no_tty: true,
+            env: vec![],
+            workdir: None,
+            command: vec!["pwd".to_string()],
+            workspace_folder: None,
+            config_path: None,
+        };
+
+        assert_eq!(args.workdir, None);
+        assert_eq!(args.command, vec!["pwd"]);
+    }
 }
