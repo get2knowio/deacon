@@ -233,3 +233,5 @@ Feature system examples demonstrate dependency resolution, parallel execution le
 Observability examples demonstrate JSON logging, standardized tracing spans, and structured fields as specified in `docs/CLI-SPEC.md` Monitoring and Observability section.
 
 Registry examples demonstrate OCI distribution workflows including offline-friendly dry-run publish operations for features and templates as specified in `docs/CLI-SPEC.md` Feature Distribution and Template Distribution sections.
+
+Registry authentication examples demonstrate multiple authentication methods (environment variables, Docker config, command-line options) for push/pull operations with proper error handling and retry logic as specified in `docs/CLI-SPEC.md` OCI Registry Integration section.

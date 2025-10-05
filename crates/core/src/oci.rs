@@ -245,6 +245,14 @@ pub struct Layer {
 }
 
 /// HTTP client trait to enable mocking and testing
+/// HTTP response with status, headers, and body
+#[derive(Debug, Clone)]
+pub struct HttpResponse {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub body: Bytes,
+}
+
 #[async_trait::async_trait]
 pub trait HttpClient: Send + Sync {
     /// Perform a GET request and return the response body
@@ -260,6 +268,13 @@ pub trait HttpClient: Send + Sync {
         headers: HashMap<String, String>,
     ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// HEAD request to check resource existence without downloading body
+    async fn head(
+        &self,
+        url: &str,
+        headers: HashMap<String, String>,
+    ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>>;
+
     /// PUT request with data and headers
     async fn put_with_headers(
         &self,
@@ -268,13 +283,13 @@ pub trait HttpClient: Send + Sync {
         headers: HashMap<String, String>,
     ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 
-    /// POST request with data and headers
+    /// POST request with data and headers, returns full response with headers
     async fn post_with_headers(
         &self,
         url: &str,
         data: Bytes,
         headers: HashMap<String, String>,
-    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 /// Default HTTP client implementation using reqwest
@@ -464,7 +479,21 @@ impl HttpClient for ReqwestClient {
             request = request.header(&key, &value);
         }
 
-        let response = request.send().await?;
+        let response = request.send().await.map_err(|e| {
+            // Improve error messages for common network issues
+            if e.is_timeout() {
+                format!("Request timeout for URL: {}. Check network connectivity.", url)
+            } else if e.is_connect() {
+                format!(
+                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
+                    url
+                )
+            } else if e.is_request() {
+                format!("Request error for URL: {}: {}", url, e)
+            } else {
+                format!("Network error for URL: {}: {}", url, e)
+            }
+        })?;
 
         // Handle 401 authentication errors
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
@@ -478,6 +507,41 @@ impl HttpClient for ReqwestClient {
 
         let bytes = response.bytes().await?;
         Ok(bytes)
+    }
+
+    async fn head(
+        &self,
+        url: &str,
+        mut headers: HashMap<String, String>,
+    ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+        // Add authentication header if available
+        let credentials = self.get_credentials_for_url(url);
+        if let Some(auth_header) = credentials.to_auth_header() {
+            headers.insert("Authorization".to_string(), auth_header);
+        }
+
+        let mut request = self.client.head(url);
+        for (key, value) in headers {
+            request = request.header(&key, &value);
+        }
+
+        let response = request.send().await.map_err(|e| {
+            // Improve error messages for common network issues
+            if e.is_timeout() {
+                format!("Request timeout for URL: {}. Check network connectivity.", url)
+            } else if e.is_connect() {
+                format!(
+                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
+                    url
+                )
+            } else if e.is_request() {
+                format!("Request error for URL: {}: {}", url, e)
+            } else {
+                format!("Network error for URL: {}: {}", url, e)
+            }
+        })?;
+
+        Ok(response.status().as_u16())
     }
 
     async fn put_with_headers(
@@ -497,7 +561,21 @@ impl HttpClient for ReqwestClient {
             request = request.header(&key, &value);
         }
 
-        let response = request.send().await?;
+        let response = request.send().await.map_err(|e| {
+            // Improve error messages for common network issues
+            if e.is_timeout() {
+                format!("Request timeout for URL: {}. Check network connectivity.", url)
+            } else if e.is_connect() {
+                format!(
+                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
+                    url
+                )
+            } else if e.is_request() {
+                format!("Request error for URL: {}: {}", url, e)
+            } else {
+                format!("Network error for URL: {}: {}", url, e)
+            }
+        })?;
 
         // Handle 401 authentication errors
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
@@ -518,7 +596,7 @@ impl HttpClient for ReqwestClient {
         url: &str,
         data: Bytes,
         mut headers: HashMap<String, String>,
-    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
         // Add authentication header if available
         let credentials = self.get_credentials_for_url(url);
         if let Some(auth_header) = credentials.to_auth_header() {
@@ -530,7 +608,31 @@ impl HttpClient for ReqwestClient {
             request = request.header(&key, &value);
         }
 
-        let response = request.send().await?;
+        let response = request.send().await.map_err(|e| {
+            // Improve error messages for common network issues
+            if e.is_timeout() {
+                format!("Request timeout for URL: {}. Check network connectivity.", url)
+            } else if e.is_connect() {
+                format!(
+                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
+                    url
+                )
+            } else if e.is_request() {
+                format!("Request error for URL: {}: {}", url, e)
+            } else {
+                format!("Network error for URL: {}: {}", url, e)
+            }
+        })?;
+
+        let status = response.status().as_u16();
+
+        // Extract headers
+        let mut response_headers = HashMap::new();
+        for (key, value) in response.headers() {
+            if let Ok(value_str) = value.to_str() {
+                response_headers.insert(key.to_string(), value_str.to_string());
+            }
+        }
 
         // Handle 401 authentication errors
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
@@ -543,7 +645,11 @@ impl HttpClient for ReqwestClient {
         }
 
         let bytes = response.bytes().await?;
-        Ok(bytes)
+        Ok(HttpResponse {
+            status,
+            headers: response_headers,
+            body: bytes,
+        })
     }
 }
 
@@ -1088,6 +1194,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
     }
 
     /// Upload a blob to any registry with a generic reference
+    /// Follows OCI Distribution Spec v2: POST to initiate, PUT to complete
     async fn upload_blob_generic(
         &self,
         registry: &str,
@@ -1095,23 +1202,132 @@ impl<C: HttpClient> FeatureFetcher<C> {
         digest: &str,
         data: Bytes,
     ) -> Result<()> {
-        let blob_url = format!("https://{}/v2/{}/blobs/{}", registry, repository, digest);
+        debug!(
+            "Uploading blob to registry: {}, repository: {}, digest: {}, size: {} bytes",
+            registry,
+            repository,
+            digest,
+            data.len()
+        );
 
-        debug!("Uploading blob to: {}", blob_url);
+        // Step 1: Check if blob already exists using HEAD request
+        let blob_check_url = format!("https://{}/v2/{}/blobs/{}", registry, repository, digest);
 
+        match self.client.head(&blob_check_url, HashMap::new()).await {
+            Ok(status) => {
+                if status == 200 {
+                    debug!(
+                        "Blob already exists in registry (status {}), skipping upload",
+                        status
+                    );
+                    return Ok(());
+                } else if status == 404 {
+                    debug!("Blob not found in registry (status 404), proceeding with upload");
+                } else if status == 401 || status == 403 {
+                    return Err(FeatureError::Authentication {
+                        message: format!(
+                            "Authentication failed when checking blob existence (status {})",
+                            status
+                        ),
+                    }
+                    .into());
+                } else if status >= 500 {
+                    return Err(FeatureError::Oci {
+                        message: format!(
+                            "Registry server error when checking blob existence (status {})",
+                            status
+                        ),
+                    }
+                    .into());
+                } else {
+                    debug!(
+                        "Unexpected status {} when checking blob existence, proceeding with upload",
+                        status
+                    );
+                }
+            }
+            Err(e) => {
+                // If HEAD request fails, log and proceed with upload anyway
+                debug!("HEAD request failed: {}, proceeding with upload", e);
+            }
+        }
+
+        // Step 2: Initiate upload session (POST to /v2/{repo}/blobs/uploads/)
+        let upload_url = format!("https://{}/v2/{}/blobs/uploads/", registry, repository);
+        debug!("Initiating upload session at: {}", upload_url);
+
+        let empty_body = Bytes::new();
+        let response = self
+            .client
+            .post_with_headers(&upload_url, empty_body, HashMap::new())
+            .await
+            .map_err(|e| FeatureError::Oci {
+                message: format!("Failed to initiate blob upload: {}", e),
+            })?;
+
+        // Extract Location header from POST response per OCI spec
+        let location = response
+            .headers
+            .get("location")
+            .or_else(|| response.headers.get("Location"))
+            .ok_or_else(|| FeatureError::Oci {
+                message: "Missing Location header in upload initiation response".to_string(),
+            })?
+            .clone();
+
+        debug!("Upload session initiated, location: {}", location);
+
+        // Build final upload URL by appending digest query parameter to Location
+        let upload_location = if location.contains('?') {
+            format!("{}&digest={}", location, digest)
+        } else {
+            format!("{}?digest={}", location, digest)
+        };
+
+        debug!("Uploading blob to: {}", upload_location);
+
+        // Step 3: Upload blob with monolithic PUT (entire blob in one request)
         let mut headers = HashMap::new();
         headers.insert(
             "Content-Type".to_string(),
             "application/octet-stream".to_string(),
         );
+        headers.insert("Content-Length".to_string(), data.len().to_string());
 
-        self.client
-            .put_with_headers(&blob_url, data, headers)
-            .await
-            .map_err(|e| FeatureError::Oci {
-                message: format!("Failed to upload blob: {}", e),
-            })?;
+        // Retry blob upload with exponential backoff
+        retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &upload_location;
+                let data_clone = data.clone();
+                let headers_clone = headers.clone();
+                async move {
+                    client
+                        .put_with_headers(url, data_clone, headers_clone)
+                        .await
+                        .map_err(|e| {
+                            let error_msg = e.to_string();
+                            if error_msg.contains("Authentication failed") {
+                                FeatureError::Authentication {
+                                    message: format!(
+                                        "Failed to authenticate for blob upload: {}",
+                                        e
+                                    ),
+                                }
+                            } else {
+                                FeatureError::Oci {
+                                    message: format!("Failed to upload blob: {}", e),
+                                }
+                            }
+                        })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
 
+        debug!("Blob uploaded successfully: {}", digest);
         Ok(())
     }
 
@@ -1163,13 +1379,38 @@ impl<C: HttpClient> FeatureFetcher<C> {
             "application/vnd.oci.image.manifest.v1+json".to_string(),
         );
 
-        let _response = self
-            .client
-            .put_with_headers(&manifest_url, manifest_data.clone(), headers)
-            .await
-            .map_err(|e| FeatureError::Oci {
-                message: format!("Failed to upload manifest: {}", e),
-            })?;
+        // Retry manifest upload with exponential backoff
+        retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let data = manifest_data.clone();
+                let headers = headers.clone();
+                async move {
+                    client
+                        .put_with_headers(url, data, headers)
+                        .await
+                        .map_err(|e| {
+                            let error_msg = e.to_string();
+                            if error_msg.contains("Authentication failed") {
+                                FeatureError::Authentication {
+                                    message: format!(
+                                        "Failed to authenticate for manifest upload: {}",
+                                        e
+                                    ),
+                                }
+                            } else {
+                                FeatureError::Oci {
+                                    message: format!("Failed to upload manifest: {}", e),
+                                }
+                            }
+                        })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
 
         // Calculate digest of the manifest
         let mut hasher = Sha256::new();
@@ -1201,13 +1442,38 @@ impl<C: HttpClient> FeatureFetcher<C> {
             "application/vnd.oci.image.manifest.v1+json".to_string(),
         );
 
-        let _response = self
-            .client
-            .put_with_headers(&manifest_url, manifest_data.clone(), headers)
-            .await
-            .map_err(|e| FeatureError::Oci {
-                message: format!("Failed to upload manifest: {}", e),
-            })?;
+        // Retry manifest upload with exponential backoff
+        retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let data = manifest_data.clone();
+                let headers = headers.clone();
+                async move {
+                    client
+                        .put_with_headers(url, data, headers)
+                        .await
+                        .map_err(|e| {
+                            let error_msg = e.to_string();
+                            if error_msg.contains("Authentication failed") {
+                                FeatureError::Authentication {
+                                    message: format!(
+                                        "Failed to authenticate for manifest upload: {}",
+                                        e
+                                    ),
+                                }
+                            } else {
+                                FeatureError::Oci {
+                                    message: format!("Failed to upload manifest: {}", e),
+                                }
+                            }
+                        })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
 
         // Calculate digest of the manifest
         let mut hasher = Sha256::new();
@@ -1481,18 +1747,32 @@ pub fn default_fetcher() -> Result<FeatureFetcher<ReqwestClient>> {
 #[derive(Debug, Clone)]
 pub struct MockHttpClient {
     responses: Arc<Mutex<HashMap<String, Bytes>>>,
+    response_with_headers: Arc<Mutex<HashMap<String, HttpResponse>>>,
+    head_responses: Arc<Mutex<HashMap<String, u16>>>,
 }
 
 impl MockHttpClient {
     pub fn new() -> Self {
         Self {
             responses: Arc::new(Mutex::new(HashMap::new())),
+            response_with_headers: Arc::new(Mutex::new(HashMap::new())),
+            head_responses: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub async fn add_response(&self, url: String, response: Bytes) {
         let mut responses = self.responses.lock().await;
         responses.insert(url, response);
+    }
+
+    pub async fn add_response_with_headers(&self, url: String, response: HttpResponse) {
+        let mut responses = self.response_with_headers.lock().await;
+        responses.insert(url, response);
+    }
+
+    pub async fn add_head_response(&self, url: String, status: u16) {
+        let mut responses = self.head_responses.lock().await;
+        responses.insert(url, status);
     }
 }
 
@@ -1523,6 +1803,18 @@ impl HttpClient for MockHttpClient {
         self.get(url).await
     }
 
+    async fn head(
+        &self,
+        url: &str,
+        _headers: HashMap<String, String>,
+    ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+        let responses = self.head_responses.lock().await;
+        responses
+            .get(url)
+            .copied()
+            .ok_or_else(|| format!("No mock HEAD response for URL: {}", url).into())
+    }
+
     async fn put_with_headers(
         &self,
         url: &str,
@@ -1541,11 +1833,24 @@ impl HttpClient for MockHttpClient {
         url: &str,
         _data: Bytes,
         _headers: HashMap<String, String>,
-    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
+        // Check for response with headers first
+        let response_with_headers = self.response_with_headers.lock().await;
+        if let Some(response) = response_with_headers.get(url) {
+            return Ok(response.clone());
+        }
+        drop(response_with_headers);
+
+        // Fall back to simple response
         let responses = self.responses.lock().await;
         responses
             .get(url)
             .cloned()
+            .map(|body| HttpResponse {
+                status: 200,
+                headers: HashMap::new(),
+                body,
+            })
             .ok_or_else(|| format!("No mock response for URL: {}", url).into())
     }
 }
@@ -1760,6 +2065,19 @@ mod tests {
                 self.get(url).await
             }
 
+            async fn head(
+                &self,
+                _url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+                let current = self.failure_count.fetch_add(1, Ordering::SeqCst);
+                if current < self.fail_attempts {
+                    Err("network error".into())
+                } else {
+                    Ok(404)
+                }
+            }
+
             async fn put_with_headers(
                 &self,
                 _url: &str,
@@ -1779,12 +2097,17 @@ mod tests {
                 _url: &str,
                 _data: Bytes,
                 _headers: HashMap<String, String>,
-            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
                 let current = self.failure_count.fetch_add(1, Ordering::SeqCst);
                 if current < self.fail_attempts {
                     Err("network error".into())
                 } else {
-                    Ok(Bytes::new())
+                    Ok(HttpResponse {
+                        status: 200,
+                        headers: HashMap::new(),
+                        body: Bytes::new(),
+                    })
                 }
             }
         }
@@ -1859,6 +2182,15 @@ mod tests {
                 self.get(url).await
             }
 
+            async fn head(
+                &self,
+                _url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+                self.call_count.fetch_add(1, Ordering::SeqCst);
+                Err("permanent network error".into())
+            }
+
             async fn put_with_headers(
                 &self,
                 _url: &str,
@@ -1874,7 +2206,8 @@ mod tests {
                 _url: &str,
                 _data: Bytes,
                 _headers: HashMap<String, String>,
-            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
                 self.call_count.fetch_add(1, Ordering::SeqCst);
                 Err("permanent network error".into())
             }

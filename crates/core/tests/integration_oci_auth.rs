@@ -5,7 +5,8 @@
 
 use bytes::Bytes;
 use deacon_core::oci::{
-    FeatureFetcher, FeatureRef, HttpClient, RegistryAuth, RegistryCredentials, ReqwestClient,
+    FeatureFetcher, FeatureRef, HttpClient, HttpResponse, RegistryAuth, RegistryCredentials,
+    ReqwestClient,
 };
 use std::collections::HashMap;
 use std::env;
@@ -105,6 +106,15 @@ impl HttpClient for AuthMockHttpClient {
         Err(format!("No mock response for URL: {}", url).into())
     }
 
+    async fn head(
+        &self,
+        _url: &str,
+        _headers: HashMap<String, String>,
+    ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+        // Return 404 for HEAD requests by default
+        Ok(404)
+    }
+
     async fn put_with_headers(
         &self,
         url: &str,
@@ -122,11 +132,15 @@ impl HttpClient for AuthMockHttpClient {
         url: &str,
         _data: Bytes,
         headers: HashMap<String, String>,
-    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
         // For POST requests, just return empty response if auth is valid
         self.get_with_headers(url, headers)
             .await
-            .map(|_| Bytes::new())
+            .map(|body| HttpResponse {
+                status: 200,
+                headers: HashMap::new(),
+                body,
+            })
     }
 }
 
@@ -504,6 +518,20 @@ impl HttpClient for MockAuthReqwestClient {
         self.mock_client.get_with_headers(url, headers).await
     }
 
+    async fn head(
+        &self,
+        url: &str,
+        mut headers: HashMap<String, String>,
+    ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+        // Add authentication header if available
+        let credentials = self.get_credentials_for_url(url);
+        if let Some(auth_header) = credentials.to_auth_header() {
+            headers.insert("Authorization".to_string(), auth_header);
+        }
+
+        self.mock_client.head(url, headers).await
+    }
+
     async fn put_with_headers(
         &self,
         url: &str,
@@ -524,7 +552,7 @@ impl HttpClient for MockAuthReqwestClient {
         url: &str,
         data: Bytes,
         mut headers: HashMap<String, String>,
-    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
         // Add authentication header if available
         let credentials = self.get_credentials_for_url(url);
         if let Some(auth_header) = credentials.to_auth_header() {
