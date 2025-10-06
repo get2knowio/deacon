@@ -1099,4 +1099,86 @@ mod tests {
         assert!(!traditional_config.uses_compose());
         assert!(!traditional_config.has_stop_compose_shutdown());
     }
+
+    #[test]
+    fn test_cli_forward_ports_merging() {
+        use deacon_core::config::PortSpec;
+
+        // Start with a config that has some ports
+        let mut config = DevContainerConfig::default();
+        config.forward_ports = vec![PortSpec::Number(3000), PortSpec::Number(4000)];
+
+        // Simulate CLI forward ports
+        let cli_ports = vec!["8080".to_string(), "5000:5000".to_string()];
+
+        // Merge CLI ports into config
+        for port_str in &cli_ports {
+            let port_spec = if port_str.contains(':') {
+                PortSpec::String(port_str.clone())
+            } else {
+                match port_str.parse::<u16>() {
+                    Ok(port) => PortSpec::Number(port),
+                    Err(_) => PortSpec::String(port_str.clone()),
+                }
+            };
+            config.forward_ports.push(port_spec);
+        }
+
+        // Verify merged ports
+        assert_eq!(config.forward_ports.len(), 4);
+        assert!(matches!(config.forward_ports[0], PortSpec::Number(3000)));
+        assert!(matches!(config.forward_ports[1], PortSpec::Number(4000)));
+        assert!(matches!(config.forward_ports[2], PortSpec::Number(8080)));
+        assert!(matches!(
+            config.forward_ports[3],
+            PortSpec::String(ref s) if s == "5000:5000"
+        ));
+    }
+
+    #[test]
+    fn test_forward_ports_parsing() {
+        use deacon_core::config::PortSpec;
+
+        // Test single port number
+        let port_str = "8080";
+        let port_spec = if port_str.contains(':') {
+            PortSpec::String(port_str.to_string())
+        } else {
+            match port_str.parse::<u16>() {
+                Ok(port) => PortSpec::Number(port),
+                Err(_) => PortSpec::String(port_str.to_string()),
+            }
+        };
+        assert!(matches!(port_spec, PortSpec::Number(8080)));
+
+        // Test port mapping
+        let port_str = "3000:3000";
+        let port_spec = if port_str.contains(':') {
+            PortSpec::String(port_str.to_string())
+        } else {
+            match port_str.parse::<u16>() {
+                Ok(port) => PortSpec::Number(port),
+                Err(_) => PortSpec::String(port_str.to_string()),
+            }
+        };
+        assert!(matches!(
+            port_spec,
+            PortSpec::String(ref s) if s == "3000:3000"
+        ));
+
+        // Test host:container mapping
+        let port_str = "8080:3000";
+        let port_spec = if port_str.contains(':') {
+            PortSpec::String(port_str.to_string())
+        } else {
+            match port_str.parse::<u16>() {
+                Ok(port) => PortSpec::Number(port),
+                Err(_) => PortSpec::String(port_str.to_string()),
+            }
+        };
+        assert!(matches!(
+            port_spec,
+            PortSpec::String(ref s) if s == "8080:3000"
+        ));
+    }
 }
