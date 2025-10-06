@@ -1105,8 +1105,10 @@ mod tests {
         use deacon_core::config::PortSpec;
 
         // Start with a config that has some ports
-        let mut config = DevContainerConfig::default();
-        config.forward_ports = vec![PortSpec::Number(3000), PortSpec::Number(4000)];
+        let mut config = DevContainerConfig {
+            forward_ports: vec![PortSpec::Number(3000), PortSpec::Number(4000)],
+            ..Default::default()
+        };
 
         // Simulate CLI forward ports
         let cli_ports = vec!["8080".to_string(), "5000:5000".to_string()];
