@@ -133,11 +133,10 @@ where
     // List containers with the specified labels
     let containers = docker_client.list_containers(Some(&label_selector)).await?;
 
-    // Filter to only running containers
-    let matching_containers: Vec<String> = containers
+    // Filter to only running containers and collect both ID and names
+    let matching_containers: Vec<_> = containers
         .into_iter()
         .filter(|c| c.state == "running")
-        .map(|c| c.id)
         .collect();
 
     let match_count = matching_containers.len();
@@ -149,18 +148,33 @@ where
             id_labels.join(", ")
         )),
         1 => {
-            let container_id = matching_containers[0].clone();
+            let container_id = matching_containers[0].id.clone();
             debug!("Found unique matching container: {}", container_id);
             Ok(container_id)
         }
-        multiple => Err(anyhow::anyhow!(
-            "Found {} running containers matching labels: {}. \
-             Please refine your label selector to uniquely identify a single container. \
-             Matching container IDs: {:?}",
-            multiple,
-            id_labels.join(", "),
-            matching_containers
-        )),
+        multiple => {
+            // Build detailed error message with IDs and names
+            let candidates: Vec<String> = matching_containers
+                .iter()
+                .map(|c| {
+                    let names = c.names.join(", ");
+                    if names.is_empty() {
+                        format!("ID: {}", c.id)
+                    } else {
+                        format!("ID: {}, Names: {}", c.id, names)
+                    }
+                })
+                .collect();
+
+            Err(anyhow::anyhow!(
+                "Found {} running containers matching labels: {}. \
+                 Please refine your label selector to uniquely identify a single container.\n\
+                 Matching containers:\n{}",
+                multiple,
+                id_labels.join(", "),
+                candidates.join("\n")
+            ))
+        }
     }
 }
 
@@ -585,5 +599,11 @@ mod tests {
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Found 2 running containers matching labels"));
         assert!(err_msg.contains("Please refine your label selector"));
+        // Verify that both container IDs are listed
+        assert!(err_msg.contains("test-111"));
+        assert!(err_msg.contains("test-222"));
+        // Verify that container names are listed
+        assert!(err_msg.contains("test-api-1"));
+        assert!(err_msg.contains("test-api-2"));
     }
 }
