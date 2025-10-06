@@ -24,6 +24,8 @@ pub struct ExecArgs {
     pub env: Vec<String>,
     /// Working directory for command execution
     pub workdir: Option<String>,
+    /// Identify container by labels (KEY=VALUE format)
+    pub id_label: Vec<String>,
     /// Command to execute
     pub command: Vec<String>,
     /// Workspace folder path
@@ -92,6 +94,85 @@ where
                 workspace_path,
                 config_name,
                 matching_containers
+            ))
+        }
+    }
+}
+
+/// Resolve target container by custom id-labels
+#[instrument(skip(docker_client))]
+pub async fn resolve_target_container_by_labels<D>(
+    docker_client: &D,
+    id_labels: &[String],
+) -> Result<String>
+where
+    D: Docker,
+{
+    debug!("Resolving target container by id-labels: {:?}", id_labels);
+
+    if id_labels.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No id-labels provided for container resolution"
+        ));
+    }
+
+    // Validate label format (KEY=VALUE)
+    for label in id_labels {
+        if !label.contains('=') {
+            return Err(anyhow::anyhow!(
+                "Invalid id-label format: '{}'. Expected KEY=VALUE",
+                label
+            ));
+        }
+    }
+
+    // Build label selector string (comma-separated)
+    let label_selector = id_labels.join(",");
+    debug!("Label selector: {}", label_selector);
+
+    // List containers with the specified labels
+    let containers = docker_client.list_containers(Some(&label_selector)).await?;
+
+    // Filter to only running containers and collect both ID and names
+    let matching_containers: Vec<_> = containers
+        .into_iter()
+        .filter(|c| c.state == "running")
+        .collect();
+
+    let match_count = matching_containers.len();
+    tracing::Span::current().record("match_count", match_count);
+
+    match matching_containers.len() {
+        0 => Err(anyhow::anyhow!(
+            "No running container found matching labels: {}",
+            id_labels.join(", ")
+        )),
+        1 => {
+            let container_id = matching_containers[0].id.clone();
+            debug!("Found unique matching container: {}", container_id);
+            Ok(container_id)
+        }
+        multiple => {
+            // Build detailed error message with IDs and names
+            let candidates: Vec<String> = matching_containers
+                .iter()
+                .map(|c| {
+                    let names = c.names.join(", ");
+                    if names.is_empty() {
+                        format!("ID: {}", c.id)
+                    } else {
+                        format!("ID: {}, Names: {}", c.id, names)
+                    }
+                })
+                .collect();
+
+            Err(anyhow::anyhow!(
+                "Found {} running containers matching labels: {}. \
+                 Please refine your label selector to uniquely identify a single container.\n\
+                 Matching containers:\n{}",
+                multiple,
+                id_labels.join(", "),
+                candidates.join("\n")
             ))
         }
     }
@@ -166,7 +247,7 @@ pub async fn execute_exec(_args: ExecArgs) -> Result<()> {
 }
 
 /// Execute the exec command with a custom Docker implementation
-#[instrument(skip(docker_client), fields(workdir, user))]
+#[instrument(skip(docker_client), fields(workdir, user, labels_used, match_count))]
 pub async fn execute_exec_with_docker<D>(args: ExecArgs, docker_client: &D) -> Result<()>
 where
     D: Docker,
@@ -191,30 +272,37 @@ where
             }
         }
 
-        // Load configuration
-        let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
-
-        let config = if let Some(config_path) = args.config_path.as_ref() {
-            ConfigLoader::load_from_path(config_path)?
-        } else {
-            let config_location = ConfigLoader::discover_config(workspace_folder)?;
-            if !config_location.exists() {
-                return Err(DeaconError::Config(ConfigError::NotFound {
-                    path: config_location.path().to_string_lossy().to_string(),
-                })
-                .into());
-            }
-            ConfigLoader::load_from_path(config_location.path())?
-        };
-
-        debug!("Loaded configuration: {:?}", config.name);
-
         // Check Docker availability
         docker_client.ping().await?;
 
-        // Resolve target container
-        let container_id =
-            resolve_target_container(docker_client, workspace_folder, &config).await?;
+        // Resolve target container using id-labels if provided, otherwise use workspace/config
+        let container_id = if !args.id_label.is_empty() {
+            // Add labels to tracing span
+            let labels_str = args.id_label.join(",");
+            tracing::Span::current().record("labels_used", &labels_str);
+            debug!("Using id-label for container resolution: {}", labels_str);
+
+            resolve_target_container_by_labels(docker_client, &args.id_label).await?
+        } else {
+            // Load configuration for workspace-based resolution
+            let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
+
+            let config = if let Some(config_path) = args.config_path.as_ref() {
+                ConfigLoader::load_from_path(config_path)?
+            } else {
+                let config_location = ConfigLoader::discover_config(workspace_folder)?;
+                if !config_location.exists() {
+                    return Err(DeaconError::Config(ConfigError::NotFound {
+                        path: config_location.path().to_string_lossy().to_string(),
+                    })
+                    .into());
+                }
+                ConfigLoader::load_from_path(config_location.path())?
+            };
+
+            debug!("Loaded configuration: {:?}", config.name);
+            resolve_target_container(docker_client, workspace_folder, &config).await?
+        };
 
         // Determine TTY allocation
         let should_use_tty = !args.no_tty && CliDocker::is_tty();
@@ -223,7 +311,19 @@ where
         let working_dir = if let Some(ref cli_workdir) = args.workdir {
             debug!("Using working directory from CLI: {}", cli_workdir);
             cli_workdir.clone()
+        } else if !args.id_label.is_empty() {
+            // For id-label based exec, default to current directory in container
+            debug!("Using default working directory for id-label based exec");
+            String::from("/")
         } else {
+            // For workspace-based exec, load config to get workspace folder
+            let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
+            let config = if let Some(config_path) = args.config_path.as_ref() {
+                ConfigLoader::load_from_path(config_path)?
+            } else {
+                let config_location = ConfigLoader::discover_config(workspace_folder)?;
+                ConfigLoader::load_from_path(config_location.path())?
+            };
             determine_container_working_dir(&config, workspace_folder)
         };
 
@@ -363,6 +463,7 @@ mod tests {
             no_tty: false,
             env: vec!["KEY=value".to_string()],
             workdir: Some("/custom/path".to_string()),
+            id_label: vec![],
             command: vec!["ls".to_string(), "-la".to_string()],
             workspace_folder: None,
             config_path: None,
@@ -380,6 +481,7 @@ mod tests {
             no_tty: true,
             env: vec![],
             workdir: None,
+            id_label: vec![],
             command: vec!["pwd".to_string()],
             workspace_folder: None,
             config_path: None,
@@ -387,5 +489,121 @@ mod tests {
 
         assert_eq!(args.workdir, None);
         assert_eq!(args.command, vec!["pwd"]);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_container_by_labels_invalid_format() {
+        use deacon_core::docker::mock::MockDocker;
+
+        let mock_docker = MockDocker::new();
+        let labels = vec!["INVALID_NO_EQUALS".to_string()];
+
+        let result = resolve_target_container_by_labels(&mock_docker, &labels).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid id-label format"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_container_by_labels_no_matches() {
+        use deacon_core::docker::mock::{MockContainer, MockDocker};
+        use std::collections::HashMap;
+
+        let mock_docker = MockDocker::new();
+
+        // Add a container with different labels
+        let mut labels = HashMap::new();
+        labels.insert("app".to_string(), "web".to_string());
+        let container = MockContainer::new(
+            "test-123".to_string(),
+            "test-web".to_string(),
+            "nginx:latest".to_string(),
+        )
+        .with_labels(labels);
+
+        mock_docker.add_container(container);
+
+        // Try to find with different labels
+        let search_labels = vec!["app=api".to_string()];
+        let result = resolve_target_container_by_labels(&mock_docker, &search_labels).await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No running container found matching labels"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_container_by_labels_unique_match() {
+        use deacon_core::docker::mock::{MockContainer, MockDocker};
+        use std::collections::HashMap;
+
+        let mock_docker = MockDocker::new();
+
+        // Add a container with matching labels
+        let mut labels = HashMap::new();
+        labels.insert("app".to_string(), "api".to_string());
+        labels.insert("env".to_string(), "prod".to_string());
+        let container = MockContainer::new(
+            "test-456".to_string(),
+            "test-api".to_string(),
+            "myapp:latest".to_string(),
+        )
+        .with_labels(labels);
+
+        mock_docker.add_container(container);
+
+        // Find with matching labels
+        let search_labels = vec!["app=api".to_string(), "env=prod".to_string()];
+        let result = resolve_target_container_by_labels(&mock_docker, &search_labels).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "test-456");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_container_by_labels_multiple_matches() {
+        use deacon_core::docker::mock::{MockContainer, MockDocker};
+        use std::collections::HashMap;
+
+        let mock_docker = MockDocker::new();
+
+        // Add two containers with same labels
+        let mut labels = HashMap::new();
+        labels.insert("app".to_string(), "api".to_string());
+
+        let container1 = MockContainer::new(
+            "test-111".to_string(),
+            "test-api-1".to_string(),
+            "myapp:latest".to_string(),
+        )
+        .with_labels(labels.clone());
+        mock_docker.add_container(container1);
+
+        let container2 = MockContainer::new(
+            "test-222".to_string(),
+            "test-api-2".to_string(),
+            "myapp:latest".to_string(),
+        )
+        .with_labels(labels);
+        mock_docker.add_container(container2);
+
+        // Try to find with ambiguous labels
+        let search_labels = vec!["app=api".to_string()];
+        let result = resolve_target_container_by_labels(&mock_docker, &search_labels).await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Found 2 running containers matching labels"));
+        assert!(err_msg.contains("Please refine your label selector"));
+        // Verify that both container IDs are listed
+        assert!(err_msg.contains("test-111"));
+        assert!(err_msg.contains("test-222"));
+        // Verify that container names are listed
+        assert!(err_msg.contains("test-api-1"));
+        assert!(err_msg.contains("test-api-2"));
     }
 }

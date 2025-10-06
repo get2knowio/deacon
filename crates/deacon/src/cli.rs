@@ -224,6 +224,9 @@ pub enum Commands {
         /// Working directory for command execution
         #[arg(short = 'w', long)]
         workdir: Option<String>,
+        /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
+        #[arg(long, action = clap::ArgAction::Append)]
+        id_label: Vec<String>,
         /// Command to execute
         command: Vec<String>,
     },
@@ -726,6 +729,7 @@ impl Cli {
                 no_tty,
                 env,
                 workdir,
+                id_label,
                 command,
             }) => {
                 use crate::commands::exec::{execute_exec, ExecArgs};
@@ -735,6 +739,7 @@ impl Cli {
                     no_tty,
                     env,
                     workdir,
+                    id_label,
                     command,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
