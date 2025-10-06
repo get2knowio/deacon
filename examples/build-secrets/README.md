@@ -14,14 +14,16 @@ The `--build-secret` flag allows you to mount secrets into your Docker build pro
 ## Syntax
 
 ```bash
-deacon build --build-secret id=<id>[,src=<path>|env=<var>]
+deacon build --build-secret id=<id>[,src=<path>|env=<var>|stdin|value-stdin]
 ```
 
 Three source types are supported:
 
 1. **File source**: `--build-secret id=mytoken,src=/path/to/secret.txt`
 2. **Environment variable**: `--build-secret id=mytoken,env=MY_SECRET_VAR`
-3. **Stdin** (default): `--build-secret id=mytoken` (reads from stdin)
+3. **Stdin**: 
+   - Implicit (default): `--build-secret id=mytoken`
+   - Explicit: `--build-secret id=mytoken,stdin` or `--build-secret id=mytoken,value-stdin`
 
 ## Example: Using a GitHub Token
 
@@ -60,7 +62,15 @@ deacon build --build-secret id=github_token,env=GITHUB_TOKEN --buildkit auto
 ### 4. Build with Secret from Stdin
 
 ```bash
+# Using implicit stdin (no source specified)
 echo "ghp_yourGitHubTokenHere" | deacon build --build-secret id=github_token --buildkit auto
+
+# Or explicitly specify stdin
+echo "ghp_yourGitHubTokenHere" | deacon build --build-secret id=github_token,stdin --buildkit auto
+
+# Or using the value-stdin flag
+echo "ghp_yourGitHubTokenHere" | deacon build --build-secret id=github_token,value-stdin --buildkit auto
+```
 ```
 
 ## Security Features

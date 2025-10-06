@@ -102,44 +102,56 @@ impl BuildSecret {
         let mut id: Option<String> = None;
         let mut src: Option<PathBuf> = None;
         let mut env: Option<String> = None;
+        let mut stdin_flag: bool = false;
 
-        // Parse key=value pairs
+        // Parse key=value pairs and standalone flags
         for part in spec.split(',') {
+            let part = part.trim();
             let kv: Vec<&str> = part.splitn(2, '=').collect();
-            if kv.len() != 2 {
-                return Err(anyhow!(
-                    "Invalid build secret format '{}': expected key=value pairs separated by commas",
-                    spec
-                ));
-            }
 
-            let key = kv[0].trim();
-            let value = kv[1].trim();
+            if kv.len() == 1 {
+                // Standalone flag (no '=' found)
+                match part {
+                    "value-stdin" | "stdin" => {
+                        stdin_flag = true;
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "Unknown build secret parameter '{}'. Valid parameters are: id, src, env, value-stdin, stdin",
+                            part
+                        ));
+                    }
+                }
+            } else {
+                // Key=value pair
+                let key = kv[0].trim();
+                let value = kv[1].trim();
 
-            match key {
-                "id" => {
-                    if value.is_empty() {
-                        return Err(anyhow!("Build secret id cannot be empty"));
+                match key {
+                    "id" => {
+                        if value.is_empty() {
+                            return Err(anyhow!("Build secret id cannot be empty"));
+                        }
+                        id = Some(value.to_string());
                     }
-                    id = Some(value.to_string());
-                }
-                "src" => {
-                    if value.is_empty() {
-                        return Err(anyhow!("Build secret src cannot be empty"));
+                    "src" => {
+                        if value.is_empty() {
+                            return Err(anyhow!("Build secret src cannot be empty"));
+                        }
+                        src = Some(PathBuf::from(value));
                     }
-                    src = Some(PathBuf::from(value));
-                }
-                "env" => {
-                    if value.is_empty() {
-                        return Err(anyhow!("Build secret env cannot be empty"));
+                    "env" => {
+                        if value.is_empty() {
+                            return Err(anyhow!("Build secret env cannot be empty"));
+                        }
+                        env = Some(value.to_string());
                     }
-                    env = Some(value.to_string());
-                }
-                _ => {
-                    return Err(anyhow!(
-                        "Unknown build secret parameter '{}'. Valid parameters are: id, src, env",
-                        key
-                    ));
+                    _ => {
+                        return Err(anyhow!(
+                            "Unknown build secret parameter '{}'. Valid parameters are: id, src, env",
+                            key
+                        ));
+                    }
                 }
             }
         }
@@ -147,7 +159,14 @@ impl BuildSecret {
         // Validate required id
         let id = id.ok_or_else(|| anyhow!("Build secret must specify 'id' parameter"))?;
 
-        // Determine source - prioritize in order: src, env, stdin (default)
+        // Validate that stdin_flag is not mixed with src or env
+        if stdin_flag && (src.is_some() || env.is_some()) {
+            return Err(anyhow!(
+                "Build secret cannot specify 'value-stdin' or 'stdin' flag with 'src' or 'env' parameters"
+            ));
+        }
+
+        // Determine source - prioritize in order: src, env, stdin (default or explicit)
         let source = if let Some(path) = src {
             if env.is_some() {
                 return Err(anyhow!(
@@ -2190,6 +2209,44 @@ mod tests {
     }
 
     #[test]
+    fn test_build_secret_parse_stdin_explicit_value_stdin() {
+        let spec = "id=password,value-stdin";
+        let secret = BuildSecret::parse(spec).unwrap();
+        assert_eq!(secret.id, "password");
+        assert_eq!(secret.source, BuildSecretSource::Stdin);
+    }
+
+    #[test]
+    fn test_build_secret_parse_stdin_explicit_stdin() {
+        let spec = "id=password,stdin";
+        let secret = BuildSecret::parse(spec).unwrap();
+        assert_eq!(secret.id, "password");
+        assert_eq!(secret.source, BuildSecretSource::Stdin);
+    }
+
+    #[test]
+    fn test_build_secret_parse_stdin_flag_with_src_error() {
+        let spec = "id=test,stdin,src=/path/to/file";
+        let result = BuildSecret::parse(spec);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot specify 'value-stdin' or 'stdin' flag with 'src' or 'env'"));
+    }
+
+    #[test]
+    fn test_build_secret_parse_stdin_flag_with_env_error() {
+        let spec = "id=test,value-stdin,env=MY_VAR";
+        let result = BuildSecret::parse(spec);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot specify 'value-stdin' or 'stdin' flag with 'src' or 'env'"));
+    }
+
+    #[test]
     fn test_build_secret_parse_missing_id() {
         let spec = "src=/path/to/file";
         let result = BuildSecret::parse(spec);
@@ -2231,14 +2288,14 @@ mod tests {
     }
 
     #[test]
-    fn test_build_secret_parse_invalid_format() {
+    fn test_build_secret_parse_unknown_flag() {
         let spec = "id=test,invalid";
         let result = BuildSecret::parse(spec);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("expected key=value"));
+            .contains("Unknown build secret parameter"));
     }
 
     #[test]
