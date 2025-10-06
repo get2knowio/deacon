@@ -119,33 +119,38 @@ pub fn get_disk_space_for_path(path: &std::path::Path) -> Result<u64> {
             })?;
 
         if !output.status.success() {
-            warn!(
-                "PowerShell command failed for {}, using fallback estimate",
-                canonical_path.display()
-            );
-            return Ok(1_000_000_000); // 1GB fallback
+            return Err(ConfigError::Validation {
+                message: format!(
+                    "PowerShell command failed for {}: {}",
+                    canonical_path.display(),
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            }
+            .into());
         }
 
         let output_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if let Ok(free_bytes) = output_str.parse::<u64>() {
-            Ok(free_bytes)
-        } else {
-            warn!(
-                "Could not parse PowerShell output for {}, using fallback estimate",
-                canonical_path.display()
-            );
-            Ok(1_000_000_000) // 1GB fallback
-        }
+        output_str.parse::<u64>().map_err(|e| {
+            ConfigError::Validation {
+                message: format!(
+                    "Could not parse PowerShell output for {}: {}",
+                    canonical_path.display(),
+                    e
+                ),
+            }
+            .into()
+        })
     }
 
     #[cfg(not(any(unix, windows)))]
     {
-        // Fallback for other platforms - return a conservative estimate
-        warn!(
-            "Disk space checking not implemented for this platform, using fallback estimate for path: {}",
-            path.display()
-        );
-        Ok(1_000_000_000) // 1GB fallback
+        Err(ConfigError::Validation {
+            message: format!(
+                "Disk space checking not implemented for this platform: {}",
+                path.display()
+            ),
+        }
+        .into())
     }
 }
 
@@ -191,12 +196,14 @@ fn parse_df_output(
         }
     }
 
-    // Fallback if parsing fails
-    warn!(
-        "Could not parse df output for {}, using fallback estimate",
-        canonical_path.display()
-    );
-    Ok(1_000_000_000) // 1GB fallback
+    // Return error if parsing fails
+    Err(ConfigError::Validation {
+        message: format!(
+            "Could not parse df output for {}: insufficient data in output",
+            canonical_path.display()
+        ),
+    }
+    .into())
 }
 
 /// Host system information collected for requirements evaluation.
@@ -673,5 +680,224 @@ mod tests {
         assert!(result.is_ok());
         let evaluation = result.unwrap();
         assert!(!evaluation.requirements_met);
+    }
+
+    #[test]
+    fn test_no_silent_fallbacks_on_error() {
+        // Test that when filesystem provider returns an error,
+        // it propagates up rather than being silently converted to a fallback value
+        struct FailingFilesystemProvider;
+
+        impl FilesystemProvider for FailingFilesystemProvider {
+            fn get_available_space(&self, _path: &std::path::Path) -> Result<u64> {
+                Err(ConfigError::Validation {
+                    message: "Simulated filesystem error".to_string(),
+                }
+                .into())
+            }
+        }
+
+        let mut evaluator =
+            HostRequirementsEvaluator::<FailingFilesystemProvider>::with_filesystem_provider(
+                FailingFilesystemProvider,
+            );
+
+        // Attempting to get host info should fail, not return a fallback value
+        let result = evaluator.get_host_info(None);
+        assert!(
+            result.is_err(),
+            "Expected error to propagate, not silent fallback"
+        );
+
+        // Verify error message contains indication of failure (it might be wrapped)
+        if let Err(e) = result {
+            let error_msg = e.to_string();
+            // The error should contain our simulated error or reference to validation/filesystem error
+            assert!(
+                error_msg.contains("Simulated filesystem error")
+                    || error_msg.contains("Configuration error")
+                    || error_msg.contains("Validation"),
+                "Error message should indicate filesystem error, got: {}",
+                error_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_df_output_linux_format() {
+        // Test parsing standard Linux df -B1 output
+        let df_output = "Filesystem     1B-blocks      Used Available Use% Mounted on\n\
+                         /dev/sda1    50000000000 30000000000 20000000000  60% /";
+        let path = std::path::Path::new("/");
+        let result = parse_df_output(df_output, path, false);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 20000000000);
+    }
+
+    #[test]
+    fn test_parse_df_output_macos_format() {
+        // Test parsing macOS df -k output (kilobytes)
+        let df_output = "Filesystem   1024-blocks      Used Available Capacity  Mounted on\n\
+                         /dev/disk1s1   244912536 175824536  52248000    78%    /";
+        let path = std::path::Path::new("/");
+        let result = parse_df_output(df_output, path, true);
+        assert!(result.is_ok());
+        // 52248000 KB * 1024 = 53501952000 bytes
+        assert_eq!(result.unwrap(), 52248000 * 1024);
+    }
+
+    #[test]
+    fn test_parse_df_output_with_long_device_name() {
+        // Test df output where device name wraps to second line
+        let df_output = "Filesystem     1B-blocks      Used Available Use% Mounted on\n\
+                         /dev/mapper/vg-lv\n\
+                                   100000000000 50000000000 50000000000  50% /data";
+        let path = std::path::Path::new("/data");
+        // This should fail with current simple parsing (line 2 doesn't have enough fields)
+        // but we're testing that it returns an error, not a fallback
+        let result = parse_df_output(df_output, path, false);
+        assert!(result.is_err());
+        // The error is wrapped, so just verify it's an error
+        assert!(
+            result.is_err(),
+            "Should return error for malformed df output"
+        );
+    }
+
+    #[test]
+    fn test_parse_df_output_low_disk_space() {
+        // Test with very low available space (bytes)
+        let df_output = "Filesystem     1B-blocks      Used Available Use% Mounted on\n\
+                         /dev/sda1    50000000000 49999000000   1000000  99% /";
+        let path = std::path::Path::new("/");
+        let result = parse_df_output(df_output, path, false);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1000000); // 1MB available
+    }
+
+    #[test]
+    fn test_parse_df_output_insufficient_columns() {
+        // Test df output with too few columns
+        let df_output = "Filesystem Used\n\
+                         /dev/sda1  50%";
+        let path = std::path::Path::new("/");
+        let result = parse_df_output(df_output, path, false);
+        assert!(
+            result.is_err(),
+            "Should return error for insufficient columns"
+        );
+    }
+
+    #[test]
+    fn test_parse_df_output_empty() {
+        // Test empty df output
+        let df_output = "";
+        let path = std::path::Path::new("/");
+        let result = parse_df_output(df_output, path, false);
+        assert!(result.is_err(), "Should return error for empty df output");
+    }
+
+    #[test]
+    fn test_low_disk_threshold_validation() {
+        // Test that low disk space properly fails validation
+        let mut mock_provider = MockFilesystemProvider::new();
+        mock_provider.set_available_space(".", 100_000_000); // 100MB available
+
+        let mut evaluator =
+            HostRequirementsEvaluator::<MockFilesystemProvider>::with_filesystem_provider(
+                mock_provider,
+            );
+
+        let requirements = HostRequirements {
+            cpus: None,
+            memory: None,
+            storage: Some(ResourceSpec::String("10GB".to_string())), // Need 10GB
+        };
+
+        // Without ignore flag, should return error
+        let result = evaluator.validate_requirements(&requirements, None, false);
+        assert!(
+            result.is_err(),
+            "Should fail validation when storage requirement not met"
+        );
+
+        // With ignore flag, should succeed but mark as not met
+        let result = evaluator.validate_requirements(&requirements, None, true);
+        assert!(result.is_ok());
+        let evaluation = result.unwrap();
+        assert!(!evaluation.requirements_met);
+        assert!(evaluation.storage_evaluation.is_some());
+        let storage_eval = evaluation.storage_evaluation.unwrap();
+        assert!(!storage_eval.met);
+    }
+
+    #[test]
+    fn test_powershell_error_propagation() {
+        // Test that PowerShell-like errors propagate properly
+        // This simulates what would happen on Windows with a failed PowerShell command
+        struct PowerShellErrorProvider;
+
+        impl FilesystemProvider for PowerShellErrorProvider {
+            fn get_available_space(&self, path: &std::path::Path) -> Result<u64> {
+                Err(ConfigError::Validation {
+                    message: format!(
+                        "PowerShell command failed for {}: Access denied",
+                        path.display()
+                    ),
+                }
+                .into())
+            }
+        }
+
+        let mut evaluator =
+            HostRequirementsEvaluator::<PowerShellErrorProvider>::with_filesystem_provider(
+                PowerShellErrorProvider,
+            );
+
+        let result = evaluator.get_host_info(None);
+        assert!(
+            result.is_err(),
+            "PowerShell errors should propagate without fallback"
+        );
+    }
+
+    #[test]
+    fn test_call_sites_propagate_errors() {
+        // Test that get_host_info and evaluate_requirements properly propagate errors
+        struct AlwaysFailProvider;
+
+        impl FilesystemProvider for AlwaysFailProvider {
+            fn get_available_space(&self, _path: &std::path::Path) -> Result<u64> {
+                Err(ConfigError::Validation {
+                    message: "Test error from filesystem provider".to_string(),
+                }
+                .into())
+            }
+        }
+
+        let mut evaluator =
+            HostRequirementsEvaluator::<AlwaysFailProvider>::with_filesystem_provider(
+                AlwaysFailProvider,
+            );
+
+        // get_host_info should propagate the error
+        let result = evaluator.get_host_info(None);
+        assert!(result.is_err());
+
+        // evaluate_requirements should also propagate the error
+        let requirements = HostRequirements {
+            cpus: Some(ResourceSpec::Number(1.0)),
+            memory: Some(ResourceSpec::String("1GB".to_string())),
+            storage: Some(ResourceSpec::String("1GB".to_string())),
+        };
+        let result = evaluator.evaluate_requirements(&requirements, None);
+        assert!(result.is_err());
+
+        // validate_requirements should propagate the error regardless of ignore flag
+        let result = evaluator.validate_requirements(&requirements, None, false);
+        assert!(result.is_err());
+
+        let result = evaluator.validate_requirements(&requirements, None, true);
+        assert!(result.is_err());
     }
 }

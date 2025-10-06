@@ -108,6 +108,9 @@ pub struct DiskSpaceInfo {
     pub total_bytes: u64,
     pub available_bytes: u64,
     pub used_bytes: u64,
+    /// Error message if disk space check failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Configuration discovery information
@@ -343,17 +346,17 @@ fn collect_disk_space_info() -> DiskSpaceInfo {
                 total_bytes: estimated_total,
                 available_bytes,
                 used_bytes,
+                error: None,
             }
         }
         Err(e) => {
-            warn!(
-                "Failed to get real disk space information: {}. Using fallback values.",
-                e
-            );
+            let error_msg = format!("Failed to get disk space information: {}", e);
+            warn!("{}", error_msg);
             DiskSpaceInfo {
                 total_bytes: 0,
                 available_bytes: 0,
                 used_bytes: 0,
+                error: Some(error_msg),
             }
         }
     }
@@ -629,6 +632,10 @@ fn print_text_output_with_redaction(
     println!();
 
     println_redacted!(redaction_config, "Disk Space:");
+    if let Some(error) = &info.disk_space.error {
+        println_redacted!(redaction_config, "  Error: {}", error);
+        println_redacted!(redaction_config, "  (Showing 0 bytes as fallback)");
+    }
     println_redacted!(
         redaction_config,
         "  Total: {}",
