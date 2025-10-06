@@ -36,6 +36,7 @@ pub mod state;
 pub mod templates;
 pub mod user_mapping;
 pub mod variable;
+pub mod workspace;
 
 /// Get the version of the core library
 pub fn version() -> &'static str {
