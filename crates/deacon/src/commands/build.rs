@@ -4,12 +4,12 @@
 //! Follows the CLI specification for Docker integration.
 
 use crate::cli::{BuildKitOption, OutputFormat};
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
@@ -26,6 +26,7 @@ pub struct BuildArgs {
     pub cache_to: Vec<String>,
     pub buildkit: Option<BuildKitOption>,
     pub secret: Vec<String>,
+    pub build_secret: Vec<String>,
     pub ssh: Vec<String>,
     pub scan_image: bool,
     pub fail_on_scan: bool,
@@ -53,6 +54,7 @@ impl Default for BuildArgs {
             cache_to: Vec::new(),
             buildkit: None,
             secret: Vec::new(),
+            build_secret: Vec::new(),
             ssh: Vec::new(),
             scan_image: false,
             fail_on_scan: false,
@@ -65,6 +67,190 @@ impl Default for BuildArgs {
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::SecretRegistry::new(),
+        }
+    }
+}
+
+/// Build secret source type
+#[derive(Debug, Clone, PartialEq)]
+pub enum BuildSecretSource {
+    /// Read secret from file
+    File(PathBuf),
+    /// Read secret from environment variable
+    Env(String),
+    /// Read secret from stdin
+    Stdin,
+}
+
+/// Parsed build secret specification
+#[derive(Debug, Clone)]
+pub struct BuildSecret {
+    /// Secret identifier (required)
+    pub id: String,
+    /// Secret source
+    pub source: BuildSecretSource,
+}
+
+impl BuildSecret {
+    /// Parse a build secret specification string
+    ///
+    /// Accepts formats:
+    /// - `id=myid,src=/path/to/file`
+    /// - `id=myid,env=ENV_VAR`
+    /// - `id=myid` (stdin)
+    pub fn parse(spec: &str) -> Result<Self> {
+        let mut id: Option<String> = None;
+        let mut src: Option<PathBuf> = None;
+        let mut env: Option<String> = None;
+
+        // Parse key=value pairs
+        for part in spec.split(',') {
+            let kv: Vec<&str> = part.splitn(2, '=').collect();
+            if kv.len() != 2 {
+                return Err(anyhow!(
+                    "Invalid build secret format '{}': expected key=value pairs separated by commas",
+                    spec
+                ));
+            }
+
+            let key = kv[0].trim();
+            let value = kv[1].trim();
+
+            match key {
+                "id" => {
+                    if value.is_empty() {
+                        return Err(anyhow!("Build secret id cannot be empty"));
+                    }
+                    id = Some(value.to_string());
+                }
+                "src" => {
+                    if value.is_empty() {
+                        return Err(anyhow!("Build secret src cannot be empty"));
+                    }
+                    src = Some(PathBuf::from(value));
+                }
+                "env" => {
+                    if value.is_empty() {
+                        return Err(anyhow!("Build secret env cannot be empty"));
+                    }
+                    env = Some(value.to_string());
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "Unknown build secret parameter '{}'. Valid parameters are: id, src, env",
+                        key
+                    ));
+                }
+            }
+        }
+
+        // Validate required id
+        let id = id.ok_or_else(|| anyhow!("Build secret must specify 'id' parameter"))?;
+
+        // Determine source - prioritize in order: src, env, stdin (default)
+        let source = if let Some(path) = src {
+            if env.is_some() {
+                return Err(anyhow!(
+                    "Build secret cannot specify both 'src' and 'env' parameters"
+                ));
+            }
+            BuildSecretSource::File(path)
+        } else if let Some(env_var) = env {
+            BuildSecretSource::Env(env_var)
+        } else {
+            BuildSecretSource::Stdin
+        };
+
+        Ok(Self { id, source })
+    }
+
+    /// Validate that the secret source is accessible
+    pub fn validate(&self) -> Result<()> {
+        match &self.source {
+            BuildSecretSource::File(path) => {
+                if !path.exists() {
+                    return Err(anyhow!(
+                        "Build secret file '{}' does not exist",
+                        path.display()
+                    ));
+                }
+                if !path.is_file() {
+                    return Err(anyhow!(
+                        "Build secret path '{}' is not a file",
+                        path.display()
+                    ));
+                }
+                // Check if file is readable
+                std::fs::metadata(path)
+                    .with_context(|| format!("Cannot read secret file '{}'", path.display()))?;
+                Ok(())
+            }
+            BuildSecretSource::Env(env_var) => {
+                if std::env::var(env_var).is_err() {
+                    return Err(anyhow!(
+                        "Build secret environment variable '{}' is not set",
+                        env_var
+                    ));
+                }
+                Ok(())
+            }
+            BuildSecretSource::Stdin => {
+                // Stdin validation happens at read time
+                Ok(())
+            }
+        }
+    }
+
+    /// Read the secret value from its source
+    ///
+    /// Returns the secret value as a string. The caller is responsible for
+    /// registering the value with the redaction system.
+    pub async fn read_value(&self) -> Result<String> {
+        match &self.source {
+            BuildSecretSource::File(path) => {
+                let value = std::fs::read_to_string(path)
+                    .with_context(|| format!("Failed to read secret from '{}'", path.display()))?;
+                Ok(value.trim().to_string())
+            }
+            BuildSecretSource::Env(env_var) => {
+                let value = std::env::var(env_var).with_context(|| {
+                    format!(
+                        "Failed to read secret from environment variable '{}'",
+                        env_var
+                    )
+                })?;
+                Ok(value)
+            }
+            BuildSecretSource::Stdin => {
+                use std::io::{self, BufRead};
+                let stdin = io::stdin();
+                let mut line = String::new();
+                stdin
+                    .lock()
+                    .read_line(&mut line)
+                    .context("Failed to read secret from stdin")?;
+                Ok(line.trim().to_string())
+            }
+        }
+    }
+
+    /// Convert to Docker build argument format
+    ///
+    /// For file sources, returns the id and file path.
+    /// For env/stdin sources, this requires the secret to be written to a temp file first.
+    pub fn to_docker_arg(&self, temp_file: Option<&Path>) -> String {
+        match &self.source {
+            BuildSecretSource::File(path) => {
+                format!("id={},src={}", self.id, path.display())
+            }
+            BuildSecretSource::Env(_) | BuildSecretSource::Stdin => {
+                if let Some(temp_path) = temp_file {
+                    format!("id={},src={}", self.id, temp_path.display())
+                } else {
+                    // Fallback - should not happen if properly handled
+                    format!("id={}", self.id)
+                }
+            }
         }
     }
 }
@@ -831,6 +1017,90 @@ async fn execute_docker_build(
             build_args.push(secret.clone());
         }
 
+        // Process and add build secrets
+        let mut temp_secret_files = Vec::new();
+        if !args.build_secret.is_empty() {
+            debug!("Processing {} build secrets", args.build_secret.len());
+
+            // Parse all build secrets
+            let mut parsed_secrets = Vec::new();
+            let mut seen_ids = HashSet::new();
+
+            for spec in &args.build_secret {
+                let secret = BuildSecret::parse(spec)
+                    .with_context(|| format!("Failed to parse build secret spec: {}", spec))?;
+
+                // Check for duplicate IDs
+                if !seen_ids.insert(secret.id.clone()) {
+                    return Err(anyhow!(
+                        "Duplicate build secret id '{}'. Each secret must have a unique id.",
+                        secret.id
+                    ));
+                }
+
+                // Validate the secret source is accessible
+                secret
+                    .validate()
+                    .with_context(|| format!("Build secret '{}' validation failed", secret.id))?;
+
+                parsed_secrets.push(secret);
+            }
+
+            // Read secret values and register them for redaction
+            for secret in &parsed_secrets {
+                let value = secret
+                    .read_value()
+                    .await
+                    .with_context(|| format!("Failed to read build secret '{}'", secret.id))?;
+
+                // Register the secret value for redaction
+                if args.redaction_config.enabled {
+                    debug!(
+                        "Registering build secret '{}' for redaction (length: {})",
+                        secret.id,
+                        value.len()
+                    );
+                    args.secret_registry.add_secret(&value);
+                }
+
+                // For env and stdin sources, we need to write to a temp file
+                let temp_file = match &secret.source {
+                    BuildSecretSource::File(_) => None,
+                    BuildSecretSource::Env(_) | BuildSecretSource::Stdin => {
+                        let temp_file = tempfile::NamedTempFile::new()
+                            .context("Failed to create temporary file for build secret")?;
+                        std::fs::write(temp_file.path(), &value).with_context(|| {
+                            format!(
+                                "Failed to write build secret '{}' to temporary file",
+                                secret.id
+                            )
+                        })?;
+                        debug!(
+                            "Wrote build secret '{}' to temp file: {}",
+                            secret.id,
+                            temp_file.path().display()
+                        );
+                        Some(temp_file)
+                    }
+                };
+
+                // Generate the Docker argument
+                let docker_arg = if let Some(ref temp) = temp_file {
+                    secret.to_docker_arg(Some(temp.path()))
+                } else {
+                    secret.to_docker_arg(None)
+                };
+
+                build_args.push("--secret".to_string());
+                build_args.push(docker_arg);
+
+                // Store temp file to keep it alive during the build
+                if let Some(temp) = temp_file {
+                    temp_secret_files.push(temp);
+                }
+            }
+        }
+
         // Add SSH forwarding
         for ssh in &args.ssh {
             build_args.push("--ssh".to_string());
@@ -842,16 +1112,18 @@ async fn execute_docker_build(
         debug!("Using BuildKit: {}", use_buildkit);
 
         // Secrets/SSH require BuildKit; provide a clear error early.
-        if !use_buildkit && (!args.secret.is_empty() || !args.ssh.is_empty()) {
+        if !use_buildkit
+            && (!args.secret.is_empty() || !args.build_secret.is_empty() || !args.ssh.is_empty())
+        {
             if args.buildkit == Some(BuildKitOption::Never) {
                 return Err(DockerError::CLIError(
-                    "The --secret/--ssh options require BuildKit but --buildkit never was specified"
+                    "The --secret/--build-secret/--ssh options require BuildKit but --buildkit never was specified"
                         .to_string(),
                 )
                 .into());
             }
             return Err(DockerError::CLIError(
-                "The --secret/--ssh options require BuildKit. Re-run with --buildkit auto or set DOCKER_BUILDKIT=1"
+                "The --secret/--build-secret/--ssh options require BuildKit. Re-run with --buildkit auto or set DOCKER_BUILDKIT=1"
                     .to_string(),
             )
             .into());
@@ -1255,6 +1527,7 @@ mod tests {
             cache_to: Vec::new(),
             buildkit: None,
             secret: Vec::new(),
+            build_secret: Vec::new(),
             ssh: Vec::new(),
             scan_image: false,
             fail_on_scan: false,
@@ -1295,6 +1568,7 @@ mod tests {
                 "id=mypassword,src=./password.txt".to_string(),
                 "id=mytoken".to_string(),
             ],
+            build_secret: Vec::new(),
             ssh: vec!["default".to_string(), "mykey=/path/to/key".to_string()],
             scan_image: false,
             fail_on_scan: false,
@@ -1883,5 +2157,158 @@ mod tests {
                 "my-image"
             ]
         );
+    }
+
+    #[test]
+    fn test_build_secret_parse_file_source() {
+        let spec = "id=mytoken,src=/path/to/secret.txt";
+        let secret = BuildSecret::parse(spec).unwrap();
+        assert_eq!(secret.id, "mytoken");
+        assert_eq!(
+            secret.source,
+            BuildSecretSource::File(PathBuf::from("/path/to/secret.txt"))
+        );
+    }
+
+    #[test]
+    fn test_build_secret_parse_env_source() {
+        let spec = "id=apikey,env=API_TOKEN";
+        let secret = BuildSecret::parse(spec).unwrap();
+        assert_eq!(secret.id, "apikey");
+        assert_eq!(
+            secret.source,
+            BuildSecretSource::Env("API_TOKEN".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_secret_parse_stdin_default() {
+        let spec = "id=password";
+        let secret = BuildSecret::parse(spec).unwrap();
+        assert_eq!(secret.id, "password");
+        assert_eq!(secret.source, BuildSecretSource::Stdin);
+    }
+
+    #[test]
+    fn test_build_secret_parse_missing_id() {
+        let spec = "src=/path/to/file";
+        let result = BuildSecret::parse(spec);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must specify 'id'"));
+    }
+
+    #[test]
+    fn test_build_secret_parse_empty_id() {
+        let spec = "id=,src=/path/to/file";
+        let result = BuildSecret::parse(spec);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
+    }
+
+    #[test]
+    fn test_build_secret_parse_both_src_and_env() {
+        let spec = "id=test,src=/path,env=VAR";
+        let result = BuildSecret::parse(spec);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot specify both"));
+    }
+
+    #[test]
+    fn test_build_secret_parse_unknown_parameter() {
+        let spec = "id=test,unknown=value";
+        let result = BuildSecret::parse(spec);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown build secret parameter"));
+    }
+
+    #[test]
+    fn test_build_secret_parse_invalid_format() {
+        let spec = "id=test,invalid";
+        let result = BuildSecret::parse(spec);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("expected key=value"));
+    }
+
+    #[test]
+    fn test_build_secret_validate_missing_file() {
+        let secret = BuildSecret {
+            id: "test".to_string(),
+            source: BuildSecretSource::File(PathBuf::from("/nonexistent/path")),
+        };
+        let result = secret.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_build_secret_validate_missing_env() {
+        // Make sure this env var doesn't exist
+        std::env::remove_var("NONEXISTENT_SECRET_VAR_12345");
+        let secret = BuildSecret {
+            id: "test".to_string(),
+            source: BuildSecretSource::Env("NONEXISTENT_SECRET_VAR_12345".to_string()),
+        };
+        let result = secret.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("is not set"));
+    }
+
+    #[test]
+    fn test_build_secret_to_docker_arg_file() {
+        let secret = BuildSecret {
+            id: "mytoken".to_string(),
+            source: BuildSecretSource::File(PathBuf::from("/secrets/token.txt")),
+        };
+        let docker_arg = secret.to_docker_arg(None);
+        assert_eq!(docker_arg, "id=mytoken,src=/secrets/token.txt");
+    }
+
+    #[test]
+    fn test_build_secret_to_docker_arg_with_temp() {
+        let secret = BuildSecret {
+            id: "apikey".to_string(),
+            source: BuildSecretSource::Env("API_KEY".to_string()),
+        };
+        let temp_path = PathBuf::from("/tmp/secret123");
+        let docker_arg = secret.to_docker_arg(Some(&temp_path));
+        assert_eq!(docker_arg, "id=apikey,src=/tmp/secret123");
+    }
+
+    #[tokio::test]
+    async fn test_build_secret_read_from_env() {
+        std::env::set_var("TEST_BUILD_SECRET_12345", "secret_value_here");
+        let secret = BuildSecret {
+            id: "test".to_string(),
+            source: BuildSecretSource::Env("TEST_BUILD_SECRET_12345".to_string()),
+        };
+        let value = secret.read_value().await.unwrap();
+        assert_eq!(value, "secret_value_here");
+        std::env::remove_var("TEST_BUILD_SECRET_12345");
+    }
+
+    #[tokio::test]
+    async fn test_build_secret_read_from_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let secret_file = temp_dir.path().join("secret.txt");
+        std::fs::write(&secret_file, "my_secret_token\n").unwrap();
+
+        let secret = BuildSecret {
+            id: "test".to_string(),
+            source: BuildSecretSource::File(secret_file),
+        };
+        let value = secret.read_value().await.unwrap();
+        assert_eq!(value, "my_secret_token");
     }
 }

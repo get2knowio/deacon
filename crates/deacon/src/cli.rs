@@ -184,6 +184,9 @@ pub enum Commands {
         /// Secret to expose to the build (format: id=secretname[,src=path])
         #[arg(long)]
         secret: Vec<String>,
+        /// Build secret (format: id=<id>[,src=<path>|env=<var>], requires BuildKit)
+        #[arg(long)]
+        build_secret: Vec<String>,
         /// SSH agent socket or keys to expose to the build
         #[arg(long)]
         ssh: Vec<String>,
@@ -679,6 +682,7 @@ impl Cli {
                 cache_to,
                 buildkit,
                 secret,
+                build_secret,
                 ssh,
                 scan_image,
                 fail_on_scan,
@@ -699,6 +703,7 @@ impl Cli {
                     cache_to,
                     buildkit,
                     secret,
+                    build_secret,
                     ssh,
                     scan_image,
                     fail_on_scan,
