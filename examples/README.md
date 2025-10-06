@@ -5,6 +5,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 ### Index
 
 - Build: Dockerfile builds, platform targeting, build args, secrets & SSH (`build/`)
+- CLI: CLI-specific features and flags including port forwarding (`cli/`)
 - Configuration: basic, variable substitution, extends chain, and nested variables (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, variables, skip flags, progress events, and redaction (`container-lifecycle/`)
 - Doctor: environment diagnostics including host requirements and storage checks (`doctor/`)

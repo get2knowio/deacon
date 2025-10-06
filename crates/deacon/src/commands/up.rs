@@ -26,6 +26,7 @@ pub struct UpArgs {
     pub skip_non_blocking_commands: bool,
     pub ports_events: bool,
     pub shutdown: bool,
+    pub forward_ports: Vec<String>,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub additional_features: Option<String>,
@@ -47,6 +48,7 @@ impl Default for UpArgs {
             skip_non_blocking_commands: false,
             ports_events: false,
             shutdown: false,
+            forward_ports: Vec::new(),
             workspace_folder: None,
             config_path: None,
             additional_features: None,
@@ -338,6 +340,30 @@ async fn execute_container_up(
 ) -> Result<()> {
     debug!("Starting traditional development container");
 
+    // Merge CLI forward_ports into config
+    let mut config = config.clone();
+    if !args.forward_ports.is_empty() {
+        use deacon_core::config::PortSpec;
+        debug!(
+            "Adding {} CLI forward ports to config",
+            args.forward_ports.len()
+        );
+        for port_str in &args.forward_ports {
+            // Parse port specification using shared parser
+            match PortSpec::parse(port_str) {
+                Ok(port_spec) => {
+                    config.forward_ports.push(port_spec);
+                }
+                Err(err) => {
+                    warn!(
+                        "Skipping invalid port specification '{}': {}",
+                        port_str, err
+                    );
+                }
+            }
+        }
+    }
+
     // Initialize progress tracking
     let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
         if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
@@ -349,7 +375,7 @@ async fn execute_container_up(
     };
 
     // Create container identity for deterministic naming and labels
-    let identity = ContainerIdentity::new(workspace_folder, config);
+    let identity = ContainerIdentity::new(workspace_folder, &config);
     debug!("Container identity: {:?}", identity);
 
     // Initialize Docker client
@@ -378,7 +404,7 @@ async fn execute_container_up(
     let container_result = docker
         .up(
             &identity,
-            config,
+            &config,
             workspace_folder,
             args.remove_existing_container,
         )
@@ -440,13 +466,13 @@ async fn execute_container_up(
 
     // Apply user mapping if configured
     if config.remote_user.is_some() || config.container_user.is_some() {
-        apply_user_mapping(&container_result.container_id, config, workspace_folder).await?;
+        apply_user_mapping(&container_result.container_id, &config, workspace_folder).await?;
     }
 
     // Execute lifecycle commands if not skipped
     execute_lifecycle_commands(
         &container_result.container_id,
-        config,
+        &config,
         workspace_folder,
         args,
     )
@@ -456,7 +482,7 @@ async fn execute_container_up(
     if args.ports_events {
         handle_container_port_events(
             &container_result.container_id,
-            config,
+            &config,
             runtime,
             &args.redaction_config,
             &args.secret_registry,
@@ -467,7 +493,7 @@ async fn execute_container_up(
     // Handle shutdown if requested
     if args.shutdown {
         handle_container_shutdown(
-            config,
+            &config,
             &container_result.container_id,
             state_manager,
             workspace_hash,
@@ -978,6 +1004,7 @@ mod tests {
             skip_non_blocking_commands: false,
             ports_events: false,
             shutdown: false,
+            forward_ports: Vec::new(),
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
             additional_features: None,
@@ -1028,6 +1055,7 @@ mod tests {
             skip_non_blocking_commands: true,
             ports_events: true,
             shutdown: true,
+            forward_ports: vec!["8080".to_string(), "3000:3000".to_string()],
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
             additional_features: None,
@@ -1071,5 +1099,65 @@ mod tests {
 
         assert!(!traditional_config.uses_compose());
         assert!(!traditional_config.has_stop_compose_shutdown());
+    }
+
+    #[test]
+    fn test_cli_forward_ports_merging() {
+        use deacon_core::config::PortSpec;
+
+        // Start with a config that has some ports
+        let mut config = DevContainerConfig {
+            forward_ports: vec![PortSpec::Number(3000), PortSpec::Number(4000)],
+            ..Default::default()
+        };
+
+        // Simulate CLI forward ports
+        let cli_ports = vec!["8080".to_string(), "5000:5000".to_string()];
+
+        // Merge CLI ports into config using shared parser
+        for port_str in &cli_ports {
+            if let Ok(port_spec) = PortSpec::parse(port_str) {
+                config.forward_ports.push(port_spec);
+            }
+        }
+
+        // Verify merged ports
+        assert_eq!(config.forward_ports.len(), 4);
+        assert!(matches!(config.forward_ports[0], PortSpec::Number(3000)));
+        assert!(matches!(config.forward_ports[1], PortSpec::Number(4000)));
+        assert!(matches!(config.forward_ports[2], PortSpec::Number(8080)));
+        assert!(matches!(
+            config.forward_ports[3],
+            PortSpec::String(ref s) if s == "5000:5000"
+        ));
+    }
+
+    #[test]
+    fn test_forward_ports_parsing() {
+        use deacon_core::config::PortSpec;
+
+        // Test single port number
+        let port_spec = PortSpec::parse("8080").unwrap();
+        assert!(matches!(port_spec, PortSpec::Number(8080)));
+
+        // Test port mapping
+        let port_spec = PortSpec::parse("3000:3000").unwrap();
+        assert!(matches!(
+            port_spec,
+            PortSpec::String(ref s) if s == "3000:3000"
+        ));
+
+        // Test host:container mapping
+        let port_spec = PortSpec::parse("8080:3000").unwrap();
+        assert!(matches!(
+            port_spec,
+            PortSpec::String(ref s) if s == "8080:3000"
+        ));
+
+        // Test invalid port
+        assert!(PortSpec::parse("invalid").is_err());
+
+        // Test invalid port mapping
+        assert!(PortSpec::parse("8080:invalid").is_err());
     }
 }
