@@ -47,6 +47,62 @@ pub enum PortSpec {
 }
 
 impl PortSpec {
+    /// Parse a port specification string into a PortSpec.
+    ///
+    /// Accepts:
+    /// - Simple port numbers: "8080" -> PortSpec::Number(8080)
+    /// - Port mappings: "8080:3000" -> PortSpec::String("8080:3000")
+    ///
+    /// Returns an error for invalid formats.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deacon_core::config::PortSpec;
+    ///
+    /// // Parse a simple port number
+    /// let spec = PortSpec::parse("8080").unwrap();
+    /// assert!(matches!(spec, PortSpec::Number(8080)));
+    ///
+    /// // Parse a port mapping
+    /// let spec = PortSpec::parse("8080:3000").unwrap();
+    /// assert!(matches!(spec, PortSpec::String(ref s) if s == "8080:3000"));
+    ///
+    /// // Invalid port
+    /// assert!(PortSpec::parse("invalid").is_err());
+    /// ```
+    pub fn parse(spec: &str) -> std::result::Result<Self, String> {
+        if spec.contains(':') {
+            // Port mapping format: "HOST:CONTAINER"
+            let parts: Vec<&str> = spec.split(':').collect();
+            if parts.len() != 2 {
+                return Err(format!(
+                    "Invalid port mapping format '{}': expected HOST:CONTAINER",
+                    spec
+                ));
+            }
+            // Validate both parts are valid port numbers
+            parts[0].parse::<u16>().map_err(|_| {
+                format!(
+                    "Invalid host port '{}' in port mapping '{}'",
+                    parts[0], spec
+                )
+            })?;
+            parts[1].parse::<u16>().map_err(|_| {
+                format!(
+                    "Invalid container port '{}' in port mapping '{}'",
+                    parts[1], spec
+                )
+            })?;
+            Ok(PortSpec::String(spec.to_string()))
+        } else {
+            // Simple port number
+            spec.parse::<u16>()
+                .map(PortSpec::Number)
+                .map_err(|_| format!("Invalid port number '{}'", spec))
+        }
+    }
+
     /// Get the primary port number from this specification.
     /// For strings like "3000:8080", returns the first port (3000).
     /// For numbers, returns the number directly.

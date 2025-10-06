@@ -919,16 +919,15 @@ impl ContainerOps for CliRuntime {
                     format!("{}:{}", port, port)
                 }
                 crate::config::PortSpec::String(spec) => {
-                    // Port string - could be "PORT" or "HOST:CONTAINER"
+                    // Port string should be validated already, but handle edge cases
                     if spec.contains(':') {
                         // Already has host:container mapping
                         spec.clone()
                     } else {
-                        // Try to parse as number and create mapping
+                        // Single port string, map to same port
                         match spec.parse::<u16>() {
                             Ok(port) => format!("{}:{}", port, port),
                             Err(_) => {
-                                // Invalid format, skip with warning
                                 warn!("Invalid port specification in forwardPorts: {}", spec);
                                 continue;
                             }
