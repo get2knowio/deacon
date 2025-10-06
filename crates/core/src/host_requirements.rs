@@ -758,7 +758,10 @@ mod tests {
         let result = parse_df_output(df_output, path, false);
         assert!(result.is_err());
         // The error is wrapped, so just verify it's an error
-        assert!(result.is_err(), "Should return error for malformed df output");
+        assert!(
+            result.is_err(),
+            "Should return error for malformed df output"
+        );
     }
 
     #[test]
@@ -779,7 +782,10 @@ mod tests {
                          /dev/sda1  50%";
         let path = std::path::Path::new("/");
         let result = parse_df_output(df_output, path, false);
-        assert!(result.is_err(), "Should return error for insufficient columns");
+        assert!(
+            result.is_err(),
+            "Should return error for insufficient columns"
+        );
     }
 
     #[test]
