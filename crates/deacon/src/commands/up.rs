@@ -26,6 +26,7 @@ pub struct UpArgs {
     pub skip_non_blocking_commands: bool,
     pub ports_events: bool,
     pub shutdown: bool,
+    pub forward_ports: Vec<String>,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub additional_features: Option<String>,
@@ -47,6 +48,7 @@ impl Default for UpArgs {
             skip_non_blocking_commands: false,
             ports_events: false,
             shutdown: false,
+            forward_ports: Vec::new(),
             workspace_folder: None,
             config_path: None,
             additional_features: None,
@@ -338,6 +340,29 @@ async fn execute_container_up(
 ) -> Result<()> {
     debug!("Starting traditional development container");
 
+    // Merge CLI forward_ports into config
+    let mut config = config.clone();
+    if !args.forward_ports.is_empty() {
+        use deacon_core::config::PortSpec;
+        debug!(
+            "Adding {} CLI forward ports to config",
+            args.forward_ports.len()
+        );
+        for port_str in &args.forward_ports {
+            // Parse port specification - can be "PORT" or "HOST:CONTAINER"
+            let port_spec = if port_str.contains(':') {
+                PortSpec::String(port_str.clone())
+            } else {
+                // Try parsing as number first
+                match port_str.parse::<u16>() {
+                    Ok(port) => PortSpec::Number(port),
+                    Err(_) => PortSpec::String(port_str.clone()),
+                }
+            };
+            config.forward_ports.push(port_spec);
+        }
+    }
+
     // Initialize progress tracking
     let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
         if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
@@ -349,7 +374,7 @@ async fn execute_container_up(
     };
 
     // Create container identity for deterministic naming and labels
-    let identity = ContainerIdentity::new(workspace_folder, config);
+    let identity = ContainerIdentity::new(workspace_folder, &config);
     debug!("Container identity: {:?}", identity);
 
     // Initialize Docker client
@@ -378,7 +403,7 @@ async fn execute_container_up(
     let container_result = docker
         .up(
             &identity,
-            config,
+            &config,
             workspace_folder,
             args.remove_existing_container,
         )
@@ -440,13 +465,13 @@ async fn execute_container_up(
 
     // Apply user mapping if configured
     if config.remote_user.is_some() || config.container_user.is_some() {
-        apply_user_mapping(&container_result.container_id, config, workspace_folder).await?;
+        apply_user_mapping(&container_result.container_id, &config, workspace_folder).await?;
     }
 
     // Execute lifecycle commands if not skipped
     execute_lifecycle_commands(
         &container_result.container_id,
-        config,
+        &config,
         workspace_folder,
         args,
     )
@@ -456,7 +481,7 @@ async fn execute_container_up(
     if args.ports_events {
         handle_container_port_events(
             &container_result.container_id,
-            config,
+            &config,
             runtime,
             &args.redaction_config,
             &args.secret_registry,
@@ -467,7 +492,7 @@ async fn execute_container_up(
     // Handle shutdown if requested
     if args.shutdown {
         handle_container_shutdown(
-            config,
+            &config,
             &container_result.container_id,
             state_manager,
             workspace_hash,
@@ -978,6 +1003,7 @@ mod tests {
             skip_non_blocking_commands: false,
             ports_events: false,
             shutdown: false,
+            forward_ports: Vec::new(),
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
             additional_features: None,
@@ -1028,6 +1054,7 @@ mod tests {
             skip_non_blocking_commands: true,
             ports_events: true,
             shutdown: true,
+            forward_ports: vec!["8080".to_string(), "3000:3000".to_string()],
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
             additional_features: None,

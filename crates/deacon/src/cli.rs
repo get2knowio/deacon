@@ -141,6 +141,10 @@ pub enum Commands {
         /// Automatically shut down when process exits
         #[arg(long)]
         shutdown: bool,
+        /// Forward port(s) from container to host (can be repeated)
+        /// Format: PORT or HOST_PORT:CONTAINER_PORT
+        #[arg(long = "forward-port")]
+        forward_ports: Vec<String>,
         /// Additional features to install (JSON map of id -> value/options)
         #[arg(long)]
         additional_features: Option<String>,
@@ -636,6 +640,7 @@ impl Cli {
                 skip_non_blocking_commands,
                 ports_events,
                 shutdown,
+                forward_ports,
                 additional_features,
                 prefer_cli_features,
                 feature_install_order,
@@ -649,6 +654,7 @@ impl Cli {
                     skip_non_blocking_commands,
                     ports_events,
                     shutdown,
+                    forward_ports,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     additional_features,

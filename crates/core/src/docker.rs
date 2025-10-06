@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 /// Container information returned by Docker operations
 
@@ -909,6 +909,35 @@ impl ContainerOps for CliRuntime {
                 conflicts: Vec::new(),
             };
             args.extend(security.to_docker_args());
+        }
+
+        // Add port forwarding from forwardPorts configuration
+        for port_spec in &config.forward_ports {
+            let port_arg = match port_spec {
+                crate::config::PortSpec::Number(port) => {
+                    // Simple port number - forward to same port on host
+                    format!("{}:{}", port, port)
+                }
+                crate::config::PortSpec::String(spec) => {
+                    // Port string - could be "PORT" or "HOST:CONTAINER"
+                    if spec.contains(':') {
+                        // Already has host:container mapping
+                        spec.clone()
+                    } else {
+                        // Try to parse as number and create mapping
+                        match spec.parse::<u16>() {
+                            Ok(port) => format!("{}:{}", port, port),
+                            Err(_) => {
+                                // Invalid format, skip with warning
+                                warn!("Invalid port specification in forwardPorts: {}", spec);
+                                continue;
+                            }
+                        }
+                    }
+                }
+            };
+            args.push("-p".to_string());
+            args.push(port_arg);
         }
 
         // Add runArgs if present
