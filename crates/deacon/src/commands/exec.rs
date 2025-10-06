@@ -476,4 +476,114 @@ mod tests {
         assert_eq!(args.workdir, None);
         assert_eq!(args.command, vec!["pwd"]);
     }
+
+    #[tokio::test]
+    async fn test_resolve_target_container_by_labels_invalid_format() {
+        use deacon_core::docker::mock::MockDocker;
+
+        let mock_docker = MockDocker::new();
+        let labels = vec!["INVALID_NO_EQUALS".to_string()];
+
+        let result = resolve_target_container_by_labels(&mock_docker, &labels).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid id-label format"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_container_by_labels_no_matches() {
+        use deacon_core::docker::mock::{MockContainer, MockDocker};
+        use std::collections::HashMap;
+
+        let mock_docker = MockDocker::new();
+
+        // Add a container with different labels
+        let mut labels = HashMap::new();
+        labels.insert("app".to_string(), "web".to_string());
+        let container = MockContainer::new(
+            "test-123".to_string(),
+            "test-web".to_string(),
+            "nginx:latest".to_string(),
+        )
+        .with_labels(labels);
+
+        mock_docker.add_container(container);
+
+        // Try to find with different labels
+        let search_labels = vec!["app=api".to_string()];
+        let result = resolve_target_container_by_labels(&mock_docker, &search_labels).await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No running container found matching labels"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_container_by_labels_unique_match() {
+        use deacon_core::docker::mock::{MockContainer, MockDocker};
+        use std::collections::HashMap;
+
+        let mock_docker = MockDocker::new();
+
+        // Add a container with matching labels
+        let mut labels = HashMap::new();
+        labels.insert("app".to_string(), "api".to_string());
+        labels.insert("env".to_string(), "prod".to_string());
+        let container = MockContainer::new(
+            "test-456".to_string(),
+            "test-api".to_string(),
+            "myapp:latest".to_string(),
+        )
+        .with_labels(labels);
+
+        mock_docker.add_container(container);
+
+        // Find with matching labels
+        let search_labels = vec!["app=api".to_string(), "env=prod".to_string()];
+        let result = resolve_target_container_by_labels(&mock_docker, &search_labels).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "test-456");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_container_by_labels_multiple_matches() {
+        use deacon_core::docker::mock::{MockContainer, MockDocker};
+        use std::collections::HashMap;
+
+        let mock_docker = MockDocker::new();
+
+        // Add two containers with same labels
+        let mut labels = HashMap::new();
+        labels.insert("app".to_string(), "api".to_string());
+
+        let container1 = MockContainer::new(
+            "test-111".to_string(),
+            "test-api-1".to_string(),
+            "myapp:latest".to_string(),
+        )
+        .with_labels(labels.clone());
+        mock_docker.add_container(container1);
+
+        let container2 = MockContainer::new(
+            "test-222".to_string(),
+            "test-api-2".to_string(),
+            "myapp:latest".to_string(),
+        )
+        .with_labels(labels);
+        mock_docker.add_container(container2);
+
+        // Try to find with ambiguous labels
+        let search_labels = vec!["app=api".to_string()];
+        let result = resolve_target_container_by_labels(&mock_docker, &search_labels).await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Found 2 running containers matching labels"));
+        assert!(err_msg.contains("Please refine your label selector"));
+    }
 }
