@@ -594,3 +594,243 @@ RUN echo "Testing affecting changes"
         );
     }
 }
+
+#[test]
+fn test_build_secret_file_source() {
+    // Create a temporary directory with Dockerfile that uses a secret
+    let temp_dir = TempDir::new().unwrap();
+    let dockerfile_content = r#"# syntax=docker/dockerfile:1
+FROM alpine:3.19
+RUN --mount=type=secret,id=mytoken \
+    cat /run/secrets/mytoken > /tmp/token_used && \
+    echo "Secret was accessed successfully"
+"#;
+
+    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+
+    // Create a secret file
+    let secret_file = temp_dir.path().join("token.txt");
+    fs::write(&secret_file, "my-secret-token-12345\n").unwrap();
+
+    // Create a devcontainer.json configuration
+    let devcontainer_config = r#"{
+    "name": "Test Build Secret Container",
+    "dockerFile": "Dockerfile",
+    "build": {
+        "context": "."
+    }
+}
+"#;
+
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    // Test build command with --build-secret
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let assert = cmd
+        .current_dir(&temp_dir)
+        .arg("build")
+        .arg("--build-secret")
+        .arg(format!("id=mytoken,src={}", secret_file.display()))
+        .arg("--buildkit")
+        .arg("auto")
+        .assert();
+
+    let output = assert.get_output();
+
+    if output.status.success() {
+        // If successful with BuildKit, the secret should have been mounted
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // The secret value should NOT appear in output (redaction test)
+        assert!(
+            !stdout.contains("my-secret-token-12345"),
+            "Secret value leaked in stdout!"
+        );
+        assert!(
+            !stderr.contains("my-secret-token-12345"),
+            "Secret value leaked in stderr!"
+        );
+    } else {
+        // If failed, it should be because Docker/BuildKit is not available
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Docker is not installed")
+                || stderr.contains("Docker daemon is not")
+                || stderr.contains("Docker build failed")
+                || stderr.contains("BuildKit")
+                || stderr.contains("permission denied"),
+            "Unexpected error: {}",
+            stderr
+        );
+    }
+}
+
+#[test]
+fn test_build_secret_env_source() {
+    // Set up environment variable with secret
+    std::env::set_var("TEST_BUILD_SECRET_ENV", "my-env-secret-value");
+
+    // Create a temporary directory with Dockerfile
+    let temp_dir = TempDir::new().unwrap();
+    let dockerfile_content = r#"# syntax=docker/dockerfile:1
+FROM alpine:3.19
+RUN --mount=type=secret,id=envtoken \
+    test -f /run/secrets/envtoken && \
+    echo "Secret from env was mounted"
+"#;
+
+    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+
+    let devcontainer_config = r#"{
+    "name": "Test Env Secret Container",
+    "dockerFile": "Dockerfile",
+    "build": {
+        "context": "."
+    }
+}
+"#;
+
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    // Test build command with env-based secret
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let assert = cmd
+        .current_dir(&temp_dir)
+        .arg("build")
+        .arg("--build-secret")
+        .arg("id=envtoken,env=TEST_BUILD_SECRET_ENV")
+        .arg("--buildkit")
+        .arg("auto")
+        .assert();
+
+    let output = assert.get_output();
+
+    if output.status.success() {
+        // Verify secret value is redacted
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(
+            !stdout.contains("my-env-secret-value"),
+            "Secret value leaked in stdout!"
+        );
+        assert!(
+            !stderr.contains("my-env-secret-value"),
+            "Secret value leaked in stderr!"
+        );
+    }
+
+    // Clean up
+    std::env::remove_var("TEST_BUILD_SECRET_ENV");
+}
+
+#[test]
+fn test_build_secret_validation_duplicate_id() {
+    let temp_dir = TempDir::new().unwrap();
+    let dockerfile_content = "FROM alpine:3.19\n";
+    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+
+    let secret_file = temp_dir.path().join("token.txt");
+    fs::write(&secret_file, "secret1\n").unwrap();
+
+    let devcontainer_config = r#"{
+    "name": "Test Duplicate Secret",
+    "dockerFile": "Dockerfile"
+}
+"#;
+
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    // Try to use same secret ID twice
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.current_dir(&temp_dir)
+        .arg("build")
+        .arg("--build-secret")
+        .arg(format!("id=mytoken,src={}", secret_file.display()))
+        .arg("--build-secret")
+        .arg("id=mytoken,env=SOME_VAR")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Duplicate build secret id"));
+}
+
+#[test]
+fn test_build_secret_validation_missing_file() {
+    let temp_dir = TempDir::new().unwrap();
+    let dockerfile_content = "FROM alpine:3.19\n";
+    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+
+    let devcontainer_config = r#"{
+    "name": "Test Missing Secret File",
+    "dockerFile": "Dockerfile"
+}
+"#;
+
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    // Try to use non-existent secret file
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.current_dir(&temp_dir)
+        .arg("build")
+        .arg("--build-secret")
+        .arg("id=mytoken,src=/nonexistent/secret.txt")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not exist"));
+}
+
+#[test]
+fn test_build_secret_requires_buildkit() {
+    let temp_dir = TempDir::new().unwrap();
+    let dockerfile_content = "FROM alpine:3.19\n";
+    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+
+    let secret_file = temp_dir.path().join("token.txt");
+    fs::write(&secret_file, "secret\n").unwrap();
+
+    let devcontainer_config = r#"{
+    "name": "Test BuildKit Required",
+    "dockerFile": "Dockerfile"
+}
+"#;
+
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    // Try to use build-secret with --buildkit never (should fail)
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.current_dir(&temp_dir)
+        .arg("build")
+        .arg("--build-secret")
+        .arg(format!("id=mytoken,src={}", secret_file.display()))
+        .arg("--buildkit")
+        .arg("never")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("require BuildKit"));
+}
