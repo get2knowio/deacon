@@ -119,33 +119,38 @@ pub fn get_disk_space_for_path(path: &std::path::Path) -> Result<u64> {
             })?;
 
         if !output.status.success() {
-            warn!(
-                "PowerShell command failed for {}, using fallback estimate",
-                canonical_path.display()
-            );
-            return Ok(1_000_000_000); // 1GB fallback
+            return Err(ConfigError::Validation {
+                message: format!(
+                    "PowerShell command failed for {}: {}",
+                    canonical_path.display(),
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            }
+            .into());
         }
 
         let output_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if let Ok(free_bytes) = output_str.parse::<u64>() {
-            Ok(free_bytes)
-        } else {
-            warn!(
-                "Could not parse PowerShell output for {}, using fallback estimate",
-                canonical_path.display()
-            );
-            Ok(1_000_000_000) // 1GB fallback
-        }
+        output_str.parse::<u64>().map_err(|e| {
+            ConfigError::Validation {
+                message: format!(
+                    "Could not parse PowerShell output for {}: {}",
+                    canonical_path.display(),
+                    e
+                ),
+            }
+            .into()
+        })
     }
 
     #[cfg(not(any(unix, windows)))]
     {
-        // Fallback for other platforms - return a conservative estimate
-        warn!(
-            "Disk space checking not implemented for this platform, using fallback estimate for path: {}",
-            path.display()
-        );
-        Ok(1_000_000_000) // 1GB fallback
+        Err(ConfigError::Validation {
+            message: format!(
+                "Disk space checking not implemented for this platform: {}",
+                path.display()
+            ),
+        }
+        .into())
     }
 }
 
@@ -191,12 +196,14 @@ fn parse_df_output(
         }
     }
 
-    // Fallback if parsing fails
-    warn!(
-        "Could not parse df output for {}, using fallback estimate",
-        canonical_path.display()
-    );
-    Ok(1_000_000_000) // 1GB fallback
+    // Return error if parsing fails
+    Err(ConfigError::Validation {
+        message: format!(
+            "Could not parse df output for {}: insufficient data in output",
+            canonical_path.display()
+        ),
+    }
+    .into())
 }
 
 /// Host system information collected for requirements evaluation.
