@@ -614,9 +614,96 @@ impl ContainerLifecycleResult {
     }
 
     /// Execute non-blocking phases synchronously (for testing or fallback)
-    pub async fn execute_non_blocking_phases_sync<D>(mut self, docker: &D) -> Result<Self>
+    ///
+    /// This method executes non-blocking phases (postStart, postAttach) synchronously
+    /// without progress event streaming. For progress event streaming, use
+    /// `execute_non_blocking_phases_sync_with_callback`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use deacon_core::container_lifecycle::*;
+    /// # use deacon_core::docker::CliDocker;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let docker = CliDocker::new();
+    /// let result = /* ... get ContainerLifecycleResult ... */
+    /// # ContainerLifecycleResult::new();
+    ///
+    /// // Execute non-blocking phases synchronously
+    /// let final_result = result.execute_non_blocking_phases_sync(&docker).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn execute_non_blocking_phases_sync<D>(self, docker: &D) -> Result<Self>
     where
         D: Docker,
+    {
+        self.execute_non_blocking_phases_sync_with_callback::<D, fn(ProgressEvent) -> anyhow::Result<()>>(
+            docker,
+            None,
+        )
+        .await
+    }
+
+    /// Execute non-blocking phases synchronously with optional progress callback
+    ///
+    /// This method executes non-blocking phases (postStart, postAttach) synchronously
+    /// while emitting progress events via the provided callback. This enables log streaming
+    /// and real-time progress tracking during non-blocking phase execution.
+    ///
+    /// # Event Ordering Guarantees
+    ///
+    /// Progress events are emitted in the following order for each non-blocking phase:
+    /// 1. `LifecyclePhaseBegin` - emitted when phase execution starts
+    /// 2. For each command in the phase:
+    ///    - `LifecycleCommandBegin` - emitted before command execution
+    ///    - `LifecycleCommandEnd` - emitted after command completes (success or failure)
+    /// 3. `LifecyclePhaseEnd` - emitted when all phase commands complete
+    ///
+    /// Phases are executed in the order they appear in `non_blocking_phases`:
+    /// typically postStart followed by postAttach. Each phase completes fully
+    /// (including all its commands) before the next phase begins.
+    ///
+    /// # Timeout and Error Handling
+    ///
+    /// - Each phase respects its configured timeout (from `NonBlockingPhaseSpec.timeout`)
+    /// - Timeouts are enforced per-phase, not per-command
+    /// - Phase failures or timeouts do not stop execution of subsequent phases
+    /// - Failed phases are marked unsuccessful but added to the result
+    /// - Timeout/execution errors are aggregated in `background_errors`
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use deacon_core::container_lifecycle::*;
+    /// # use deacon_core::docker::CliDocker;
+    /// # use deacon_core::progress::ProgressEvent;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let docker = CliDocker::new();
+    /// let result = /* ... get ContainerLifecycleResult ... */
+    /// # ContainerLifecycleResult::new();
+    ///
+    /// // Define progress callback for event streaming
+    /// let progress_callback = |event: ProgressEvent| {
+    ///     println!("Progress: {:?}", event);
+    ///     Ok(())
+    /// };
+    ///
+    /// // Execute non-blocking phases with progress streaming
+    /// let final_result = result
+    ///     .execute_non_blocking_phases_sync_with_callback(&docker, Some(progress_callback))
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn execute_non_blocking_phases_sync_with_callback<D, F>(
+        mut self,
+        docker: &D,
+        progress_callback: Option<F>,
+    ) -> Result<Self>
+    where
+        D: Docker,
+        F: Fn(ProgressEvent) -> anyhow::Result<()>,
     {
         let non_blocking_phases = std::mem::take(&mut self.non_blocking_phases);
 
@@ -629,13 +716,13 @@ impl ContainerLifecycleResult {
             // Enforce per-phase timeout
             match timeout(
                 spec.timeout,
-                execute_lifecycle_phase_impl::<D, fn(ProgressEvent) -> anyhow::Result<()>>(
+                execute_lifecycle_phase_impl(
                     spec.phase,
                     &spec.commands,
                     &spec.config,
                     docker,
                     &spec.context,
-                    None,
+                    progress_callback.as_ref(),
                 ),
             )
             .await
@@ -716,5 +803,241 @@ mod tests {
         assert!(result.success());
         assert_eq!(result.total_duration(), std::time::Duration::default());
         assert!(result.phases.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_execute_non_blocking_phases_sync_without_callback() {
+        use crate::docker::mock::{MockDocker, MockDockerConfig, MockExecResponse};
+        use crate::lifecycle::LifecyclePhase;
+        use crate::variable::SubstitutionContext;
+
+        // Create mock docker
+        let config = MockDockerConfig {
+            default_exec_response: MockExecResponse {
+                exit_code: 0,
+                success: true,
+                delay: None,
+                stdout: None,
+                stderr: None,
+            },
+            ..Default::default()
+        };
+        let docker = MockDocker::with_config(config);
+
+        // Create a result with non-blocking phases
+        let mut result = ContainerLifecycleResult::new();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
+
+        result.non_blocking_phases.push(NonBlockingPhaseSpec {
+            phase: LifecyclePhase::PostStart,
+            commands: vec!["echo 'test'".to_string()],
+            config: ContainerLifecycleConfig {
+                container_id: "test".to_string(),
+                user: None,
+                container_workspace_folder: "/workspace".to_string(),
+                container_env: HashMap::new(),
+                skip_post_create: false,
+                skip_non_blocking_commands: false,
+                non_blocking_timeout: Duration::from_secs(30),
+            },
+            context: substitution_context,
+            timeout: Duration::from_secs(30),
+        });
+
+        // Execute without callback (None branch)
+        let final_result = result
+            .execute_non_blocking_phases_sync(&docker)
+            .await
+            .unwrap();
+
+        // Verify execution completed successfully
+        assert_eq!(final_result.phases.len(), 1);
+        assert_eq!(final_result.non_blocking_phases.len(), 0);
+        assert!(final_result.background_errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_execute_non_blocking_phases_sync_with_callback() {
+        use crate::docker::mock::{MockDocker, MockDockerConfig, MockExecResponse};
+        use crate::lifecycle::LifecyclePhase;
+        use crate::variable::SubstitutionContext;
+        use std::sync::{Arc, Mutex};
+
+        // Create mock docker
+        let config = MockDockerConfig {
+            default_exec_response: MockExecResponse {
+                exit_code: 0,
+                success: true,
+                delay: None,
+                stdout: None,
+                stderr: None,
+            },
+            ..Default::default()
+        };
+        let docker = MockDocker::with_config(config);
+
+        // Create a result with non-blocking phases
+        let mut result = ContainerLifecycleResult::new();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
+
+        result.non_blocking_phases.push(NonBlockingPhaseSpec {
+            phase: LifecyclePhase::PostStart,
+            commands: vec!["echo 'test'".to_string()],
+            config: ContainerLifecycleConfig {
+                container_id: "test".to_string(),
+                user: None,
+                container_workspace_folder: "/workspace".to_string(),
+                container_env: HashMap::new(),
+                skip_post_create: false,
+                skip_non_blocking_commands: false,
+                non_blocking_timeout: Duration::from_secs(30),
+            },
+            context: substitution_context,
+            timeout: Duration::from_secs(30),
+        });
+
+        // Track callback invocations
+        let callback_invoked = Arc::new(Mutex::new(false));
+        let callback_invoked_clone = callback_invoked.clone();
+
+        let progress_callback = move |_event: ProgressEvent| {
+            *callback_invoked_clone.lock().unwrap() = true;
+            Ok(())
+        };
+
+        // Execute with callback (Some branch)
+        let final_result = result
+            .execute_non_blocking_phases_sync_with_callback(&docker, Some(progress_callback))
+            .await
+            .unwrap();
+
+        // Verify execution completed successfully
+        assert_eq!(final_result.phases.len(), 1);
+        assert_eq!(final_result.non_blocking_phases.len(), 0);
+        assert!(final_result.background_errors.is_empty());
+
+        // Verify callback was invoked
+        assert!(
+            *callback_invoked.lock().unwrap(),
+            "Progress callback should have been invoked"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_non_blocking_phases_timeout_unchanged() {
+        use crate::docker::mock::{MockDocker, MockDockerConfig, MockExecResponse};
+        use crate::lifecycle::LifecyclePhase;
+        use crate::variable::SubstitutionContext;
+
+        // Create mock docker with delay that will cause timeout
+        let config = MockDockerConfig {
+            default_exec_response: MockExecResponse {
+                exit_code: 0,
+                success: true,
+                delay: Some(Duration::from_secs(5)),
+                stdout: None,
+                stderr: None,
+            },
+            ..Default::default()
+        };
+        let docker = MockDocker::with_config(config);
+
+        // Create a result with non-blocking phases
+        let mut result = ContainerLifecycleResult::new();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
+
+        result.non_blocking_phases.push(NonBlockingPhaseSpec {
+            phase: LifecyclePhase::PostStart,
+            commands: vec!["echo 'test'".to_string()],
+            config: ContainerLifecycleConfig {
+                container_id: "test".to_string(),
+                user: None,
+                container_workspace_folder: "/workspace".to_string(),
+                container_env: HashMap::new(),
+                skip_post_create: false,
+                skip_non_blocking_commands: false,
+                non_blocking_timeout: Duration::from_millis(100), // Very short timeout
+            },
+            context: substitution_context,
+            timeout: Duration::from_millis(100), // Very short timeout
+        });
+
+        // Execute with callback - should timeout
+        let final_result = result
+            .execute_non_blocking_phases_sync_with_callback(
+                &docker,
+                None::<fn(ProgressEvent) -> anyhow::Result<()>>,
+            )
+            .await
+            .unwrap();
+
+        // Verify timeout was handled correctly
+        assert_eq!(final_result.background_errors.len(), 1);
+        assert!(final_result.background_errors[0].contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn test_non_blocking_phases_error_propagation_unchanged() {
+        use crate::docker::mock::{MockDocker, MockDockerConfig, MockExecResponse};
+        use crate::lifecycle::LifecyclePhase;
+        use crate::variable::SubstitutionContext;
+
+        // Create mock docker that returns error
+        let config = MockDockerConfig {
+            default_exec_response: MockExecResponse {
+                exit_code: 1,
+                success: false,
+                delay: None,
+                stdout: None,
+                stderr: None,
+            },
+            ..Default::default()
+        };
+        let docker = MockDocker::with_config(config);
+
+        // Create a result with non-blocking phases
+        let mut result = ContainerLifecycleResult::new();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
+
+        result.non_blocking_phases.push(NonBlockingPhaseSpec {
+            phase: LifecyclePhase::PostStart,
+            commands: vec!["echo 'test'".to_string()],
+            config: ContainerLifecycleConfig {
+                container_id: "test".to_string(),
+                user: None,
+                container_workspace_folder: "/workspace".to_string(),
+                container_env: HashMap::new(),
+                skip_post_create: false,
+                skip_non_blocking_commands: false,
+                non_blocking_timeout: Duration::from_secs(30),
+            },
+            context: substitution_context,
+            timeout: Duration::from_secs(30),
+        });
+
+        // Execute with callback - command should fail but not propagate error
+        let final_result = result
+            .execute_non_blocking_phases_sync_with_callback(
+                &docker,
+                None::<fn(ProgressEvent) -> anyhow::Result<()>>,
+            )
+            .await
+            .unwrap();
+
+        // Verify error handling: phase completes but marked as failed
+        assert_eq!(final_result.phases.len(), 1);
+        assert!(
+            !final_result.phases[0].success,
+            "Failed phase should be marked as unsuccessful"
+        );
+        assert_eq!(
+            final_result.background_errors.len(),
+            0,
+            "Non-blocking command failures should not add to background_errors"
+        );
     }
 }

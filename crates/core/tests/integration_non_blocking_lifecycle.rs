@@ -458,3 +458,139 @@ async fn test_non_blocking_phase_timeout_handling() {
         final_result.background_errors[0]
     );
 }
+
+#[tokio::test]
+async fn test_non_blocking_phases_with_progress_streaming() {
+    let temp_dir = TempDir::new().unwrap();
+    let workspace_path = temp_dir.path();
+    let substitution_context = SubstitutionContext::new(workspace_path).unwrap();
+
+    // Create a mock Docker runtime with successful responses
+    let config = MockDockerConfig {
+        default_exec_response: MockExecResponse {
+            exit_code: 0,
+            success: true,
+            delay: None,
+            stdout: None,
+            stderr: None,
+        },
+        ..Default::default()
+    };
+    let docker = MockDocker::with_config(config);
+
+    // Create lifecycle configuration with non-blocking commands enabled
+    let lifecycle_config = ContainerLifecycleConfig {
+        container_id: "test-container".to_string(),
+        user: Some("root".to_string()),
+        container_workspace_folder: "/workspace".to_string(),
+        container_env: HashMap::new(),
+        skip_post_create: false,
+        skip_non_blocking_commands: false,
+        non_blocking_timeout: Duration::from_secs(30),
+    };
+
+    // Create lifecycle commands with non-blocking phases
+    let commands = ContainerLifecycleCommands::new()
+        .with_on_create(vec!["echo 'onCreate'".to_string()])
+        .with_post_create(vec!["echo 'postCreate'".to_string()])
+        .with_post_start(vec!["echo 'postStart'".to_string()])
+        .with_post_attach(vec!["echo 'postAttach'".to_string()]);
+
+    // Execute lifecycle commands
+    let result = execute_container_lifecycle_with_docker(
+        &lifecycle_config,
+        &commands,
+        &substitution_context,
+        &docker,
+    )
+    .await
+    .unwrap();
+
+    // Verify that non-blocking phases are scheduled
+    assert_eq!(result.non_blocking_phases.len(), 2);
+
+    // Set up progress event tracking
+    use std::sync::{Arc, Mutex};
+    let captured_events = Arc::new(Mutex::new(Vec::new()));
+    let captured_events_clone = captured_events.clone();
+
+    let progress_callback = move |event: deacon_core::progress::ProgressEvent| {
+        captured_events_clone.lock().unwrap().push(event);
+        Ok(())
+    };
+
+    // Execute non-blocking phases with progress streaming
+    let final_result = result
+        .execute_non_blocking_phases_sync_with_callback(&docker, Some(progress_callback))
+        .await
+        .unwrap();
+
+    // Verify that all phases completed
+    assert_eq!(final_result.phases.len(), 4); // All phases should now be complete
+    assert_eq!(final_result.non_blocking_phases.len(), 0);
+
+    // Verify that progress events were emitted
+    let events = captured_events.lock().unwrap();
+    assert!(
+        !events.is_empty(),
+        "Progress events should have been captured"
+    );
+
+    // Count phase begin/end events for non-blocking phases
+    let phase_begin_count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                deacon_core::progress::ProgressEvent::LifecyclePhaseBegin { .. }
+            )
+        })
+        .count();
+    let phase_end_count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                deacon_core::progress::ProgressEvent::LifecyclePhaseEnd { .. }
+            )
+        })
+        .count();
+
+    // Should have begin/end for postStart and postAttach
+    assert_eq!(phase_begin_count, 2, "Should have 2 phase begin events");
+    assert_eq!(phase_end_count, 2, "Should have 2 phase end events");
+
+    // Count command begin/end events (one command per phase)
+    let command_begin_count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                deacon_core::progress::ProgressEvent::LifecycleCommandBegin { .. }
+            )
+        })
+        .count();
+    let command_end_count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                deacon_core::progress::ProgressEvent::LifecycleCommandEnd { .. }
+            )
+        })
+        .count();
+
+    assert_eq!(command_begin_count, 2, "Should have 2 command begin events");
+    assert_eq!(command_end_count, 2, "Should have 2 command end events");
+
+    println!("✓ Non-blocking phases emit progress events during execution");
+    println!("✓ Captured {} total progress events", events.len());
+    println!(
+        "✓ Phase events: {} begin, {} end",
+        phase_begin_count, phase_end_count
+    );
+    println!(
+        "✓ Command events: {} begin, {} end",
+        command_begin_count, command_end_count
+    );
+}
