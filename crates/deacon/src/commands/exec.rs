@@ -24,6 +24,8 @@ pub struct ExecArgs {
     pub env: Vec<String>,
     /// Working directory for command execution
     pub workdir: Option<String>,
+    /// Identify container by labels (KEY=VALUE format)
+    pub id_label: Vec<String>,
     /// Command to execute
     pub command: Vec<String>,
     /// Workspace folder path
@@ -97,6 +99,71 @@ where
     }
 }
 
+/// Resolve target container by custom id-labels
+#[instrument(skip(docker_client))]
+pub async fn resolve_target_container_by_labels<D>(
+    docker_client: &D,
+    id_labels: &[String],
+) -> Result<String>
+where
+    D: Docker,
+{
+    debug!("Resolving target container by id-labels: {:?}", id_labels);
+
+    if id_labels.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No id-labels provided for container resolution"
+        ));
+    }
+
+    // Validate label format (KEY=VALUE)
+    for label in id_labels {
+        if !label.contains('=') {
+            return Err(anyhow::anyhow!(
+                "Invalid id-label format: '{}'. Expected KEY=VALUE",
+                label
+            ));
+        }
+    }
+
+    // Build label selector string (comma-separated)
+    let label_selector = id_labels.join(",");
+    debug!("Label selector: {}", label_selector);
+
+    // List containers with the specified labels
+    let containers = docker_client.list_containers(Some(&label_selector)).await?;
+
+    // Filter to only running containers
+    let matching_containers: Vec<String> = containers
+        .into_iter()
+        .filter(|c| c.state == "running")
+        .map(|c| c.id)
+        .collect();
+
+    let match_count = matching_containers.len();
+    tracing::Span::current().record("match_count", match_count);
+
+    match matching_containers.len() {
+        0 => Err(anyhow::anyhow!(
+            "No running container found matching labels: {}",
+            id_labels.join(", ")
+        )),
+        1 => {
+            let container_id = matching_containers[0].clone();
+            debug!("Found unique matching container: {}", container_id);
+            Ok(container_id)
+        }
+        multiple => Err(anyhow::anyhow!(
+            "Found {} running containers matching labels: {}. \
+             Please refine your label selector to uniquely identify a single container. \
+             Matching container IDs: {:?}",
+            multiple,
+            id_labels.join(", "),
+            matching_containers
+        )),
+    }
+}
+
 /// Resolve the target container for Docker Compose configurations
 #[instrument]
 async fn resolve_compose_target_container(
@@ -166,7 +233,7 @@ pub async fn execute_exec(_args: ExecArgs) -> Result<()> {
 }
 
 /// Execute the exec command with a custom Docker implementation
-#[instrument(skip(docker_client), fields(workdir, user))]
+#[instrument(skip(docker_client), fields(workdir, user, labels_used, match_count))]
 pub async fn execute_exec_with_docker<D>(args: ExecArgs, docker_client: &D) -> Result<()>
 where
     D: Docker,
@@ -191,30 +258,37 @@ where
             }
         }
 
-        // Load configuration
-        let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
-
-        let config = if let Some(config_path) = args.config_path.as_ref() {
-            ConfigLoader::load_from_path(config_path)?
-        } else {
-            let config_location = ConfigLoader::discover_config(workspace_folder)?;
-            if !config_location.exists() {
-                return Err(DeaconError::Config(ConfigError::NotFound {
-                    path: config_location.path().to_string_lossy().to_string(),
-                })
-                .into());
-            }
-            ConfigLoader::load_from_path(config_location.path())?
-        };
-
-        debug!("Loaded configuration: {:?}", config.name);
-
         // Check Docker availability
         docker_client.ping().await?;
 
-        // Resolve target container
-        let container_id =
-            resolve_target_container(docker_client, workspace_folder, &config).await?;
+        // Resolve target container using id-labels if provided, otherwise use workspace/config
+        let container_id = if !args.id_label.is_empty() {
+            // Add labels to tracing span
+            let labels_str = args.id_label.join(",");
+            tracing::Span::current().record("labels_used", &labels_str);
+            debug!("Using id-label for container resolution: {}", labels_str);
+
+            resolve_target_container_by_labels(docker_client, &args.id_label).await?
+        } else {
+            // Load configuration for workspace-based resolution
+            let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
+
+            let config = if let Some(config_path) = args.config_path.as_ref() {
+                ConfigLoader::load_from_path(config_path)?
+            } else {
+                let config_location = ConfigLoader::discover_config(workspace_folder)?;
+                if !config_location.exists() {
+                    return Err(DeaconError::Config(ConfigError::NotFound {
+                        path: config_location.path().to_string_lossy().to_string(),
+                    })
+                    .into());
+                }
+                ConfigLoader::load_from_path(config_location.path())?
+            };
+
+            debug!("Loaded configuration: {:?}", config.name);
+            resolve_target_container(docker_client, workspace_folder, &config).await?
+        };
 
         // Determine TTY allocation
         let should_use_tty = !args.no_tty && CliDocker::is_tty();
@@ -223,7 +297,19 @@ where
         let working_dir = if let Some(ref cli_workdir) = args.workdir {
             debug!("Using working directory from CLI: {}", cli_workdir);
             cli_workdir.clone()
+        } else if !args.id_label.is_empty() {
+            // For id-label based exec, default to current directory in container
+            debug!("Using default working directory for id-label based exec");
+            String::from("/")
         } else {
+            // For workspace-based exec, load config to get workspace folder
+            let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
+            let config = if let Some(config_path) = args.config_path.as_ref() {
+                ConfigLoader::load_from_path(config_path)?
+            } else {
+                let config_location = ConfigLoader::discover_config(workspace_folder)?;
+                ConfigLoader::load_from_path(config_location.path())?
+            };
             determine_container_working_dir(&config, workspace_folder)
         };
 
@@ -363,6 +449,7 @@ mod tests {
             no_tty: false,
             env: vec!["KEY=value".to_string()],
             workdir: Some("/custom/path".to_string()),
+            id_label: vec![],
             command: vec!["ls".to_string(), "-la".to_string()],
             workspace_folder: None,
             config_path: None,
@@ -380,6 +467,7 @@ mod tests {
             no_tty: true,
             env: vec![],
             workdir: None,
+            id_label: vec![],
             command: vec!["pwd".to_string()],
             workspace_folder: None,
             config_path: None,
