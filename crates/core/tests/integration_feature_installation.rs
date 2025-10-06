@@ -30,6 +30,7 @@ fn create_test_feature() -> (ResolvedFeature, DownloadedFeature) {
         privileged: None,
         cap_add: vec![],
         security_opt: vec![],
+        entrypoint: None,
         installs_after: vec![],
         depends_on: HashMap::new(),
         on_create_command: None,

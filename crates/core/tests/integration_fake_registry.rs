@@ -402,6 +402,7 @@ async fn test_fake_registry_push_pull_cycle() {
         privileged: None,
         cap_add: vec![],
         security_opt: vec![],
+        entrypoint: None,
         installs_after: vec![],
         depends_on: std::collections::HashMap::new(),
         documentation_url: None,

@@ -66,6 +66,7 @@ fn test_security_options_merge_with_features() -> anyhow::Result<()> {
             privileged: None,
             cap_add: vec!["NET_ADMIN".to_string()],
             security_opt: vec!["seccomp=unconfined".to_string()],
+            entrypoint: None,
             installs_after: Vec::new(),
             depends_on: HashMap::new(),
             on_create_command: None,

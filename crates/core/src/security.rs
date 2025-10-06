@@ -321,6 +321,7 @@ mod tests {
                 privileged,
                 cap_add,
                 security_opt: Vec::new(),
+                entrypoint: None,
                 installs_after: Vec::new(),
                 depends_on: HashMap::new(),
                 on_create_command: None,
@@ -475,6 +476,7 @@ mod tests {
                 privileged: Some(false), // Explicit conflict
                 cap_add: Vec::new(),
                 security_opt: Vec::new(),
+                entrypoint: None,
                 installs_after: Vec::new(),
                 depends_on: HashMap::new(),
                 on_create_command: None,
@@ -524,6 +526,7 @@ mod tests {
                 privileged: None,
                 cap_add: Vec::new(),
                 security_opt: vec!["seccomp=profile:default".to_string()], // Conflicts with config
+                entrypoint: None,
                 installs_after: Vec::new(),
                 depends_on: HashMap::new(),
                 on_create_command: None,
