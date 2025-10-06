@@ -85,8 +85,22 @@ pub fn detect_git_worktree(path: &Path) -> Result<Option<PathBuf>> {
                 debug!("Found .git file at: {}", git_path.display());
                 match parse_git_file(&git_path)? {
                     Some(gitdir) => {
-                        // Check if this is a worktree by looking for "worktrees/" in the path
-                        if gitdir.to_string_lossy().contains("worktrees") {
+                        // Check if this is a worktree by examining path components
+                        // A worktree has the canonical pattern: .../path/.git/worktrees/<name>
+                        let components: Vec<_> = gitdir.components().collect();
+                        let is_worktree = components.windows(2).any(|window| {
+                            if let (
+                                std::path::Component::Normal(a),
+                                std::path::Component::Normal(b),
+                            ) = (window[0], window[1])
+                            {
+                                a == ".git" && b == "worktrees"
+                            } else {
+                                false
+                            }
+                        });
+
+                        if is_worktree {
                             debug!("Detected worktree pointing to gitdir: {}", gitdir.display());
                             // The current directory is the worktree root
                             return Ok(Some(current.to_path_buf()));
@@ -261,6 +275,44 @@ mod tests {
         let result = detect_git_worktree(&subdir)?;
         assert!(result.is_some());
         assert_eq!(result.unwrap(), temp_dir.path());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_detect_git_worktree_false_positive_prevention() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+
+        // Create a .git file with a path that contains "worktrees" but not in the canonical pattern
+        // This tests the fix for false positives from substring matching
+        let git_file = temp_dir.path().join(".git");
+
+        // Case 1: "worktrees" appears in a parent directory name, but not after .git
+        let gitdir_content = "gitdir: /home/user/my-worktrees-project/.git/modules/submodule\n";
+        fs::write(&git_file, gitdir_content)?;
+
+        let result = detect_git_worktree(temp_dir.path())?;
+        assert_eq!(
+            result, None,
+            "Should not detect as worktree when 'worktrees' is in parent path"
+        );
+
+        // Case 2: "worktrees" appears as part of another word
+        let gitdir_content2 = "gitdir: /home/user/project/.git/my-worktrees-data/info\n";
+        fs::write(&git_file, gitdir_content2)?;
+
+        let result2 = detect_git_worktree(temp_dir.path())?;
+        assert_eq!(
+            result2, None,
+            "Should not detect as worktree when 'worktrees' is part of another directory name"
+        );
+
+        // Case 3: Proper worktree pattern - should be detected
+        let gitdir_content3 = "gitdir: /home/user/project/.git/worktrees/feature-branch\n";
+        fs::write(&git_file, gitdir_content3)?;
+
+        let result3 = detect_git_worktree(temp_dir.path())?;
+        assert!(result3.is_some(), "Should detect proper worktree pattern");
 
         Ok(())
     }
