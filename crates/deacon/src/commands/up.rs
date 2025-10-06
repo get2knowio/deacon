@@ -27,6 +27,7 @@ pub struct UpArgs {
     pub ports_events: bool,
     pub shutdown: bool,
     pub forward_ports: Vec<String>,
+    pub container_name: Option<String>,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub additional_features: Option<String>,
@@ -49,6 +50,7 @@ impl Default for UpArgs {
             ports_events: false,
             shutdown: false,
             forward_ports: Vec::new(),
+            container_name: None,
             workspace_folder: None,
             config_path: None,
             additional_features: None,
@@ -375,7 +377,11 @@ async fn execute_container_up(
     };
 
     // Create container identity for deterministic naming and labels
-    let identity = ContainerIdentity::new(workspace_folder, &config);
+    let identity = ContainerIdentity::new_with_custom_name(
+        workspace_folder,
+        &config,
+        args.container_name.clone(),
+    );
     debug!("Container identity: {:?}", identity);
 
     // Initialize Docker client
@@ -1005,6 +1011,7 @@ mod tests {
             ports_events: false,
             shutdown: false,
             forward_ports: Vec::new(),
+            container_name: None,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
             additional_features: None,
@@ -1056,6 +1063,7 @@ mod tests {
             ports_events: true,
             shutdown: true,
             forward_ports: vec!["8080".to_string(), "3000:3000".to_string()],
+            container_name: None,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
             additional_features: None,

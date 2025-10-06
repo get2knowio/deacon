@@ -29,6 +29,8 @@ pub struct ContainerIdentity {
     pub config_hash: String,
     /// Human-readable name
     pub name: Option<String>,
+    /// Custom container name (overrides generated name)
+    pub custom_name: Option<String>,
 }
 
 /// Container creation result
@@ -72,6 +74,16 @@ impl ContainerIdentity {
     /// Create a new container identity from workspace path and configuration
     #[instrument(skip(config))]
     pub fn new(workspace_path: &Path, config: &DevContainerConfig) -> Self {
+        Self::new_with_custom_name(workspace_path, config, None)
+    }
+
+    /// Create a new container identity with optional custom container name
+    #[instrument(skip(config))]
+    pub fn new_with_custom_name(
+        workspace_path: &Path,
+        config: &DevContainerConfig,
+        custom_name: Option<String>,
+    ) -> Self {
         let workspace_hash = Self::hash_workspace_path(workspace_path);
         let config_hash = Self::hash_config(config);
         let name = config.name.clone();
@@ -80,6 +92,7 @@ impl ContainerIdentity {
             workspace_hash = %workspace_hash,
             config_hash = %config_hash,
             name = ?name,
+            custom_name = ?custom_name,
             "Created container identity"
         );
 
@@ -87,6 +100,7 @@ impl ContainerIdentity {
             workspace_hash,
             config_hash,
             name,
+            custom_name,
         }
     }
 
@@ -131,6 +145,12 @@ impl ContainerIdentity {
 
     /// Generate a deterministic container name
     pub fn container_name(&self) -> String {
+        // Use custom name if provided
+        if let Some(ref custom_name) = self.custom_name {
+            return custom_name.clone();
+        }
+
+        // Otherwise generate deterministic name
         let combined_hash = format!("{}{}", self.workspace_hash, self.config_hash);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         use std::hash::{Hash, Hasher};
@@ -336,6 +356,31 @@ mod tests {
         let identity2 = ContainerIdentity::new(temp_dir2.path(), &config);
 
         assert_ne!(identity1.workspace_hash, identity2.workspace_hash);
+    }
+
+    #[test]
+    fn test_custom_container_name() {
+        let temp_dir = TempDir::new().unwrap();
+        let workspace_path = temp_dir.path();
+
+        let config = DevContainerConfig {
+            name: Some("test".to_string()),
+            image: Some("ubuntu:20.04".to_string()),
+            ..Default::default()
+        };
+
+        let custom_name = Some("my-custom-container".to_string());
+        let identity =
+            ContainerIdentity::new_with_custom_name(workspace_path, &config, custom_name.clone());
+
+        // Verify custom name is used
+        assert_eq!(identity.container_name(), "my-custom-container");
+        assert_eq!(identity.custom_name, custom_name);
+
+        // Verify without custom name, generated name is used
+        let identity_no_custom = ContainerIdentity::new(workspace_path, &config);
+        assert!(identity_no_custom.container_name().starts_with("deacon-"));
+        assert_eq!(identity_no_custom.custom_name, None);
     }
 
     #[test]
