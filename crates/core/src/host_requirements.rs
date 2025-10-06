@@ -681,4 +681,45 @@ mod tests {
         let evaluation = result.unwrap();
         assert!(!evaluation.requirements_met);
     }
+
+    #[test]
+    fn test_no_silent_fallbacks_on_error() {
+        // Test that when filesystem provider returns an error,
+        // it propagates up rather than being silently converted to a fallback value
+        struct FailingFilesystemProvider;
+
+        impl FilesystemProvider for FailingFilesystemProvider {
+            fn get_available_space(&self, _path: &std::path::Path) -> Result<u64> {
+                Err(ConfigError::Validation {
+                    message: "Simulated filesystem error".to_string(),
+                }
+                .into())
+            }
+        }
+
+        let mut evaluator =
+            HostRequirementsEvaluator::<FailingFilesystemProvider>::with_filesystem_provider(
+                FailingFilesystemProvider,
+            );
+
+        // Attempting to get host info should fail, not return a fallback value
+        let result = evaluator.get_host_info(None);
+        assert!(
+            result.is_err(),
+            "Expected error to propagate, not silent fallback"
+        );
+
+        // Verify error message contains indication of failure (it might be wrapped)
+        if let Err(e) = result {
+            let error_msg = e.to_string();
+            // The error should contain our simulated error or reference to validation/filesystem error
+            assert!(
+                error_msg.contains("Simulated filesystem error")
+                    || error_msg.contains("Configuration error")
+                    || error_msg.contains("Validation"),
+                "Error message should indicate filesystem error, got: {}",
+                error_msg
+            );
+        }
+    }
 }
