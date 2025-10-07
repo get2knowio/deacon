@@ -156,6 +156,10 @@ pub struct FeatureMetadata {
     #[serde(default)]
     pub security_opt: Vec<String>,
 
+    /// Entrypoint override or wrapper
+    #[serde(default)]
+    pub entrypoint: Option<String>,
+
     /// Features to install after
     #[serde(default)]
     pub installs_after: Vec<String>,
@@ -1425,6 +1429,7 @@ mod tests {
             privileged: None,
             cap_add: vec![],
             security_opt: vec![],
+            entrypoint: None,
             installs_after,
             depends_on,
             on_create_command: None,

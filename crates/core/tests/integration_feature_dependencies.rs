@@ -164,6 +164,7 @@ fn create_feature(
         privileged: None,
         cap_add: vec![],
         security_opt: vec![],
+        entrypoint: None,
         installs_after,
         depends_on,
         on_create_command: None,
