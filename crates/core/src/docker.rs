@@ -2158,6 +2158,7 @@ mod tests {
             workspace_hash: "workspace123".to_string(),
             config_hash: "config456".to_string(),
             name: Some("test-dev".to_string()),
+            custom_name: None,
         };
 
         let config = DevContainerConfig {

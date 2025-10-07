@@ -145,6 +145,9 @@ pub enum Commands {
         /// Format: PORT or HOST_PORT:CONTAINER_PORT
         #[arg(long = "forward-port")]
         forward_ports: Vec<String>,
+        /// Custom container name (overrides generated name)
+        #[arg(long)]
+        container_name: Option<String>,
         /// Additional features to install (JSON map of id -> value/options)
         #[arg(long)]
         additional_features: Option<String>,
@@ -641,6 +644,7 @@ impl Cli {
                 ports_events,
                 shutdown,
                 forward_ports,
+                container_name,
                 additional_features,
                 prefer_cli_features,
                 feature_install_order,
@@ -655,6 +659,7 @@ impl Cli {
                     ports_events,
                     shutdown,
                     forward_ports,
+                    container_name,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     additional_features,
