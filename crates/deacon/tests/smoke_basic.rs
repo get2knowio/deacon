@@ -18,6 +18,8 @@ use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
+mod test_utils;
+use test_utils::DeaconGuard;
 
 // No Docker error tolerance: smoke tests require Docker
 
@@ -82,6 +84,7 @@ fn smoke_read_configuration_with_variables() {
 fn smoke_build_json_then_text() {
     // Temp workspace with a simple Dockerfile under .devcontainer
     let tmp = TempDir::new().unwrap();
+    let mut guard = DeaconGuard::new(tmp.path());
     fs::write(
         tmp.path().join("Dockerfile"),
         "FROM alpine:3.19\nRUN echo hi\n",
@@ -118,6 +121,11 @@ fn smoke_build_json_then_text() {
     let s = String::from_utf8_lossy(&out.stdout);
     assert!(s.contains("image_id"));
     assert!(s.contains("build_duration"));
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&s) {
+        if let Some(id) = json.get("image_id").and_then(|v| v.as_str()) {
+            guard.register_image(id.to_string());
+        }
+    }
 
     // Text output
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -134,6 +142,7 @@ fn smoke_build_json_then_text() {
 fn smoke_up_then_exec_traditional() {
     // Use an nginx image that stays running to allow exec
     let tmp = TempDir::new().unwrap();
+    let _guard = DeaconGuard::new(tmp.path());
     let config = r#"{
         "name": "SmokeUpExec",
         "image": "nginx:alpine",
@@ -180,15 +189,7 @@ fn smoke_up_then_exec_traditional() {
     let s = String::from_utf8_lossy(&exec_out.stdout);
     assert!(s.contains("OK:"));
 
-    // Clean up container
-    let mut down = Command::cargo_bin("deacon").unwrap();
-    let _ = down
-        .current_dir(tmp.path())
-        .arg("down")
-        .assert()
-        .get_output()
-        .status
-        .success();
+    // Cleanup handled by guard
 }
 
 #[test]
@@ -226,6 +227,7 @@ fn smoke_doctor_json() {
 #[test]
 fn test_compose_based_up_path_detection() {
     let temp_dir = TempDir::new().unwrap();
+    let _guard = DeaconGuard::new(temp_dir.path());
 
     // Create a docker-compose.yml file
     let compose_content = r#"
@@ -266,21 +268,14 @@ services:
         "compose-based up failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    // Clean up
-    let mut down = Command::cargo_bin("deacon").unwrap();
-    let _ = down
-        .current_dir(&temp_dir)
-        .arg("down")
-        .assert()
-        .get_output()
-        .status
-        .success();
+    // Cleanup handled by guard
 }
 
 /// Test exec environment and working directory behavior
 #[test]
 fn test_exec_environment_and_working_directory() {
     let temp_dir = TempDir::new().unwrap();
+    let _guard = DeaconGuard::new(temp_dir.path());
 
     // Create devcontainer.json with custom workspaceFolder
     let devcontainer_config = r#"{
@@ -338,19 +333,14 @@ fn test_exec_environment_and_working_directory() {
         stdout
     );
 
-    // Clean up
-    let mut down = Command::cargo_bin("deacon").unwrap();
-    let _ = down
-        .current_dir(&temp_dir)
-        .arg("down")
-        .assert()
-        .get_output();
+    // Cleanup handled by guard
 }
 
 /// Test build arg handling with simple Dockerfile
 #[test]
 fn test_build_arg_handling() {
     let temp_dir = TempDir::new().unwrap();
+    let mut guard = DeaconGuard::new(temp_dir.path());
 
     // Create Dockerfile with ARGs and labels
     let dockerfile_content = r#"FROM alpine:3.19
@@ -407,6 +397,9 @@ RUN echo "Building with version: $BUILD_VERSION, env: $BUILD_ENV"
     // Try to parse as JSON to validate structure
     if let Ok(json) = serde_json::from_str::<Value>(&stdout) {
         assert!(json.get("image_id").is_some());
+        if let Some(id) = json.get("image_id").and_then(|v| v.as_str()) {
+            guard.register_image(id.to_string());
+        }
     }
 }
 
@@ -496,6 +489,7 @@ fn test_read_configuration_fixtures_breadth() {
 #[test]
 fn test_up_exec_happy_path() {
     let temp_dir = TempDir::new().unwrap();
+    let _guard = DeaconGuard::new(temp_dir.path());
 
     // Create a simple devcontainer.json for long-running container
     let devcontainer_config = r#"{
@@ -532,11 +526,5 @@ fn test_up_exec_happy_path() {
         .success()
         .stdout(pred_str::contains("hello from container"));
 
-    // Clean up
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
-    let _ = down_cmd
-        .current_dir(&temp_dir)
-        .arg("down")
-        .assert()
-        .get_output();
+    // Cleanup handled by guard
 }
