@@ -1,5 +1,22 @@
 # deacon
 
+<!-- Badges -->
+<p>
+  <a href="https://github.com/get2knowio/deacon/actions/workflows/ci.yml">
+    <img alt="Build Status" src="https://github.com/get2knowio/deacon/actions/workflows/ci.yml/badge.svg" />
+  </a>
+  <a href="https://coveralls.io/github/get2knowio/deacon?branch=main">
+    <img alt="Coverage Status" src="https://coveralls.io/repos/github/get2knowio/deacon/badge.svg?branch=main" />
+  </a>
+  <a href="https://github.com/get2knowio/deacon/blob/main/LICENSE">
+    <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg" />
+  </a>
+  <a href="https://github.com/get2knowio/deacon/releases/latest">
+    <img alt="Latest Release" src="https://img.shields.io/github/v/release/get2knowio/deacon" />
+  </a>
+  <img alt="Rust 2021" src="https://img.shields.io/badge/rust-2021-orange" />
+</p>
+
 A Rust reimplementation of the Development Containers CLI, following the [containers.dev specification](https://containers.dev).
 
  
@@ -307,3 +324,5 @@ We use cargo-llvm-cov (LLVM source-based coverage) locally and in CI.
 CI enforces a minimum line coverage threshold (see MIN_COVERAGE in `.github/workflows/ci.yml`). To try the same locally:
 
 - cargo llvm-cov --workspace --fail-under-lines 80
+
+Coverage reporting is published to Coveralls for the `main` branch and PRs: https://coveralls.io/github/get2knowio/deacon
