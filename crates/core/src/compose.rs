@@ -24,6 +24,8 @@ pub struct ComposeProject {
     pub service: String,
     /// Additional services to run
     pub run_services: Vec<String>,
+    /// Environment files to pass to docker compose
+    pub env_files: Vec<PathBuf>,
 }
 
 /// Docker Compose service information
@@ -52,6 +54,8 @@ pub struct ComposeCommand {
     project_name: Option<String>,
     /// Base directory
     base_path: PathBuf,
+    /// Environment files
+    env_files: Vec<PathBuf>,
 }
 
 impl ComposeCommand {
@@ -62,6 +66,7 @@ impl ComposeCommand {
             compose_files,
             project_name: None,
             base_path,
+            env_files: Vec::new(),
         }
     }
 
@@ -77,6 +82,12 @@ impl ComposeCommand {
         self
     }
 
+    /// Set environment files
+    pub fn with_env_files(mut self, env_files: Vec<PathBuf>) -> Self {
+        self.env_files = env_files;
+        self
+    }
+
     /// Build docker compose command with given arguments
     pub fn build_command(&self, args: &[&str]) -> Command {
         let mut command = Command::new(&self.docker_path);
@@ -85,6 +96,11 @@ impl ComposeCommand {
         // Add compose files
         for file in &self.compose_files {
             command.arg("-f").arg(file);
+        }
+
+        // Add environment files
+        for file in &self.env_files {
+            command.arg("--env-file").arg(file);
         }
 
         // Add project name if specified
@@ -330,6 +346,7 @@ impl ComposeManager {
             compose_files: resolved_files,
             service: service.clone(),
             run_services: config.run_services.clone(),
+            env_files: Vec::new(),
         })
     }
 
@@ -338,6 +355,7 @@ impl ComposeManager {
         ComposeCommand::new(project.base_path.clone(), project.compose_files.clone())
             .with_docker_path(self.docker_path.clone())
             .with_project_name(project.name.clone())
+            .with_env_files(project.env_files.clone())
     }
 
     /// Check if project containers are running
@@ -591,6 +609,32 @@ mod tests {
     }
 
     #[test]
+    fn test_compose_command_with_env_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let compose_files = vec![base_path.join("docker-compose.yml")];
+        let env_files = vec![base_path.join(".env"), base_path.join(".env.local")];
+
+        let cmd = ComposeCommand::new(base_path.clone(), compose_files.clone())
+            .with_project_name("test-project".to_string())
+            .with_env_files(env_files.clone());
+
+        let command = cmd.build_command(&["up", "-d"]);
+
+        let args: Vec<String> = command
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
+
+        assert!(args.contains(&"compose".to_string()));
+        assert!(args.contains(&"--env-file".to_string()));
+
+        // Verify that both env files are included
+        let env_file_count = args.iter().filter(|&arg| arg == "--env-file").count();
+        assert_eq!(env_file_count, 2, "Should have two --env-file flags");
+    }
+
+    #[test]
     fn test_compose_project_get_all_services() {
         let project = ComposeProject {
             name: "test".to_string(),
@@ -598,6 +642,7 @@ mod tests {
             compose_files: vec![PathBuf::from("docker-compose.yml")],
             service: "app".to_string(),
             run_services: vec!["db".to_string(), "redis".to_string()],
+            env_files: Vec::new(),
         };
 
         let services = project.get_all_services();
@@ -668,6 +713,7 @@ mod tests {
                 "cache".to_string(),
                 "queue".to_string(),
             ],
+            env_files: Vec::new(),
         };
 
         let all_services = project.get_all_services();
@@ -687,6 +733,7 @@ mod tests {
             compose_files: vec![PathBuf::from("docker-compose.yml")],
             service: "app".to_string(),
             run_services: vec![],
+            env_files: Vec::new(),
         };
 
         let all_services = project.get_all_services();

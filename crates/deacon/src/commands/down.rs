@@ -334,6 +334,7 @@ async fn execute_compose_down(
             .collect(),
         service: compose_state.service_name.clone(),
         run_services: vec![], // We don't track run_services in state currently
+        env_files: Vec::new(),
     };
 
     // Check if project is still running

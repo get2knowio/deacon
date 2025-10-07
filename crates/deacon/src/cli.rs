@@ -160,6 +160,9 @@ pub enum Commands {
         /// Ignore host requirements validation (log warnings instead of failing)
         #[arg(long)]
         ignore_host_requirements: bool,
+        /// Environment file(s) to pass to docker compose (can be repeated)
+        #[arg(long)]
+        env_file: Vec<PathBuf>,
     },
 
     /// Build development container image
@@ -215,6 +218,9 @@ pub enum Commands {
         /// Ignore host requirements validation (log warnings instead of failing)
         #[arg(long)]
         ignore_host_requirements: bool,
+        /// Environment file(s) to pass to docker compose (can be repeated)
+        #[arg(long)]
+        env_file: Vec<PathBuf>,
     },
 
     /// Execute command in running container
@@ -649,6 +655,7 @@ impl Cli {
                 prefer_cli_features,
                 feature_install_order,
                 ignore_host_requirements,
+                env_file,
             }) => {
                 use crate::commands::up::{execute_up, UpArgs};
 
@@ -670,6 +677,7 @@ impl Cli {
                     runtime: self.runtime.map(|r| r.into()),
                     redaction_config: redaction_config.clone(),
                     secret_registry: secret_registry.clone(),
+                    env_file,
                 };
 
                 match execute_up(args).await {
@@ -704,6 +712,7 @@ impl Cli {
                 prefer_cli_features,
                 feature_install_order,
                 ignore_host_requirements,
+                env_file,
             }) => {
                 use crate::commands::build::{execute_build, BuildArgs};
 
@@ -730,6 +739,7 @@ impl Cli {
                     progress_tracker: progress_tracker.clone(),
                     redaction_config: redaction_config.clone(),
                     secret_registry: secret_registry.clone(),
+                    env_file,
                 };
 
                 execute_build(args).await?;

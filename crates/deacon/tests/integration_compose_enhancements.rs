@@ -104,6 +104,7 @@ fn test_compose_project_all_services_inclusion() {
             "cache".to_string(),
             "worker".to_string(),
         ],
+        env_files: Vec::new(),
     };
 
     let all_services = project.get_all_services();
