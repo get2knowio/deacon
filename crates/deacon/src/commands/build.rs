@@ -40,6 +40,8 @@ pub struct BuildArgs {
         std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
     pub redaction_config: deacon_core::redaction::RedactionConfig,
     pub secret_registry: deacon_core::redaction::SecretRegistry,
+    #[allow(dead_code)] // Build command doesn't yet support compose configurations
+    pub env_file: Vec<PathBuf>,
 }
 
 impl Default for BuildArgs {
@@ -67,6 +69,7 @@ impl Default for BuildArgs {
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::SecretRegistry::new(),
+            env_file: Vec::new(),
         }
     }
 }
@@ -1559,6 +1562,7 @@ mod tests {
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::SecretRegistry::new(),
+            env_file: Vec::new(),
         };
 
         // Verify args are structured correctly
@@ -1600,6 +1604,7 @@ mod tests {
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::SecretRegistry::new(),
+            env_file: Vec::new(),
         };
 
         // Verify advanced args are structured correctly

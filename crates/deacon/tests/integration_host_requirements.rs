@@ -58,6 +58,7 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
         runtime: None,
         redaction_config: deacon_core::redaction::RedactionConfig::default(),
         secret_registry: deacon_core::redaction::global_registry().clone(),
+        env_file: Vec::new(),
     };
 
     // This should not fail due to host requirements
@@ -113,6 +114,7 @@ async fn test_host_requirements_validation_fails_with_unrealistic_requirements()
         runtime: None,
         redaction_config: deacon_core::redaction::RedactionConfig::default(),
         secret_registry: deacon_core::redaction::global_registry().clone(),
+        env_file: Vec::new(),
     };
 
     let result = execute_up(args).await;
@@ -168,6 +170,7 @@ async fn test_host_requirements_ignored_with_flag() {
         runtime: None,
         redaction_config: deacon_core::redaction::RedactionConfig::default(),
         secret_registry: deacon_core::redaction::global_registry().clone(),
+        env_file: Vec::new(),
     };
 
     let result = execute_up(args).await;

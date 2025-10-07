@@ -39,6 +39,7 @@ pub struct UpArgs {
     pub runtime: Option<deacon_core::runtime::RuntimeKind>,
     pub redaction_config: deacon_core::redaction::RedactionConfig,
     pub secret_registry: deacon_core::redaction::SecretRegistry,
+    pub env_file: Vec<PathBuf>,
 }
 
 impl Default for UpArgs {
@@ -61,6 +62,7 @@ impl Default for UpArgs {
             runtime: None,
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::global_registry().clone(),
+            env_file: Vec::new(),
         }
     }
 }
@@ -234,7 +236,10 @@ async fn execute_compose_up(
     debug!("Starting Docker Compose project");
 
     let compose_manager = ComposeManager::new();
-    let project = compose_manager.create_project(config, workspace_folder)?;
+    let mut project = compose_manager.create_project(config, workspace_folder)?;
+
+    // Add env files from CLI args
+    project.env_files = args.env_file.clone();
 
     debug!("Created compose project: {:?}", project.name);
 
@@ -1022,6 +1027,7 @@ mod tests {
             runtime: None,
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::global_registry().clone(),
+            env_file: Vec::new(),
         };
 
         assert!(args.remove_existing_container);
@@ -1074,6 +1080,7 @@ mod tests {
             runtime: None,
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::global_registry().clone(),
+            env_file: Vec::new(),
         };
 
         assert!(args.remove_existing_container);
