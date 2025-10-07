@@ -649,4 +649,49 @@ mod tests {
         assert!(err_msg.contains("test-api-1"));
         assert!(err_msg.contains("test-api-2"));
     }
+
+    #[test]
+    fn test_exec_args_with_service() {
+        // Test that ExecArgs correctly stores service field for compose targeting
+        let args = ExecArgs {
+            user: None,
+            no_tty: false,
+            env: vec![],
+            workdir: None,
+            id_label: vec![],
+            service: Some("redis".to_string()),
+            command: vec!["redis-cli".to_string(), "ping".to_string()],
+            workspace_folder: None,
+            config_path: None,
+        };
+
+        assert_eq!(args.service, Some("redis".to_string()));
+        assert_eq!(args.command, vec!["redis-cli", "ping"]);
+    }
+
+    #[test]
+    fn test_compose_run_services_enumeration() {
+        use serde_json::json;
+
+        // Test that a compose config with run services properly enumerates all services
+        let config = DevContainerConfig {
+            docker_compose_file: Some(json!("docker-compose.yml")),
+            service: Some("app".to_string()),
+            run_services: vec![
+                "postgres".to_string(),
+                "redis".to_string(),
+                "elasticsearch".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        let all_services = config.get_all_services();
+
+        // Should have primary service plus 3 run services
+        assert_eq!(all_services.len(), 4);
+        assert_eq!(all_services[0], "app"); // Primary first
+        assert!(all_services.contains(&"postgres".to_string()));
+        assert!(all_services.contains(&"redis".to_string()));
+        assert!(all_services.contains(&"elasticsearch".to_string()));
+    }
 }
