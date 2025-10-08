@@ -5,7 +5,7 @@
 
 use crate::docker::{CliDocker, Docker, ExecConfig};
 use crate::errors::{DeaconError, Result};
-use crate::lifecycle::LifecyclePhase;
+use crate::lifecycle::{ExecutionContext, ExecutionMode, LifecycleCommands, LifecyclePhase};
 use crate::progress::{ProgressEvent, ProgressTracker};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
@@ -117,10 +117,12 @@ where
 /// Execute lifecycle commands in a container with optional progress event callback and custom Docker implementation
 ///
 /// This function executes lifecycle commands in the specified order:
-/// 1. onCreate
-/// 2. postCreate (if not skipped)
-/// 3. postStart (if not skipped by skip_non_blocking_commands)
-/// 4. postAttach (if not skipped by skip_non_blocking_commands)
+/// 1. initialize (host-side, if provided)
+/// 2. onCreate
+/// 3. updateContent (if provided)
+/// 4. postCreate (if not skipped)
+/// 5. postStart (if not skipped by skip_non_blocking_commands)
+/// 6. postAttach (if not skipped by skip_non_blocking_commands)
 ///
 /// Emits per-command progress events via the callback if provided.
 #[instrument(skip(config, commands, substitution_context, docker, progress_callback))]
@@ -148,12 +150,41 @@ where
         .with_container_workspace_folder(config.container_workspace_folder.clone())
         .with_container_env(config.container_env.clone());
 
+    // Execute initialize phase (host-side) if provided
+    if let Some(initialize_commands) = &commands.initialize {
+        info!("Executing initialize phase on host");
+        result.phases.push(
+            execute_host_lifecycle_phase(
+                LifecyclePhase::Initialize,
+                initialize_commands,
+                substitution_context,
+                progress_callback.as_ref(),
+            )
+            .await?,
+        );
+    }
+
     // Execute onCreate phase
     if let Some(on_create_commands) = &commands.on_create {
         result.phases.push(
             execute_lifecycle_phase(
                 LifecyclePhase::OnCreate,
                 on_create_commands,
+                config,
+                &docker,
+                &container_context,
+                progress_callback.as_ref(),
+            )
+            .await?,
+        );
+    }
+
+    // Execute updateContent phase if provided
+    if let Some(update_content_commands) = &commands.update_content {
+        result.phases.push(
+            execute_lifecycle_phase(
+                LifecyclePhase::UpdateContent,
+                update_content_commands,
                 config,
                 &docker,
                 &container_context,
@@ -218,6 +249,172 @@ where
 
     info!("Completed container lifecycle execution");
     Ok(result)
+}
+
+/// Execute a lifecycle phase on the host system (not in container)
+#[instrument(skip(commands, context, progress_callback))]
+async fn execute_host_lifecycle_phase<F>(
+    phase: LifecyclePhase,
+    commands: &[String],
+    context: &SubstitutionContext,
+    progress_callback: Option<&F>,
+) -> Result<PhaseResult>
+where
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
+    info!("Executing host lifecycle phase: {}", phase.as_str());
+    let phase_start = Instant::now();
+
+    // Emit phase begin event
+    if let Some(callback) = progress_callback {
+        let event = ProgressEvent::LifecyclePhaseBegin {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: phase.as_str().to_string(),
+            commands: commands.to_vec(),
+        };
+        if let Err(e) = callback(event) {
+            debug!("Failed to emit phase begin event: {}", e);
+        }
+    }
+
+    let mut phase_result = PhaseResult {
+        phase,
+        commands: Vec::new(),
+        total_duration: Duration::default(),
+        success: true,
+    };
+
+    // Convert commands to LifecycleCommands format with variable substitution
+    let mut lifecycle_commands_vec = Vec::new();
+    let mut substituted_commands = Vec::new();
+
+    for command_template in commands {
+        // Apply variable substitution to the command (same as container phases)
+        let mut substitution_report = SubstitutionReport::new();
+        let substituted_command = VariableSubstitution::substitute_string(
+            command_template,
+            context,
+            &mut substitution_report,
+        );
+
+        debug!(
+            "Host command after variable substitution: {} -> {}",
+            command_template, substituted_command
+        );
+
+        if substitution_report.has_substitutions() {
+            debug!(
+                "Variable substitutions applied: {:?}",
+                substitution_report.replacements
+            );
+            if !substitution_report.unknown_variables.is_empty() {
+                debug!(
+                    "Unknown variables left unchanged: {:?}",
+                    substitution_report.unknown_variables
+                );
+            }
+        }
+
+        // Store the substituted command for later use in CommandResult
+        substituted_commands.push(substituted_command.clone());
+
+        lifecycle_commands_vec.push(crate::lifecycle::CommandTemplate {
+            command: substituted_command,
+            env_vars: context.local_env.clone(),
+        });
+    }
+    let lifecycle_commands = LifecycleCommands {
+        commands: lifecycle_commands_vec,
+    };
+
+    // Create execution context for host
+    let exec_ctx = ExecutionContext {
+        environment: context.local_env.clone(),
+        working_directory: Some(std::path::PathBuf::from(&context.local_workspace_folder)),
+        timeout: None,
+        redaction_config: RedactionConfig::default(),
+        execution_mode: ExecutionMode::Host,
+    };
+
+    // Execute the phase using the lifecycle module's host execution
+    let result = tokio::task::spawn_blocking(move || {
+        crate::lifecycle::run_phase(phase, &lifecycle_commands, &exec_ctx)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(lifecycle_result)) => {
+            // Convert lifecycle result to phase result
+            for (i, exit_code) in lifecycle_result.exit_codes.iter().enumerate() {
+                let command_result = CommandResult {
+                    command: substituted_commands.get(i).cloned().unwrap_or_default(),
+                    exit_code: *exit_code,
+                    duration: lifecycle_result
+                        .durations
+                        .get(i)
+                        .copied()
+                        .unwrap_or_default(),
+                    success: *exit_code == 0,
+                    stdout: String::new(), // Not captured in detail per-command
+                    stderr: String::new(),
+                };
+                if !command_result.success {
+                    phase_result.success = false;
+                }
+                phase_result.commands.push(command_result);
+            }
+
+            if !lifecycle_result.success {
+                error!(
+                    "Host lifecycle phase {} failed with output:\nstdout: {}\nstderr: {}",
+                    phase.as_str(),
+                    lifecycle_result.stdout,
+                    lifecycle_result.stderr
+                );
+            }
+        }
+        Ok(Err(e)) => {
+            error!(
+                "Failed to execute host lifecycle phase {}: {}",
+                phase.as_str(),
+                e
+            );
+            phase_result.success = false;
+            return Err(e);
+        }
+        Err(e) => {
+            error!("Failed to spawn host lifecycle phase execution: {}", e);
+            phase_result.success = false;
+            return Err(DeaconError::Lifecycle(format!(
+                "Failed to spawn host lifecycle phase execution: {}",
+                e
+            )));
+        }
+    }
+
+    phase_result.total_duration = phase_start.elapsed();
+
+    // Emit phase end event
+    if let Some(callback) = progress_callback {
+        let event = ProgressEvent::LifecyclePhaseEnd {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: phase.as_str().to_string(),
+            duration_ms: phase_result.total_duration.as_millis() as u64,
+            success: phase_result.success,
+        };
+        if let Err(e) = callback(event) {
+            debug!("Failed to emit phase end event: {}", e);
+        }
+    }
+
+    info!(
+        "Completed host lifecycle phase: {} in {:?}",
+        phase.as_str(),
+        phase_result.total_duration
+    );
+    Ok(phase_result)
 }
 
 /// Execute a single lifecycle phase in the container
@@ -476,8 +673,12 @@ where
 /// Commands for each lifecycle phase
 #[derive(Debug, Clone, Default)]
 pub struct ContainerLifecycleCommands {
+    /// Commands to run during initialize phase (host-side)
+    pub initialize: Option<Vec<String>>,
     /// Commands to run during onCreate phase
     pub on_create: Option<Vec<String>>,
+    /// Commands to run during updateContent phase
+    pub update_content: Option<Vec<String>>,
     /// Commands to run during postCreate phase
     pub post_create: Option<Vec<String>>,
     /// Commands to run during postStart phase
@@ -492,9 +693,21 @@ impl ContainerLifecycleCommands {
         Self::default()
     }
 
+    /// Set initialize commands (host-side)
+    pub fn with_initialize(mut self, commands: Vec<String>) -> Self {
+        self.initialize = Some(commands);
+        self
+    }
+
     /// Set onCreate commands
     pub fn with_on_create(mut self, commands: Vec<String>) -> Self {
         self.on_create = Some(commands);
+        self
+    }
+
+    /// Set updateContent commands
+    pub fn with_update_content(mut self, commands: Vec<String>) -> Self {
+        self.update_content = Some(commands);
         self
     }
 
@@ -786,15 +999,65 @@ mod tests {
     #[test]
     fn test_container_lifecycle_commands_builder() {
         let commands = ContainerLifecycleCommands::new()
+            .with_initialize(vec!["echo 'initialize'".to_string()])
             .with_on_create(vec!["echo 'onCreate'".to_string()])
+            .with_update_content(vec!["echo 'updateContent'".to_string()])
             .with_post_create(vec!["echo 'postCreate'".to_string()])
             .with_post_start(vec!["echo 'postStart'".to_string()])
             .with_post_attach(vec!["echo 'postAttach'".to_string()]);
 
+        assert!(commands.initialize.is_some());
         assert!(commands.on_create.is_some());
+        assert!(commands.update_content.is_some());
         assert!(commands.post_create.is_some());
         assert!(commands.post_start.is_some());
         assert!(commands.post_attach.is_some());
+    }
+
+    #[test]
+    fn test_lifecycle_commands_all_phases() {
+        // Test that all 6 lifecycle phases can be configured
+        let commands = ContainerLifecycleCommands::new()
+            .with_initialize(vec!["echo 'Phase 1: initialize'".to_string()])
+            .with_on_create(vec!["echo 'Phase 2: onCreate'".to_string()])
+            .with_update_content(vec!["echo 'Phase 3: updateContent'".to_string()])
+            .with_post_create(vec!["echo 'Phase 4: postCreate'".to_string()])
+            .with_post_start(vec!["echo 'Phase 5: postStart'".to_string()])
+            .with_post_attach(vec!["echo 'Phase 6: postAttach'".to_string()]);
+
+        // Verify all phases are present
+        assert_eq!(commands.initialize.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.on_create.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.update_content.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.post_create.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.post_start.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.post_attach.as_ref().unwrap().len(), 1);
+
+        // Verify phase content
+        assert_eq!(
+            commands.initialize.as_ref().unwrap()[0],
+            "echo 'Phase 1: initialize'"
+        );
+        assert_eq!(
+            commands.on_create.as_ref().unwrap()[0],
+            "echo 'Phase 2: onCreate'"
+        );
+        assert_eq!(
+            commands.update_content.as_ref().unwrap()[0],
+            "echo 'Phase 3: updateContent'"
+        );
+        assert_eq!(
+            commands.post_create.as_ref().unwrap()[0],
+            "echo 'Phase 4: postCreate'"
+        );
+        assert_eq!(
+            commands.post_start.as_ref().unwrap()[0],
+            "echo 'Phase 5: postStart'"
+        );
+        assert_eq!(
+            commands.post_attach.as_ref().unwrap()[0],
+            "echo 'Phase 6: postAttach'"
+        );
     }
 
     #[test]

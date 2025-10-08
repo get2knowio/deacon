@@ -148,12 +148,28 @@ async fn execute_lifecycle_commands(
     let mut phases_to_execute = Vec::new();
 
     // Handle different lifecycle phases based on configuration
+    // Phase 1: initialize (host-side)
+    if let Some(ref initialize) = config.initialize_command {
+        let phase_commands = commands_from_json_value(initialize)?;
+        commands = commands.with_initialize(phase_commands.clone());
+        phases_to_execute.push(("initialize".to_string(), phase_commands));
+    }
+
+    // Phase 2: onCreate (container)
     if let Some(ref on_create) = config.on_create_command {
         let phase_commands = commands_from_json_value(on_create)?;
         commands = commands.with_on_create(phase_commands.clone());
         phases_to_execute.push(("onCreate".to_string(), phase_commands));
     }
 
+    // Phase 3: updateContent (container)
+    if let Some(ref update_content) = config.update_content_command {
+        let phase_commands = commands_from_json_value(update_content)?;
+        commands = commands.with_update_content(phase_commands.clone());
+        phases_to_execute.push(("updateContent".to_string(), phase_commands));
+    }
+
+    // Phase 4: postCreate (container, can be skipped)
     if !args.skip_post_create {
         if let Some(ref post_create) = config.post_create_command {
             let phase_commands = commands_from_json_value(post_create)?;
@@ -162,6 +178,7 @@ async fn execute_lifecycle_commands(
         }
     }
 
+    // Phase 5: postStart (container, non-blocking, can be skipped)
     if !args.skip_non_blocking_commands {
         if let Some(ref post_start) = config.post_start_command {
             let phase_commands = commands_from_json_value(post_start)?;
@@ -169,6 +186,7 @@ async fn execute_lifecycle_commands(
             phases_to_execute.push(("postStart".to_string(), phase_commands));
         }
 
+        // Phase 6: postAttach (container, non-blocking, can be skipped)
         if !args.skip_post_attach {
             if let Some(ref post_attach) = config.post_attach_command {
                 let phase_commands = commands_from_json_value(post_attach)?;
