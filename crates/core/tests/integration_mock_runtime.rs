@@ -332,7 +332,9 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
 
     // Create lifecycle commands
     let commands = ContainerLifecycleCommands {
+        initialize: None,
         on_create: Some(vec!["npm install".to_string()]),
+        update_content: None,
         post_create: Some(vec!["npm run build".to_string()]),
         post_start: Some(vec!["echo 'container started'".to_string()]),
         post_attach: Some(vec!["echo 'container attached'".to_string()]),
@@ -421,7 +423,9 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
 
     // Create lifecycle commands
     let commands = ContainerLifecycleCommands {
+        initialize: None,
         on_create: Some(vec!["echo 'on create'".to_string()]),
+        update_content: None,
         post_create: Some(vec!["echo 'post create'".to_string()]),
         post_start: Some(vec!["echo 'post start'".to_string()]),
         post_attach: Some(vec!["echo 'post attach'".to_string()]),
@@ -483,7 +487,9 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
 
     // Create lifecycle commands with a failing command
     let commands = ContainerLifecycleCommands {
+        initialize: None,
         on_create: Some(vec!["echo 'success'".to_string()]),
+        update_content: None,
         post_create: Some(vec!["failing-command".to_string()]),
         post_start: None,
         post_attach: None,
@@ -569,7 +575,9 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
 
     // Create lifecycle commands
     let commands = ContainerLifecycleCommands {
+        initialize: None,
         on_create: Some(vec!["echo 'onCreate'".to_string()]),
+        update_content: None,
         post_create: Some(vec!["echo 'postCreate'".to_string()]),
         post_start: Some(vec!["echo 'postStart'".to_string()]),
         post_attach: Some(vec!["echo 'postAttach'".to_string()]),
