@@ -285,11 +285,42 @@ where
         success: true,
     };
 
-    // Convert commands to LifecycleCommands format
+    // Convert commands to LifecycleCommands format with variable substitution
     let mut lifecycle_commands_vec = Vec::new();
+    let mut substituted_commands = Vec::new();
+
     for command_template in commands {
+        // Apply variable substitution to the command (same as container phases)
+        let mut substitution_report = SubstitutionReport::new();
+        let substituted_command = VariableSubstitution::substitute_string(
+            command_template,
+            context,
+            &mut substitution_report,
+        );
+
+        debug!(
+            "Host command after variable substitution: {} -> {}",
+            command_template, substituted_command
+        );
+
+        if substitution_report.has_substitutions() {
+            debug!(
+                "Variable substitutions applied: {:?}",
+                substitution_report.replacements
+            );
+            if !substitution_report.unknown_variables.is_empty() {
+                debug!(
+                    "Unknown variables left unchanged: {:?}",
+                    substitution_report.unknown_variables
+                );
+            }
+        }
+
+        // Store the substituted command for later use in CommandResult
+        substituted_commands.push(substituted_command.clone());
+
         lifecycle_commands_vec.push(crate::lifecycle::CommandTemplate {
-            command: command_template.clone(),
+            command: substituted_command,
             env_vars: context.local_env.clone(),
         });
     }
@@ -317,7 +348,7 @@ where
             // Convert lifecycle result to phase result
             for (i, exit_code) in lifecycle_result.exit_codes.iter().enumerate() {
                 let command_result = CommandResult {
-                    command: commands.get(i).cloned().unwrap_or_default(),
+                    command: substituted_commands.get(i).cloned().unwrap_or_default(),
                     exit_code: *exit_code,
                     duration: lifecycle_result
                         .durations
