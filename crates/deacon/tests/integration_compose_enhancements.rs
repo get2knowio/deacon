@@ -200,3 +200,74 @@ fn test_port_attributes_for_multiservice() {
     assert!(config.ports_attributes.contains_key("5432"));
     assert!(config.ports_attributes.contains_key("6379"));
 }
+
+#[test]
+fn test_compose_get_all_container_ids() {
+    // Test that get_all_container_ids method exists and can be called
+    let project = ComposeProject {
+        name: "test-project".to_string(),
+        base_path: PathBuf::from("/test"),
+        compose_files: vec![PathBuf::from("docker-compose.yml")],
+        service: "app".to_string(),
+        run_services: vec!["db".to_string(), "redis".to_string()],
+        env_files: Vec::new(),
+    };
+
+    let compose_manager = ComposeManager::new();
+
+    // This will fail in practice because no containers are running,
+    // but we're testing that the API exists and is callable
+    let result = compose_manager.get_all_container_ids(&project);
+
+    // We expect this to succeed with empty result or fail with Docker error
+    // but not panic or have a compilation error
+    match result {
+        Ok(container_ids) => {
+            // If successful and containers are present, validate the structure
+            if !container_ids.is_empty() {
+                // Build expected service set from project
+                let expected_services: std::collections::HashSet<String> =
+                    project.get_all_services().into_iter().collect();
+
+                // Verify all returned keys are valid service names
+                assert!(
+                    container_ids.keys().all(|k| expected_services.contains(k)),
+                    "All container IDs should map to valid service names"
+                );
+
+                // Verify all container IDs are non-empty strings
+                assert!(
+                    container_ids.values().all(|v| !v.is_empty()),
+                    "Container IDs should be non-empty strings"
+                );
+            }
+            // Empty result is acceptable (no containers running)
+        }
+        Err(_) => {
+            // Expected to fail since no Docker containers are running
+            // This is fine for unit test purposes
+        }
+    }
+}
+
+#[test]
+fn test_compose_service_targeting() {
+    // Test that services can be individually targeted in a multi-service setup
+    let project = ComposeProject {
+        name: "multi-service".to_string(),
+        base_path: PathBuf::from("/workspace"),
+        compose_files: vec![PathBuf::from("docker-compose.yml")],
+        service: "web".to_string(),
+        run_services: vec!["db".to_string(), "cache".to_string()],
+        env_files: Vec::new(),
+    };
+
+    // Verify all services are accessible
+    let all_services = project.get_all_services();
+    assert!(all_services.contains(&"web".to_string()));
+    assert!(all_services.contains(&"db".to_string()));
+    assert!(all_services.contains(&"cache".to_string()));
+
+    // Verify primary service is first
+    assert_eq!(all_services[0], "web");
+}

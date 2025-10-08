@@ -26,6 +26,8 @@ pub struct ExecArgs {
     pub workdir: Option<String>,
     /// Identify container by labels (KEY=VALUE format)
     pub id_label: Vec<String>,
+    /// Target specific service in Docker Compose projects (defaults to primary service)
+    pub service: Option<String>,
     /// Command to execute
     pub command: Vec<String>,
     /// Workspace folder path
@@ -40,6 +42,7 @@ pub async fn resolve_target_container<D>(
     docker_client: &D,
     workspace_folder: &Path,
     config: &DevContainerConfig,
+    target_service: Option<&str>,
 ) -> Result<String>
 where
     D: Docker,
@@ -49,7 +52,14 @@ where
     // Check if this is a Docker Compose configuration
     if config.uses_compose() {
         debug!("Configuration uses Docker Compose, resolving via compose manager");
-        return resolve_compose_target_container(workspace_folder, config).await;
+        return resolve_compose_target_container(workspace_folder, config, target_service).await;
+    }
+
+    // For single container configurations, service parameter is not applicable
+    if target_service.is_some() {
+        return Err(anyhow::anyhow!(
+            "--service parameter is only applicable for Docker Compose configurations"
+        ));
     }
 
     // For single container configurations, use existing logic
@@ -183,6 +193,7 @@ where
 async fn resolve_compose_target_container(
     workspace_folder: &Path,
     config: &DevContainerConfig,
+    target_service: Option<&str>,
 ) -> Result<String> {
     debug!("Resolving compose target container");
 
@@ -191,16 +202,40 @@ async fn resolve_compose_target_container(
 
     debug!("Created compose project: {:?}", project.name);
 
-    // Get the primary service container ID
-    match compose_manager.get_primary_container_id(&project)? {
+    // Determine which service to target
+    let service_name = if let Some(service) = target_service {
+        // Validate that the requested service is in the project
+        let all_services = project.get_all_services();
+        if !all_services.contains(&service.to_string()) {
+            return Err(anyhow::anyhow!(
+                "Service '{}' not found in compose project. Available services: {}",
+                service,
+                all_services.join(", ")
+            ));
+        }
+        service.to_string()
+    } else {
+        // Default to primary service
+        project.service.clone()
+    };
+
+    debug!("Targeting service: {}", service_name);
+
+    // Get all container IDs for the project
+    let container_ids = compose_manager.get_all_container_ids(&project)?;
+
+    // Find the container for the target service
+    match container_ids.get(&service_name) {
         Some(container_id) => {
-            debug!("Found primary service container: {}", container_id);
-            Ok(container_id)
+            debug!(
+                "Found container for service '{}': {}",
+                service_name, container_id
+            );
+            Ok(container_id.clone())
         }
         None => {
             let workspace_path = workspace_folder.display();
             let config_name = config.name.as_deref().unwrap_or("unnamed");
-            let service_name = &project.service;
             Err(anyhow::anyhow!(
                 "No running container found for service '{}' in compose project for workspace '{}' with config '{}'. \
                  Run 'deacon up' first to start the compose project.",
@@ -301,7 +336,13 @@ where
             };
 
             debug!("Loaded configuration: {:?}", config.name);
-            resolve_target_container(docker_client, workspace_folder, &config).await?
+            resolve_target_container(
+                docker_client,
+                workspace_folder,
+                &config,
+                args.service.as_deref(),
+            )
+            .await?
         };
 
         // Determine TTY allocation
@@ -464,6 +505,7 @@ mod tests {
             env: vec!["KEY=value".to_string()],
             workdir: Some("/custom/path".to_string()),
             id_label: vec![],
+            service: None,
             command: vec!["ls".to_string(), "-la".to_string()],
             workspace_folder: None,
             config_path: None,
@@ -482,6 +524,7 @@ mod tests {
             env: vec![],
             workdir: None,
             id_label: vec![],
+            service: None,
             command: vec!["pwd".to_string()],
             workspace_folder: None,
             config_path: None,
@@ -605,5 +648,50 @@ mod tests {
         // Verify that container names are listed
         assert!(err_msg.contains("test-api-1"));
         assert!(err_msg.contains("test-api-2"));
+    }
+
+    #[test]
+    fn test_exec_args_with_service() {
+        // Test that ExecArgs correctly stores service field for compose targeting
+        let args = ExecArgs {
+            user: None,
+            no_tty: false,
+            env: vec![],
+            workdir: None,
+            id_label: vec![],
+            service: Some("redis".to_string()),
+            command: vec!["redis-cli".to_string(), "ping".to_string()],
+            workspace_folder: None,
+            config_path: None,
+        };
+
+        assert_eq!(args.service, Some("redis".to_string()));
+        assert_eq!(args.command, vec!["redis-cli", "ping"]);
+    }
+
+    #[test]
+    fn test_compose_run_services_enumeration() {
+        use serde_json::json;
+
+        // Test that a compose config with run services properly enumerates all services
+        let config = DevContainerConfig {
+            docker_compose_file: Some(json!("docker-compose.yml")),
+            service: Some("app".to_string()),
+            run_services: vec![
+                "postgres".to_string(),
+                "redis".to_string(),
+                "elasticsearch".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        let all_services = config.get_all_services();
+
+        // Should have primary service plus 3 run services
+        assert_eq!(all_services.len(), 4);
+        assert_eq!(all_services[0], "app"); // Primary first
+        assert!(all_services.contains(&"postgres".to_string()));
+        assert!(all_services.contains(&"redis".to_string()));
+        assert!(all_services.contains(&"elasticsearch".to_string()));
     }
 }

@@ -85,7 +85,7 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
 
     let container_id = {
         let docker_client = deacon_core::docker::CliDocker::new();
-        match resolve_target_container(&docker_client, &workspace_folder, &config).await {
+        match resolve_target_container(&docker_client, &workspace_folder, &config, None).await {
             Ok(id) => id,
             Err(e) => {
                 debug!(error = ?e, "Failed to resolve target container for workspace");

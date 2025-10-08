@@ -240,6 +240,9 @@ pub enum Commands {
         /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
         #[arg(long, action = clap::ArgAction::Append)]
         id_label: Vec<String>,
+        /// Target specific service in Docker Compose projects (defaults to primary service)
+        #[arg(long)]
+        service: Option<String>,
         /// Command to execute
         command: Vec<String>,
     },
@@ -751,6 +754,7 @@ impl Cli {
                 env,
                 workdir,
                 id_label,
+                service,
                 command,
             }) => {
                 use crate::commands::exec::{execute_exec, ExecArgs};
@@ -761,6 +765,7 @@ impl Cli {
                     env,
                     workdir,
                     id_label,
+                    service,
                     command,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
