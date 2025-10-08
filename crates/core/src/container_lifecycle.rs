@@ -968,15 +968,65 @@ mod tests {
     #[test]
     fn test_container_lifecycle_commands_builder() {
         let commands = ContainerLifecycleCommands::new()
+            .with_initialize(vec!["echo 'initialize'".to_string()])
             .with_on_create(vec!["echo 'onCreate'".to_string()])
+            .with_update_content(vec!["echo 'updateContent'".to_string()])
             .with_post_create(vec!["echo 'postCreate'".to_string()])
             .with_post_start(vec!["echo 'postStart'".to_string()])
             .with_post_attach(vec!["echo 'postAttach'".to_string()]);
 
+        assert!(commands.initialize.is_some());
         assert!(commands.on_create.is_some());
+        assert!(commands.update_content.is_some());
         assert!(commands.post_create.is_some());
         assert!(commands.post_start.is_some());
         assert!(commands.post_attach.is_some());
+    }
+
+    #[test]
+    fn test_lifecycle_commands_all_phases() {
+        // Test that all 6 lifecycle phases can be configured
+        let commands = ContainerLifecycleCommands::new()
+            .with_initialize(vec!["echo 'Phase 1: initialize'".to_string()])
+            .with_on_create(vec!["echo 'Phase 2: onCreate'".to_string()])
+            .with_update_content(vec!["echo 'Phase 3: updateContent'".to_string()])
+            .with_post_create(vec!["echo 'Phase 4: postCreate'".to_string()])
+            .with_post_start(vec!["echo 'Phase 5: postStart'".to_string()])
+            .with_post_attach(vec!["echo 'Phase 6: postAttach'".to_string()]);
+
+        // Verify all phases are present
+        assert_eq!(commands.initialize.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.on_create.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.update_content.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.post_create.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.post_start.as_ref().unwrap().len(), 1);
+        assert_eq!(commands.post_attach.as_ref().unwrap().len(), 1);
+
+        // Verify phase content
+        assert_eq!(
+            commands.initialize.as_ref().unwrap()[0],
+            "echo 'Phase 1: initialize'"
+        );
+        assert_eq!(
+            commands.on_create.as_ref().unwrap()[0],
+            "echo 'Phase 2: onCreate'"
+        );
+        assert_eq!(
+            commands.update_content.as_ref().unwrap()[0],
+            "echo 'Phase 3: updateContent'"
+        );
+        assert_eq!(
+            commands.post_create.as_ref().unwrap()[0],
+            "echo 'Phase 4: postCreate'"
+        );
+        assert_eq!(
+            commands.post_start.as_ref().unwrap()[0],
+            "echo 'Phase 5: postStart'"
+        );
+        assert_eq!(
+            commands.post_attach.as_ref().unwrap()[0],
+            "echo 'Phase 6: postAttach'"
+        );
     }
 
     #[test]
