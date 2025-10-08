@@ -378,7 +378,15 @@ pub enum FeatureCommands {
         password_stdin: bool,
     },
     /// Get feature information
-    Info { mode: String, feature: String },
+    Info {
+        /// Information mode (manifest, tags, dependencies, verbose)
+        mode: String,
+        /// Feature path (local directory) or registry reference
+        feature: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate feature installation plan
     Plan {
         /// Output in JSON format

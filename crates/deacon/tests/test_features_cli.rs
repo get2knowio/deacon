@@ -42,6 +42,18 @@ fn extract_json_from_output(output: &str) -> Result<serde_json::Value, serde_jso
     serde_json::from_str(output)
 }
 
+/// Helper function to get absolute path to fixtures
+fn fixture_path(relative_path: &str) -> std::path::PathBuf {
+    let current_dir = std::env::current_dir().unwrap();
+    // Tests run from crate directory, so we need to go up to workspace root
+    let workspace_root = if current_dir.ends_with("crates/deacon") {
+        current_dir.parent().unwrap().parent().unwrap()
+    } else {
+        &current_dir
+    };
+    workspace_root.join(relative_path)
+}
+
 /// Test features test command with a valid feature
 #[test]
 fn test_features_test_with_valid_feature() {
@@ -392,4 +404,307 @@ fn test_features_help_shows_pull() {
         .stdout(predicate::str::contains("Feature management commands"))
         .stdout(predicate::str::contains("pull"))
         .stdout(predicate::str::contains("Pull features from registry"));
+}
+
+/// Test features info command help output
+#[test]
+fn test_features_info_help() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args(["features", "info", "--help"]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Get feature information"))
+        .stdout(predicate::str::contains("MODE"))
+        .stdout(predicate::str::contains("FEATURE"))
+        .stdout(predicate::str::contains("--json"));
+}
+
+/// Test features info manifest mode with local feature (JSON)
+#[test]
+fn test_features_info_manifest_local_json() {
+    let fixture = fixture_path("fixtures/features/with-options");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "info",
+        "manifest",
+        fixture.to_str().unwrap(),
+        "--json",
+    ]);
+
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse JSON output
+    let json: serde_json::Value = extract_json_from_output(&stdout).unwrap();
+
+    // Verify basic fields
+    assert_eq!(json["id"], "feature-with-options");
+    assert_eq!(json["version"], "1.0.0");
+    assert_eq!(json["name"], "Feature with Options");
+    assert!(json["description"]
+        .as_str()
+        .unwrap()
+        .contains("test feature"));
+
+    // Verify options are present
+    assert!(json["options"].is_object());
+    assert!(json["options"]["enableFeature"].is_object());
+
+    // Verify dependencies
+    assert!(json["installsAfter"].is_array());
+    assert_eq!(json["installsAfter"][0], "common-utils");
+    assert!(json["dependsOn"].is_object());
+}
+
+/// Test features info manifest mode with local feature (text)
+#[test]
+fn test_features_info_manifest_local_text() {
+    let fixture = fixture_path("fixtures/features/with-options");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args(["features", "info", "manifest", fixture.to_str().unwrap()]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Feature Manifest:"))
+        .stdout(predicate::str::contains("ID: feature-with-options"))
+        .stdout(predicate::str::contains("Version: 1.0.0"))
+        .stdout(predicate::str::contains("Name: Feature with Options"));
+}
+
+/// Test features info tags mode with local feature (JSON)
+#[test]
+fn test_features_info_tags_local_json() {
+    let fixture = fixture_path("fixtures/features/with-options");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "info",
+        "tags",
+        fixture.to_str().unwrap(),
+        "--json",
+    ]);
+
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse JSON output
+    let json: serde_json::Value = extract_json_from_output(&stdout).unwrap();
+
+    // Verify fields
+    assert_eq!(json["id"], "feature-with-options");
+    assert!(json["tags"].is_array());
+    assert_eq!(json["tags"][0], "1.0.0");
+}
+
+/// Test features info tags mode with local feature (text)
+#[test]
+fn test_features_info_tags_local_text() {
+    let fixture = fixture_path("fixtures/features/with-options");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args(["features", "info", "tags", fixture.to_str().unwrap()]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Available Tags"))
+        .stdout(predicate::str::contains("feature-with-options"))
+        .stdout(predicate::str::contains("1.0.0"));
+}
+
+/// Test features info dependencies mode with local feature (JSON)
+#[test]
+fn test_features_info_dependencies_local_json() {
+    let fixture = fixture_path("fixtures/features/with-options");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "info",
+        "dependencies",
+        fixture.to_str().unwrap(),
+        "--json",
+    ]);
+
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse JSON output
+    let json: serde_json::Value = extract_json_from_output(&stdout).unwrap();
+
+    // Verify fields
+    assert_eq!(json["id"], "feature-with-options");
+    assert!(json["installsAfter"].is_array());
+    assert_eq!(json["installsAfter"][0], "common-utils");
+    assert!(json["dependsOn"].is_object());
+    assert_eq!(json["dependsOn"]["common-utils"], "latest");
+}
+
+/// Test features info dependencies mode with local feature (text)
+#[test]
+fn test_features_info_dependencies_local_text() {
+    let fixture = fixture_path("fixtures/features/with-options");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "info",
+        "dependencies",
+        fixture.to_str().unwrap(),
+    ]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Dependencies for"))
+        .stdout(predicate::str::contains("feature-with-options"))
+        .stdout(predicate::str::contains("Installs After:"))
+        .stdout(predicate::str::contains("common-utils"))
+        .stdout(predicate::str::contains("Depends On:"))
+        .stdout(predicate::str::contains("latest"));
+}
+
+/// Test features info verbose mode with local feature (JSON)
+#[test]
+fn test_features_info_verbose_local_json() {
+    let fixture = fixture_path("fixtures/features/with-options");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "info",
+        "verbose",
+        fixture.to_str().unwrap(),
+        "--json",
+    ]);
+
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse JSON output
+    let json: serde_json::Value = extract_json_from_output(&stdout).unwrap();
+
+    // Verify all fields are present
+    assert_eq!(json["id"], "feature-with-options");
+    assert_eq!(json["version"], "1.0.0");
+    assert_eq!(json["name"], "Feature with Options");
+    assert!(json["options"].is_object());
+    assert!(json["containerEnv"].is_object());
+    assert!(json["mounts"].is_array());
+    assert_eq!(json["init"], true);
+    assert_eq!(json["privileged"], false);
+    assert!(json["capAdd"].is_array());
+    assert!(json["securityOpt"].is_array());
+    assert!(json["installsAfter"].is_array());
+    assert!(json["dependsOn"].is_object());
+}
+
+/// Test features info verbose mode with local feature (text)
+#[test]
+fn test_features_info_verbose_local_text() {
+    let fixture = fixture_path("fixtures/features/with-options");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args(["features", "info", "verbose", fixture.to_str().unwrap()]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Feature Information (Verbose)"))
+        .stdout(predicate::str::contains("Basic Information:"))
+        .stdout(predicate::str::contains("ID: feature-with-options"))
+        .stdout(predicate::str::contains("Version: 1.0.0"))
+        .stdout(predicate::str::contains("Options:"))
+        .stdout(predicate::str::contains("Dependencies:"))
+        .stdout(predicate::str::contains("Container Environment Variables:"))
+        .stdout(predicate::str::contains("Mounts:"))
+        .stdout(predicate::str::contains("Container Options:"))
+        .stdout(predicate::str::contains("Lifecycle Commands:"));
+}
+
+/// Test features info with minimal feature (no optional fields)
+#[test]
+fn test_features_info_manifest_minimal() {
+    let fixture = fixture_path("fixtures/features/minimal");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "info",
+        "manifest",
+        fixture.to_str().unwrap(),
+        "--json",
+    ]);
+
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse JSON output
+    let json: serde_json::Value = extract_json_from_output(&stdout).unwrap();
+
+    // Verify only required fields
+    assert_eq!(json["id"], "minimal-feature");
+    assert!(json["version"].is_null());
+    assert!(json["name"].is_null());
+}
+
+/// Test features info with invalid mode
+#[test]
+fn test_features_info_invalid_mode() {
+    let fixture = fixture_path("fixtures/features/minimal");
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "info",
+        "invalid-mode",
+        fixture.to_str().unwrap(),
+    ]);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid mode"))
+        .stderr(predicate::str::contains(
+            "manifest, tags, dependencies, verbose",
+        ));
+}
+
+/// Test features info with non-existent feature
+#[test]
+fn test_features_info_nonexistent_feature() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "info",
+        "manifest",
+        "/nonexistent/path/to/feature",
+    ]);
+
+    cmd.assert().failure();
+}
+
+/// Test features info missing arguments
+#[test]
+fn test_features_info_missing_args() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args(["features", "info"]);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("required"));
+}
+
+/// Test that features help shows the info command
+#[test]
+fn test_features_help_shows_info() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args(["features", "--help"]);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Feature management commands"))
+        .stdout(predicate::str::contains("info"))
+        .stdout(predicate::str::contains("Get feature information"));
 }
