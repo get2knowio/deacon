@@ -223,8 +223,25 @@ fn test_compose_get_all_container_ids() {
     // but not panic or have a compilation error
     match result {
         Ok(container_ids) => {
-            // If successful, it should return a HashMap
-            assert!(container_ids.is_empty() || !container_ids.is_empty());
+            // If successful and containers are present, validate the structure
+            if !container_ids.is_empty() {
+                // Build expected service set from project
+                let expected_services: std::collections::HashSet<String> =
+                    project.get_all_services().into_iter().collect();
+
+                // Verify all returned keys are valid service names
+                assert!(
+                    container_ids.keys().all(|k| expected_services.contains(k)),
+                    "All container IDs should map to valid service names"
+                );
+
+                // Verify all container IDs are non-empty strings
+                assert!(
+                    container_ids.values().all(|v| !v.is_empty()),
+                    "Container IDs should be non-empty strings"
+                );
+            }
+            // Empty result is acceptable (no containers running)
         }
         Err(_) => {
             // Expected to fail since no Docker containers are running
