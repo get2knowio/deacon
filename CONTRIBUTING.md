@@ -155,7 +155,7 @@ Notes:
 ## Release Process
 1. Update version in `Cargo.toml` files
 2. Update `CHANGELOG.md` (when created)
-3. Create and push a git tag: `git tag v0.1.1 && git push origin v0.1.1`
+3. Create and push a git tag: `git tag v0.1.2 && git push origin v0.1.2`
 4. GitHub Actions will automatically build and release binaries
 
 ### Production (Distribution) Build Guidance
