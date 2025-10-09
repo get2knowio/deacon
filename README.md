@@ -303,6 +303,31 @@ This CLI implements the DevContainer specification domains below and continues t
 
 See the [CLI specification](docs/CLI-SPEC.md) for detailed architecture and planned features.
 
+### Binary Authenticity & Code Signing
+
+Current release artifacts (tar.gz / zip) are **not yet code signed**. Integrity is provided via `SHA256SUMS` published with every release. You should always:
+
+```bash
+# Download archive and checksum listing
+curl -LO https://github.com/get2knowio/deacon/releases/download/<version>/SHA256SUMS
+grep '<archive-filename>' SHA256SUMS | sha256sum -c -
+```
+
+Planned enhancements (tracked in issue: Code Signing):
+- GPG detached signature for `SHA256SUMS` (`SHA256SUMS.asc`)
+- macOS codesign + notarization
+- Windows Authenticode signature
+- Supply chain provenance (SLSA build attestation)
+
+Until signatures are in place, rely on checksum verification and the GitHub release provenance. If you need reproducible build parity, the workflow captures the exact `rustc -Vv` used in each release (`RUSTC_VERSION.txt` asset). Deterministic builds for comparison can be performed via:
+
+```bash
+rustup toolchain install $(grep '^release:' RUSTC_VERSION.txt | cut -d':' -f2 | xargs)
+cargo build --release --locked --all-features
+```
+
+If you have requirements around signed binaries and would like to help accelerate this, comment on the tracking issue once it is opened.
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, testing guidelines, and contribution requirements.

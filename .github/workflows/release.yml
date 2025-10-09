@@ -5,159 +5,247 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_FEATURE_FLAGS: --all-features
 
 jobs:
+  verify:
+    name: Verify (tests & lint) before release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-verify-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-verify-
+      - name: Fmt check
+        run: cargo fmt --all -- --check
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests (single thread)
+        run: cargo test --workspace -- --test-threads=1
+
   create-release:
     name: Create Release
+    needs: verify
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
-    - name: Get version
-      id: get_version
-      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-      
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.get_version.outputs.version }}
-        release_name: Release ${{ steps.get_version.outputs.version }}
-        draft: false
-        prerelease: false
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Extract tag version
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Validate tag matches crate version
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/}
+          CRATE_VERSION=$(grep '^version = ' crates/deacon/Cargo.toml | head -n1 | sed -E 's/version = "(.*)"/v\1/')
+          echo "Tag version:    $TAG_VERSION"
+            echo "Crate version:  $CRATE_VERSION"
+          if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+            echo "Tag version does not match crates/deacon/Cargo.toml version" >&2
+            exit 1
+          fi
+      - name: Install Rust toolchain (capture version)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Capture rustc version
+        run: |
+          rustc -Vv > RUSTC_VERSION.txt
+          cat RUSTC_VERSION.txt
+      - name: Create GitHub Release (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          # Create release if it doesn't exist
+          gh release view "$VERSION" >/dev/null 2>&1 || gh release create "$VERSION" -t "Release $VERSION" -n "Automated release for $VERSION" --verify-tag
+          # Upload rustc version provenance snippet
+          gh release upload "$VERSION" RUSTC_VERSION.txt --clobber
 
   build:
-    name: Build Release Binaries
+    name: Build & Package (${{ matrix.target }})
     needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
           - os: macos-latest
             target: x86_64-apple-darwin
           - os: macos-latest
             target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+    env:
+      VERSION: ${{ needs.create-release.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: ${{ matrix.target }}
-        
-    - name: Install cross-compilation tools (Linux ARM64)
-      if: matrix.target == 'aarch64-unknown-linux-gnu'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc-aarch64-linux-gnu
-        echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-        
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-${{ matrix.target }}-cargo-
-          
-    - name: Build release binary (full feature set)
-      run: >
-        cargo build --release --target ${{ matrix.target }}
-        --no-default-features --features "docker,config,plugins,json-logs"
-      
-    - name: Create archive (Unix)
-      if: runner.os != 'Windows'
-      run: |
-        cd target/${{ matrix.target }}/release
-        tar -czf ../../../deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz deacon
-        cd ../../..
-        
-    - name: Create archive (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        cd target/${{ matrix.target }}/release
-        7z a ../../../deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip deacon.exe
-        cd ../../..
-        
-    - name: Generate checksums (Unix)
-      if: runner.os != 'Windows'
-      run: |
-        sha256sum deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz > deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz.sha256
-        
-    - name: Generate checksums (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        Get-FileHash -Algorithm SHA256 deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip | ForEach-Object { "$($_.Hash.ToLower())  deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip" } > deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip.sha256
-        
-    - name: Upload archive artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}
-        path: |
-          deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.*
-        
-    - name: Upload Release Asset (Unix)
-      if: runner.os != 'Windows'
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz
-        asset_name: deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz
-        asset_content_type: application/gzip
-        
-    - name: Upload Release Asset (Windows)
-      if: runner.os == 'Windows'
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip
-        asset_name: deacon-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip
-        asset_content_type: application/zip
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross (for musl targets)
+        if: contains(matrix.target, 'musl')
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Install musl tools (x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install musl tools (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+      - name: Build (musl)
+        if: contains(matrix.target, 'musl')
+        run: cross build --release --target ${{ matrix.target }} $RELEASE_FEATURE_FLAGS
+      - name: Build (standard)
+        if: ${{ !contains(matrix.target, 'musl') }}
+        run: cargo build --release --target ${{ matrix.target }} $RELEASE_FEATURE_FLAGS
+      - name: Smoke run (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          BIN=target/${{ matrix.target }}/release/deacon
+          "$BIN" --version
+          "$BIN" --help | head -n 20
+      - name: Smoke run (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $bin = "target/${{ matrix.target }}/release/deacon.exe"
+          & $bin --version
+          & $bin --help | Select-Object -First 20
+      - name: Prepare packaging files (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp README.md LICENSE target/${{ matrix.target }}/release/
+          # Attempt to strip (ignore failures on unsupported formats)
+          strip target/${{ matrix.target }}/release/deacon || true
+      - name: Prepare packaging files (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Copy-Item README.md target/${{ matrix.target }}\release\
+          Copy-Item LICENSE target/${{ matrix.target }}\release\
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czf ../../../deacon-${{ env.VERSION }}-${{ matrix.target }}.tar.gz deacon README.md LICENSE
+          cd ../../..
+      - name: Create archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}\release
+          7z a ..\..\..\deacon-${{ env.VERSION }}-${{ matrix.target }}.zip deacon.exe README.md LICENSE
+          cd ..\..\..
+      - name: Generate checksum (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          sha256sum deacon-${{ env.VERSION }}-${{ matrix.target }}.tar.gz | tee deacon-${{ env.VERSION }}-${{ matrix.target }}.tar.gz.sha256
+          sha256sum -c deacon-${{ env.VERSION }}-${{ matrix.target }}.tar.gz.sha256
+      - name: Generate checksum (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 deacon-${{ env.VERSION }}-${{ matrix.target }}.zip).Hash.ToLower()
+          "$hash  deacon-${{ env.VERSION }}-${{ matrix.target }}.zip" | Tee-Object -FilePath deacon-${{ env.VERSION }}-${{ matrix.target }}.zip.sha256
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: target/${{ matrix.target }}/release
+          output-file: sbom-${{ env.VERSION }}-${{ matrix.target }}.spdx.json
+      - name: Upload release assets
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ARCHIVE="deacon-${VERSION}-${{ matrix.target }}.zip"
+          else
+            ARCHIVE="deacon-${VERSION}-${{ matrix.target }}.tar.gz"
+          fi
+          gh release upload "$VERSION" "$ARCHIVE" "${ARCHIVE}.sha256" "sbom-${VERSION}-${{ matrix.target }}.spdx.json" --clobber
+      - name: Upload checksum artifact (for aggregation)
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksum-${{ matrix.target }}
+          path: |
+            deacon-${{ env.VERSION }}-${{ matrix.target }}.*.sha256
 
   checksums:
-    name: Generate SHA256SUMS
+    name: Aggregate & Sign Checksums
     needs: [create-release, build]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ needs.create-release.outputs.version }}
     steps:
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        pattern: deacon-${{ needs.create-release.outputs.version }}-*
-        merge-multiple: true
-        
-    - name: Generate combined SHA256SUMS
-      run: |
-        # Combine all individual checksum files
-        cat *.sha256 > SHA256SUMS
-        # Verify the format and content
-        cat SHA256SUMS
-        
-    - name: Upload SHA256SUMS
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./SHA256SUMS
-        asset_name: SHA256SUMS
-        asset_content_type: text/plain
+      - name: Download checksum artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: checksum-*
+          merge-multiple: true
+      - name: Detect signing capability
+        run: |
+          echo "SIGNING_ENABLED=false" >> $GITHUB_ENV  # Placeholder until GPG secrets added
+      - name: Assemble SHA256SUMS
+        run: |
+          cat *.sha256 > SHA256SUMS
+          echo "Combined checksums:" && cat SHA256SUMS
+      # TODO: Re-introduce GPG import & signing once secrets are configured (see issues #241 and #243)
+      - name: Upload checksum assets
+        run: |
+          if [ -f SHA256SUMS.asc ]; then
+            gh release upload "$VERSION" SHA256SUMS SHA256SUMS.asc --clobber
+          else
+            gh release upload "$VERSION" SHA256SUMS --clobber
+      - name: Verify (optional) presence
+        run: gh release view "$VERSION" --json assets --jq '.assets[].name'
+
+  provenance:
+    name: Generate Build Provenance (SLSA)
+    needs: [checksums]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+      attestations: write
+    steps:
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            **/deacon-*.tar.gz
+            **/deacon-*.zip
+            SHA256SUMS
