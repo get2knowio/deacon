@@ -26,7 +26,8 @@ fn test_version_output() {
     cmd.arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("deacon 0.1.0"));
+    // Match current package version dynamically
+    .stdout(predicate::str::contains(format!("deacon {}", env!("CARGO_PKG_VERSION"))));
 }
 
 #[test]

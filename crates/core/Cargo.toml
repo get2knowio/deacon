@@ -1,6 +1,6 @@
 [package]
 name = "deacon-core"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -16,7 +16,8 @@ json5 = "0.4"
 regex = "1.0"
 tokio = { version = "1.0", features = ["rt", "process", "macros", "io-util"] }
 once_cell.workspace = true
-reqwest = { version = "0.12", features = ["json"] }
+# Use rustls for a pure-Rust TLS stack to simplify cross-compilation (musl, aarch64) and avoid OpenSSL toolchain requirements.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tar = "0.4"
 sha2 = "0.10"
 bytes = "1.0"

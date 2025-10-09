@@ -144,11 +144,14 @@ jobs:
           "$BIN" --version
           "$BIN" --help | head -n 20
       - name: Smoke run (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.target == 'x86_64-pc-windows-msvc'
         run: |
           $bin = "target/${{ matrix.target }}/release/deacon.exe"
           & $bin --version
           & $bin --help | Select-Object -First 20
+      - name: Skip note (Windows ARM64 unsupported exec on x64 runner)
+        if: runner.os == 'Windows' && matrix.target == 'aarch64-pc-windows-msvc'
+        run: echo "Skipping runtime smoke test for ${{ matrix.target }} (host runner cannot execute ARM64 binary)."
       - name: Prepare packaging files (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -187,6 +190,7 @@ jobs:
         with:
           path: target/${{ matrix.target }}/release
           output-file: sbom-${{ env.VERSION }}-${{ matrix.target }}.spdx.json
+          artifact-name: sbom-${{ matrix.target }}
       - name: Upload release assets
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
