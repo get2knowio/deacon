@@ -14,6 +14,7 @@ use deacon_core::observability::{feature_plan_span, TimedSpan};
 use deacon_core::oci::{default_fetcher, FeatureRef};
 use deacon_core::registry_parser::parse_registry_reference;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile;
 use tracing::{debug, info};
@@ -620,6 +621,11 @@ async fn execute_features_info(mode: &str, feature: &str, json: bool) -> Result<
 /// Output manifest information (metadata only)
 fn output_manifest_info(metadata: &FeatureMetadata, json: bool) -> Result<()> {
     if json {
+        // Convert HashMaps to BTreeMaps for deterministic ordering
+        let options: BTreeMap<_, _> = metadata.options.iter().collect();
+        let container_env: BTreeMap<_, _> = metadata.container_env.iter().collect();
+        let depends_on: BTreeMap<_, _> = metadata.depends_on.iter().collect();
+
         let manifest = serde_json::json!({
             "id": metadata.id,
             "version": metadata.version,
@@ -627,8 +633,8 @@ fn output_manifest_info(metadata: &FeatureMetadata, json: bool) -> Result<()> {
             "description": metadata.description,
             "documentationURL": metadata.documentation_url,
             "licenseURL": metadata.license_url,
-            "options": metadata.options,
-            "containerEnv": metadata.container_env,
+            "options": options,
+            "containerEnv": container_env,
             "mounts": metadata.mounts,
             "init": metadata.init,
             "privileged": metadata.privileged,
@@ -636,7 +642,7 @@ fn output_manifest_info(metadata: &FeatureMetadata, json: bool) -> Result<()> {
             "securityOpt": metadata.security_opt,
             "entrypoint": metadata.entrypoint,
             "installsAfter": metadata.installs_after,
-            "dependsOn": metadata.depends_on,
+            "dependsOn": depends_on,
             "onCreateCommand": metadata.on_create_command,
             "updateContentCommand": metadata.update_content_command,
             "postCreateCommand": metadata.post_create_command,
@@ -758,6 +764,11 @@ fn output_verbose_info(
     json: bool,
 ) -> Result<()> {
     if json {
+        // Convert HashMaps to BTreeMaps for deterministic ordering
+        let options: BTreeMap<_, _> = metadata.options.iter().collect();
+        let container_env: BTreeMap<_, _> = metadata.container_env.iter().collect();
+        let depends_on: BTreeMap<_, _> = metadata.depends_on.iter().collect();
+
         let mut info = serde_json::json!({
             "id": metadata.id,
             "version": metadata.version,
@@ -765,8 +776,8 @@ fn output_verbose_info(
             "description": metadata.description,
             "documentationURL": metadata.documentation_url,
             "licenseURL": metadata.license_url,
-            "options": metadata.options,
-            "containerEnv": metadata.container_env,
+            "options": options,
+            "containerEnv": container_env,
             "mounts": metadata.mounts,
             "init": metadata.init,
             "privileged": metadata.privileged,
@@ -774,7 +785,7 @@ fn output_verbose_info(
             "securityOpt": metadata.security_opt,
             "entrypoint": metadata.entrypoint,
             "installsAfter": metadata.installs_after,
-            "dependsOn": metadata.depends_on,
+            "dependsOn": depends_on,
             "onCreateCommand": metadata.on_create_command,
             "updateContentCommand": metadata.update_content_command,
             "postCreateCommand": metadata.post_create_command,
