@@ -240,11 +240,52 @@ jobs:
           echo "SIGNING_ENABLED=false" >> $GITHUB_ENV  # Placeholder until GPG secrets added
       - name: Assemble SHA256SUMS
         run: |
+          # List downloaded files for debugging
+          echo "Downloaded checksum files:"
+          ls -la *.sha256 || echo "WARNING: No .sha256 files found!"
+
+          # Verify that we have checksum files
+          if ! ls *.sha256 1>/dev/null 2>&1; then
+            echo "ERROR: No checksum files (.sha256) found in workspace!"
+            echo "This likely means the build jobs didn't upload checksum artifacts."
+            exit 1
+          fi
+
+          # Combine all checksums into SHA256SUMS
           cat *.sha256 > SHA256SUMS
-          echo "Combined checksums:" && cat SHA256SUMS
+
+          # Verify SHA256SUMS is not empty
+          if [ ! -s SHA256SUMS ]; then
+            echo "ERROR: SHA256SUMS file is empty!"
+            exit 1
+          fi
+
+          echo "Combined checksums:"
+          cat SHA256SUMS
       # TODO: Re-introduce GPG import & signing once secrets are configured (see issues #241 and #243)
       - name: Upload checksum assets
         run: |
+          # Verify VERSION is set
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: VERSION environment variable is not set!"
+            exit 1
+          fi
+
+          # Verify SHA256SUMS exists and is not empty
+          if [ ! -f SHA256SUMS ]; then
+            echo "ERROR: SHA256SUMS file not found!"
+            exit 1
+          fi
+
+          if [ ! -s SHA256SUMS ]; then
+            echo "ERROR: SHA256SUMS file is empty!"
+            exit 1
+          fi
+
+          echo "Uploading SHA256SUMS to release $VERSION"
+          echo "File size: $(wc -c < SHA256SUMS) bytes"
+          echo "Number of checksums: $(wc -l < SHA256SUMS)"
+
           if [ -f SHA256SUMS.asc ]; then
             gh release upload "$VERSION" SHA256SUMS SHA256SUMS.asc --clobber
           else
@@ -255,18 +296,32 @@ jobs:
 
   provenance:
     name: Generate Build Provenance (SLSA)
-    needs: [checksums]
+    needs: [create-release, checksums]
     runs-on: ubuntu-latest
     permissions:
       actions: read
       id-token: write
       contents: write
       attestations: write
+    env:
+      VERSION: ${{ needs.create-release.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Download release artifacts for attestation
+        run: |
+          # Download archives and SHA256SUMS from the GitHub release
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --pattern "deacon-*.tar.gz" \
+            --pattern "deacon-*.zip" \
+            --pattern "SHA256SUMS" || {
+            echo "WARNING: Failed to download release artifacts for attestation"
+            echo "Provenance will be skipped for this release"
+            exit 0
+          }
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: |
-            **/deacon-*.tar.gz
-            **/deacon-*.zip
+            deacon-*.tar.gz
+            deacon-*.zip
             SHA256SUMS
