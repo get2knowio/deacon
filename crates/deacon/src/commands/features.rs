@@ -8,12 +8,13 @@ use anyhow::Result;
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::features::{
     parse_feature_metadata, FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger,
-    OptionValue, ResolvedFeature,
+    FeatureMetadata, OptionValue, ResolvedFeature,
 };
 use deacon_core::observability::{feature_plan_span, TimedSpan};
 use deacon_core::oci::{default_fetcher, FeatureRef};
 use deacon_core::registry_parser::parse_registry_reference;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile;
 use tracing::{debug, info};
@@ -77,7 +78,11 @@ pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
             )
             .await
         }
-        FeatureCommands::Info { mode, feature } => execute_features_info(&mode, &feature).await,
+        FeatureCommands::Info {
+            mode,
+            feature,
+            json,
+        } => execute_features_info(&mode, &feature, json).await,
         FeatureCommands::Plan {
             json,
             ref additional_features,
@@ -534,46 +539,425 @@ async fn execute_features_publish(
 }
 
 /// Execute features info command
-async fn execute_features_info(mode: &str, feature: &str) -> Result<()> {
+async fn execute_features_info(mode: &str, feature: &str, json: bool) -> Result<()> {
     debug!("Getting feature info for: {} (mode: {})", feature, mode);
 
-    // Parse the feature reference
-    let (registry_url, namespace, name, tag) = parse_registry_reference(feature)?;
+    // Determine if this is a local path or OCI reference
+    // Check if it's a path by trying to see if it exists as a directory
+    let path = Path::new(feature);
+    let is_local = path.exists() && path.is_dir();
 
-    let feature_ref = FeatureRef::new(
-        registry_url.clone(),
-        namespace.clone(),
-        name.clone(),
-        tag.clone(),
-    );
+    let (metadata, registry_url, namespace, name, tag, digest) = if is_local {
+        // Load from local path
+        let feature_path = Path::new(feature);
+        let metadata_path = feature_path.join("devcontainer-feature.json");
+        let metadata = parse_feature_metadata(&metadata_path)
+            .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
 
-    // Create OCI client and fetch feature metadata
-    let fetcher =
-        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+        info!("Loading feature info from local path: {}", feature);
+        (metadata, None, None, None, None, None)
+    } else {
+        // Parse the feature reference and fetch from OCI
+        let (registry_url, namespace, name, tag) = parse_registry_reference(feature)?;
 
-    info!("Fetching feature info from: {}", feature_ref.reference());
+        let feature_ref = FeatureRef::new(
+            registry_url.clone(),
+            namespace.clone(),
+            name.clone(),
+            tag.clone(),
+        );
 
-    let downloaded_feature = fetcher
-        .fetch_feature(&feature_ref)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to fetch feature: {}", e))?;
+        // Create OCI client and fetch feature metadata
+        let fetcher =
+            default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
 
-    // Create feature info result
-    let feature_info = serde_json::json!({
-        "id": downloaded_feature.metadata.id,
-        "version": downloaded_feature.metadata.version,
-        "name": downloaded_feature.metadata.name,
-        "description": downloaded_feature.metadata.description,
-        "documentationURL": downloaded_feature.metadata.documentation_url,
-        "options": downloaded_feature.metadata.options,
-        "installsAfter": downloaded_feature.metadata.installs_after,
-        "registry": registry_url,
-        "namespace": namespace,
-        "reference": feature_ref.reference(),
-        "digest": downloaded_feature.digest,
-    });
+        info!("Fetching feature info from: {}", feature_ref.reference());
 
-    println!("{}", serde_json::to_string_pretty(&feature_info)?);
+        let downloaded_feature = fetcher
+            .fetch_feature(&feature_ref)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch feature: {}", e))?;
+
+        (
+            downloaded_feature.metadata,
+            Some(registry_url),
+            Some(namespace),
+            Some(name),
+            tag,
+            Some(downloaded_feature.digest),
+        )
+    };
+
+    // Generate output based on mode
+    match mode {
+        "manifest" => output_manifest_info(&metadata, json),
+        "tags" => {
+            output_tags_info(
+                &metadata,
+                registry_url.as_deref(),
+                namespace.as_deref(),
+                name.as_deref(),
+                json,
+            )
+            .await
+        }
+        "dependencies" => output_dependencies_info(&metadata, json),
+        "verbose" => output_verbose_info(
+            &metadata,
+            registry_url.as_deref(),
+            namespace.as_deref(),
+            name.as_deref(),
+            tag.as_deref(),
+            digest.as_deref(),
+            json,
+        ),
+        _ => Err(anyhow::anyhow!(
+            "Invalid mode '{}'. Valid modes are: manifest, tags, dependencies, verbose",
+            mode
+        )),
+    }
+}
+
+/// Output manifest information (metadata only)
+fn output_manifest_info(metadata: &FeatureMetadata, json: bool) -> Result<()> {
+    if json {
+        // Convert HashMaps to BTreeMaps for deterministic ordering
+        let options: BTreeMap<_, _> = metadata.options.iter().collect();
+        let container_env: BTreeMap<_, _> = metadata.container_env.iter().collect();
+        let depends_on: BTreeMap<_, _> = metadata.depends_on.iter().collect();
+
+        let manifest = serde_json::json!({
+            "id": metadata.id,
+            "version": metadata.version,
+            "name": metadata.name,
+            "description": metadata.description,
+            "documentationURL": metadata.documentation_url,
+            "licenseURL": metadata.license_url,
+            "options": options,
+            "containerEnv": container_env,
+            "mounts": metadata.mounts,
+            "init": metadata.init,
+            "privileged": metadata.privileged,
+            "capAdd": metadata.cap_add,
+            "securityOpt": metadata.security_opt,
+            "entrypoint": metadata.entrypoint,
+            "installsAfter": metadata.installs_after,
+            "dependsOn": depends_on,
+            "onCreateCommand": metadata.on_create_command,
+            "updateContentCommand": metadata.update_content_command,
+            "postCreateCommand": metadata.post_create_command,
+            "postStartCommand": metadata.post_start_command,
+            "postAttachCommand": metadata.post_attach_command,
+        });
+        println!("{}", serde_json::to_string_pretty(&manifest)?);
+    } else {
+        println!("Feature Manifest:");
+        println!("  ID: {}", metadata.id);
+        if let Some(ref version) = metadata.version {
+            println!("  Version: {}", version);
+        }
+        if let Some(ref name) = metadata.name {
+            println!("  Name: {}", name);
+        }
+        if let Some(ref desc) = metadata.description {
+            println!("  Description: {}", desc);
+        }
+        if let Some(ref doc_url) = metadata.documentation_url {
+            println!("  Documentation: {}", doc_url);
+        }
+        if let Some(ref license_url) = metadata.license_url {
+            println!("  License: {}", license_url);
+        }
+        if !metadata.options.is_empty() {
+            println!("  Options: {} defined", metadata.options.len());
+        }
+        if !metadata.installs_after.is_empty() {
+            println!("  Installs After: {:?}", metadata.installs_after);
+        }
+        if !metadata.depends_on.is_empty() {
+            println!("  Dependencies: {:?}", metadata.depends_on.keys());
+        }
+    }
+    Ok(())
+}
+
+/// Output tags information (available versions)
+async fn output_tags_info(
+    metadata: &FeatureMetadata,
+    registry_url: Option<&str>,
+    namespace: Option<&str>,
+    name: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    // For local features, we can only show the current version
+    let tags = if let (Some(_registry), Some(_ns), Some(_n)) = (registry_url, namespace, name) {
+        // Note: This is a placeholder - in a full implementation, we would
+        // query the OCI registry for available tags
+        // For now, we'll just return the current version if available
+        vec![metadata
+            .version
+            .clone()
+            .unwrap_or_else(|| "latest".to_string())]
+    } else {
+        // Local feature - only current version
+        vec![metadata
+            .version
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string())]
+    };
+
+    if json {
+        let output = serde_json::json!({
+            "id": metadata.id,
+            "tags": tags,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!("Available Tags for '{}':", metadata.id);
+        for tag in tags {
+            println!("  - {}", tag);
+        }
+    }
+    Ok(())
+}
+
+/// Output dependencies information
+fn output_dependencies_info(metadata: &FeatureMetadata, json: bool) -> Result<()> {
+    if json {
+        let deps = serde_json::json!({
+            "id": metadata.id,
+            "installsAfter": metadata.installs_after,
+            "dependsOn": metadata.depends_on,
+        });
+        println!("{}", serde_json::to_string_pretty(&deps)?);
+    } else {
+        println!("Dependencies for '{}':", metadata.id);
+        if !metadata.installs_after.is_empty() {
+            println!("  Installs After:");
+            for feature in &metadata.installs_after {
+                println!("    - {}", feature);
+            }
+        } else {
+            println!("  Installs After: (none)");
+        }
+
+        if !metadata.depends_on.is_empty() {
+            println!("  Depends On:");
+            for (feature, options) in &metadata.depends_on {
+                println!("    - {}: {}", feature, options);
+            }
+        } else {
+            println!("  Depends On: (none)");
+        }
+    }
+    Ok(())
+}
+
+/// Output verbose information (all available details)
+fn output_verbose_info(
+    metadata: &FeatureMetadata,
+    registry_url: Option<&str>,
+    namespace: Option<&str>,
+    name: Option<&str>,
+    tag: Option<&str>,
+    digest: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    if json {
+        // Convert HashMaps to BTreeMaps for deterministic ordering
+        let options: BTreeMap<_, _> = metadata.options.iter().collect();
+        let container_env: BTreeMap<_, _> = metadata.container_env.iter().collect();
+        let depends_on: BTreeMap<_, _> = metadata.depends_on.iter().collect();
+
+        let mut info = serde_json::json!({
+            "id": metadata.id,
+            "version": metadata.version,
+            "name": metadata.name,
+            "description": metadata.description,
+            "documentationURL": metadata.documentation_url,
+            "licenseURL": metadata.license_url,
+            "options": options,
+            "containerEnv": container_env,
+            "mounts": metadata.mounts,
+            "init": metadata.init,
+            "privileged": metadata.privileged,
+            "capAdd": metadata.cap_add,
+            "securityOpt": metadata.security_opt,
+            "entrypoint": metadata.entrypoint,
+            "installsAfter": metadata.installs_after,
+            "dependsOn": depends_on,
+            "onCreateCommand": metadata.on_create_command,
+            "updateContentCommand": metadata.update_content_command,
+            "postCreateCommand": metadata.post_create_command,
+            "postStartCommand": metadata.post_start_command,
+            "postAttachCommand": metadata.post_attach_command,
+        });
+
+        // Add OCI-specific fields if available
+        if let Some(registry) = registry_url {
+            info["registry"] = serde_json::json!(registry);
+        }
+        if let Some(ns) = namespace {
+            info["namespace"] = serde_json::json!(ns);
+        }
+        if let Some(n) = name {
+            info["featureName"] = serde_json::json!(n);
+        }
+        if let Some(t) = tag {
+            info["tag"] = serde_json::json!(t);
+        }
+        if let Some(d) = digest {
+            info["digest"] = serde_json::json!(d);
+        }
+
+        println!("{}", serde_json::to_string_pretty(&info)?);
+    } else {
+        println!("=== Feature Information (Verbose) ===");
+        println!("\nBasic Information:");
+        println!("  ID: {}", metadata.id);
+        if let Some(ref version) = metadata.version {
+            println!("  Version: {}", version);
+        }
+        if let Some(ref name) = metadata.name {
+            println!("  Name: {}", name);
+        }
+        if let Some(ref desc) = metadata.description {
+            println!("  Description: {}", desc);
+        }
+        if let Some(ref doc_url) = metadata.documentation_url {
+            println!("  Documentation: {}", doc_url);
+        }
+        if let Some(ref license_url) = metadata.license_url {
+            println!("  License: {}", license_url);
+        }
+
+        if let Some(registry) = registry_url {
+            println!("\nRegistry Information:");
+            println!("  Registry: {}", registry);
+            if let Some(ns) = namespace {
+                println!("  Namespace: {}", ns);
+            }
+            if let Some(n) = name {
+                println!("  Name: {}", n);
+            }
+            if let Some(t) = tag {
+                println!("  Tag: {}", t);
+            }
+            if let Some(d) = digest {
+                println!("  Digest: {}", d);
+            }
+        }
+
+        if !metadata.options.is_empty() {
+            println!("\nOptions:");
+            for (key, option) in &metadata.options {
+                println!("  {}:", key);
+                match option {
+                    deacon_core::features::FeatureOption::Boolean {
+                        default,
+                        description,
+                    } => {
+                        println!("    Type: boolean");
+                        if let Some(def) = default {
+                            println!("    Default: {}", def);
+                        }
+                        if let Some(desc) = description {
+                            println!("    Description: {}", desc);
+                        }
+                    }
+                    deacon_core::features::FeatureOption::String {
+                        default,
+                        description,
+                        r#enum,
+                        proposals,
+                    } => {
+                        println!("    Type: string");
+                        if let Some(def) = default {
+                            println!("    Default: {}", def);
+                        }
+                        if let Some(desc) = description {
+                            println!("    Description: {}", desc);
+                        }
+                        if let Some(values) = r#enum {
+                            println!("    Allowed values: {:?}", values);
+                        }
+                        if let Some(props) = proposals {
+                            println!("    Proposals: {:?}", props);
+                        }
+                    }
+                }
+            }
+        }
+
+        if !metadata.installs_after.is_empty() || !metadata.depends_on.is_empty() {
+            println!("\nDependencies:");
+            if !metadata.installs_after.is_empty() {
+                println!("  Installs After:");
+                for feature in &metadata.installs_after {
+                    println!("    - {}", feature);
+                }
+            }
+            if !metadata.depends_on.is_empty() {
+                println!("  Depends On:");
+                for (feature, options) in &metadata.depends_on {
+                    println!("    - {}: {}", feature, options);
+                }
+            }
+        }
+
+        if !metadata.container_env.is_empty() {
+            println!("\nContainer Environment Variables:");
+            for (key, value) in &metadata.container_env {
+                println!("  {}: {}", key, value);
+            }
+        }
+
+        if !metadata.mounts.is_empty() {
+            println!("\nMounts:");
+            for mount in &metadata.mounts {
+                println!("  - {}", mount);
+            }
+        }
+
+        if metadata.init.is_some()
+            || metadata.privileged.is_some()
+            || !metadata.cap_add.is_empty()
+            || !metadata.security_opt.is_empty()
+        {
+            println!("\nContainer Options:");
+            if let Some(init) = metadata.init {
+                println!("  Init: {}", init);
+            }
+            if let Some(privileged) = metadata.privileged {
+                println!("  Privileged: {}", privileged);
+            }
+            if !metadata.cap_add.is_empty() {
+                println!("  Capabilities: {:?}", metadata.cap_add);
+            }
+            if !metadata.security_opt.is_empty() {
+                println!("  Security Options: {:?}", metadata.security_opt);
+            }
+        }
+
+        if metadata.has_lifecycle_commands() {
+            println!("\nLifecycle Commands:");
+            if let Some(ref cmd) = metadata.on_create_command {
+                println!("  onCreate: {}", cmd);
+            }
+            if let Some(ref cmd) = metadata.update_content_command {
+                println!("  updateContent: {}", cmd);
+            }
+            if let Some(ref cmd) = metadata.post_create_command {
+                println!("  postCreate: {}", cmd);
+            }
+            if let Some(ref cmd) = metadata.post_start_command {
+                println!("  postStart: {}", cmd);
+            }
+            if let Some(ref cmd) = metadata.post_attach_command {
+                println!("  postAttach: {}", cmd);
+            }
+        }
+    }
     Ok(())
 }
 
