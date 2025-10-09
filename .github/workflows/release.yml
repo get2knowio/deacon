@@ -121,6 +121,9 @@ jobs:
       - name: Install musl tools (aarch64)
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+      - name: Install cross-compiler (aarch64 gnu)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -137,12 +140,15 @@ jobs:
       - name: Build (standard)
         if: ${{ !contains(matrix.target, 'musl') }}
         run: cargo build --release --target ${{ matrix.target }} $RELEASE_FEATURE_FLAGS
-      - name: Smoke run (Unix)
-        if: runner.os != 'Windows'
+      - name: Smoke run (Unix native)
+        if: runner.os != 'Windows' && !contains(matrix.target, 'aarch64') && !contains(matrix.target, 'arm')
         run: |
           BIN=target/${{ matrix.target }}/release/deacon
           "$BIN" --version
           "$BIN" --help | head -n 20
+      - name: Skip note (cross-compiled ARM64 on x86 runner)
+        if: runner.os != 'Windows' && (contains(matrix.target, 'aarch64') || contains(matrix.target, 'arm'))
+        run: echo "Skipping runtime smoke test for ${{ matrix.target }} (cross-compiled binary cannot execute on x86 runner)."
       - name: Smoke run (Windows)
         if: runner.os == 'Windows' && matrix.target == 'x86_64-pc-windows-msvc'
         run: |
@@ -191,14 +197,17 @@ jobs:
           path: target/${{ matrix.target }}/release
           output-file: sbom-${{ env.VERSION }}-${{ matrix.target }}.spdx.json
           artifact-name: sbom-${{ matrix.target }}
-      - name: Upload release assets
+      - name: Upload release assets (Unix)
+        if: runner.os != 'Windows'
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            ARCHIVE="deacon-${VERSION}-${{ matrix.target }}.zip"
-          else
-            ARCHIVE="deacon-${VERSION}-${{ matrix.target }}.tar.gz"
-          fi
+          ARCHIVE="deacon-${VERSION}-${{ matrix.target }}.tar.gz"
           gh release upload "$VERSION" "$ARCHIVE" "${ARCHIVE}.sha256" "sbom-${VERSION}-${{ matrix.target }}.spdx.json" --clobber
+      - name: Upload release assets (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "deacon-$env:VERSION-${{ matrix.target }}.zip"
+          gh release upload "$env:VERSION" "$archive" "${archive}.sha256" "sbom-$env:VERSION-${{ matrix.target }}.spdx.json" --clobber
       - name: Upload checksum artifact (for aggregation)
         uses: actions/upload-artifact@v4
         with:
@@ -233,6 +242,7 @@ jobs:
             gh release upload "$VERSION" SHA256SUMS SHA256SUMS.asc --clobber
           else
             gh release upload "$VERSION" SHA256SUMS --clobber
+          fi
       - name: Verify (optional) presence
         run: gh release view "$VERSION" --json assets --jq '.assets[].name'
 
