@@ -281,12 +281,12 @@ jobs:
           echo "Number of checksums: $(wc -l < SHA256SUMS)"
 
           if [ -f SHA256SUMS.asc ]; then
-            gh release upload "$VERSION" SHA256SUMS SHA256SUMS.asc --clobber
+            gh release upload "$VERSION" SHA256SUMS SHA256SUMS.asc --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release upload "$VERSION" SHA256SUMS --clobber
+            gh release upload "$VERSION" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
           fi
       - name: Verify (optional) presence
-        run: gh release view "$VERSION" --json assets --jq '.assets[].name'
+        run: gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'
 
   provenance:
     name: Generate Build Provenance (SLSA)
