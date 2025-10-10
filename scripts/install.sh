@@ -9,7 +9,7 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | bash
 #   # or with a specific version (with or without leading 'v')
-#   DEACON_VERSION=0.1.3 curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | DEACON_VERSION=0.1.3 bash
 #   
 # Environment Variables:
 #   DEACON_VERSION: Specific version to install (default: latest). Accepts 'v0.1.3' or '0.1.3'

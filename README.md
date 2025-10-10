@@ -43,11 +43,11 @@ You can steer the installer using the following environment variables:
 Examples:
 ```bash
 # Install a specific version
-DEACON_VERSION=0.1.3 curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | DEACON_VERSION=0.1.3 bash
 
 # Install to a custom directory and overwrite without prompt
-DEACON_VERSION=v0.1.3 DEACON_INSTALL_DIR="$HOME/.local/bin" DEACON_FORCE=true \
-  curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | \
+  DEACON_VERSION=v0.1.3 DEACON_INSTALL_DIR="$HOME/.local/bin" DEACON_FORCE=true bash
 ```
 
 Note: On Linux, the installer auto-detects your libc (GNU vs musl) and selects the matching asset (e.g., Alpine → musl).
