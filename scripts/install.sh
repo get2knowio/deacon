@@ -7,10 +7,12 @@
 # appropriate binary, verifies its checksum, and installs it to a directory in your PATH.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | bash
+#   # or with a specific version (with or without leading 'v')
+#   DEACON_VERSION=0.1.3 curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | bash
 #   
 # Environment Variables:
-#   DEACON_VERSION: Specific version to install (default: latest)
+#   DEACON_VERSION: Specific version to install (default: latest). Accepts 'v0.1.3' or '0.1.3'
 #   DEACON_BASE_URL: Base URL for releases (default: GitHub releases)
 #   DEACON_INSTALL_DIR: Installation directory (default: /usr/local/bin or ~/.local/bin)
 #   DEACON_FORCE: Skip confirmation prompts (default: false)
@@ -69,7 +71,7 @@ trap cleanup EXIT
 
 # Platform detection
 detect_platform() {
-    local os arch
+    local os arch libc
     
     # Detect OS
     case "$(uname -s)" in
@@ -86,14 +88,32 @@ detect_platform() {
         *)              error_exit "Unsupported architecture: $(uname -m)" ;;
     esac
     
+    # Detect libc on Linux (gnu vs musl)
+    libc=""
+    if [[ "$os" == "linux" ]]; then
+        if command -v ldd >/dev/null 2>&1; then
+            if ldd --version 2>&1 | grep -qi musl; then
+                libc="musl"
+            else
+                libc="gnu"
+            fi
+        elif [[ -f "/etc/alpine-release" ]]; then
+            libc="musl"
+        else
+            libc="gnu"
+        fi
+    fi
+
     # Map to Rust target triple
-    case "${os}-${arch}" in
-        linux-x86_64)      echo "x86_64-unknown-linux-gnu" ;;
-        linux-aarch64)     echo "aarch64-unknown-linux-gnu" ;;
-        darwin-x86_64)     echo "x86_64-apple-darwin" ;;
-        darwin-aarch64)    echo "aarch64-apple-darwin" ;;
-        windows-x86_64)    echo "x86_64-pc-windows-msvc" ;;
-        *)                 error_exit "Unsupported platform: ${os}-${arch}" ;;
+    case "${os}-${arch}-${libc}" in
+        linux-x86_64-musl)     echo "x86_64-unknown-linux-musl" ;;
+        linux-aarch64-musl)    echo "aarch64-unknown-linux-musl" ;;
+        linux-x86_64-gnu)      echo "x86_64-unknown-linux-gnu" ;;
+        linux-aarch64-gnu)     echo "aarch64-unknown-linux-gnu" ;;
+        darwin-x86_64-*)       echo "x86_64-apple-darwin" ;;
+        darwin-aarch64-*)      echo "aarch64-apple-darwin" ;;
+        windows-x86_64-*)      echo "x86_64-pc-windows-msvc" ;;
+        *)                     error_exit "Unsupported platform: ${os}-${arch}" ;;
     esac
 }
 
@@ -193,7 +213,7 @@ extract_archive() {
 
 # Main installation function
 install_deacon() {
-    local platform version install_dir
+    local platform version install_dir tag
     
     platform=$(detect_platform)
     log_info "Detected platform: $platform"
@@ -203,7 +223,13 @@ install_deacon() {
     else
         version="$VERSION"
     fi
-    log_info "Installing version: $version"
+
+    # Normalize version tag to include leading 'v' (supports inputs like '0.1.3' or 'v0.1.3')
+    tag="$version"
+    if [[ "$tag" != v* ]]; then
+        tag="v$tag"
+    fi
+    log_info "Installing version: $tag"
     
     install_dir=$(get_install_dir)
     log_info "Installation directory: $install_dir"
@@ -222,14 +248,14 @@ install_deacon() {
     esac
     
     # Construct URLs and filenames
-    local archive_name="deacon-${version}-${platform}.${file_ext}"
+    local archive_name="deacon-${tag}-${platform}.${file_ext}"
     local checksums_name="SHA256SUMS"
     
     local download_url
     if [[ "$BASE_URL" == *"github.com"* ]] && [[ "$VERSION" == "latest" ]]; then
         download_url="${BASE_URL}/latest/download"
     else
-        download_url="${BASE_URL}/download/${version}"
+        download_url="${BASE_URL}/download/${tag}"
     fi
     
     local archive_url="${download_url}/${archive_name}"
