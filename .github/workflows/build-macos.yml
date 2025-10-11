@@ -1,0 +1,41 @@
+name: Build macOS (Apple Silicon)
+
+on:
+  # Manual trigger only to avoid publishing or running on every push
+  workflow_dispatch:
+
+jobs:
+  build-macos-aarch64:
+    name: Build deacon for aarch64-apple-darwin
+    # Apple Silicon runners (macOS 14) build native arm64 binaries
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Show environment
+        run: |
+          uname -a
+          uname -m
+          rustc -vV
+          cargo -vV
+
+      - name: Build release binary (deacon)
+        env:
+          CARGO_TERM_COLOR: always
+        run: |
+          cargo build --release -p deacon
+          file target/release/deacon || true
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deacon-macos-aarch64
+          path: target/release/deacon
+          if-no-files-found: error
