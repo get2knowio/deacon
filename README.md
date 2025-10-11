@@ -176,6 +176,18 @@ deacon doctor  # Structured JSON logs for machine parsing
 
 The JSON format is useful for CI/CD systems and log aggregation tools that need structured data.
 
+### Quiet mode and spinner (TTY only)
+
+When running in a real terminal (stderr is a TTY) and using the default text output, deacon shows a small spinner during long-running operations like `up` and `down`. In these spinner sessions, if you haven't set `DEACON_LOG`, `RUST_LOG`, or `--log-level`, the default log level is temporarily set to `warn` so routine progress noise stays out of your way. JSON mode or non‑TTY environments (CI, redirections) do not render a spinner and keep the previous logging behavior.
+
+Tips:
+- Want details with the spinner? Set `RUST_LOG=info` or use `--log-level info`.
+- Prefer structured logs? Use `--log-format json` (no spinner) and parse stderr.
+
+Color and accessibility:
+- Help/usage output uses automatic color when writing to a terminal. Spinner/status messages also use subtle colors (yellow for in‑progress, green for success, red for failures).
+- Respecting your environment, color is disabled when not writing to a TTY and when `NO_COLOR` is set (see https://no-color.org/). To force-disable colors, export `NO_COLOR=1`.
+
 ## Output Streams
 
 Deacon follows a strict stdout/stderr separation contract to ensure reliable machine-readable output:

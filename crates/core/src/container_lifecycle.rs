@@ -137,7 +137,7 @@ where
     D: Docker,
     F: Fn(ProgressEvent) -> anyhow::Result<()>,
 {
-    info!(
+    debug!(
         "Starting container lifecycle execution in container: {}",
         config.container_id
     );
@@ -247,7 +247,7 @@ where
         info!("Skipping postAttach phase (non-blocking commands disabled)");
     }
 
-    info!("Completed container lifecycle execution");
+    debug!("Completed container lifecycle execution");
     Ok(result)
 }
 
@@ -449,7 +449,7 @@ where
     D: Docker,
     F: Fn(ProgressEvent) -> anyhow::Result<()>,
 {
-    info!("Executing lifecycle phase: {}", phase.as_str());
+    debug!("Executing lifecycle phase: {}", phase.as_str());
     let phase_start = Instant::now();
 
     // Emit phase begin event
@@ -662,7 +662,7 @@ where
         }
     }
 
-    info!(
+    debug!(
         "Completed lifecycle phase: {} in {:?}",
         phase.as_str(),
         phase_result.total_duration

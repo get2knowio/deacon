@@ -20,6 +20,7 @@ impl DeaconGuard {
     }
 
     /// Register an image id to remove on drop.
+    #[allow(dead_code)]
     pub fn register_image<S: Into<String>>(&mut self, image_id: S) {
         let id = image_id.into();
         if !id.is_empty() {

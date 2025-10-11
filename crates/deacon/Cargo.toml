@@ -18,6 +18,9 @@ sha2 = "0.10"
 tar = "0.4"
 toml.workspace = true
 shell-words.workspace = true
+indicatif = "0.17"
+atty = "0.2"
+console = "0.15"
 
 [lints]
 workspace = true

@@ -14,7 +14,7 @@ rust-version = "1.70"
 
 [workspace.dependencies]
 deacon-core = { path = "crates/core" }
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "color"] }
 anyhow = "1.0"
 thiserror = "1.0"
 tracing = "0.1"

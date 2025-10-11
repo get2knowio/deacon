@@ -1,5 +1,7 @@
+use crate::ui::spinner::{PlainSpinner, SpinnerEmitter};
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 /// Runtime selection options
@@ -54,7 +56,7 @@ pub enum LogLevel {
 }
 
 /// Progress format options
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, ValueEnum, PartialEq, Eq)]
 pub enum ProgressFormat {
     /// No progress output
     None,
@@ -486,7 +488,8 @@ pub enum ConfigCommands {
     name = env!("CARGO_PKG_NAME"),
     version,
     about = "Development container CLI",
-    long_about = "Development container CLI (Rust reimplementation)\n\nImplements the Development Containers specification for creating and managing development environments."
+    long_about = "Development container CLI (Rust reimplementation)\n\nImplements the Development Containers specification for creating and managing development environments.",
+    color = clap::ColorChoice::Auto
 )]
 pub struct Cli {
     /// Log format (text or json, defaults to text, can be set via DEACON_LOG_FORMAT env var)
@@ -605,7 +608,7 @@ impl Cli {
             None => None, // Let logging module check environment variable
         };
 
-        let log_level = match self.log_level {
+        let mut log_level = match self.log_level {
             LogLevel::Error => "error",
             LogLevel::Warn => "warn",
             LogLevel::Info => "info",
@@ -613,8 +616,20 @@ impl Cli {
             LogLevel::Trace => "trace",
         };
 
+        // Determine if spinner-friendly session: progress auto, no progress_file, stderr is TTY, non-JSON format
+        let stderr_is_tty = std::io::stderr().is_terminal();
+        let json_format = matches!(log_format, Some("json"));
+        let spinner_eligible = self.progress == ProgressFormat::Auto
+            && self.progress_file.is_none()
+            && stderr_is_tty
+            && !json_format;
+
         // Set environment variable for log level before initializing logging
         if std::env::var_os("DEACON_LOG").is_none() && std::env::var_os("RUST_LOG").is_none() {
+            // In spinner sessions, prefer quieter default unless user overrode via flag/env
+            if spinner_eligible {
+                log_level = "warn";
+            }
             std::env::set_var(
                 "RUST_LOG",
                 format!("deacon={},deacon_core={}", log_level, log_level),
@@ -642,13 +657,29 @@ impl Cli {
 
         // Initialize progress tracking
         let progress_format: deacon_core::progress::ProgressFormat = self.progress.clone().into();
-        let progress_tracker = deacon_core::progress::create_progress_tracker(
-            &progress_format,
-            self.progress_file.as_deref(),
-            self.workspace_folder.as_deref(),
-            &redaction_config,
-            secret_registry,
-        )?;
+
+        // Prefer spinner emitter in eligible sessions; otherwise fall back to core helper
+        let progress_tracker = if spinner_eligible {
+            // Build a tracker with SpinnerEmitter
+            use deacon_core::progress::get_cache_dir;
+            use deacon_core::progress::ProgressTracker;
+            let cache_dir = get_cache_dir()?;
+            let emitter: Box<dyn deacon_core::progress::ProgressEmitter> =
+                Box::new(SpinnerEmitter::new());
+            Some(ProgressTracker::new(
+                Some(emitter),
+                Some(&cache_dir),
+                redaction_config.clone(),
+            )?)
+        } else {
+            deacon_core::progress::create_progress_tracker(
+                &progress_format,
+                self.progress_file.as_deref(),
+                self.workspace_folder.as_deref(),
+                &redaction_config,
+                secret_registry,
+            )?
+        };
 
         // Convert to Arc<Mutex<Option<_>>> for sharing between operations
         let progress_tracker = std::sync::Arc::new(std::sync::Mutex::new(progress_tracker));
@@ -882,7 +913,27 @@ impl Cli {
                     config_path: self.config,
                 };
 
-                execute_down(args).await
+                // If spinner is eligible, wrap the down execution with a plain spinner
+                if spinner_eligible {
+                    if stderr_is_tty {
+                        let sp = PlainSpinner::start("Stopping environment…");
+                        let res = execute_down(args).await;
+                        match res {
+                            Ok(()) => {
+                                sp.finish_with_message("Shutdown completed");
+                                Ok(())
+                            }
+                            Err(e) => {
+                                sp.fail_with_message("Shutdown failed");
+                                Err(e)
+                            }
+                        }
+                    } else {
+                        execute_down(args).await
+                    }
+                } else {
+                    execute_down(args).await
+                }
             }
             Some(Commands::Doctor { json, bundle }) => {
                 // Create a DoctorContext for doctor command

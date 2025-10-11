@@ -98,7 +98,7 @@ impl Default for UpArgs {
 /// ```
 #[instrument(skip(args))]
 pub async fn execute_up(args: UpArgs) -> Result<()> {
-    info!("Starting up command execution");
+    debug!("Starting up command execution");
     debug!("Up args: {:?}", args);
 
     // Create runtime based on args
@@ -112,7 +112,7 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
 /// Execute up command with a specific runtime implementation
 #[instrument(skip(args, runtime))]
 async fn execute_up_with_runtime(args: UpArgs, runtime: ContainerRuntimeImpl) -> Result<()> {
-    info!("Starting up command execution");
+    debug!("Starting up command execution");
     debug!("Up args: {:?}", args);
 
     // Load configuration

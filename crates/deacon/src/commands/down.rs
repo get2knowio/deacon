@@ -34,7 +34,7 @@ pub struct DownArgs {
 /// Execute the down command
 #[instrument(skip(args))]
 pub async fn execute_down(args: DownArgs) -> Result<()> {
-    info!("Starting down command execution");
+    debug!("Starting down command execution");
     debug!("Down args: {:?}", args);
 
     // Add structured tracing for container lifecycle
