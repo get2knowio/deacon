@@ -252,3 +252,107 @@ services:
         marker_content
     );
 }
+
+/// Test that failing initializeCommand prevents container creation
+#[test]
+fn test_initialize_command_failure_prevents_container_creation() {
+    let temp_dir = TempDir::new().unwrap();
+
+    // Create a devcontainer.json with a failing initializeCommand
+    let devcontainer_config = r#"{
+    "name": "Failing Initialize Command Test",
+    "image": "alpine:3.19",
+    "workspaceFolder": "/workspace",
+    "initializeCommand": "exit 1",
+    "postCreateCommand": "echo 'This should not run'"
+}"#;
+
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    // Run deacon up - should fail
+    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let up_output = up_cmd
+        .current_dir(&temp_dir)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+
+    // Check that the command failed
+    assert!(
+        !up_output.status.success(),
+        "deacon up should have failed when initializeCommand fails"
+    );
+
+    // Verify error message mentions the failure
+    let stderr = String::from_utf8_lossy(&up_output.stderr);
+    assert!(
+        stderr.contains("initialize") || stderr.contains("failed") || stderr.contains("exit"),
+        "Error message should indicate initialize command failure: {}",
+        stderr
+    );
+}
+
+/// Test that variable substitution works in initializeCommand
+#[test]
+fn test_initialize_command_variable_substitution() {
+    let temp_dir = TempDir::new().unwrap();
+
+    let marker_path = temp_dir.path().join("substitution_marker.txt");
+
+    // Create a devcontainer.json with variable substitution in initializeCommand
+    let devcontainer_config = format!(
+        r#"{{
+    "name": "Variable Substitution Test",
+    "image": "alpine:3.19",
+    "workspaceFolder": "/workspace",
+    "initializeCommand": "echo 'Workspace: ${{localWorkspaceFolder}}' > {}",
+    "postCreateCommand": "echo 'Container created'"
+}}"#,
+        marker_path.display()
+    );
+
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    // Run deacon up
+    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let up_output = up_cmd
+        .current_dir(&temp_dir)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+
+    // Check that the command succeeded
+    assert!(
+        up_output.status.success(),
+        "deacon up failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+
+    // Verify the marker file was created
+    assert!(
+        marker_path.exists(),
+        "Variable substitution marker file was not created"
+    );
+
+    // Verify the content contains the substituted workspace folder path
+    let marker_content = fs::read_to_string(&marker_path).unwrap();
+    assert!(
+        marker_content.contains(&temp_dir.path().to_string_lossy().to_string()),
+        "Marker file should contain substituted workspace folder path. Content: {}",
+        marker_content
+    );
+}
