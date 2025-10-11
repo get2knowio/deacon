@@ -730,10 +730,8 @@ impl Docker for CliRuntime {
                 args.push(env_arg);
             }
 
-            // Add signal proxy for TTY sessions
-            if config.tty {
-                args.push("--sig-proxy=true");
-            }
+            // Note: '--sig-proxy' is not supported by 'docker exec' (only 'docker run').
+            // Do not add it here to avoid 'unknown flag: --sig-proxy' errors.
 
             // Add container ID
             args.push(&container_id);
