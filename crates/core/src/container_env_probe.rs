@@ -31,20 +31,15 @@ use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
 
 /// Environment probing modes for container
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ContainerProbeMode {
     /// No environment probing
     None,
     /// Login shell only (-l)
+    #[default]
     LoginShell,
     /// Login + Interactive shell (-l -i)
     LoginInteractiveShell,
-}
-
-impl Default for ContainerProbeMode {
-    fn default() -> Self {
-        ContainerProbeMode::LoginShell
-    }
 }
 
 /// Result of container environment probe
@@ -61,7 +56,8 @@ pub struct ContainerProbeResult {
 /// Container environment prober
 #[derive(Debug)]
 pub struct ContainerEnvironmentProber {
-    /// Timeout for probe execution
+    /// Timeout for probe execution (reserved for future use)
+    #[allow(dead_code)]
     probe_timeout: Duration,
 }
 
@@ -422,7 +418,7 @@ pub fn get_shell_command_for_lifecycle(
     }
 
     // Determine shell name for flag compatibility
-    let shell_name = shell.split('/').last().unwrap_or(shell);
+    let shell_name = shell.split('/').next_back().unwrap_or(shell);
 
     match shell_name {
         "zsh" | "bash" => {

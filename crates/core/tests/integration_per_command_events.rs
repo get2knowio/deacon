@@ -69,6 +69,8 @@ async fn test_per_command_events_emitted() {
         skip_post_create: false,
         skip_non_blocking_commands: false,
         non_blocking_timeout: Duration::from_secs(300),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     // Create lifecycle commands with multiple commands in a phase

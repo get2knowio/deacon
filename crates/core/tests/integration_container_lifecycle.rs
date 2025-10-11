@@ -33,6 +33,8 @@ async fn test_container_lifecycle_with_variable_substitution() {
         skip_post_create: false,
         skip_non_blocking_commands: false,
         non_blocking_timeout: Duration::from_secs(300),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     // Define lifecycle commands with variable substitution
@@ -98,6 +100,8 @@ async fn test_container_lifecycle_with_skip_flags() {
         skip_post_create: true,
         skip_non_blocking_commands: true,
         non_blocking_timeout: Duration::from_secs(300),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     let commands = ContainerLifecycleCommands::new()
@@ -142,6 +146,8 @@ fn test_container_lifecycle_config_validation() {
         skip_post_create: false,
         skip_non_blocking_commands: true,
         non_blocking_timeout: Duration::from_secs(300),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     assert_eq!(config.container_id, "test-container");
@@ -195,6 +201,8 @@ async fn test_all_lifecycle_phases_ordering() {
         skip_post_create: false,
         skip_non_blocking_commands: false,
         non_blocking_timeout: Duration::from_secs(300),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     // Define all 6 lifecycle phases
