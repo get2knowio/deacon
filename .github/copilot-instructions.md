@@ -269,6 +269,38 @@ Each error enum variant should carry minimal, actionable context. Prefer convert
 - Keep README & CONTRIBUTING authoritative for dev workflow; avoid duplicating extended rationale (link to spec sections instead).
 - When adding a feature touching spec semantics, include a short `docs/` note referencing the relevant workflow diagram.
 
+## Release Notes Automation & Labeling Policy
+We use GitHub's auto-generated release notes with category configuration in `.github/release.yml`. To ensure high-quality release notes, every AI-assisted PR MUST:
+
+- Use Conventional Commits style for the PR title (also acceptable as the squash-merge commit title):
+  - `feat: …`, `fix: …`, `perf: …`, `docs: …`, `refactor: …`, `ci: …`, `build: …`, `chore: …`.
+  - Include `BREAKING CHANGE:` in the PR description footer for any backward-incompatible change.
+
+- Apply at least one of these labels (choose the most user-impacting primary label):
+  - Breaking changes: `breaking-change` (plus the appropriate type label below)
+  - Features: `feature`, `feat`, or `enhancement`
+  - Fixes: `fix`, `bug`, or `bugfix`
+  - Performance: `perf`
+  - Documentation: `docs`
+  - Refactors: `refactor`
+  - CI/CD & Build: `ci`, `build`
+  - Dependencies: `deps`, `dependencies`
+  - Chore & Maintenance: `chore`, `maintenance`
+
+- Exclude from changelog when appropriate by adding one of:
+  - `skip-changelog`, `no-release-notes`
+
+Notes
+- These labels map directly to `.github/release.yml` categories used by the Release workflow (`release.yml`).
+- If multiple labels apply, prefer ONE primary label; add a secondary label only if it significantly improves categorization.
+- For breaking changes, always add `breaking-change` and describe the migration in the PR body under a "Migration" subsection.
+
+Definition of Done for PRs (in addition to quality gates above)
+- PR title follows Conventional Commits and describes user-visible impact.
+- Appropriate labels applied from the list above.
+- Docs updated for user-visible changes (README/examples/spec references as needed).
+- Tests updated/added for behavior changes.
+
 ## Examples Maintenance
 The `examples/` directory and configuration/feature/template fixtures under `examples/` and `fixtures/` are living documentation and MUST reflect current CLI behavior defined in `docs/CLI-SPEC.md`.
 

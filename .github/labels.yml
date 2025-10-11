@@ -1,0 +1,54 @@
+- name: breaking-change
+  color: d73a4a
+  description: Backward-incompatible change that requires migration
+- name: feat
+  color: 0e8a16
+  description: New feature
+- name: feature
+  color: 0e8a16
+  description: New feature (alias)
+- name: enhancement
+  color: 0e8a16
+  description: Feature enhancement
+- name: fix
+  color: d73a4a
+  description: Bug fix
+- name: bug
+  color: d73a4a
+  description: Bug
+- name: bugfix
+  color: d73a4a
+  description: Bug fix (alias)
+- name: perf
+  color: fbca04
+  description: Performance improvement
+- name: docs
+  color: 0052cc
+  description: Documentation changes
+- name: refactor
+  color: 5319e7
+  description: Code refactor
+- name: ci
+  color: 0366d6
+  description: CI/CD changes
+- name: build
+  color: 5319e7
+  description: Build system changes
+- name: deps
+  color: 5319e7
+  description: Dependency updates
+- name: dependencies
+  color: 5319e7
+  description: Dependency updates (alias)
+- name: chore
+  color: c5def5
+  description: Chore & maintenance
+- name: maintenance
+  color: c5def5
+  description: Maintenance changes
+- name: skip-changelog
+  color: ededed
+  description: Exclude from auto-generated release notes
+- name: no-release-notes
+  color: ededed
+  description: Exclude from release notes (alias)
