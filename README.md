@@ -17,7 +17,7 @@
   <img alt="Rust 2021" src="https://img.shields.io/badge/rust-2021-orange" />
 </p>
 
-A Rust reimplementation of the Development Containers CLI, following the [containers.dev specification](https://containers.dev).
+A Rust implementation of the Development Containers CLI, following the [containers.dev specification](https://containers.dev).
 
  
 

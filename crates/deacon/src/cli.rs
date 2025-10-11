@@ -488,7 +488,7 @@ pub enum ConfigCommands {
     name = env!("CARGO_PKG_NAME"),
     version,
     about = "Development container CLI",
-    long_about = "Development container CLI (Rust reimplementation)\n\nImplements the Development Containers specification for creating and managing development environments.",
+    long_about = "Development container CLI\n\nImplements the Development Containers specification for creating and managing development environments.",
     color = clap::ColorChoice::Auto
 )]
 pub struct Cli {
