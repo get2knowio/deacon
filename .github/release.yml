@@ -1,0 +1,47 @@
+# Configuration for GitHub's auto-generated release notes
+# Docs: https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+
+changelog:
+  categories:
+    - title: Breaking changes
+      labels:
+        - breaking-change
+        - breaking
+    - title: Features
+      labels:
+        - feature
+        - feat
+        - enhancement
+    - title: Fixes
+      labels:
+        - fix
+        - bug
+        - bugfix
+    - title: Performance
+      labels:
+        - perf
+    - title: Documentation
+      labels:
+        - docs
+    - title: Refactors
+      labels:
+        - refactor
+    - title: CI/CD & Build
+      labels:
+        - ci
+        - build
+    - title: Dependencies
+      labels:
+        - deps
+        - dependencies
+    - title: Chore & Maintenance
+      labels:
+        - chore
+        - maintenance
+    - title: Other changes
+      labels:
+        - "*"
+  exclude:
+    labels:
+      - skip-changelog
+      - no-release-notes
