@@ -136,7 +136,7 @@ impl ContainerEnvironmentProber {
     /// Detect the shell to use in the container
     ///
     /// Order of detection:
-    /// 1. Check $SHELL environment variable
+    /// 1. Check $SHELL environment variable (if valid and executable)
     /// 2. Check /etc/passwd for user's shell
     /// 3. Fallback chain: zsh → bash → sh
     pub async fn detect_container_shell<D>(
@@ -148,15 +148,24 @@ impl ContainerEnvironmentProber {
     where
         D: Docker,
     {
-        // Try $SHELL first
+        // Try $SHELL first - but verify it's valid and executable
         if let Ok(shell) = self
             .exec_simple_command(docker, container_id, &["sh", "-c", "echo $SHELL"], user)
             .await
         {
             let shell = shell.trim();
             if !shell.is_empty() && shell != "/bin/sh" && shell != "sh" {
-                debug!("Using $SHELL from container: {}", shell);
-                return Ok(shell.to_string());
+                // Verify the shell actually exists and is executable
+                if self
+                    .check_shell_exists(docker, container_id, shell, user)
+                    .await
+                    .unwrap_or(false)
+                {
+                    debug!("Using verified $SHELL from container: {}", shell);
+                    return Ok(shell.to_string());
+                } else {
+                    debug!("$SHELL '{}' is not executable, trying alternatives", shell);
+                }
             }
         }
 
@@ -166,8 +175,23 @@ impl ContainerEnvironmentProber {
                 .read_shell_from_passwd(docker, container_id, user, user)
                 .await
             {
-                debug!("Using shell from /etc/passwd for user {}: {}", user, shell);
-                return Ok(shell);
+                // Verify this shell is also executable
+                if self
+                    .check_shell_exists(docker, container_id, &shell, Some(user))
+                    .await
+                    .unwrap_or(false)
+                {
+                    debug!(
+                        "Using verified shell from /etc/passwd for user {}: {}",
+                        user, shell
+                    );
+                    return Ok(shell);
+                } else {
+                    debug!(
+                        "Shell from /etc/passwd '{}' is not executable, trying fallbacks",
+                        shell
+                    );
+                }
             }
         }
 
@@ -183,7 +207,7 @@ impl ContainerEnvironmentProber {
             }
         }
 
-        // Ultimate fallback
+        // Ultimate fallback - sh should always exist
         debug!("Using ultimate fallback: sh");
         Ok("sh".to_string())
     }
@@ -244,20 +268,28 @@ impl ContainerEnvironmentProber {
     where
         D: Docker,
     {
-        let result = self
-            .exec_simple_command(
-                docker,
-                container_id,
-                &[
-                    "sh",
-                    "-c",
-                    &format!("test -x {} && echo 'exists'", shell_path),
-                ],
-                user,
-            )
-            .await;
+        use crate::docker::ExecConfig;
 
-        Ok(result.map(|s| s.trim() == "exists").unwrap_or(false))
+        let command = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            format!("test -x {}", shell_path),
+        ];
+
+        let exec_config = ExecConfig {
+            user: user.map(String::from),
+            working_dir: None,
+            env: HashMap::new(),
+            tty: false,
+            interactive: false,
+            detach: false,
+        };
+
+        // Use exit code to determine if shell exists (0 = exists, non-zero = doesn't exist)
+        match docker.exec(container_id, &command, exec_config).await {
+            Ok(result) => Ok(result.success && result.exit_code == 0),
+            Err(_) => Ok(false),
+        }
     }
 
     /// Execute probe command in container
@@ -342,6 +374,15 @@ impl ContainerEnvironmentProber {
     }
 
     /// Parse environment output from shell
+    ///
+    /// Handles:
+    /// - Standard KEY=VALUE pairs
+    /// - Empty values (KEY=)
+    /// - Values containing equals signs (KEY=val=ue)
+    /// - Skips invalid lines and keys
+    ///
+    /// Note: Multiline values are challenging without proper quoting/escaping from the shell.
+    /// This implementation handles single-line values robustly.
     fn parse_env_output(&self, output: &str) -> Result<HashMap<String, String>> {
         let mut env_vars = HashMap::new();
 
@@ -351,13 +392,18 @@ impl ContainerEnvironmentProber {
                 continue;
             }
 
+            // Find the first '=' which separates key from value
             if let Some(eq_pos) = line.find('=') {
-                let key = line[..eq_pos].to_string();
-                let value = line[eq_pos + 1..].to_string();
+                let key = &line[..eq_pos];
 
                 // Only include if key is valid (non-empty and contains only valid characters)
-                if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    env_vars.insert(key, value);
+                // Valid environment variable names: alphanumeric and underscore, cannot start with digit
+                if !key.is_empty()
+                    && key.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    && !key.chars().next().unwrap().is_ascii_digit()
+                {
+                    let value = &line[eq_pos + 1..];
+                    env_vars.insert(key.to_string(), value.to_string());
                 }
             }
         }
@@ -488,6 +534,78 @@ mod tests {
         assert_eq!(result.get("REMOTE_VAR"), Some(&"remote_value".to_string()));
         // Probed-only vars should be preserved
         assert_eq!(result.get("HOME"), Some(&"/home/user".to_string()));
+    }
+
+    #[test]
+    fn test_merge_environments_container_overrides_probed() {
+        let prober = ContainerEnvironmentProber::new();
+
+        let mut probed_env = HashMap::new();
+        probed_env.insert("VAR".to_string(), "probed".to_string());
+
+        let mut container_env = HashMap::new();
+        container_env.insert("VAR".to_string(), "container".to_string());
+
+        let result = prober.merge_environments(&probed_env, Some(&container_env), None);
+
+        // Container env should override probed
+        assert_eq!(result.get("VAR"), Some(&"container".to_string()));
+    }
+
+    #[test]
+    fn test_merge_environments_remote_overrides_all() {
+        let prober = ContainerEnvironmentProber::new();
+
+        let mut probed_env = HashMap::new();
+        probed_env.insert("VAR".to_string(), "probed".to_string());
+
+        let mut container_env = HashMap::new();
+        container_env.insert("VAR".to_string(), "container".to_string());
+
+        let mut remote_env = HashMap::new();
+        remote_env.insert("VAR".to_string(), "remote".to_string());
+
+        let result =
+            prober.merge_environments(&probed_env, Some(&container_env), Some(&remote_env));
+
+        // Remote env should override both container and probed
+        assert_eq!(result.get("VAR"), Some(&"remote".to_string()));
+    }
+
+    #[test]
+    fn test_parse_env_output_with_equals_in_value() {
+        let prober = ContainerEnvironmentProber::new();
+        let output = "KEY=value=with=equals\nANOTHER=normal";
+
+        let result = prober.parse_env_output(output).unwrap();
+
+        assert_eq!(result.get("KEY"), Some(&"value=with=equals".to_string()));
+        assert_eq!(result.get("ANOTHER"), Some(&"normal".to_string()));
+    }
+
+    #[test]
+    fn test_parse_env_output_empty_values() {
+        let prober = ContainerEnvironmentProber::new();
+        let output = "EMPTY=\nNONEMPTY=value\nALSO_EMPTY=";
+
+        let result = prober.parse_env_output(output).unwrap();
+
+        assert_eq!(result.get("EMPTY"), Some(&"".to_string()));
+        assert_eq!(result.get("NONEMPTY"), Some(&"value".to_string()));
+        assert_eq!(result.get("ALSO_EMPTY"), Some(&"".to_string()));
+    }
+
+    #[test]
+    fn test_parse_env_output_invalid_keys_ignored() {
+        let prober = ContainerEnvironmentProber::new();
+        let output = "VALID=value\nINVALID-KEY=bad\n123START=bad\nVALID_KEY=good";
+
+        let result = prober.parse_env_output(output).unwrap();
+
+        assert_eq!(result.get("VALID"), Some(&"value".to_string()));
+        assert_eq!(result.get("VALID_KEY"), Some(&"good".to_string()));
+        assert!(!result.contains_key("INVALID-KEY"));
+        assert!(!result.contains_key("123START"));
     }
 
     #[test]
