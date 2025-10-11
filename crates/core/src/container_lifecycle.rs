@@ -12,7 +12,7 @@ use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitut
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 /// Configuration for container lifecycle execution
 #[derive(Debug, Clone)]
@@ -31,6 +31,10 @@ pub struct ContainerLifecycleConfig {
     pub skip_non_blocking_commands: bool,
     /// Timeout for non-blocking commands (default: 5 minutes)
     pub non_blocking_timeout: Duration,
+    /// Whether to use login shell for lifecycle commands (default: true)
+    pub use_login_shell: bool,
+    /// User environment probe mode for lifecycle commands
+    pub user_env_probe: crate::container_env_probe::ContainerProbeMode,
 }
 
 /// Execute lifecycle commands in a container with full variable substitution
@@ -144,11 +148,84 @@ where
 
     let mut result = ContainerLifecycleResult::new();
 
-    // Create substitution context with container information
+    // Detect shell early if using login shell mode
+    let detected_shell = if config.use_login_shell {
+        let prober = crate::container_env_probe::ContainerEnvironmentProber::new();
+        let shell = prober
+            .detect_container_shell(docker, &config.container_id, config.user.as_deref())
+            .await
+            .unwrap_or_else(|e| {
+                warn!(
+                    "Failed to detect container shell, falling back to 'sh': {}",
+                    e
+                );
+                "sh".to_string()
+            });
+        info!(
+            "Detected shell in container for lifecycle execution: {}",
+            shell
+        );
+        Some(shell)
+    } else {
+        None
+    };
+
+    // Probe container environment if enabled
+    let probed_env =
+        if config.user_env_probe != crate::container_env_probe::ContainerProbeMode::None {
+            info!(
+                "Probing container environment with mode: {:?}",
+                config.user_env_probe
+            );
+            let prober = crate::container_env_probe::ContainerEnvironmentProber::new();
+            match prober
+                .probe_container_environment(
+                    docker,
+                    &config.container_id,
+                    config.user_env_probe,
+                    config.user.as_deref(),
+                )
+                .await
+            {
+                Ok(probe_result) => {
+                    info!(
+                        "Container environment probe completed: {} variables captured using {}",
+                        probe_result.var_count, probe_result.shell_used
+                    );
+                    Some(probe_result.env_vars)
+                }
+                Err(e) => {
+                    warn!(
+                        "Container environment probe failed, continuing without probed env: {}",
+                        e
+                    );
+                    None
+                }
+            }
+        } else {
+            debug!("Container environment probing disabled");
+            None
+        };
+
+    // Merge probed environment with container_env (probed env is lowest priority)
+    let merged_env = if let Some(probed) = probed_env.as_ref() {
+        let prober = crate::container_env_probe::ContainerEnvironmentProber::new();
+        prober.merge_environments(probed, Some(&config.container_env), None)
+    } else {
+        config.container_env.clone()
+    };
+
+    // Create substitution context with container information and merged env
     let container_context = substitution_context
         .clone()
         .with_container_workspace_folder(config.container_workspace_folder.clone())
-        .with_container_env(config.container_env.clone());
+        .with_container_env(merged_env.clone());
+
+    // Create an updated config with merged environment
+    let updated_config = ContainerLifecycleConfig {
+        container_env: merged_env,
+        ..config.clone()
+    };
 
     // Execute initialize phase (host-side) if provided
     if let Some(initialize_commands) = &commands.initialize {
@@ -170,9 +247,10 @@ where
             execute_lifecycle_phase(
                 LifecyclePhase::OnCreate,
                 on_create_commands,
-                config,
-                &docker,
+                &updated_config,
+                docker,
                 &container_context,
+                detected_shell.as_deref(),
                 progress_callback.as_ref(),
             )
             .await?,
@@ -185,9 +263,10 @@ where
             execute_lifecycle_phase(
                 LifecyclePhase::UpdateContent,
                 update_content_commands,
-                config,
-                &docker,
+                &updated_config,
+                docker,
                 &container_context,
+                detected_shell.as_deref(),
                 progress_callback.as_ref(),
             )
             .await?,
@@ -195,15 +274,16 @@ where
     }
 
     // Execute postCreate phase (if not skipped)
-    if !config.skip_post_create {
+    if !updated_config.skip_post_create {
         if let Some(post_create_commands) = &commands.post_create {
             result.phases.push(
                 execute_lifecycle_phase(
                     LifecyclePhase::PostCreate,
                     post_create_commands,
-                    config,
-                    &docker,
+                    &updated_config,
+                    docker,
                     &container_context,
+                    detected_shell.as_deref(),
                     progress_callback.as_ref(),
                 )
                 .await?,
@@ -214,15 +294,16 @@ where
     }
 
     // Execute postStart phase (if not skipped by non-blocking commands flag)
-    if !config.skip_non_blocking_commands {
+    if !updated_config.skip_non_blocking_commands {
         if let Some(post_start_commands) = &commands.post_start {
             // Add postStart phase to non-blocking specs for later execution
             result.non_blocking_phases.push(NonBlockingPhaseSpec {
                 phase: LifecyclePhase::PostStart,
                 commands: post_start_commands.clone(),
-                config: config.clone(),
+                config: updated_config.clone(),
                 context: container_context.clone(),
-                timeout: config.non_blocking_timeout,
+                timeout: updated_config.non_blocking_timeout,
+                detected_shell: detected_shell.clone(),
             });
             info!("Added postStart phase for non-blocking execution");
         }
@@ -231,15 +312,16 @@ where
     }
 
     // Execute postAttach phase (if not skipped by non-blocking commands flag)
-    if !config.skip_non_blocking_commands {
+    if !updated_config.skip_non_blocking_commands {
         if let Some(post_attach_commands) = &commands.post_attach {
             // Add postAttach phase to non-blocking specs for later execution
             result.non_blocking_phases.push(NonBlockingPhaseSpec {
                 phase: LifecyclePhase::PostAttach,
                 commands: post_attach_commands.clone(),
-                config: config.clone(),
+                config: updated_config.clone(),
                 context: container_context.clone(),
-                timeout: config.non_blocking_timeout,
+                timeout: updated_config.non_blocking_timeout,
+                detected_shell: detected_shell.clone(),
             });
             info!("Added postAttach phase for non-blocking execution");
         }
@@ -425,13 +507,23 @@ async fn execute_lifecycle_phase<D, F>(
     config: &ContainerLifecycleConfig,
     docker: &D,
     context: &SubstitutionContext,
+    detected_shell: Option<&str>,
     progress_callback: Option<&F>,
 ) -> Result<PhaseResult>
 where
     D: Docker,
     F: Fn(ProgressEvent) -> anyhow::Result<()>,
 {
-    execute_lifecycle_phase_impl(phase, commands, config, docker, context, progress_callback).await
+    execute_lifecycle_phase_impl(
+        phase,
+        commands,
+        config,
+        docker,
+        context,
+        detected_shell,
+        progress_callback,
+    )
+    .await
 }
 
 /// Execute a single lifecycle phase in the container (implementation detail)
@@ -443,6 +535,7 @@ async fn execute_lifecycle_phase_impl<D, F>(
     config: &ContainerLifecycleConfig,
     docker: &D,
     context: &SubstitutionContext,
+    detected_shell: Option<&str>,
     progress_callback: Option<&F>,
 ) -> Result<PhaseResult>
 where
@@ -540,12 +633,25 @@ where
             detach: false,
         };
 
-        // Execute command in container using sh -c
-        let command_args = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            substituted_command.clone(),
-        ];
+        // Detect shell and create appropriate command args
+        let command_args = if config.use_login_shell {
+            // Use detected shell or fallback to sh
+            let shell = detected_shell.unwrap_or("sh");
+            debug!("Using login shell for lifecycle command: {}", shell);
+            crate::container_env_probe::get_shell_command_for_lifecycle(
+                shell,
+                &substituted_command,
+                true,
+            )
+        } else {
+            // Legacy mode: plain sh -c
+            debug!("Using plain sh -c for lifecycle command (legacy mode)");
+            vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                substituted_command.clone(),
+            ]
+        };
 
         let exec_result = docker
             .exec(&config.container_id, &command_args, exec_config)
@@ -784,6 +890,8 @@ pub struct NonBlockingPhaseSpec {
     pub context: SubstitutionContext,
     /// Timeout for execution
     pub timeout: Duration,
+    /// Detected shell for lifecycle execution
+    pub detected_shell: Option<String>,
 }
 
 impl Default for ContainerLifecycleResult {
@@ -935,6 +1043,7 @@ impl ContainerLifecycleResult {
                     &spec.config,
                     docker,
                     &spec.context,
+                    spec.detected_shell.as_deref(),
                     progress_callback.as_ref(),
                 ),
             )
@@ -986,6 +1095,8 @@ mod tests {
             skip_post_create: false,
             skip_non_blocking_commands: false,
             non_blocking_timeout: Duration::from_secs(300), // 5 minutes default
+            use_login_shell: true,
+            user_env_probe: crate::container_env_probe::ContainerProbeMode::LoginShell,
         };
 
         assert_eq!(config.container_id, "test-container");
@@ -994,6 +1105,7 @@ mod tests {
         assert!(!config.skip_post_create);
         assert!(!config.skip_non_blocking_commands);
         assert_eq!(config.non_blocking_timeout, Duration::from_secs(300));
+        assert!(config.use_login_shell);
     }
 
     #[test]
@@ -1103,9 +1215,12 @@ mod tests {
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
                 non_blocking_timeout: Duration::from_secs(30),
+                use_login_shell: false, // Use plain sh for tests
+                user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
+            detected_shell: None,
         });
 
         // Execute without callback (None branch)
@@ -1156,9 +1271,12 @@ mod tests {
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
                 non_blocking_timeout: Duration::from_secs(30),
+                use_login_shell: false,
+                user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
+            detected_shell: None,
         });
 
         // Track callback invocations
@@ -1223,9 +1341,12 @@ mod tests {
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
                 non_blocking_timeout: Duration::from_millis(100), // Very short timeout
+                use_login_shell: false,
+                user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
             },
             context: substitution_context,
             timeout: Duration::from_millis(100), // Very short timeout
+            detected_shell: None,
         });
 
         // Execute with callback - should timeout
@@ -1277,9 +1398,12 @@ mod tests {
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
                 non_blocking_timeout: Duration::from_secs(30),
+                use_login_shell: false,
+                user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
+            detected_shell: None,
         });
 
         // Execute with callback - command should fail but not propagate error
