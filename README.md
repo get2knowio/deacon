@@ -35,7 +35,7 @@ This will automatically detect your platform, download the latest release, verif
 #### Script options (env vars)
 You can steer the installer using the following environment variables:
 
-- `DEACON_VERSION` — Specific version to install (default: latest). Accepts `v0.1.3` or `0.1.3`.
+- `DEACON_VERSION` — Specific version to install (default: latest). Accepts `v0.1.4` or `0.1.4`.
 - `DEACON_BASE_URL` — Base URL for release downloads (default: GitHub Releases). Useful for mirrors.
 - `DEACON_INSTALL_DIR` — Install directory (default: `/usr/local/bin` if writable, otherwise `~/.local/bin`).
 - `DEACON_FORCE` — Set to `true` to overwrite an existing binary without a prompt.
@@ -43,11 +43,11 @@ You can steer the installer using the following environment variables:
 Examples:
 ```bash
 # Install a specific version
-curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | DEACON_VERSION=0.1.3 bash
+curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | DEACON_VERSION=0.1.4 bash
 
 # Install to a custom directory and overwrite without prompt
 curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | \
-  DEACON_VERSION=v0.1.3 DEACON_INSTALL_DIR="$HOME/.local/bin" DEACON_FORCE=true bash
+  DEACON_VERSION=v0.1.4 DEACON_INSTALL_DIR="$HOME/.local/bin" DEACON_FORCE=true bash
 ```
 
 Note: On Linux, the installer auto-detects your libc (GNU vs musl) and selects the matching asset (e.g., Alpine → musl).
@@ -57,27 +57,27 @@ Download the latest release for your platform from the [releases page](https://g
 
 ```bash
 # For Linux x86_64 (glibc)
-curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.3-x86_64-unknown-linux-gnu.tar.gz -o deacon.tar.gz
+curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-x86_64-unknown-linux-gnu.tar.gz -o deacon.tar.gz
 tar -xzf deacon.tar.gz
 sudo mv deacon /usr/local/bin/
 
 # For Linux x86_64 (musl/Alpine)
-curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.3-x86_64-unknown-linux-musl.tar.gz -o deacon.tar.gz
+curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-x86_64-unknown-linux-musl.tar.gz -o deacon.tar.gz
 tar -xzf deacon.tar.gz
 sudo mv deacon /usr/local/bin/
 
 # For macOS x86_64
-curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.3-x86_64-apple-darwin.tar.gz -o deacon.tar.gz
+curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-x86_64-apple-darwin.tar.gz -o deacon.tar.gz
 tar -xzf deacon.tar.gz
 sudo mv deacon /usr/local/bin/
 
 # For macOS ARM64 (Apple Silicon)
-curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.3-aarch64-apple-darwin.tar.gz -o deacon.tar.gz
+curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-aarch64-apple-darwin.tar.gz -o deacon.tar.gz
 tar -xzf deacon.tar.gz
 sudo mv deacon /usr/local/bin/
 
 # For Windows x86_64 (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.3-x86_64-pc-windows-msvc.zip" -OutFile "deacon.zip"
+Invoke-WebRequest -Uri "https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-x86_64-pc-windows-msvc.zip" -OutFile "deacon.zip"
 Expand-Archive -Path "deacon.zip" -DestinationPath "."
 # Move deacon.exe to a directory in your PATH
 ```
