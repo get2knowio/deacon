@@ -68,6 +68,54 @@ release-check: ## Full quality gate
 	cargo test -- --test-threads=1 && \
 	cargo build --release
 
+.PHONY: macos-artifact
+macos-artifact: ## Rebuild macOS artifact via GitHub Actions and download to artifacts/deacon
+	@set -euo pipefail; \
+	WORKFLOW="Build macOS (Apple Silicon)"; \
+	echo "Cleaning previous artifact(s)..."; \
+	rm -f ./artifacts/deacon || true; \
+	rm -rf ./artifacts/deacon-macos-aarch64 || true; \
+	if ! command -v gh >/dev/null 2>&1; then \
+	  echo "Error: GitHub CLI 'gh' not found in PATH."; \
+	  exit 1; \
+	fi; \
+	echo "Triggering workflow: $$WORKFLOW"; \
+	gh workflow run "$$WORKFLOW"; \
+	echo "Waiting for workflow run to start..."; \
+	sleep 2; \
+	echo "Polling latest run for workflow '$$WORKFLOW'..."; \
+	# Poll until the latest run for the workflow completes; capture id/status/conclusion each loop. \
+	while :; do \
+	  run_id=$$(gh run list --workflow "$$WORKFLOW" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true); \
+	  status=$$(gh run list --workflow "$$WORKFLOW" --limit 1 --json status --jq '.[0].status' 2>/dev/null || true); \
+	  conclusion=$$(gh run list --workflow "$$WORKFLOW" --limit 1 --json conclusion --jq '.[0].conclusion' 2>/dev/null || true); \
+	  if [[ -z "$$run_id" || -z "$$status" ]]; then \
+	    printf '.'; sleep 3; continue; \
+	  fi; \
+	  printf "\rRun ID: %s  Status: %s  Conclusion: %s" "$$run_id" "$$status" "$$conclusion"; \
+	  if [[ "$$status" == "completed" ]]; then echo ""; break; fi; \
+	  sleep 5; \
+	done; \
+	if [[ "$$conclusion" != "success" ]]; then \
+	  echo "Workflow concluded with status '$$conclusion' (run $$run_id)"; \
+	  exit 1; \
+	fi; \
+	echo "Downloading artifact 'deacon-macos-aarch64' from run $$run_id..."; \
+	mkdir -p ./artifacts; \
+	gh run download "$$run_id" --name deacon-macos-aarch64 --dir ./artifacts; \
+	# Move resulting binary into ./artifacts/deacon if present; otherwise leave directory content intact. \
+	if [[ -f ./artifacts/deacon-macos-aarch64/deacon ]]; then \
+	  mv -f ./artifacts/deacon-macos-aarch64/deacon ./artifacts/deacon; \
+	  rm -rf ./artifacts/deacon-macos-aarch64; \
+	elif [[ $$(find ./artifacts/deacon-macos-aarch64 -maxdepth 1 -type f | wc -l) -eq 1 ]]; then \
+	  f=$$(find ./artifacts/deacon-macos-aarch64 -maxdepth 1 -type f | head -n1); \
+	  mv -f "$$f" ./artifacts/deacon; \
+	  rm -rf ./artifacts/deacon-macos-aarch64; \
+	else \
+	  echo "Downloaded files under ./artifacts/deacon-macos-aarch64/. Please move the desired binary to ./artifacts/deacon manually."; \
+	fi; \
+	echo "Done. Artifact at ./artifacts/deacon"
+
 .PHONY: test-parity parity
 parity: test-parity ## Alias for test-parity
 
