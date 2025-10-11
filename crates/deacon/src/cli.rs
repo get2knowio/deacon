@@ -798,6 +798,15 @@ impl Cli {
             }) => {
                 use crate::commands::exec::{execute_exec, ExecArgs};
 
+                // Exec attaches to an interactive shell. If a spinner-based progress tracker
+                // was initialized earlier (eligible session), drop it now to avoid the spinner
+                // continuing to tick while the terminal is attached to the container.
+                {
+                    let mut guard = progress_tracker.lock().unwrap();
+                    // Take and drop any existing tracker/emitter immediately to prevent spinner from ticking.
+                    let _ = (*guard).take();
+                }
+
                 let args = ExecArgs {
                     user,
                     no_tty,
