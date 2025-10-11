@@ -31,7 +31,7 @@ fn parity_build_creates_discoverable_image() {
     let ws = tmp.path();
     let unique_token = format!("parity-build-{}", std::process::id());
 
-    // Create Dockerfile with unique label
+    // Create Dockerfile at workspace root with unique label
     fs::write(
         ws.join("Dockerfile"),
         format!(
@@ -43,17 +43,17 @@ LABEL parity.token={}
     )
     .unwrap();
 
-    // Create devcontainer.json with build context
-    parity_utils::write_devcontainer(
-        ws,
+    // Create root-level .devcontainer.json referencing Dockerfile at workspace root
+    fs::write(
+        ws.join(".devcontainer.json"),
         r#"{
-  "name": "ParityBuild",
-  "dockerFile": "Dockerfile",
-  "build": {
-    "context": "."
-  }
-}
-"#,
+        "name": "ParityBuild",
+        "dockerFile": "Dockerfile",
+        "build": {
+            "context": "."
+        }
+    }
+    "#,
     )
     .unwrap();
 
@@ -68,35 +68,49 @@ LABEL parity.token={}
         String::from_utf8_lossy(&st1.stderr)
     );
 
-    // Check if upstream created an image with our label
-    let mut inspect1 = std::process::Command::new("docker");
-    inspect1.arg("images");
-    inspect1.arg("--filter");
-    inspect1.arg(format!("label=parity.token={}", unique_token));
-    inspect1.arg("--format");
-    inspect1.arg("{{.Repository}}:{{.Tag}}");
-    let images1 = inspect1.output().unwrap();
+    // Check if upstream created an image with our label (discover by ID with retry)
+    // Small initial delay in case the daemon hasn't flushed image metadata yet
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let mut upstream_ids: Vec<String> = Vec::new();
+    for _ in 0..20 {
+        let images1 = std::process::Command::new("docker")
+            .args([
+                "images",
+                "-a",
+                "--filter",
+                &format!("label=parity.token={}", unique_token),
+                "--format",
+                "{{.ID}}",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            images1.status.success(),
+            "docker images failed after upstream build: {}",
+            String::from_utf8_lossy(&images1.stderr)
+        );
+        upstream_ids = String::from_utf8_lossy(&images1.stdout)
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !upstream_ids.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
     assert!(
-        images1.status.success(),
-        "docker images failed after upstream build: {}",
-        String::from_utf8_lossy(&images1.stderr)
-    );
-    let upstream_images = String::from_utf8_lossy(&images1.stdout).trim().to_string();
-    assert!(
-        !upstream_images.is_empty(),
+        !upstream_ids.is_empty(),
         "upstream build should create an image with label parity.token={}",
         unique_token
     );
 
-    // Clean up the upstream image to avoid conflicts
-    if !upstream_images.is_empty() {
-        for image in upstream_images.lines() {
-            if !image.trim().is_empty() {
-                let mut rmi = std::process::Command::new("docker");
-                rmi.arg("rmi");
-                rmi.arg(image.trim());
-                let _ = rmi.output(); // Ignore errors in cleanup
-            }
+    // Clean up the upstream image(s) to avoid conflicts
+    if !upstream_ids.is_empty() {
+        for id in &upstream_ids {
+            let _ = std::process::Command::new("docker")
+                .args(["rmi", id])
+                .output();
         }
     }
 
@@ -110,40 +124,45 @@ LABEL parity.token={}
         String::from_utf8_lossy(&st2.stderr)
     );
 
-    // Check if deacon created an image with our label
-    let mut inspect2 = std::process::Command::new("docker");
-    inspect2.arg("images");
-    inspect2.arg("--filter");
-    inspect2.arg(format!("label=parity.token={}", unique_token));
-    inspect2.arg("--format");
-    inspect2.arg("{{.Repository}}:{{.Tag}}");
-    let images2 = inspect2.output().unwrap();
+    // Check if deacon created an image with our label (discover by ID for robustness)
+    let images2 = std::process::Command::new("docker")
+        .args([
+            "images",
+            "-a",
+            "--filter",
+            &format!("label=parity.token={}", unique_token),
+            "--format",
+            "{{.ID}}",
+        ])
+        .output()
+        .unwrap();
     assert!(
         images2.status.success(),
         "docker images failed after deacon build: {}",
         String::from_utf8_lossy(&images2.stderr)
     );
-    let deacon_images = String::from_utf8_lossy(&images2.stdout).trim().to_string();
+    let deacon_ids: Vec<String> = String::from_utf8_lossy(&images2.stdout)
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     assert!(
-        !deacon_images.is_empty(),
+        !deacon_ids.is_empty(),
         "deacon build should create an image with label parity.token={}",
         unique_token
     );
 
     // Both should have created images - we don't require exact same image names
     // but both should be discoverable via the same label
-    eprintln!("upstream created images: {}", upstream_images);
-    eprintln!("deacon created images: {}", deacon_images);
+    eprintln!("upstream created images (IDs): {}", upstream_ids.join(", "));
+    eprintln!("deacon created images (IDs): {}", deacon_ids.join(", "));
 
-    // Clean up the deacon image
-    if !deacon_images.is_empty() {
-        for image in deacon_images.lines() {
-            if !image.trim().is_empty() {
-                let mut rmi = std::process::Command::new("docker");
-                rmi.arg("rmi");
-                rmi.arg(image.trim());
-                let _ = rmi.output(); // Ignore errors in cleanup
-            }
+    // Clean up the deacon image(s)
+    if !deacon_ids.is_empty() {
+        for id in &deacon_ids {
+            let _ = std::process::Command::new("docker")
+                .args(["rmi", id])
+                .output();
         }
     }
 }
@@ -186,20 +205,20 @@ LABEL build.arg.value=$BUILD_ARG_VALUE
     )
     .unwrap();
 
-    // Create devcontainer.json with build args
-    parity_utils::write_devcontainer(
-        ws,
+    // Create root-level .devcontainer.json with build args
+    fs::write(
+        ws.join(".devcontainer.json"),
         r#"{
-  "name": "ParityBuildArgs",
-  "dockerFile": "Dockerfile",
-  "build": {
-    "context": ".",
-    "args": {
-      "BUILD_ARG_VALUE": "parity-test"
+        "name": "ParityBuildArgs",
+        "dockerFile": "Dockerfile",
+        "build": {
+            "context": ".",
+            "args": {
+                "BUILD_ARG_VALUE": "parity-test"
+            }
+        }
     }
-  }
-}
-"#,
+    "#,
     )
     .unwrap();
 
@@ -214,36 +233,63 @@ LABEL build.arg.value=$BUILD_ARG_VALUE
         String::from_utf8_lossy(&st1.stderr)
     );
 
-    // Check if upstream created an image with our build arg label
-    let mut inspect1 = std::process::Command::new("docker");
-    inspect1.arg("images");
-    inspect1.arg("--filter");
-    inspect1.arg(format!("label=parity.token={}", unique_token));
-    inspect1.arg("--filter");
-    inspect1.arg("label=build.arg.value=parity-test");
-    inspect1.arg("--format");
-    inspect1.arg("{{.Repository}}:{{.Tag}}");
-    let images1 = inspect1.output().unwrap();
+    // Find image IDs by parity token first, then inspect for the build arg label
+    fn docker_list_image_ids_by_label(label: &str) -> Vec<String> {
+        let out = std::process::Command::new("docker")
+            .args([
+                "images",
+                "--filter",
+                &format!("label={}", label),
+                "--format",
+                "{{.ID}}",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "docker images failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    let upstream_ids = docker_list_image_ids_by_label(&format!("parity.token={}", unique_token));
     assert!(
-        images1.status.success(),
-        "docker images failed after upstream build: {}",
-        String::from_utf8_lossy(&images1.stderr)
+        !upstream_ids.is_empty(),
+        "upstream build should produce at least one image with parity token label"
     );
-    let upstream_images = String::from_utf8_lossy(&images1.stdout).trim().to_string();
+    let mut found_build_arg = false;
+    for id in &upstream_ids {
+        let out = std::process::Command::new("docker")
+            .args(["inspect", "-f", "{{ json .Config.Labels }}", id])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "docker inspect failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let labels_json = String::from_utf8_lossy(&out.stdout);
+        if labels_json.contains("\"build.arg.value\":\"parity-test\"") {
+            found_build_arg = true;
+            break;
+        }
+    }
     assert!(
-        !upstream_images.is_empty(),
-        "upstream build should create an image with build arg label"
+        found_build_arg,
+        "upstream image should carry build.arg.value=parity-test label"
     );
 
-    // Clean up the upstream image
-    if !upstream_images.is_empty() {
-        for image in upstream_images.lines() {
-            if !image.trim().is_empty() {
-                let mut rmi = std::process::Command::new("docker");
-                rmi.arg("rmi");
-                rmi.arg(image.trim());
-                let _ = rmi.output(); // Ignore errors in cleanup
-            }
+    // Clean up the upstream image(s)
+    if !upstream_ids.is_empty() {
+        for id in &upstream_ids {
+            let _ = std::process::Command::new("docker")
+                .args(["rmi", id])
+                .output();
         }
     }
 
@@ -257,43 +303,46 @@ LABEL build.arg.value=$BUILD_ARG_VALUE
         String::from_utf8_lossy(&st2.stderr)
     );
 
-    // Check if deacon created an image with our build arg label
-    let mut inspect2 = std::process::Command::new("docker");
-    inspect2.arg("images");
-    inspect2.arg("--filter");
-    inspect2.arg(format!("label=parity.token={}", unique_token));
-    inspect2.arg("--filter");
-    inspect2.arg("label=build.arg.value=parity-test");
-    inspect2.arg("--format");
-    inspect2.arg("{{.Repository}}:{{.Tag}}");
-    let images2 = inspect2.output().unwrap();
+    let deacon_ids = docker_list_image_ids_by_label(&format!("parity.token={}", unique_token));
     assert!(
-        images2.status.success(),
-        "docker images failed after deacon build: {}",
-        String::from_utf8_lossy(&images2.stderr)
+        !deacon_ids.is_empty(),
+        "deacon build should produce at least one image with parity token label"
     );
-    let deacon_images = String::from_utf8_lossy(&images2.stdout).trim().to_string();
+    let mut found_build_arg2 = false;
+    for id in &deacon_ids {
+        let out = std::process::Command::new("docker")
+            .args(["inspect", "-f", "{{ json .Config.Labels }}", id])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "docker inspect failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let labels_json = String::from_utf8_lossy(&out.stdout);
+        if labels_json.contains("\"build.arg.value\":\"parity-test\"") {
+            found_build_arg2 = true;
+            break;
+        }
+    }
     assert!(
-        !deacon_images.is_empty(),
-        "deacon build should create an image with build arg label"
+        found_build_arg2,
+        "deacon image should carry build.arg.value=parity-test label"
     );
 
     // Both should have processed build args correctly
     eprintln!(
-        "upstream created images with build args: {}",
-        upstream_images
+        "upstream images with token label: {}",
+        upstream_ids.join(", ")
     );
-    eprintln!("deacon created images with build args: {}", deacon_images);
+    eprintln!("deacon images with token label: {}", deacon_ids.join(", "));
 
-    // Clean up the deacon image
-    if !deacon_images.is_empty() {
-        for image in deacon_images.lines() {
-            if !image.trim().is_empty() {
-                let mut rmi = std::process::Command::new("docker");
-                rmi.arg("rmi");
-                rmi.arg(image.trim());
-                let _ = rmi.output(); // Ignore errors in cleanup
-            }
+    // Clean up the deacon image(s)
+    if !deacon_ids.is_empty() {
+        for id in &deacon_ids {
+            let _ = std::process::Command::new("docker")
+                .args(["rmi", id])
+                .output();
         }
     }
 }

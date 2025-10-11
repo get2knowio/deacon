@@ -601,11 +601,22 @@ fn extract_build_config(
                 // Extract build options/args
                 if let Some(options) = build_obj.get("options").and_then(|v| v.as_object()) {
                     for (key, value) in options {
-                        if let Some(val_str) = value.as_str() {
-                            build_config
-                                .options
-                                .insert(key.clone(), val_str.to_string());
-                        }
+                        let val_str = value
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| value.to_string());
+                        build_config.options.insert(key.clone(), val_str);
+                    }
+                }
+
+                // Extract build args (upstream-compatible: build.args)
+                if let Some(args_obj) = build_obj.get("args").and_then(|v| v.as_object()) {
+                    for (key, value) in args_obj {
+                        let val_str = value
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| value.to_string());
+                        build_config.options.insert(key.clone(), val_str);
                     }
                 }
             }
