@@ -66,15 +66,48 @@ jobs:
         run: |
           rustc -Vv > RUSTC_VERSION.txt
           cat RUSTC_VERSION.txt
-      - name: Create GitHub Release (idempotent)
+      - name: Create GitHub Release (idempotent, with notes)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=${{ steps.get_version.outputs.version }}
           # Create release if it doesn't exist
-          gh release view "$VERSION" >/dev/null 2>&1 || gh release create "$VERSION" -t "Release $VERSION" -n "Automated release for $VERSION" --verify-tag
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            # Use GitHub auto-generated notes for a descriptive changelog
+            gh release create "$VERSION" -t "Release $VERSION" --generate-notes --verify-tag
+          fi
           # Upload rustc version provenance snippet
           gh release upload "$VERSION" RUSTC_VERSION.txt --clobber
+      - name: Enhance release notes (append sections)
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch current body (may be auto-generated)
+          BODY=$(gh release view "$VERSION" --json body -q '.body' || echo "")
+          # Only append if our sections are not already present
+          if ! printf "%s" "$BODY" | grep -q "## Install"; then
+            {
+              printf "%s\n\n" "$BODY"
+              echo "## Install"
+              echo "- Linux/macOS: download the archive for your platform from Assets, extract, and place 'deacon' in your PATH."
+              echo "- Windows: download the .zip, extract 'deacon.exe' and add its location to your PATH."
+              echo
+              echo "## Verify checksums"
+              echo "Download SHA256SUMS from Assets and verify the archive integrity:"
+              echo '```bash'
+              echo 'sha256sum -c SHA256SUMS'
+              echo '```'
+              echo
+              echo "## Artifacts and SBOM"
+              echo "Each archive bundles README and LICENSE. SPDX SBOMs are attached as sbom-<version>-<target>.spdx.json."
+              echo
+              echo "## Changes"
+              echo "The auto-generated notes above enumerate PRs and commits since the previous release."
+            } > RELEASE_NOTES_ENHANCED.md
+
+            gh release edit "$VERSION" --notes-file RELEASE_NOTES_ENHANCED.md
+          fi
 
   build:
     name: Build & Package (${{ matrix.target }})
