@@ -263,6 +263,11 @@ async fn execute_compose_up(
         }
     }
 
+    // Execute initializeCommand on host before starting compose project
+    if let Some(ref initialize) = config.initialize_command {
+        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
+    }
+
     // Start the compose project
     // First, warn about security options that cannot be applied dynamically
     ComposeCommand::warn_security_options_for_compose(config);
@@ -394,6 +399,11 @@ async fn execute_container_up(
 
     // Check Docker availability
     docker.ping().await?;
+
+    // Execute initializeCommand on host before container creation
+    if let Some(ref initialize) = config.initialize_command {
+        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
+    }
 
     // Emit container create begin event
     emit_progress_event(deacon_core::progress::ProgressEvent::ContainerCreateBegin {
@@ -645,6 +655,68 @@ async fn handle_port_events(
         "Emitted {} total port events across all services",
         total_events
     );
+    Ok(())
+}
+
+/// Execute initializeCommand on the host before container creation
+#[instrument(skip(initialize_command, progress_tracker))]
+async fn execute_initialize_command(
+    initialize_command: &serde_json::Value,
+    workspace_folder: &Path,
+    progress_tracker: &std::sync::Arc<
+        std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>,
+    >,
+) -> Result<()> {
+    use deacon_core::container_lifecycle::ContainerLifecycleCommands;
+    use deacon_core::variable::SubstitutionContext;
+
+    debug!("Executing initializeCommand on host");
+
+    // Parse the initialize command
+    let phase_commands = commands_from_json_value(initialize_command)?;
+
+    // Create substitution context for host-side execution
+    let substitution_context = SubstitutionContext::new(workspace_folder)?;
+
+    // Build lifecycle commands with just initialize phase
+    let commands = ContainerLifecycleCommands::new().with_initialize(phase_commands.clone());
+
+    // Create a dummy lifecycle config (only needed for container phases, not host phases)
+    let lifecycle_config = deacon_core::container_lifecycle::ContainerLifecycleConfig {
+        container_id: String::new(),
+        user: None,
+        container_workspace_folder: String::new(),
+        container_env: std::collections::HashMap::new(),
+        skip_post_create: false,
+        skip_non_blocking_commands: false,
+        non_blocking_timeout: Duration::from_secs(300),
+    };
+
+    // Create a progress event callback
+    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
+        if let Ok(mut tracker_guard) = progress_tracker.lock() {
+            if let Some(ref mut tracker) = tracker_guard.as_mut() {
+                tracker.emit_event(event)?;
+            }
+        }
+        Ok(())
+    };
+
+    // Execute only the initialize phase (host-side)
+    use deacon_core::container_lifecycle::execute_container_lifecycle_with_progress_callback;
+    let result = execute_container_lifecycle_with_progress_callback(
+        &lifecycle_config,
+        &commands,
+        &substitution_context,
+        Some(emit_progress_event),
+    )
+    .await?;
+
+    debug!(
+        "initializeCommand execution completed: {} phases executed",
+        result.phases.len()
+    );
+
     Ok(())
 }
 
