@@ -140,6 +140,9 @@ jobs:
           # Incrementally re-added: macOS x86_64 (runs under Rosetta on GitHub runners)
           - os: macos-latest
             target: x86_64-apple-darwin
+          # Incrementally re-added: Linux x86_64 musl (static-ish)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
     env:
       VERSION: ${{ needs.create-release.outputs.version }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
