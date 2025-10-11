@@ -68,6 +68,46 @@ release-check: ## Full quality gate
 	cargo test -- --test-threads=1 && \
 	cargo build --release
 
+.PHONY: release-run
+release-run: ## Dispatch 'Release' workflow for TAG=vX.Y.Z and watch until completion (requires gh)
+	@set -euo pipefail; \
+	if ! command -v gh >/dev/null 2>&1; then \
+	  echo "Error: GitHub CLI 'gh' not found in PATH."; \
+	  exit 1; \
+	fi; \
+	TAG="$${TAG:-}"; \
+	if [[ -z "$$TAG" ]]; then \
+	  echo "Usage: make release-run TAG=v0.1.4"; \
+	  exit 1; \
+	fi; \
+	echo "Dispatching Release workflow for $$TAG..."; \
+	gh workflow run Release --ref main -f version="$$TAG"; \
+	echo "Waiting for workflow run to be registered..."; \
+	sleep 2; \
+	run_id=$$(gh run list --workflow "Release" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true); \
+	if [[ -z "$$run_id" ]]; then \
+	  echo "Error: Could not determine dispatched run id."; \
+	  exit 1; \
+	fi; \
+	echo "Watching run $$run_id..."; \
+	gh run watch "$$run_id" --interval 10 --exit-status; \
+	echo "Run $$run_id completed."
+
+.PHONY: release-assets
+release-assets: ## List assets for a release TAG=vX.Y.Z (requires gh)
+	@set -euo pipefail; \
+	if ! command -v gh >/dev/null 2>&1; then \
+	  echo "Error: GitHub CLI 'gh' not found in PATH."; \
+	  exit 1; \
+	fi; \
+	TAG="$${TAG:-}"; \
+	if [[ -z "$$TAG" ]]; then \
+	  echo "Usage: make release-assets TAG=v0.1.4"; \
+	  exit 1; \
+	fi; \
+	echo "Assets for $$TAG:"; \
+	gh release view "$$TAG" --json assets --jq '.assets[].name' | sort || true
+
 .PHONY: macos-artifact
 macos-artifact: ## Rebuild macOS artifact via GitHub Actions and download to artifacts/deacon
 	@set -euo pipefail; \
