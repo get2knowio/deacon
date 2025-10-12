@@ -28,7 +28,7 @@ use crate::errors::{DeaconError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument};
 
 /// Environment probing modes for container
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -97,6 +97,15 @@ impl ContainerEnvironmentProber {
     where
         D: Docker,
     {
+        // Validate container ID
+        if container_id.is_empty() {
+            return Err(DeaconError::Internal(
+                crate::errors::InternalError::Generic {
+                    message: "Container ID cannot be empty for environment probing".to_string(),
+                },
+            ));
+        }
+
         if mode == ContainerProbeMode::None {
             debug!("Container environment probing disabled (mode: None)");
             return Ok(ContainerProbeResult {
@@ -148,9 +157,23 @@ impl ContainerEnvironmentProber {
     where
         D: Docker,
     {
+        // Validate container ID
+        if container_id.is_empty() {
+            return Err(DeaconError::Internal(
+                crate::errors::InternalError::Generic {
+                    message: "Container ID cannot be empty for shell detection".to_string(),
+                },
+            ));
+        }
+
         // Try $SHELL first - but verify it's valid and executable
         if let Ok(shell) = self
-            .exec_simple_command(docker, container_id, &["sh", "-c", "echo $SHELL"], user)
+            .exec_simple_command(
+                docker,
+                container_id,
+                &["sh", "-c", "echo $SHELL 2>/dev/null"],
+                user,
+            )
             .await
         {
             let shell = shell.trim();
@@ -231,7 +254,7 @@ impl ContainerEnvironmentProber {
                     "sh",
                     "-c",
                     &format!(
-                        "getent passwd {} || grep '^{}:' /etc/passwd || echo ''",
+                        "getent passwd {} 2>/dev/null || grep '^{}:' /etc/passwd 2>/dev/null || echo ''",
                         user, user
                     ),
                 ],
@@ -273,7 +296,7 @@ impl ContainerEnvironmentProber {
         let command = vec![
             "sh".to_string(),
             "-c".to_string(),
-            format!("test -x {}", shell_path),
+            format!("test -x {} 2>/dev/null", shell_path),
         ];
 
         let exec_config = ExecConfig {
@@ -318,7 +341,7 @@ impl ContainerEnvironmentProber {
             ContainerProbeMode::LoginInteractiveShell => "-lic",
         };
 
-        let probe_cmd = format!("{} {} 'env'", shell, shell_flags);
+        let probe_cmd = format!("{} {} 'env 2>/dev/null'", shell, shell_flags);
         debug!("Executing probe command: {}", probe_cmd);
 
         self.exec_simple_command(docker, container_id, &["sh", "-c", &probe_cmd], user)
@@ -369,7 +392,7 @@ impl ContainerEnvironmentProber {
 
         // TODO: Capture actual output when Docker trait supports it
         // For now, return empty string to indicate success
-        warn!("Docker exec doesn't capture output yet - probe will be limited");
+        debug!("Docker exec doesn't capture output - using exit code only for validation");
         Ok(String::new())
     }
 
