@@ -467,8 +467,19 @@ pub fn get_shell_command_for_lifecycle(
     let shell_name = shell.split('/').next_back().unwrap_or(shell);
 
     match shell_name {
-        "zsh" | "bash" => {
-            // Use login shell with -l flag
+        "zsh" => {
+            // Use login + interactive shell for zsh to source .zshrc
+            // This is critical for tools installed via package managers like nvm
+            vec![
+                shell.to_string(),
+                "-l".to_string(),
+                "-i".to_string(),
+                "-c".to_string(),
+                command.to_string(),
+            ]
+        }
+        "bash" => {
+            // Use login shell with -lc flag for bash
             vec![shell.to_string(), "-lc".to_string(), command.to_string()]
         }
         _ => {
@@ -623,7 +634,7 @@ mod tests {
     #[test]
     fn test_get_shell_command_zsh_login() {
         let cmd = get_shell_command_for_lifecycle("/usr/bin/zsh", "echo hello", true);
-        assert_eq!(cmd, vec!["/usr/bin/zsh", "-lc", "echo hello"]);
+        assert_eq!(cmd, vec!["/usr/bin/zsh", "-l", "-i", "-c", "echo hello"]);
     }
 
     #[test]
