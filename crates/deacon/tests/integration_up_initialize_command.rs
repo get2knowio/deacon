@@ -191,7 +191,7 @@ fn test_initialize_command_with_compose() {
     let marker_path = temp_dir.path().join("compose_init_marker.txt");
 
     // Create a simple docker-compose.yml
-        let compose_config = r#"
+    let compose_config = r#"
 services:
     app:
         image: alpine:3.19
