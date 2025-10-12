@@ -354,6 +354,7 @@ impl FeatureInstaller {
             tty: false,
             interactive: false,
             detach: false,
+            silent: false,
         };
 
         let mkdir_result = self
@@ -431,6 +432,7 @@ impl FeatureInstaller {
                 tty: false,
                 interactive: false,
                 detach: false,
+                silent: false,
             };
 
             self.docker
@@ -466,6 +468,7 @@ impl FeatureInstaller {
             tty: false,
             interactive: false,
             detach: false,
+            silent: false,
         };
 
         let result = self
@@ -525,6 +528,7 @@ impl FeatureInstaller {
             tty: false,
             interactive: false,
             detach: false,
+            silent: false,
         };
 
         debug!("Executing install script: {}", install_script_path);
@@ -590,6 +594,7 @@ impl FeatureInstaller {
             tty: false,
             interactive: false,
             detach: false,
+            silent: false,
         };
 
         let result = self

@@ -631,6 +631,7 @@ where
             tty: false,
             interactive: false,
             detach: false,
+            silent: false,
         };
 
         // Detect shell and create appropriate command args

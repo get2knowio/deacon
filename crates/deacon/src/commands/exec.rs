@@ -386,6 +386,7 @@ where
             tty: should_use_tty,
             interactive: true,
             detach: false,
+            silent: false,
         };
 
         match docker_client

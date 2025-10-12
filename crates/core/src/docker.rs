@@ -72,6 +72,8 @@ pub struct ExecConfig {
     pub interactive: bool,
     /// Whether to detach the command
     pub detach: bool,
+    /// Whether to suppress stdout/stderr (for internal probe commands)
+    pub silent: bool,
 }
 
 /// Result of executing a command in a container
@@ -743,12 +745,18 @@ impl Docker for CliRuntime {
 
             debug!("Runtime exec args: {:?}", args);
 
-            let mut child = std::process::Command::new(&runtime_path)
-                .args(&args)
-                .spawn()
-                .map_err(|e| {
-                    DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e))
-                })?;
+            let mut command = std::process::Command::new(&runtime_path);
+            command.args(&args);
+
+            // Suppress stdout/stderr if silent mode is enabled (for probe commands)
+            if config.silent {
+                command.stdout(std::process::Stdio::null());
+                command.stderr(std::process::Stdio::null());
+            }
+
+            let mut child = command.spawn().map_err(|e| {
+                DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e))
+            })?;
 
             let exit_status = child.wait().map_err(|e| {
                 DockerError::CLIError(format!("Failed to wait for runtime exec: {}", e))
@@ -2079,6 +2087,7 @@ mod tests {
             tty: true,
             interactive: true,
             detach: false,
+            silent: false,
         };
 
         let result = mock_docker
@@ -2129,6 +2138,7 @@ mod tests {
             tty: false,
             interactive: false,
             detach: false,
+            silent: false,
         };
 
         let start_time = Instant::now();

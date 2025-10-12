@@ -575,6 +575,7 @@ async fn execute_compose_post_create(
                         tty: false,
                         interactive: false,
                         detach: false,
+                        silent: false,
                     },
                 )
                 .await;

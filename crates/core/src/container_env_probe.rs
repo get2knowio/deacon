@@ -306,6 +306,7 @@ impl ContainerEnvironmentProber {
             tty: false,
             interactive: false,
             detach: false,
+            silent: true, // Suppress output for shell detection probes
         };
 
         // Use exit code to determine if shell exists (0 = exists, non-zero = doesn't exist)
@@ -370,6 +371,7 @@ impl ContainerEnvironmentProber {
             tty: false,
             interactive: false,
             detach: false,
+            silent: true, // Suppress output for environment probes
         };
 
         // Note: Current Docker trait doesn't capture output, so we use a workaround

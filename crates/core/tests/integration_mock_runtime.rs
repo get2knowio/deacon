@@ -69,6 +69,7 @@ async fn test_exec_with_mock_docker_success() -> Result<()> {
         tty: true,
         interactive: true,
         detach: false,
+        silent: false,
     };
 
     let result = mock_docker
@@ -123,6 +124,7 @@ async fn test_exec_with_mock_docker_failure() -> Result<()> {
         tty: false,
         interactive: false,
         detach: false,
+        silent: false,
     };
 
     let start_time = std::time::Instant::now();
@@ -166,6 +168,7 @@ async fn test_exec_with_tty_flag_capture() -> Result<()> {
         tty: true,
         interactive: true,
         detach: false,
+        silent: false,
     };
 
     let _result = mock_docker
@@ -188,6 +191,7 @@ async fn test_exec_with_tty_flag_capture() -> Result<()> {
         tty: false,
         interactive: false,
         detach: false,
+        silent: false,
     };
 
     let _result = mock_docker
@@ -554,6 +558,7 @@ async fn test_docker_daemon_unavailable_error() -> Result<()> {
         tty: false,
         interactive: false,
         detach: false,
+        silent: false,
     };
 
     let exec_result = mock_docker
