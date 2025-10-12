@@ -19,18 +19,19 @@ fn test_compose_path_detection_without_docker() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create docker-compose.yml
-    let compose_config = r#"version: '3.8'
-services:
-  app:
-    image: alpine:3.19
-    working_dir: /workspace
-    volumes:
-      - .:/workspace
-  db:
-    image: postgres:13
-    environment:
-      POSTGRES_PASSWORD: password
-"#;
+    let compose_config = r#"services:
+        app:
+            image: alpine:3.19
+            working_dir: /workspace
+            volumes:
+                - .:/workspace
+            network_mode: bridge
+        db:
+            image: postgres:13
+            environment:
+                POSTGRES_PASSWORD: password
+            network_mode: bridge
+    "#;
 
     fs::write(temp_dir.path().join("docker-compose.yml"), compose_config).unwrap();
 
@@ -58,14 +59,13 @@ services:
         .arg(temp_dir.path())
         .output()
         .unwrap();
-
     assert!(
         up_output.status.success(),
         "Compose up failed: {}",
         String::from_utf8_lossy(&up_output.stderr)
     );
 
-    // Cleanup
+    // Cleanup only if we actually brought the project up successfully
     let mut down_cmd = Command::cargo_bin("deacon").unwrap();
     let _ = down_cmd
         .current_dir(&temp_dir)
@@ -86,14 +86,14 @@ fn test_compose_subfolder_config() {
     fs::create_dir(&subdir).unwrap();
 
     // Create docker-compose.yml in subdirectory
-    let compose_config = r#"version: '3.8'
-services:
-  app:
-    image: alpine:3.19
-    working_dir: /workspace
-    volumes:
-      - .:/workspace
-"#;
+    let compose_config = r#"services:
+        app:
+            image: alpine:3.19
+            working_dir: /workspace
+            volumes:
+                - .:/workspace
+            network_mode: bridge
+    "#;
 
     fs::write(subdir.join("docker-compose.yml"), compose_config).unwrap();
 
@@ -259,12 +259,12 @@ fn test_compose_multiple_files() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create base docker-compose.yml
-    let base_compose_config = r#"version: '3.8'
-services:
-  app:
-    image: alpine:3.19
-    working_dir: /workspace
-"#;
+    let base_compose_config = r#"services:
+        app:
+            image: alpine:3.19
+            working_dir: /workspace
+            network_mode: bridge
+    "#;
 
     fs::write(
         temp_dir.path().join("docker-compose.yml"),
@@ -273,14 +273,14 @@ services:
     .unwrap();
 
     // Create override docker-compose.override.yml
-    let override_compose_config = r#"version: '3.8'
-services:
-  app:
-    volumes:
-      - .:/workspace
-    environment:
-      - ENV=override
-"#;
+    let override_compose_config = r#"services:
+        app:
+            volumes:
+                - .:/workspace
+            environment:
+                - ENV=override
+            network_mode: bridge
+    "#;
 
     fs::write(
         temp_dir.path().join("docker-compose.override.yml"),

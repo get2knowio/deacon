@@ -191,12 +191,12 @@ fn test_initialize_command_with_compose() {
     let marker_path = temp_dir.path().join("compose_init_marker.txt");
 
     // Create a simple docker-compose.yml
-    let compose_config = r#"
-version: '3.8'
+        let compose_config = r#"
 services:
-  app:
-    image: alpine:3.19
-    command: sleep infinity
+    app:
+        image: alpine:3.19
+        command: sleep infinity
+        network_mode: bridge
 "#;
 
     fs::write(temp_dir.path().join("docker-compose.yml"), compose_config).unwrap();

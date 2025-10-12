@@ -183,6 +183,14 @@ async fn execute_up_with_runtime(args: UpArgs, runtime: ContainerRuntimeImpl) ->
         }
     }
 
+    // Apply variable substitution prior to runtime operations (workspaceMount, mounts, runArgs, env, lifecycle)
+    {
+        use deacon_core::variable::SubstitutionContext;
+        let substitution_context = SubstitutionContext::new(workspace_folder)?;
+        let (substituted, _report) = config.apply_variable_substitution(&substitution_context);
+        config = substituted;
+    }
+
     // Create container identity for state tracking
     let identity = ContainerIdentity::new(workspace_folder, &config);
     let workspace_hash = identity.workspace_hash.clone();
