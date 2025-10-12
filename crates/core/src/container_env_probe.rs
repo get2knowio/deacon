@@ -374,9 +374,6 @@ impl ContainerEnvironmentProber {
             silent: true, // Suppress output for environment probes
         };
 
-        // Note: Current Docker trait doesn't capture output, so we use a workaround
-        // We'll need to enhance this when output capture is added to the trait
-        // For now, we execute and check success
         let result = docker
             .exec(container_id, &command_strings, exec_config)
             .await?;
@@ -385,17 +382,16 @@ impl ContainerEnvironmentProber {
             return Err(DeaconError::Internal(
                 crate::errors::InternalError::Generic {
                     message: format!(
-                        "Container command failed with exit code {}",
-                        result.exit_code
+                        "Container command failed with exit code {}: {}",
+                        result.exit_code,
+                        result.stderr.trim()
                     ),
                 },
             ));
         }
 
-        // TODO: Capture actual output when Docker trait supports it
-        // For now, return empty string to indicate success
-        debug!("Docker exec doesn't capture output - using exit code only for validation");
-        Ok(String::new())
+        // Return the captured stdout
+        Ok(result.stdout)
     }
 
     /// Parse environment output from shell

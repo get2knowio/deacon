@@ -84,6 +84,10 @@ pub struct ExecResult {
     pub exit_code: i32,
     /// Whether the command completed successfully (exit code 0)
     pub success: bool,
+    /// Standard output from the command
+    pub stdout: String,
+    /// Standard error from the command
+    pub stderr: String,
 }
 
 /// Docker client abstraction trait
@@ -748,24 +752,52 @@ impl Docker for CliRuntime {
             let mut command = std::process::Command::new(&runtime_path);
             command.args(&args);
 
-            // Suppress stdout/stderr if silent mode is enabled (for probe commands)
+            // Handle stdio based on silent mode:
+            // - silent=true: Capture output for return value (used by probes)
+            // - silent=false: Inherit stdio for real-time display (used by user commands)
             if config.silent {
-                command.stdout(std::process::Stdio::null());
-                command.stderr(std::process::Stdio::null());
+                // Capture stdout/stderr for probes and internal commands
+                command.stdout(std::process::Stdio::piped());
+                command.stderr(std::process::Stdio::piped());
+
+                let output = command.output().map_err(|e| {
+                    DockerError::CLIError(format!("Failed to execute runtime exec: {}", e))
+                })?;
+
+                let exit_code = output.status.code().unwrap_or(-1);
+                let success = output.status.success();
+
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                Ok(ExecResult {
+                    exit_code,
+                    success,
+                    stdout,
+                    stderr,
+                })
+            } else {
+                // Inherit stdio for real-time display (user-facing commands)
+                // Output cannot be captured in this mode, but user sees it immediately
+                let mut child = command.spawn().map_err(|e| {
+                    DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e))
+                })?;
+
+                let exit_status = child.wait().map_err(|e| {
+                    DockerError::CLIError(format!("Failed to wait for runtime exec: {}", e))
+                })?;
+
+                let exit_code = exit_status.code().unwrap_or(-1);
+                let success = exit_status.success();
+
+                // Output was displayed in real-time, return empty strings
+                Ok(ExecResult {
+                    exit_code,
+                    success,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                })
             }
-
-            let mut child = command.spawn().map_err(|e| {
-                DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e))
-            })?;
-
-            let exit_status = child.wait().map_err(|e| {
-                DockerError::CLIError(format!("Failed to wait for runtime exec: {}", e))
-            })?;
-
-            let exit_code = exit_status.code().unwrap_or(-1);
-            let success = exit_status.success();
-
-            Ok(ExecResult { exit_code, success })
         })
         .await
         .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
@@ -1551,6 +1583,8 @@ pub mod mock {
             Ok(ExecResult {
                 exit_code: response.exit_code,
                 success: response.success,
+                stdout: response.stdout.unwrap_or_default(),
+                stderr: response.stderr.unwrap_or_default(),
             })
         }
 
