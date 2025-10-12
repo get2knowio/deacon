@@ -37,6 +37,8 @@ async fn test_non_blocking_phases_are_deferred() {
         skip_post_create: false,
         skip_non_blocking_commands: false, // Enable non-blocking commands
         non_blocking_timeout: Duration::from_secs(30),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     // Create lifecycle commands with all phases
@@ -129,6 +131,8 @@ async fn test_skip_non_blocking_commands_behavior() {
         skip_post_create: false,
         skip_non_blocking_commands: true, // Disable non-blocking commands
         non_blocking_timeout: Duration::from_secs(30),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     // Create lifecycle commands with all phases
@@ -196,6 +200,8 @@ async fn test_non_blocking_phases_sync_execution() {
         skip_post_create: false,
         skip_non_blocking_commands: false, // Enable non-blocking commands
         non_blocking_timeout: Duration::from_secs(30),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     // Create lifecycle commands with all phases
@@ -313,6 +319,8 @@ async fn test_non_blocking_phase_command_failures_are_handled() {
         skip_post_create: false,
         skip_non_blocking_commands: false,
         non_blocking_timeout: Duration::from_secs(30),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     // Create lifecycle commands with all phases
@@ -417,6 +425,8 @@ async fn test_non_blocking_phase_timeout_handling() {
         skip_post_create: false,
         skip_non_blocking_commands: false,
         non_blocking_timeout: Duration::from_millis(100), // Very short timeout
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     // Create lifecycle commands
@@ -487,6 +497,8 @@ async fn test_non_blocking_phases_with_progress_streaming() {
         skip_post_create: false,
         skip_non_blocking_commands: false,
         non_blocking_timeout: Duration::from_secs(30),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
     };
 
     // Create lifecycle commands with non-blocking phases
