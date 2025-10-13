@@ -239,6 +239,9 @@ pub enum Commands {
         /// Working directory for command execution
         #[arg(short = 'w', long)]
         workdir: Option<String>,
+        /// Target container ID directly
+        #[arg(long)]
+        container_id: Option<String>,
         /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
         #[arg(long, action = clap::ArgAction::Append)]
         id_label: Vec<String>,
@@ -845,6 +848,7 @@ impl Cli {
                 no_tty,
                 env,
                 workdir,
+                container_id,
                 id_label,
                 service,
                 command,
@@ -865,6 +869,7 @@ impl Cli {
                     no_tty,
                     env,
                     workdir,
+                    container_id,
                     id_label,
                     service,
                     command,

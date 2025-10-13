@@ -24,6 +24,8 @@ pub struct ExecArgs {
     pub env: Vec<String>,
     /// Working directory for command execution
     pub workdir: Option<String>,
+    /// Target container ID directly
+    pub container_id: Option<String>,
     /// Identify container by labels (KEY=VALUE format)
     pub id_label: Vec<String>,
     /// Target specific service in Docker Compose projects (defaults to primary service)
@@ -123,6 +125,7 @@ where
 
 /// Resolve target container by custom id-labels
 #[instrument(skip(docker_client))]
+#[allow(dead_code)] // Legacy function, kept for compatibility with existing tests
 pub async fn resolve_target_container_by_labels<D>(
     docker_client: &D,
     id_labels: &[String],
@@ -324,14 +327,40 @@ where
         // Check Docker availability
         docker_client.ping().await?;
 
-        // Resolve target container using id-labels if provided, otherwise use workspace/config
-        let container_id = if !args.id_label.is_empty() {
-            // Add labels to tracing span
-            let labels_str = args.id_label.join(",");
-            tracing::Span::current().record("labels_used", &labels_str);
-            debug!("Using id-label for container resolution: {}", labels_str);
+        // Resolve target container using ContainerSelector priority:
+        // 1. Direct container ID (--container-id)
+        // 2. Label-based lookup (--id-label)
+        // 3. Workspace-based resolution (default)
+        let container_id = if args.container_id.is_some() || !args.id_label.is_empty() {
+            // Use ContainerSelector for direct ID or label-based lookup
+            use deacon_core::container::{resolve_container, ContainerSelector};
 
-            resolve_target_container_by_labels(docker_client, &args.id_label).await?
+            let selector = ContainerSelector::new(
+                args.container_id.clone(),
+                args.id_label.clone(),
+                None, // workspace_folder not used for direct/label selection
+            )?;
+            selector.validate()?;
+
+            // Add to tracing span
+            if let Some(ref cid) = selector.container_id {
+                tracing::Span::current().record("labels_used", format!("container_id={}", cid));
+            } else if !selector.id_labels.is_empty() {
+                let labels_str = selector
+                    .id_labels
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                tracing::Span::current().record("labels_used", &labels_str);
+            }
+
+            match resolve_container(docker_client, &selector).await? {
+                Some(info) => info.id,
+                None => {
+                    return Err(anyhow::anyhow!("Dev container not found."));
+                }
+            }
         } else {
             // Load configuration for workspace-based resolution
             let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
@@ -367,9 +396,9 @@ where
         let working_dir = if let Some(ref cli_workdir) = args.workdir {
             debug!("Using working directory from CLI: {}", cli_workdir);
             cli_workdir.clone()
-        } else if !args.id_label.is_empty() {
-            // For id-label based exec, default to current directory in container
-            debug!("Using default working directory for id-label based exec");
+        } else if args.container_id.is_some() || !args.id_label.is_empty() {
+            // For direct container ID or label-based exec, default to root directory
+            debug!("Using default working directory for direct/label-based exec");
             String::from("/")
         } else {
             // For workspace-based exec, load config to get workspace folder
@@ -520,6 +549,7 @@ mod tests {
             no_tty: false,
             env: vec!["KEY=value".to_string()],
             workdir: Some("/custom/path".to_string()),
+            container_id: None,
             id_label: vec![],
             service: None,
             command: vec!["ls".to_string(), "-la".to_string()],
@@ -541,6 +571,7 @@ mod tests {
             no_tty: true,
             env: vec![],
             workdir: None,
+            container_id: None,
             id_label: vec![],
             service: None,
             command: vec!["pwd".to_string()],
@@ -678,6 +709,7 @@ mod tests {
             no_tty: false,
             env: vec![],
             workdir: None,
+            container_id: None,
             id_label: vec![],
             service: Some("redis".to_string()),
             command: vec!["redis-cli".to_string(), "ping".to_string()],
