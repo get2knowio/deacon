@@ -29,6 +29,12 @@ pub struct DownArgs {
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
     pub config_path: Option<PathBuf>,
+    /// Path to docker executable
+    #[allow(dead_code)] // Future: Will be used for custom docker executable path
+    pub docker_path: String,
+    /// Path to docker-compose executable (legacy standalone binary)
+    #[allow(dead_code)] // Future: Will be used for standalone docker-compose binary support
+    pub docker_compose_path: String,
 }
 
 /// Execute the down command
@@ -321,7 +327,7 @@ async fn execute_compose_down(
         compose_state.project_name
     );
 
-    let compose_manager = ComposeManager::new();
+    let compose_manager = ComposeManager::with_docker_path(args.docker_path.clone());
 
     // Create project from saved state
     let project = ComposeProject {
@@ -469,6 +475,8 @@ mod tests {
             timeout: None,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
         };
 
         assert!(args.remove);

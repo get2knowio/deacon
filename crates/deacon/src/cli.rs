@@ -537,12 +537,55 @@ pub struct Cli {
     #[arg(long, global = true, value_enum)]
     pub runtime: Option<RuntimeOption>,
 
+    /// Path to docker executable
+    #[arg(long, global = true, default_value = "docker")]
+    pub docker_path: String,
+
+    /// Path to docker-compose executable
+    #[arg(long, global = true, default_value = "docker-compose")]
+    pub docker_compose_path: String,
+
+    /// Terminal columns for output formatting (requires --terminal-rows)
+    #[arg(long, global = true, requires = "terminal_rows")]
+    pub terminal_columns: Option<u32>,
+
+    /// Terminal rows for output formatting (requires --terminal-columns)
+    #[arg(long, global = true, requires = "terminal_columns")]
+    pub terminal_rows: Option<u32>,
+
     /// Subcommand to execute
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
 
 impl Cli {
+    /// Validate CLI arguments after parsing
+    ///
+    /// Performs additional validation beyond what clap provides automatically.
+    /// Currently validates that terminal dimensions (if provided) are positive integers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if terminal dimensions are zero or if any other validation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use clap::Parser;
+    /// let cli = deacon::cli::Cli::parse_from(&["deacon"]);
+    /// assert!(cli.validate().is_ok());
+    /// ```
+    pub fn validate(&self) -> Result<()> {
+        // Clap's `requires` attribute already ensures both terminal dimensions are provided together
+        // Here we add additional validation for positive values
+        if let (Some(cols), Some(rows)) = (self.terminal_columns, self.terminal_rows) {
+            if cols == 0 || rows == 0 {
+                anyhow::bail!("Terminal dimensions must be positive integers");
+            }
+        }
+        Ok(())
+    }
+
     /// Extract global options into CliContext
     #[allow(dead_code)] // For future command implementations
     /// Build a CliContext from the parsed CLI options.
@@ -600,6 +643,9 @@ impl Cli {
     /// ```
     pub async fn dispatch(self) -> Result<()> {
         use deacon_core::errors::{ConfigError, DeaconError};
+
+        // Validate CLI arguments
+        self.validate()?;
 
         // Initialize logging based on global options
         let log_format = match self.log_format {
@@ -720,6 +766,10 @@ impl Cli {
                     redaction_config: redaction_config.clone(),
                     secret_registry: secret_registry.clone(),
                     env_file,
+                    docker_path: self.docker_path.clone(),
+                    docker_compose_path: self.docker_compose_path.clone(),
+                    terminal_columns: self.terminal_columns,
+                    terminal_rows: self.terminal_rows,
                 };
 
                 match execute_up(args).await {
@@ -782,6 +832,9 @@ impl Cli {
                     redaction_config: redaction_config.clone(),
                     secret_registry: secret_registry.clone(),
                     env_file,
+                    docker_path: self.docker_path.clone(),
+                    terminal_columns: self.terminal_columns,
+                    terminal_rows: self.terminal_rows,
                 };
 
                 execute_build(args).await?;
@@ -817,6 +870,8 @@ impl Cli {
                     command,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    docker_path: self.docker_path.clone(),
+                    docker_compose_path: self.docker_compose_path.clone(),
                 };
 
                 execute_exec(args).await
@@ -899,6 +954,7 @@ impl Cli {
                     override_config_path: self.override_config,
                     secrets_files: self.secrets_file,
                     progress_tracker: progress_tracker.clone(),
+                    docker_path: self.docker_path.clone(),
                 };
 
                 execute_run_user_commands(args).await
@@ -920,6 +976,8 @@ impl Cli {
                     timeout,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    docker_path: self.docker_path.clone(),
+                    docker_compose_path: self.docker_compose_path.clone(),
                 };
 
                 // If spinner is eligible, wrap the down execution with a plain spinner
@@ -965,5 +1023,108 @@ impl Cli {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_global_flags_default_values() {
+        let cli = Cli::parse_from(["deacon"]);
+        assert_eq!(cli.docker_path, "docker");
+        assert_eq!(cli.docker_compose_path, "docker-compose");
+        assert!(cli.terminal_columns.is_none());
+        assert!(cli.terminal_rows.is_none());
+    }
+
+    #[test]
+    fn test_global_flags_custom_values() {
+        let cli = Cli::parse_from([
+            "deacon",
+            "--docker-path",
+            "/usr/local/bin/docker",
+            "--docker-compose-path",
+            "/usr/local/bin/docker-compose",
+        ]);
+        assert_eq!(cli.docker_path, "/usr/local/bin/docker");
+        assert_eq!(cli.docker_compose_path, "/usr/local/bin/docker-compose");
+    }
+
+    #[test]
+    fn test_terminal_dimensions_both_required() {
+        // Should fail if only columns provided
+        let result = Cli::try_parse_from(["deacon", "--terminal-columns", "80"]);
+        assert!(result.is_err());
+
+        // Should fail if only rows provided
+        let result = Cli::try_parse_from(["deacon", "--terminal-rows", "24"]);
+        assert!(result.is_err());
+
+        // Should succeed if both provided
+        let result = Cli::try_parse_from([
+            "deacon",
+            "--terminal-columns",
+            "80",
+            "--terminal-rows",
+            "24",
+        ]);
+        assert!(result.is_ok());
+        let cli = result.unwrap();
+        assert_eq!(cli.terminal_columns, Some(80));
+        assert_eq!(cli.terminal_rows, Some(24));
+    }
+
+    #[test]
+    fn test_validate_rejects_zero_dimensions() {
+        // Zero columns should fail
+        let cli = Cli::parse_from(["deacon", "--terminal-columns", "0", "--terminal-rows", "24"]);
+        assert!(cli.validate().is_err());
+
+        // Zero rows should fail
+        let cli = Cli::parse_from(["deacon", "--terminal-columns", "80", "--terminal-rows", "0"]);
+        assert!(cli.validate().is_err());
+
+        // Both zero should fail
+        let cli = Cli::parse_from(["deacon", "--terminal-columns", "0", "--terminal-rows", "0"]);
+        assert!(cli.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_accepts_positive_dimensions() {
+        let cli = Cli::parse_from([
+            "deacon",
+            "--terminal-columns",
+            "80",
+            "--terminal-rows",
+            "24",
+        ]);
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_accepts_no_dimensions() {
+        let cli = Cli::parse_from(["deacon"]);
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn test_global_flags_with_subcommand() {
+        let cli = Cli::parse_from([
+            "deacon",
+            "--docker-path",
+            "/custom/docker",
+            "--terminal-columns",
+            "120",
+            "--terminal-rows",
+            "30",
+            "build",
+        ]);
+        assert_eq!(cli.docker_path, "/custom/docker");
+        assert_eq!(cli.terminal_columns, Some(120));
+        assert_eq!(cli.terminal_rows, Some(30));
+        assert!(matches!(cli.command, Some(Commands::Build { .. })));
     }
 }

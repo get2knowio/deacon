@@ -33,6 +33,7 @@ pub struct RunUserCommandsArgs {
     pub override_config_path: Option<std::path::PathBuf>,
     pub secrets_files: Vec<std::path::PathBuf>,
     pub progress_tracker: Arc<Mutex<Option<deacon_core::progress::ProgressTracker>>>,
+    pub docker_path: String,
 }
 
 /// Execute the run-user-commands command
@@ -85,7 +86,15 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
 
     let container_id = {
         let docker_client = deacon_core::docker::CliDocker::new();
-        match resolve_target_container(&docker_client, &workspace_folder, &config, None).await {
+        match resolve_target_container(
+            &docker_client,
+            &workspace_folder,
+            &config,
+            None,
+            &args.docker_path,
+        )
+        .await
+        {
             Ok(id) => id,
             Err(e) => {
                 debug!(error = ?e, "Failed to resolve target container for workspace");
@@ -309,6 +318,7 @@ mod tests {
             override_config_path: None,
             secrets_files: vec![],
             progress_tracker,
+            docker_path: "docker".to_string(),
         };
 
         assert!(!args.skip_post_create);
