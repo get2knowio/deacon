@@ -244,6 +244,70 @@ pub struct Layer {
     pub digest: String,
 }
 
+/// OCI tag list response structure
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TagList {
+    /// Repository name
+    pub name: String,
+    /// List of tags
+    pub tags: Vec<String>,
+}
+
+/// DevContainer collection metadata structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionMetadata {
+    /// Source information (e.g., GitHub repository)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_information: Option<CollectionSourceInfo>,
+    /// List of features in the collection
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub features: Option<Vec<CollectionFeature>>,
+    /// List of templates in the collection
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub templates: Option<Vec<CollectionTemplate>>,
+}
+
+/// Source information for a collection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionSourceInfo {
+    /// Source provider (e.g., "github")
+    pub provider: String,
+    /// Repository or source identifier
+    pub repository: String,
+}
+
+/// Feature entry in a collection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionFeature {
+    /// Feature identifier
+    pub id: String,
+    /// Feature version
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Feature name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Feature description
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Template entry in a collection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionTemplate {
+    /// Template identifier
+    pub id: String,
+    /// Template version
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Template name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Template description
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 /// HTTP client trait to enable mocking and testing
 /// HTTP response with status, headers, and body
 #[derive(Debug, Clone)]
@@ -1732,6 +1796,339 @@ impl<C: HttpClient> FeatureFetcher<C> {
 
         debug!("Install script completed successfully");
         Ok(())
+    }
+
+    /// List tags for a repository
+    /// Implements OCI Distribution Spec `/v2/<name>/tags/list` endpoint
+    #[instrument(level = "info", skip(self))]
+    pub async fn list_tags(&self, feature_ref: &FeatureRef) -> Result<Vec<String>> {
+        let tags_url = format!(
+            "https://{}/v2/{}/tags/list",
+            feature_ref.registry,
+            feature_ref.repository()
+        );
+
+        debug!("Fetching tags from: {}", tags_url);
+
+        let mut headers = HashMap::new();
+        headers.insert("Accept".to_string(), "application/json".to_string());
+
+        // Retry the tags download with exponential backoff
+        let tags_data = retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &tags_url;
+                let headers = headers.clone();
+                async move {
+                    client.get_with_headers(url, headers).await.map_err(|e| {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Authentication failed") {
+                            FeatureError::Authentication {
+                                message: format!("Failed to authenticate for tags list: {}", e),
+                            }
+                        } else {
+                            FeatureError::Download {
+                                message: format!("Failed to download tags list: {}", e),
+                            }
+                        }
+                    })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
+
+        let tag_list: TagList =
+            serde_json::from_slice(&tags_data).map_err(|e| FeatureError::Parsing {
+                message: format!("Failed to parse tags list: {}", e),
+            })?;
+
+        Ok(tag_list.tags)
+    }
+
+    /// Get the OCI manifest for a feature by digest
+    /// Allows fetching specific manifest versions using their digest
+    #[instrument(level = "info", skip(self))]
+    pub async fn get_manifest_by_digest(
+        &self,
+        feature_ref: &FeatureRef,
+        digest: &str,
+    ) -> Result<Manifest> {
+        let manifest_url = format!(
+            "https://{}/v2/{}/manifests/{}",
+            feature_ref.registry,
+            feature_ref.repository(),
+            digest
+        );
+
+        debug!("Fetching manifest by digest from: {}", manifest_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Accept".to_string(),
+            "application/vnd.oci.image.manifest.v1+json".to_string(),
+        );
+
+        // Retry the manifest download with exponential backoff
+        let manifest_data = retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let headers = headers.clone();
+                async move {
+                    client.get_with_headers(url, headers).await.map_err(|e| {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Authentication failed") {
+                            FeatureError::Authentication {
+                                message: format!("Failed to authenticate for manifest: {}", e),
+                            }
+                        } else {
+                            FeatureError::Download {
+                                message: format!("Failed to download manifest: {}", e),
+                            }
+                        }
+                    })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
+
+        let manifest: Manifest =
+            serde_json::from_slice(&manifest_data).map_err(|e| FeatureError::Parsing {
+                message: format!("Failed to parse manifest: {}", e),
+            })?;
+
+        Ok(manifest)
+    }
+
+    /// Publish a feature with multiple tags
+    /// This is more efficient than calling publish_feature multiple times
+    #[instrument(level = "info", skip(self, tar_data))]
+    pub async fn publish_feature_multi_tag(
+        &self,
+        registry: String,
+        namespace: String,
+        name: String,
+        tags: Vec<String>,
+        tar_data: Bytes,
+        metadata: &FeatureMetadata,
+    ) -> Result<Vec<PublishResult>> {
+        info!(
+            "Publishing feature {}/{} with {} tags",
+            namespace,
+            name,
+            tags.len()
+        );
+
+        let mut results = Vec::new();
+
+        for tag in tags {
+            let feature_ref = FeatureRef::new(
+                registry.clone(),
+                namespace.clone(),
+                name.clone(),
+                Some(tag.clone()),
+            );
+
+            // Check if tag already exists by trying to fetch manifest
+            match self.get_manifest(&feature_ref).await {
+                Ok(_) => {
+                    info!("Tag {} already exists, skipping", tag);
+                    continue;
+                }
+                Err(_) => {
+                    // Tag doesn't exist, proceed with publishing
+                    debug!("Tag {} doesn't exist, publishing", tag);
+                }
+            }
+
+            let result = self
+                .publish_feature(&feature_ref, tar_data.clone(), metadata)
+                .await?;
+            results.push(result);
+        }
+
+        info!(
+            "Successfully published {} tags for {}/{}",
+            results.len(),
+            namespace,
+            name
+        );
+        Ok(results)
+    }
+}
+
+/// Semantic version utilities
+pub mod semver_utils {
+    use semver::Version;
+    use std::cmp::Ordering;
+
+    /// Parse a semantic version from a tag string
+    /// Handles tags like "v1.2.3", "1.2.3", "1.2", "1"
+    pub fn parse_version(tag: &str) -> Option<Version> {
+        // Strip leading 'v' if present
+        let version_str = tag.strip_prefix('v').unwrap_or(tag);
+
+        // Try direct parse first
+        if let Ok(version) = Version::parse(version_str) {
+            return Some(version);
+        }
+
+        // Try with .0 suffix for major.minor versions
+        if let Ok(version) = Version::parse(&format!("{}.0", version_str)) {
+            return Some(version);
+        }
+
+        // Try with .0.0 suffix for major versions
+        if let Ok(version) = Version::parse(&format!("{}.0.0", version_str)) {
+            return Some(version);
+        }
+
+        None
+    }
+
+    /// Filter tags to only semantic versions
+    pub fn filter_semver_tags(tags: &[String]) -> Vec<String> {
+        tags.iter()
+            .filter(|tag| parse_version(tag).is_some())
+            .cloned()
+            .collect()
+    }
+
+    /// Sort tags in descending semantic version order
+    pub fn sort_tags_descending(tags: &mut [String]) {
+        tags.sort_by(|a, b| {
+            match (parse_version(a), parse_version(b)) {
+                (Some(v_a), Some(v_b)) => v_b.cmp(&v_a), // Reverse for descending
+                (Some(_), None) => Ordering::Less,       // Valid versions come first
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => b.cmp(a), // Fallback to string comparison
+            }
+        });
+    }
+
+    /// Compute semantic version tags from a version string
+    /// Returns [major, major.minor, major.minor.patch, latest]
+    /// For example: "1.2.3" -> ["1", "1.2", "1.2.3", "latest"]
+    pub fn compute_semantic_tags(version: &str) -> Vec<String> {
+        let version = parse_version(version);
+        if version.is_none() {
+            return vec!["latest".to_string()];
+        }
+
+        let version = version.unwrap();
+        vec![
+            format!("{}", version.major),
+            format!("{}.{}", version.major, version.minor),
+            format!("{}.{}.{}", version.major, version.minor, version.patch),
+            "latest".to_string(),
+        ]
+    }
+
+    /// Compare two version tags
+    /// Returns Ordering::Greater if a > b, Ordering::Less if a < b, Ordering::Equal if equal
+    pub fn compare_versions(a: &str, b: &str) -> Ordering {
+        match (parse_version(a), parse_version(b)) {
+            (Some(v_a), Some(v_b)) => v_a.cmp(&v_b),
+            (Some(_), None) => Ordering::Greater, // Valid version is greater than invalid
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => a.cmp(b), // Fallback to string comparison
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_parse_version_standard() {
+            assert!(parse_version("1.2.3").is_some());
+            assert!(parse_version("v1.2.3").is_some());
+            assert_eq!(parse_version("1.2.3").unwrap().to_string(), "1.2.3");
+        }
+
+        #[test]
+        fn test_parse_version_short() {
+            assert!(parse_version("1.2").is_some());
+            assert!(parse_version("1").is_some());
+            assert_eq!(parse_version("1.2").unwrap().to_string(), "1.2.0");
+            assert_eq!(parse_version("1").unwrap().to_string(), "1.0.0");
+        }
+
+        #[test]
+        fn test_parse_version_invalid() {
+            assert!(parse_version("invalid").is_none());
+            assert!(parse_version("v").is_none());
+            assert!(parse_version("").is_none());
+        }
+
+        #[test]
+        fn test_filter_semver_tags() {
+            let tags = vec![
+                "1.2.3".to_string(),
+                "v2.0.0".to_string(),
+                "latest".to_string(),
+                "dev".to_string(),
+                "1.0".to_string(),
+            ];
+            let filtered = filter_semver_tags(&tags);
+            assert_eq!(filtered.len(), 3);
+            assert!(filtered.contains(&"1.2.3".to_string()));
+            assert!(filtered.contains(&"v2.0.0".to_string()));
+            assert!(filtered.contains(&"1.0".to_string()));
+        }
+
+        #[test]
+        fn test_sort_tags_descending() {
+            let mut tags = vec![
+                "1.0.0".to_string(),
+                "2.1.0".to_string(),
+                "1.5.0".to_string(),
+                "2.0.0".to_string(),
+            ];
+            sort_tags_descending(&mut tags);
+            assert_eq!(tags[0], "2.1.0");
+            assert_eq!(tags[1], "2.0.0");
+            assert_eq!(tags[2], "1.5.0");
+            assert_eq!(tags[3], "1.0.0");
+        }
+
+        #[test]
+        fn test_compute_semantic_tags() {
+            let tags = compute_semantic_tags("1.2.3");
+            assert_eq!(tags.len(), 4);
+            assert_eq!(tags[0], "1");
+            assert_eq!(tags[1], "1.2");
+            assert_eq!(tags[2], "1.2.3");
+            assert_eq!(tags[3], "latest");
+        }
+
+        #[test]
+        fn test_compute_semantic_tags_with_v_prefix() {
+            let tags = compute_semantic_tags("v2.5.1");
+            assert_eq!(tags.len(), 4);
+            assert_eq!(tags[0], "2");
+            assert_eq!(tags[1], "2.5");
+            assert_eq!(tags[2], "2.5.1");
+            assert_eq!(tags[3], "latest");
+        }
+
+        #[test]
+        fn test_compare_versions() {
+            assert_eq!(compare_versions("1.2.3", "1.2.4"), Ordering::Less);
+            assert_eq!(compare_versions("2.0.0", "1.9.9"), Ordering::Greater);
+            assert_eq!(compare_versions("1.0.0", "1.0.0"), Ordering::Equal);
+        }
+
+        #[test]
+        fn test_compare_versions_with_invalid() {
+            // Valid version is greater than invalid
+            assert_eq!(compare_versions("1.0.0", "invalid"), Ordering::Greater);
+            assert_eq!(compare_versions("invalid", "1.0.0"), Ordering::Less);
+        }
     }
 }
 
