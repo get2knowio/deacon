@@ -36,7 +36,8 @@ pub struct ExecArgs {
     pub config_path: Option<std::path::PathBuf>,
     /// Path to docker executable
     pub docker_path: String,
-    /// Path to docker-compose executable
+    /// Path to docker-compose executable (legacy standalone binary)
+    #[allow(dead_code)] // Future: Will be used for standalone docker-compose binary support
     pub docker_compose_path: String,
 }
 
@@ -47,7 +48,7 @@ pub async fn resolve_target_container<D>(
     workspace_folder: &Path,
     config: &DevContainerConfig,
     target_service: Option<&str>,
-    docker_compose_path: &str,
+    docker_path: &str,
 ) -> Result<String>
 where
     D: Docker,
@@ -61,7 +62,7 @@ where
             workspace_folder,
             config,
             target_service,
-            docker_compose_path,
+            docker_path,
         )
         .await;
     }
@@ -205,11 +206,11 @@ async fn resolve_compose_target_container(
     workspace_folder: &Path,
     config: &DevContainerConfig,
     target_service: Option<&str>,
-    docker_compose_path: &str,
+    docker_path: &str,
 ) -> Result<String> {
     debug!("Resolving compose target container");
 
-    let compose_manager = ComposeManager::with_docker_path(docker_compose_path.to_string());
+    let compose_manager = ComposeManager::with_docker_path(docker_path.to_string());
     let project = compose_manager.create_project(config, workspace_folder)?;
 
     debug!("Created compose project: {:?}", project.name);
@@ -354,7 +355,7 @@ where
                 workspace_folder,
                 &config,
                 args.service.as_deref(),
-                &args.docker_compose_path,
+                &args.docker_path,
             )
             .await?
         };

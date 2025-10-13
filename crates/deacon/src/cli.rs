@@ -954,7 +954,7 @@ impl Cli {
                     override_config_path: self.override_config,
                     secrets_files: self.secrets_file,
                     progress_tracker: progress_tracker.clone(),
-                    docker_compose_path: self.docker_compose_path.clone(),
+                    docker_path: self.docker_path.clone(),
                 };
 
                 execute_run_user_commands(args).await

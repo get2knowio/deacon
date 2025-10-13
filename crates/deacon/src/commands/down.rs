@@ -32,7 +32,8 @@ pub struct DownArgs {
     /// Path to docker executable
     #[allow(dead_code)] // Future: Will be used for custom docker executable path
     pub docker_path: String,
-    /// Path to docker-compose executable
+    /// Path to docker-compose executable (legacy standalone binary)
+    #[allow(dead_code)] // Future: Will be used for standalone docker-compose binary support
     pub docker_compose_path: String,
 }
 
@@ -326,7 +327,7 @@ async fn execute_compose_down(
         compose_state.project_name
     );
 
-    let compose_manager = ComposeManager::with_docker_path(args.docker_compose_path.clone());
+    let compose_manager = ComposeManager::with_docker_path(args.docker_path.clone());
 
     // Create project from saved state
     let project = ComposeProject {

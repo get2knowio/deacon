@@ -33,7 +33,7 @@ pub struct RunUserCommandsArgs {
     pub override_config_path: Option<std::path::PathBuf>,
     pub secrets_files: Vec<std::path::PathBuf>,
     pub progress_tracker: Arc<Mutex<Option<deacon_core::progress::ProgressTracker>>>,
-    pub docker_compose_path: String,
+    pub docker_path: String,
 }
 
 /// Execute the run-user-commands command
@@ -91,7 +91,7 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
             &workspace_folder,
             &config,
             None,
-            &args.docker_compose_path,
+            &args.docker_path,
         )
         .await
         {
@@ -318,7 +318,7 @@ mod tests {
             override_config_path: None,
             secrets_files: vec![],
             progress_tracker,
-            docker_compose_path: "docker-compose".to_string(),
+            docker_path: "docker".to_string(),
         };
 
         assert!(!args.skip_post_create);
