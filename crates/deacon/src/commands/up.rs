@@ -40,6 +40,13 @@ pub struct UpArgs {
     pub redaction_config: deacon_core::redaction::RedactionConfig,
     pub secret_registry: deacon_core::redaction::SecretRegistry,
     pub env_file: Vec<PathBuf>,
+    #[allow(dead_code)] // Future: Will be used for custom docker executable path
+    pub docker_path: String,
+    pub docker_compose_path: String,
+    #[allow(dead_code)] // Future: Will be used for terminal output formatting
+    pub terminal_columns: Option<u32>,
+    #[allow(dead_code)] // Future: Will be used for terminal output formatting
+    pub terminal_rows: Option<u32>,
 }
 
 impl Default for UpArgs {
@@ -63,6 +70,10 @@ impl Default for UpArgs {
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::global_registry().clone(),
             env_file: Vec::new(),
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            terminal_columns: None,
+            terminal_rows: None,
         }
     }
 }
@@ -243,7 +254,7 @@ async fn execute_compose_up(
 ) -> Result<()> {
     debug!("Starting Docker Compose project");
 
-    let compose_manager = ComposeManager::new();
+    let compose_manager = ComposeManager::with_docker_path(args.docker_compose_path.clone());
     let mut project = compose_manager.create_project(config, workspace_folder)?;
 
     // Add env files from CLI args
@@ -302,7 +313,7 @@ async fn execute_compose_up(
 
     // Execute post-create lifecycle if not skipped
     if !args.skip_post_create {
-        execute_compose_post_create(&project, config).await?;
+        execute_compose_post_create(&project, config, &args.docker_compose_path).await?;
     }
 
     // Handle port forwarding and events
@@ -312,13 +323,21 @@ async fn execute_compose_up(
             &project,
             &args.redaction_config,
             &args.secret_registry,
+            &args.docker_compose_path,
         )
         .await?;
     }
 
     // Handle shutdown if requested
     if args.shutdown {
-        handle_compose_shutdown(config, &project, state_manager, workspace_hash).await?;
+        handle_compose_shutdown(
+            config,
+            &project,
+            state_manager,
+            workspace_hash,
+            &args.docker_compose_path,
+        )
+        .await?;
     }
 
     Ok(())
@@ -536,15 +555,16 @@ async fn execute_container_up(
 }
 
 /// Execute post-create lifecycle for compose projects
-#[instrument(skip(project, config))]
+#[instrument(skip(project, config, docker_compose_path))]
 async fn execute_compose_post_create(
     project: &ComposeProject,
     config: &DevContainerConfig,
+    docker_compose_path: &str,
 ) -> Result<()> {
     debug!("Executing post-create lifecycle for compose project");
 
     // Get the primary container ID
-    let compose_manager = ComposeManager::new();
+    let compose_manager = ComposeManager::with_docker_path(docker_compose_path.to_string());
     let container_id = match compose_manager.get_primary_container_id(project)? {
         Some(id) => id,
         None => {
@@ -591,16 +611,23 @@ async fn execute_compose_post_create(
 }
 
 /// Handle port events for compose projects
-#[instrument(skip(config, project, redaction_config, secret_registry))]
+#[instrument(skip(
+    config,
+    project,
+    redaction_config,
+    secret_registry,
+    docker_compose_path
+))]
 async fn handle_port_events(
     config: &DevContainerConfig,
     project: &ComposeProject,
     redaction_config: &deacon_core::redaction::RedactionConfig,
     secret_registry: &deacon_core::redaction::SecretRegistry,
+    docker_compose_path: &str,
 ) -> Result<()> {
     debug!("Processing port events for compose project");
 
-    let compose_manager = ComposeManager::new();
+    let compose_manager = ComposeManager::with_docker_path(docker_compose_path.to_string());
     let docker = deacon_core::docker::CliDocker::new();
 
     // Get all services in the project
@@ -1053,12 +1080,13 @@ async fn handle_container_shutdown(
 }
 
 /// Handle shutdown for compose configurations
-#[instrument(skip(config, state_manager))]
+#[instrument(skip(config, state_manager, docker_compose_path))]
 async fn handle_compose_shutdown(
     config: &DevContainerConfig,
     project: &ComposeProject,
     state_manager: &mut StateManager,
     workspace_hash: &str,
+    docker_compose_path: &str,
 ) -> Result<()> {
     debug!("Handling shutdown for compose project: {}", project.name);
 
@@ -1070,7 +1098,7 @@ async fn handle_compose_shutdown(
         }
         "stopCompose" => {
             debug!("Stopping compose project due to shutdown action");
-            let compose_manager = ComposeManager::new();
+            let compose_manager = ComposeManager::with_docker_path(docker_compose_path.to_string());
             compose_manager.stop_project(project)?;
             state_manager.remove_workspace_state(workspace_hash);
             info!("Compose project stopped and removed from state");
@@ -1113,6 +1141,10 @@ mod tests {
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::global_registry().clone(),
             env_file: Vec::new(),
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            terminal_columns: None,
+            terminal_rows: None,
         };
 
         assert!(args.remove_existing_container);
@@ -1166,6 +1198,10 @@ mod tests {
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::global_registry().clone(),
             env_file: Vec::new(),
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            terminal_columns: None,
+            terminal_rows: None,
         };
 
         assert!(args.remove_existing_container);

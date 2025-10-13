@@ -42,6 +42,12 @@ pub struct BuildArgs {
     pub secret_registry: deacon_core::redaction::SecretRegistry,
     #[allow(dead_code)] // Build command doesn't yet support compose configurations
     pub env_file: Vec<PathBuf>,
+    #[allow(dead_code)] // Future: Will be used for custom docker executable path
+    pub docker_path: String,
+    #[allow(dead_code)] // Future: Will be used for terminal output formatting
+    pub terminal_columns: Option<u32>,
+    #[allow(dead_code)] // Future: Will be used for terminal output formatting
+    pub terminal_rows: Option<u32>,
 }
 
 impl Default for BuildArgs {
@@ -70,6 +76,9 @@ impl Default for BuildArgs {
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::SecretRegistry::new(),
             env_file: Vec::new(),
+            docker_path: "docker".to_string(),
+            terminal_columns: None,
+            terminal_rows: None,
         }
     }
 }
@@ -1574,6 +1583,9 @@ mod tests {
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::SecretRegistry::new(),
             env_file: Vec::new(),
+            docker_path: "docker".to_string(),
+            terminal_columns: None,
+            terminal_rows: None,
         };
 
         // Verify args are structured correctly
@@ -1616,6 +1628,9 @@ mod tests {
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::SecretRegistry::new(),
             env_file: Vec::new(),
+            docker_path: "docker".to_string(),
+            terminal_columns: None,
+            terminal_rows: None,
         };
 
         // Verify advanced args are structured correctly

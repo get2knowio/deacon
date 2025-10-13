@@ -59,6 +59,10 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
         redaction_config: deacon_core::redaction::RedactionConfig::default(),
         secret_registry: deacon_core::redaction::global_registry().clone(),
         env_file: Vec::new(),
+        docker_path: "docker".to_string(),
+        docker_compose_path: "docker-compose".to_string(),
+        terminal_columns: None,
+        terminal_rows: None,
     };
 
     // This should not fail due to host requirements
@@ -115,6 +119,10 @@ async fn test_host_requirements_validation_fails_with_unrealistic_requirements()
         redaction_config: deacon_core::redaction::RedactionConfig::default(),
         secret_registry: deacon_core::redaction::global_registry().clone(),
         env_file: Vec::new(),
+        docker_path: "docker".to_string(),
+        docker_compose_path: "docker-compose".to_string(),
+        terminal_columns: None,
+        terminal_rows: None,
     };
 
     let result = execute_up(args).await;
@@ -171,6 +179,10 @@ async fn test_host_requirements_ignored_with_flag() {
         redaction_config: deacon_core::redaction::RedactionConfig::default(),
         secret_registry: deacon_core::redaction::global_registry().clone(),
         env_file: Vec::new(),
+        docker_path: "docker".to_string(),
+        docker_compose_path: "docker-compose".to_string(),
+        terminal_columns: None,
+        terminal_rows: None,
     };
 
     let result = execute_up(args).await;

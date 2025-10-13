@@ -766,6 +766,10 @@ impl Cli {
                     redaction_config: redaction_config.clone(),
                     secret_registry: secret_registry.clone(),
                     env_file,
+                    docker_path: self.docker_path.clone(),
+                    docker_compose_path: self.docker_compose_path.clone(),
+                    terminal_columns: self.terminal_columns,
+                    terminal_rows: self.terminal_rows,
                 };
 
                 match execute_up(args).await {
@@ -828,6 +832,9 @@ impl Cli {
                     redaction_config: redaction_config.clone(),
                     secret_registry: secret_registry.clone(),
                     env_file,
+                    docker_path: self.docker_path.clone(),
+                    terminal_columns: self.terminal_columns,
+                    terminal_rows: self.terminal_rows,
                 };
 
                 execute_build(args).await?;
@@ -863,6 +870,8 @@ impl Cli {
                     command,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    docker_path: self.docker_path.clone(),
+                    docker_compose_path: self.docker_compose_path.clone(),
                 };
 
                 execute_exec(args).await
@@ -945,6 +954,7 @@ impl Cli {
                     override_config_path: self.override_config,
                     secrets_files: self.secrets_file,
                     progress_tracker: progress_tracker.clone(),
+                    docker_compose_path: self.docker_compose_path.clone(),
                 };
 
                 execute_run_user_commands(args).await
@@ -966,6 +976,8 @@ impl Cli {
                     timeout,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    docker_path: self.docker_path.clone(),
+                    docker_compose_path: self.docker_compose_path.clone(),
                 };
 
                 // If spinner is eligible, wrap the down execution with a plain spinner
