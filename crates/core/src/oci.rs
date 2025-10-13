@@ -3,6 +3,31 @@
 //! This module implements OCI registry v2 support with authentication for fetching
 //! and installing DevContainer features. It supports authentication via environment
 //! variables, Docker credential helpers, custom CA certificates, and proxy configuration.
+//!
+//! ## Core Capabilities
+//!
+//! - **Feature and Template Operations**: Fetch, install, and publish features and templates
+//! - **Tag Listing**: Query available tags from registries (`list_tags`)
+//! - **Manifest Operations**: Fetch manifests by tag or digest (`get_manifest`, `get_manifest_by_digest`)
+//! - **Multi-Tag Publishing**: Publish artifacts with multiple tags in one operation (`publish_feature_multi_tag`)
+//! - **Collection Metadata**: Support for devcontainer-collection.json structure
+//! - **Semantic Versioning**: Parse, filter, sort, and compute semantic version tags (`semver_utils` module)
+//!
+//! ## Authentication
+//!
+//! Supports multiple authentication methods:
+//! - Environment variables (`DEACON_REGISTRY_USER`, `DEACON_REGISTRY_PASS`, `DEACON_REGISTRY_TOKEN`)
+//! - Docker config.json credentials
+//! - Custom CA certificates via `DEACON_CUSTOM_CA_BUNDLE`
+//!
+//! ## Semantic Version Utilities
+//!
+//! The `semver_utils` module provides utilities for working with semantic versions:
+//! - Parse versions from tags (handles "v1.2.3", "1.2.3", "1.2", "1" formats)
+//! - Filter tags to only semantic versions
+//! - Sort tags in semantic version order
+//! - Compute semantic tags (e.g., "1.2.3" → ["1", "1.2", "1.2.3", "latest"])
+//! - Compare versions
 
 use crate::errors::{FeatureError, Result};
 use crate::features::{parse_feature_metadata, FeatureMetadata};
