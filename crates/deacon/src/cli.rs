@@ -257,6 +257,12 @@ pub enum Commands {
         /// Include merged configuration
         #[arg(long)]
         include_merged_configuration: bool,
+        /// Target container ID directly
+        #[arg(long)]
+        container_id: Option<String>,
+        /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
+        #[arg(long, action = clap::ArgAction::Append)]
+        id_label: Vec<String>,
     },
 
     /// Configuration management commands
@@ -298,6 +304,12 @@ pub enum Commands {
         /// Stop before personalization
         #[arg(long)]
         stop_for_personalization: bool,
+        /// Target container ID directly
+        #[arg(long)]
+        container_id: Option<String>,
+        /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
+        #[arg(long, action = clap::ArgAction::Append)]
+        id_label: Vec<String>,
     },
 
     /// Stop and optionally remove development container or compose project
@@ -883,6 +895,8 @@ impl Cli {
             }
             Some(Commands::ReadConfiguration {
                 include_merged_configuration,
+                container_id,
+                id_label,
             }) => {
                 use crate::commands::read_configuration::{
                     execute_read_configuration, ReadConfigurationArgs,
@@ -890,6 +904,8 @@ impl Cli {
 
                 let args = ReadConfigurationArgs {
                     include_merged_configuration,
+                    container_id,
+                    id_label,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,
@@ -943,6 +959,8 @@ impl Cli {
                 skip_non_blocking_commands,
                 prebuild,
                 stop_for_personalization,
+                container_id,
+                id_label,
             }) => {
                 use crate::commands::run_user_commands::{
                     execute_run_user_commands, RunUserCommandsArgs,
@@ -954,6 +972,8 @@ impl Cli {
                     skip_non_blocking_commands,
                     prebuild,
                     stop_for_personalization,
+                    container_id,
+                    id_label,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,

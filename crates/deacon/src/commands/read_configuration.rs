@@ -17,6 +17,10 @@ use tracing::{debug, instrument};
 #[derive(Debug, Clone)]
 pub struct ReadConfigurationArgs {
     pub include_merged_configuration: bool,
+    #[allow(dead_code)] // Future: container selection integration
+    pub container_id: Option<String>,
+    #[allow(dead_code)] // Future: container selection integration
+    pub id_label: Vec<String>,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub override_config_path: Option<PathBuf>,
@@ -202,6 +206,8 @@ mod tests {
     ) -> ReadConfigurationArgs {
         ReadConfigurationArgs {
             include_merged_configuration: include_merged,
+            container_id: None,
+            id_label: vec![],
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path,
             override_config_path: override_path,
