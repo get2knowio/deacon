@@ -20,6 +20,7 @@ pub mod features;
 pub mod host_requirements;
 pub mod io;
 pub mod lifecycle;
+pub mod lockfile;
 pub mod logging;
 pub mod mount;
 pub mod observability;

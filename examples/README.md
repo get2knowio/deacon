@@ -12,7 +12,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 - Docker Compose: multi-service orchestration and port events (`compose/`)
 - Exec: command execution semantics covering working directory, user, TTY, and environment (`exec/`)
 - Feature Management: minimal & with-options features (`feature-management/`)
-- Feature System: dependencies, parallelism, and caching (`features/`)
+- Feature System: dependencies, parallelism, caching, and lockfile support (`features/`)
 - Observability: JSON logs, standardized spans, and structured fields (`observability/`)
 - Registry: OCI registry operations including dry-run publish workflows (`registry/`)
 - Template Management: minimal & with-options templates (`template-management/`)
@@ -218,6 +218,13 @@ cd examples/features/cache-reuse-hint
 RUST_LOG=debug deacon read-configuration --config devcontainer.json
 ```
 
+Examine lockfile structure and path derivation:
+```sh
+cd examples/features/lockfile-demo
+cat devcontainer-lock.json | jq '.features | keys'
+cat devcontainer-lock.json | jq '.features["ghcr.io/devcontainers/features/node:1"]'
+```
+
 Verify JSON logs with standardized spans:
 ```sh
 cd examples/observability/json-logs
@@ -235,7 +242,7 @@ Doctor examples demonstrate environment diagnostics including host requirements 
 
 Exec examples demonstrate command execution semantics including working directory, user context, TTY allocation, and environment variable handling as specified in `docs/CLI-SPEC.md` Exec Command section.
 
-Feature system examples demonstrate dependency resolution, parallel execution levels, and digest-based caching as specified in `docs/CLI-SPEC.md` Feature Installation Workflow and Distribution & Caching sections.
+Feature system examples demonstrate dependency resolution, parallel execution levels, digest-based caching, and lockfile support for reproducible builds as specified in `docs/CLI-SPEC.md` Feature Installation Workflow, Distribution & Caching sections, and lockfile specifications.
 
 Observability examples demonstrate JSON logging, standardized tracing spans, and structured fields as specified in `docs/CLI-SPEC.md` Monitoring and Observability section.
 
