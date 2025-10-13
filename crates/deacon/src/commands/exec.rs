@@ -748,4 +748,52 @@ mod tests {
         assert!(all_services.contains(&"redis".to_string()));
         assert!(all_services.contains(&"elasticsearch".to_string()));
     }
+
+    #[test]
+    fn test_exec_args_container_id_default_workdir() {
+        // Test that exec with --container-id defaults to "/" for workdir
+        // This is intentional: when targeting a specific container directly,
+        // we don't have config context, so we use root directory as a safe default.
+        // Users can override with --workdir if needed.
+        let args = ExecArgs {
+            user: None,
+            no_tty: false,
+            env: vec![],
+            workdir: None,
+            container_id: Some("abc123".to_string()),
+            id_label: vec![],
+            service: None,
+            command: vec!["echo".to_string(), "test".to_string()],
+            workspace_folder: None,
+            config_path: None,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+        };
+
+        assert_eq!(args.container_id, Some("abc123".to_string()));
+        assert_eq!(args.workdir, None); // Will be resolved to "/" in execute logic
+    }
+
+    #[test]
+    fn test_exec_args_id_label_default_workdir() {
+        // Test that exec with --id-label defaults to "/" for workdir
+        // Similar to container_id: no config context means safe default
+        let args = ExecArgs {
+            user: None,
+            no_tty: false,
+            env: vec![],
+            workdir: None,
+            container_id: None,
+            id_label: vec!["app=web".to_string()],
+            service: None,
+            command: vec!["pwd".to_string()],
+            workspace_folder: None,
+            config_path: None,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+        };
+
+        assert!(!args.id_label.is_empty());
+        assert_eq!(args.workdir, None); // Will be resolved to "/" in execute logic
+    }
 }

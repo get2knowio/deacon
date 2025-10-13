@@ -17,9 +17,13 @@ use tracing::{debug, instrument};
 #[derive(Debug, Clone)]
 pub struct ReadConfigurationArgs {
     pub include_merged_configuration: bool,
-    #[allow(dead_code)] // Future: container selection integration
+    /// TODO(#268): Implement container-based config reading
+    /// When container_id is provided, read configuration from running container
+    #[allow(dead_code)]
     pub container_id: Option<String>,
-    #[allow(dead_code)] // Future: container selection integration
+    /// TODO(#268): Implement container-based config reading
+    /// When id_label is provided, resolve container and read configuration from it
+    #[allow(dead_code)]
     pub id_label: Vec<String>,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,

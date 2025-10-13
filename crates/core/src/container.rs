@@ -794,9 +794,14 @@ where
 /// Resolve container using selector criteria
 ///
 /// Resolves a container using the provided selector, following priority order:
-/// 1. Direct container ID
+/// 1. Direct container ID (highest priority)
 /// 2. Label-based lookup
-/// 3. Workspace-based lookup (placeholder, returns None)
+/// 3. Workspace-based lookup (TODO: implement when workspace labels defined - see issue #270)
+///
+/// **Priority Order Details:**
+/// - **Container ID**: If provided, performs direct lookup ignoring other selectors
+/// - **Labels**: If no ID but labels provided, finds containers matching all specified labels
+/// - **Workspace**: TODO(#270) - When implemented, will query containers with workspace-specific labels
 ///
 /// Returns the first matching container when using label-based lookup.
 ///
@@ -860,8 +865,10 @@ where
         return Ok(None);
     }
 
-    // Priority 3: Workspace-based lookup (TODO: implement when workspace labels defined)
-    // This would query containers with workspace-specific labels
+    // Priority 3: Workspace-based lookup
+    // TODO(#270): Implement workspace-based container resolution
+    // This would query containers with workspace-specific labels (e.g., workspace folder hash)
+    // Priority: Low - most users will use direct ID or labels
     debug!("Workspace-based lookup not yet implemented");
 
     Ok(None)

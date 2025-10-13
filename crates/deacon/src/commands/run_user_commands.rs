@@ -28,9 +28,13 @@ pub struct RunUserCommandsArgs {
     pub prebuild: bool,
     #[allow(dead_code)] // Future feature: stop for personalization
     pub stop_for_personalization: bool,
-    #[allow(dead_code)] // Future: container selection integration
+    /// TODO(#269): Implement container selection for run-user-commands
+    /// When container_id is provided, run lifecycle commands in specific container
+    #[allow(dead_code)]
     pub container_id: Option<String>,
-    #[allow(dead_code)] // Future: container selection integration
+    /// TODO(#269): Implement container selection for run-user-commands
+    /// When id_label is provided, resolve container and run lifecycle commands in it
+    #[allow(dead_code)]
     pub id_label: Vec<String>,
     pub workspace_folder: Option<std::path::PathBuf>,
     pub config_path: Option<std::path::PathBuf>,
