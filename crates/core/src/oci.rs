@@ -3,6 +3,37 @@
 //! This module implements OCI registry v2 support with authentication for fetching
 //! and installing DevContainer features. It supports authentication via environment
 //! variables, Docker credential helpers, custom CA certificates, and proxy configuration.
+//!
+//! ## Core Capabilities
+//!
+//! - **Feature and Template Operations**: Fetch, install, and publish features and templates
+//! - **Tag Listing**: Query available tags from registries (`list_tags`)
+//! - **Manifest Operations**: Fetch manifests by tag or digest (`get_manifest`, `get_manifest_by_digest`)
+//! - **Multi-Tag Publishing**: Publish artifacts with multiple tags in one operation (`publish_feature_multi_tag`)
+//! - **Collection Metadata**: Support for devcontainer-collection.json structure
+//! - **Semantic Versioning**: Parse, filter, sort, and compute semantic version tags (`semver_utils` module)
+//!
+//! ## Authentication
+//!
+//! Supports multiple authentication methods with the following precedence order:
+//!
+//! 1. **Environment Variables** (highest priority):
+//!    - `DEACON_REGISTRY_TOKEN`: Bearer token authentication
+//!    - `DEACON_REGISTRY_USER` + `DEACON_REGISTRY_PASS`: Basic authentication
+//! 2. **Docker config.json**: Credentials from `~/.docker/config.json`
+//! 3. **No authentication**: Fallback for public registries
+//!
+//! Custom CA certificates can be configured via:
+//! - `DEACON_CUSTOM_CA_BUNDLE`: Path to a PEM-encoded CA certificate bundle
+//!
+//! ## Semantic Version Utilities
+//!
+//! The `semver_utils` module provides utilities for working with semantic versions:
+//! - Parse versions from tags (handles "v1.2.3", "1.2.3", "1.2", "1" formats)
+//! - Filter tags to only semantic versions
+//! - Sort tags in semantic version order
+//! - Compute semantic tags (e.g., "1.2.3" → ["1", "1.2", "1.2.3", "latest"])
+//! - Compare versions
 
 use crate::errors::{FeatureError, Result};
 use crate::features::{parse_feature_metadata, FeatureMetadata};
@@ -242,6 +273,70 @@ pub struct Layer {
     pub media_type: String,
     pub size: u64,
     pub digest: String,
+}
+
+/// OCI tag list response structure
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TagList {
+    /// Repository name
+    pub name: String,
+    /// List of tags
+    pub tags: Vec<String>,
+}
+
+/// DevContainer collection metadata structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionMetadata {
+    /// Source information (e.g., GitHub repository)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_information: Option<CollectionSourceInfo>,
+    /// List of features in the collection
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub features: Option<Vec<CollectionFeature>>,
+    /// List of templates in the collection
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub templates: Option<Vec<CollectionTemplate>>,
+}
+
+/// Source information for a collection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionSourceInfo {
+    /// Source provider (e.g., "github")
+    pub provider: String,
+    /// Repository or source identifier
+    pub repository: String,
+}
+
+/// Feature entry in a collection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionFeature {
+    /// Feature identifier
+    pub id: String,
+    /// Feature version
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Feature name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Feature description
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Template entry in a collection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionTemplate {
+    /// Template identifier
+    pub id: String,
+    /// Template version
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Template name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Template description
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// HTTP client trait to enable mocking and testing
@@ -1733,7 +1828,195 @@ impl<C: HttpClient> FeatureFetcher<C> {
         debug!("Install script completed successfully");
         Ok(())
     }
+
+    /// List tags for a repository
+    /// Implements OCI Distribution Spec `/v2/<name>/tags/list` endpoint
+    #[instrument(level = "info", skip(self))]
+    pub async fn list_tags(&self, feature_ref: &FeatureRef) -> Result<Vec<String>> {
+        let tags_url = format!(
+            "https://{}/v2/{}/tags/list",
+            feature_ref.registry,
+            feature_ref.repository()
+        );
+
+        debug!("Fetching tags from: {}", tags_url);
+
+        let mut headers = HashMap::new();
+        headers.insert("Accept".to_string(), "application/json".to_string());
+
+        // Retry the tags download with exponential backoff
+        let tags_data = retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &tags_url;
+                let headers = headers.clone();
+                async move {
+                    client.get_with_headers(url, headers).await.map_err(|e| {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Authentication failed") {
+                            FeatureError::Authentication {
+                                message: format!("Failed to authenticate for tags list: {}", e),
+                            }
+                        } else {
+                            FeatureError::Download {
+                                message: format!("Failed to download tags list: {}", e),
+                            }
+                        }
+                    })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
+
+        let tag_list: TagList =
+            serde_json::from_slice(&tags_data).map_err(|e| FeatureError::Parsing {
+                message: format!("Failed to parse tags list: {}", e),
+            })?;
+
+        Ok(tag_list.tags)
+    }
+
+    /// Get the OCI manifest for a feature by digest
+    /// Allows fetching specific manifest versions using their digest
+    #[instrument(level = "info", skip(self))]
+    pub async fn get_manifest_by_digest(
+        &self,
+        feature_ref: &FeatureRef,
+        digest: &str,
+    ) -> Result<Manifest> {
+        let manifest_url = format!(
+            "https://{}/v2/{}/manifests/{}",
+            feature_ref.registry,
+            feature_ref.repository(),
+            digest
+        );
+
+        debug!("Fetching manifest by digest from: {}", manifest_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Accept".to_string(),
+            "application/vnd.oci.image.manifest.v1+json".to_string(),
+        );
+
+        // Retry the manifest download with exponential backoff
+        let manifest_data = retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let headers = headers.clone();
+                async move {
+                    client.get_with_headers(url, headers).await.map_err(|e| {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Authentication failed") {
+                            FeatureError::Authentication {
+                                message: format!("Failed to authenticate for manifest: {}", e),
+                            }
+                        } else {
+                            FeatureError::Download {
+                                message: format!("Failed to download manifest: {}", e),
+                            }
+                        }
+                    })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
+
+        let manifest: Manifest =
+            serde_json::from_slice(&manifest_data).map_err(|e| FeatureError::Parsing {
+                message: format!("Failed to parse manifest: {}", e),
+            })?;
+
+        Ok(manifest)
+    }
+
+    /// Publish a feature with multiple tags
+    /// This is more efficient than calling publish_feature multiple times
+    ///
+    /// # Error Handling
+    ///
+    /// - If a tag already exists (manifest found), it is skipped with a log message
+    /// - If manifest check returns 404 (not found), the tag is published
+    /// - If manifest check returns other errors (network, auth, 5xx), the error is propagated
+    #[instrument(level = "info", skip(self, tar_data))]
+    pub async fn publish_feature_multi_tag(
+        &self,
+        registry: String,
+        namespace: String,
+        name: String,
+        tags: Vec<String>,
+        tar_data: Bytes,
+        metadata: &FeatureMetadata,
+    ) -> Result<Vec<PublishResult>> {
+        info!(
+            "Publishing feature {}/{} with {} tags",
+            namespace,
+            name,
+            tags.len()
+        );
+
+        let mut results = Vec::new();
+
+        for tag in tags {
+            let feature_ref = FeatureRef::new(
+                registry.clone(),
+                namespace.clone(),
+                name.clone(),
+                Some(tag.clone()),
+            );
+
+            // Check if tag already exists by trying to fetch manifest
+            match self.get_manifest(&feature_ref).await {
+                Ok(_) => {
+                    info!("Tag {} already exists, skipping", tag);
+                    continue;
+                }
+                Err(e) => {
+                    // Inspect the error to determine if it's a 404 (tag doesn't exist)
+                    // or a different error (network, auth, etc.)
+                    let error_msg = e.to_string().to_lowercase();
+
+                    // Check if this is a "not found" error (404)
+                    // Common patterns: "404", "not found", "no such"
+                    let is_not_found = error_msg.contains("404")
+                        || error_msg.contains("not found")
+                        || error_msg.contains("no such");
+
+                    if is_not_found {
+                        // Tag doesn't exist, proceed with publishing
+                        debug!("Tag {} doesn't exist, publishing", tag);
+                    } else {
+                        // This is a different error (network, auth, 5xx, etc.)
+                        // Propagate it instead of continuing
+                        warn!("Failed to check if tag {} exists: {}", tag, e);
+                        return Err(e);
+                    }
+                }
+            }
+
+            let result = self
+                .publish_feature(&feature_ref, tar_data.clone(), metadata)
+                .await?;
+            results.push(result);
+        }
+
+        info!(
+            "Successfully published {} tags for {}/{}",
+            results.len(),
+            namespace,
+            name
+        );
+        Ok(results)
+    }
 }
+
+// Re-export semver_utils for backwards compatibility with oci::semver_utils path
+pub use crate::semver_utils;
 
 /// Convenience function to create a default feature fetcher
 pub fn default_fetcher() -> Result<FeatureFetcher<ReqwestClient>> {
