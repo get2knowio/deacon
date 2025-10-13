@@ -166,8 +166,8 @@ fn test_merge_workflow() {
     // feature-c should be added
     assert_eq!(merged.features.get("feature-c").unwrap().version, "3.0.0");
 
-    // Write merged lockfile
-    write_lockfile(&lockfile_path, &merged, false).expect("Failed to write merged lockfile");
+    // Write merged lockfile (force_init=true to overwrite existing)
+    write_lockfile(&lockfile_path, &merged, true).expect("Failed to write merged lockfile");
 
     // Verify final state
     let final_lockfile = read_lockfile(&lockfile_path)
@@ -300,6 +300,63 @@ fn test_overwrite_existing_lockfile() {
     assert_eq!(read_lockfile.features.len(), 1);
     assert!(read_lockfile.features.contains_key("feature-b"));
     assert!(!read_lockfile.features.contains_key("feature-a"));
+}
+
+#[test]
+fn test_no_overwrite_when_force_init_false() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let lockfile_path = temp_dir.path().join("no-overwrite-test.json");
+
+    // Write initial lockfile
+    let mut lockfile1 = Lockfile {
+        features: HashMap::new(),
+    };
+    lockfile1.features.insert(
+        "original-feature".to_string(),
+        LockfileFeature {
+            version: "1.0.0".to_string(),
+            resolved: "registry/original@sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+            integrity: "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+            depends_on: None,
+        },
+    );
+
+    write_lockfile(&lockfile_path, &lockfile1, false).expect("Failed to write first lockfile");
+
+    // Read original content
+    let original_content = std::fs::read_to_string(&lockfile_path).expect("Failed to read file");
+
+    // Try to overwrite with force_init=false (should fail)
+    let mut lockfile2 = Lockfile {
+        features: HashMap::new(),
+    };
+    lockfile2.features.insert(
+        "new-feature".to_string(),
+        LockfileFeature {
+            version: "2.0.0".to_string(),
+            resolved: "registry/new@sha256:2222222222222222222222222222222222222222222222222222222222222222".to_string(),
+            integrity: "sha256:2222222222222222222222222222222222222222222222222222222222222222".to_string(),
+            depends_on: None,
+        },
+    );
+
+    let result = write_lockfile(&lockfile_path, &lockfile2, false);
+    assert!(result.is_err());
+    let error_msg = result.unwrap_err().to_string();
+    assert!(error_msg.contains("already exists"));
+    assert!(error_msg.contains("force_init=true"));
+
+    // Verify original file is unchanged
+    let current_content = std::fs::read_to_string(&lockfile_path).expect("Failed to read file");
+    assert_eq!(original_content, current_content);
+
+    // Verify original content is still there
+    let read_lockfile = read_lockfile(&lockfile_path)
+        .expect("Failed to read lockfile")
+        .expect("Lockfile should exist");
+    assert_eq!(read_lockfile.features.len(), 1);
+    assert!(read_lockfile.features.contains_key("original-feature"));
+    assert!(!read_lockfile.features.contains_key("new-feature"));
 }
 
 #[test]

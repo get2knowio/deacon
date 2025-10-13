@@ -249,7 +249,15 @@ pub fn read_lockfile(path: &Path) -> Result<Option<Lockfile>> {
 ///
 /// write_lockfile(Path::new("/tmp/test-lock.json"), &lockfile, false).unwrap();
 /// ```
-pub fn write_lockfile(path: &Path, lockfile: &Lockfile, _force_init: bool) -> Result<()> {
+pub fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) -> Result<()> {
+    // Check if file exists and force_init is false
+    if path.exists() && !force_init {
+        anyhow::bail!(
+            "Lockfile already exists at {}. Use force_init=true to overwrite.",
+            path.display()
+        );
+    }
+
     // Validate lockfile before writing
     validate_lockfile(lockfile).context("Lockfile validation failed before write")?;
 
@@ -259,18 +267,48 @@ pub fn write_lockfile(path: &Path, lockfile: &Lockfile, _force_init: bool) -> Re
             .with_context(|| format!("Failed to create directory {}", parent.display()))?;
     }
 
+    // Convert to serde_json::Value for deterministic ordering
+    let mut value =
+        serde_json::to_value(lockfile).context("Failed to convert lockfile to JSON value")?;
+
+    // Sort all object keys recursively for stable JSON output
+    sort_json_object(&mut value);
+
     // Serialize with pretty printing (2-space indentation)
     let json =
-        serde_json::to_string_pretty(lockfile).context("Failed to serialize lockfile to JSON")?;
+        serde_json::to_string_pretty(&value).context("Failed to serialize lockfile to JSON")?;
 
-    // Atomic write: write to temp file, then rename
-    let temp_path = path.with_extension("json.tmp");
+    // Atomic write: write to temp file in same directory, then rename
+    // Using same directory ensures same filesystem for atomic rename on all platforms
+    let temp_path = if let Some(parent) = path.parent() {
+        parent.join(format!(
+            ".{}.tmp",
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("lockfile")
+        ))
+    } else {
+        PathBuf::from(format!(
+            ".{}.tmp",
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("lockfile")
+        ))
+    };
+
     fs::write(&temp_path, json.as_bytes()).with_context(|| {
         format!(
             "Failed to write temporary lockfile to {}",
             temp_path.display()
         )
     })?;
+
+    // On Windows, remove destination file if it exists before rename
+    #[cfg(windows)]
+    if path.exists() {
+        fs::remove_file(path)
+            .with_context(|| format!("Failed to remove existing lockfile at {}", path.display()))?;
+    }
 
     fs::rename(&temp_path, path)
         .with_context(|| format!("Failed to rename temporary lockfile to {}", path.display()))?;
@@ -344,26 +382,27 @@ pub fn merge_lockfile_features(existing: &Lockfile, new: &Lockfile) -> Lockfile 
 /// - Resolved fields are valid OCI references
 /// - Integrity fields are valid SHA256 digests
 /// - Dependency references exist in the lockfile
+/// - No circular dependencies
 fn validate_lockfile(lockfile: &Lockfile) -> Result<()> {
     for (feature_id, feature) in &lockfile.features {
         // Validate version is valid semver
         validate_semver(&feature.version)
-            .with_context(|| format!("Invalid version for feature '{}'", feature_id))?;
+            .with_context(|| format!("Invalid version field for feature '{}'", feature_id))?;
 
         // Validate resolved is a valid OCI reference
         validate_oci_reference(&feature.resolved)
-            .with_context(|| format!("Invalid resolved reference for feature '{}'", feature_id))?;
+            .with_context(|| format!("Invalid resolved field for feature '{}'", feature_id))?;
 
         // Validate integrity is a valid SHA256 digest
         validate_sha256_digest(&feature.integrity)
-            .with_context(|| format!("Invalid integrity digest for feature '{}'", feature_id))?;
+            .with_context(|| format!("Invalid integrity field for feature '{}'", feature_id))?;
 
         // Validate dependencies exist in lockfile
         if let Some(deps) = &feature.depends_on {
             for dep in deps {
                 if !lockfile.features.contains_key(dep) {
                     anyhow::bail!(
-                        "Feature '{}' depends on '{}' which is not in the lockfile",
+                        "Feature '{}' has dependency '{}' in depends_on field which is not present in the lockfile",
                         feature_id,
                         dep
                     );
@@ -372,7 +411,91 @@ fn validate_lockfile(lockfile: &Lockfile) -> Result<()> {
         }
     }
 
+    // Check for circular dependencies
+    detect_dependency_cycles(lockfile)?;
+
     Ok(())
+}
+
+/// Detect circular dependencies in the lockfile
+fn detect_dependency_cycles(lockfile: &Lockfile) -> Result<()> {
+    use std::collections::HashSet;
+
+    fn visit(
+        feature_id: &str,
+        lockfile: &Lockfile,
+        visited: &mut HashSet<String>,
+        rec_stack: &mut HashSet<String>,
+        path: &mut Vec<String>,
+    ) -> Result<()> {
+        visited.insert(feature_id.to_string());
+        rec_stack.insert(feature_id.to_string());
+        path.push(feature_id.to_string());
+
+        if let Some(feature) = lockfile.features.get(feature_id) {
+            if let Some(deps) = &feature.depends_on {
+                for dep in deps {
+                    if !visited.contains(dep) {
+                        visit(dep, lockfile, visited, rec_stack, path)?;
+                    } else if rec_stack.contains(dep) {
+                        // Found a cycle
+                        path.push(dep.to_string());
+                        let cycle_path = path.join(" -> ");
+                        anyhow::bail!(
+                            "Circular dependency detected in depends_on fields: {}",
+                            cycle_path
+                        );
+                    }
+                }
+            }
+        }
+
+        path.pop();
+        rec_stack.remove(feature_id);
+        Ok(())
+    }
+
+    let mut visited = HashSet::new();
+    let mut rec_stack = HashSet::new();
+    let mut path = Vec::new();
+
+    for feature_id in lockfile.features.keys() {
+        if !visited.contains(feature_id) {
+            visit(
+                feature_id,
+                lockfile,
+                &mut visited,
+                &mut rec_stack,
+                &mut path,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Recursively sort all keys in a JSON object for deterministic output
+fn sort_json_object(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            // Convert to BTreeMap for sorted keys
+            let sorted: std::collections::BTreeMap<_, _> = map.iter().collect();
+            *map = sorted
+                .into_iter()
+                .map(|(k, v)| {
+                    let mut v = v.clone();
+                    sort_json_object(&mut v);
+                    (k.clone(), v)
+                })
+                .collect();
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                sort_json_object(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Validate semantic version format
@@ -380,7 +503,12 @@ fn validate_semver(version: &str) -> Result<()> {
     // Use semver crate for proper validation
     use semver::Version;
 
-    Version::parse(version).with_context(|| format!("Invalid semantic version: '{}'", version))?;
+    Version::parse(version).with_context(|| {
+        format!(
+            "Invalid semantic version '{}': must be in format X.Y.Z (e.g., '1.2.3')",
+            version
+        )
+    })?;
 
     Ok(())
 }
@@ -392,7 +520,7 @@ fn validate_oci_reference(reference: &str) -> Result<()> {
     // Must contain @ for digest-based reference
     if !reference.contains('@') {
         anyhow::bail!(
-            "OCI reference must contain '@' with digest: '{}'",
+            "OCI reference '{}' must contain '@' separator with digest (expected format: 'registry/path@sha256:...')",
             reference
         );
     }
@@ -400,7 +528,7 @@ fn validate_oci_reference(reference: &str) -> Result<()> {
     // Must contain sha256: in the digest part
     if !reference.contains("sha256:") {
         anyhow::bail!(
-            "OCI reference must contain 'sha256:' digest: '{}'",
+            "OCI reference '{}' must contain 'sha256:' digest (expected format: 'registry/path@sha256:...')",
             reference
         );
     }
@@ -412,7 +540,10 @@ fn validate_oci_reference(reference: &str) -> Result<()> {
 fn validate_sha256_digest(digest: &str) -> Result<()> {
     // Must start with sha256:
     if !digest.starts_with("sha256:") {
-        anyhow::bail!("Digest must start with 'sha256:': '{}'", digest);
+        anyhow::bail!(
+            "Digest '{}' must start with 'sha256:' (expected format: 'sha256:<64-hex-chars>')",
+            digest
+        );
     }
 
     // Extract hash part after sha256:
@@ -421,15 +552,18 @@ fn validate_sha256_digest(digest: &str) -> Result<()> {
     // Hash should be 64 hex characters
     if hash.len() != 64 {
         anyhow::bail!(
-            "SHA256 hash must be 64 characters, got {}: '{}'",
-            hash.len(),
-            digest
+            "SHA256 hash in '{}' must be exactly 64 characters, got {} (expected format: 'sha256:<64-hex-chars>')",
+            digest,
+            hash.len()
         );
     }
 
     // All characters should be valid hex
     if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
-        anyhow::bail!("SHA256 hash must contain only hex characters: '{}'", digest);
+        anyhow::bail!(
+            "SHA256 hash in '{}' must contain only hexadecimal characters (0-9, a-f, A-F)",
+            digest
+        );
     }
 
     Ok(())
@@ -725,8 +859,8 @@ mod tests {
         // Write lockfile
         write_lockfile(&lockfile_path, &lockfile, false).unwrap();
 
-        // Verify temp file was cleaned up
-        let temp_path = lockfile_path.with_extension("json.tmp");
+        // Verify temp file was cleaned up (new naming: .atomic-test.json.tmp)
+        let temp_path = temp_dir.path().join(".atomic-test.json.tmp");
         assert!(!temp_path.exists());
 
         // Verify final file exists
@@ -757,5 +891,126 @@ mod tests {
         let read_back = read_lockfile(&lockfile_path).unwrap().unwrap();
 
         assert_eq!(lockfile, read_back);
+    }
+
+    #[test]
+    fn test_circular_dependency_detection() {
+        let mut lockfile = Lockfile {
+            features: HashMap::new(),
+        };
+
+        // Create a circular dependency: A -> B -> C -> A
+        lockfile.features.insert(
+            "feature-a".to_string(),
+            LockfileFeature {
+                version: "1.0.0".to_string(),
+                resolved: "registry/feature-a@sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                integrity: "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                depends_on: Some(vec!["feature-b".to_string()]),
+            },
+        );
+
+        lockfile.features.insert(
+            "feature-b".to_string(),
+            LockfileFeature {
+                version: "2.0.0".to_string(),
+                resolved: "registry/feature-b@sha256:2222222222222222222222222222222222222222222222222222222222222222".to_string(),
+                integrity: "sha256:2222222222222222222222222222222222222222222222222222222222222222".to_string(),
+                depends_on: Some(vec!["feature-c".to_string()]),
+            },
+        );
+
+        lockfile.features.insert(
+            "feature-c".to_string(),
+            LockfileFeature {
+                version: "3.0.0".to_string(),
+                resolved: "registry/feature-c@sha256:3333333333333333333333333333333333333333333333333333333333333333".to_string(),
+                integrity: "sha256:3333333333333333333333333333333333333333333333333333333333333333".to_string(),
+                depends_on: Some(vec!["feature-a".to_string()]),
+            },
+        );
+
+        let result = validate_lockfile(&lockfile);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Circular dependency"));
+    }
+
+    #[test]
+    fn test_self_referencing_dependency() {
+        let mut lockfile = Lockfile {
+            features: HashMap::new(),
+        };
+
+        // Feature depends on itself
+        lockfile.features.insert(
+            "feature-a".to_string(),
+            LockfileFeature {
+                version: "1.0.0".to_string(),
+                resolved: "registry/feature-a@sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                integrity: "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                depends_on: Some(vec!["feature-a".to_string()]),
+            },
+        );
+
+        let result = validate_lockfile(&lockfile);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Circular dependency"));
+    }
+
+    #[test]
+    fn test_deterministic_json_ordering() {
+        let temp_dir = TempDir::new().unwrap();
+        let lockfile_path = temp_dir.path().join("ordered-test.json");
+
+        let mut lockfile = Lockfile {
+            features: HashMap::new(),
+        };
+
+        // Add features in non-alphabetical order
+        lockfile.features.insert(
+            "z-feature".to_string(),
+            LockfileFeature {
+                version: "1.0.0".to_string(),
+                resolved: "registry/z@sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                integrity: "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                depends_on: None,
+            },
+        );
+
+        lockfile.features.insert(
+            "a-feature".to_string(),
+            LockfileFeature {
+                version: "2.0.0".to_string(),
+                resolved: "registry/a@sha256:2222222222222222222222222222222222222222222222222222222222222222".to_string(),
+                integrity: "sha256:2222222222222222222222222222222222222222222222222222222222222222".to_string(),
+                depends_on: None,
+            },
+        );
+
+        lockfile.features.insert(
+            "m-feature".to_string(),
+            LockfileFeature {
+                version: "3.0.0".to_string(),
+                resolved: "registry/m@sha256:3333333333333333333333333333333333333333333333333333333333333333".to_string(),
+                integrity: "sha256:3333333333333333333333333333333333333333333333333333333333333333".to_string(),
+                depends_on: None,
+            },
+        );
+
+        // Write twice and verify output is identical
+        write_lockfile(&lockfile_path, &lockfile, false).unwrap();
+        let content1 = std::fs::read_to_string(&lockfile_path).unwrap();
+
+        std::fs::remove_file(&lockfile_path).unwrap();
+        write_lockfile(&lockfile_path, &lockfile, false).unwrap();
+        let content2 = std::fs::read_to_string(&lockfile_path).unwrap();
+
+        assert_eq!(content1, content2);
+
+        // Verify keys are in alphabetical order in the JSON
+        assert!(content1.find("a-feature").unwrap() < content1.find("m-feature").unwrap());
+        assert!(content1.find("m-feature").unwrap() < content1.find("z-feature").unwrap());
     }
 }
