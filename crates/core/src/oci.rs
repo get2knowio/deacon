@@ -15,10 +15,16 @@
 //!
 //! ## Authentication
 //!
-//! Supports multiple authentication methods:
-//! - Environment variables (`DEACON_REGISTRY_USER`, `DEACON_REGISTRY_PASS`, `DEACON_REGISTRY_TOKEN`)
-//! - Docker config.json credentials
-//! - Custom CA certificates via `DEACON_CUSTOM_CA_BUNDLE`
+//! Supports multiple authentication methods with the following precedence order:
+//!
+//! 1. **Environment Variables** (highest priority):
+//!    - `DEACON_REGISTRY_TOKEN`: Bearer token authentication
+//!    - `DEACON_REGISTRY_USER` + `DEACON_REGISTRY_PASS`: Basic authentication
+//! 2. **Docker config.json**: Credentials from `~/.docker/config.json`
+//! 3. **No authentication**: Fallback for public registries
+//!
+//! Custom CA certificates can be configured via:
+//! - `DEACON_CUSTOM_CA_BUNDLE`: Path to a PEM-encoded CA certificate bundle
 //!
 //! ## Semantic Version Utilities
 //!
@@ -1931,6 +1937,12 @@ impl<C: HttpClient> FeatureFetcher<C> {
 
     /// Publish a feature with multiple tags
     /// This is more efficient than calling publish_feature multiple times
+    ///
+    /// # Error Handling
+    ///
+    /// - If a tag already exists (manifest found), it is skipped with a log message
+    /// - If manifest check returns 404 (not found), the tag is published
+    /// - If manifest check returns other errors (network, auth, 5xx), the error is propagated
     #[instrument(level = "info", skip(self, tar_data))]
     pub async fn publish_feature_multi_tag(
         &self,
@@ -1964,9 +1976,26 @@ impl<C: HttpClient> FeatureFetcher<C> {
                     info!("Tag {} already exists, skipping", tag);
                     continue;
                 }
-                Err(_) => {
-                    // Tag doesn't exist, proceed with publishing
-                    debug!("Tag {} doesn't exist, publishing", tag);
+                Err(e) => {
+                    // Inspect the error to determine if it's a 404 (tag doesn't exist)
+                    // or a different error (network, auth, etc.)
+                    let error_msg = e.to_string().to_lowercase();
+
+                    // Check if this is a "not found" error (404)
+                    // Common patterns: "404", "not found", "no such"
+                    let is_not_found = error_msg.contains("404")
+                        || error_msg.contains("not found")
+                        || error_msg.contains("no such");
+
+                    if is_not_found {
+                        // Tag doesn't exist, proceed with publishing
+                        debug!("Tag {} doesn't exist, publishing", tag);
+                    } else {
+                        // This is a different error (network, auth, 5xx, etc.)
+                        // Propagate it instead of continuing
+                        warn!("Failed to check if tag {} exists: {}", tag, e);
+                        return Err(e);
+                    }
                 }
             }
 
@@ -1986,176 +2015,8 @@ impl<C: HttpClient> FeatureFetcher<C> {
     }
 }
 
-/// Semantic version utilities
-pub mod semver_utils {
-    use semver::Version;
-    use std::cmp::Ordering;
-
-    /// Parse a semantic version from a tag string
-    /// Handles tags like "v1.2.3", "1.2.3", "1.2", "1"
-    pub fn parse_version(tag: &str) -> Option<Version> {
-        // Strip leading 'v' if present
-        let version_str = tag.strip_prefix('v').unwrap_or(tag);
-
-        // Try direct parse first
-        if let Ok(version) = Version::parse(version_str) {
-            return Some(version);
-        }
-
-        // Try with .0 suffix for major.minor versions
-        if let Ok(version) = Version::parse(&format!("{}.0", version_str)) {
-            return Some(version);
-        }
-
-        // Try with .0.0 suffix for major versions
-        if let Ok(version) = Version::parse(&format!("{}.0.0", version_str)) {
-            return Some(version);
-        }
-
-        None
-    }
-
-    /// Filter tags to only semantic versions
-    pub fn filter_semver_tags(tags: &[String]) -> Vec<String> {
-        tags.iter()
-            .filter(|tag| parse_version(tag).is_some())
-            .cloned()
-            .collect()
-    }
-
-    /// Sort tags in descending semantic version order
-    pub fn sort_tags_descending(tags: &mut [String]) {
-        tags.sort_by(|a, b| {
-            match (parse_version(a), parse_version(b)) {
-                (Some(v_a), Some(v_b)) => v_b.cmp(&v_a), // Reverse for descending
-                (Some(_), None) => Ordering::Less,       // Valid versions come first
-                (None, Some(_)) => Ordering::Greater,
-                (None, None) => b.cmp(a), // Fallback to string comparison
-            }
-        });
-    }
-
-    /// Compute semantic version tags from a version string
-    /// Returns [major, major.minor, major.minor.patch, latest]
-    /// For example: "1.2.3" -> ["1", "1.2", "1.2.3", "latest"]
-    pub fn compute_semantic_tags(version: &str) -> Vec<String> {
-        let version = parse_version(version);
-        if version.is_none() {
-            return vec!["latest".to_string()];
-        }
-
-        let version = version.unwrap();
-        vec![
-            format!("{}", version.major),
-            format!("{}.{}", version.major, version.minor),
-            format!("{}.{}.{}", version.major, version.minor, version.patch),
-            "latest".to_string(),
-        ]
-    }
-
-    /// Compare two version tags
-    /// Returns Ordering::Greater if a > b, Ordering::Less if a < b, Ordering::Equal if equal
-    pub fn compare_versions(a: &str, b: &str) -> Ordering {
-        match (parse_version(a), parse_version(b)) {
-            (Some(v_a), Some(v_b)) => v_a.cmp(&v_b),
-            (Some(_), None) => Ordering::Greater, // Valid version is greater than invalid
-            (None, Some(_)) => Ordering::Less,
-            (None, None) => a.cmp(b), // Fallback to string comparison
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn test_parse_version_standard() {
-            assert!(parse_version("1.2.3").is_some());
-            assert!(parse_version("v1.2.3").is_some());
-            assert_eq!(parse_version("1.2.3").unwrap().to_string(), "1.2.3");
-        }
-
-        #[test]
-        fn test_parse_version_short() {
-            assert!(parse_version("1.2").is_some());
-            assert!(parse_version("1").is_some());
-            assert_eq!(parse_version("1.2").unwrap().to_string(), "1.2.0");
-            assert_eq!(parse_version("1").unwrap().to_string(), "1.0.0");
-        }
-
-        #[test]
-        fn test_parse_version_invalid() {
-            assert!(parse_version("invalid").is_none());
-            assert!(parse_version("v").is_none());
-            assert!(parse_version("").is_none());
-        }
-
-        #[test]
-        fn test_filter_semver_tags() {
-            let tags = vec![
-                "1.2.3".to_string(),
-                "v2.0.0".to_string(),
-                "latest".to_string(),
-                "dev".to_string(),
-                "1.0".to_string(),
-            ];
-            let filtered = filter_semver_tags(&tags);
-            assert_eq!(filtered.len(), 3);
-            assert!(filtered.contains(&"1.2.3".to_string()));
-            assert!(filtered.contains(&"v2.0.0".to_string()));
-            assert!(filtered.contains(&"1.0".to_string()));
-        }
-
-        #[test]
-        fn test_sort_tags_descending() {
-            let mut tags = vec![
-                "1.0.0".to_string(),
-                "2.1.0".to_string(),
-                "1.5.0".to_string(),
-                "2.0.0".to_string(),
-            ];
-            sort_tags_descending(&mut tags);
-            assert_eq!(tags[0], "2.1.0");
-            assert_eq!(tags[1], "2.0.0");
-            assert_eq!(tags[2], "1.5.0");
-            assert_eq!(tags[3], "1.0.0");
-        }
-
-        #[test]
-        fn test_compute_semantic_tags() {
-            let tags = compute_semantic_tags("1.2.3");
-            assert_eq!(tags.len(), 4);
-            assert_eq!(tags[0], "1");
-            assert_eq!(tags[1], "1.2");
-            assert_eq!(tags[2], "1.2.3");
-            assert_eq!(tags[3], "latest");
-        }
-
-        #[test]
-        fn test_compute_semantic_tags_with_v_prefix() {
-            let tags = compute_semantic_tags("v2.5.1");
-            assert_eq!(tags.len(), 4);
-            assert_eq!(tags[0], "2");
-            assert_eq!(tags[1], "2.5");
-            assert_eq!(tags[2], "2.5.1");
-            assert_eq!(tags[3], "latest");
-        }
-
-        #[test]
-        fn test_compare_versions() {
-            assert_eq!(compare_versions("1.2.3", "1.2.4"), Ordering::Less);
-            assert_eq!(compare_versions("2.0.0", "1.9.9"), Ordering::Greater);
-            assert_eq!(compare_versions("1.0.0", "1.0.0"), Ordering::Equal);
-        }
-
-        #[test]
-        fn test_compare_versions_with_invalid() {
-            // Valid version is greater than invalid
-            assert_eq!(compare_versions("1.0.0", "invalid"), Ordering::Greater);
-            assert_eq!(compare_versions("invalid", "1.0.0"), Ordering::Less);
-        }
-    }
-}
+// Re-export semver_utils for backwards compatibility with oci::semver_utils path
+pub use crate::semver_utils;
 
 /// Convenience function to create a default feature fetcher
 pub fn default_fetcher() -> Result<FeatureFetcher<ReqwestClient>> {
