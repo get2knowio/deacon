@@ -13,5 +13,8 @@
       ]
     }
   },
-  "initializeCommand": "docker pull ghcr.io/get2knowio/devcontainer:latest"
+  "initializeCommand": "docker pull ghcr.io/get2knowio/devcontainer:latest",
+  "mounts": [
+    "source=${localEnv:HOME}/.codex,target=/home/vscode/.codex,type=bind,consistency=cached"
+  ]
 }
