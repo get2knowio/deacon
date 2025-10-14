@@ -16,15 +16,15 @@ Use this checklist to track implementation progress against the specification.
 - [x] `--workspace-folder <PATH>` (via global flag)
 - [x] `--config <PATH>` (via global flag)
 - [x] `--override-config <PATH>` (via global flag)
-- [ ] `--mount-workspace-git-root` (optional boolean, default true)
+- [x] `--mount-workspace-git-root` (optional boolean, default true)
 
 ### Container Selection
 - [x] `--container-id <ID>` (optional)
 - [x] `--id-label <name=value>` (optional, repeatable)
 
 ### Docker Tooling
-- [ ] `--docker-path <PATH>` (optional, default `docker`)
-- [ ] `--docker-compose-path <PATH>` (optional, default `docker-compose`)
+- [x] `--docker-path <PATH>` (optional, default `docker`) - via global flag
+- [x] `--docker-compose-path <PATH>` (optional, default `docker-compose`) - via global flag
 
 ### Logging/Terminal
 - [x] `--log-level {info|debug|trace}` (via global flag)
