@@ -14,7 +14,7 @@ The `read-configuration` subcommand supports three flags for controlling feature
 
 ### `--include-features-configuration`
 
-**Type**: Boolean flag (optional)  
+**Type**: Boolean flag (optional)
 **Default**: `false`
 
 Forces computation and output of feature resolution details even when `--include-merged-configuration` is not specified.
@@ -58,7 +58,7 @@ deacon read-configuration --workspace-folder . --include-features-configuration
 
 ### `--additional-features <JSON>`
 
-**Type**: JSON string (optional)  
+**Type**: JSON string (optional)
 **Format**: Must be a valid JSON object mapping feature IDs to options
 
 Accepts additional features to merge with features from the devcontainer.json. The features are merged using the same logic as the `features plan` command.
@@ -115,7 +115,7 @@ deacon read-configuration \
 
 ### `--skip-feature-auto-mapping`
 
-**Type**: Boolean flag (optional, hidden)  
+**Type**: Boolean flag (optional, hidden)
 **Default**: `false`
 
 Hidden testing flag that disables auto-mapping of string values to version options. When enabled, string feature values are treated as empty options instead of being mapped to `{"version": "<value>"}`.
@@ -204,7 +204,7 @@ Feature options are parsed from the configuration value:
    }
    ```
 
-3. **Boolean values**: 
+3. **Boolean values**:
    - `true`: Feature enabled with no options
    - `false`: Feature skipped (not included in resolution)
 
