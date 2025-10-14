@@ -83,4 +83,5 @@ knowledge_base:
       - ".github/copilot-instructions.md"
       - "AGENTS.md"
       - "CONTRIBUTING.md"
-      - "docs/CLI-SPEC.md"
+      - "docs/subcommand-specs/**"
+      - "docs/PARITY_APPROACH.md"
