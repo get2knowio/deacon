@@ -324,6 +324,34 @@ fn create_mock_resolved_feature_with_deps(
 }
 
 /// Build a graph representation from resolved features
+///
+/// Creates an adjacency list representation where each feature ID maps to an array
+/// of its dependencies. The graph structure follows the format:
+/// ```json
+/// {
+///   "featureA": [],
+///   "featureB": ["featureA"],
+///   "featureC": ["featureA", "featureB"]
+/// }
+/// ```
+///
+/// ## Graph Direction
+/// The graph encodes **dependencies** (not dependents):
+/// - `"featureB": ["featureA"]` means featureB depends on featureA
+/// - Empty array means the feature has no dependencies
+/// - This representation makes it clear what must be installed before each feature
+///
+/// ## Dependency Union
+/// The dependency list for each feature is the **union** of:
+/// - `installsAfter`: Ordering constraints from the feature metadata
+/// - `dependsOn`: Hard dependencies from the feature metadata
+///
+/// Both fields are combined to provide a complete view of installation constraints.
+/// Uses `BTreeSet` internally to ensure deterministic ordering and deduplication.
+///
+/// ## Conformance
+/// Matches specification in `docs/subcommand-specs/features-plan/DATA-STRUCTURES.md`
+/// and design decision in `docs/subcommand-specs/features-plan/SPEC.md` §16.
 fn build_graph_representation(features: &[ResolvedFeature]) -> serde_json::Value {
     let mut graph = serde_json::Map::new();
 
@@ -1369,6 +1397,176 @@ mod tests {
         } else {
             panic!("feature-b should exist in graph");
         }
+    }
+
+    #[test]
+    fn test_graph_structure_no_dependencies() {
+        // Test: Feature with no dependencies should have empty array in graph
+        let feature = create_mock_resolved_feature("feature-standalone");
+
+        let graph = build_graph_representation(&[feature]);
+
+        // Verify the feature exists in the graph with an empty dependencies array
+        let deps = graph
+            .get("feature-standalone")
+            .expect("Feature should exist in graph");
+        let deps_array = deps.as_array().expect("Dependencies should be an array");
+        assert!(
+            deps_array.is_empty(),
+            "Feature with no dependencies should have empty array"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_simple_chain() {
+        // Test: Simple dependency chain A->B where B depends on A
+        // Graph should show: { "feature-a": [], "feature-b": ["feature-a"] }
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]);
+
+        let graph = build_graph_representation(&[feature_a, feature_b]);
+
+        // Verify feature-a has no dependencies
+        let deps_a = graph.get("feature-a").expect("feature-a should exist");
+        let deps_a_array = deps_a.as_array().expect("Dependencies should be an array");
+        assert!(
+            deps_a_array.is_empty(),
+            "feature-a should have no dependencies"
+        );
+
+        // Verify feature-b depends on feature-a
+        let deps_b = graph.get("feature-b").expect("feature-b should exist");
+        let deps_b_array = deps_b.as_array().expect("Dependencies should be an array");
+        assert_eq!(deps_b_array.len(), 1, "feature-b should have 1 dependency");
+        assert!(
+            deps_b_array.contains(&serde_json::Value::String("feature-a".to_string())),
+            "feature-b should depend on feature-a"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_combined_installs_after_and_depends_on() {
+        // Test: Feature with both installsAfter and dependsOn should union them
+        // If both specify different dependencies, all should appear
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature("feature-b");
+        let feature_c = create_mock_resolved_feature_with_deps(
+            "feature-c",
+            &["feature-a"], // installsAfter
+            &["feature-b"], // dependsOn
+        );
+
+        let graph = build_graph_representation(&[feature_a, feature_b, feature_c]);
+
+        // Verify feature-c has both dependencies
+        let deps_c = graph.get("feature-c").expect("feature-c should exist");
+        let deps_c_array = deps_c.as_array().expect("Dependencies should be an array");
+        assert_eq!(
+            deps_c_array.len(),
+            2,
+            "feature-c should have 2 dependencies"
+        );
+        assert!(
+            deps_c_array.contains(&serde_json::Value::String("feature-a".to_string())),
+            "feature-c should have feature-a from installsAfter"
+        );
+        assert!(
+            deps_c_array.contains(&serde_json::Value::String("feature-b".to_string())),
+            "feature-c should have feature-b from dependsOn"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_union_deduplication() {
+        // Test: If same dependency appears in both installsAfter and dependsOn,
+        // it should appear only once (deduplication)
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature_with_deps(
+            "feature-b",
+            &["feature-a"], // installsAfter
+            &["feature-a"], // dependsOn (same)
+        );
+
+        let graph = build_graph_representation(&[feature_a, feature_b]);
+
+        // Verify feature-b has feature-a only once
+        let deps_b = graph.get("feature-b").expect("feature-b should exist");
+        let deps_b_array = deps_b.as_array().expect("Dependencies should be an array");
+        assert_eq!(
+            deps_b_array.len(),
+            1,
+            "Duplicate dependency should be deduplicated"
+        );
+        assert!(
+            deps_b_array.contains(&serde_json::Value::String("feature-a".to_string())),
+            "feature-b should depend on feature-a"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_fan_in() {
+        // Test: Fan-in pattern where C depends on both A and B
+        // Graph should show: { "feature-c": ["feature-a", "feature-b"] }
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature("feature-b");
+        let feature_c =
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-a", "feature-b"], &[]);
+
+        let graph = build_graph_representation(&[feature_a, feature_b, feature_c]);
+
+        // Verify feature-c depends on both feature-a and feature-b
+        let deps_c = graph.get("feature-c").expect("feature-c should exist");
+        let deps_c_array = deps_c.as_array().expect("Dependencies should be an array");
+        assert_eq!(
+            deps_c_array.len(),
+            2,
+            "feature-c should have 2 dependencies"
+        );
+        assert!(
+            deps_c_array.contains(&serde_json::Value::String("feature-a".to_string())),
+            "feature-c should depend on feature-a"
+        );
+        assert!(
+            deps_c_array.contains(&serde_json::Value::String("feature-b".to_string())),
+            "feature-c should depend on feature-b"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_deterministic_ordering() {
+        // Test: Dependencies should be in deterministic (lexicographic) order
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature("feature-b");
+        let feature_c = create_mock_resolved_feature("feature-c");
+        // Add dependencies in non-lexicographic order
+        let feature_d = create_mock_resolved_feature_with_deps(
+            "feature-d",
+            &["feature-c", "feature-a", "feature-b"], // Not sorted
+            &[],
+        );
+
+        let graph = build_graph_representation(&[feature_a, feature_b, feature_c, feature_d]);
+
+        // Verify dependencies are in lexicographic order
+        let deps_d = graph.get("feature-d").expect("feature-d should exist");
+        let deps_d_array = deps_d.as_array().expect("Dependencies should be an array");
+        assert_eq!(
+            deps_d_array.len(),
+            3,
+            "feature-d should have 3 dependencies"
+        );
+
+        // Extract dependency strings in order
+        let dep_strings: Vec<String> = deps_d_array
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+
+        assert_eq!(
+            dep_strings,
+            vec!["feature-a", "feature-b", "feature-c"],
+            "Dependencies should be in lexicographic order"
+        );
     }
 
     #[test]
