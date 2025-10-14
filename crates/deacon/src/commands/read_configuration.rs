@@ -743,4 +743,105 @@ API_KEY=another-secret
         let result = execute_read_configuration(args).await;
         assert!(result.is_ok());
     }
+
+    #[tokio::test]
+    async fn test_read_configuration_additional_features_flag() {
+        // Test that the additional_features flag is accepted
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: Some(
+                r#"{"ghcr.io/devcontainers/features/node:1": "lts"}"#.to_string(),
+            ),
+            skip_feature_auto_mapping: false,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_include_features_flag() {
+        // Test that the include_features_configuration flag is accepted (without features in config)
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: true,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_skip_feature_auto_mapping_flag() {
+        // Test that the skip_feature_auto_mapping flag is accepted
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: true,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+    }
 }
