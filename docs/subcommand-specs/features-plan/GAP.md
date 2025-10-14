@@ -169,20 +169,13 @@ The `features plan` subcommand is **partially implemented** with core functional
 - **JSON Mode**: Outputs `{ "order": [...], "graph": {...} }` ✅
 - **Text Mode**: Human-readable header, order list, and pretty-printed graph JSON ✅
 - **Exit Codes**: Returns `Result<()>` which becomes 0 on success, 1 on failure ✅
-
-### ⚠️ Partially Implemented
 - **Graph structure**: Spec shows `"graph": { "<id>": ["dep1", ...] }`
-  - Current implementation uses `build_graph_representation` which combines `installsAfter` and `dependsOn`
+  - Implementation uses `build_graph_representation` which combines `installsAfter` and `dependsOn`
   - This is correct per spec's design decision: "combines installsAfter and dependsOn"
-  - However, the graph values are dependencies (what this feature depends on), not dependents
-  - **Verification needed**: Confirm graph edges point in correct direction
-
-### ❌ Missing or Unclear
-- **Graph edge direction**: Specification doesn't explicitly state whether graph should show:
-  - Option A: `"featureC": ["featureA", "featureB"]` (C depends on A and B) ← Current implementation
-  - Option B: `"featureA": ["featureC"]` (A is depended on by C)
-  - Current implementation appears to use Option A (dependencies, not dependents)
-  - **Recommendation**: Clarify in spec or confirm with examples
+  - Graph values are dependencies (what this feature depends on), not dependents
+  - ✅ **Verified**: Graph edges correctly show dependencies (Option A)
+  - ✅ **Documented**: Comprehensive rustdoc explains direction and behavior
+  - ✅ **Tested**: Six new tests verify graph structure, union, deduplication, and ordering
 
 ---
 
@@ -249,16 +242,22 @@ The `features plan` subcommand is **partially implemented** with core functional
 2. ✅ `test_features_plan_with_additional_features` - Additional features (expects error for invalid refs)
 3. ✅ `test_output_plan_result_json` - JSON output format
 4. ✅ `test_output_plan_result_text` - Text output format
+5. ✅ `test_graph_structure_no_dependencies` - Feature with no dependencies has empty array
+6. ✅ `test_graph_structure_simple_chain` - Simple chain A->B verification
+7. ✅ `test_graph_structure_combined_installs_after_and_depends_on` - Union of both fields
+8. ✅ `test_graph_structure_union_deduplication` - Deduplication of duplicate dependencies
+9. ✅ `test_graph_structure_fan_in` - Fan-in pattern (C depends on A and B)
+10. ✅ `test_graph_structure_deterministic_ordering` - Lexicographic ordering verification
 
-### ❌ Missing Tests (from spec)
-1. ❌ **Simple chain test**: "A -> B installsAfter; expect order [A, B]"
-2. ❌ **Cycle detection test**: "dependsOn cycles: expect error"
-3. ❌ **Additional features merge test**: "ensure CLI additions included in order/graph"
-4. ❌ **Override order test**: Verify `overrideFeatureInstallOrder` behavior
-5. ❌ **Option normalization test**: Verify different option value types
-6. ❌ **Graph structure test**: Verify graph contains correct edges
+### ⚠️ Partially Implemented Tests (from spec)
+1. ✅ **Graph structure test**: Verify graph contains correct edges ← NOW IMPLEMENTED
+2. ⚠️ **Simple chain test**: "A -> B installsAfter; expect order [A, B]" - Graph verified; order tested separately
+3. ❌ **Cycle detection test**: "dependsOn cycles: expect error" - Implemented in core, not in features.rs
+4. ❌ **Additional features merge test**: "ensure CLI additions included in order/graph" - Partially tested
+5. ❌ **Override order test**: Verify `overrideFeatureInstallOrder` behavior - Tested in core
+6. ❌ **Option normalization test**: Verify different option value types
 7. ❌ **Error message format test**: Verify circular dependency error includes details
-8. ❌ **Local feature rejection test**: Verify clear error for local feature paths
+8. ❌ **Local feature rejection test**: Verify clear error for local feature paths - EXISTS as test_features_plan_rejects_local_paths
 
 ---
 
@@ -277,17 +276,23 @@ The `features plan` subcommand is **partially implemented** with core functional
 - Uses `BTreeSet` for deterministic ordering
 - Produces unified adjacency list
 
-### ⚠️ Needs Verification
-- **Edge direction**: Need to confirm graph shows dependencies correctly
+### ✅ Verified and Documented
+- **Edge direction**: Confirmed graph shows dependencies correctly
   - Current code: `graph[featureId] = [dep1, dep2]` (dependencies of featureId)
   - Spec example matches this interpretation ✅
+  - Comprehensive rustdoc added explaining direction and behavior
+  - Test coverage added to verify graph structure
 
 ---
 
 ## 17. Code Quality Issues
 
 ### Style and Documentation
-1. ❌ **Missing function documentation**: `build_graph_representation` has no rustdoc
+1. ✅ **Function documentation added**: `build_graph_representation` now has comprehensive rustdoc
+   - Explains graph direction (dependencies, not dependents)
+   - Documents union behavior of installsAfter and dependsOn
+   - Includes example JSON structure
+   - References specification documents
 2. ❌ **Missing design rationale**: No comment explaining why variable substitution is skipped
 3. ⚠️ **Mock functions in non-test code**: `create_mock_resolved_feature*` are only `#[cfg(test)]` ✅ Actually correct
 4. ⚠️ **Silent type dropping**: Option value conversion silently skips unsupported types with comment, but should this be logged?
