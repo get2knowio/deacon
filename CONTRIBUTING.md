@@ -46,7 +46,7 @@ crates/
   deacon/          # CLI binary crate (main entrypoint)
   core/            # Shared library crate (config, docker, features, etc.)
 docs/
-  CLI-SPEC.md      # Authoritative specification
+  subcommand-specs/*/SPEC.md      # Authoritative specification
 .github/
   workflows/       # CI and release automation
 ```
@@ -122,7 +122,7 @@ The e2e tests are designed to run quickly (total runtime < 30 seconds) and valid
 - **Documentation**: Add rustdoc comments for public APIs
 
 ## Architecture Guidelines
-- **Follow the CLI specification** in `docs/CLI-SPEC.md` as the source of truth
+- **Follow the CLI specification** in `docs/subcommand-specs/*/SPEC.md` as the source of truth
 - **Small, incremental changes** - avoid large refactors in single PRs
 - **Domain separation**: Keep CLI concerns in `crates/deacon`, shared logic in `crates/core`
 - **Trait abstractions**: Use traits for testability (Docker client, file system, etc.)
@@ -175,7 +175,7 @@ All capabilities are always available:
 ## Getting Help
 - **Issues**: Open a GitHub issue for bugs or feature requests
 - **Discussions**: Use GitHub Discussions for questions or ideas
-- **Specification**: Refer to `docs/CLI-SPEC.md` for architecture decisions
+- **Specification**: Refer to `docs/subcommand-specs/*/SPEC.md` for architecture decisions
 
 ## Code of Conduct
 Be respectful, constructive, and collaborative in all interactions.

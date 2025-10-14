@@ -4,7 +4,7 @@
 //! postCreate, postStart, postAttach) with host-only simulation for phases before
 //! container support.
 //!
-//! References: CLI-SPEC.md "Container Lifecycle Management"
+//! References: subcommand-specs/*/SPEC.md "Container Lifecycle Management"
 
 use crate::errors::{DeaconError, Result};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
@@ -17,7 +17,7 @@ use tracing::{debug, error, info, instrument};
 
 /// Lifecycle phases representing different stages of container setup
 ///
-/// References: CLI-SPEC.md "Lifecycle Commands"
+/// References: subcommand-specs/*/SPEC.md "Lifecycle Commands"
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LifecyclePhase {
     /// Host-side initialization

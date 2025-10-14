@@ -48,7 +48,7 @@ If there were dependencies, they would be in different levels:
 
 - **[Feature Installation](https://containers.dev/implementors/spec/#feature-installation)**: How features are installed
 - **[Performance Considerations](https://containers.dev/implementors/spec/#performance)**: Parallel execution strategies
-- **CLI-SPEC**: Feature Installation Workflow; Distribution & Caching sections
+- See Features Plan SPEC: ../../../docs/subcommand-specs/features-plan/SPEC.md
 
 ## Commands
 

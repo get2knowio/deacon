@@ -297,7 +297,7 @@ deacon templates apply ../template-with-options \
 
 ## Spec References
 
-- CLI-SPEC.md: Template Application Workflow
-- CLI-SPEC.md: Template System
+- subcommand-specs/*/SPEC.md: Template Application Workflow
+- subcommand-specs/*/SPEC.md: Template System
 - DevContainer Spec: Template Option Resolution
 - DevContainer Spec: Template Files

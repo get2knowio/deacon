@@ -39,7 +39,7 @@ This example demonstrates distribution workflows from the [DevContainer Specific
 
 ## CLI Specification References
 
-See `docs/CLI-SPEC.md` sections:
+See `docs/subcommand-specs/*/SPEC.md` sections:
 
 - **Feature Distribution**: Feature publication and OCI integration
 - **Template Distribution**: Template publication and OCI integration

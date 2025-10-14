@@ -300,4 +300,4 @@ Redaction is optimized:
 - Tests: `crates/core/src/progress.rs` (test_redacting_*)
 - Secret loading: `crates/core/src/secrets.rs`
 - Related issues: #110, #115, #125
-- CLI-SPEC.md: Security and Redaction sections
+- Up SPEC: Security and redaction: ../../../docs/subcommand-specs/up/SPEC.md#12-security-considerations

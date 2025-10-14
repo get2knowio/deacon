@@ -4,7 +4,7 @@
 //! doctor bundle, and errors. It maintains an in-memory set of secret keys and hashed
 //! values for detection via naive substring scanning with length thresholds.
 //!
-//! References: CLI-SPEC.md "Security and Compliance"
+//! References: subcommand-specs/*/SPEC.md "Security and Compliance"
 
 use std::collections::HashSet;
 use std::io::{self, Write};

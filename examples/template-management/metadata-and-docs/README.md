@@ -430,7 +430,7 @@ echo "$METADATA" | jq -e '.options | .[] | .description' > /dev/null && echo "âœ
 
 ## Spec References
 
-- CLI-SPEC.md: Template System
-- CLI-SPEC.md: Template Metadata
+- subcommand-specs/*/SPEC.md: Template System
+- subcommand-specs/*/SPEC.md: Template Metadata
 - DevContainer Spec: Template Properties
 - DevContainer Spec: Template Options

@@ -165,5 +165,5 @@ The secret is available at `/run/secrets/<secret-id>` during the RUN instruction
 
 - [Docker BuildKit Secrets Documentation](https://docs.docker.com/build/building/secrets/)
 - [DevContainer Specification](https://containers.dev/)
-- CLI-SPEC.md: Build Process Workflow
-- CLI-SPEC.md: Security and Permissions
+- subcommand-specs/*/SPEC.md: Build Process Workflow
+- subcommand-specs/*/SPEC.md: Security and Permissions

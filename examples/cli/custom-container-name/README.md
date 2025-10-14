@@ -52,4 +52,4 @@ If you specify an invalid container name (e.g., containing invalid characters), 
 ## See Also
 
 - `deacon up --help` for all available flags
-- Container lifecycle management documentation in `docs/CLI-SPEC.md`
+- Container lifecycle management documentation in `docs/subcommand-specs/*/SPEC.md`

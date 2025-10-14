@@ -77,5 +77,5 @@ Port events are emitted to stdout with the prefix `PORT_EVENT:` followed by JSON
 
 ## See Also
 
-- [Port Configuration Documentation](../../../docs/CLI-SPEC.md#http-and-network-handling)
+- [Port Configuration Documentation](../../../docs/subcommand-specs/*/SPEC.md#http-and-network-handling)
 - [Compose Port Events Example](../../compose/port-events/)

@@ -60,7 +60,7 @@ Container lifecycle commands run at specific points during container creation an
 
 ## Lifecycle Command Reference
 
-Based on the [DevContainer specification](https://containers.dev/implementors/spec/#lifecycle-scripts) and [CLI-SPEC.md](../../docs/CLI-SPEC.md):
+Based on the [DevContainer specification](https://containers.dev/implementors/spec/#lifecycle-scripts) and [Up SPEC](../../docs/subcommand-specs/up/SPEC.md):
 
 | Command | When It Runs | Frequency | Purpose |
 |---------|-------------|-----------|---------|
@@ -227,5 +227,5 @@ devcontainer up --remove-existing-container
 ## References
 
 - [DevContainer Specification - Lifecycle Scripts](https://containers.dev/implementors/spec/#lifecycle-scripts)
-- [CLI-SPEC.md Container Lifecycle Management](../../docs/CLI-SPEC.md#container-lifecycle-management)
+- [Up SPEC: Core Execution Logic](../../docs/subcommand-specs/up/SPEC.md#5-core-execution-logic)
 - [Variable Substitution Documentation](https://containers.dev/implementors/spec/#variables-in-devcontainer-json)
