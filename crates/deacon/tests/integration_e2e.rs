@@ -256,17 +256,24 @@ fn test_e2e_basic_config_read() {
         );
     });
 
-    // Verify basic configuration fields
-    assert_eq!(json["name"], "basic-test-container");
-    assert_eq!(json["image"], "mcr.microsoft.com/devcontainers/base:ubuntu");
-    assert_eq!(json["workspaceFolder"], "/workspaces/test");
+    // Verify basic configuration fields (now nested under "configuration")
+    let config = &json["configuration"];
+    assert_eq!(config["name"], "basic-test-container");
+    assert_eq!(
+        config["image"],
+        "mcr.microsoft.com/devcontainers/base:ubuntu"
+    );
+    assert_eq!(config["workspaceFolder"], "/workspaces/test");
 
     // Verify container environment
-    let container_env = &json["containerEnv"];
+    let container_env = &config["containerEnv"];
     assert_eq!(container_env["TEST_ENV"], "test-value");
 
     // Verify lifecycle command
-    assert_eq!(json["postCreateCommand"], "echo 'Hello from devcontainer'");
+    assert_eq!(
+        config["postCreateCommand"],
+        "echo 'Hello from devcontainer'"
+    );
 
     println!("✅ Basic config read test completed successfully");
 }
@@ -298,8 +305,11 @@ fn test_e2e_variable_substitution() {
     // Parse JSON output
     let json = result.parse_json().expect("Failed to parse JSON output");
 
+    // Access configuration from nested structure
+    let config = &json["configuration"];
+
     // Verify variable substitution occurred
-    let workspace_folder = json["workspaceFolder"].as_str().unwrap();
+    let workspace_folder = config["workspaceFolder"].as_str().unwrap();
     assert!(
         workspace_folder.contains("/src"),
         "workspaceFolder should contain /src after substitution: {}",
@@ -312,7 +322,7 @@ fn test_e2e_variable_substitution() {
     );
 
     // Verify container environment variable substitution
-    let container_env = &json["containerEnv"];
+    let container_env = &config["containerEnv"];
     let workspace_path = container_env["WORKSPACE_PATH"].as_str().unwrap();
     assert!(
         !workspace_path.contains("${localWorkspaceFolder}"),
@@ -321,7 +331,7 @@ fn test_e2e_variable_substitution() {
     );
 
     // Verify lifecycle command variable substitution
-    let post_create_command = json["postCreateCommand"].as_str().unwrap();
+    let post_create_command = config["postCreateCommand"].as_str().unwrap();
     assert!(
         !post_create_command.contains("${localWorkspaceFolder}"),
         "postCreateCommand should not contain variable reference: {}",
@@ -361,11 +371,14 @@ fn test_e2e_features_configuration() {
     // Parse JSON output
     let json = result.parse_json().expect("Failed to parse JSON output");
 
+    // Access configuration from nested structure
+    let config = &json["configuration"];
+
     // Verify the configuration loaded successfully
-    assert_eq!(json["name"], "feature-test-container");
+    assert_eq!(config["name"], "feature-test-container");
 
     // Verify features section is preserved with remote references
-    let features = &json["features"];
+    let features = &config["features"];
     assert!(features.is_object(), "Features should be an object");
 
     // Check docker-in-docker feature
@@ -418,8 +431,11 @@ fn test_e2e_plugin_customizations() {
     // Parse JSON output
     let json = result.parse_json().expect("Failed to parse JSON output");
 
+    // Access configuration from nested structure
+    let config = &json["configuration"];
+
     // Verify customizations are preserved (this simulates plugin-added configuration)
-    let customizations = &json["customizations"];
+    let customizations = &config["customizations"];
     assert!(
         customizations.is_object(),
         "Customizations should be an object"
@@ -473,8 +489,11 @@ fn test_e2e_lifecycle_simulation() {
     // Parse JSON output
     let json = result.parse_json().expect("Failed to parse JSON output");
 
+    // Access configuration from nested structure
+    let config = &json["configuration"];
+
     // Verify all lifecycle commands have variables substituted
-    let on_create = json["onCreateCommand"].as_str().unwrap();
+    let on_create = config["onCreateCommand"].as_str().unwrap();
     assert!(
         !on_create.contains("${"),
         "Variables should be substituted in onCreateCommand"
@@ -484,14 +503,14 @@ fn test_e2e_lifecycle_simulation() {
         "Command should reference build directory"
     );
 
-    let post_start = json["postStartCommand"].as_array().unwrap();
+    let post_start = config["postStartCommand"].as_array().unwrap();
     let message = post_start[1].as_str().unwrap();
     assert!(
         !message.contains("${"),
         "Variables should be substituted in postStartCommand array"
     );
 
-    let post_create = json["postCreateCommand"].as_object().unwrap();
+    let post_create = config["postCreateCommand"].as_object().unwrap();
     let setup_cmd = post_create["setup"].as_str().unwrap();
     assert!(
         !setup_cmd.contains("${"),
@@ -581,7 +600,8 @@ fn test_e2e_performance_under_30s() {
 
         // Output should be consistent
         let json = result.parse_json().expect("Failed to parse JSON output");
-        assert_eq!(json["name"], "performance-test-container");
+        let config = &json["configuration"];
+        assert_eq!(config["name"], "performance-test-container");
 
         println!(
             "✅ Performance test iteration {} completed in {:?}",
