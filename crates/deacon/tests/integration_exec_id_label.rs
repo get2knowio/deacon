@@ -69,7 +69,9 @@ fn test_exec_id_label_with_invalid_format() {
         .assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains("Invalid label format"));
+        .stderr(predicate::str::contains(
+            "Unmatched argument format: id-label must match <name>=<value>.",
+        ));
 }
 
 #[test]

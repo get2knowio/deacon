@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use deacon_core::config::ConfigLoader;
+use deacon_core::container::ContainerSelector;
 use deacon_core::errors::{ConfigError, DeaconError};
 use deacon_core::io::Output;
 use deacon_core::redaction::{RedactionConfig, SecretRegistry};
@@ -46,6 +47,11 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         args.override_config_path,
         args.secrets_files.len()
     );
+
+    // Validate id_label format (must match <name>=<value> pattern)
+    if !args.id_label.is_empty() {
+        ContainerSelector::parse_labels(&args.id_label)?;
+    }
 
     // Create output helper with redaction support
     let mut output = Output::new(args.redaction_config.clone(), &args.secret_registry);
@@ -355,5 +361,86 @@ API_KEY=another-secret
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_invalid_label_format() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            container_id: None,
+            id_label: vec!["invalid".to_string()], // Missing '='
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert_eq!(
+            err_msg,
+            "Unmatched argument format: id-label must match <name>=<value>."
+        );
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_valid_with_container_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            container_id: Some("abc123".to_string()),
+            id_label: vec![],
+            workspace_folder: None,
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_valid_with_id_label() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            container_id: None,
+            id_label: vec!["app=web".to_string()],
+            workspace_folder: None,
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
     }
 }

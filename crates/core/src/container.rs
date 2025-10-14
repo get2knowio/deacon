@@ -432,10 +432,10 @@ mod tests {
         let labels = vec!["invalid".to_string()];
         let result = ContainerSelector::parse_labels(&labels);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid label format"));
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Unmatched argument format: id-label must match <name>=<value>."
+        );
     }
 
     #[test]
@@ -461,10 +461,10 @@ mod tests {
         };
         let result = selector.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("At least one of --container-id, --id-label, or --workspace-folder"));
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Missing required argument: One of --container-id, --id-label or --workspace-folder is required."
+        );
     }
 
     #[test]
@@ -637,7 +637,7 @@ impl ContainerSelector {
             && self.workspace_folder.is_none()
         {
             anyhow::bail!(
-                "At least one of --container-id, --id-label, or --workspace-folder is required"
+                "Missing required argument: One of --container-id, --id-label or --workspace-folder is required."
             );
         }
         Ok(())
@@ -681,10 +681,7 @@ impl ContainerSelector {
         let mut result = Vec::new();
         for label in labels {
             if !regex.is_match(label) {
-                anyhow::bail!(
-                    "Invalid label format '{}'. Must be name=value with non-empty key and value",
-                    label
-                );
+                anyhow::bail!("Unmatched argument format: id-label must match <name>=<value>.");
             }
             let parts: Vec<&str> = label.splitn(2, '=').collect();
             result.push((parts[0].to_string(), parts[1].to_string()));
