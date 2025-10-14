@@ -99,6 +99,33 @@ pub struct FeaturesPlanResult {
     pub graph: serde_json::Value,
 }
 
+/// Check if a feature identifier looks like a local path
+fn is_local_path(feature_id: &str) -> bool {
+    // Check for relative paths
+    if feature_id.starts_with("./") || feature_id.starts_with("../") {
+        return true;
+    }
+
+    // Check for absolute Unix paths
+    if feature_id.starts_with('/') {
+        return true;
+    }
+
+    // Check for Windows absolute paths (C:\, D:\, etc.)
+    if feature_id.len() >= 3 {
+        let chars: Vec<char> = feature_id.chars().collect();
+        if chars.len() >= 3
+            && chars[0].is_ascii_alphabetic()
+            && chars[1] == ':'
+            && (chars[2] == '\\' || chars[2] == '/')
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Execute features plan command
 async fn execute_features_plan(
     json: bool,
@@ -173,6 +200,14 @@ async fn execute_features_plan(
             default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
         let mut resolved_features = Vec::with_capacity(features_map.len());
         for (feature_id, feature_value) in features_map {
+            // Check if feature_id looks like a local path
+            if is_local_path(feature_id) {
+                anyhow::bail!(
+                    "Local features are not supported by 'features plan'. Use registry references (e.g., ghcr.io/owner/feature). Feature key: '{}'",
+                    feature_id
+                );
+            }
+
             let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
             let feature_ref = FeatureRef::new(
                 registry_url.clone(),
@@ -1107,6 +1142,118 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_is_local_path() {
+        // Relative paths
+        assert!(is_local_path("./feature"));
+        assert!(is_local_path("../feature"));
+        assert!(is_local_path("./path/to/feature"));
+        assert!(is_local_path("../path/to/feature"));
+
+        // Absolute Unix paths
+        assert!(is_local_path("/abs/path"));
+        assert!(is_local_path("/feature"));
+
+        // Windows paths
+        assert!(is_local_path("C:\\path"));
+        assert!(is_local_path("D:/path"));
+        assert!(is_local_path("E:\\feature"));
+
+        // Valid registry references (should NOT be detected as local paths)
+        assert!(!is_local_path("ghcr.io/devcontainers/node"));
+        assert!(!is_local_path("myteam/myfeature"));
+        assert!(!is_local_path("myfeature"));
+        assert!(!is_local_path("ghcr.io/devcontainers/node:18"));
+        assert!(!is_local_path("feature-name"));
+        assert!(!is_local_path("my-feature"));
+    }
+
+    #[tokio::test]
+    async fn test_features_plan_rejects_local_paths() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test with relative path ./feature
+        let config_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        fs::write(&config_path, r#"{"features": {"./my-feature": true}}"#).unwrap();
+
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path.clone()),
+        };
+
+        let result = execute_features_plan(true, None, &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Local features are not supported by 'features plan'"));
+        assert!(err_msg.contains("./my-feature"));
+        assert!(err_msg.contains("ghcr.io/owner/feature"));
+
+        // Test with absolute path
+        fs::write(&config_path, r#"{"features": {"/abs/path/feature": true}}"#).unwrap();
+
+        let args2 = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path.clone()),
+        };
+
+        let result2 = execute_features_plan(true, None, &args2).await;
+        assert!(result2.is_err());
+        let err_msg2 = format!("{}", result2.unwrap_err());
+        assert!(err_msg2.contains("Local features are not supported by 'features plan'"));
+        assert!(err_msg2.contains("/abs/path/feature"));
+
+        // Test with parent relative path
+        fs::write(
+            &config_path,
+            r#"{"features": {"../another-feature": true}}"#,
+        )
+        .unwrap();
+
+        let args3 = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path.clone()),
+        };
+
+        let result3 = execute_features_plan(true, None, &args3).await;
+        assert!(result3.is_err());
+        let err_msg3 = format!("{}", result3.unwrap_err());
+        assert!(err_msg3.contains("Local features are not supported by 'features plan'"));
+        assert!(err_msg3.contains("../another-feature"));
+    }
+
+    #[tokio::test]
+    async fn test_features_plan_additional_features_with_local_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some(r#"{"./local-feature": true}"#.to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result = execute_features_plan(true, Some(r#"{"./local-feature": true}"#), &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Local features are not supported by 'features plan'"));
+        assert!(err_msg.contains("./local-feature"));
+    }
 
     #[test]
     fn test_features_result_json_serialization() {
