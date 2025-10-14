@@ -1985,6 +1985,8 @@ mod tests {
             state: "running".to_string(),
             exposed_ports: vec![],
             port_mappings: vec![],
+            env: HashMap::new(),
+            labels: HashMap::new(),
         };
 
         let serialized = serde_json::to_string(&container).unwrap();

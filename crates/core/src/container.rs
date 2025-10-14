@@ -690,6 +690,66 @@ impl ContainerSelector {
     }
 }
 
+/// Compute deterministic dev container ID from id-labels
+///
+/// Creates a deterministic 12-character hex ID from a set of id-labels.
+/// The ID is independent of label order - labels are sorted before hashing.
+/// Adding or removing labels changes the ID.
+///
+/// # Arguments
+///
+/// * `id_labels` - Slice of (key, value) tuples representing container labels
+///
+/// # Returns
+///
+/// A 12-character hexadecimal string representing the deterministic container ID
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::container::compute_dev_container_id;
+///
+/// let labels = vec![
+///     ("app".to_string(), "web".to_string()),
+///     ("env".to_string(), "prod".to_string()),
+/// ];
+/// let id1 = compute_dev_container_id(&labels);
+/// assert_eq!(id1.len(), 12);
+///
+/// // Order doesn't matter
+/// let labels_reversed = vec![
+///     ("env".to_string(), "prod".to_string()),
+///     ("app".to_string(), "web".to_string()),
+/// ];
+/// let id2 = compute_dev_container_id(&labels_reversed);
+/// assert_eq!(id1, id2);
+/// ```
+pub fn compute_dev_container_id(id_labels: &[(String, String)]) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    // Sort labels to ensure determinism regardless of order
+    let mut sorted_labels = id_labels.to_vec();
+    sorted_labels.sort_by(|a, b| match a.0.cmp(&b.0) {
+        std::cmp::Ordering::Equal => a.1.cmp(&b.1),
+        other => other,
+    });
+
+    // Create string representation: "key1=value1,key2=value2,..."
+    let label_string = sorted_labels
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let mut hasher = DefaultHasher::new();
+    label_string.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // Return first 12 characters of hex representation
+    format!("{:016x}", hash)[..12].to_string()
+}
+
 /// Container lookup operations
 ///
 /// These functions provide utilities for finding and inspecting containers

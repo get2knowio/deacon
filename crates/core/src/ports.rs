@@ -484,6 +484,8 @@ mod tests {
                 protocol: "tcp".to_string(),
                 host_ip: "0.0.0.0".to_string(),
             }],
+            env: HashMap::new(),
+            labels: HashMap::new(),
         };
 
         // This should generate a warning for port 9999 which is not configured
