@@ -1852,8 +1852,9 @@ mod tests {
         use deacon_core::features::FeatureDependencyResolver;
 
         // Test: Verify complete error message format per SPEC.md §9 Error Handling
-        // Requirement: Circular dependencies detected => error with details
-        // GAP.md §8: Missing test that circular dependency errors include "details"
+        // SPEC.md §9 requirement: "Circular dependencies detected => error with details"
+        // GAP.md §8: "Missing test that circular dependency errors include 'details'"
+        // This test validates all required elements and serves as a snapshot test
 
         // Cycle: feature-x -> feature-y -> feature-z -> feature-x
         let features = vec![
@@ -1865,39 +1866,42 @@ mod tests {
         let resolver = FeatureDependencyResolver::new(None);
         let result = resolver.resolve(&features);
 
-        // Verify error is returned
-        assert!(result.is_err(), "Cycle should produce an error");
+        // Verify error is returned per SPEC.md §9
+        assert!(
+            result.is_err(),
+            "Cycle should produce an error per SPEC.md §9"
+        );
 
         let err = result.unwrap_err();
 
         // Test 1: Verify error type is DependencyCycle
         match &err {
             FeatureError::DependencyCycle { cycle_path } => {
-                // Test 2: Verify cycle_path field contains all involved features
+                // Test 2: SPEC.md §9 "details" requirement - all involved features present
                 assert!(
                     cycle_path.contains("feature-x"),
-                    "Cycle path should contain feature-x, got: {}",
+                    "Cycle path should contain feature-x (required detail), got: {}",
                     cycle_path
                 );
                 assert!(
                     cycle_path.contains("feature-y"),
-                    "Cycle path should contain feature-y, got: {}",
+                    "Cycle path should contain feature-y (required detail), got: {}",
                     cycle_path
                 );
                 assert!(
                     cycle_path.contains("feature-z"),
-                    "Cycle path should contain feature-z, got: {}",
+                    "Cycle path should contain feature-z (required detail), got: {}",
                     cycle_path
                 );
 
-                // Test 3: Verify path shows direction (uses arrows)
+                // Test 3: Verify path shows direction (part of details)
                 assert!(
                     cycle_path.contains("->") || cycle_path.contains("→"),
                     "Cycle path should show direction with arrows, got: {}",
                     cycle_path
                 );
 
-                // Test 4: Verify path forms a closed loop (starts and ends with same feature)
+                // Test 4: Verify path forms a closed loop (validates correctness)
                 let parts: Vec<&str> = cycle_path.split(" -> ").collect();
                 assert!(
                     parts.len() >= 3,
@@ -1911,41 +1915,56 @@ mod tests {
                     cycle_path
                 );
             }
-            _ => panic!("Expected DependencyCycle error, got: {:?}", err),
+            _ => panic!(
+                "Expected DependencyCycle error per SPEC.md §9, got: {:?}",
+                err
+            ),
         }
 
-        // Test 5: Verify full Display format includes required terminology
+        // Test 5: Verify full Display format includes required terminology per SPEC.md §9
         let full_msg = format!("{}", err);
+
+        // SPEC.md §9: "Circular dependencies detected"
         assert!(
-            full_msg.contains("Dependency cycle") || full_msg.contains("cycle"),
-            "Full error message should contain 'cycle' terminology, got: {}",
-            full_msg
-        );
-        assert!(
-            full_msg.contains("detected") || full_msg.contains("Dependency"),
-            "Full error message should indicate detection, got: {}",
-            full_msg
-        );
-        assert!(
-            full_msg.contains("feature"),
-            "Full error message should reference features, got: {}",
+            full_msg.to_lowercase().contains("cycle")
+                || full_msg.to_lowercase().contains("circular"),
+            "Full error message should contain 'cycle' or 'circular' per SPEC.md §9, got: {}",
             full_msg
         );
 
-        // Test 6: Verify all involved features are in the full message
+        assert!(
+            full_msg.to_lowercase().contains("depend"),
+            "Full error message should reference 'dependencies' per SPEC.md §9, got: {}",
+            full_msg
+        );
+
+        assert!(
+            full_msg.contains("feature"),
+            "Full error message should reference features context, got: {}",
+            full_msg
+        );
+
+        // Snapshot test: Lock the format to prevent regressions
+        assert!(
+            full_msg.starts_with("Dependency cycle detected in features:"),
+            "Error message format should match expected pattern (snapshot), got: {}",
+            full_msg
+        );
+
+        // Test 6: Verify all involved features are in the full message (the "details")
         assert!(
             full_msg.contains("feature-x"),
-            "Full error message should contain feature-x, got: {}",
+            "Full error message should contain feature-x (required detail), got: {}",
             full_msg
         );
         assert!(
             full_msg.contains("feature-y"),
-            "Full error message should contain feature-y, got: {}",
+            "Full error message should contain feature-y (required detail), got: {}",
             full_msg
         );
         assert!(
             full_msg.contains("feature-z"),
-            "Full error message should contain feature-z, got: {}",
+            "Full error message should contain feature-z (required detail), got: {}",
             full_msg
         );
     }

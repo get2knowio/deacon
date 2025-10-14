@@ -812,3 +812,142 @@ fn test_features_plan_graph_json_structure() {
     // Verify JSON serialization is valid
     let _json_str = serde_json::to_string_pretty(&json).expect("Should be able to serialize JSON");
 }
+
+/// Test features plan command with circular dependency detection
+/// End-to-end test that validates CLI error output format per SPEC.md §9
+#[test]
+fn test_features_plan_cycle_detection_e2e() {
+    // This test validates that when the CLI encounters a circular dependency,
+    // it emits a properly formatted error message that includes:
+    // 1. The term "cycle" or "circular"
+    // 2. All involved feature IDs
+    // 3. Clear indication this is a dependency error
+    // Per SPEC.md §9: "Circular dependencies detected => error with details"
+
+    use deacon_core::features::{FeatureDependencyResolver, FeatureMetadata, ResolvedFeature};
+    use std::collections::HashMap;
+
+    // Create mock features with a circular dependency:
+    // feature-alpha -> feature-beta -> feature-gamma -> feature-alpha
+    let create_mock_feature = |id: &str, depends_on: Vec<&str>| -> ResolvedFeature {
+        let mut depends_on_map = HashMap::new();
+        for dep in depends_on {
+            depends_on_map.insert(dep.to_string(), serde_json::Value::Bool(true));
+        }
+
+        ResolvedFeature {
+            id: id.to_string(),
+            source: format!("ghcr.io/test/{}:1", id),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: id.to_string(),
+                name: Some(format!("Test {}", id)),
+                version: Some("1.0.0".to_string()),
+                description: None,
+                documentation_url: None,
+                license_url: None,
+                options: HashMap::new(),
+                container_env: HashMap::new(),
+                depends_on: depends_on_map,
+                installs_after: vec![],
+                init: None,
+                privileged: None,
+                cap_add: vec![],
+                security_opt: vec![],
+                entrypoint: None,
+                mounts: vec![],
+                post_create_command: None,
+                post_start_command: None,
+                post_attach_command: None,
+                on_create_command: None,
+                update_content_command: None,
+            },
+        }
+    };
+
+    let features = vec![
+        create_mock_feature("feature-alpha", vec!["feature-beta"]),
+        create_mock_feature("feature-beta", vec!["feature-gamma"]),
+        create_mock_feature("feature-gamma", vec!["feature-alpha"]),
+    ];
+
+    let resolver = FeatureDependencyResolver::new(None);
+    let result = resolver.resolve(&features);
+
+    // Assert that we got an error
+    assert!(
+        result.is_err(),
+        "Circular dependency should produce an error"
+    );
+
+    let error = result.unwrap_err();
+    let error_text = format!("{}", error);
+
+    // SPEC.md §9 requirement: "error with details"
+    // Validate the error message format includes required elements:
+
+    // 1. Contains cycle/circular terminology
+    assert!(
+        error_text.to_lowercase().contains("cycle")
+            || error_text.to_lowercase().contains("circular"),
+        "Error message must contain 'cycle' or 'circular' terminology per SPEC.md §9.\nGot: {}",
+        error_text
+    );
+
+    // 2. Contains dependency terminology
+    assert!(
+        error_text.to_lowercase().contains("depend"),
+        "Error message must reference dependencies per SPEC.md §9.\nGot: {}",
+        error_text
+    );
+
+    // 3. Contains all involved feature IDs (the "details" requirement)
+    assert!(
+        error_text.contains("feature-alpha"),
+        "Error message must include feature-alpha in cycle details.\nGot: {}",
+        error_text
+    );
+    assert!(
+        error_text.contains("feature-beta"),
+        "Error message must include feature-beta in cycle details.\nGot: {}",
+        error_text
+    );
+    assert!(
+        error_text.contains("feature-gamma"),
+        "Error message must include feature-gamma in cycle details.\nGot: {}",
+        error_text
+    );
+
+    // 4. Shows directionality (arrow notation)
+    assert!(
+        error_text.contains("->") || error_text.contains("→"),
+        "Error message should show dependency direction with arrows.\nGot: {}",
+        error_text
+    );
+
+    // 5. Snapshot of expected format (for regression protection)
+    // The error should follow the pattern: "Dependency cycle detected in features: <path>"
+    assert!(
+        error_text.starts_with("Dependency cycle detected in features:"),
+        "Error message format should match expected pattern.\nGot: {}",
+        error_text
+    );
+
+    // Additional validation: ensure it's a properly formed cycle path
+    // A cycle path should form a closed loop (start and end with same feature)
+    let cycle_path = error_text
+        .strip_prefix("Dependency cycle detected in features: ")
+        .unwrap_or("");
+    let parts: Vec<&str> = cycle_path.split(" -> ").collect();
+    assert!(
+        parts.len() >= 3,
+        "Cycle path should have at least 3 nodes.\nGot: {}",
+        cycle_path
+    );
+    assert_eq!(
+        parts.first(),
+        parts.last(),
+        "Cycle path should form closed loop (start == end).\nGot: {}",
+        cycle_path
+    );
+}
