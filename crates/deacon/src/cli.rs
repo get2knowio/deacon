@@ -264,6 +264,9 @@ pub enum Commands {
         /// Must match pattern <name>=<value> with non-empty name and value.
         #[arg(long, action = clap::ArgAction::Append)]
         id_label: Vec<String>,
+        /// Mount workspace git root (default: true)
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        mount_workspace_git_root: bool,
     },
 
     /// Configuration management commands
@@ -898,6 +901,7 @@ impl Cli {
                 include_merged_configuration,
                 container_id,
                 id_label,
+                mount_workspace_git_root,
             }) => {
                 use crate::commands::read_configuration::{
                     execute_read_configuration, ReadConfigurationArgs,
@@ -907,6 +911,7 @@ impl Cli {
                     include_merged_configuration,
                     container_id,
                     id_label,
+                    mount_workspace_git_root,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,
