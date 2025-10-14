@@ -257,6 +257,9 @@ pub enum Commands {
         /// Include merged configuration
         #[arg(long)]
         include_merged_configuration: bool,
+        /// Include features configuration
+        #[arg(long)]
+        include_features_configuration: bool,
         /// Target container ID directly
         #[arg(long)]
         container_id: Option<String>,
@@ -267,6 +270,12 @@ pub enum Commands {
         /// Mount workspace git root (default: true)
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         mount_workspace_git_root: bool,
+        /// Additional features to install (JSON map of id -> value/options)
+        #[arg(long)]
+        additional_features: Option<String>,
+        /// Skip feature auto-mapping (hidden testing flag)
+        #[arg(long, hide = true)]
+        skip_feature_auto_mapping: bool,
     },
 
     /// Configuration management commands
@@ -899,9 +908,12 @@ impl Cli {
             }
             Some(Commands::ReadConfiguration {
                 include_merged_configuration,
+                include_features_configuration,
                 container_id,
                 id_label,
                 mount_workspace_git_root,
+                additional_features,
+                skip_feature_auto_mapping,
             }) => {
                 use crate::commands::read_configuration::{
                     execute_read_configuration, ReadConfigurationArgs,
@@ -909,9 +921,12 @@ impl Cli {
 
                 let args = ReadConfigurationArgs {
                     include_merged_configuration,
+                    include_features_configuration,
                     container_id,
                     id_label,
                     mount_workspace_git_root,
+                    additional_features,
+                    skip_feature_auto_mapping,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,
