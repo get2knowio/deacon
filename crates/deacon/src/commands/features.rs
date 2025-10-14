@@ -1570,6 +1570,155 @@ mod tests {
     }
 
     #[test]
+    fn test_graph_structure_cycle_detection_error_shape() {
+        use deacon_core::errors::FeatureError;
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Verify cycle detection returns proper error structure
+        // Cycle: a -> b -> c -> a
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-a", &["feature-b"], &[]),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-c"], &[]),
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-a"], &[]),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+
+        // Verify error type matches spec
+        assert!(result.is_err(), "Cycle should produce an error");
+
+        match result {
+            Err(FeatureError::DependencyCycle { cycle_path }) => {
+                // Verify error message contains cycle information
+                assert!(
+                    cycle_path.contains("feature-a"),
+                    "Cycle path should contain feature-a"
+                );
+                assert!(
+                    cycle_path.contains("feature-b"),
+                    "Cycle path should contain feature-b"
+                );
+                assert!(
+                    cycle_path.contains("feature-c"),
+                    "Cycle path should contain feature-c"
+                );
+                // Verify it's formatted as a path with arrows
+                assert!(
+                    cycle_path.contains("->") || cycle_path.contains("→"),
+                    "Cycle path should show direction with arrows"
+                );
+            }
+            _ => panic!("Expected DependencyCycle error, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_graph_structure_complete_json_output() {
+        // Test: Verify complete JSON output structure matches DATA-STRUCTURES.md spec
+        let features = vec![
+            create_mock_resolved_feature("feature-a"),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-a", "feature-b"], &[]),
+        ];
+
+        let graph = build_graph_representation(&features);
+
+        // Verify it's a JSON object
+        assert!(graph.is_object(), "Graph should be a JSON object");
+
+        // Verify all features are present
+        assert!(
+            graph.get("feature-a").is_some(),
+            "feature-a should be in graph"
+        );
+        assert!(
+            graph.get("feature-b").is_some(),
+            "feature-b should be in graph"
+        );
+        assert!(
+            graph.get("feature-c").is_some(),
+            "feature-c should be in graph"
+        );
+
+        // Verify structure: feature-a has no deps
+        let deps_a = graph.get("feature-a").unwrap();
+        assert!(deps_a.is_array(), "Dependencies should be an array");
+        assert_eq!(
+            deps_a.as_array().unwrap().len(),
+            0,
+            "feature-a has no dependencies"
+        );
+
+        // Verify structure: feature-b depends on feature-a
+        let deps_b = graph.get("feature-b").unwrap().as_array().unwrap();
+        assert_eq!(deps_b.len(), 1, "feature-b has 1 dependency");
+        assert_eq!(
+            deps_b[0],
+            serde_json::Value::String("feature-a".to_string()),
+            "feature-b depends on feature-a"
+        );
+
+        // Verify structure: feature-c depends on both (sorted)
+        let deps_c = graph.get("feature-c").unwrap().as_array().unwrap();
+        assert_eq!(deps_c.len(), 2, "feature-c has 2 dependencies");
+        assert_eq!(
+            deps_c[0],
+            serde_json::Value::String("feature-a".to_string()),
+            "First dep should be feature-a (sorted)"
+        );
+        assert_eq!(
+            deps_c[1],
+            serde_json::Value::String("feature-b".to_string()),
+            "Second dep should be feature-b (sorted)"
+        );
+
+        // Verify JSON serialization matches expected format
+        let json_str = serde_json::to_string_pretty(&graph).unwrap();
+        assert!(
+            json_str.contains("\"feature-a\""),
+            "JSON should contain feature-a"
+        );
+        assert!(json_str.contains("[]"), "JSON should contain empty arrays");
+    }
+
+    #[test]
+    fn test_graph_structure_features_in_order_without_deps() {
+        // Test: Features present in plan order but without explicit dependency fields
+        // should have empty arrays in graph
+        let features = vec![
+            create_mock_resolved_feature("independent-1"),
+            create_mock_resolved_feature("independent-2"),
+            create_mock_resolved_feature("independent-3"),
+        ];
+
+        let graph = build_graph_representation(&features);
+
+        // All features should be present with empty dependency arrays
+        for feature_id in &["independent-1", "independent-2", "independent-3"] {
+            let deps = graph
+                .get(*feature_id)
+                .unwrap_or_else(|| panic!("{} should exist in graph", feature_id));
+            let deps_array = deps
+                .as_array()
+                .unwrap_or_else(|| panic!("{} deps should be an array", feature_id));
+            assert!(
+                deps_array.is_empty(),
+                "{} should have empty dependencies array",
+                feature_id
+            );
+        }
+
+        // Verify consistent JSON structure
+        let graph_obj = graph.as_object().expect("Graph should be a JSON object");
+        assert_eq!(
+            graph_obj.len(),
+            3,
+            "Graph should have exactly 3 feature entries"
+        );
+    }
+
+    #[test]
     fn test_create_mock_resolved_feature() {
         let feature = create_mock_resolved_feature("test-feature");
         assert_eq!(feature.id, "test-feature");

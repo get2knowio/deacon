@@ -752,3 +752,63 @@ fn test_features_plan_cli_rejects_local_paths() {
             .stderr(predicate::str::contains(expected_feature_key));
     }
 }
+
+/// Integration test: Verify complete graph JSON output structure
+#[test]
+fn test_features_plan_graph_json_structure() {
+    // This test validates the graph JSON output structure matches DATA-STRUCTURES.md
+    // Using a minimal config that will produce empty features list but valid structure
+
+    let temp_dir = TempDir::new().unwrap();
+
+    // Create devcontainer.json with no features
+    let config_dir = temp_dir.path().join(".devcontainer");
+    fs::create_dir_all(&config_dir).unwrap();
+    let config_content = r#"{
+        "name": "Test",
+        "image": "mcr.microsoft.com/devcontainers/base:alpine",
+        "features": {}
+    }"#;
+    fs::write(config_dir.join("devcontainer.json"), config_content).unwrap();
+
+    // Run features plan
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.args([
+        "features",
+        "plan",
+        "--workspace-folder",
+        temp_dir.path().to_str().unwrap(),
+        "--json",
+        "true",
+    ]);
+
+    let output = cmd.assert().success();
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+
+    // Extract and parse JSON
+    let json = extract_json_from_output(&stdout).expect("Should produce valid JSON");
+
+    // Verify structure matches DATA-STRUCTURES.md specification
+    assert!(json.get("order").is_some(), "Should have 'order' field");
+    assert!(json.get("graph").is_some(), "Should have 'graph' field");
+
+    // Verify types
+    let order = json.get("order").unwrap();
+    assert!(order.is_array(), "Order should be an array");
+
+    let graph = json.get("graph").unwrap();
+    assert!(graph.is_object(), "Graph should be an object");
+
+    // For empty features, we should have empty arrays
+    let order_array = order.as_array().unwrap();
+    let graph_obj = graph.as_object().unwrap();
+
+    assert_eq!(
+        order_array.len(),
+        graph_obj.len(),
+        "Graph should have entries for all features in order"
+    );
+
+    // Verify JSON serialization is valid
+    let _json_str = serde_json::to_string_pretty(&json).expect("Should be able to serialize JSON");
+}
