@@ -39,7 +39,7 @@ The caching system uses content-based addressing:
 
 - **[Feature Caching](https://containers.dev/implementors/spec/#caching)**: How features are cached
 - **[Content Addressing](https://containers.dev/implementors/spec/#feature-resolution)**: Using digests for cache keys
-- **CLI-SPEC**: Distribution & Caching section
+- Up SPEC: Performance and caching: ../../../docs/subcommand-specs/up/SPEC.md#11-performance-considerations
 
 ## Commands
 

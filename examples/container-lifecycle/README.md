@@ -227,5 +227,5 @@ devcontainer up --remove-existing-container
 ## References
 
 - [DevContainer Specification - Lifecycle Scripts](https://containers.dev/implementors/spec/#lifecycle-scripts)
-- [CLI-SPEC.md Container Lifecycle Management](../../docs/subcommand-specs/*/SPEC.md#container-lifecycle-management)
+- [Up SPEC: Core Execution Logic](../../docs/subcommand-specs/up/SPEC.md#5-core-execution-logic)
 - [Variable Substitution Documentation](https://containers.dev/implementors/spec/#variables-in-devcontainer-json)
