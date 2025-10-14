@@ -323,6 +323,62 @@ mod tests {
     }
 
     #[test]
+    fn test_feature_dependency_cycle_error_display() {
+        // Test: Verify DependencyCycle error message format per SPEC.md §9
+        // Requirement: Error message should include involved features and clear description
+
+        let cycle_path = "feature-a -> feature-b -> feature-c -> feature-a".to_string();
+        let error = FeatureError::DependencyCycle {
+            cycle_path: cycle_path.clone(),
+        };
+
+        let error_msg = format!("{}", error);
+
+        // Verify error message contains key terminology
+        assert!(
+            error_msg.to_lowercase().contains("cycle"),
+            "Error should contain 'cycle' terminology, got: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.to_lowercase().contains("depend"),
+            "Error should reference dependencies, got: {}",
+            error_msg
+        );
+
+        // Verify all feature IDs from the cycle are in the error message
+        assert!(
+            error_msg.contains("feature-a"),
+            "Error should contain feature-a, got: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains("feature-b"),
+            "Error should contain feature-b, got: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains("feature-c"),
+            "Error should contain feature-c, got: {}",
+            error_msg
+        );
+
+        // Verify arrow notation is preserved
+        assert!(
+            error_msg.contains("->"),
+            "Error should preserve arrow notation, got: {}",
+            error_msg
+        );
+
+        // Verify expected format matches the error attribute definition
+        let expected = format!("Dependency cycle detected in features: {}", cycle_path);
+        assert_eq!(
+            error_msg, expected,
+            "Error message should match expected format"
+        );
+    }
+
+    #[test]
     fn test_template_error_display() {
         let error = TemplateError::NotImplemented;
         assert_eq!(format!("{}", error), "Template not implemented");

@@ -1846,6 +1846,211 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_dependency_cycle_error_message_format() {
+        use deacon_core::errors::FeatureError;
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Verify complete error message format per SPEC.md §9 Error Handling
+        // Requirement: Circular dependencies detected => error with details
+        // GAP.md §8: Missing test that circular dependency errors include "details"
+
+        // Cycle: feature-x -> feature-y -> feature-z -> feature-x
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-x", &["feature-y"], &[]),
+            create_mock_resolved_feature_with_deps("feature-y", &["feature-z"], &[]),
+            create_mock_resolved_feature_with_deps("feature-z", &["feature-x"], &[]),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+
+        // Verify error is returned
+        assert!(result.is_err(), "Cycle should produce an error");
+
+        let err = result.unwrap_err();
+
+        // Test 1: Verify error type is DependencyCycle
+        match &err {
+            FeatureError::DependencyCycle { cycle_path } => {
+                // Test 2: Verify cycle_path field contains all involved features
+                assert!(
+                    cycle_path.contains("feature-x"),
+                    "Cycle path should contain feature-x, got: {}",
+                    cycle_path
+                );
+                assert!(
+                    cycle_path.contains("feature-y"),
+                    "Cycle path should contain feature-y, got: {}",
+                    cycle_path
+                );
+                assert!(
+                    cycle_path.contains("feature-z"),
+                    "Cycle path should contain feature-z, got: {}",
+                    cycle_path
+                );
+
+                // Test 3: Verify path shows direction (uses arrows)
+                assert!(
+                    cycle_path.contains("->") || cycle_path.contains("→"),
+                    "Cycle path should show direction with arrows, got: {}",
+                    cycle_path
+                );
+
+                // Test 4: Verify path forms a closed loop (starts and ends with same feature)
+                let parts: Vec<&str> = cycle_path.split(" -> ").collect();
+                assert!(
+                    parts.len() >= 3,
+                    "Cycle path should have at least 3 nodes (minimum cycle), got: {}",
+                    cycle_path
+                );
+                assert_eq!(
+                    parts.first(),
+                    parts.last(),
+                    "Cycle path should start and end with the same feature, got: {}",
+                    cycle_path
+                );
+            }
+            _ => panic!("Expected DependencyCycle error, got: {:?}", err),
+        }
+
+        // Test 5: Verify full Display format includes required terminology
+        let full_msg = format!("{}", err);
+        assert!(
+            full_msg.contains("Dependency cycle") || full_msg.contains("cycle"),
+            "Full error message should contain 'cycle' terminology, got: {}",
+            full_msg
+        );
+        assert!(
+            full_msg.contains("detected") || full_msg.contains("Dependency"),
+            "Full error message should indicate detection, got: {}",
+            full_msg
+        );
+        assert!(
+            full_msg.contains("feature"),
+            "Full error message should reference features, got: {}",
+            full_msg
+        );
+
+        // Test 6: Verify all involved features are in the full message
+        assert!(
+            full_msg.contains("feature-x"),
+            "Full error message should contain feature-x, got: {}",
+            full_msg
+        );
+        assert!(
+            full_msg.contains("feature-y"),
+            "Full error message should contain feature-y, got: {}",
+            full_msg
+        );
+        assert!(
+            full_msg.contains("feature-z"),
+            "Full error message should contain feature-z, got: {}",
+            full_msg
+        );
+    }
+
+    #[test]
+    fn test_dependency_cycle_error_message_simple_cycle() {
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Verify error message format for simple 2-node cycle
+        // Cycle: feature-a -> feature-b -> feature-a
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-a", &["feature-b"], &[]),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+
+        assert!(result.is_err(), "Simple cycle should produce an error");
+
+        let err = result.unwrap_err();
+        let full_msg = format!("{}", err);
+
+        // Verify error includes cycle terminology
+        assert!(
+            full_msg.to_lowercase().contains("cycle"),
+            "Error message should contain 'cycle', got: {}",
+            full_msg
+        );
+
+        // Verify both features are mentioned
+        assert!(
+            full_msg.contains("feature-a") && full_msg.contains("feature-b"),
+            "Error message should contain both feature-a and feature-b, got: {}",
+            full_msg
+        );
+
+        // Verify arrow notation
+        assert!(
+            full_msg.contains("->"),
+            "Error message should contain arrow notation, got: {}",
+            full_msg
+        );
+    }
+
+    #[test]
+    fn test_dependency_cycle_error_message_complex_cycle() {
+        use deacon_core::errors::FeatureError;
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Verify error message format for longer cycle
+        // Cycle: a -> b -> c -> d -> e -> a
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-a", &["feature-b"], &[]),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-c"], &[]),
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-d"], &[]),
+            create_mock_resolved_feature_with_deps("feature-d", &["feature-e"], &[]),
+            create_mock_resolved_feature_with_deps("feature-e", &["feature-a"], &[]),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+
+        assert!(result.is_err(), "Complex cycle should produce an error");
+
+        match result {
+            Err(FeatureError::DependencyCycle { cycle_path }) => {
+                // Verify all features in the cycle are present in the path
+                let features_in_cycle = vec![
+                    "feature-a",
+                    "feature-b",
+                    "feature-c",
+                    "feature-d",
+                    "feature-e",
+                ];
+
+                for feature in features_in_cycle {
+                    assert!(
+                        cycle_path.contains(feature),
+                        "Cycle path should contain {}, got: {}",
+                        feature,
+                        cycle_path
+                    );
+                }
+
+                // Verify the path is properly formatted
+                assert!(
+                    cycle_path.contains("->"),
+                    "Cycle path should use arrow notation, got: {}",
+                    cycle_path
+                );
+
+                // Count arrows - should be at least 4 for a 5-node cycle
+                let arrow_count = cycle_path.matches("->").count();
+                assert!(
+                    arrow_count >= 4,
+                    "Complex cycle should have multiple arrows, got {} arrows in: {}",
+                    arrow_count,
+                    cycle_path
+                );
+            }
+            _ => panic!("Expected DependencyCycle error"),
+        }
+    }
+
     #[tokio::test]
     async fn test_features_plan_empty_config() {
         let temp_dir = TempDir::new().unwrap();
