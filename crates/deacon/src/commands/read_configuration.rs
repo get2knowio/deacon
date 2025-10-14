@@ -26,6 +26,10 @@ pub struct ReadConfigurationArgs {
     /// When id_label is provided, resolve container and read configuration from it
     #[allow(dead_code)]
     pub id_label: Vec<String>,
+    /// TODO(#295): Wire mount_workspace_git_root to workspace resolution
+    /// Flag accepted for CLI compatibility but not yet used in ConfigLoader.
+    /// Should influence workspace discovery/mount behavior per spec.
+    #[allow(dead_code)]
     pub mount_workspace_git_root: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
@@ -452,6 +456,7 @@ API_KEY=another-secret
 
     #[tokio::test]
     async fn test_read_configuration_mount_workspace_git_root_flag() {
+        // Test that the flag is accepted by the CLI (functionality not yet wired to ConfigLoader)
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("devcontainer.json");
 
