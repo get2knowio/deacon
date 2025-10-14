@@ -99,6 +99,9 @@ pub struct FeaturesPlanResult {
     pub graph: serde_json::Value,
 }
 
+/// Error message for local feature paths
+const LOCAL_FEATURE_ERROR_MSG: &str = "Local features are not supported by 'features plan'. Use registry references (e.g., ghcr.io/owner/feature)";
+
 /// Check if a feature identifier looks like a local path
 fn is_local_path(feature_id: &str) -> bool {
     // Check for relative paths
@@ -202,10 +205,7 @@ async fn execute_features_plan(
         for (feature_id, feature_value) in features_map {
             // Check if feature_id looks like a local path
             if is_local_path(feature_id) {
-                anyhow::bail!(
-                    "Local features are not supported by 'features plan'. Use registry references (e.g., ghcr.io/owner/feature). Feature key: '{}'",
-                    feature_id
-                );
+                anyhow::bail!("{}. Feature key: '{}'", LOCAL_FEATURE_ERROR_MSG, feature_id);
             }
 
             let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
@@ -1191,9 +1191,8 @@ mod tests {
         let result = execute_features_plan(true, None, &args).await;
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
-        assert!(err_msg.contains("Local features are not supported by 'features plan'"));
+        assert!(err_msg.contains(LOCAL_FEATURE_ERROR_MSG));
         assert!(err_msg.contains("./my-feature"));
-        assert!(err_msg.contains("ghcr.io/owner/feature"));
 
         // Test with absolute path
         fs::write(&config_path, r#"{"features": {"/abs/path/feature": true}}"#).unwrap();
@@ -1210,7 +1209,7 @@ mod tests {
         let result2 = execute_features_plan(true, None, &args2).await;
         assert!(result2.is_err());
         let err_msg2 = format!("{}", result2.unwrap_err());
-        assert!(err_msg2.contains("Local features are not supported by 'features plan'"));
+        assert!(err_msg2.contains(LOCAL_FEATURE_ERROR_MSG));
         assert!(err_msg2.contains("/abs/path/feature"));
 
         // Test with parent relative path
@@ -1232,7 +1231,7 @@ mod tests {
         let result3 = execute_features_plan(true, None, &args3).await;
         assert!(result3.is_err());
         let err_msg3 = format!("{}", result3.unwrap_err());
-        assert!(err_msg3.contains("Local features are not supported by 'features plan'"));
+        assert!(err_msg3.contains(LOCAL_FEATURE_ERROR_MSG));
         assert!(err_msg3.contains("../another-feature"));
     }
 
@@ -1251,8 +1250,40 @@ mod tests {
         let result = execute_features_plan(true, Some(r#"{"./local-feature": true}"#), &args).await;
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
-        assert!(err_msg.contains("Local features are not supported by 'features plan'"));
+        assert!(err_msg.contains(LOCAL_FEATURE_ERROR_MSG));
         assert!(err_msg.contains("./local-feature"));
+    }
+
+    #[tokio::test]
+    async fn test_features_plan_mixed_local_and_registry() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test with mixed features: one local, one registry
+        // The map iteration order may vary, but at least one local path should be detected
+        let config_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        fs::write(
+            &config_path,
+            r#"{"features": {"./local-feature": true, "ghcr.io/devcontainers/node": true}}"#,
+        )
+        .unwrap();
+
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path.clone()),
+        };
+
+        let result = execute_features_plan(true, None, &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains(LOCAL_FEATURE_ERROR_MSG));
+        // Should detect the local path and error
+        assert!(err_msg.contains("./local-feature") || err_msg.contains("Feature key:"));
     }
 
     #[test]

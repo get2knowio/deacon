@@ -712,91 +712,43 @@ fn test_features_help_shows_info() {
 /// Test features plan command rejects local paths (CLI integration)
 #[test]
 fn test_features_plan_cli_rejects_local_paths() {
-    let temp_dir = TempDir::new().unwrap();
+    // Test data: (feature_path, feature_id_in_error)
+    let test_cases = vec![
+        (r#"{"features": {"./my-feature": true}}"#, "./my-feature"),
+        (
+            r#"{"features": {"/abs/path/feature": true}}"#,
+            "/abs/path/feature",
+        ),
+        (
+            r#"{"features": {"../another-feature": true}}"#,
+            "../another-feature",
+        ),
+    ];
 
-    // Create a config with local path
-    let config_dir = temp_dir.path().join(".devcontainer");
-    std::fs::create_dir_all(&config_dir).unwrap();
-    let config_path = config_dir.join("devcontainer.json");
-    std::fs::write(&config_path, r#"{"features": {"./my-feature": true}}"#).unwrap();
+    for (config_content, expected_feature_key) in test_cases {
+        let temp_dir = TempDir::new().unwrap();
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.args([
-        "features",
-        "plan",
-        "--workspace-folder",
-        temp_dir.path().to_str().unwrap(),
-        "--config",
-        config_path.to_str().unwrap(),
-    ]);
+        // Create a config with the test case's path
+        let config_dir = temp_dir.path().join(".devcontainer");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        std::fs::write(&config_path, config_content).unwrap();
 
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "Local features are not supported by 'features plan'",
-        ))
-        .stderr(predicate::str::contains("./my-feature"))
-        .stderr(predicate::str::contains("ghcr.io/owner/feature"));
-}
+        let mut cmd = Command::cargo_bin("deacon").unwrap();
+        cmd.args([
+            "features",
+            "plan",
+            "--workspace-folder",
+            temp_dir.path().to_str().unwrap(),
+            "--config",
+            config_path.to_str().unwrap(),
+        ]);
 
-/// Test features plan command rejects absolute paths
-#[test]
-fn test_features_plan_cli_rejects_absolute_paths() {
-    let temp_dir = TempDir::new().unwrap();
-
-    // Create a config with absolute path
-    let config_dir = temp_dir.path().join(".devcontainer");
-    std::fs::create_dir_all(&config_dir).unwrap();
-    let config_path = config_dir.join("devcontainer.json");
-    std::fs::write(&config_path, r#"{"features": {"/abs/path/feature": true}}"#).unwrap();
-
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.args([
-        "features",
-        "plan",
-        "--workspace-folder",
-        temp_dir.path().to_str().unwrap(),
-        "--config",
-        config_path.to_str().unwrap(),
-    ]);
-
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "Local features are not supported by 'features plan'",
-        ))
-        .stderr(predicate::str::contains("/abs/path/feature"));
-}
-
-/// Test features plan command rejects parent relative paths
-#[test]
-fn test_features_plan_cli_rejects_parent_relative_paths() {
-    let temp_dir = TempDir::new().unwrap();
-
-    // Create a config with parent relative path
-    let config_dir = temp_dir.path().join(".devcontainer");
-    std::fs::create_dir_all(&config_dir).unwrap();
-    let config_path = config_dir.join("devcontainer.json");
-    std::fs::write(
-        &config_path,
-        r#"{"features": {"../another-feature": true}}"#,
-    )
-    .unwrap();
-
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.args([
-        "features",
-        "plan",
-        "--workspace-folder",
-        temp_dir.path().to_str().unwrap(),
-        "--config",
-        config_path.to_str().unwrap(),
-    ]);
-
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "Local features are not supported by 'features plan'",
-        ))
-        .stderr(predicate::str::contains("../another-feature"));
+        cmd.assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "Local features are not supported by 'features plan'",
+            ))
+            .stderr(predicate::str::contains(expected_feature_key));
+    }
 }
