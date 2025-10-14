@@ -708,3 +708,47 @@ fn test_features_help_shows_info() {
         .stdout(predicate::str::contains("info"))
         .stdout(predicate::str::contains("Get feature information"));
 }
+
+/// Test features plan command rejects local paths (CLI integration)
+#[test]
+fn test_features_plan_cli_rejects_local_paths() {
+    // Test data: (feature_path, feature_id_in_error)
+    let test_cases = vec![
+        (r#"{"features": {"./my-feature": true}}"#, "./my-feature"),
+        (
+            r#"{"features": {"/abs/path/feature": true}}"#,
+            "/abs/path/feature",
+        ),
+        (
+            r#"{"features": {"../another-feature": true}}"#,
+            "../another-feature",
+        ),
+    ];
+
+    for (config_content, expected_feature_key) in test_cases {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create a config with the test case's path
+        let config_dir = temp_dir.path().join(".devcontainer");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        std::fs::write(&config_path, config_content).unwrap();
+
+        let mut cmd = Command::cargo_bin("deacon").unwrap();
+        cmd.args([
+            "features",
+            "plan",
+            "--workspace-folder",
+            temp_dir.path().to_str().unwrap(),
+            "--config",
+            config_path.to_str().unwrap(),
+        ]);
+
+        cmd.assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "Local features are not supported by 'features plan'",
+            ))
+            .stderr(predicate::str::contains(expected_feature_key));
+    }
+}
