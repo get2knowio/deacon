@@ -41,13 +41,13 @@ fn test_read_configuration_json_purity() -> Result<()> {
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
         .map_err(|e| anyhow::anyhow!("stdout is not valid JSON: {}", e))?;
 
-    // Should contain expected fields
-    assert_eq!(parsed["name"], "test-container");
+    // Should contain expected fields (now nested under configuration)
+    assert_eq!(parsed["configuration"]["name"], "test-container");
     assert_eq!(
-        parsed["image"],
+        parsed["configuration"]["image"],
         "mcr.microsoft.com/devcontainers/base:ubuntu"
     );
-    assert!(parsed.get("features").is_some());
+    assert!(parsed["configuration"].get("features").is_some());
 
     Ok(())
 }
@@ -95,7 +95,7 @@ fn test_json_output_purity_with_debug_logging() -> Result<()> {
 
     // Stdout should parse as clean JSON
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim())?;
-    assert_eq!(parsed["name"], "purity-test");
+    assert_eq!(parsed["configuration"]["name"], "purity-test");
 
     Ok(())
 }
@@ -134,8 +134,8 @@ fn test_stderr_log_separation() -> Result<()> {
 
     // Stdout should only contain JSON result
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim())?;
-    assert_eq!(parsed["name"], "stderr-test");
-    assert_eq!(parsed["image"], "node:18");
+    assert_eq!(parsed["configuration"]["name"], "stderr-test");
+    assert_eq!(parsed["configuration"]["image"], "node:18");
 
     // Logs should not contaminate stdout
     assert!(!stdout.contains("Starting"));
