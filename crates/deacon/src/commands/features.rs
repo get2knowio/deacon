@@ -1846,6 +1846,137 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_cycle_detection_error_message_format() {
+        use deacon_core::errors::FeatureError;
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Verify the complete error message format shown to users
+        // This test validates that circular dependency errors include all required details
+        // per SPEC.md §9 Error Handling Strategy
+
+        // Create a cycle: feature-x -> feature-y -> feature-z -> feature-x
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-x", &["feature-y"], &[]),
+            create_mock_resolved_feature_with_deps("feature-y", &["feature-z"], &[]),
+            create_mock_resolved_feature_with_deps("feature-z", &["feature-x"], &[]),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+
+        assert!(result.is_err(), "Cycle should produce an error");
+
+        match result {
+            Err(FeatureError::DependencyCycle { cycle_path }) => {
+                // Verify the error message format when displayed to users
+                let error_msg = format!(
+                    "{}",
+                    FeatureError::DependencyCycle {
+                        cycle_path: cycle_path.clone(),
+                    }
+                );
+
+                // 1. Error message should contain "Dependency cycle" or similar terminology
+                assert!(
+                    error_msg.contains("Dependency cycle") || error_msg.contains("cycle"),
+                    "Error message should mention dependency cycle: {}",
+                    error_msg
+                );
+
+                // 2. Error message should include all involved feature IDs
+                assert!(
+                    error_msg.contains("feature-x"),
+                    "Error message should include feature-x: {}",
+                    error_msg
+                );
+                assert!(
+                    error_msg.contains("feature-y"),
+                    "Error message should include feature-y: {}",
+                    error_msg
+                );
+                assert!(
+                    error_msg.contains("feature-z"),
+                    "Error message should include feature-z: {}",
+                    error_msg
+                );
+
+                // 3. Cycle path should use arrows to show direction
+                assert!(
+                    cycle_path.contains("->") || cycle_path.contains("→"),
+                    "Cycle path should show direction with arrows: {}",
+                    cycle_path
+                );
+
+                // 4. Verify the cycle path is included in the error message
+                assert!(
+                    error_msg.contains(&cycle_path),
+                    "Error message should include the cycle path: {}",
+                    error_msg
+                );
+            }
+            _ => panic!("Expected DependencyCycle error, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_cycle_detection_different_cycle_patterns() {
+        use deacon_core::errors::FeatureError;
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test various cycle patterns to ensure robust error reporting
+
+        // Test 1: Self-cycle (feature depends on itself)
+        let features = vec![create_mock_resolved_feature_with_deps(
+            "self-cycle",
+            &["self-cycle"],
+            &[],
+        )];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+        assert!(result.is_err(), "Self-cycle should produce an error");
+        if let Err(FeatureError::DependencyCycle { cycle_path }) = result {
+            assert!(
+                cycle_path.contains("self-cycle"),
+                "Self-cycle error should include feature ID"
+            );
+        }
+
+        // Test 2: Two-node cycle (A -> B -> A)
+        let features = vec![
+            create_mock_resolved_feature_with_deps("alpha", &["beta"], &[]),
+            create_mock_resolved_feature_with_deps("beta", &["alpha"], &[]),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+        assert!(result.is_err(), "Two-node cycle should produce an error");
+        if let Err(FeatureError::DependencyCycle { cycle_path }) = result {
+            assert!(cycle_path.contains("alpha") && cycle_path.contains("beta"));
+            assert!(cycle_path.contains("->") || cycle_path.contains("→"));
+        }
+
+        // Test 3: Longer cycle (A -> B -> C -> D -> A)
+        let features = vec![
+            create_mock_resolved_feature_with_deps("node-a", &["node-b"], &[]),
+            create_mock_resolved_feature_with_deps("node-b", &["node-c"], &[]),
+            create_mock_resolved_feature_with_deps("node-c", &["node-d"], &[]),
+            create_mock_resolved_feature_with_deps("node-d", &["node-a"], &[]),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+        assert!(result.is_err(), "Four-node cycle should produce an error");
+        if let Err(FeatureError::DependencyCycle { cycle_path }) = result {
+            // Should contain all nodes in the cycle
+            assert!(cycle_path.contains("node-a"));
+            assert!(cycle_path.contains("node-b"));
+            assert!(cycle_path.contains("node-c"));
+            assert!(cycle_path.contains("node-d"));
+        }
+    }
+
     #[tokio::test]
     async fn test_features_plan_empty_config() {
         let temp_dir = TempDir::new().unwrap();
