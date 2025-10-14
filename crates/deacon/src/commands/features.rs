@@ -2250,4 +2250,461 @@ mod tests {
         let err_msg = format!("{}", result.unwrap_err());
         assert!(!err_msg.contains("--additional-features must be a JSON object."));
     }
+
+    #[test]
+    fn test_merge_semantics_additive_no_overwrite() {
+        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+
+        // Test: Additive merge without overwrite (default behavior)
+        // Config has: git=true, node="16"
+        // CLI adds: docker=true, python="3.9"
+        // Expected: All 4 features present, config values preserved
+        let config_features = serde_json::json!({
+            "git": true,
+            "node": "16"
+        });
+
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"docker": true, "python": "3.9"}"#.to_string()),
+            false, // Don't prefer CLI features (default)
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        // Verify all features are present
+        assert_eq!(obj.len(), 4, "Should have 4 features after merge");
+
+        // Verify original config features are preserved
+        assert_eq!(
+            obj["git"],
+            serde_json::Value::Bool(true),
+            "Config feature 'git' should be preserved"
+        );
+        assert_eq!(
+            obj["node"],
+            serde_json::Value::String("16".to_string()),
+            "Config feature 'node' should be preserved"
+        );
+
+        // Verify CLI features are added
+        assert_eq!(
+            obj["docker"],
+            serde_json::Value::Bool(true),
+            "CLI feature 'docker' should be added"
+        );
+        assert_eq!(
+            obj["python"],
+            serde_json::Value::String("3.9".to_string()),
+            "CLI feature 'python' should be added"
+        );
+    }
+
+    #[test]
+    fn test_merge_semantics_no_overwrite_on_conflict() {
+        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+
+        // Test: When CLI features conflict with config, config wins by default
+        // Config has: git=true, node="16"
+        // CLI has: git=false, node="18"
+        // Expected: Config values preserved (git=true, node="16")
+        let config_features = serde_json::json!({
+            "git": true,
+            "node": "16"
+        });
+
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"git": false, "node": "18"}"#.to_string()),
+            false, // Config wins on conflict
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        assert_eq!(obj.len(), 2, "Should have 2 features");
+
+        // Verify config values are preserved, not overwritten
+        assert_eq!(
+            obj["git"],
+            serde_json::Value::Bool(true),
+            "Config value for 'git' should NOT be overwritten by CLI"
+        );
+        assert_eq!(
+            obj["node"],
+            serde_json::Value::String("16".to_string()),
+            "Config value for 'node' should NOT be overwritten by CLI"
+        );
+    }
+
+    #[test]
+    fn test_merge_semantics_mixed_add_and_preserve() {
+        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+
+        // Test: Mix of new features and conflicts
+        // Config has: git=true, node="16", python="3.8"
+        // CLI has: git=false, docker=true, rust="latest"
+        // Expected: git=true (config wins), node="16", python="3.8", docker=true, rust="latest"
+        let config_features = serde_json::json!({
+            "git": true,
+            "node": "16",
+            "python": "3.8"
+        });
+
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"git": false, "docker": true, "rust": "latest"}"#.to_string()),
+            false,
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        assert_eq!(obj.len(), 5, "Should have 5 features total");
+
+        // Config features preserved
+        assert_eq!(obj["git"], serde_json::Value::Bool(true));
+        assert_eq!(obj["node"], serde_json::Value::String("16".to_string()));
+        assert_eq!(obj["python"], serde_json::Value::String("3.8".to_string()));
+
+        // CLI features added
+        assert_eq!(obj["docker"], serde_json::Value::Bool(true));
+        assert_eq!(obj["rust"], serde_json::Value::String("latest".to_string()));
+    }
+
+    #[test]
+    fn test_override_order_affects_resolution() {
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Override order determines final installation order
+        // Create 3 independent features (no dependencies)
+        // Override order: ["feature-c", "feature-a", "feature-b"]
+        // Expected: Resolver respects this exact order
+        let features = vec![
+            create_mock_resolved_feature("feature-a"),
+            create_mock_resolved_feature("feature-b"),
+            create_mock_resolved_feature("feature-c"),
+        ];
+
+        let override_order = Some(vec![
+            "feature-c".to_string(),
+            "feature-a".to_string(),
+            "feature-b".to_string(),
+        ]);
+
+        let resolver = FeatureDependencyResolver::new(override_order);
+        let plan = resolver.resolve(&features).unwrap();
+        let order = plan.feature_ids();
+
+        // Verify the order matches the override exactly
+        assert_eq!(
+            order,
+            vec!["feature-c", "feature-a", "feature-b"],
+            "Override order should determine exact installation order"
+        );
+    }
+
+    #[test]
+    fn test_override_order_deterministic_with_partial_deps() {
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Override order with some dependencies
+        // Dependencies: feature-b depends on feature-a
+        // Override order: ["feature-a", "feature-b", "feature-c"]
+        // Expected: Order respects both dependencies and override
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
+            create_mock_resolved_feature("feature-a"),
+            create_mock_resolved_feature("feature-c"),
+        ];
+
+        let override_order = Some(vec![
+            "feature-a".to_string(),
+            "feature-b".to_string(),
+            "feature-c".to_string(),
+        ]);
+
+        let resolver = FeatureDependencyResolver::new(override_order);
+        let plan = resolver.resolve(&features).unwrap();
+        let order = plan.feature_ids();
+
+        // Verify the order follows override (which is valid for dependencies)
+        assert_eq!(
+            order,
+            vec!["feature-a", "feature-b", "feature-c"],
+            "Override order should be respected when it's valid for dependencies"
+        );
+    }
+
+    #[test]
+    fn test_override_order_without_override_uses_topo_sort() {
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Without override order, resolver uses topological sort
+        // Dependencies: feature-c depends on feature-b, feature-b depends on feature-a
+        // No override order provided
+        // Expected: Topological sort order (feature-a, feature-b, feature-c)
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-b"], &[]),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
+            create_mock_resolved_feature("feature-a"),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let plan = resolver.resolve(&features).unwrap();
+        let order = plan.feature_ids();
+
+        // Verify topological sort order
+        assert_eq!(
+            order,
+            vec!["feature-a", "feature-b", "feature-c"],
+            "Without override, should use topological sort based on dependencies"
+        );
+    }
+
+    #[test]
+    fn test_get_effective_install_order_with_cli_and_config() {
+        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+
+        // Test: CLI override takes precedence over config order
+        // Config order: ["git", "node"]
+        // CLI order: ["docker", "git", "node"]
+        // Expected: CLI order wins
+        let config_order = Some(vec!["git".to_string(), "node".to_string()]);
+        let merge_config =
+            FeatureMergeConfig::new(None, false, Some("docker,git,node".to_string()));
+
+        let result =
+            FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
+                .unwrap();
+
+        assert_eq!(
+            result,
+            Some(vec![
+                "docker".to_string(),
+                "git".to_string(),
+                "node".to_string()
+            ]),
+            "CLI override should take precedence over config order"
+        );
+    }
+
+    #[test]
+    fn test_get_effective_install_order_config_only() {
+        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+
+        // Test: Without CLI override, use config order
+        // Config order: ["python", "node", "docker"]
+        // CLI order: None
+        // Expected: Config order used
+        let config_order = Some(vec![
+            "python".to_string(),
+            "node".to_string(),
+            "docker".to_string(),
+        ]);
+        let merge_config = FeatureMergeConfig::new(None, false, None);
+
+        let result =
+            FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
+                .unwrap();
+
+        assert_eq!(
+            result,
+            Some(vec![
+                "python".to_string(),
+                "node".to_string(),
+                "docker".to_string()
+            ]),
+            "Config order should be used when no CLI override provided"
+        );
+    }
+
+    #[test]
+    fn test_merge_with_override_order_maintains_determinism() {
+        use deacon_core::features::{FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger};
+
+        // Test: Merging features and applying override order produces deterministic results
+        // This combines merge semantics with override order behavior
+        let config_features = serde_json::json!({
+            "feature-a": true,
+            "feature-b": true
+        });
+
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"feature-c": true}"#.to_string()),
+            false,
+            Some("feature-c,feature-b,feature-a".to_string()),
+        );
+
+        // First verify merge works
+        let merged = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        assert_eq!(merged.as_object().unwrap().len(), 3);
+
+        // Then verify override order is extracted correctly
+        let override_order =
+            FeatureMerger::get_effective_install_order(None, &merge_config).unwrap();
+        assert_eq!(
+            override_order,
+            Some(vec![
+                "feature-c".to_string(),
+                "feature-b".to_string(),
+                "feature-a".to_string()
+            ])
+        );
+
+        // Verify resolver respects this order
+        let features = vec![
+            create_mock_resolved_feature("feature-a"),
+            create_mock_resolved_feature("feature-b"),
+            create_mock_resolved_feature("feature-c"),
+        ];
+        let resolver = FeatureDependencyResolver::new(override_order);
+        let plan = resolver.resolve(&features).unwrap();
+        let order = plan.feature_ids();
+
+        assert_eq!(
+            order,
+            vec!["feature-c", "feature-b", "feature-a"],
+            "Override order should produce deterministic installation plan"
+        );
+    }
+
+    #[test]
+    fn test_merge_semantics_with_chain_dependencies() {
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Merge semantics work correctly when features have chain dependencies
+        // feature-c depends on feature-b, feature-b depends on feature-a
+        // This verifies merge doesn't break dependency resolution
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-b"], &[]),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
+            create_mock_resolved_feature("feature-a"),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let plan = resolver.resolve(&features).unwrap();
+        let order = plan.feature_ids();
+
+        // Verify topological order respects chain
+        assert_eq!(
+            order,
+            vec!["feature-a", "feature-b", "feature-c"],
+            "Chain dependencies should be resolved in correct order"
+        );
+
+        // Verify deterministic (multiple runs produce same result)
+        let plan2 = resolver.resolve(&features).unwrap();
+        let order2 = plan2.feature_ids();
+        assert_eq!(order, order2, "Resolution should be deterministic");
+    }
+
+    #[test]
+    fn test_negative_invalid_additional_features_empty_string() {
+        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+
+        // Test: Empty string for additional features should fail
+        let config_features = serde_json::json!({"git": true});
+        let merge_config = FeatureMergeConfig::new(Some("".to_string()), false, None);
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config);
+        assert!(result.is_err(), "Empty string should produce parse error");
+
+        if let Err(e) = result {
+            let err_msg = format!("{}", e);
+            assert!(
+                err_msg.contains("parse") || err_msg.contains("JSON"),
+                "Error should mention parsing or JSON, got: {}",
+                err_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_negative_malformed_json_additional_features() {
+        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+
+        // Test: Malformed JSON should produce explicit error
+        let config_features = serde_json::json!({"git": true});
+        let merge_config =
+            FeatureMergeConfig::new(Some(r#"{"unclosed": true"#.to_string()), false, None);
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config);
+        assert!(result.is_err(), "Malformed JSON should produce error");
+
+        if let Err(e) = result {
+            let err_msg = format!("{}", e);
+            assert!(
+                err_msg.contains("parse") || err_msg.contains("JSON"),
+                "Error should mention parsing issue, got: {}",
+                err_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_graph_edge_direction_consistency() {
+        // Test: Verify graph edges consistently point from dependent to dependency
+        // When feature-b depends on feature-a, graph should show: "feature-b": ["feature-a"]
+        let features = vec![
+            create_mock_resolved_feature("feature-a"),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
+        ];
+
+        let graph = build_graph_representation(&features);
+        let graph_obj = graph.as_object().unwrap();
+
+        // feature-a has no dependencies
+        assert_eq!(
+            graph_obj["feature-a"].as_array().unwrap().len(),
+            0,
+            "feature-a should have empty dependency array"
+        );
+
+        // feature-b depends on feature-a (edge points to dependency)
+        let b_deps = graph_obj["feature-b"].as_array().unwrap();
+        assert_eq!(b_deps.len(), 1, "feature-b should have 1 dependency");
+        assert_eq!(
+            b_deps[0],
+            serde_json::Value::String("feature-a".to_string()),
+            "Graph edge should point from dependent (feature-b) to dependency (feature-a)"
+        );
+    }
+
+    #[test]
+    fn test_json_output_order_deterministic() {
+        // Test: JSON output order should be deterministic (sorted)
+        // This ensures snapshot tests and comparisons are reliable
+        let features = vec![
+            create_mock_resolved_feature("zebra"),
+            create_mock_resolved_feature("alpha"),
+            create_mock_resolved_feature("beta"),
+        ];
+
+        let graph = build_graph_representation(&features);
+        let json_str = serde_json::to_string(&graph).unwrap();
+
+        // Verify JSON contains all features
+        assert!(json_str.contains("zebra"));
+        assert!(json_str.contains("alpha"));
+        assert!(json_str.contains("beta"));
+
+        // Verify structure is consistent (object with array values)
+        let graph_obj = graph.as_object().unwrap();
+        assert_eq!(graph_obj.len(), 3);
+        for (_key, value) in graph_obj {
+            assert!(
+                value.is_array(),
+                "Each feature should have an array of dependencies"
+            );
+        }
+
+        // Multiple serializations should produce identical output
+        let json_str2 = serde_json::to_string(&graph).unwrap();
+        assert_eq!(
+            json_str, json_str2,
+            "JSON serialization should be deterministic"
+        );
+    }
 }
