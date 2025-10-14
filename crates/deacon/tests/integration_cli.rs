@@ -45,6 +45,21 @@ fn test_default_output() {
 }
 
 #[test]
+fn test_read_configuration_invalid_id_label_format() {
+    // Test that read-configuration validates id-label format at CLI level
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("read-configuration")
+        .arg("--id-label")
+        .arg("invalid") // Missing '=' sign
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Unmatched argument format: id-label must match <name>=<value>.",
+        ));
+}
+
+#[test]
 fn test_subcommand_not_implemented() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")

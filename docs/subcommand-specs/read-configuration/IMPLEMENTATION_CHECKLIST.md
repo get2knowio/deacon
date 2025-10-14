@@ -19,8 +19,8 @@ Use this checklist to track implementation progress against the specification.
 - [ ] `--mount-workspace-git-root` (optional boolean, default true)
 
 ### Container Selection
-- [ ] `--container-id <ID>` (optional)
-- [ ] `--id-label <name=value>` (optional, repeatable)
+- [x] `--container-id <ID>` (optional)
+- [x] `--id-label <name=value>` (optional, repeatable)
 
 ### Docker Tooling
 - [ ] `--docker-path <PATH>` (optional, default `docker`)
@@ -45,8 +45,8 @@ Use this checklist to track implementation progress against the specification.
 
 ## Argument Validation
 
-- [ ] Require at least one of: `--container-id`, `--id-label`, or `--workspace-folder`
-- [ ] Validate `--id-label` format: `/.+=.+/` (non-empty key and value)
+- [x] Validate `--id-label` format: `/.+=.+/` (non-empty key and value)
+- [ ] Require at least one of: `--container-id`, `--id-label`, or `--workspace-folder` (Note: workspace-folder defaults to current directory, implicitly satisfying this requirement)
 - [ ] Validate terminal dimensions are paired (both or neither)
 - [ ] Validate `--additional-features` parses as JSON object
 - [x] Handle invalid/missing config paths with clear errors
@@ -138,8 +138,8 @@ Use this checklist to track implementation progress against the specification.
 ## Error Handling
 
 ### User Errors
-- [ ] Missing selector: "Missing required argument: One of --container-id, --id-label or --workspace-folder is required."
-- [ ] Invalid `--id-label` format: "Unmatched argument format: id-label must match <name>=<value>."
+- [ ] Missing selector: "Missing required argument: One of --container-id, --id-label or --workspace-folder is required." (Note: workspace-folder defaults to current directory, so this error is not typically encountered)
+- [x] Invalid `--id-label` format: "Unmatched argument format: id-label must match <name>=<value>."
 - [x] Config not found: Message includes resolved path
 - [x] Malformed JSON in config: Parse/validation failure details
 - [ ] Malformed JSON in `--additional-features`: Parse error

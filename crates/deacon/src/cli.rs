@@ -260,7 +260,8 @@ pub enum Commands {
         /// Target container ID directly
         #[arg(long)]
         container_id: Option<String>,
-        /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
+        /// Identify container by labels (KEY=VALUE format, can be specified multiple times).
+        /// Must match pattern <name>=<value> with non-empty name and value.
         #[arg(long, action = clap::ArgAction::Append)]
         id_label: Vec<String>,
     },
