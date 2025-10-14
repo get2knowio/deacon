@@ -4,7 +4,7 @@
 //! DevContainer features. Follows the CLI specification for feature management.
 
 use crate::cli::FeatureCommands;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::features::{
     parse_feature_metadata, FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger,
@@ -134,6 +134,20 @@ async fn execute_features_plan(
 
         // Parse and merge additional features if provided
         if let Some(additional_features_str) = additional_features {
+            // Early validation: parse JSON and ensure it's an object before merge
+            let parsed_json: serde_json::Value = serde_json::from_str(additional_features_str)
+                .with_context(|| {
+                    format!(
+                        "Failed to parse --additional-features JSON: {}",
+                        additional_features_str
+                    )
+                })?;
+
+            // Validate that the parsed JSON is an object (map)
+            if !parsed_json.is_object() {
+                anyhow::bail!("--additional-features must be a JSON object.");
+            }
+
             let merge_config = FeatureMergeConfig::new(
                 Some(additional_features_str.to_string()),
                 false, // Don't prefer CLI features by default
@@ -1363,5 +1377,128 @@ mod tests {
 
         // Test text output
         assert!(output_plan_result(&result, false).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_features_plan_additional_features_invalid_json() {
+        let temp_dir = TempDir::new().unwrap();
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some("invalid json".to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        // Should fail due to invalid JSON syntax
+        let result = execute_features_plan(true, Some("invalid json"), &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("Failed to parse --additional-features JSON")
+                || err_msg.contains("parse")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_features_plan_additional_features_not_object() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test with array
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some(r#"["git", "node"]"#.to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result = execute_features_plan(true, Some(r#"["git", "node"]"#), &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert_eq!(err_msg, "--additional-features must be a JSON object.");
+
+        // Test with string
+        let args2 = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some(r#""just a string""#.to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result2 = execute_features_plan(true, Some(r#""just a string""#), &args2).await;
+        assert!(result2.is_err());
+        let err_msg2 = format!("{}", result2.unwrap_err());
+        assert_eq!(err_msg2, "--additional-features must be a JSON object.");
+
+        // Test with number
+        let args3 = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some("42".to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result3 = execute_features_plan(true, Some("42"), &args3).await;
+        assert!(result3.is_err());
+        let err_msg3 = format!("{}", result3.unwrap_err());
+        assert_eq!(err_msg3, "--additional-features must be a JSON object.");
+
+        // Test with boolean
+        let args4 = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some("true".to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result4 = execute_features_plan(true, Some("true"), &args4).await;
+        assert!(result4.is_err());
+        let err_msg4 = format!("{}", result4.unwrap_err());
+        assert_eq!(err_msg4, "--additional-features must be a JSON object.");
+
+        // Test with null
+        let args5 = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some("null".to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result5 = execute_features_plan(true, Some("null"), &args5).await;
+        assert!(result5.is_err());
+        let err_msg5 = format!("{}", result5.unwrap_err());
+        assert_eq!(err_msg5, "--additional-features must be a JSON object.");
+    }
+
+    #[tokio::test]
+    async fn test_features_plan_additional_features_valid_object() {
+        let temp_dir = TempDir::new().unwrap();
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some(r#"{"git": true}"#.to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        // Should fail at OCI fetch stage, not at validation stage
+        // (because "git" is not a valid OCI reference)
+        let result = execute_features_plan(true, Some(r#"{"git": true}"#), &args).await;
+        assert!(result.is_err());
+        // The error should NOT be about JSON object validation
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(!err_msg.contains("--additional-features must be a JSON object."));
     }
 }
