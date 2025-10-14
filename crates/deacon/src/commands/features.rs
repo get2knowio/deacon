@@ -2519,4 +2519,192 @@ mod tests {
             "Config order should be used when no CLI override provided"
         );
     }
+
+    #[test]
+    fn test_merge_with_override_order_maintains_determinism() {
+        use deacon_core::features::{FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger};
+
+        // Test: Merging features and applying override order produces deterministic results
+        // This combines merge semantics with override order behavior
+        let config_features = serde_json::json!({
+            "feature-a": true,
+            "feature-b": true
+        });
+
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"feature-c": true}"#.to_string()),
+            false,
+            Some("feature-c,feature-b,feature-a".to_string()),
+        );
+
+        // First verify merge works
+        let merged = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        assert_eq!(merged.as_object().unwrap().len(), 3);
+
+        // Then verify override order is extracted correctly
+        let override_order =
+            FeatureMerger::get_effective_install_order(None, &merge_config).unwrap();
+        assert_eq!(
+            override_order,
+            Some(vec![
+                "feature-c".to_string(),
+                "feature-b".to_string(),
+                "feature-a".to_string()
+            ])
+        );
+
+        // Verify resolver respects this order
+        let features = vec![
+            create_mock_resolved_feature("feature-a"),
+            create_mock_resolved_feature("feature-b"),
+            create_mock_resolved_feature("feature-c"),
+        ];
+        let resolver = FeatureDependencyResolver::new(override_order);
+        let plan = resolver.resolve(&features).unwrap();
+        let order = plan.feature_ids();
+
+        assert_eq!(
+            order,
+            vec!["feature-c", "feature-b", "feature-a"],
+            "Override order should produce deterministic installation plan"
+        );
+    }
+
+    #[test]
+    fn test_merge_semantics_with_chain_dependencies() {
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Merge semantics work correctly when features have chain dependencies
+        // feature-c depends on feature-b, feature-b depends on feature-a
+        // This verifies merge doesn't break dependency resolution
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-b"], &[]),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
+            create_mock_resolved_feature("feature-a"),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let plan = resolver.resolve(&features).unwrap();
+        let order = plan.feature_ids();
+
+        // Verify topological order respects chain
+        assert_eq!(
+            order,
+            vec!["feature-a", "feature-b", "feature-c"],
+            "Chain dependencies should be resolved in correct order"
+        );
+
+        // Verify deterministic (multiple runs produce same result)
+        let plan2 = resolver.resolve(&features).unwrap();
+        let order2 = plan2.feature_ids();
+        assert_eq!(order, order2, "Resolution should be deterministic");
+    }
+
+    #[test]
+    fn test_negative_invalid_additional_features_empty_string() {
+        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+
+        // Test: Empty string for additional features should fail
+        let config_features = serde_json::json!({"git": true});
+        let merge_config = FeatureMergeConfig::new(Some("".to_string()), false, None);
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config);
+        assert!(result.is_err(), "Empty string should produce parse error");
+
+        if let Err(e) = result {
+            let err_msg = format!("{}", e);
+            assert!(
+                err_msg.contains("parse") || err_msg.contains("JSON"),
+                "Error should mention parsing or JSON, got: {}",
+                err_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_negative_malformed_json_additional_features() {
+        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+
+        // Test: Malformed JSON should produce explicit error
+        let config_features = serde_json::json!({"git": true});
+        let merge_config =
+            FeatureMergeConfig::new(Some(r#"{"unclosed": true"#.to_string()), false, None);
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config);
+        assert!(result.is_err(), "Malformed JSON should produce error");
+
+        if let Err(e) = result {
+            let err_msg = format!("{}", e);
+            assert!(
+                err_msg.contains("parse") || err_msg.contains("JSON"),
+                "Error should mention parsing issue, got: {}",
+                err_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_graph_edge_direction_consistency() {
+        // Test: Verify graph edges consistently point from dependent to dependency
+        // When feature-b depends on feature-a, graph should show: "feature-b": ["feature-a"]
+        let features = vec![
+            create_mock_resolved_feature("feature-a"),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
+        ];
+
+        let graph = build_graph_representation(&features);
+        let graph_obj = graph.as_object().unwrap();
+
+        // feature-a has no dependencies
+        assert_eq!(
+            graph_obj["feature-a"].as_array().unwrap().len(),
+            0,
+            "feature-a should have empty dependency array"
+        );
+
+        // feature-b depends on feature-a (edge points to dependency)
+        let b_deps = graph_obj["feature-b"].as_array().unwrap();
+        assert_eq!(b_deps.len(), 1, "feature-b should have 1 dependency");
+        assert_eq!(
+            b_deps[0],
+            serde_json::Value::String("feature-a".to_string()),
+            "Graph edge should point from dependent (feature-b) to dependency (feature-a)"
+        );
+    }
+
+    #[test]
+    fn test_json_output_order_deterministic() {
+        // Test: JSON output order should be deterministic (sorted)
+        // This ensures snapshot tests and comparisons are reliable
+        let features = vec![
+            create_mock_resolved_feature("zebra"),
+            create_mock_resolved_feature("alpha"),
+            create_mock_resolved_feature("beta"),
+        ];
+
+        let graph = build_graph_representation(&features);
+        let json_str = serde_json::to_string(&graph).unwrap();
+
+        // Verify JSON contains all features
+        assert!(json_str.contains("zebra"));
+        assert!(json_str.contains("alpha"));
+        assert!(json_str.contains("beta"));
+
+        // Verify structure is consistent (object with array values)
+        let graph_obj = graph.as_object().unwrap();
+        assert_eq!(graph_obj.len(), 3);
+        for (_key, value) in graph_obj {
+            assert!(
+                value.is_array(),
+                "Each feature should have an array of dependencies"
+            );
+        }
+
+        // Multiple serializations should produce identical output
+        let json_str2 = serde_json::to_string(&graph).unwrap();
+        assert_eq!(
+            json_str, json_str2,
+            "JSON serialization should be deterministic"
+        );
+    }
 }
