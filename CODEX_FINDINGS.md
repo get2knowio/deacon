@@ -24,7 +24,7 @@
 
 **Parity With devcontainers/cli (TypeScript)**
 - Commands and general behavior
-  - `up`: Supports traditional container and Compose; remove/reuse behavior; lifecycle phases (`onCreate`, `postCreate`, `postStart`, `postAttach`); port events (`PORT_EVENT: {json}`) and optional shutdown. Mirrors the flow described in docs/CLI-SPEC.md and TS CLI.
+  - `up`: Supports traditional container and Compose; remove/reuse behavior; lifecycle phases (`onCreate`, `postCreate`, `postStart`, `postAttach`); port events (`PORT_EVENT: {json}`) and optional shutdown. Mirrors the flow described in docs/subcommand-specs/*/SPEC.md and TS CLI.
   - `build`: Config discovery, host requirement validation, build config extraction (`dockerFile`, `build.context/target/options`), deterministic config hash, cache layer, Docker build args ordering, progress begin/end, and result output (text/JSON). Disallows direct build for Compose projects as TS CLI does.
   - `exec`: Resolves container by identity labels, runs command with TTY detection, supports `--user`, `--no-tty`, `--env`, and working directory derivation per spec (`containerWorkspaceFolder` or `/workspaces/{name}`).
   - `read-configuration`: Discovery, overrides, secrets, substitution, and merged output. Matches TS behavior of merging override and applying variables before output.

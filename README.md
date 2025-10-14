@@ -338,7 +338,14 @@ This CLI implements the DevContainer specification domains below and continues t
 - Docker/OCI integration
 - Cross-platform support
 
-See the [CLI specification](docs/CLI-SPEC.md) for detailed architecture and planned features.
+See the [CLI specification](docs/subcommand-specs/*/SPEC.md) for detailed architecture and planned features.
+
+For detailed, language-agnostic designs of specific subcommands, see:
+- Features Test: `docs/subcommand-specs/features-test/SPEC.md`
+- Features Package: `docs/subcommand-specs/features-package/SPEC.md`
+- Features Publish: `docs/subcommand-specs/features-publish/SPEC.md`
+- Features Info: `docs/subcommand-specs/features-info/SPEC.md`
+- Features Plan: `docs/subcommand-specs/features-plan/SPEC.md`
 
 ### Binary Authenticity & Code Signing
 
