@@ -773,7 +773,43 @@ API_KEY=another-secret
     }
 
     #[tokio::test]
-    async fn test_read_configuration_valid_with_container_id() {
+    async fn test_read_configuration_without_container_discovery() {
+        // Test that the command works without container discovery
+        // (Previously named test_read_configuration_valid_with_container_id but that
+        // now requires a running container, which we don't have in tests)
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None, // No container discovery
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            workspace_folder: None,
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_container_discovery_requires_docker() {
+        // Test that container discovery fails gracefully when Docker is unavailable
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("devcontainer.json");
 
@@ -801,39 +837,17 @@ API_KEY=another-secret
         };
 
         let result = execute_read_configuration(args).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_read_configuration_valid_with_id_label() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("devcontainer.json");
-
-        let config_content = r#"{
-            "name": "test-container",
-            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
-        }"#;
-
-        fs::write(&config_path, config_content).unwrap();
-
-        let args = ReadConfigurationArgs {
-            include_merged_configuration: false,
-            include_features_configuration: false,
-            container_id: None,
-            id_label: vec!["app=web".to_string()],
-            mount_workspace_git_root: true,
-            additional_features: None,
-            skip_feature_auto_mapping: false,
-            workspace_folder: None,
-            config_path: Some(config_path),
-            override_config_path: None,
-            secrets_files: vec![],
-            redaction_config: RedactionConfig::default(),
-            secret_registry: SecretRegistry::new(),
-        };
-
-        let result = execute_read_configuration(args).await;
-        assert!(result.is_ok());
+        // Should fail with a clear error (Docker unavailable or container not found)
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        // Error should mention Docker or container not found
+        assert!(
+            err_msg.contains("Docker")
+                || err_msg.contains("container")
+                || err_msg.contains("not found"),
+            "Error message should mention Docker or container: {}",
+            err_msg
+        );
     }
 
     #[tokio::test]

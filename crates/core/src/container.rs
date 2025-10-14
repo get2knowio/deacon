@@ -522,6 +522,76 @@ mod tests {
         let result = ContainerSelector::new(None, vec!["invalid".to_string()], None);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_compute_dev_container_id_basic() {
+        let labels = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "prod".to_string()),
+        ];
+        let id = compute_dev_container_id(&labels);
+        assert_eq!(id.len(), 12);
+        // Should be hexadecimal
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_compute_dev_container_id_deterministic() {
+        let labels = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "prod".to_string()),
+        ];
+        let id1 = compute_dev_container_id(&labels);
+        let id2 = compute_dev_container_id(&labels);
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_compute_dev_container_id_order_independent() {
+        let labels1 = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "prod".to_string()),
+        ];
+        let labels2 = vec![
+            ("env".to_string(), "prod".to_string()),
+            ("app".to_string(), "web".to_string()),
+        ];
+        let id1 = compute_dev_container_id(&labels1);
+        let id2 = compute_dev_container_id(&labels2);
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_compute_dev_container_id_changes_with_labels() {
+        let labels1 = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "prod".to_string()),
+        ];
+        let labels2 = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "dev".to_string()),
+        ];
+        let labels3 = vec![("app".to_string(), "web".to_string())];
+
+        let id1 = compute_dev_container_id(&labels1);
+        let id2 = compute_dev_container_id(&labels2);
+        let id3 = compute_dev_container_id(&labels3);
+
+        // Changing label value should change ID
+        assert_ne!(id1, id2);
+        // Removing a label should change ID
+        assert_ne!(id1, id3);
+        assert_ne!(id2, id3);
+    }
+
+    #[test]
+    fn test_compute_dev_container_id_empty_labels() {
+        let labels = vec![];
+        let id = compute_dev_container_id(&labels);
+        assert_eq!(id.len(), 12);
+        // Should still produce a valid ID (hash of empty string)
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }
 
 /// Container selection criteria for targeting containers
