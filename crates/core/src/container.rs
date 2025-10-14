@@ -1,7 +1,8 @@
 //! Container lifecycle management and hashing utilities
 //!
 //! This module provides container lifecycle operations including creation, starting,
-//! reuse logic, and identification labels according to the DevContainer specification.
+//! reuse logic, identification labels, and container selection utilities according
+//! to the DevContainer specification.
 
 use crate::config::DevContainerConfig;
 use crate::errors::Result;
@@ -402,5 +403,521 @@ mod tests {
         let hash2 = ContainerIdentity::hash_config(&config);
 
         assert_eq!(hash1, hash2);
+    }
+
+    // ContainerSelector tests
+
+    #[test]
+    fn test_label_parsing_valid() {
+        let labels = vec!["key=value".to_string(), "foo=bar".to_string()];
+        let result = ContainerSelector::parse_labels(&labels).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("key".to_string(), "value".to_string()));
+        assert_eq!(result[1], ("foo".to_string(), "bar".to_string()));
+    }
+
+    #[test]
+    fn test_label_parsing_with_equals_in_value() {
+        let labels = vec!["key=value=with=equals".to_string()];
+        let result = ContainerSelector::parse_labels(&labels).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            ("key".to_string(), "value=with=equals".to_string())
+        );
+    }
+
+    #[test]
+    fn test_label_parsing_invalid_no_equals() {
+        let labels = vec!["invalid".to_string()];
+        let result = ContainerSelector::parse_labels(&labels);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid label format"));
+    }
+
+    #[test]
+    fn test_label_parsing_invalid_empty_key() {
+        let labels = vec!["=value".to_string()];
+        let result = ContainerSelector::parse_labels(&labels);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_label_parsing_invalid_empty_value() {
+        let labels = vec!["key=".to_string()];
+        let result = ContainerSelector::parse_labels(&labels);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_selector_validation_empty() {
+        let selector = ContainerSelector {
+            container_id: None,
+            id_labels: vec![],
+            workspace_folder: None,
+        };
+        let result = selector.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("At least one of --container-id, --id-label, or --workspace-folder"));
+    }
+
+    #[test]
+    fn test_selector_validation_with_container_id() {
+        let selector = ContainerSelector {
+            container_id: Some("abc123".to_string()),
+            id_labels: vec![],
+            workspace_folder: None,
+        };
+        assert!(selector.validate().is_ok());
+    }
+
+    #[test]
+    fn test_selector_validation_with_labels() {
+        let selector = ContainerSelector {
+            container_id: None,
+            id_labels: vec![("app".to_string(), "web".to_string())],
+            workspace_folder: None,
+        };
+        assert!(selector.validate().is_ok());
+    }
+
+    #[test]
+    fn test_selector_validation_with_workspace() {
+        let temp_dir = TempDir::new().unwrap();
+        let selector = ContainerSelector {
+            container_id: None,
+            id_labels: vec![],
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+        };
+        assert!(selector.validate().is_ok());
+    }
+
+    #[test]
+    fn test_selector_new_with_valid_labels() {
+        let selector = ContainerSelector::new(
+            None,
+            vec!["app=web".to_string(), "env=prod".to_string()],
+            None,
+        )
+        .unwrap();
+        assert_eq!(selector.id_labels.len(), 2);
+        assert_eq!(
+            selector.id_labels[0],
+            ("app".to_string(), "web".to_string())
+        );
+        assert_eq!(
+            selector.id_labels[1],
+            ("env".to_string(), "prod".to_string())
+        );
+    }
+
+    #[test]
+    fn test_selector_new_with_invalid_labels() {
+        let result = ContainerSelector::new(None, vec!["invalid".to_string()], None);
+        assert!(result.is_err());
+    }
+}
+
+/// Container selection criteria for targeting containers
+///
+/// Provides flexible container selection via direct ID, label filters, or workspace folder.
+/// Used by commands like exec, read-configuration, run-user-commands, and set-up.
+///
+/// # Priority Order
+///
+/// When multiple selectors are provided, resolution follows this priority:
+/// 1. Direct container ID (--container-id)
+/// 2. Label-based lookup (--id-label)
+/// 3. Workspace-based lookup (--workspace-folder)
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::container::ContainerSelector;
+/// use std::path::PathBuf;
+///
+/// // Create selector with container ID
+/// let selector = ContainerSelector::new(
+///     Some("abc123".to_string()),
+///     vec![],
+///     None,
+/// ).unwrap();
+/// assert!(selector.validate().is_ok());
+///
+/// // Create selector with labels
+/// let selector = ContainerSelector::new(
+///     None,
+///     vec!["app=myapp".to_string(), "env=prod".to_string()],
+///     None,
+/// ).unwrap();
+/// assert!(selector.validate().is_ok());
+/// ```
+#[derive(Debug, Clone)]
+pub struct ContainerSelector {
+    /// Direct container ID
+    pub container_id: Option<String>,
+
+    /// Label filters (key=value pairs)
+    pub id_labels: Vec<(String, String)>,
+
+    /// Workspace folder (for workspace-based lookup)
+    pub workspace_folder: Option<std::path::PathBuf>,
+}
+
+impl ContainerSelector {
+    /// Create a new ContainerSelector from CLI arguments
+    ///
+    /// Parses id-label strings into (key, value) tuples and validates their format.
+    ///
+    /// # Arguments
+    ///
+    /// * `container_id` - Optional direct container ID
+    /// * `id_label_strings` - Label strings in "key=value" format
+    /// * `workspace_folder` - Optional workspace folder path
+    ///
+    /// # Errors
+    ///
+    /// Returns error if any label string doesn't match the "key=value" format with non-empty parts
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deacon_core::container::ContainerSelector;
+    ///
+    /// let selector = ContainerSelector::new(
+    ///     Some("abc123".to_string()),
+    ///     vec!["app=web".to_string()],
+    ///     None,
+    /// ).unwrap();
+    /// ```
+    pub fn new(
+        container_id: Option<String>,
+        id_label_strings: Vec<String>,
+        workspace_folder: Option<std::path::PathBuf>,
+    ) -> anyhow::Result<Self> {
+        let id_labels = Self::parse_labels(&id_label_strings)?;
+        Ok(Self {
+            container_id,
+            id_labels,
+            workspace_folder,
+        })
+    }
+
+    /// Validate that at least one selector is provided
+    ///
+    /// Ensures the selector can be used to identify a container by checking that
+    /// at least one of container_id, id_labels, or workspace_folder is provided.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if no selection criteria are provided
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deacon_core::container::ContainerSelector;
+    ///
+    /// // Valid: has container_id
+    /// let selector = ContainerSelector::new(Some("abc123".to_string()), vec![], None).unwrap();
+    /// assert!(selector.validate().is_ok());
+    ///
+    /// // Invalid: no selectors
+    /// let selector = ContainerSelector::new(None, vec![], None).unwrap();
+    /// assert!(selector.validate().is_err());
+    /// ```
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if self.container_id.is_none()
+            && self.id_labels.is_empty()
+            && self.workspace_folder.is_none()
+        {
+            anyhow::bail!(
+                "At least one of --container-id, --id-label, or --workspace-folder is required"
+            );
+        }
+        Ok(())
+    }
+
+    /// Parse and validate label format
+    ///
+    /// Labels must be in "name=value" format with non-empty key and value parts.
+    /// Uses regex pattern `^.+=.+$` to validate format.
+    ///
+    /// # Arguments
+    ///
+    /// * `labels` - Slice of label strings to parse
+    ///
+    /// # Returns
+    ///
+    /// Vector of (key, value) tuples
+    ///
+    /// # Errors
+    ///
+    /// Returns error if any label doesn't match the required format
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deacon_core::container::ContainerSelector;
+    ///
+    /// // Valid labels
+    /// let labels = vec!["key=value".to_string(), "app=web".to_string()];
+    /// let parsed = ContainerSelector::parse_labels(&labels).unwrap();
+    /// assert_eq!(parsed.len(), 2);
+    /// assert_eq!(parsed[0], ("key".to_string(), "value".to_string()));
+    ///
+    /// // Invalid label (missing '=')
+    /// let invalid = vec!["invalid".to_string()];
+    /// assert!(ContainerSelector::parse_labels(&invalid).is_err());
+    /// ```
+    pub fn parse_labels(labels: &[String]) -> anyhow::Result<Vec<(String, String)>> {
+        use regex::Regex;
+        let regex = Regex::new(r"^.+=.+$").expect("Valid regex pattern");
+        let mut result = Vec::new();
+        for label in labels {
+            if !regex.is_match(label) {
+                anyhow::bail!(
+                    "Invalid label format '{}'. Must be name=value with non-empty key and value",
+                    label
+                );
+            }
+            let parts: Vec<&str> = label.splitn(2, '=').collect();
+            result.push((parts[0].to_string(), parts[1].to_string()));
+        }
+        Ok(result)
+    }
+}
+
+/// Container lookup operations
+///
+/// These functions provide utilities for finding and inspecting containers
+/// using various selection criteria.
+/// Find container by exact ID match
+///
+/// Looks up a container by its exact ID using the Docker inspect API.
+///
+/// # Arguments
+///
+/// * `docker` - Docker client implementing the Docker trait
+/// * `container_id` - Container ID to search for
+///
+/// # Returns
+///
+/// * `Ok(Some(ContainerInfo))` - Container found
+/// * `Ok(None)` - Container not found (404)
+/// * `Err(_)` - Docker API error
+///
+/// # Examples
+///
+/// ```no_run
+/// use deacon_core::container::find_container_by_id;
+/// use deacon_core::docker::CliDocker;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let docker = CliDocker::new();
+/// let result = find_container_by_id(&docker, "abc123").await?;
+/// match result {
+///     Some(info) => println!("Found container: {}", info.id),
+///     None => println!("Container not found"),
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[instrument(skip(docker))]
+pub async fn find_container_by_id<D>(
+    docker: &D,
+    container_id: &str,
+) -> Result<Option<crate::docker::ContainerInfo>>
+where
+    D: crate::docker::Docker,
+{
+    debug!("Finding container by ID: {}", container_id);
+    docker.inspect_container(container_id).await
+}
+
+/// Find containers matching all specified labels
+///
+/// Lists containers that match all provided label filters.
+///
+/// # Arguments
+///
+/// * `docker` - Docker client implementing the Docker trait
+/// * `labels` - Slice of (key, value) tuples for label filters
+///
+/// # Returns
+///
+/// Vector of matching containers (may be empty)
+///
+/// # Examples
+///
+/// ```no_run
+/// use deacon_core::container::find_containers_by_labels;
+/// use deacon_core::docker::CliDocker;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let docker = CliDocker::new();
+/// let labels = vec![
+///     ("app".to_string(), "web".to_string()),
+///     ("env".to_string(), "prod".to_string()),
+/// ];
+/// let containers = find_containers_by_labels(&docker, &labels).await?;
+/// println!("Found {} matching containers", containers.len());
+/// # Ok(())
+/// # }
+/// ```
+#[instrument(skip(docker))]
+pub async fn find_containers_by_labels<D>(
+    docker: &D,
+    labels: &[(String, String)],
+) -> Result<Vec<crate::docker::ContainerInfo>>
+where
+    D: crate::docker::Docker,
+{
+    debug!("Finding containers by labels: {:?}", labels);
+
+    if labels.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Build label selector string (comma-separated key=value pairs)
+    let label_selector: Vec<String> = labels.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+    let label_selector = label_selector.join(",");
+
+    docker.list_containers(Some(&label_selector)).await
+}
+
+/// Resolve container using selector criteria
+///
+/// Resolves a container using the provided selector, following priority order:
+/// 1. Direct container ID (highest priority)
+/// 2. Label-based lookup
+/// 3. Workspace-based lookup (TODO: implement when workspace labels defined - see issue #270)
+///
+/// **Priority Order Details:**
+/// - **Container ID**: If provided, performs direct lookup ignoring other selectors
+/// - **Labels**: If no ID but labels provided, finds containers matching all specified labels
+/// - **Workspace**: TODO(#270) - When implemented, will query containers with workspace-specific labels
+///
+/// Returns the first matching container when using label-based lookup.
+///
+/// # Arguments
+///
+/// * `docker` - Docker client implementing the Docker trait
+/// * `selector` - Container selection criteria
+///
+/// # Returns
+///
+/// * `Ok(Some(ContainerInfo))` - Container found and inspected
+/// * `Ok(None)` - No matching container found
+/// * `Err(_)` - Docker API error or invalid selector
+///
+/// # Examples
+///
+/// ```no_run
+/// use deacon_core::container::{ContainerSelector, resolve_container};
+/// use deacon_core::docker::CliDocker;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let docker = CliDocker::new();
+/// let selector = ContainerSelector::new(
+///     Some("abc123".to_string()),
+///     vec![],
+///     None,
+/// )?;
+/// selector.validate()?;
+///
+/// match resolve_container(&docker, &selector).await? {
+///     Some(info) => println!("Found container: {}", info.id),
+///     None => eprintln!("Dev container not found."),
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[instrument(skip(docker))]
+pub async fn resolve_container<D>(
+    docker: &D,
+    selector: &ContainerSelector,
+) -> Result<Option<crate::docker::ContainerInfo>>
+where
+    D: crate::docker::Docker,
+{
+    debug!("Resolving container with selector: {:?}", selector);
+
+    // Priority 1: Direct container ID
+    if let Some(ref container_id) = selector.container_id {
+        debug!("Using container ID selector: {}", container_id);
+        return find_container_by_id(docker, container_id).await;
+    }
+
+    // Priority 2: Label-based lookup
+    if !selector.id_labels.is_empty() {
+        debug!("Using label-based selector: {:?}", selector.id_labels);
+        let containers = find_containers_by_labels(docker, &selector.id_labels).await?;
+        if let Some(container) = containers.first() {
+            debug!("Found container via labels: {}", container.id);
+            return find_container_by_id(docker, &container.id).await;
+        }
+        return Ok(None);
+    }
+
+    // Priority 3: Workspace-based lookup
+    // TODO(#270): Implement workspace-based container resolution
+    // This would query containers with workspace-specific labels (e.g., workspace folder hash)
+    // Priority: Low - most users will use direct ID or labels
+    debug!("Workspace-based lookup not yet implemented");
+
+    Ok(None)
+}
+
+/// Inspect container and return full metadata
+///
+/// Wrapper around Docker inspect that provides a more ergonomic API.
+///
+/// # Arguments
+///
+/// * `docker` - Docker client implementing the Docker trait
+/// * `container_id` - Container ID to inspect
+///
+/// # Returns
+///
+/// Full container metadata
+///
+/// # Errors
+///
+/// Returns error if container doesn't exist or Docker API fails
+///
+/// # Examples
+///
+/// ```no_run
+/// use deacon_core::container::inspect_container;
+/// use deacon_core::docker::CliDocker;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let docker = CliDocker::new();
+/// let info = inspect_container(&docker, "abc123").await?;
+/// println!("Container state: {}", info.state);
+/// # Ok(())
+/// # }
+/// ```
+#[instrument(skip(docker))]
+pub async fn inspect_container<D>(
+    docker: &D,
+    container_id: &str,
+) -> Result<crate::docker::ContainerInfo>
+where
+    D: crate::docker::Docker,
+{
+    debug!("Inspecting container: {}", container_id);
+    match docker.inspect_container(container_id).await? {
+        Some(info) => Ok(info),
+        None => Err(crate::errors::DockerError::ContainerNotFound {
+            id: container_id.to_string(),
+        }
+        .into()),
     }
 }
