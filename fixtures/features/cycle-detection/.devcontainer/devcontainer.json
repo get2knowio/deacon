@@ -1,0 +1,9 @@
+{
+  "name": "Cycle Detection Test",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/test/feature-a:1": true,
+    "ghcr.io/test/feature-b:1": true,
+    "ghcr.io/test/feature-c:1": true
+  }
+}

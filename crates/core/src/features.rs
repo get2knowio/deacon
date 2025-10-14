@@ -1320,6 +1320,131 @@ mod tests {
     }
 
     #[test]
+    fn test_dependency_cycle_error_format_spec_compliance() {
+        // Test: Verify cycle detection error message format per SPEC.md §9
+        // SPEC.md §9 requirement: "Circular dependencies detected => error with details"
+        // This test validates the error includes all required information and locks the format
+
+        let mut depends_on_b = HashMap::new();
+        depends_on_b.insert("feature-c".to_string(), serde_json::Value::Bool(true));
+
+        let mut depends_on_c = HashMap::new();
+        depends_on_c.insert("feature-a".to_string(), serde_json::Value::Bool(true));
+
+        let features = vec![
+            create_test_feature("feature-a", vec!["feature-b".to_string()], HashMap::new()),
+            create_test_feature("feature-b", vec![], depends_on_b),
+            create_test_feature("feature-c", vec![], depends_on_c),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+
+        // Verify error is returned
+        assert!(
+            result.is_err(),
+            "Circular dependency should produce an error per SPEC.md §9"
+        );
+
+        let err = result.unwrap_err();
+
+        // Test the error structure
+        match &err {
+            FeatureError::DependencyCycle { cycle_path } => {
+                // SPEC.md §9: "error with details" - verify all involved features are present
+                assert!(
+                    cycle_path.contains("feature-a"),
+                    "Cycle path should contain feature-a (required detail), got: {}",
+                    cycle_path
+                );
+                assert!(
+                    cycle_path.contains("feature-b"),
+                    "Cycle path should contain feature-b (required detail), got: {}",
+                    cycle_path
+                );
+                assert!(
+                    cycle_path.contains("feature-c"),
+                    "Cycle path should contain feature-c (required detail), got: {}",
+                    cycle_path
+                );
+
+                // Verify the path shows directionality (part of "details")
+                assert!(
+                    cycle_path.contains("->"),
+                    "Cycle path should show direction with arrows, got: {}",
+                    cycle_path
+                );
+
+                // Verify the cycle forms a closed loop (validates correctness of cycle detection)
+                let parts: Vec<&str> = cycle_path.split(" -> ").collect();
+                assert!(
+                    parts.len() >= 3,
+                    "Cycle path should have at least 3 nodes, got: {}",
+                    cycle_path
+                );
+                assert_eq!(
+                    parts.first(),
+                    parts.last(),
+                    "Cycle path should form a closed loop (start == end), got: {}",
+                    cycle_path
+                );
+            }
+            _ => panic!(
+                "Expected DependencyCycle error per SPEC.md §9, got: {:?}",
+                err
+            ),
+        }
+
+        // Verify the full error message includes proper terminology per SPEC.md §9
+        let full_error_msg = format!("{}", err);
+
+        // SPEC.md §9: "Circular dependencies detected"
+        assert!(
+            full_error_msg.to_lowercase().contains("cycle")
+                || full_error_msg.to_lowercase().contains("circular"),
+            "Error message should contain 'cycle' or 'circular' terminology per SPEC.md §9, got: {}",
+            full_error_msg
+        );
+
+        assert!(
+            full_error_msg.to_lowercase().contains("depend"),
+            "Error message should reference 'dependencies' per SPEC.md §9, got: {}",
+            full_error_msg
+        );
+
+        assert!(
+            full_error_msg.contains("feature"),
+            "Error message should reference 'features' context, got: {}",
+            full_error_msg
+        );
+
+        // Snapshot test: Lock the exact format to prevent regressions
+        // Expected format: "Dependency cycle detected in features: <cycle_path>"
+        assert!(
+            full_error_msg.starts_with("Dependency cycle detected in features:"),
+            "Error message format should match expected pattern (snapshot), got: {}",
+            full_error_msg
+        );
+
+        // Verify all feature IDs are in the full error message (the "details" requirement)
+        assert!(
+            full_error_msg.contains("feature-a"),
+            "Full error should contain feature-a (required detail), got: {}",
+            full_error_msg
+        );
+        assert!(
+            full_error_msg.contains("feature-b"),
+            "Full error should contain feature-b (required detail), got: {}",
+            full_error_msg
+        );
+        assert!(
+            full_error_msg.contains("feature-c"),
+            "Full error should contain feature-c (required detail), got: {}",
+            full_error_msg
+        );
+    }
+
+    #[test]
     fn test_dependency_resolver_override_order() {
         let features = vec![
             create_test_feature("feature-a", vec![], HashMap::new()),
