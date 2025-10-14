@@ -26,6 +26,11 @@ pub struct ReadConfigurationArgs {
     /// When id_label is provided, resolve container and read configuration from it
     #[allow(dead_code)]
     pub id_label: Vec<String>,
+    /// TODO(#295): Wire mount_workspace_git_root to workspace resolution
+    /// Flag accepted for CLI compatibility but not yet used in ConfigLoader.
+    /// Should influence workspace discovery/mount behavior per spec.
+    #[allow(dead_code)]
+    pub mount_workspace_git_root: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub override_config_path: Option<PathBuf>,
@@ -40,8 +45,9 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     // Keep startup message at debug to avoid noisy INFO output for simple queries
     debug!("Starting read-configuration command execution");
     debug!(
-        "Read configuration args: include_merged={}, workspace_folder={:?}, config_path={:?}, override_config_path={:?}, secrets_files_count={}",
+        "Read configuration args: include_merged={}, mount_workspace_git_root={}, workspace_folder={:?}, config_path={:?}, override_config_path={:?}, secrets_files_count={}",
         args.include_merged_configuration,
+        args.mount_workspace_git_root,
         args.workspace_folder,
         args.config_path,
         args.override_config_path,
@@ -218,6 +224,7 @@ mod tests {
             include_merged_configuration: include_merged,
             container_id: None,
             id_label: vec![],
+            mount_workspace_git_root: true,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path,
             override_config_path: override_path,
@@ -371,6 +378,7 @@ API_KEY=another-secret
             include_merged_configuration: false,
             container_id: None,
             id_label: vec!["invalid".to_string()], // Missing '='
+            mount_workspace_git_root: true,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: None,
             override_config_path: None,
@@ -404,6 +412,7 @@ API_KEY=another-secret
             include_merged_configuration: false,
             container_id: Some("abc123".to_string()),
             id_label: vec![],
+            mount_workspace_git_root: true,
             workspace_folder: None,
             config_path: Some(config_path),
             override_config_path: None,
@@ -432,7 +441,56 @@ API_KEY=another-secret
             include_merged_configuration: false,
             container_id: None,
             id_label: vec!["app=web".to_string()],
+            mount_workspace_git_root: true,
             workspace_folder: None,
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_mount_workspace_git_root_flag() {
+        // Test that the flag is accepted by the CLI (functionality not yet wired to ConfigLoader)
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        // Test with mount_workspace_git_root = false
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: false,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path.clone()),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+
+        // Test with mount_workspace_git_root = true (default)
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
             secrets_files: vec![],

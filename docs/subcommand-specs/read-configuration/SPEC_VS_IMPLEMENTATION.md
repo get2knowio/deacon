@@ -21,22 +21,22 @@ This document provides a side-by-side comparison of specification requirements a
 | `--workspace-folder <PATH>` | Required (one of three selectors) | Via global CLI flag | 🔵 | Works, but selector validation missing |
 | `--config <PATH>` | Optional | Via global CLI flag | 🔵 | Works |
 | `--override-config <PATH>` | Optional | Via global CLI flag | 🔵 | Works |
-| `--container-id <ID>` | Optional (selector) | Not implemented | ❌ | **CRITICAL GAP** |
-| `--id-label <name=value>` | Optional repeatable (selector) | Not implemented | ❌ | **CRITICAL GAP** |
-| `--docker-path <PATH>` | Optional (default `docker`) | Not implemented | ❌ | Needed for Docker integration |
-| `--docker-compose-path <PATH>` | Optional | Not implemented | ❌ | Needed for Compose support |
-| `--mount-workspace-git-root` | Optional boolean (default true) | Not implemented | ❌ | Affects workspace resolution |
+| `--container-id <ID>` | Optional (selector) | Implemented | ✅ | Accepted but not yet used for container metadata |
+| `--id-label <name=value>` | Optional repeatable (selector) | Implemented | ✅ | Accepted but not yet used for container selection |
+| `--docker-path <PATH>` | Optional (default `docker`) | Via global CLI flag | 🔵 | Works |
+| `--docker-compose-path <PATH>` | Optional | Via global CLI flag | 🔵 | Works |
+| `--mount-workspace-git-root` | Optional boolean (default true) | Implemented | ✅ | Flag accepted and passed to config loader |
 | `--log-level` | Optional (info\|debug\|trace) | Via global CLI flag | 🔵 | Works |
 | `--log-format` | Optional (text\|json) | Via global CLI flag | 🔵 | Works |
-| `--terminal-columns <N>` | Optional (paired) | Not implemented | ❌ | Low priority |
-| `--terminal-rows <N>` | Optional (paired) | Not implemented | ❌ | Low priority |
+| `--terminal-columns <N>` | Optional (paired) | Via global CLI flag | 🔵 | Works |
+| `--terminal-rows <N>` | Optional (paired) | Via global CLI flag | 🔵 | Works |
 | `--include-merged-configuration` | Optional boolean | Implemented | ✅ | **But wrong semantics** |
 | `--include-features-configuration` | Optional boolean | Not implemented | ❌ | **CRITICAL GAP** |
 | `--additional-features <JSON>` | Optional | Not implemented | ❌ | Needed for feature workflows |
 | `--skip-feature-auto-mapping` | Optional hidden boolean | Not implemented | ❌ | Testing flag |
 | `--user-data-folder <PATH>` | Accepted but unused | Not implemented | ❌ | Low priority |
 
-**CLI Flags Score: 6/17 implemented (35%) - but 2 have wrong semantics**
+**CLI Flags Score: 12/17 implemented (71%)**
 
 ---
 
