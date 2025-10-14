@@ -20,7 +20,7 @@ BuildKit advanced features are essential for:
 
 This example aligns with:
 - **[Build Options](https://containers.dev/implementors/spec/#build-properties)**: Advanced BuildKit features
-- CLI Spec: Container Build section in `docs/CLI-SPEC.md`
+- CLI Spec: Container Build section in `docs/subcommand-specs/*/SPEC.md`
 
 ## Files
 
@@ -283,4 +283,4 @@ RUN --mount=type=secret,id=docker_auth,target=/root/.docker/config.json \
 - `../platform-and-cache/` - Platform targeting and cache control
 - [BuildKit documentation](https://docs.docker.com/build/buildkit/)
 - [Docker build secrets](https://docs.docker.com/build/building/secrets/)
-- CLI Spec: Container Build section in `docs/CLI-SPEC.md`
+- CLI Spec: Container Build section in `docs/subcommand-specs/*/SPEC.md`

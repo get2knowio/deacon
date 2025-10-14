@@ -20,7 +20,7 @@ Platform and cache controls are critical for:
 
 This example aligns with:
 - **[Build Options](https://containers.dev/implementors/spec/#build-properties)**: Platform targeting and cache control
-- CLI Spec: Container Build section in `docs/CLI-SPEC.md`
+- CLI Spec: Container Build section in `docs/subcommand-specs/*/SPEC.md`
 
 ## Files
 
@@ -181,4 +181,4 @@ docker images --filter "label=example.type=platform-and-cache" -q | xargs -r doc
 - `../basic-dockerfile/` - Basic Dockerfile builds with build args
 - `../secrets-and-ssh/` - BuildKit secrets and SSH forwarding
 - Docker docs on [multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
-- CLI Spec: Container Build section in `docs/CLI-SPEC.md`
+- CLI Spec: Container Build section in `docs/subcommand-specs/*/SPEC.md`

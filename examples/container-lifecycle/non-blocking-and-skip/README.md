@@ -9,7 +9,7 @@ This example shows how to use skip flags to control which lifecycle commands exe
 
 ## Lifecycle Phases Overview
 
-According to the [CLI-SPEC.md](../../../docs/CLI-SPEC.md), lifecycle commands execute in this order:
+According to the [CLI-SPEC.md](../../../docs/subcommand-specs/*/SPEC.md), lifecycle commands execute in this order:
 
 1. **onCreate** - Always runs during initial container creation
 2. **postCreate** - Runs after features are installed (can be skipped)
@@ -157,6 +157,6 @@ This example creates marker files in `/tmp/markers/` to demonstrate which phases
 
 ## References
 
-- [CLI-SPEC.md: Container Lifecycle Management](../../../docs/CLI-SPEC.md)
+- [CLI-SPEC.md: Container Lifecycle Management](../../../docs/subcommand-specs/*/SPEC.md)
 - [DevContainer Lifecycle Scripts Specification](https://containers.dev/implementors/spec/#lifecycle-scripts)
 - Related tests: `crates/deacon/tests/smoke_up_idempotent.rs`

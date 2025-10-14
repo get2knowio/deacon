@@ -191,7 +191,7 @@ Error: Configuration cycle detected: cycle.json extends itself
 
 ## Spec References
 
-Per CLI-SPEC.md "Configuration Resolution Workflow":
+Per subcommand-specs/*/SPEC.md "Configuration Resolution Workflow":
 - Extends chain is resolved recursively with cycle detection
 - Configurations merge in order: base → overlay with later taking precedence
 - Objects deep merge, arrays and scalars replace

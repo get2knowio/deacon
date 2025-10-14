@@ -19,7 +19,7 @@ JSON logging is essential for:
 
 ## DevContainer Specification References
 
-This example aligns with the [CLI-SPEC Monitoring and Observability](../../docs/CLI-SPEC.md#monitoring-and-observability) section:
+This example aligns with the [CLI-SPEC Monitoring and Observability](../../docs/subcommand-specs/*/SPEC.md#monitoring-and-observability) section:
 
 - **Standardized Tracing Spans**: Core workflow spans (`config.resolve`, `feature.plan`, etc.)
 - **Common Fields**: Standard fields (`workspace_id`, `duration_ms`, `feature_id`, etc.)

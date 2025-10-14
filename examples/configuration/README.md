@@ -1,6 +1,6 @@
 # Configuration Examples
 
-This directory contains comprehensive examples demonstrating DevContainer configuration capabilities as specified in the [DevContainer Specification](https://containers.dev/implementors/spec/) and implemented in the Deacon CLI per `docs/CLI-SPEC.md`.
+This directory contains comprehensive examples demonstrating DevContainer configuration capabilities as specified in the [DevContainer Specification](https://containers.dev/implementors/spec/) and implemented in the Deacon CLI per `docs/subcommand-specs/*/SPEC.md`.
 
 ## Overview
 
@@ -218,7 +218,7 @@ These examples implement concepts from:
 ## Related Documentation
 
 - Main examples index: `../README.md`
-- CLI specification: `../../docs/CLI-SPEC.md`
+- CLI specification: `../../docs/subcommand-specs/*/SPEC.md`
 - DevContainer spec: https://containers.dev/implementors/spec/
 - Container lifecycle examples: `../container-lifecycle/`
 - Feature examples: `../feature-management/`

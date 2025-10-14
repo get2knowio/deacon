@@ -6,7 +6,7 @@ This example clearly shows the exact order in which DevContainer lifecycle comma
 
 ## Lifecycle Command Execution Order
 
-According to the [DevContainer specification](https://containers.dev/implementors/spec/#lifecycle-scripts) and [CLI-SPEC.md](../../../docs/CLI-SPEC.md), the complete execution order is:
+According to the [DevContainer specification](https://containers.dev/implementors/spec/#lifecycle-scripts) and [Up SPEC](../../../docs/subcommand-specs/up/SPEC.md), the complete execution order is:
 
 1. **initializeCommand** *(Host-side, not shown in this example)*
 2. **onCreateCommand** ← *STEP 1*

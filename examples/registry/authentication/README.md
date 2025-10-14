@@ -232,5 +232,5 @@ When working offline or without network access:
 ## Related Documentation
 
 - [Dry-Run Publish](../dry-run-publish/README.md) - Test publish operations without network
-- [CLI-SPEC.md](../../../docs/CLI-SPEC.md) - OCI Registry Integration section
+- [subcommand-specs/*/SPEC.md](../../../docs/subcommand-specs/*/SPEC.md) - OCI Registry Integration section
 - [Feature Management](../../feature-management/README.md) - Feature lifecycle

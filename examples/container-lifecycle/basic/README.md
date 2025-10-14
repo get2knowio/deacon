@@ -11,7 +11,7 @@ This example showcases the fundamental container lifecycle commands execution in
 
 ## Lifecycle Command Execution Order
 
-Based on the [CLI specification](../../../docs/CLI-SPEC.md), lifecycle commands execute in this order:
+Based on the [CLI specification](../../../docs/subcommand-specs/*/SPEC.md), lifecycle commands execute in this order:
 
 1. **initializeCommand**: Host-side initialization (not shown in this example)
 2. **onCreateCommand**: Container creation setup

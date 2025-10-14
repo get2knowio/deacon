@@ -234,18 +234,18 @@ deacon config substitute --workspace-folder . --output-format json 2>&1 \
 ```
 
 ### Notes
-Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/CLI-SPEC.md` Container Build section.
+Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/subcommand-specs/*/SPEC.md` Container Build section.
 
-Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/CLI-SPEC.md` Lifecycle Execution Workflow.
+Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/subcommand-specs/*/SPEC.md` Lifecycle Execution Workflow.
 
-Doctor examples demonstrate environment diagnostics including host requirements validation (CPU, memory, storage) and real disk space checking using platform-specific APIs as specified in `docs/CLI-SPEC.md` Host Requirements section.
+Doctor examples demonstrate environment diagnostics including host requirements validation (CPU, memory, storage) and real disk space checking using platform-specific APIs as specified in `docs/subcommand-specs/*/SPEC.md` Host Requirements section.
 
-Exec examples demonstrate command execution semantics including working directory, user context, TTY allocation, and environment variable handling as specified in `docs/CLI-SPEC.md` Exec Command section.
+Exec examples demonstrate command execution semantics including working directory, user context, TTY allocation, and environment variable handling as specified in `docs/subcommand-specs/*/SPEC.md` Exec Command section.
 
-Feature system examples demonstrate dependency resolution, parallel execution levels, digest-based caching, and lockfile support for reproducible builds as specified in `docs/CLI-SPEC.md` Feature Installation Workflow, Distribution & Caching sections, and lockfile specifications.
+Feature system examples demonstrate dependency resolution, parallel execution levels, digest-based caching, and lockfile support for reproducible builds as specified in `docs/subcommand-specs/*/SPEC.md` Feature Installation Workflow, Distribution & Caching sections, and lockfile specifications.
 
-Observability examples demonstrate JSON logging, standardized tracing spans, and structured fields as specified in `docs/CLI-SPEC.md` Monitoring and Observability section.
+Observability examples demonstrate JSON logging, standardized tracing spans, and structured fields as specified in `docs/subcommand-specs/*/SPEC.md` Monitoring and Observability section.
 
-Registry examples demonstrate OCI distribution workflows including offline-friendly dry-run publish operations for features and templates as specified in `docs/CLI-SPEC.md` Feature Distribution and Template Distribution sections.
+Registry examples demonstrate OCI distribution workflows including offline-friendly dry-run publish operations for features and templates as specified in `docs/subcommand-specs/*/SPEC.md` Feature Distribution and Template Distribution sections.
 
-Registry authentication examples demonstrate multiple authentication methods (environment variables, Docker config, command-line options) for push/pull operations with proper error handling and retry logic as specified in `docs/CLI-SPEC.md` OCI Registry Integration section.
+Registry authentication examples demonstrate multiple authentication methods (environment variables, Docker config, command-line options) for push/pull operations with proper error handling and retry logic as specified in `docs/subcommand-specs/*/SPEC.md` OCI Registry Integration section.

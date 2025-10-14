@@ -11,7 +11,7 @@ This example shows how to track container lifecycle execution using progress eve
 
 ## Progress Event System
 
-According to the [CLI-SPEC.md](../../../docs/CLI-SPEC.md) and implementation in `crates/core/src/progress.rs`, the deacon CLI emits structured progress events throughout the lifecycle execution.
+According to the [CLI-SPEC.md](../../../docs/subcommand-specs/*/SPEC.md) and implementation in `crates/core/src/progress.rs`, the deacon CLI emits structured progress events throughout the lifecycle execution.
 
 ### Event Types
 
@@ -244,7 +244,7 @@ Here's what a typical lifecycle.command.begin event looks like:
 
 ## References
 
-- [CLI-SPEC.md: Progress Events](../../../docs/CLI-SPEC.md)
+- [CLI-SPEC.md: Progress Events](../../../docs/subcommand-specs/*/SPEC.md)
 - Implementation: `crates/core/src/progress.rs`
 - Tests: `crates/deacon/tests/integration_progress.rs`, `crates/core/tests/integration_per_command_events.rs`
 - Related issues: #107, #124, #110, #115, #125

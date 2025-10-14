@@ -116,4 +116,4 @@ docker images --filter "label=example.type=basic-dockerfile" -q | xargs -r docke
 
 - `../platform-and-cache/` - Platform targeting and cache control
 - `../secrets-and-ssh/` - BuildKit secrets and SSH forwarding
-- CLI Spec: Container Build section in `docs/CLI-SPEC.md`
+- CLI Spec: Container Build section in `docs/subcommand-specs/*/SPEC.md`
