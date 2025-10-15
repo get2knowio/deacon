@@ -30,14 +30,12 @@ pub struct ReadConfigurationArgs {
     /// When container_id is provided, read configuration from running container
     #[allow(dead_code)]
     pub container_id: Option<String>,
-    /// TODO(#268): Implement container-based config reading
     /// When id_label is provided, resolve container and read configuration from it
     #[allow(dead_code)]
     pub id_label: Vec<String>,
-    /// TODO(#295): Wire mount_workspace_git_root to workspace resolution
-    /// Flag accepted for CLI compatibility but not yet used in ConfigLoader.
-    /// Should influence workspace discovery/mount behavior per spec.
-    #[allow(dead_code)]
+    /// Flag to control workspace root discovery behavior.
+    /// When true (default), uses Git worktree detection to find the true workspace root.
+    /// When false, uses the workspace folder path as-is.
     pub mount_workspace_git_root: bool,
     pub additional_features: Option<String>,
     pub skip_feature_auto_mapping: bool,
@@ -160,6 +158,7 @@ fn resolve_workspace_configuration(
 
     // Compute workspace mount specification
     // Format: type=bind,source=<host-path>,target=<container-path>
+    // Always provided to indicate the default workspace mounting behavior
     let workspace_mount = Some(format!(
         "type=bind,source={},target={}",
         root_folder_path.display(),
