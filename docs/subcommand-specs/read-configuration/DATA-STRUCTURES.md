@@ -95,7 +95,7 @@ END STRUCT
 
 STRUCT Feature:
     id: string
-    options?: map<string, string | boolean>
+    options?: map<string, any>              // Supports all JSON types: string, boolean, number, array, object, null
     customizations?: map<string, any>
     init?: boolean
     privileged?: boolean

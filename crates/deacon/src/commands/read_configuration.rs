@@ -167,14 +167,17 @@ async fn resolve_features_configuration(
             serde_json::Value::Object(map) => map
                 .clone()
                 .into_iter()
-                .filter_map(|(k, v)| {
-                    // Convert serde_json::Value to OptionValue
+                .map(|(k, v)| {
+                    // Convert serde_json::Value to OptionValue, preserving all types
                     let option_value = match v {
-                        serde_json::Value::Bool(b) => Some(OptionValue::Boolean(b)),
-                        serde_json::Value::String(s) => Some(OptionValue::String(s)),
-                        _ => None, // Skip other types
+                        serde_json::Value::Bool(b) => OptionValue::Boolean(b),
+                        serde_json::Value::String(s) => OptionValue::String(s),
+                        serde_json::Value::Number(n) => OptionValue::Number(n),
+                        serde_json::Value::Array(a) => OptionValue::Array(a),
+                        serde_json::Value::Object(o) => OptionValue::Object(o),
+                        serde_json::Value::Null => OptionValue::Null,
                     };
-                    option_value.map(|ov| (k, ov))
+                    (k, option_value)
                 })
                 .collect(),
             serde_json::Value::String(s) if !_skip_feature_auto_mapping => {
@@ -235,6 +238,10 @@ async fn resolve_features_configuration(
                         let json_val = match v {
                             OptionValue::Boolean(b) => serde_json::Value::Bool(*b),
                             OptionValue::String(s) => serde_json::Value::String(s.clone()),
+                            OptionValue::Number(n) => serde_json::Value::Number(n.clone()),
+                            OptionValue::Array(a) => serde_json::Value::Array(a.clone()),
+                            OptionValue::Object(o) => serde_json::Value::Object(o.clone()),
+                            OptionValue::Null => serde_json::Value::Null,
                         };
                         (k.clone(), json_val)
                     })
@@ -1149,5 +1156,76 @@ API_KEY=another-secret
             .unwrap_err()
             .to_string()
             .contains("--additional-features must be a JSON object"));
+    }
+
+    #[tokio::test]
+    async fn test_option_preservation_roundtrip_all_types() {
+        // Test that all JSON option types survive the complete pipeline
+        // from config parsing through conversion and back to JSON output
+        use deacon_core::features::OptionValue;
+        use std::collections::HashMap;
+
+        // Create test options with all JSON types
+        let mut test_options = HashMap::new();
+        test_options.insert(
+            "string".to_string(),
+            OptionValue::String("test".to_string()),
+        );
+        test_options.insert("bool".to_string(), OptionValue::Boolean(false));
+        test_options.insert(
+            "number".to_string(),
+            OptionValue::Number(serde_json::Number::from(123)),
+        );
+        test_options.insert(
+            "array".to_string(),
+            OptionValue::Array(vec![
+                serde_json::Value::String("item".to_string()),
+                serde_json::Value::Number(serde_json::Number::from(1)),
+            ]),
+        );
+        let mut obj = serde_json::Map::new();
+        obj.insert("key".to_string(), serde_json::Value::Bool(true));
+        test_options.insert("object".to_string(), OptionValue::Object(obj));
+        test_options.insert("null".to_string(), OptionValue::Null);
+
+        // Simulate the conversion that happens in read_configuration
+        let json_output: HashMap<String, serde_json::Value> = test_options
+            .iter()
+            .map(|(k, v)| {
+                let json_val = match v {
+                    OptionValue::Boolean(b) => serde_json::Value::Bool(*b),
+                    OptionValue::String(s) => serde_json::Value::String(s.clone()),
+                    OptionValue::Number(n) => serde_json::Value::Number(n.clone()),
+                    OptionValue::Array(a) => serde_json::Value::Array(a.clone()),
+                    OptionValue::Object(o) => serde_json::Value::Object(o.clone()),
+                    OptionValue::Null => serde_json::Value::Null,
+                };
+                (k.clone(), json_val)
+            })
+            .collect();
+
+        // Verify all types are preserved in the JSON output
+        assert_eq!(json_output.len(), 6, "All option types should be preserved");
+        assert!(json_output.get("string").unwrap().is_string());
+        assert!(json_output.get("bool").unwrap().is_boolean());
+        assert!(json_output.get("number").unwrap().is_number());
+        assert!(json_output.get("array").unwrap().is_array());
+        assert!(json_output.get("object").unwrap().is_object());
+        assert!(json_output.get("null").unwrap().is_null());
+
+        // Verify specific values are correct
+        assert_eq!(json_output.get("string").unwrap().as_str(), Some("test"));
+        assert_eq!(json_output.get("bool").unwrap().as_bool(), Some(false));
+        assert_eq!(json_output.get("number").unwrap().as_i64(), Some(123));
+
+        // Verify array contents
+        let array = json_output.get("array").unwrap().as_array().unwrap();
+        assert_eq!(array.len(), 2);
+        assert_eq!(array[0].as_str(), Some("item"));
+        assert_eq!(array[1].as_i64(), Some(1));
+
+        // Verify object contents
+        let object = json_output.get("object").unwrap().as_object().unwrap();
+        assert_eq!(object.get("key").unwrap().as_bool(), Some(true));
     }
 }

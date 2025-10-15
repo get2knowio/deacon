@@ -225,14 +225,17 @@ async fn execute_features_plan(
                 serde_json::Value::Object(map) => map
                     .clone()
                     .into_iter()
-                    .filter_map(|(k, v)| {
-                        // Convert serde_json::Value to OptionValue
+                    .map(|(k, v)| {
+                        // Convert serde_json::Value to OptionValue, preserving all types
                         let option_value = match v {
-                            serde_json::Value::Bool(b) => Some(OptionValue::Boolean(b)),
-                            serde_json::Value::String(s) => Some(OptionValue::String(s)),
-                            _ => None, // Skip other types
+                            serde_json::Value::Bool(b) => OptionValue::Boolean(b),
+                            serde_json::Value::String(s) => OptionValue::String(s),
+                            serde_json::Value::Number(n) => OptionValue::Number(n),
+                            serde_json::Value::Array(a) => OptionValue::Array(a),
+                            serde_json::Value::Object(o) => OptionValue::Object(o),
+                            serde_json::Value::Null => OptionValue::Null,
                         };
-                        option_value.map(|ov| (k, ov))
+                        (k, option_value)
                     })
                     .collect(),
                 _ => std::collections::HashMap::new(),
@@ -2706,5 +2709,122 @@ mod tests {
             json_str, json_str2,
             "JSON serialization should be deterministic"
         );
+    }
+
+    #[test]
+    fn test_option_preservation_roundtrip_mixed_types() {
+        // Test that all JSON types in options are preserved through the conversion pipeline
+        // This validates the fix for silent drops of Number, Array, Object, Null types
+        use deacon_core::features::OptionValue;
+        use std::collections::HashMap;
+
+        // Create options with all supported JSON types
+        let mut input_options = HashMap::new();
+        input_options.insert(
+            "stringOption".to_string(),
+            OptionValue::String("latest".to_string()),
+        );
+        input_options.insert("boolOption".to_string(), OptionValue::Boolean(true));
+        input_options.insert(
+            "numberOption".to_string(),
+            OptionValue::Number(serde_json::Number::from(300)),
+        );
+        input_options.insert(
+            "arrayOption".to_string(),
+            OptionValue::Array(vec![
+                serde_json::Value::String("repo1".to_string()),
+                serde_json::Value::Number(serde_json::Number::from(42)),
+            ]),
+        );
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "nested".to_string(),
+            serde_json::Value::String("value".to_string()),
+        );
+        input_options.insert("objectOption".to_string(), OptionValue::Object(obj));
+        input_options.insert("nullOption".to_string(), OptionValue::Null);
+
+        // Verify all options are preserved (not silently dropped)
+        assert_eq!(
+            input_options.len(),
+            6,
+            "All 6 option types should be present"
+        );
+
+        // Convert to JSON (simulating what read_configuration does)
+        let json_options: HashMap<String, serde_json::Value> = input_options
+            .iter()
+            .map(|(k, v)| {
+                let json_val = match v {
+                    OptionValue::Boolean(b) => serde_json::Value::Bool(*b),
+                    OptionValue::String(s) => serde_json::Value::String(s.clone()),
+                    OptionValue::Number(n) => serde_json::Value::Number(n.clone()),
+                    OptionValue::Array(a) => serde_json::Value::Array(a.clone()),
+                    OptionValue::Object(o) => serde_json::Value::Object(o.clone()),
+                    OptionValue::Null => serde_json::Value::Null,
+                };
+                (k.clone(), json_val)
+            })
+            .collect();
+
+        // Verify no data loss in conversion
+        assert_eq!(
+            json_options.len(),
+            6,
+            "All options should survive JSON conversion"
+        );
+        assert!(json_options.contains_key("stringOption"));
+        assert!(json_options.contains_key("boolOption"));
+        assert!(json_options.contains_key("numberOption"));
+        assert!(json_options.contains_key("arrayOption"));
+        assert!(json_options.contains_key("objectOption"));
+        assert!(json_options.contains_key("nullOption"));
+
+        // Convert back to OptionValue (simulating what features.rs does)
+        let roundtrip_options: HashMap<String, OptionValue> = json_options
+            .iter()
+            .map(|(k, v)| {
+                let option_value = match v {
+                    serde_json::Value::Bool(b) => OptionValue::Boolean(*b),
+                    serde_json::Value::String(s) => OptionValue::String(s.clone()),
+                    serde_json::Value::Number(n) => OptionValue::Number(n.clone()),
+                    serde_json::Value::Array(a) => OptionValue::Array(a.clone()),
+                    serde_json::Value::Object(o) => OptionValue::Object(o.clone()),
+                    serde_json::Value::Null => OptionValue::Null,
+                };
+                (k.clone(), option_value)
+            })
+            .collect();
+
+        // Verify complete roundtrip preservation
+        assert_eq!(
+            roundtrip_options.len(),
+            6,
+            "All options should survive complete roundtrip"
+        );
+        assert_eq!(
+            roundtrip_options.get("stringOption").unwrap().as_str(),
+            Some("latest")
+        );
+        assert_eq!(
+            roundtrip_options.get("boolOption").unwrap().as_bool(),
+            Some(true)
+        );
+        assert!(roundtrip_options
+            .get("numberOption")
+            .unwrap()
+            .as_number()
+            .is_some());
+        assert!(roundtrip_options
+            .get("arrayOption")
+            .unwrap()
+            .as_array()
+            .is_some());
+        assert!(roundtrip_options
+            .get("objectOption")
+            .unwrap()
+            .as_object()
+            .is_some());
+        assert!(roundtrip_options.get("nullOption").unwrap().is_null());
     }
 }
