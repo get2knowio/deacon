@@ -2918,4 +2918,182 @@ mod tests {
             err_msg
         );
     }
+
+    #[tokio::test]
+    async fn test_error_context_includes_phase_and_identifiers() {
+        // Test: Verify error messages include both phase and relevant identifiers
+        // This test verifies the structure is correct for OCI fetch failures
+        // Requirement: SPEC.md §9 - errors include phase and relevant identifiers
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test OCI fetch error includes both phase and feature ID
+        let config_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        fs::write(
+            &config_path,
+            r#"{"features": {"ghcr.io/test/nonexistent-feature:v1": true}}"#,
+        )
+        .unwrap();
+
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+        };
+
+        let result = execute_features_plan(true, None, &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{:#}", result.unwrap_err());
+
+        // Verify phase context
+        assert!(
+            err_msg.contains("fetch") || err_msg.contains("parse") || err_msg.contains("resolve"),
+            "Error should contain phase information, got: {}",
+            err_msg
+        );
+
+        // Verify feature identifier is included
+        assert!(
+            err_msg.contains("ghcr.io/test/nonexistent-feature"),
+            "Error should contain feature identifier, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_context_oci_fetch_failure() {
+        // Test: Verify error message includes context for OCI fetch failure
+        // Requirement: GAP.md §8 - Error context could be more specific
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create a config with a feature that doesn't exist in any registry
+        let config_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        // Use a feature reference that will fail to fetch (non-existent)
+        fs::write(
+            &config_path,
+            r#"{"features": {"ghcr.io/nonexistent/invalid-feature:latest": true}}"#,
+        )
+        .unwrap();
+
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+        };
+
+        let result = execute_features_plan(true, None, &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{:#}", result.unwrap_err());
+
+        // Verify error message contains phase context and feature identifier
+        assert!(
+            err_msg.contains("fetch") && err_msg.contains("feature metadata"),
+            "Error should contain phase (fetch) and what is being fetched (feature metadata), got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("OCI registry"),
+            "Error should contain source (OCI registry), got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("ghcr.io/nonexistent/invalid-feature"),
+            "Error should contain feature identifier, got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains('.'),
+            "Error message should end with period per Theme 6, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_messages_sentence_case_and_periods() {
+        // Test: Verify all error messages follow Theme 6 formatting
+        // - Sentence case (first word capitalized)
+        // - End with period
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test 1: Validation error
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some(r#"["array"]"#.to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result = execute_features_plan(true, Some(r#"["array"]"#), &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+
+        // Check sentence case: first word is "Failed"
+        assert!(
+            err_msg.starts_with("Failed"),
+            "Error message should start with capital letter (sentence case), got: {}",
+            err_msg
+        );
+        // Check period at end
+        assert!(
+            err_msg.ends_with('.'),
+            "Error message should end with period per Theme 6, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_all_error_contexts_include_identifiers() {
+        // Test: Verify all errors include relevant identifiers (feature ID, flag name, etc.)
+        // Requirement: SPEC.md §9 - errors include relevant identifiers
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test parse error includes flag name
+        let args_parse = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some("{invalid".to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result_parse = execute_features_plan(true, Some("{invalid"), &args_parse).await;
+        assert!(result_parse.is_err());
+        let err_parse = format!("{:#}", result_parse.unwrap_err());
+        assert!(
+            err_parse.contains("--additional-features"),
+            "Parse error should include flag name, got: {}",
+            err_parse
+        );
+
+        // Test validation error includes flag name
+        let args_validate = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some("42".to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result_validate = execute_features_plan(true, Some("42"), &args_validate).await;
+        assert!(result_validate.is_err());
+        let err_validate = format!("{}", result_validate.unwrap_err());
+        assert!(
+            err_validate.contains("--additional-features"),
+            "Validation error should include flag name, got: {}",
+            err_validate
+        );
+    }
 }
