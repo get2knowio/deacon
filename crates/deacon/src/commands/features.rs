@@ -225,14 +225,17 @@ async fn execute_features_plan(
                 serde_json::Value::Object(map) => map
                     .clone()
                     .into_iter()
-                    .filter_map(|(k, v)| {
-                        // Convert serde_json::Value to OptionValue
+                    .map(|(k, v)| {
+                        // Convert serde_json::Value to OptionValue, preserving all types
                         let option_value = match v {
-                            serde_json::Value::Bool(b) => Some(OptionValue::Boolean(b)),
-                            serde_json::Value::String(s) => Some(OptionValue::String(s)),
-                            _ => None, // Skip other types
+                            serde_json::Value::Bool(b) => OptionValue::Boolean(b),
+                            serde_json::Value::String(s) => OptionValue::String(s),
+                            serde_json::Value::Number(n) => OptionValue::Number(n),
+                            serde_json::Value::Array(a) => OptionValue::Array(a),
+                            serde_json::Value::Object(o) => OptionValue::Object(o),
+                            serde_json::Value::Null => OptionValue::Null,
                         };
-                        option_value.map(|ov| (k, ov))
+                        (k, option_value)
                     })
                     .collect(),
                 _ => std::collections::HashMap::new(),

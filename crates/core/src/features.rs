@@ -14,6 +14,10 @@ use tracing::{debug, instrument, warn};
 pub enum OptionValue {
     Boolean(bool),
     String(String),
+    Number(serde_json::Number),
+    Array(Vec<serde_json::Value>),
+    Object(serde_json::Map<String, serde_json::Value>),
+    Null,
 }
 
 impl OptionValue {
@@ -32,6 +36,35 @@ impl OptionValue {
             _ => None,
         }
     }
+
+    /// Get as number if it's a number value
+    pub fn as_number(&self) -> Option<&serde_json::Number> {
+        match self {
+            OptionValue::Number(n) => Some(n),
+            _ => None,
+        }
+    }
+
+    /// Get as array if it's an array value
+    pub fn as_array(&self) -> Option<&Vec<serde_json::Value>> {
+        match self {
+            OptionValue::Array(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    /// Get as object if it's an object value
+    pub fn as_object(&self) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        match self {
+            OptionValue::Object(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    /// Check if the value is null
+    pub fn is_null(&self) -> bool {
+        matches!(self, OptionValue::Null)
+    }
 }
 
 impl std::fmt::Display for OptionValue {
@@ -39,6 +72,12 @@ impl std::fmt::Display for OptionValue {
         match self {
             OptionValue::Boolean(b) => write!(f, "{}", b),
             OptionValue::String(s) => write!(f, "{}", s),
+            OptionValue::Number(n) => write!(f, "{}", n),
+            OptionValue::Array(a) => write!(f, "{}", serde_json::to_string(a).unwrap_or_default()),
+            OptionValue::Object(o) => {
+                write!(f, "{}", serde_json::to_string(o).unwrap_or_default())
+            }
+            OptionValue::Null => write!(f, "null"),
         }
     }
 }
@@ -95,6 +134,15 @@ impl FeatureOption {
                 } else {
                     Ok(())
                 }
+            }
+            // For unsupported combinations, only error if the value is not one of the
+            // pass-through types (Number, Array, Object, Null)
+            (_, OptionValue::Number(_))
+            | (_, OptionValue::Array(_))
+            | (_, OptionValue::Object(_))
+            | (_, OptionValue::Null) => {
+                // These types are preserved but not validated against schema
+                Ok(())
             }
             _ => Err("Type mismatch between option definition and provided value".to_string()),
         }
@@ -1057,6 +1105,156 @@ mod tests {
     }
 
     #[test]
+    fn test_option_value_all_types() {
+        // Test Boolean
+        let bool_val = OptionValue::Boolean(true);
+        assert_eq!(bool_val.as_bool(), Some(true));
+        assert_eq!(bool_val.as_str(), None);
+        assert!(!bool_val.is_null());
+
+        // Test String
+        let string_val = OptionValue::String("test".to_string());
+        assert_eq!(string_val.as_bool(), None);
+        assert_eq!(string_val.as_str(), Some("test"));
+        assert!(!string_val.is_null());
+
+        // Test Number
+        let number_val = OptionValue::Number(serde_json::Number::from(42));
+        assert_eq!(number_val.as_bool(), None);
+        assert_eq!(number_val.as_str(), None);
+        assert!(number_val.as_number().is_some());
+        assert_eq!(number_val.as_number().unwrap().as_i64(), Some(42));
+        assert!(!number_val.is_null());
+
+        // Test Array
+        let array_val = OptionValue::Array(vec![serde_json::Value::String("item".to_string())]);
+        assert_eq!(array_val.as_bool(), None);
+        assert!(array_val.as_array().is_some());
+        assert_eq!(array_val.as_array().unwrap().len(), 1);
+        assert!(!array_val.is_null());
+
+        // Test Object
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "key".to_string(),
+            serde_json::Value::String("value".to_string()),
+        );
+        let object_val = OptionValue::Object(obj.clone());
+        assert_eq!(object_val.as_bool(), None);
+        assert!(object_val.as_object().is_some());
+        assert_eq!(object_val.as_object().unwrap().len(), 1);
+        assert!(!object_val.is_null());
+
+        // Test Null
+        let null_val = OptionValue::Null;
+        assert_eq!(null_val.as_bool(), None);
+        assert_eq!(null_val.as_str(), None);
+        assert!(null_val.is_null());
+    }
+
+    #[test]
+    fn test_option_value_display() {
+        assert_eq!(OptionValue::Boolean(true).to_string(), "true");
+        assert_eq!(
+            OptionValue::String("hello".to_string()).to_string(),
+            "hello"
+        );
+        assert_eq!(
+            OptionValue::Number(serde_json::Number::from(42)).to_string(),
+            "42"
+        );
+        assert_eq!(
+            OptionValue::Array(vec![serde_json::Value::String("item".to_string())]).to_string(),
+            "[\"item\"]"
+        );
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "key".to_string(),
+            serde_json::Value::String("value".to_string()),
+        );
+        assert_eq!(OptionValue::Object(obj).to_string(), "{\"key\":\"value\"}");
+        assert_eq!(OptionValue::Null.to_string(), "null");
+    }
+
+    #[test]
+    fn test_option_value_json_roundtrip() {
+        // Test that all OptionValue variants can be serialized and deserialized
+        let test_values = vec![
+            OptionValue::Boolean(true),
+            OptionValue::String("test".to_string()),
+            OptionValue::Number(serde_json::Number::from(42)),
+            OptionValue::Array(vec![
+                serde_json::Value::String("item1".to_string()),
+                serde_json::Value::Number(serde_json::Number::from(123)),
+            ]),
+            {
+                let mut obj = serde_json::Map::new();
+                obj.insert("nested".to_string(), serde_json::Value::Bool(true));
+                OptionValue::Object(obj)
+            },
+            OptionValue::Null,
+        ];
+
+        for original in test_values {
+            let json = serde_json::to_string(&original).expect("Failed to serialize");
+            let deserialized: OptionValue =
+                serde_json::from_str(&json).expect("Failed to deserialize");
+            assert_eq!(original, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_option_value_from_json_value() {
+        // Test converting serde_json::Value to OptionValue for all types
+        let test_cases = vec![
+            (serde_json::Value::Bool(true), OptionValue::Boolean(true)),
+            (
+                serde_json::Value::String("test".to_string()),
+                OptionValue::String("test".to_string()),
+            ),
+            (
+                serde_json::Value::Number(serde_json::Number::from(42)),
+                OptionValue::Number(serde_json::Number::from(42)),
+            ),
+            (
+                serde_json::Value::Array(vec![serde_json::Value::String("item".to_string())]),
+                OptionValue::Array(vec![serde_json::Value::String("item".to_string())]),
+            ),
+            (
+                {
+                    let mut obj = serde_json::Map::new();
+                    obj.insert(
+                        "key".to_string(),
+                        serde_json::Value::String("value".to_string()),
+                    );
+                    serde_json::Value::Object(obj.clone())
+                },
+                {
+                    let mut obj = serde_json::Map::new();
+                    obj.insert(
+                        "key".to_string(),
+                        serde_json::Value::String("value".to_string()),
+                    );
+                    OptionValue::Object(obj)
+                },
+            ),
+            (serde_json::Value::Null, OptionValue::Null),
+        ];
+
+        for (json_val, expected_option_val) in test_cases {
+            let option_val = match json_val {
+                serde_json::Value::Bool(b) => OptionValue::Boolean(b),
+                serde_json::Value::String(s) => OptionValue::String(s),
+                serde_json::Value::Number(n) => OptionValue::Number(n),
+                serde_json::Value::Array(a) => OptionValue::Array(a),
+                serde_json::Value::Object(o) => OptionValue::Object(o),
+                serde_json::Value::Null => OptionValue::Null,
+            };
+            assert_eq!(option_val, expected_option_val);
+        }
+    }
+
+    #[test]
     fn test_feature_option_default_values() {
         let bool_option = FeatureOption::Boolean {
             default: Some(true),
@@ -1104,6 +1302,47 @@ mod tests {
         assert!(enum_option
             .validate_value(&OptionValue::String("invalid".to_string()))
             .is_err());
+    }
+
+    #[test]
+    fn test_feature_option_validation_passthrough_types() {
+        // Test that pass-through types (Number, Array, Object, Null) are accepted
+        // regardless of the option definition, since they're not in the schema
+        let bool_option = FeatureOption::Boolean {
+            default: Some(true),
+            description: None,
+        };
+
+        // Pass-through types should be accepted even for Boolean option
+        assert!(bool_option
+            .validate_value(&OptionValue::Number(serde_json::Number::from(42)))
+            .is_ok());
+        assert!(bool_option
+            .validate_value(&OptionValue::Array(vec![]))
+            .is_ok());
+        assert!(bool_option
+            .validate_value(&OptionValue::Object(serde_json::Map::new()))
+            .is_ok());
+        assert!(bool_option.validate_value(&OptionValue::Null).is_ok());
+
+        let string_option = FeatureOption::String {
+            default: None,
+            description: None,
+            r#enum: None,
+            proposals: None,
+        };
+
+        // Pass-through types should also be accepted for String option
+        assert!(string_option
+            .validate_value(&OptionValue::Number(serde_json::Number::from(42)))
+            .is_ok());
+        assert!(string_option
+            .validate_value(&OptionValue::Array(vec![]))
+            .is_ok());
+        assert!(string_option
+            .validate_value(&OptionValue::Object(serde_json::Map::new()))
+            .is_ok());
+        assert!(string_option.validate_value(&OptionValue::Null).is_ok());
     }
 
     #[test]
