@@ -1,6 +1,51 @@
 //! DevContainer features system
 //!
 //! This module handles feature discovery, installation, and lifecycle management.
+//!
+//! ## API Changes
+//!
+//! ### OptionValue Enum Extension (v0.1.5)
+//!
+//! The `OptionValue` enum has been extended to support all JSON types, not just Boolean and String.
+//!
+//! **Before (v0.1.4 and earlier):**
+//! ```ignore
+//! pub enum OptionValue {
+//!     Boolean(bool),
+//!     String(String),
+//! }
+//! ```
+//!
+//! **After (v0.1.5+):**
+//! ```ignore
+//! pub enum OptionValue {
+//!     Boolean(bool),
+//!     String(String),
+//!     Number(serde_json::Number),
+//!     Array(Vec<serde_json::Value>),
+//!     Object(serde_json::Map<String, serde_json::Value>),
+//!     Null,
+//! }
+//! ```
+//!
+//! **Migration Notes:**
+//! - **Backward Compatible:** Existing code using Boolean and String variants continues to work unchanged.
+//! - **New Accessors:** Use `as_number()`, `as_array()`, `as_object()`, and `is_null()` to access new types.
+//! - **Pattern Matching:** If you exhaustively match on `OptionValue`, add cases for the new variants:
+//!   ```rust
+//!   match option_value {
+//!       OptionValue::Boolean(b) => { /* existing code */ }
+//!       OptionValue::String(s) => { /* existing code */ }
+//!       OptionValue::Number(n) => { /* handle number */ }
+//!       OptionValue::Array(a) => { /* handle array */ }
+//!       OptionValue::Object(o) => { /* handle object */ }
+//!       OptionValue::Null => { /* handle null */ }
+//!   }
+//!   ```
+//! - **Data Preservation:** All option values are now preserved through the pipeline. Previously,
+//!   Number, Array, Object, and Null types were silently dropped. This fixes a data loss issue.
+//! - **Validation:** Pass-through types (Number, Array, Object, Null) are accepted but not validated
+//!   against feature option schemas, as they are not defined in the DevContainer feature spec.
 
 use crate::errors::{FeatureError, Result};
 use serde::{Deserialize, Serialize};
@@ -9,6 +54,25 @@ use std::path::Path;
 use tracing::{debug, instrument, warn};
 
 /// Processed option value supporting different types
+///
+/// Supports all JSON value types to ensure complete data preservation through
+/// the feature option pipeline. Previously only Boolean and String were supported,
+/// causing silent data loss for other types.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::features::OptionValue;
+///
+/// // String and Boolean (always supported)
+/// let string_opt = OptionValue::String("latest".to_string());
+/// let bool_opt = OptionValue::Boolean(true);
+///
+/// // Number, Array, Object, Null (added in v0.1.5 to prevent data loss)
+/// let number_opt = OptionValue::Number(serde_json::Number::from(300));
+/// let array_opt = OptionValue::Array(vec![serde_json::Value::String("item".to_string())]);
+/// let null_opt = OptionValue::Null;
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum OptionValue {
