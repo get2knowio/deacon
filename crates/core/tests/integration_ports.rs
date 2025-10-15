@@ -96,6 +96,8 @@ fn test_port_event_generation_with_attributes() {
                 host_ip: "0.0.0.0".to_string(),
             },
         ],
+        env: HashMap::new(),
+        labels: HashMap::new(),
     };
 
     // Process container ports without emitting events (for testing)
@@ -212,6 +214,8 @@ fn test_port_attribute_fallback_behavior() {
             protocol: "tcp".to_string(),
             host_ip: "0.0.0.0".to_string(),
         }],
+        env: HashMap::new(),
+        labels: HashMap::new(),
     };
 
     let events =
@@ -248,6 +252,8 @@ fn test_exposed_ports_without_mappings() {
             protocol: "tcp".to_string(),
         }],
         port_mappings: vec![], // No port mappings - port is exposed but not forwarded
+        env: HashMap::new(),
+        labels: HashMap::new(),
     };
 
     let events =
@@ -302,6 +308,8 @@ fn test_port_event_redaction() {
             protocol: "tcp".to_string(),
             host_ip: "127.0.0.1".to_string(),
         }],
+        env: HashMap::new(),
+        labels: HashMap::new(),
     };
 
     let mut port_attrs = HashMap::new();

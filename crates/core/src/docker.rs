@@ -30,6 +30,10 @@ pub struct ContainerInfo {
     pub exposed_ports: Vec<ExposedPort>,
     /// Port mappings from host to container
     pub port_mappings: Vec<PortMapping>,
+    /// Container environment variables (from Config.Env)
+    pub env: HashMap<String, String>,
+    /// Container labels (from Config.Labels)
+    pub labels: HashMap<String, String>,
 }
 
 /// Represents an exposed port from a container
@@ -385,8 +389,10 @@ impl CliRuntime {
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string(),
-                exposed_ports: vec![], // Not available in list format
-                port_mappings: vec![], // Not available in list format
+                exposed_ports: vec![],  // Not available in list format
+                port_mappings: vec![],  // Not available in list format
+                env: HashMap::new(),    // Not available in list format (requires inspect)
+                labels: HashMap::new(), // Not available in list format (requires inspect)
             };
             result.push(container_info);
         }
@@ -436,6 +442,37 @@ impl CliRuntime {
         let exposed_ports = Self::parse_exposed_ports(container);
         let port_mappings = Self::parse_port_mappings(container);
 
+        // Parse environment variables from Config.Env array
+        let env = container
+            .get("Config")
+            .and_then(|config| config.get("Env"))
+            .and_then(|env| env.as_array())
+            .map(|env_array| {
+                let mut env_map = HashMap::new();
+                for env_var in env_array {
+                    if let Some(env_str) = env_var.as_str() {
+                        if let Some((key, value)) = env_str.split_once('=') {
+                            env_map.insert(key.to_string(), value.to_string());
+                        }
+                    }
+                }
+                env_map
+            })
+            .unwrap_or_default();
+
+        // Parse labels from Config.Labels object
+        let labels = container
+            .get("Config")
+            .and_then(|config| config.get("Labels"))
+            .and_then(|labels| labels.as_object())
+            .map(|labels_obj| {
+                labels_obj
+                    .iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let container_info = ContainerInfo {
             id: container
                 .get("Id")
@@ -467,6 +504,8 @@ impl CliRuntime {
                 .to_string(),
             exposed_ports,
             port_mappings,
+            env,
+            labels,
         };
 
         Ok(Some(container_info))
@@ -591,8 +630,10 @@ impl Docker for CliRuntime {
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown")
                         .to_string(),
-                    exposed_ports: vec![], // Not available in list format
-                    port_mappings: vec![], // Not available in list format
+                    exposed_ports: vec![],  // Not available in list format
+                    port_mappings: vec![],  // Not available in list format
+                    env: HashMap::new(),    // Not available in list format (requires inspect)
+                    labels: HashMap::new(), // Not available in list format (requires inspect)
                 };
                 containers.push(container_info);
             }
@@ -645,6 +686,37 @@ impl Docker for CliRuntime {
             let exposed_ports = Self::parse_exposed_ports(container);
             let port_mappings = Self::parse_port_mappings(container);
 
+            // Parse environment variables from Config.Env array
+            let env = container
+                .get("Config")
+                .and_then(|config| config.get("Env"))
+                .and_then(|env| env.as_array())
+                .map(|env_array| {
+                    let mut env_map = HashMap::new();
+                    for env_var in env_array {
+                        if let Some(env_str) = env_var.as_str() {
+                            if let Some((key, value)) = env_str.split_once('=') {
+                                env_map.insert(key.to_string(), value.to_string());
+                            }
+                        }
+                    }
+                    env_map
+                })
+                .unwrap_or_default();
+
+            // Parse labels from Config.Labels object
+            let labels = container
+                .get("Config")
+                .and_then(|config| config.get("Labels"))
+                .and_then(|labels| labels.as_object())
+                .map(|labels_obj| {
+                    labels_obj
+                        .iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let container_info = ContainerInfo {
                 id: container
                     .get("Id")
@@ -676,6 +748,8 @@ impl Docker for CliRuntime {
                     .to_string(),
                 exposed_ports,
                 port_mappings,
+                env,
+                labels,
             };
 
             Ok(Some(container_info))
@@ -1271,6 +1345,8 @@ pub mod mock {
         pub state: String,
         /// Labels on the container
         pub labels: HashMap<String, String>,
+        /// Environment variables on the container
+        pub env: HashMap<String, String>,
     }
 
     impl MockContainer {
@@ -1283,12 +1359,19 @@ pub mod mock {
                 status: "Up 5 minutes".to_string(),
                 state: "running".to_string(),
                 labels: HashMap::new(),
+                env: HashMap::new(),
             }
         }
 
         /// Set container labels
         pub fn with_labels(mut self, labels: HashMap<String, String>) -> Self {
             self.labels = labels;
+            self
+        }
+
+        /// Set container environment variables
+        pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
+            self.env = env;
             self
         }
 
@@ -1415,6 +1498,8 @@ pub mod mock {
                 state: container.state.clone(),
                 exposed_ports: vec![], // Not implemented for mock
                 port_mappings: vec![], // Not implemented for mock
+                env: container.env.clone(),
+                labels: container.labels.clone(),
             }
         }
 
@@ -1900,6 +1985,8 @@ mod tests {
             state: "running".to_string(),
             exposed_ports: vec![],
             port_mappings: vec![],
+            env: HashMap::new(),
+            labels: HashMap::new(),
         };
 
         let serialized = serde_json::to_string(&container).unwrap();

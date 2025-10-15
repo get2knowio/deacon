@@ -386,6 +386,104 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         substitution_report.replacements.len()
     );
 
+    // Container discovery and container-aware substitutions
+    let (config, container_id_labels, container_env) = if args.container_id.is_some()
+        || !args.id_label.is_empty()
+    {
+        // Discover container using provided selectors
+        debug!("Container discovery requested");
+        let docker = deacon_core::docker::CliDocker::new();
+
+        // Build container selector
+        let selector = ContainerSelector::new(
+            args.container_id.clone(),
+            args.id_label.clone(),
+            args.workspace_folder.clone(),
+        )?;
+        selector.validate()?;
+
+        // Resolve container
+        match deacon_core::container::resolve_container(&docker, &selector).await? {
+            Some(container_info) => {
+                debug!(
+                    "Container found: id={}, labels={:?}",
+                    container_info.id, container_info.labels
+                );
+
+                // Extract id-labels (use provided labels or extract from container)
+                let id_labels: Vec<(String, String)> = if !args.id_label.is_empty() {
+                    // Use provided labels (already parsed and validated above)
+                    ContainerSelector::parse_labels(&args.id_label)?
+                } else {
+                    // Extract relevant labels from container (all labels in this case)
+                    container_info
+                        .labels
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect()
+                };
+
+                // Compute devcontainerId from id-labels
+                let dev_container_id = deacon_core::container::compute_dev_container_id(&id_labels);
+                debug!("Computed devcontainerId: {}", dev_container_id);
+
+                // Apply beforeContainerSubstitute: ${devcontainerId}
+                let mut before_context = SubstitutionContext::new(workspace_folder)?;
+                before_context.devcontainer_id = dev_container_id.clone();
+                if let Some(ref secrets) = secrets {
+                    for (key, value) in secrets.as_env_vars() {
+                        before_context.local_env.insert(key.clone(), value.clone());
+                    }
+                }
+
+                let (config_after_before, _before_report) =
+                    config.apply_variable_substitution(&before_context);
+
+                // Apply containerSubstitute: ${containerEnv:VAR}, ${containerWorkspaceFolder}
+                let mut container_context = SubstitutionContext::new(workspace_folder)?;
+                container_context.devcontainer_id = dev_container_id;
+                container_context.container_env = Some(container_info.env.clone());
+                // TODO: Extract containerWorkspaceFolder from container config
+                // For now, we don't set it as it requires parsing container mounts/config
+
+                if let Some(ref secrets) = secrets {
+                    for (key, value) in secrets.as_env_vars() {
+                        container_context
+                            .local_env
+                            .insert(key.clone(), value.clone());
+                    }
+                }
+
+                let (config_final, _container_report) =
+                    config_after_before.apply_variable_substitution(&container_context);
+
+                (
+                    config_final,
+                    Some(id_labels),
+                    Some(container_info.env.clone()),
+                )
+            }
+            None => {
+                // Container not found - fail with clear error
+                return Err(anyhow::anyhow!(
+                        "Dev container not found. Container ID or labels did not match any running containers."
+                    ));
+            }
+        }
+    } else {
+        // No container discovery requested
+        debug!("No container discovery requested");
+        (config, None, None)
+    };
+
+    // Store container metadata for potential use (currently just for debugging)
+    if let Some(ref id_labels) = container_id_labels {
+        debug!("Container id-labels: {:?}", id_labels);
+    }
+    if let Some(ref env) = container_env {
+        debug!("Container has {} environment variables", env.len());
+    }
+
     // Resolve features if requested
     let features_configuration = if args.include_features_configuration
         || (args.include_merged_configuration && args.container_id.is_none())
@@ -675,7 +773,43 @@ API_KEY=another-secret
     }
 
     #[tokio::test]
-    async fn test_read_configuration_valid_with_container_id() {
+    async fn test_read_configuration_without_container_discovery() {
+        // Test that the command works without container discovery
+        // (Previously named test_read_configuration_valid_with_container_id but that
+        // now requires a running container, which we don't have in tests)
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None, // No container discovery
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            workspace_folder: None,
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_container_discovery_requires_docker() {
+        // Test that container discovery fails gracefully when Docker is unavailable
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("devcontainer.json");
 
@@ -703,39 +837,17 @@ API_KEY=another-secret
         };
 
         let result = execute_read_configuration(args).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_read_configuration_valid_with_id_label() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("devcontainer.json");
-
-        let config_content = r#"{
-            "name": "test-container",
-            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
-        }"#;
-
-        fs::write(&config_path, config_content).unwrap();
-
-        let args = ReadConfigurationArgs {
-            include_merged_configuration: false,
-            include_features_configuration: false,
-            container_id: None,
-            id_label: vec!["app=web".to_string()],
-            mount_workspace_git_root: true,
-            additional_features: None,
-            skip_feature_auto_mapping: false,
-            workspace_folder: None,
-            config_path: Some(config_path),
-            override_config_path: None,
-            secrets_files: vec![],
-            redaction_config: RedactionConfig::default(),
-            secret_registry: SecretRegistry::new(),
-        };
-
-        let result = execute_read_configuration(args).await;
-        assert!(result.is_ok());
+        // Should fail with a clear error (Docker unavailable or container not found)
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        // Error should mention Docker or container not found
+        assert!(
+            err_msg.contains("Docker")
+                || err_msg.contains("container")
+                || err_msg.contains("not found"),
+            "Error message should mention Docker or container: {}",
+            err_msg
+        );
     }
 
     #[tokio::test]

@@ -522,6 +522,76 @@ mod tests {
         let result = ContainerSelector::new(None, vec!["invalid".to_string()], None);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_compute_dev_container_id_basic() {
+        let labels = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "prod".to_string()),
+        ];
+        let id = compute_dev_container_id(&labels);
+        assert_eq!(id.len(), 12);
+        // Should be hexadecimal
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_compute_dev_container_id_deterministic() {
+        let labels = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "prod".to_string()),
+        ];
+        let id1 = compute_dev_container_id(&labels);
+        let id2 = compute_dev_container_id(&labels);
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_compute_dev_container_id_order_independent() {
+        let labels1 = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "prod".to_string()),
+        ];
+        let labels2 = vec![
+            ("env".to_string(), "prod".to_string()),
+            ("app".to_string(), "web".to_string()),
+        ];
+        let id1 = compute_dev_container_id(&labels1);
+        let id2 = compute_dev_container_id(&labels2);
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_compute_dev_container_id_changes_with_labels() {
+        let labels1 = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "prod".to_string()),
+        ];
+        let labels2 = vec![
+            ("app".to_string(), "web".to_string()),
+            ("env".to_string(), "dev".to_string()),
+        ];
+        let labels3 = vec![("app".to_string(), "web".to_string())];
+
+        let id1 = compute_dev_container_id(&labels1);
+        let id2 = compute_dev_container_id(&labels2);
+        let id3 = compute_dev_container_id(&labels3);
+
+        // Changing label value should change ID
+        assert_ne!(id1, id2);
+        // Removing a label should change ID
+        assert_ne!(id1, id3);
+        assert_ne!(id2, id3);
+    }
+
+    #[test]
+    fn test_compute_dev_container_id_empty_labels() {
+        let labels = vec![];
+        let id = compute_dev_container_id(&labels);
+        assert_eq!(id.len(), 12);
+        // Should still produce a valid ID (hash of empty string)
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }
 
 /// Container selection criteria for targeting containers
@@ -688,6 +758,63 @@ impl ContainerSelector {
         }
         Ok(result)
     }
+}
+
+/// Compute deterministic dev container ID from id-labels
+///
+/// Creates a deterministic 12-character hex ID from a set of id-labels.
+/// The ID is independent of label order - labels are sorted before hashing.
+/// Adding or removing labels changes the ID.
+///
+/// # Arguments
+///
+/// * `id_labels` - Slice of (key, value) tuples representing container labels
+///
+/// # Returns
+///
+/// A 12-character hexadecimal string representing the deterministic container ID
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::container::compute_dev_container_id;
+///
+/// let labels = vec![
+///     ("app".to_string(), "web".to_string()),
+///     ("env".to_string(), "prod".to_string()),
+/// ];
+/// let id1 = compute_dev_container_id(&labels);
+/// assert_eq!(id1.len(), 12);
+///
+/// // Order doesn't matter
+/// let labels_reversed = vec![
+///     ("env".to_string(), "prod".to_string()),
+///     ("app".to_string(), "web".to_string()),
+/// ];
+/// let id2 = compute_dev_container_id(&labels_reversed);
+/// assert_eq!(id1, id2);
+/// ```
+pub fn compute_dev_container_id(id_labels: &[(String, String)]) -> String {
+    // Sort labels to ensure determinism regardless of order
+    let mut sorted_labels = id_labels.to_vec();
+    sorted_labels.sort_by(|a, b| match a.0.cmp(&b.0) {
+        std::cmp::Ordering::Equal => a.1.cmp(&b.1),
+        other => other,
+    });
+
+    // Create string representation: "key1=value1,key2=value2,..."
+    let label_string = sorted_labels
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    // Use blake3 for stable, cross-platform hashing
+    let hash = blake3::hash(label_string.as_bytes());
+    let hex_digest = hash.to_hex();
+
+    // Return first 12 characters of hex representation (lowercase)
+    hex_digest.as_str()[..12].to_string()
 }
 
 /// Container lookup operations
