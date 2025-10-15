@@ -32,7 +32,7 @@
 //! - **Backward Compatible:** Existing code using Boolean and String variants continues to work unchanged.
 //! - **New Accessors:** Use `as_number()`, `as_array()`, `as_object()`, and `is_null()` to access new types.
 //! - **Pattern Matching:** If you exhaustively match on `OptionValue`, add cases for the new variants:
-//!   ```rust
+//!   ```ignore
 //!   match option_value {
 //!       OptionValue::Boolean(b) => { /* existing code */ }
 //!       OptionValue::String(s) => { /* existing code */ }
