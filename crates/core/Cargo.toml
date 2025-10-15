@@ -32,6 +32,7 @@ num_cpus = "1.0"
 directories-next = "2.0"
 bytesize = "2.0.1"
 semver = "1.0"
+blake3 = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

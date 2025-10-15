@@ -795,9 +795,6 @@ impl ContainerSelector {
 /// assert_eq!(id1, id2);
 /// ```
 pub fn compute_dev_container_id(id_labels: &[(String, String)]) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
     // Sort labels to ensure determinism regardless of order
     let mut sorted_labels = id_labels.to_vec();
     sorted_labels.sort_by(|a, b| match a.0.cmp(&b.0) {
@@ -812,12 +809,12 @@ pub fn compute_dev_container_id(id_labels: &[(String, String)]) -> String {
         .collect::<Vec<_>>()
         .join(",");
 
-    let mut hasher = DefaultHasher::new();
-    label_string.hash(&mut hasher);
-    let hash = hasher.finish();
+    // Use blake3 for stable, cross-platform hashing
+    let hash = blake3::hash(label_string.as_bytes());
+    let hex_digest = hash.to_hex();
 
-    // Return first 12 characters of hex representation
-    format!("{:016x}", hash)[..12].to_string()
+    // Return first 12 characters of hex representation (lowercase)
+    hex_digest.as_str()[..12].to_string()
 }
 
 /// Container lookup operations
