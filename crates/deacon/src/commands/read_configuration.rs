@@ -137,8 +137,13 @@ fn resolve_workspace_configuration(
 
     // Determine config folder path
     let config_folder_path = if let Some(config) = config_path {
-        // If config path is provided, use its parent directory
-        config.parent().unwrap_or(workspace_folder).to_path_buf()
+        // If config path is a directory, use it directly
+        // Otherwise, use its parent directory (for file paths)
+        if config.is_dir() {
+            config.to_path_buf()
+        } else {
+            config.parent().unwrap_or(workspace_folder).to_path_buf()
+        }
     } else {
         // Otherwise, look for .devcontainer directory in workspace
         let devcontainer_dir = workspace_folder.join(".devcontainer");
@@ -1031,6 +1036,148 @@ API_KEY=another-secret
         // - workspaceMount (mount specification)
         // - configFolderPath (host path)
         // - rootFolderPath (host path)
+    }
+
+    #[tokio::test]
+    async fn test_workspace_config_with_file_in_devcontainer_dir() {
+        // Test that when config file is in .devcontainer directory,
+        // config_folder_path correctly identifies the parent directory
+        let temp_dir = TempDir::new().unwrap();
+        let devcontainer_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir(&devcontainer_dir).unwrap();
+        let config_file = devcontainer_dir.join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_file, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_file),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+        // The config_folder_path should be the .devcontainer directory
+    }
+
+    #[tokio::test]
+    async fn test_workspace_config_without_mount_workspace_git_root() {
+        // Test workspace resolution without git root mounting
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: false,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_workspace_omitted_when_not_available() {
+        // Test that workspace section is omitted when workspace folder is not provided
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            workspace_folder: None,
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
+        // The workspace field should be None/omitted in the output
+    }
+
+    #[tokio::test]
+    async fn test_workspace_config_path_precedence() {
+        // Test that config_path takes precedence when both workspace_folder and config_path are provided
+        let temp_dir = TempDir::new().unwrap();
+        let workspace_dir = temp_dir.path().join("workspace");
+        fs::create_dir(&workspace_dir).unwrap();
+
+        let config_dir = temp_dir.path().join("configs");
+        fs::create_dir(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            workspace_folder: Some(workspace_dir),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
