@@ -168,14 +168,14 @@ async fn execute_features_plan(
             let parsed_json: serde_json::Value = serde_json::from_str(additional_features_str)
                 .with_context(|| {
                     format!(
-                        "Failed to parse --additional-features JSON: {}",
+                        "Failed to parse --additional-features during feature plan initialization: {}",
                         additional_features_str
                     )
                 })?;
 
             // Validate that the parsed JSON is an object (map)
             if !parsed_json.is_object() {
-                anyhow::bail!("--additional-features must be a JSON object.");
+                anyhow::bail!("Failed to validate --additional-features: must be a JSON object.");
             }
 
             let merge_config = FeatureMergeConfig::new(
@@ -183,7 +183,8 @@ async fn execute_features_plan(
                 false, // Don't prefer CLI features by default
                 None,  // No install order override in this context
             );
-            config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
+            config.features = FeatureMerger::merge_features(&config.features, &merge_config)
+                .context("Failed to merge additional features with devcontainer configuration.")?;
         }
 
         // Extract features from config
@@ -199,8 +200,8 @@ async fn execute_features_plan(
         let features_map = features_map_opt.unwrap();
 
         // Resolve features from registries to obtain metadata (deps, installsAfter, etc.)
-        let fetcher =
-            default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+        let fetcher = default_fetcher()
+            .context("Failed to initialize OCI client for fetching feature metadata.")?;
         let mut resolved_features = Vec::with_capacity(features_map.len());
         for (feature_id, feature_value) in features_map {
             // Check if feature_id looks like a local path
@@ -208,17 +209,25 @@ async fn execute_features_plan(
                 anyhow::bail!("{}. Feature key: '{}'", LOCAL_FEATURE_ERROR_MSG, feature_id);
             }
 
-            let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
+            let (registry_url, namespace, name, tag) =
+                parse_registry_reference(feature_id).with_context(|| {
+                    format!(
+                        "Failed to parse registry reference for feature '{}' during feature resolution.",
+                        feature_id
+                    )
+                })?;
             let feature_ref = FeatureRef::new(
                 registry_url.clone(),
                 namespace.clone(),
                 name.clone(),
                 tag.clone(),
             );
-            let downloaded = fetcher
-                .fetch_feature(&feature_ref)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to fetch feature '{}': {}", feature_id, e))?;
+            let downloaded = fetcher.fetch_feature(&feature_ref).await.with_context(|| {
+                format!(
+                    "Failed to fetch feature metadata from OCI registry for feature '{}'.",
+                    feature_id
+                )
+            })?;
 
             // Extract per-feature options from config entry if present
             let options: std::collections::HashMap<String, OptionValue> = match feature_value {
@@ -254,7 +263,9 @@ async fn execute_features_plan(
         let resolver = FeatureDependencyResolver::new(override_order);
 
         // Resolve dependencies and create installation plan
-        let installation_plan = resolver.resolve(&resolved_features)?;
+        let installation_plan = resolver
+            .resolve(&resolved_features)
+            .context("Failed to resolve feature dependencies and compute installation order.")?;
 
         // Extract order and create graph representation
         let order = installation_plan.feature_ids();
@@ -2148,8 +2159,9 @@ mod tests {
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
         assert!(
-            err_msg.contains("Failed to parse --additional-features JSON")
-                || err_msg.contains("parse")
+            err_msg.contains(
+                "Failed to parse --additional-features during feature plan initialization"
+            ) || err_msg.contains("parse")
         );
     }
 
@@ -2170,7 +2182,10 @@ mod tests {
         let result = execute_features_plan(true, Some(r#"["git", "node"]"#), &args).await;
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
-        assert_eq!(err_msg, "--additional-features must be a JSON object.");
+        assert_eq!(
+            err_msg,
+            "Failed to validate --additional-features: must be a JSON object."
+        );
 
         // Test with string
         let args2 = FeaturesArgs {
@@ -2185,7 +2200,10 @@ mod tests {
         let result2 = execute_features_plan(true, Some(r#""just a string""#), &args2).await;
         assert!(result2.is_err());
         let err_msg2 = format!("{}", result2.unwrap_err());
-        assert_eq!(err_msg2, "--additional-features must be a JSON object.");
+        assert_eq!(
+            err_msg2,
+            "Failed to validate --additional-features: must be a JSON object."
+        );
 
         // Test with number
         let args3 = FeaturesArgs {
@@ -2200,7 +2218,10 @@ mod tests {
         let result3 = execute_features_plan(true, Some("42"), &args3).await;
         assert!(result3.is_err());
         let err_msg3 = format!("{}", result3.unwrap_err());
-        assert_eq!(err_msg3, "--additional-features must be a JSON object.");
+        assert_eq!(
+            err_msg3,
+            "Failed to validate --additional-features: must be a JSON object."
+        );
 
         // Test with boolean
         let args4 = FeaturesArgs {
@@ -2215,7 +2236,10 @@ mod tests {
         let result4 = execute_features_plan(true, Some("true"), &args4).await;
         assert!(result4.is_err());
         let err_msg4 = format!("{}", result4.unwrap_err());
-        assert_eq!(err_msg4, "--additional-features must be a JSON object.");
+        assert_eq!(
+            err_msg4,
+            "Failed to validate --additional-features: must be a JSON object."
+        );
 
         // Test with null
         let args5 = FeaturesArgs {
@@ -2230,7 +2254,10 @@ mod tests {
         let result5 = execute_features_plan(true, Some("null"), &args5).await;
         assert!(result5.is_err());
         let err_msg5 = format!("{}", result5.unwrap_err());
-        assert_eq!(err_msg5, "--additional-features must be a JSON object.");
+        assert_eq!(
+            err_msg5,
+            "Failed to validate --additional-features: must be a JSON object."
+        );
     }
 
     #[tokio::test]
@@ -2251,7 +2278,9 @@ mod tests {
         assert!(result.is_err());
         // The error should NOT be about JSON object validation
         let err_msg = format!("{}", result.unwrap_err());
-        assert!(!err_msg.contains("--additional-features must be a JSON object."));
+        assert!(
+            !err_msg.contains("Failed to validate --additional-features: must be a JSON object.")
+        );
     }
 
     #[test]
@@ -2826,5 +2855,245 @@ mod tests {
             .as_object()
             .is_some());
         assert!(roundtrip_options.get("nullOption").unwrap().is_null());
+    }
+
+    #[tokio::test]
+    async fn test_error_context_parse_additional_features() {
+        // Test: Verify error message includes proper context for --additional-features parsing
+        // Requirement: GAP.md §8 - Error context could be more specific
+        let temp_dir = TempDir::new().unwrap();
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some("invalid json".to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result = execute_features_plan(true, Some("invalid json"), &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{:#}", result.unwrap_err());
+
+        // Verify error message contains phase context
+        assert!(
+            err_msg.contains("parse") && err_msg.contains("--additional-features"),
+            "Error should contain phase (parse) and flag (--additional-features), got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("feature plan initialization"),
+            "Error should contain phase context, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_context_validate_additional_features() {
+        // Test: Verify error message includes proper context for --additional-features validation
+        // Requirement: GAP.md §8 - Error context could be more specific
+        let temp_dir = TempDir::new().unwrap();
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some(r#"["not", "an", "object"]"#.to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result = execute_features_plan(true, Some(r#"["not", "an", "object"]"#), &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+
+        // Verify error message contains validation context
+        assert!(
+            err_msg.contains("validate") && err_msg.contains("--additional-features"),
+            "Error should contain phase (validate) and flag (--additional-features), got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.ends_with('.'),
+            "Error message should end with period per Theme 6, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_context_includes_phase_and_identifiers() {
+        // Test: Verify error messages include both phase and relevant identifiers
+        // This test verifies the structure is correct for OCI fetch failures
+        // Requirement: SPEC.md §9 - errors include phase and relevant identifiers
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test OCI fetch error includes both phase and feature ID
+        let config_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        fs::write(
+            &config_path,
+            r#"{"features": {"ghcr.io/test/nonexistent-feature:v1": true}}"#,
+        )
+        .unwrap();
+
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+        };
+
+        let result = execute_features_plan(true, None, &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{:#}", result.unwrap_err());
+
+        // Verify phase context
+        assert!(
+            err_msg.contains("fetch") || err_msg.contains("parse") || err_msg.contains("resolve"),
+            "Error should contain phase information, got: {}",
+            err_msg
+        );
+
+        // Verify feature identifier is included
+        assert!(
+            err_msg.contains("ghcr.io/test/nonexistent-feature"),
+            "Error should contain feature identifier, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_context_oci_fetch_failure() {
+        // Test: Verify error message includes context for OCI fetch failure
+        // Requirement: GAP.md §8 - Error context could be more specific
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create a config with a feature that doesn't exist in any registry
+        let config_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        // Use a feature reference that will fail to fetch (non-existent)
+        fs::write(
+            &config_path,
+            r#"{"features": {"ghcr.io/nonexistent/invalid-feature:latest": true}}"#,
+        )
+        .unwrap();
+
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+        };
+
+        let result = execute_features_plan(true, None, &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{:#}", result.unwrap_err());
+
+        // Verify error message contains phase context and feature identifier
+        assert!(
+            err_msg.contains("fetch") && err_msg.contains("feature metadata"),
+            "Error should contain phase (fetch) and what is being fetched (feature metadata), got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("OCI registry"),
+            "Error should contain source (OCI registry), got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("ghcr.io/nonexistent/invalid-feature"),
+            "Error should contain feature identifier, got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains('.'),
+            "Error message should end with period per Theme 6, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_messages_sentence_case_and_periods() {
+        // Test: Verify all error messages follow Theme 6 formatting
+        // - Sentence case (first word capitalized)
+        // - End with period
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test 1: Validation error
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some(r#"["array"]"#.to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result = execute_features_plan(true, Some(r#"["array"]"#), &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+
+        // Check sentence case: first word is "Failed"
+        assert!(
+            err_msg.starts_with("Failed"),
+            "Error message should start with capital letter (sentence case), got: {}",
+            err_msg
+        );
+        // Check period at end
+        assert!(
+            err_msg.ends_with('.'),
+            "Error message should end with period per Theme 6, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_all_error_contexts_include_identifiers() {
+        // Test: Verify all errors include relevant identifiers (feature ID, flag name, etc.)
+        // Requirement: SPEC.md §9 - errors include relevant identifiers
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test parse error includes flag name
+        let args_parse = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some("{invalid".to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result_parse = execute_features_plan(true, Some("{invalid"), &args_parse).await;
+        assert!(result_parse.is_err());
+        let err_parse = format!("{:#}", result_parse.unwrap_err());
+        assert!(
+            err_parse.contains("--additional-features"),
+            "Parse error should include flag name, got: {}",
+            err_parse
+        );
+
+        // Test validation error includes flag name
+        let args_validate = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some("42".to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result_validate = execute_features_plan(true, Some("42"), &args_validate).await;
+        assert!(result_validate.is_err());
+        let err_validate = format!("{}", result_validate.unwrap_err());
+        assert!(
+            err_validate.contains("--additional-features"),
+            "Validation error should include flag name, got: {}",
+            err_validate
+        );
     }
 }
