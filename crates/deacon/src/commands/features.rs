@@ -205,108 +205,112 @@ async fn execute_features_plan(
         let mut resolved_features = Vec::with_capacity(features_map.len());
 
         // Add span for metadata fetch loop with structured fields
-        let fetch_start = std::time::Instant::now();
-        let fetch_span = tracing::span!(
-            target: "deacon::features",
-            tracing::Level::INFO,
-            "features.fetch_metadata",
-            feature_count = features_map.len(),
-            fetch_ms = tracing::field::Empty
-        );
-        let _fetch_guard = fetch_span.enter();
+        {
+            let fetch_start = std::time::Instant::now();
+            let fetch_span = tracing::span!(
+                target: "deacon::features",
+                tracing::Level::INFO,
+                "features.fetch_metadata",
+                feature_count = features_map.len(),
+                fetch_ms = tracing::field::Empty
+            );
+            let _fetch_guard = fetch_span.enter();
 
-        for (feature_id, feature_value) in features_map {
-            // Check if feature_id looks like a local path
-            if is_local_path(feature_id) {
-                anyhow::bail!("{}. Feature key: '{}'", LOCAL_FEATURE_ERROR_MSG, feature_id);
-            }
+            for (feature_id, feature_value) in features_map {
+                // Check if feature_id looks like a local path
+                if is_local_path(feature_id) {
+                    anyhow::bail!("{}. Feature key: '{}'", LOCAL_FEATURE_ERROR_MSG, feature_id);
+                }
 
-            let (registry_url, namespace, name, tag) =
-                parse_registry_reference(feature_id).with_context(|| {
+                let (registry_url, namespace, name, tag) =
+                    parse_registry_reference(feature_id).with_context(|| {
+                        format!(
+                            "Failed to parse registry reference for feature '{}' during feature resolution.",
+                            feature_id
+                        )
+                    })?;
+                let feature_ref = FeatureRef::new(
+                    registry_url.clone(),
+                    namespace.clone(),
+                    name.clone(),
+                    tag.clone(),
+                );
+                let downloaded = fetcher.fetch_feature(&feature_ref).await.with_context(|| {
                     format!(
-                        "Failed to parse registry reference for feature '{}' during feature resolution.",
+                        "Failed to fetch feature metadata from OCI registry for feature '{}'.",
                         feature_id
                     )
                 })?;
-            let feature_ref = FeatureRef::new(
-                registry_url.clone(),
-                namespace.clone(),
-                name.clone(),
-                tag.clone(),
-            );
-            let downloaded = fetcher.fetch_feature(&feature_ref).await.with_context(|| {
-                format!(
-                    "Failed to fetch feature metadata from OCI registry for feature '{}'.",
-                    feature_id
-                )
-            })?;
 
-            // Extract per-feature options from config entry if present
-            let options: std::collections::HashMap<String, OptionValue> = match feature_value {
-                serde_json::Value::Object(map) => map
-                    .clone()
-                    .into_iter()
-                    .map(|(k, v)| {
-                        // Convert serde_json::Value to OptionValue, preserving all types
-                        let option_value = match v {
-                            serde_json::Value::Bool(b) => OptionValue::Boolean(b),
-                            serde_json::Value::String(s) => OptionValue::String(s),
-                            serde_json::Value::Number(n) => OptionValue::Number(n),
-                            serde_json::Value::Array(a) => OptionValue::Array(a),
-                            serde_json::Value::Object(o) => OptionValue::Object(o),
-                            serde_json::Value::Null => OptionValue::Null,
-                        };
-                        (k, option_value)
-                    })
-                    .collect(),
-                _ => std::collections::HashMap::new(),
-            };
+                // Extract per-feature options from config entry if present
+                let options: std::collections::HashMap<String, OptionValue> = match feature_value {
+                    serde_json::Value::Object(map) => map
+                        .clone()
+                        .into_iter()
+                        .map(|(k, v)| {
+                            // Convert serde_json::Value to OptionValue, preserving all types
+                            let option_value = match v {
+                                serde_json::Value::Bool(b) => OptionValue::Boolean(b),
+                                serde_json::Value::String(s) => OptionValue::String(s),
+                                serde_json::Value::Number(n) => OptionValue::Number(n),
+                                serde_json::Value::Array(a) => OptionValue::Array(a),
+                                serde_json::Value::Object(o) => OptionValue::Object(o),
+                                serde_json::Value::Null => OptionValue::Null,
+                            };
+                            (k, option_value)
+                        })
+                        .collect(),
+                    _ => std::collections::HashMap::new(),
+                };
 
-            resolved_features.push(ResolvedFeature {
-                id: downloaded.metadata.id.clone(),
-                source: feature_ref.reference(),
-                options,
-                metadata: downloaded.metadata,
-            });
+                resolved_features.push(ResolvedFeature {
+                    id: downloaded.metadata.id.clone(),
+                    source: feature_ref.reference(),
+                    options,
+                    metadata: downloaded.metadata,
+                });
+            }
+
+            // Record fetch duration before exiting span
+            let fetch_duration_ms = fetch_start.elapsed().as_millis() as u64;
+            fetch_span.record("fetch_ms", fetch_duration_ms);
         }
-
-        // Record fetch duration before exiting span
-        let fetch_duration_ms = fetch_start.elapsed().as_millis() as u64;
-        fetch_span.record("fetch_ms", fetch_duration_ms);
-        drop(_fetch_guard);
 
         // Create dependency resolver with override order from config
         let override_order = config.override_feature_install_order.clone();
         let resolver = FeatureDependencyResolver::new(override_order);
 
         // Add span for dependency resolution with structured fields
-        let resolve_start = std::time::Instant::now();
-        let node_count = resolved_features.len();
-        // Count total edges (dependencies) across all features
-        let edge_count: usize = resolved_features
-            .iter()
-            .map(|f| f.metadata.installs_after.len() + f.metadata.depends_on.len())
-            .sum();
+        let installation_plan = {
+            let resolve_start = std::time::Instant::now();
+            let node_count = resolved_features.len();
+            // Count total edges (dependencies) across all features
+            let edge_count: usize = resolved_features
+                .iter()
+                .map(|f| f.metadata.installs_after.len() + f.metadata.depends_on.len())
+                .sum();
 
-        let resolve_span = tracing::span!(
-            target: "deacon::features",
-            tracing::Level::INFO,
-            "features.resolve_dependencies",
-            node_count = node_count,
-            edge_count = edge_count,
-            resolve_ms = tracing::field::Empty
-        );
-        let _resolve_guard = resolve_span.enter();
+            let resolve_span = tracing::span!(
+                target: "deacon::features",
+                tracing::Level::INFO,
+                "features.resolve_dependencies",
+                node_count = node_count,
+                edge_count = edge_count,
+                resolve_ms = tracing::field::Empty
+            );
+            let _resolve_guard = resolve_span.enter();
 
-        // Resolve dependencies and create installation plan
-        let installation_plan = resolver
-            .resolve(&resolved_features)
-            .context("Failed to resolve feature dependencies and compute installation order.")?;
+            // Resolve dependencies and create installation plan
+            let plan = resolver.resolve(&resolved_features).context(
+                "Failed to resolve feature dependencies and compute installation order.",
+            )?;
 
-        // Record resolution duration before exiting span
-        let resolve_duration_ms = resolve_start.elapsed().as_millis() as u64;
-        resolve_span.record("resolve_ms", resolve_duration_ms);
-        drop(_resolve_guard);
+            // Record resolution duration before exiting span
+            let resolve_duration_ms = resolve_start.elapsed().as_millis() as u64;
+            resolve_span.record("resolve_ms", resolve_duration_ms);
+
+            plan
+        };
 
         // Extract order and create graph representation
         let order = installation_plan.feature_ids();
