@@ -203,6 +203,18 @@ async fn execute_features_plan(
         let fetcher = default_fetcher()
             .context("Failed to initialize OCI client for fetching feature metadata.")?;
         let mut resolved_features = Vec::with_capacity(features_map.len());
+
+        // Add span for metadata fetch loop with structured fields
+        let fetch_start = std::time::Instant::now();
+        let fetch_span = tracing::span!(
+            target: "deacon::features",
+            tracing::Level::INFO,
+            "features.fetch_metadata",
+            feature_count = features_map.len(),
+            fetch_ms = tracing::field::Empty
+        );
+        let _fetch_guard = fetch_span.enter();
+
         for (feature_id, feature_value) in features_map {
             // Check if feature_id looks like a local path
             if is_local_path(feature_id) {
@@ -258,14 +270,43 @@ async fn execute_features_plan(
             });
         }
 
+        // Record fetch duration before exiting span
+        let fetch_duration_ms = fetch_start.elapsed().as_millis() as u64;
+        fetch_span.record("fetch_ms", fetch_duration_ms);
+        drop(_fetch_guard);
+
         // Create dependency resolver with override order from config
         let override_order = config.override_feature_install_order.clone();
         let resolver = FeatureDependencyResolver::new(override_order);
+
+        // Add span for dependency resolution with structured fields
+        let resolve_start = std::time::Instant::now();
+        let node_count = resolved_features.len();
+        // Count total edges (dependencies) across all features
+        let edge_count: usize = resolved_features
+            .iter()
+            .map(|f| f.metadata.installs_after.len() + f.metadata.depends_on.len())
+            .sum();
+
+        let resolve_span = tracing::span!(
+            target: "deacon::features",
+            tracing::Level::INFO,
+            "features.resolve_dependencies",
+            node_count = node_count,
+            edge_count = edge_count,
+            resolve_ms = tracing::field::Empty
+        );
+        let _resolve_guard = resolve_span.enter();
 
         // Resolve dependencies and create installation plan
         let installation_plan = resolver
             .resolve(&resolved_features)
             .context("Failed to resolve feature dependencies and compute installation order.")?;
+
+        // Record resolution duration before exiting span
+        let resolve_duration_ms = resolve_start.elapsed().as_millis() as u64;
+        resolve_span.record("resolve_ms", resolve_duration_ms);
+        drop(_resolve_guard);
 
         // Extract order and create graph representation
         let order = installation_plan.feature_ids();
