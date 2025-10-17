@@ -660,6 +660,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     }
 
     // Resolve features if requested
+    // Per spec: Features are needed for:
+    // 1. When --include-features-configuration is set (explicit request)
+    // 2. When --include-merged-configuration is set WITHOUT a container
+    //    (to derive metadata from features per issue #289)
     let features_configuration = if args.include_features_configuration
         || (args.include_merged_configuration && args.container_id.is_none())
     {
