@@ -1,3 +1,17 @@
+---
+name: Subcommand Design
+description: Generate Detailed Design Specification for DevContainer CLI subcommands
+version: 1
+slashCommand: subcommand-design
+arguments:
+  - name: subcommand
+    description: The DevContainer CLI subcommand to document (e.g., up, build)
+    required: true
+tags:
+  - devcontainer
+  - spec
+  - cli
+---
 # Generate Detailed Design Specification for DevContainer CLI Subcommand
 
 ## Command Usage
