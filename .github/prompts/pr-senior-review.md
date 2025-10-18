@@ -57,12 +57,11 @@ Use the standards and acceptance bar defined by the chat mode `maintainer-review
      - Security vulnerabilities
    - Incorporate coderabbit findings into your review, but apply your own judgment—coderabbit is a tool to assist, not replace your analysis.
 
-3. **Validate quality gates locally** (YOU are the quality gate)
-   - `cargo fmt --all -- --check` — Does code follow formatting standards?
-   - `cargo build --verbose` — Does it compile without errors?
-   - `cargo test --verbose -- --test-threads=1` — Do all tests pass?
-   - `cargo test --doc` — Do documentation examples work?
-   - `cargo clippy --all-targets -- -D warnings` — Are there any code quality warnings?
+3. **Note CI quality gates status** (do NOT re-run locally)
+   - The CI status (passing/failing) will be provided in the prompt context.
+   - If CI is failing, note which checks failed and include remediation in your action items.
+   - If CI is passing, note this as validation that fmt/build/test/clippy all pass.
+   - Do NOT waste tokens re-running these checks locally—trust the CI pipeline.
 
 4. **Deep code review** (apply rigorous scrutiny)
    - **Requirements verification**: Does the code actually solve the problem described in the issue?
@@ -87,7 +86,7 @@ Use the standards and acceptance bar defined by the chat mode `maintainer-review
 # Acceptance Bar
 As the sole reviewer, you must enforce these standards:
 
-- **All quality gate commands pass**: fmt, build, test, doctest, clippy—zero tolerance for failures
+- **All CI checks pass**: The CI status provided in the prompt must be "passing" (fmt, build, test, doctest, clippy)—zero tolerance for failures
 - **Requirements are met**: Every requirement in the issue is addressed
 - **Tests are comprehensive**: Not just "tests exist" but tests that actually validate correctness
 - **Code is production-ready**: No obvious bugs, no sloppy patterns, follows repository conventions
@@ -105,6 +104,7 @@ Summary:
 - Key risks: [list]
 
 Detailed Findings:
+- CI Status: [passing/failing - note which checks if failing]
 - Specification alignment:
 - Design and architecture:
 - Error handling and UX:

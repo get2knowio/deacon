@@ -179,15 +179,51 @@ EOF
     fi
 }
 
+# Function to check CI status for a PR
+check_ci_status() {
+    local branch_name="$1"
+    log_info "Checking CI status for branch ${branch_name}..."
+    
+    # Get the latest workflow run for this branch
+    local workflow_status
+    workflow_status=$(gh run list --branch "$branch_name" --limit 1 --json status,conclusion --jq '.[0]')
+    
+    if [ -z "$workflow_status" ] || [ "$workflow_status" = "null" ]; then
+        echo "no-run"
+        return 0
+    fi
+    
+    local status
+    local conclusion
+    status=$(echo "$workflow_status" | jq -r '.status')
+    conclusion=$(echo "$workflow_status" | jq -r '.conclusion')
+    
+    if [ "$status" = "completed" ]; then
+        if [ "$conclusion" = "success" ]; then
+            echo "passing"
+        else
+            echo "failing"
+        fi
+    else
+        echo "running"
+    fi
+}
+
 # Function to run copilot command with file-based prompt
 run_copilot() {
     local prompt_name="$1"
     local prompt_file="$2"
     local pr_number="$3"
     local model="$4"
+    local extra_context="${5:-}"
     log_info "Running copilot for: ${prompt_name} (using ${model})"
     
-    if copilot --allow-all-paths --allow-all-tools --model "$model" --prompt "Follow the instructions in ${prompt_file} for PR #${pr_number}"; then
+    local prompt_text="Follow the instructions in ${prompt_file} for PR #${pr_number}"
+    if [ -n "$extra_context" ]; then
+        prompt_text="${prompt_text}. ${extra_context}"
+    fi
+    
+    if copilot --allow-all-paths --allow-all-tools --model "$model" --prompt "$prompt_text"; then
         log_success "Completed: ${prompt_name}"
     else
         log_error "Failed: ${prompt_name}"
@@ -450,7 +486,21 @@ main() {
     
     # Step: PR Senior Review
     if [ -z "$START_STEP" ] || [ "$START_STEP" = "branch" ] || [ "$START_STEP" = "pr" ] || [ "$START_STEP" = "implement" ] || [ "$START_STEP" = "review" ]; then
-        if ! run_copilot "PR Senior Review" ".github/prompts/pr-senior-review.md" "$pr_number" "claude-sonnet-4.5"; then
+        # Wait for CI to complete before review
+        log_info "Waiting for CI checks to complete before review..."
+        if wait_for_workflow "$branch_name"; then
+            log_success "CI checks passed!"
+            local ci_status="passing"
+        else
+            log_error "CI checks failed!"
+            local ci_status="failing"
+        fi
+        echo
+        pause_if_interactive
+        
+        # Run review with CI status context
+        local ci_context="CI Status: All GitHub Actions checks are ${ci_status}. Do not re-run local quality gates (fmt/build/test/clippy) - just note the CI status in your review."
+        if ! run_copilot "PR Senior Review" ".github/prompts/pr-senior-review.md" "$pr_number" "claude-sonnet-4.5" "$ci_context"; then
             log_warning "Senior review had issues. Please review manually."
             exit 1
         fi
@@ -470,7 +520,9 @@ main() {
     
     # Step: Wait for workflow
     if [ -z "$START_STEP" ] || [ "$START_STEP" = "branch" ] || [ "$START_STEP" = "pr" ] || [ "$START_STEP" = "implement" ] || [ "$START_STEP" = "review" ] || [ "$START_STEP" = "apply" ] || [ "$START_STEP" = "workflow" ]; then
+        log_info "Waiting for CI checks after applying review feedback..."
         if wait_for_workflow "$branch_name"; then
+            log_success "CI checks passed after review feedback!"
             echo
             pause_if_interactive
         else

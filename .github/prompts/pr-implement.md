@@ -59,9 +59,17 @@ Use this prompt together with the rust-incremental-implementer chatmode. The cha
    - PR description includes a final summary of changes and a fully checked checklist.
 
 # Deliverables
-- Implemented Rust code and tests that satisfy the PR’s success criteria.
+- Implemented Rust code and tests that satisfy the PR's success criteria.
 - Updated PR body with a maintained progress checklist and final summary.
-- Updated PR name in a conventional commit format indicating the work that was done.
+- Updated PR title in Conventional Commits format using one of these lowercase prefixes:
+  - `feat:` - New features or capabilities
+  - `fix:` - Bug fixes
+  - `perf:` - Performance improvements
+  - `docs:` - Documentation changes
+  - `refactor:` - Code refactoring without behavior changes
+  - `ci:` - CI/CD pipeline changes
+  - `build:` - Build system or dependency changes
+  - `chore:` - Maintenance tasks
 - Passing CI across all workflows.
 
 # Notes
