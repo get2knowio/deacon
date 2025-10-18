@@ -121,6 +121,10 @@ create_branch() {
     else
         git checkout -b "$branch_name"
         log_success "Created and switched to branch: ${branch_name}"
+        
+        # Create an initial empty commit so we can push and create PR
+        git commit --allow-empty -m "Initial commit for issue #${issue_id}"
+        log_success "Created initial commit"
     fi
     
     echo "$branch_name"
