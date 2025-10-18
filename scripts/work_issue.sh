@@ -135,7 +135,7 @@ create_pr() {
     local issue_id="$1"
     local branch_name="$2"
     
-    log_info "Creating initial PR for issue #${issue_id}..."
+    log_info "Creating initial PR for issue #${issue_id}..." >&2
     
     # Fetch issue details
     local issue_title
@@ -157,21 +157,21 @@ EOF
 )
     
     # Push the branch to remote first (force push to handle any existing remote branch)
-    log_info "Pushing branch to remote..."
-    git push -u origin "$branch_name" --force
+    log_info "Pushing branch to remote..." >&2
+    git push -u origin "$branch_name" --force >&2
     
     # Check if PR already exists
     local existing_pr
     existing_pr=$(gh pr list --head "$branch_name" --json number --jq '.[0].number' 2>/dev/null || echo "")
     
     if [ -n "$existing_pr" ]; then
-        log_warning "PR #${existing_pr} already exists for branch ${branch_name}"
+        log_warning "PR #${existing_pr} already exists for branch ${branch_name}" >&2
         echo "$existing_pr"
     else
         # Create PR
         local pr_number
-        pr_number=$(gh pr create --title "Fix: ${issue_title}" --body "$pr_body" --draft | grep -oP '(?<=pull/)[0-9]+')
-        log_success "Created draft PR #${pr_number}"
+        pr_number=$(gh pr create --title "Fix: ${issue_title}" --body "$pr_body" --draft 2>&1 | grep -oP '(?<=pull/)[0-9]+')
+        log_success "Created draft PR #${pr_number}" >&2
         echo "$pr_number"
     fi
 }
