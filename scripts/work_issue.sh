@@ -156,9 +156,9 @@ Fixes #${issue_id}
 EOF
 )
     
-    # Push the branch to remote first
+    # Push the branch to remote first (force push to handle any existing remote branch)
     log_info "Pushing branch to remote..."
-    git push -u origin "$branch_name"
+    git push -u origin "$branch_name" --force
     
     # Check if PR already exists
     local existing_pr
