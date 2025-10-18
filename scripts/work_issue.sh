@@ -176,15 +176,16 @@ EOF
     fi
 }
 
-# Function to run copilot command
+# Function to run copilot command with file-based prompt
 run_copilot() {
-    local prompt="$1"
-    log_info "Running: copilot --prompt ${prompt}"
+    local prompt_name="$1"
+    local prompt_file="$2"
+    log_info "Running copilot for: ${prompt_name}"
     
-    if copilot --prompt "$prompt"; then
-        log_success "Completed: ${prompt}"
+    if copilot --prompt "Follow the instructions in ${prompt_file}"; then
+        log_success "Completed: ${prompt_name}"
     else
-        log_error "Failed: ${prompt}"
+        log_error "Failed: ${prompt_name}"
         return 1
     fi
 }
@@ -369,21 +370,21 @@ main() {
     echo
     pause_if_interactive
     
-    if ! run_copilot "/pr-implement"; then
+    if ! run_copilot "PR Implementation" ".github/prompts/pr-implement.md"; then
         log_error "PR implementation failed. Please review manually."
         exit 1
     fi
     echo
     pause_if_interactive
     
-    if ! run_copilot "/pr-senior-review"; then
+    if ! run_copilot "PR Senior Review" ".github/prompts/pr-senior-review.md"; then
         log_warning "Senior review had issues. Please review manually."
         exit 1
     fi
     echo
     pause_if_interactive
 
-    if ! run_copilot "/pr-apply-review"; then
+    if ! run_copilot "PR Apply Review" ".github/prompts/pr-apply-review.md"; then
         log_warning "Applying review feedback had issues. Please review manually."
         exit 1
     fi
