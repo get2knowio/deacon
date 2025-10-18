@@ -156,8 +156,9 @@ Fixes #${issue_id}
 EOF
 )
     
-    # Push the branch first (even if empty, to create the PR)
-    git push -u origin "$branch_name" 2>/dev/null || true
+    # Push the branch to remote first
+    log_info "Pushing branch to remote..."
+    git push -u origin "$branch_name"
     
     # Check if PR already exists
     local existing_pr
