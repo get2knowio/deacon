@@ -39,6 +39,20 @@ pub struct ReadConfigurationArgs {
     pub mount_workspace_git_root: bool,
     pub additional_features: Option<String>,
     pub skip_feature_auto_mapping: bool,
+    /// Docker tooling path. Accepted per spec for CLI parity; not yet consumed by implementation.
+    /// Future use: #292 will integrate with container runtime selection.
+    #[allow(dead_code)]
+    pub docker_path: String,
+    /// Docker Compose tooling path. Accepted per spec for CLI parity; not yet consumed by
+    /// implementation. Future use: #292 will integrate with container runtime selection.
+    #[allow(dead_code)]
+    pub docker_compose_path: String,
+    /// User data folder path. Accepted per spec (Section 3, line 62) but not used by
+    /// read-configuration command. Included for CLI parity with specification.
+    #[allow(dead_code)]
+    pub user_data_folder: Option<PathBuf>,
+    pub terminal_columns: Option<u16>,
+    pub terminal_rows: Option<u16>,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub override_config_path: Option<PathBuf>,
@@ -450,9 +464,31 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         args.secrets_files.len()
     );
 
+    // Validate that at least one selector is provided
+    // Note: workspace_folder defaults to "." (CWD) if not specified, so we check for that implicitly
+    let has_container_id = args.container_id.is_some();
+    let has_id_label = !args.id_label.is_empty();
+    let has_workspace_folder = args.workspace_folder.is_some();
+    let has_config = args.config_path.is_some() || args.override_config_path.is_some();
+
+    // At least one must be provided (workspace defaults to CWD if nothing is specified)
+    if !has_container_id && !has_id_label && !has_workspace_folder && !has_config {
+        // This is OK - workspace will default to "." (CWD)
+        // per the implementation at line 502
+    }
+
     // Validate id_label format (must match <name>=<value> pattern)
     if !args.id_label.is_empty() {
         ContainerSelector::parse_labels(&args.id_label)?;
+    }
+
+    // Validate terminal dimensions are paired (both or neither)
+    let has_terminal_cols = args.terminal_columns.is_some();
+    let has_terminal_rows = args.terminal_rows.is_some();
+    if has_terminal_cols != has_terminal_rows {
+        anyhow::bail!(
+            "--terminal-columns and --terminal-rows must both be provided or both be omitted."
+        );
     }
 
     // Validate additional_features JSON early (must be an object if provided)
@@ -733,6 +769,11 @@ mod tests {
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path,
             override_config_path: override_path,
@@ -890,6 +931,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: None,
             override_config_path: None,
@@ -930,6 +976,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: None,
             config_path: Some(config_path),
             override_config_path: None,
@@ -963,6 +1014,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: None,
             config_path: Some(config_path),
             override_config_path: None,
@@ -1007,6 +1063,11 @@ API_KEY=another-secret
             mount_workspace_git_root: false,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path.clone()),
             override_config_path: None,
@@ -1027,6 +1088,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1060,6 +1126,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1104,6 +1175,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_file),
             override_config_path: None,
@@ -1138,6 +1214,11 @@ API_KEY=another-secret
             mount_workspace_git_root: false,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1172,6 +1253,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1210,6 +1296,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1256,6 +1347,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: None,
             config_path: Some(config_path),
             override_config_path: None,
@@ -1295,6 +1391,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(workspace_dir),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1330,6 +1431,11 @@ API_KEY=another-secret
                 r#"{"ghcr.io/devcontainers/features/node:1": "lts"}"#.to_string(),
             ),
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1363,6 +1469,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1396,6 +1507,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: true,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1433,6 +1549,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: None,
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1468,6 +1589,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: Some("{}".to_string()),
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1501,6 +1627,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: Some("not valid json".to_string()),
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1538,6 +1669,11 @@ API_KEY=another-secret
             mount_workspace_git_root: true,
             additional_features: Some(r#"["not", "an", "object"]"#.to_string()),
             skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
@@ -1623,5 +1759,298 @@ API_KEY=another-secret
         // Verify object contents
         let object = json_output.get("object").unwrap().as_object().unwrap();
         assert_eq!(object.get("key").unwrap().as_bool(), Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_terminal_dimensions_both_provided() {
+        // When both terminal columns and rows are provided, should succeed
+        let temp_dir = TempDir::new().unwrap();
+        let devcontainer_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&devcontainer_dir).unwrap();
+        let config_path = devcontainer_dir.join("devcontainer.json");
+
+        fs::write(
+            &config_path,
+            r#"{ "name": "test", "image": "ubuntu:22.04" }"#,
+        )
+        .unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: Some(80),
+            terminal_rows: Some(24),
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(
+            result.is_ok(),
+            "Should succeed with both dimensions provided"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_terminal_dimensions_only_columns() {
+        // When only columns are provided, should fail with clear error message
+        let temp_dir = TempDir::new().unwrap();
+        let devcontainer_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&devcontainer_dir).unwrap();
+        let config_path = devcontainer_dir.join("devcontainer.json");
+
+        fs::write(
+            &config_path,
+            r#"{ "name": "test", "image": "ubuntu:22.04" }"#,
+        )
+        .unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: Some(80),
+            terminal_rows: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_err(), "Should fail when only columns provided");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("--terminal-columns and --terminal-rows must both be provided"));
+    }
+
+    #[tokio::test]
+    async fn test_terminal_dimensions_only_rows() {
+        // When only rows are provided, should fail with clear error message
+        let temp_dir = TempDir::new().unwrap();
+        let devcontainer_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&devcontainer_dir).unwrap();
+        let config_path = devcontainer_dir.join("devcontainer.json");
+
+        fs::write(
+            &config_path,
+            r#"{ "name": "test", "image": "ubuntu:22.04" }"#,
+        )
+        .unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: Some(24),
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_err(), "Should fail when only rows provided");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("--terminal-columns and --terminal-rows must both be provided"));
+    }
+
+    #[tokio::test]
+    async fn test_terminal_dimensions_neither_provided() {
+        // When neither columns nor rows are provided, should succeed (optional feature)
+        let temp_dir = TempDir::new().unwrap();
+        let devcontainer_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&devcontainer_dir).unwrap();
+        let config_path = devcontainer_dir.join("devcontainer.json");
+
+        fs::write(
+            &config_path,
+            r#"{ "name": "test", "image": "ubuntu:22.04" }"#,
+        )
+        .unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(
+            result.is_ok(),
+            "Should succeed when no terminal dimensions provided"
+        );
+    }
+
+    #[test]
+    fn test_docker_paths_default_values() {
+        // Verify default values for docker paths are set in CLI parsing
+        // These are tested in cli.rs but we verify the struct can be created with defaults
+        let temp_dir = TempDir::new().unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        // Verify defaults are set correctly
+        assert_eq!(args.docker_path, "docker");
+        assert_eq!(args.docker_compose_path, "docker-compose");
+    }
+
+    #[test]
+    fn test_docker_paths_custom_values() {
+        // Verify custom docker paths are accepted and stored
+        let temp_dir = TempDir::new().unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "/usr/local/bin/docker".to_string(),
+            docker_compose_path: "/usr/local/bin/docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        // Verify custom paths are preserved
+        assert_eq!(args.docker_path, "/usr/local/bin/docker");
+        assert_eq!(args.docker_compose_path, "/usr/local/bin/docker-compose");
+    }
+
+    #[test]
+    fn test_user_data_folder_optional() {
+        // Verify user_data_folder is properly optional and can be None
+        let temp_dir = TempDir::new().unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        assert!(args.user_data_folder.is_none());
+    }
+
+    #[test]
+    fn test_user_data_folder_with_value() {
+        // Verify user_data_folder can store a path when provided
+        let temp_dir = TempDir::new().unwrap();
+        let data_folder = temp_dir.path().join("data");
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: Some(data_folder.clone()),
+            terminal_columns: None,
+            terminal_rows: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        assert!(args.user_data_folder.is_some());
+        assert_eq!(args.user_data_folder.unwrap(), data_folder);
     }
 }

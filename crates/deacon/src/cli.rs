@@ -276,6 +276,15 @@ pub enum Commands {
         /// Skip feature auto-mapping (hidden testing flag)
         #[arg(long, hide = true)]
         skip_feature_auto_mapping: bool,
+        /// Terminal columns (requires --terminal-rows)
+        #[arg(long)]
+        terminal_columns: Option<u16>,
+        /// Terminal rows (requires --terminal-columns)
+        #[arg(long)]
+        terminal_rows: Option<u16>,
+        /// User data folder (accepted but not used by this subcommand)
+        #[arg(long)]
+        user_data_folder: Option<PathBuf>,
     },
 
     /// Configuration management commands
@@ -914,6 +923,9 @@ impl Cli {
                 mount_workspace_git_root,
                 additional_features,
                 skip_feature_auto_mapping,
+                terminal_columns,
+                terminal_rows,
+                user_data_folder,
             }) => {
                 use crate::commands::read_configuration::{
                     execute_read_configuration, ReadConfigurationArgs,
@@ -927,6 +939,11 @@ impl Cli {
                     mount_workspace_git_root,
                     additional_features,
                     skip_feature_auto_mapping,
+                    docker_path: self.docker_path.clone(),
+                    docker_compose_path: self.docker_compose_path.clone(),
+                    user_data_folder,
+                    terminal_columns,
+                    terminal_rows,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,

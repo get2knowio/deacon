@@ -48,7 +48,14 @@ Use the standards and acceptance bar defined by the chat mode `maintainer-review
 
 2. **Fetch latest PR state**
    - Retrieve commits, changed files, and current description using `gh pr view <PR_NUMBER>`.
-   - Run coderabbit analysis against the PR to surface hot spots via `coderabbit review --plain`.
+   - **REQUIRED**: Run coderabbit analysis against the PR to surface hot spots via `coderabbit review --plain`.
+   - Parse the coderabbit output for insights on:
+     - Code complexity and maintainability issues
+     - Potential bugs or logical errors
+     - Performance concerns
+     - Best practice violations
+     - Security vulnerabilities
+   - Incorporate coderabbit findings into your review, but apply your own judgment—coderabbit is a tool to assist, not replace your analysis.
 
 3. **Validate quality gates locally** (YOU are the quality gate)
    - `cargo fmt --all -- --check` — Does code follow formatting standards?
@@ -104,6 +111,7 @@ Detailed Findings:
 - Tests and coverage:
 - Performance and allocations:
 - Docs/examples/fixtures:
+- CodeRabbit insights: [summarize relevant findings from coderabbit analysis]
 
 Actionable Items (required for approval):
 - [ ] Item 1 — What to change, why, and acceptance criteria
