@@ -14,7 +14,7 @@ tags:
 ---
 
 # Purpose
-Apply actionable review feedback on a Rust CLI pull request, update code and tests, and iterate until all GitHub Actions workflows pass.
+Apply actionable review feedback on a Rust CLI pull request, update code and tests, and iterate until all GitHub Actions workflows pass. The PR number will be provided in the prompt (e.g., "for PR #123").
 
 # Notes and references
 Role, guardrails, and coding standards are defined by the chatmode at `.github/chatmodes/address-pr-comments.chatmode.md` (which in turn references `.github/copilot-instructions.md` and the spec under `docs/subcommand-specs/*/SPEC.md`). This prompt focuses on the task flow and deliverables only.

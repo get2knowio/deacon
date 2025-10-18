@@ -180,9 +180,11 @@ EOF
 run_copilot() {
     local prompt_name="$1"
     local prompt_file="$2"
-    log_info "Running copilot for: ${prompt_name}"
+    local pr_number="$3"
+    local model="$4"
+    log_info "Running copilot for: ${prompt_name} (using ${model})"
     
-    if copilot --allow-all-paths --allow-all-tools --prompt "Follow the instructions in ${prompt_file}"; then
+    if copilot --allow-all-paths --allow-all-tools --model "$model" --prompt "Follow the instructions in ${prompt_file} for PR #${pr_number}"; then
         log_success "Completed: ${prompt_name}"
     else
         log_error "Failed: ${prompt_name}"
@@ -370,21 +372,21 @@ main() {
     echo
     pause_if_interactive
     
-    if ! run_copilot "PR Implementation" ".github/prompts/pr-implement.md"; then
+    if ! run_copilot "PR Implementation" ".github/prompts/pr-implement.md" "$pr_number" "claude-haiku-4.5"; then
         log_error "PR implementation failed. Please review manually."
         exit 1
     fi
     echo
     pause_if_interactive
     
-    if ! run_copilot "PR Senior Review" ".github/prompts/pr-senior-review.md"; then
+    if ! run_copilot "PR Senior Review" ".github/prompts/pr-senior-review.md" "$pr_number" "claude-sonnet-4.5"; then
         log_warning "Senior review had issues. Please review manually."
         exit 1
     fi
     echo
     pause_if_interactive
 
-    if ! run_copilot "PR Apply Review" ".github/prompts/pr-apply-review.md"; then
+    if ! run_copilot "PR Apply Review" ".github/prompts/pr-apply-review.md" "$pr_number" "claude-haiku-4.5"; then
         log_warning "Applying review feedback had issues. Please review manually."
         exit 1
     fi

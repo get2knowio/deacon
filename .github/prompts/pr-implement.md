@@ -32,8 +32,9 @@ Use this prompt together with the rust-incremental-implementer chatmode. The cha
 - Ability to run repository tests and CI locally.
 
 # Operating Procedure
-1. Identify the active PR
-   - Use `gh pr status` or `gh pr view --json number,title,body,headRefName,baseRefName,author,labels,assignees,state`
+1. Identify the target PR
+   - The PR number will be provided in the prompt (e.g., "for PR #123").
+   - Use `gh pr view <PR_NUMBER> --json number,title,body,headRefName,baseRefName,author,labels,assignees,state` to fetch PR details.
    - Read the PR description, success criteria, and any linked issues.
 2. Create a PR checklist
    - Insert a markdown checklist at the top of the PR description derived from the PR’s success criteria and the CLI specification.

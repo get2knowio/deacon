@@ -30,7 +30,8 @@ Use the role, standards, and acceptance bar defined by the chat mode `maintainer
 
 # Review Procedure
 1. Fetch latest PR state
-   - Retrieve PR number, commits, changed files, and current description.
+   - The PR number will be provided in the prompt (e.g., "for PR #123").
+   - Retrieve commits, changed files, and current description using `gh pr view <PR_NUMBER>`.
    - Run coderabbit analysis against the PR to surface hot spots via `coderabbit review --plain`.
 2. Validate quality gates locally
    - `cargo fmt --all -- --check`
