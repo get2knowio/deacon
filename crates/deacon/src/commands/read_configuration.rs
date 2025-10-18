@@ -477,16 +477,14 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     // Determine workspace folder
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
-    // Resolve workspace configuration if workspace folder is available
-    let workspace_config = if args.workspace_folder.is_some() || args.config_path.is_some() {
-        Some(resolve_workspace_configuration(
-            workspace_folder,
-            args.config_path.as_deref(),
-            args.mount_workspace_git_root,
-        )?)
-    } else {
-        None
-    };
+    // Always try to resolve workspace configuration
+    // Per spec: workspace is omitted only if it cannot be resolved
+    let workspace_config = resolve_workspace_configuration(
+        workspace_folder,
+        args.config_path.as_deref(),
+        args.mount_workspace_git_root,
+    )
+    .ok();
 
     // Load secrets if provided
     let secrets = if !args.secrets_files.is_empty() {
