@@ -11,6 +11,9 @@ NC='\033[0m' # No Color
 # Global flag for interactive mode
 INTERACTIVE_MODE=false
 
+# Global variable for starting step
+START_STEP=""
+
 # Function to print colored messages
 log_info() {
     echo -e "${BLUE}ℹ${NC} $1"
@@ -282,10 +285,20 @@ show_usage() {
     echo
     echo "Options:"
     echo "  -i, --interactive    Enable interactive mode (pause between steps)"
+    echo "  -s, --start STEP     Start from a specific step (branch|pr|implement|review|apply|workflow|merge)"
     echo "  -h, --help          Show this help message"
     echo
     echo "Arguments:"
     echo "  issue_id            GitHub issue number to work on"
+    echo
+    echo "Available steps:"
+    echo "  branch      - Create/checkout branch"
+    echo "  pr          - Create PR"
+    echo "  implement   - Run PR implementation"
+    echo "  review      - Run PR senior review"
+    echo "  apply       - Apply review feedback"
+    echo "  workflow    - Wait for workflow completion"
+    echo "  merge       - Merge PR"
     echo
 }
 
@@ -299,6 +312,10 @@ main() {
             -i|--interactive)
                 INTERACTIVE_MODE=true
                 shift
+                ;;
+            -s|--start)
+                START_STEP="$2"
+                shift 2
                 ;;
             -h|--help)
                 show_usage
@@ -335,6 +352,20 @@ main() {
         exit 1
     fi
     
+    # Validate start step if provided
+    if [ -n "$START_STEP" ]; then
+        case "$START_STEP" in
+            branch|pr|implement|review|apply|workflow|merge)
+                log_info "Starting from step: ${START_STEP}"
+                ;;
+            *)
+                log_error "Invalid start step: ${START_STEP}"
+                log_info "Valid steps: branch, pr, implement, review, apply, workflow, merge"
+                exit 1
+                ;;
+        esac
+    fi
+    
     log_info "Starting automated issue workflow for issue #${issue_id}"
     if [ "$INTERACTIVE_MODE" = true ]; then
         log_info "Interactive mode enabled - you will be prompted between steps"
@@ -351,57 +382,107 @@ main() {
     echo
     pause_if_interactive
     
-    # Check for uncommitted changes BEFORE creating branch
-    check_clean_working_tree
-    pause_if_interactive
+    # Determine branch name and PR number for resume scenarios
+    local branch_name="fix/issue-${issue_id}"
+    local pr_number=""
     
-    # Create branch
-    local branch_name
-    branch_name=$(create_branch "$issue_id")
-    echo
-    pause_if_interactive
-    
-    # Create PR
-    local pr_number
-    pr_number=$(create_pr "$issue_id" "$branch_name")
-    echo
-    pause_if_interactive
-    
-    # Run Copilot workflows
-    log_info "Running Copilot AI workflows..."
-    echo
-    pause_if_interactive
-    
-    if ! run_copilot "PR Implementation" ".github/prompts/pr-implement.md" "$pr_number" "claude-haiku-4.5"; then
-        log_error "PR implementation failed. Please review manually."
-        exit 1
+    # If starting from a step other than branch, try to get existing PR number
+    if [ -n "$START_STEP" ] && [ "$START_STEP" != "branch" ]; then
+        pr_number=$(gh pr list --head "$branch_name" --json number --jq '.[0].number' 2>/dev/null || echo "")
+        if [ -z "$pr_number" ]; then
+            log_error "No PR found for branch ${branch_name}. Cannot resume from ${START_STEP}."
+            log_info "Please start from 'branch' or 'pr' step, or create the PR manually first."
+            exit 1
+        fi
+        log_info "Found existing PR #${pr_number} for branch ${branch_name}"
+        
+        # Make sure we're on the correct branch
+        local current_branch
+        current_branch=$(git branch --show-current)
+        if [ "$current_branch" != "$branch_name" ]; then
+            log_info "Switching to branch ${branch_name}"
+            git checkout "$branch_name"
+        fi
+        
+        # Push any local commits to ensure PR is up to date
+        log_info "Ensuring local commits are pushed to remote..."
+        if git push origin "$branch_name" 2>/dev/null; then
+            log_success "Local changes pushed successfully"
+        else
+            log_warning "No new changes to push (or push failed)"
+        fi
+        echo
     fi
-    echo
-    pause_if_interactive
     
-    if ! run_copilot "PR Senior Review" ".github/prompts/pr-senior-review.md" "$pr_number" "claude-sonnet-4.5"; then
-        log_warning "Senior review had issues. Please review manually."
-        exit 1
-    fi
-    echo
-    pause_if_interactive
-
-    if ! run_copilot "PR Apply Review" ".github/prompts/pr-apply-review.md" "$pr_number" "claude-haiku-4.5"; then
-        log_warning "Applying review feedback had issues. Please review manually."
-        exit 1
-    fi
-    echo
-    pause_if_interactive
-    
-    # Wait for workflow to pass
-    if wait_for_workflow "$branch_name"; then
+    # Step: Create/checkout branch
+    if [ -z "$START_STEP" ] || [ "$START_STEP" = "branch" ]; then
+        # Check for uncommitted changes BEFORE creating branch
+        check_clean_working_tree
+        pause_if_interactive
+        
+        branch_name=$(create_branch "$issue_id")
         echo
         pause_if_interactive
+    fi
+    
+    # Step: Create PR
+    if [ -z "$START_STEP" ] || [ "$START_STEP" = "branch" ] || [ "$START_STEP" = "pr" ]; then
+        if [ -z "$pr_number" ]; then
+            pr_number=$(create_pr "$issue_id" "$branch_name")
+            echo
+            pause_if_interactive
+        fi
+    fi
+    
+    # Step: PR Implementation
+    if [ -z "$START_STEP" ] || [ "$START_STEP" = "branch" ] || [ "$START_STEP" = "pr" ] || [ "$START_STEP" = "implement" ]; then
+        log_info "Running Copilot AI workflows..."
+        echo
+        pause_if_interactive
+        
+        if ! run_copilot "PR Implementation" ".github/prompts/pr-implement.md" "$pr_number" "claude-haiku-4.5"; then
+            log_error "PR implementation failed. Please review manually."
+            exit 1
+        fi
+        echo
+        pause_if_interactive
+    fi
+    
+    # Step: PR Senior Review
+    if [ -z "$START_STEP" ] || [ "$START_STEP" = "branch" ] || [ "$START_STEP" = "pr" ] || [ "$START_STEP" = "implement" ] || [ "$START_STEP" = "review" ]; then
+        if ! run_copilot "PR Senior Review" ".github/prompts/pr-senior-review.md" "$pr_number" "claude-sonnet-4.5"; then
+            log_warning "Senior review had issues. Please review manually."
+            exit 1
+        fi
+        echo
+        pause_if_interactive
+    fi
+
+    # Step: Apply Review Feedback
+    if [ -z "$START_STEP" ] || [ "$START_STEP" = "branch" ] || [ "$START_STEP" = "pr" ] || [ "$START_STEP" = "implement" ] || [ "$START_STEP" = "review" ] || [ "$START_STEP" = "apply" ]; then
+        if ! run_copilot "PR Apply Review" ".github/prompts/pr-apply-review.md" "$pr_number" "claude-haiku-4.5"; then
+            log_warning "Applying review feedback had issues. Please review manually."
+            exit 1
+        fi
+        echo
+        pause_if_interactive
+    fi
+    
+    # Step: Wait for workflow
+    if [ -z "$START_STEP" ] || [ "$START_STEP" = "branch" ] || [ "$START_STEP" = "pr" ] || [ "$START_STEP" = "implement" ] || [ "$START_STEP" = "review" ] || [ "$START_STEP" = "apply" ] || [ "$START_STEP" = "workflow" ]; then
+        if wait_for_workflow "$branch_name"; then
+            echo
+            pause_if_interactive
+        else
+            log_error "Workflow did not pass. Please review the PR manually at:"
+            gh pr view "$pr_number" --web
+            exit 1
+        fi
+    fi
+    
+    # Step: Merge PR
+    if [ -z "$START_STEP" ] || [ "$START_STEP" = "merge" ]; then
         merge_pr "$pr_number" "$branch_name"
-    else
-        log_error "Workflow did not pass. Please review the PR manually at:"
-        gh pr view "$pr_number" --web
-        exit 1
     fi
     
     echo
