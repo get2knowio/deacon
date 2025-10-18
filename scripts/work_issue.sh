@@ -104,27 +104,27 @@ create_branch() {
     local issue_id="$1"
     local branch_name="fix/issue-${issue_id}"
     
-    log_info "Creating branch: ${branch_name}"
+    log_info "Creating branch: ${branch_name}" >&2
     
     # Ensure we're on the default branch
     local default_branch
     default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
     
-    log_info "Switching to default branch: ${default_branch}"
-    git checkout "$default_branch"
-    git pull origin "$default_branch"
+    log_info "Switching to default branch: ${default_branch}" >&2
+    git checkout "$default_branch" >&2
+    git pull origin "$default_branch" >&2
     
     # Create and switch to new branch
     if git rev-parse --verify "$branch_name" >/dev/null 2>&1; then
-        log_warning "Branch ${branch_name} already exists. Switching to it."
-        git checkout "$branch_name"
+        log_warning "Branch ${branch_name} already exists. Switching to it." >&2
+        git checkout "$branch_name" >&2
     else
-        git checkout -b "$branch_name"
-        log_success "Created and switched to branch: ${branch_name}"
+        git checkout -b "$branch_name" >&2
+        log_success "Created and switched to branch: ${branch_name}" >&2
         
         # Create an initial empty commit so we can push and create PR
-        git commit --allow-empty -m "Initial commit for issue #${issue_id}"
-        log_success "Created initial commit"
+        git commit --allow-empty -m "Initial commit for issue #${issue_id}" >&2
+        log_success "Created initial commit" >&2
     fi
     
     echo "$branch_name"
