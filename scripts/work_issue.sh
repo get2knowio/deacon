@@ -182,7 +182,7 @@ run_copilot() {
     local prompt_file="$2"
     log_info "Running copilot for: ${prompt_name}"
     
-    if copilot --prompt "Follow the instructions in ${prompt_file}"; then
+    if copilot --allow-all-paths --allow-all-tools --prompt "Follow the instructions in ${prompt_file}"; then
         log_success "Completed: ${prompt_name}"
     else
         log_error "Failed: ${prompt_name}"
