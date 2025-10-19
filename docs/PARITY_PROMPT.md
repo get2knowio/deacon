@@ -42,9 +42,6 @@ For each logical unit of work, create a markdown implementation task in the <sub
 - [ ] Testing & Validation
 - [ ] Other: ___________
 
-## Parent Issue
-Tracks: #XXX (tracking issue)
-
 ## Description
 [2-3 sentences describing what needs to be implemented and why it matters]
 
