@@ -1,4 +1,4 @@
-# Prompt: Generate GitHub Issues for DevContainer CLI Parity Implementation
+# Prompt: Generate Markdown Tasks for DevContainer CLI Parity Implementation
 
 ## Context
 
@@ -6,86 +6,24 @@ You are working on the `deacon` project, a Rust implementation of a DevContainer
 
 ## Your Task
 
-For a given subcommand (e.g., `up`, `build`, `exec`, etc.), create:
-
-1. **One tracking issue** for the overall subcommand implementation
-2. **Multiple implementation issues** - each scoped to be completable by an AI coding agent in a single session
+For a given subcommand (e.g., `up`, `build`, `exec`, etc.), create multiple implementation tasks - each scoped to be completable by an AI coding agent in a single session
 
 ## Required Inputs
 
-You will be provided with the following files for the target subcommand:
+You will be provided with a subcommand directory containing the following files for the target subcommand:
 
 - **GAP.md** - Detailed gap analysis showing what's missing vs. implemented
 - **SPEC.md** - Complete specification of expected behavior
 - **DATA-STRUCTURES.md** - Data structures and types required
 - **DIAGRAMS.md** - Sequence diagrams and flow charts
-- **PARITY_APPROACH.md** - Cross-cutting concerns and consistency themes (from `docs/`)
+
+You will also be provided with `PARITY_APPROACH.md`.  These are cross-cutting concerns and consistency themes (from `docs/`)
+
+These are the inputs you *must* consult when determing which tasks to create and generating the content for those tasks.
 
 ## Output Requirements
 
-### 1. Tracking Issue Template
-
-Create a parent tracking issue with:
-
-**Title Format:** `[Subcommand] Implement Full Parity for \`<subcommand>\``
-
-**Body Structure:**
-```markdown
-## Overview
-[2-3 sentence summary of the subcommand's purpose and current state]
-
-**Current Completeness:** ~XX% (from GAP.md Executive Summary)
-
-**Specification Location:** `docs/subcommand-specs/<subcommand>/`
-
-## Implementation Status
-
-### ✅ Already Implemented
-[Bulleted list from GAP.md "Implemented" sections]
-
-### ❌ Missing Functionality
-[High-level categories of missing features from GAP.md]
-
-## Implementation Plan
-
-This tracking issue coordinates the following implementation issues:
-
-- [ ] #XXX - [Category 1: Title]
-- [ ] #XXX - [Category 2: Title]
-- [ ] #XXX - [Category 3: Title]
-...
-
-## Cross-Cutting Concerns
-
-This implementation must address:
-
-- [ ] **Consistency Theme 1:** JSON Output Contract Compliance
-- [ ] **Consistency Theme 2:** CLI Validation Rules
-- [ ] **Consistency Theme 3:** [Theme if applicable]
-- [ ] **Infrastructure Item X:** [If needed from PARITY_APPROACH.md items 5-8]
-
-## Quality Gates
-
-Before closing this tracking issue, ALL sub-issues must pass:
-
-- [ ] All CI checks pass (build, test, fmt, clippy)
-- [ ] JSON output matches DATA-STRUCTURES.md exactly
-- [ ] All specification validation rules enforced
-- [ ] Smoke tests updated in `crates/deacon/tests/smoke_basic.rs`
-- [ ] Examples updated in `examples/<subcommand>/`
-- [ ] Gap analysis updated with "COMPLETED" markers
-
-## References
-
-- Specification: `docs/subcommand-specs/<subcommand>/SPEC.md`
-- Gap Analysis: `docs/subcommand-specs/<subcommand>/GAP.md`
-- Data Structures: `docs/subcommand-specs/<subcommand>/DATA-STRUCTURES.md`
-- Parity Approach: `docs/PARITY_APPROACH.md`
-```
-
-### 2. Implementation Issue Template
-
-For each logical unit of work, create an implementation issue:
+For each logical unit of work, create a markdown implementation task in the <subcommand>/tasks directory:
 
 **Title Format:** `[<subcommand>] Implement <Specific Feature/Category>`
 
@@ -215,14 +153,6 @@ Tracks: #XXX (tracking issue)
 ### Reference Implementation
 [If TypeScript reference code is relevant, note the source file/function]
 
-## Dependencies
-
-**Blocks:**
-- None / Issue #XXX (if this issue must complete before another)
-
-**Blocked By:**
-- None / Issue #XXX (if infrastructure must be built first)
-
 **Related to Infrastructure (PARITY_APPROACH.md):**
 - [ ] Item 5: Environment Probing System with Caching
 - [ ] Item 6: Dotfiles Installation Workflow
@@ -250,7 +180,7 @@ Tracks: #XXX (tracking issue)
 - **Copilot Instructions:** `.github/copilot-instructions.md`
 ```
 
-## Issue Creation Strategy
+## Task Creation Strategy
 
 ### Grouping Guidelines
 
@@ -306,8 +236,6 @@ If the subcommand requires one of these infrastructure items:
 
 1. Create a **separate issue** for the infrastructure component
 2. Label it: `infrastructure`, `cross-cutting`
-3. Reference it in the tracking issue under "Cross-Cutting Concerns"
-4. Make other issues dependent on it with "Blocked By" section
 5. Include in the issue title: `[Infrastructure]` prefix
 
 ### For Consistency Themes (PARITY_APPROACH.md Themes 1-6)
@@ -323,28 +251,17 @@ If the subcommand requires one of these infrastructure items:
    - **Theme 5 (Marker Files):** Only run-user-commands, set-up
    - **Theme 6 (Error Messages):** ALL issues
 
-### For Phase 0 Dependencies (PARITY_APPROACH.md)
-
-If the subcommand depends on Phase 0 infrastructure that's not yet complete:
-
-1. Note the dependency explicitly in tracking issue
-2. Add "Blocked By: Phase 0 - Issue #XXX" to relevant implementation issues
-3. Consider deferring the subcommand until Phase 0 is complete
-
 ## Output Format
 
-Generate issues in Markdown format, with:
-
-1. Clear separators between issues (use `---` or `## Issue N`)
-2. Issue numbers as placeholders (`#XXX`, `#YYY`) to be filled when created
-3. Labels suggested for each issue in a comment at the top
+Generate issues in Markdown format, with labels suggested for each issue in frontmatter at the top
 
 ## Example Labels for Issues
 
 ```
-<!-- Labels: subcommand:<name>, type:enhancement, priority:high, scope:medium -->
-<!-- For infrastructure: infrastructure, cross-cutting -->
-<!-- For bugs found during implementation: type:bug -->
+subcommand: name
+type: enhancement
+priority: high
+scope: medium
 ```
 
 ---
@@ -354,9 +271,8 @@ Generate issues in Markdown format, with:
 When you receive this prompt along with a specific subcommand's documentation:
 
 1. **Read all provided files** (GAP.md, SPEC.md, DATA-STRUCTURES.md, DIAGRAMS.md, PARITY_APPROACH.md)
-2. **Create the tracking issue first** with complete overview
-3. **Identify logical groupings** for implementation issues (aim for 5-10 issues total)
-4. **Generate each implementation issue** with full detail
+3. **Identify logical groupings** for implementation tasks (aim for 5-10 issues total)
+4. **Generate each implementation task** with full detail
+5. **Generate them in dependency order**, and number them in their filename accordingly
 5. **Verify completeness** - all missing functionality from GAP.md should be covered
-6. **Check dependencies** - order issues appropriately
 7. **Validate scope** - each issue should be AI-agent-completable
