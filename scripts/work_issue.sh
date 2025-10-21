@@ -14,6 +14,13 @@ INTERACTIVE_MODE=false
 # Global variable for starting step
 START_STEP=""
 
+# Global: task metadata (populated from task file)
+TASK_FILE=""
+TASK_TITLE=""
+TASK_BODY=""
+TASK_REL_PATH=""
+TASK_SLUG=""
+
 # Function to print colored messages
 log_info() {
     echo -e "${BLUE}ℹ${NC} $1"
@@ -60,6 +67,8 @@ check_requirements() {
     if ! command_exists copilot; then
         missing+=("copilot")
     fi
+
+    # Note: External jq is NOT required; we rely on `gh --jq` internally.
     
     if [ ${#missing[@]} -gt 0 ]; then
         log_error "Missing required commands: ${missing[*]}"
@@ -89,23 +98,95 @@ check_clean_working_tree() {
     fi
 }
 
-# Function to fetch issue details
-fetch_issue() {
-    local issue_id="$1"
-    log_info "Fetching issue #${issue_id}..."
-    
-    if ! gh issue view "$issue_id" --json title,body >/dev/null 2>&1; then
-        log_error "Failed to fetch issue #${issue_id}"
+# Helpers for path operations
+abs_path() {
+    local path="$1"
+    if command_exists realpath; then
+        realpath "$path"
+    elif command_exists readlink; then
+        readlink -f "$path"
+    else
+        # Fallback to Python if available
+        if command_exists python3; then
+            python3 -c 'import os,sys;print(os.path.abspath(sys.argv[1]))' "$path"
+        else
+            echo "$path"
+        fi
+    fi
+}
+
+rel_path_to_repo_root() {
+    local path="$1"
+    local repo_root
+    repo_root=$(git rev-parse --show-toplevel)
+    if command_exists realpath; then
+        realpath --relative-to="$repo_root" "$path"
+    else
+        # Fallback via Python
+        if command_exists python3; then
+            python3 -c 'import os,sys;print(os.path.relpath(sys.argv[1], sys.argv[2]))' "$path" "$repo_root"
+        else
+            echo "$path"
+        fi
+    fi
+}
+
+sanitize_slug() {
+    # Lowercase, replace non-alnum with '-', collapse repeats, trim leading/trailing '-'
+    echo "$1" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed -E 's/[^a-z0-9]+/-/g; s/-+/-/g; s/^-+//; s/-+$//'
+}
+
+# Parse task file to populate TASK_TITLE, TASK_BODY, TASK_REL_PATH, TASK_SLUG
+parse_task_file() {
+    TASK_FILE="$1"
+
+    if [ ! -f "$TASK_FILE" ]; then
+        log_error "Task file not found: $TASK_FILE"
         exit 1
     fi
-    
-    log_success "Issue #${issue_id} found"
+
+    local abs
+    abs=$(abs_path "$TASK_FILE")
+    TASK_REL_PATH=$(rel_path_to_repo_root "$abs")
+
+    # Extract first markdown H1 as title; fallback to filename (without extension)
+    local title
+    title=$(grep -m1 -E '^# ' "$TASK_FILE" | sed -E 's/^# +//') || true
+    if [ -z "$title" ]; then
+        title=$(basename "$TASK_FILE")
+        title=${title%.*}
+    fi
+    TASK_TITLE="$title"
+
+    # Body is the full file content minus the first H1 line if present
+    if grep -q -E '^# ' "$TASK_FILE"; then
+        TASK_BODY=$(awk 'NR==1 && $0 ~ /^# / {next} {print}' "$TASK_FILE")
+    else
+        TASK_BODY=$(cat "$TASK_FILE")
+    fi
+
+    # Build slug from subcommand + filename where possible
+    # Expect structure: docs/subcommand-specs/<subcommand>/tasks/<file>
+    local subcommand
+    subcommand=$(echo "$TASK_REL_PATH" | awk -F'/' 'BEGIN{sc=""} {for(i=1;i<=NF-2;i++){if($i=="subcommand-specs"){sc=$(i+1);break}}} END{print sc}')
+    if [ -z "$subcommand" ]; then
+        subcommand="task"
+    fi
+    local filestem
+    filestem=$(basename "$TASK_FILE")
+    filestem=${filestem%.*}
+
+    TASK_SLUG=$(sanitize_slug "${subcommand}-${filestem}")
+
+    log_success "Parsed task: ${TASK_TITLE} (${TASK_REL_PATH})"
 }
 
 # Function to create and switch to branch
 create_branch() {
-    local issue_id="$1"
-    local branch_name="fix/issue-${issue_id}"
+    local task_slug="$1"
+    local branch_name="task/${task_slug}"
     
     log_info "Creating branch: ${branch_name}" >&2
     
@@ -126,7 +207,7 @@ create_branch() {
         log_success "Created and switched to branch: ${branch_name}" >&2
         
         # Create an initial empty commit so we can push and create PR
-        git commit --allow-empty -m "Initial commit for issue #${issue_id}" >&2
+        git commit --allow-empty -m "chore(task): bootstrap ${task_slug}" >&2
         log_success "Created initial commit" >&2
     fi
     
@@ -135,45 +216,47 @@ create_branch() {
 
 # Function to create initial PR
 create_pr() {
-    local issue_id="$1"
-    local branch_name="$2"
-    
-    log_info "Creating initial PR for issue #${issue_id}..." >&2
-    
-    # Fetch issue details
-    local issue_title
-    local issue_body
-    issue_title=$(gh issue view "$issue_id" --json title --jq '.title')
-    issue_body=$(gh issue view "$issue_id" --json body --jq '.body')
-    
-    # Create PR body
+    local branch_name="$1"
+    local title="$2"
+    local body="$3"
+
+    log_info "Creating initial PR from task..." >&2
+
+    # Create PR body, include task path for traceability
+    local pr_title
+    pr_title="chore(task): ${title}"
+
     local pr_body
     pr_body=$(cat <<EOF
-## Issue Description
+## Task
 
-${issue_body}
+- Source: \
+  \
+  ${TASK_REL_PATH}
 
 ---
 
-Fixes #${issue_id}
+## Context
+
+${body}
 EOF
 )
-    
+
     # Push the branch to remote first (force push to handle any existing remote branch)
     log_info "Pushing branch to remote..." >&2
     git push -u origin "$branch_name" --force >&2
-    
+
     # Check if PR already exists
     local existing_pr
     existing_pr=$(gh pr list --head "$branch_name" --json number --jq '.[0].number' 2>/dev/null || echo "")
-    
+
     if [ -n "$existing_pr" ]; then
         log_warning "PR #${existing_pr} already exists for branch ${branch_name}" >&2
         echo "$existing_pr"
     else
-        # Create PR
+        # Create PR with JSON output to reliably get number
         local pr_number
-        pr_number=$(gh pr create --title "Fix: ${issue_title}" --body "$pr_body" --draft 2>&1 | grep -oP '(?<=pull/)[0-9]+')
+        pr_number=$(gh pr create --title "$pr_title" --body "$pr_body" --draft --json number --jq '.number')
         log_success "Created draft PR #${pr_number}" >&2
         echo "$pr_number"
     fi
@@ -185,19 +268,16 @@ check_ci_status() {
     log_info "Checking CI status for branch ${branch_name}..."
     
     # Get the latest workflow run for this branch
-    local workflow_status
-    workflow_status=$(gh run list --branch "$branch_name" --limit 1 --json status,conclusion --jq '.[0]')
-    
-    if [ -z "$workflow_status" ] || [ "$workflow_status" = "null" ]; then
+    local status
+    status=$(gh run list --branch "$branch_name" --limit 1 --json status --jq '.[0].status' 2>/dev/null || true)
+    local conclusion
+    conclusion=$(gh run list --branch "$branch_name" --limit 1 --json conclusion --jq '.[0].conclusion' 2>/dev/null || true)
+
+    if [ -z "$status" ] || [ "$status" = "null" ]; then
         echo "no-run"
         return 0
     fi
-    
-    local status
-    local conclusion
-    status=$(echo "$workflow_status" | jq -r '.status')
-    conclusion=$(echo "$workflow_status" | jq -r '.conclusion')
-    
+
     if [ "$status" = "completed" ]; then
         if [ "$conclusion" = "success" ]; then
             echo "passing"
@@ -218,7 +298,7 @@ run_copilot() {
     local extra_context="${5:-}"
     log_info "Running copilot for: ${prompt_name} (using ${model})"
     
-    local prompt_text="Follow the instructions in ${prompt_file} for PR #${pr_number}"
+    local prompt_text="Follow the instructions in ${prompt_file} for PR #${pr_number}. Task: ${TASK_REL_PATH} (${TASK_TITLE})."
     if [ -n "$extra_context" ]; then
         prompt_text="${prompt_text}. ${extra_context}"
     fi
@@ -242,20 +322,17 @@ wait_for_workflow() {
     
     while [ $attempt -lt $max_attempts ]; do
         # Get the latest workflow run for this branch
-        local workflow_status
-        workflow_status=$(gh run list --branch "$branch_name" --limit 1 --json status,conclusion --jq '.[0]')
-        
-        if [ -z "$workflow_status" ] || [ "$workflow_status" = "null" ]; then
+        local status
+        status=$(gh run list --branch "$branch_name" --limit 1 --json status --jq '.[0].status' 2>/dev/null || true)
+        local conclusion
+        conclusion=$(gh run list --branch "$branch_name" --limit 1 --json conclusion --jq '.[0].conclusion' 2>/dev/null || true)
+
+        if [ -z "$status" ] || [ "$status" = "null" ]; then
             log_warning "No workflow run found yet. Waiting..."
             sleep $sleep_duration
             ((attempt++))
             continue
         fi
-        
-        local status
-        local conclusion
-        status=$(echo "$workflow_status" | jq -r '.status')
-        conclusion=$(echo "$workflow_status" | jq -r '.conclusion')
         
         log_info "Workflow status: ${status}, conclusion: ${conclusion}"
         
@@ -317,7 +394,7 @@ merge_pr() {
 
 # Function to show usage
 show_usage() {
-    echo "Usage: $0 [OPTIONS] <issue_id>"
+    echo "Usage: $0 [OPTIONS] <task_file>"
     echo
     echo "Options:"
     echo "  -i, --interactive    Enable interactive mode (pause between steps)"
@@ -325,7 +402,7 @@ show_usage() {
     echo "  -h, --help          Show this help message"
     echo
     echo "Arguments:"
-    echo "  issue_id            GitHub issue number to work on"
+    echo "  task_file          Path to local task file (e.g., docs/subcommand-specs/<subcommand>/tasks/<task>.md)"
     echo
     echo "Available steps:"
     echo "  branch      - Create/checkout branch"
@@ -341,7 +418,7 @@ show_usage() {
 # Main script
 main() {
     # Parse arguments
-    local issue_id=""
+    local task_file=""
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -363,10 +440,10 @@ main() {
                 exit 1
                 ;;
             *)
-                if [ -z "$issue_id" ]; then
-                    issue_id="$1"
+                if [ -z "$task_file" ]; then
+                    task_file="$1"
                 else
-                    log_error "Multiple issue IDs provided"
+                    log_error "Multiple task files provided"
                     show_usage
                     exit 1
                 fi
@@ -375,16 +452,10 @@ main() {
         esac
     done
     
-    # Check if issue ID is provided
-    if [ -z "$issue_id" ]; then
-        log_error "Issue ID is required"
+    # Check if task file is provided
+    if [ -z "$task_file" ]; then
+        log_error "Task file is required"
         show_usage
-        exit 1
-    fi
-    
-    # Validate issue ID is a number
-    if ! [[ "$issue_id" =~ ^[0-9]+$ ]]; then
-        log_error "Issue ID must be a number"
         exit 1
     fi
     
@@ -402,7 +473,7 @@ main() {
         esac
     fi
     
-    log_info "Starting automated issue workflow for issue #${issue_id}"
+    log_info "Starting automated task workflow for ${task_file}"
     if [ "$INTERACTIVE_MODE" = true ]; then
         log_info "Interactive mode enabled - you will be prompted between steps"
     fi
@@ -413,13 +484,13 @@ main() {
     check_git_repo
     pause_if_interactive
     
-    # Fetch and validate issue
-    fetch_issue "$issue_id"
+    # Parse task file
+    parse_task_file "$task_file"
     echo
     pause_if_interactive
     
     # Determine branch name and PR number for resume scenarios
-    local branch_name="fix/issue-${issue_id}"
+    local branch_name="task/${TASK_SLUG}"
     local pr_number=""
     
     # If starting from a step other than branch, try to get existing PR number
@@ -456,7 +527,7 @@ main() {
         check_clean_working_tree
         pause_if_interactive
         
-        branch_name=$(create_branch "$issue_id")
+        branch_name=$(create_branch "$TASK_SLUG")
         echo
         pause_if_interactive
     fi
@@ -464,7 +535,7 @@ main() {
     # Step: Create PR
     if [ -z "$START_STEP" ] || [ "$START_STEP" = "branch" ] || [ "$START_STEP" = "pr" ]; then
         if [ -z "$pr_number" ]; then
-            pr_number=$(create_pr "$issue_id" "$branch_name")
+            pr_number=$(create_pr "$branch_name" "$TASK_TITLE" "$TASK_BODY")
             echo
             pause_if_interactive
         fi
@@ -538,7 +609,7 @@ main() {
     fi
     
     echo
-    log_success "Issue #${issue_id} workflow completed successfully!"
+    log_success "Task workflow completed successfully for ${TASK_REL_PATH}!"
 }
 
 # Run main function
