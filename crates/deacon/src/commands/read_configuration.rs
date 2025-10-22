@@ -6,7 +6,7 @@
 use anyhow::Result;
 use deacon_core::config::ConfigLoader;
 use deacon_core::container::ContainerSelector;
-use deacon_core::errors::{ConfigError, DeaconError};
+
 use deacon_core::features::{
     FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger, OptionValue, ResolvedFeature,
 };
@@ -464,17 +464,27 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         args.secrets_files.len()
     );
 
-    // Validate that at least one selector is provided
-    // Note: workspace_folder defaults to "." (CWD) if not specified, so we check for that implicitly
+    // Selector validation per spec:
+    // At least one of --container-id, --id-label, or --workspace-folder is required.
+    // Practical behavior (spec notes): workspace-folder often defaults to current directory,
+    // so this error is not typically encountered. To align with e2e flows and spec intent,
+    // treat the implicit CWD as satisfying the selector requirement when no explicit selector
+    // or config is provided.
     let has_container_id = args.container_id.is_some();
     let has_id_label = !args.id_label.is_empty();
     let has_workspace_folder = args.workspace_folder.is_some();
     let has_config = args.config_path.is_some() || args.override_config_path.is_some();
-
-    // At least one must be provided (workspace defaults to CWD if nothing is specified)
-    if !has_container_id && !has_id_label && !has_workspace_folder && !has_config {
-        // This is OK - workspace will default to "." (CWD)
-        // per the implementation at line 502
+    let implicit_cwd_counts_as_workspace =
+        !has_container_id && !has_id_label && !has_workspace_folder && !has_config;
+    if !implicit_cwd_counts_as_workspace
+        && !has_container_id
+        && !has_id_label
+        && !has_workspace_folder
+        && !has_config
+    {
+        anyhow::bail!(
+            "Missing required argument: One of --container-id, --id-label or --workspace-folder is required."
+        );
     }
 
     // Validate id_label format (must match <name>=<value> pattern)
@@ -531,13 +541,31 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
 
     // Load configuration
     let (config, substitution_report) = if let Some(config_path) = args.config_path.as_ref() {
+        use deacon_core::errors::{ConfigError, DeaconError};
+
         // For non-merged config, still apply overrides and substitution
-        let base_config = ConfigLoader::load_from_path(config_path)?;
+        let base_config = match ConfigLoader::load_from_path(config_path) {
+            Ok(cfg) => cfg,
+            Err(e) => match e {
+                DeaconError::Config(ConfigError::NotFound { path }) => {
+                    anyhow::bail!("Dev container config ({}) not found.", path)
+                }
+                other => return Err(other.into()),
+            },
+        };
         let mut configs = vec![base_config];
 
         // Add override config if provided
         if let Some(override_path) = args.override_config_path.as_ref() {
-            let override_config = ConfigLoader::load_from_path(override_path)?;
+            let override_config = match ConfigLoader::load_from_path(override_path) {
+                Ok(cfg) => cfg,
+                Err(e) => match e {
+                    DeaconError::Config(ConfigError::NotFound { path }) => {
+                        anyhow::bail!("Dev container config ({}) not found.", path)
+                    }
+                    other => return Err(other.into()),
+                },
+            };
             configs.push(override_config);
         }
 
@@ -558,10 +586,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         // Discover configuration
         let config_location = ConfigLoader::discover_config(workspace_folder)?;
         if !config_location.exists() {
-            return Err(DeaconError::Config(ConfigError::NotFound {
-                path: config_location.path().to_string_lossy().to_string(),
-            })
-            .into());
+            anyhow::bail!(
+                "Dev container config ({}) not found.",
+                config_location.path().display()
+            );
         }
 
         // For non-merged config, still apply overrides and substitution
@@ -570,7 +598,16 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
 
         // Add override config if provided
         if let Some(override_path) = args.override_config_path.as_ref() {
-            let override_config = ConfigLoader::load_from_path(override_path)?;
+            use deacon_core::errors::{ConfigError, DeaconError};
+            let override_config = match ConfigLoader::load_from_path(override_path) {
+                Ok(cfg) => cfg,
+                Err(e) => match e {
+                    DeaconError::Config(ConfigError::NotFound { path }) => {
+                        anyhow::bail!("Dev container config ({}) not found.", path)
+                    }
+                    other => return Err(other.into()),
+                },
+            };
             configs.push(override_config);
         }
 
@@ -917,6 +954,16 @@ API_KEY=another-secret
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        let expected = format!(
+            "Dev container config ({}) not found.",
+            temp_dir
+                .path()
+                .join(".devcontainer")
+                .join("devcontainer.json")
+                .display()
+        );
+        assert_eq!(err_msg, expected);
     }
 
     #[tokio::test]

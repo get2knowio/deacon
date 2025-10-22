@@ -633,7 +633,9 @@ fn test_e2e_error_handling() {
     let result = harness.run_deacon_command(["read-configuration"]);
     result
         .assert_failure()
-        .assert_stderr_contains("Configuration file not found");
+        // Spec-exact message for missing config per task 294
+        .assert_stderr_contains("Dev container config (")
+        .assert_stderr_contains(") not found.");
 
     // Test 2: Invalid JSON
     let invalid_config = r#"{ "name": "invalid" missing comma }"#;
