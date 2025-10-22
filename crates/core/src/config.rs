@@ -1386,6 +1386,16 @@ impl ConfigLoader {
             })
         })?;
 
+        // Ensure root is a JSON object per spec
+        if !raw_value.is_object() {
+            return Err(DeaconError::Config(ConfigError::Validation {
+                message: format!(
+                    "Dev container config ({}) must contain a JSON object literal.",
+                    path.display()
+                ),
+            }));
+        }
+
         // Log unknown top-level keys at DEBUG level
         if let serde_json::Value::Object(obj) = &raw_value {
             Self::log_unknown_keys(obj);
@@ -2722,6 +2732,94 @@ mod tests {
         assert_eq!(merged.container_user, Some("root".to_string())); // From base
         assert_eq!(merged.remote_user, Some("vscode".to_string())); // From overlay
         assert_eq!(merged.update_remote_user_uid, Some(true)); // From overlay
+    }
+
+    #[test]
+    fn test_load_root_is_array() -> anyhow::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(b"[]")?;
+
+        let result = ConfigLoader::load_from_path(temp_file.path());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DeaconError::Config(ConfigError::Validation { message }) => {
+                assert_eq!(
+                    message,
+                    format!(
+                        "Dev container config ({}) must contain a JSON object literal.",
+                        temp_file.path().display()
+                    )
+                );
+            }
+            _ => panic!("Expected Config(Validation) error"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_root_is_null() -> anyhow::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(b"null")?;
+
+        let result = ConfigLoader::load_from_path(temp_file.path());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DeaconError::Config(ConfigError::Validation { message }) => {
+                assert_eq!(
+                    message,
+                    format!(
+                        "Dev container config ({}) must contain a JSON object literal.",
+                        temp_file.path().display()
+                    )
+                );
+            }
+            _ => panic!("Expected Config(Validation) error"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_root_is_number() -> anyhow::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(b"123")?;
+
+        let result = ConfigLoader::load_from_path(temp_file.path());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DeaconError::Config(ConfigError::Validation { message }) => {
+                assert_eq!(
+                    message,
+                    format!(
+                        "Dev container config ({}) must contain a JSON object literal.",
+                        temp_file.path().display()
+                    )
+                );
+            }
+            _ => panic!("Expected Config(Validation) error"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_root_is_string() -> anyhow::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(br#""hello""#)?;
+
+        let result = ConfigLoader::load_from_path(temp_file.path());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DeaconError::Config(ConfigError::Validation { message }) => {
+                assert_eq!(
+                    message,
+                    format!(
+                        "Dev container config ({}) must contain a JSON object literal.",
+                        temp_file.path().display()
+                    )
+                );
+            }
+            _ => panic!("Expected Config(Validation) error"),
+        }
+        Ok(())
     }
 }
 
