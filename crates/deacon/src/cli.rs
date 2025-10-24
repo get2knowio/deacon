@@ -278,10 +278,10 @@ pub enum Commands {
         skip_feature_auto_mapping: bool,
         /// Terminal columns (requires --terminal-rows)
         #[arg(long)]
-        terminal_columns: Option<u16>,
+        terminal_columns: Option<u32>,
         /// Terminal rows (requires --terminal-columns)
         #[arg(long)]
-        terminal_rows: Option<u16>,
+        terminal_rows: Option<u32>,
         /// User data folder (accepted but not used by this subcommand)
         #[arg(long)]
         user_data_folder: Option<PathBuf>,
