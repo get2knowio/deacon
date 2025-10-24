@@ -13,6 +13,7 @@ use deacon_core::features::{
 use deacon_core::observability::{feature_plan_span, TimedSpan};
 use deacon_core::oci::{default_fetcher, FeatureRef};
 use deacon_core::registry_parser::parse_registry_reference;
+use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -101,6 +102,29 @@ pub struct FeaturesPlanResult {
 
 /// Error message for local feature paths
 const LOCAL_FEATURE_ERROR_MSG: &str = "Local features are not supported by 'features plan'. Use registry references (e.g., ghcr.io/owner/feature)";
+
+/// Default concurrency limit for parallel OCI metadata fetching
+const DEFAULT_FETCH_CONCURRENCY: usize = 6;
+
+/// Get the concurrency limit for parallel OCI metadata fetching
+///
+/// Reads from the DEACON_FETCH_CONCURRENCY environment variable if set,
+/// otherwise uses the default of 6. The limit is clamped to a minimum of 1
+/// and maximum of 32 to prevent resource exhaustion.
+fn get_fetch_concurrency() -> usize {
+    get_fetch_concurrency_impl(std::env::var("DEACON_FETCH_CONCURRENCY").ok().as_deref())
+}
+
+/// Internal implementation for getting fetch concurrency from an optional environment value
+///
+/// This function is separated to allow testing without global state mutation.
+/// Takes an optional string value and returns the parsed, clamped concurrency limit.
+fn get_fetch_concurrency_impl(env_value: Option<&str>) -> usize {
+    env_value
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_FETCH_CONCURRENCY)
+        .clamp(1, 32)
+}
 
 /// Check if a feature identifier looks like a local path
 fn is_local_path(feature_id: &str) -> bool {
@@ -202,79 +226,108 @@ async fn execute_features_plan(
         // Resolve features from registries to obtain metadata (deps, installsAfter, etc.)
         let fetcher = default_fetcher()
             .context("Failed to initialize OCI client for fetching feature metadata.")?;
-        let mut resolved_features = Vec::with_capacity(features_map.len());
 
         // Add span for metadata fetch loop with structured fields
-        {
+        let resolved_features = {
             let fetch_start = std::time::Instant::now();
+            let concurrency = get_fetch_concurrency();
             let fetch_span = tracing::span!(
                 target: "deacon::features",
                 tracing::Level::INFO,
                 "features.fetch_metadata",
                 feature_count = features_map.len(),
+                concurrency = concurrency,
                 fetch_ms = tracing::field::Empty
             );
             let _fetch_guard = fetch_span.enter();
 
-            for (feature_id, feature_value) in features_map {
-                // Check if feature_id looks like a local path
+            // Pre-validate all feature IDs before starting any fetches
+            for (feature_id, _) in features_map.iter() {
                 if is_local_path(feature_id) {
                     anyhow::bail!("{}. Feature key: '{}'", LOCAL_FEATURE_ERROR_MSG, feature_id);
                 }
-
-                let (registry_url, namespace, name, tag) =
-                    parse_registry_reference(feature_id).with_context(|| {
-                        format!(
-                            "Failed to parse registry reference for feature '{}' during feature resolution.",
-                            feature_id
-                        )
-                    })?;
-                let feature_ref = FeatureRef::new(
-                    registry_url.clone(),
-                    namespace.clone(),
-                    name.clone(),
-                    tag.clone(),
-                );
-                let downloaded = fetcher.fetch_feature(&feature_ref).await.with_context(|| {
-                    format!(
-                        "Failed to fetch feature metadata from OCI registry for feature '{}'.",
-                        feature_id
-                    )
-                })?;
-
-                // Extract per-feature options from config entry if present
-                let options: std::collections::HashMap<String, OptionValue> = match feature_value {
-                    serde_json::Value::Object(map) => map
-                        .clone()
-                        .into_iter()
-                        .map(|(k, v)| {
-                            // Convert serde_json::Value to OptionValue, preserving all types
-                            let option_value = match v {
-                                serde_json::Value::Bool(b) => OptionValue::Boolean(b),
-                                serde_json::Value::String(s) => OptionValue::String(s),
-                                serde_json::Value::Number(n) => OptionValue::Number(n),
-                                serde_json::Value::Array(a) => OptionValue::Array(a),
-                                serde_json::Value::Object(o) => OptionValue::Object(o),
-                                serde_json::Value::Null => OptionValue::Null,
-                            };
-                            (k, option_value)
-                        })
-                        .collect(),
-                    _ => std::collections::HashMap::new(),
-                };
-
-                resolved_features.push(ResolvedFeature {
-                    id: downloaded.metadata.id.clone(),
-                    source: feature_ref.reference(),
-                    options,
-                    metadata: downloaded.metadata,
-                });
             }
+
+            // Convert features_map to a Vec for parallel processing
+            // Use a BTreeMap to ensure deterministic ordering of results
+            let features_to_fetch: Vec<_> = features_map.iter().collect();
+
+            // Fetch metadata in parallel with bounded concurrency
+            let fetch_results: BTreeMap<String, ResolvedFeature> = stream::iter(features_to_fetch)
+                .map(|(feature_id, feature_value)| {
+                    let fetcher = &fetcher;
+                    let feature_id = feature_id.to_string();
+                    let feature_value = feature_value.clone();
+
+                    async move {
+                        // Parse registry reference
+                        let (registry_url, namespace, name, tag) =
+                            parse_registry_reference(&feature_id).with_context(|| {
+                                format!(
+                                    "Failed to parse registry reference for feature '{}' during feature resolution.",
+                                    feature_id
+                                )
+                            })?;
+
+                        let feature_ref = FeatureRef::new(
+                            registry_url.clone(),
+                            namespace.clone(),
+                            name.clone(),
+                            tag.clone(),
+                        );
+
+                        // Fetch feature metadata from OCI registry
+                        let downloaded = fetcher.fetch_feature(&feature_ref).await.with_context(|| {
+                            format!(
+                                "Failed to fetch feature metadata from OCI registry for feature '{}'.",
+                                feature_id
+                            )
+                        })?;
+
+                        // Extract per-feature options from config entry if present
+                        let options: std::collections::HashMap<String, OptionValue> = match feature_value {
+                            serde_json::Value::Object(map) => map
+                                .into_iter()
+                                .map(|(k, v)| {
+                                    // Convert serde_json::Value to OptionValue, preserving all types
+                                    let option_value = match v {
+                                        serde_json::Value::Bool(b) => OptionValue::Boolean(b),
+                                        serde_json::Value::String(s) => OptionValue::String(s.clone()),
+                                        serde_json::Value::Number(n) => OptionValue::Number(n.clone()),
+                                        serde_json::Value::Array(a) => OptionValue::Array(a.clone()),
+                                        serde_json::Value::Object(o) => OptionValue::Object(o.clone()),
+                                        serde_json::Value::Null => OptionValue::Null,
+                                    };
+                                    (k.clone(), option_value)
+                                })
+                                .collect(),
+                            _ => std::collections::HashMap::new(),
+                        };
+
+                        let resolved = ResolvedFeature {
+                            id: downloaded.metadata.id.clone(),
+                            source: feature_ref.reference(),
+                            options,
+                            metadata: downloaded.metadata,
+                        };
+
+                        // Return the feature_id as key for deterministic ordering
+                        Ok::<(String, ResolvedFeature), anyhow::Error>((feature_id, resolved))
+                    }
+                })
+                .buffer_unordered(concurrency)
+                .collect::<Vec<Result<(String, ResolvedFeature)>>>()
+                .await
+                .into_iter()
+                .collect::<Result<BTreeMap<String, ResolvedFeature>>>()?;
 
             // Record fetch duration before exiting span
             let fetch_duration_ms = fetch_start.elapsed().as_millis() as u64;
             fetch_span.record("fetch_ms", fetch_duration_ms);
-        }
+
+            // Convert BTreeMap to Vec, maintaining deterministic order
+            fetch_results.into_values().collect::<Vec<_>>()
+        };
 
         // Create dependency resolver with override order from config
         let override_order = config.override_feature_install_order.clone();
@@ -2537,6 +2590,52 @@ mod tests {
             order,
             vec!["feature-a", "feature-b", "feature-c"],
             "Without override, should use topological sort based on dependencies"
+        );
+    }
+
+    #[test]
+    fn test_get_fetch_concurrency_default() {
+        // Test: Default concurrency limit is 6
+        let concurrency = super::get_fetch_concurrency_impl(None);
+        assert_eq!(
+            concurrency, 6,
+            "Default concurrency should be 6 when env var not set"
+        );
+    }
+
+    #[test]
+    fn test_get_fetch_concurrency_from_env() {
+        // Test: Concurrency can be set via environment variable
+        let concurrency = super::get_fetch_concurrency_impl(Some("8"));
+        assert_eq!(
+            concurrency, 8,
+            "Concurrency should be read from DEACON_FETCH_CONCURRENCY env var"
+        );
+    }
+
+    #[test]
+    fn test_get_fetch_concurrency_clamped() {
+        // Test: Concurrency is clamped between 1 and 32
+        let concurrency = super::get_fetch_concurrency_impl(Some("0"));
+        assert_eq!(
+            concurrency, 1,
+            "Concurrency should be clamped to minimum of 1"
+        );
+
+        let concurrency = super::get_fetch_concurrency_impl(Some("100"));
+        assert_eq!(
+            concurrency, 32,
+            "Concurrency should be clamped to maximum of 32"
+        );
+    }
+
+    #[test]
+    fn test_get_fetch_concurrency_invalid_env() {
+        // Test: Invalid env var value falls back to default
+        let concurrency = super::get_fetch_concurrency_impl(Some("invalid"));
+        assert_eq!(
+            concurrency, 6,
+            "Invalid env var should fall back to default"
         );
     }
 
