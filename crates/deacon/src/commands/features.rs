@@ -112,8 +112,15 @@ const DEFAULT_FETCH_CONCURRENCY: usize = 6;
 /// otherwise uses the default of 6. The limit is clamped to a minimum of 1
 /// and maximum of 32 to prevent resource exhaustion.
 fn get_fetch_concurrency() -> usize {
-    std::env::var("DEACON_FETCH_CONCURRENCY")
-        .ok()
+    get_fetch_concurrency_impl(std::env::var("DEACON_FETCH_CONCURRENCY").ok().as_deref())
+}
+
+/// Internal implementation for getting fetch concurrency from an optional environment value
+///
+/// This function is separated to allow testing without global state mutation.
+/// Takes an optional string value and returns the parsed, clamped concurrency limit.
+fn get_fetch_concurrency_impl(env_value: Option<&str>) -> usize {
+    env_value
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(DEFAULT_FETCH_CONCURRENCY)
         .clamp(1, 32)
@@ -2589,8 +2596,7 @@ mod tests {
     #[test]
     fn test_get_fetch_concurrency_default() {
         // Test: Default concurrency limit is 6
-        std::env::remove_var("DEACON_FETCH_CONCURRENCY");
-        let concurrency = super::get_fetch_concurrency();
+        let concurrency = super::get_fetch_concurrency_impl(None);
         assert_eq!(
             concurrency, 6,
             "Default concurrency should be 6 when env var not set"
@@ -2600,44 +2606,37 @@ mod tests {
     #[test]
     fn test_get_fetch_concurrency_from_env() {
         // Test: Concurrency can be set via environment variable
-        std::env::set_var("DEACON_FETCH_CONCURRENCY", "8");
-        let concurrency = super::get_fetch_concurrency();
+        let concurrency = super::get_fetch_concurrency_impl(Some("8"));
         assert_eq!(
             concurrency, 8,
             "Concurrency should be read from DEACON_FETCH_CONCURRENCY env var"
         );
-        std::env::remove_var("DEACON_FETCH_CONCURRENCY");
     }
 
     #[test]
     fn test_get_fetch_concurrency_clamped() {
         // Test: Concurrency is clamped between 1 and 32
-        std::env::set_var("DEACON_FETCH_CONCURRENCY", "0");
-        let concurrency = super::get_fetch_concurrency();
+        let concurrency = super::get_fetch_concurrency_impl(Some("0"));
         assert_eq!(
             concurrency, 1,
             "Concurrency should be clamped to minimum of 1"
         );
 
-        std::env::set_var("DEACON_FETCH_CONCURRENCY", "100");
-        let concurrency = super::get_fetch_concurrency();
+        let concurrency = super::get_fetch_concurrency_impl(Some("100"));
         assert_eq!(
             concurrency, 32,
             "Concurrency should be clamped to maximum of 32"
         );
-        std::env::remove_var("DEACON_FETCH_CONCURRENCY");
     }
 
     #[test]
     fn test_get_fetch_concurrency_invalid_env() {
         // Test: Invalid env var value falls back to default
-        std::env::set_var("DEACON_FETCH_CONCURRENCY", "invalid");
-        let concurrency = super::get_fetch_concurrency();
+        let concurrency = super::get_fetch_concurrency_impl(Some("invalid"));
         assert_eq!(
             concurrency, 6,
             "Invalid env var should fall back to default"
         );
-        std::env::remove_var("DEACON_FETCH_CONCURRENCY");
     }
 
     #[test]
