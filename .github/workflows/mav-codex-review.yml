@@ -50,7 +50,7 @@ jobs:
       - name: Pre-fetch Rust dependencies (no network needed later)
         run: cargo fetch --locked
 
-            - name: Recreate OpenCode auth.json for Copilot
+      - name: Recreate OpenCode auth.json for Copilot
         env:
           CODEX_ACCOUNT_ID: ${{ secrets.CODEX_ACCOUNT_ID }}
           CODEX_ID_TOKEN: ${{ secrets.CODEX_ID_TOKEN }}
