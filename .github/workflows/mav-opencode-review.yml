@@ -1,0 +1,48 @@
+name: maverick-opencode-review
+
+# Run OpenCode when someone comments /oc or /opencode on a PR.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  review:
+    if: >-
+      github.event.issue.pull_request &&
+      (
+        contains(github.event.comment.body, '/oc') ||
+        contains(github.event.comment.body, '/opencode')
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Recreate OpenCode auth.json for Copilot
+        env:
+          OPENCODE_COPILOT_REFRESH: ${{ secrets.OPENCODE_COPILOT_REFRESH }}
+        run: |
+          mkdir -p ~/.local/share/opencode
+          cat > ~/.local/share/opencode/auth.json <<'JSON'
+          {
+            "github-copilot": {
+              "type": "oauth",
+              "refresh": "${OPENCODE_COPILOT_REFRESH}",
+              "access": "",
+              "expires": 0
+            }
+          }
+          JSON
+
+      - name: Run OpenCode
+        uses: sst/opencode/github@latest
+        with:
+          # Specify the Copilot model you wish to use, e.g. copilot/sonnet-4.5
+          model: github-copilot/gpt-5-codex
