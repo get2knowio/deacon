@@ -1,6 +1,6 @@
-name: maverick-opencode-review
+name: maverick-codex-review
 
-# Run OpenCode when someone comments /oc or /opencode on a PR.
+# Run Codex when someone comments /codex on a PR.
 
 on:
   issue_comment:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  review:
+  codex:
     if: >-
       github.event.issue.pull_request &&
       (
@@ -50,7 +50,7 @@ jobs:
       - name: Pre-fetch Rust dependencies (no network needed later)
         run: cargo fetch --locked
 
-      - name: Recreate OpenCode auth.json for Copilot
+      - name: Recreate Codex auth.json
         env:
           CODEX_ACCOUNT_ID: ${{ secrets.CODEX_ACCOUNT_ID }}
           CODEX_ID_TOKEN: ${{ secrets.CODEX_ID_TOKEN }}
@@ -88,7 +88,7 @@ jobs:
             ----
             ${{ github.event.pull_request.title }}
             ${{ github.event.pull_request.body }}
-
+            
   post_feedback:
     runs-on: ubuntu-latest
     needs: codex
