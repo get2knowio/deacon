@@ -92,24 +92,44 @@ jobs:
           }
           JSON
 
-      - name: Run Codex
-        id: run_codex
-        uses: openai/codex-action@v1
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          # openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt: |
-            This is PR #${{ github.event.issue.number }} for ${{ github.repository }}.
+          node-version: '20'
 
-            Review ONLY the changes introduced by the PR, so consider:
-            git log --oneline ${{ steps.pr_info.outputs.base_sha }}...${{ steps.pr_info.outputs.head_sha }}
+      - name: Run Codex CLI
+        id: run_codex
+        env:
+          CODEX_HOME: ${{ env.HOME }}/.codex
+        run: |
+          set -euo pipefail
+          OUTPUT_FILE="$(mktemp)"
+          # Invoke Codex CLI via npx, feeding the prompt on stdin and writing the last message to OUTPUT_FILE.
+          npx -y @openai/codex@latest exec \
+            --skip-git-repo-check \
+            --cd "$GITHUB_WORKSPACE" \
+            --output-last-message "$OUTPUT_FILE" <<'PROMPT'
+          This is PR #${{ github.event.issue.number }} for ${{ github.repository }}.
 
-            Suggest any improvements, potential bugs, or issues.
-            Be concise and specific in your feedback.
+          Review ONLY the changes introduced by the PR, so consider:
+          git log --oneline ${{ steps.pr_info.outputs.base_sha }}...${{ steps.pr_info.outputs.head_sha }}
 
-            Pull request title and body:
-            ----
-            ${{ steps.pr_info.outputs.title }}
-            ${{ steps.pr_info.outputs.body }}
+          Suggest any improvements, potential bugs, or issues.
+          Be concise and specific in your feedback.
+
+          Pull request title and body:
+          ----
+          ${{ steps.pr_info.outputs.title }}
+          ${{ steps.pr_info.outputs.body }}
+          PROMPT
+
+          # Expose final message as a step output for downstream job usage.
+          {
+            echo 'final-message<<EOF'
+            cat "$OUTPUT_FILE"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+          rm -f "$OUTPUT_FILE"
 
   post_feedback:
     runs-on: ubuntu-latest
