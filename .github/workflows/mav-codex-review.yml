@@ -1,0 +1,112 @@
+name: maverick-opencode-review
+
+# Run OpenCode when someone comments /oc or /opencode on a PR.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    if: >-
+      github.event.issue.pull_request &&
+      (
+        contains(github.event.comment.body, '/codex')
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Explicitly check out the PR's merge commit.
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+
+      - name: Pre-fetch base and head refs for the PR
+        run: |
+          git fetch --no-tags origin \
+            ${{ github.event.pull_request.base.ref }} \
+            +refs/pull/${{ github.event.pull_request.number }}/head
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Pre-fetch Rust dependencies (no network needed later)
+        run: cargo fetch --locked
+
+            - name: Recreate OpenCode auth.json for Copilot
+        env:
+          CODEX_ACCOUNT_ID: ${{ secrets.CODEX_ACCOUNT_ID }}
+          CODEX_ID_TOKEN: ${{ secrets.CODEX_ID_TOKEN }}
+          CODEX_REFRESH_TOKEN: ${{ secrets.CODEX_REFRESH_TOKEN }}
+        run: |
+          mkdir -p ~/.codex
+          cat > ~/.codex/auth.json <<'JSON'
+          {
+            "OPENAI_API_KEY": null,
+            "tokens": {
+              "id_token": "${CODEX_ID_TOKEN}",
+              "access_token": "abc123",
+              "refresh_token": "${CODEX_REFRESH_TOKEN}",
+              "account_id": "${CODEX_ACCOUNT_ID}"
+            },
+            "last_refresh": "2025-10-01T19:24:20.220933559Z"
+          }
+          JSON
+
+      - name: Run Codex
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          # openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt: |
+            This is PR #${{ github.event.pull_request.number }} for ${{ github.repository }}.
+
+            Review ONLY the changes introduced by the PR, so consider:
+               git log --oneline ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+
+            Suggest any improvements, potential bugs, or issues.
+            Be concise and specific in your feedback.
+
+            Pull request title and body:
+            ----
+            ${{ github.event.pull_request.title }}
+            ${{ github.event.pull_request.body }}
+
+  post_feedback:
+    runs-on: ubuntu-latest
+    needs: codex
+    if: needs.codex.outputs.final_message != ''
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Report Codex feedback
+        uses: actions/github-script@v7
+        env:
+          CODEX_FINAL_MESSAGE: ${{ needs.codex.outputs.final_message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: process.env.CODEX_FINAL_MESSAGE,
+            });
