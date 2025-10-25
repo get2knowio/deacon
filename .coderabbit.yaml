@@ -5,39 +5,33 @@ language: "en-US"
 early_access: false
 enable_free_tier: true
 
-# Instruct CodeRabbit to always append a call for Copilot to act on feedback.
-# This leverages global tone instructions to influence the final actionable
-# comment it posts. (No dedicated footer key exists in current schema.)
-tone_instructions: "After listing actionable suggestions, append a final line exactly: '@copilot please address this feedback'"
+tone_instructions: "After listing actionable suggestions, append a final line exactly: 'You have the controls.'"
 
 reviews:
   profile: "chill"
-  high_level_summary: true
+  high_level_summary: false
+  review_status: false
 
-  # Only run when explicitly requested. Copilot agents open WIP PRs early,
-  # so keep CodeRabbit idle until "Request review" is used.
   auto_review:
     enabled: true
     auto_incremental_review: true
-    drafts: false
-    # Require a label so we can trigger via workflow on review request
-    labels:
-      - "ai:review"
+    drafts: true
 
   # Keep commit status enabled so manual runs still surface status checks.
   commit_status: true
 
   # Keep suggestions and walkthrough useful but lightweight.
-  changed_files_summary: true
+  changed_files_summary: false
   sequence_diagrams: false
-  estimate_code_review_effort: true
+  estimate_code_review_effort: false
   assess_linked_issues: true
-  related_issues: true
-  related_prs: true
-  suggested_labels: true
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
   auto_apply_labels: false
-  suggested_reviewers: true
+  suggested_reviewers: false
   auto_assign_reviewers: false
+  in_progress_fortune: false
   poem: false
 
   # Restrict review surface to meaningful paths for this Rust workspace.
@@ -68,10 +62,9 @@ reviews:
   # Pre-merge nudges without blocking merges unless desired later.
   pre_merge_checks:
     title:
-      mode: "warning"
-      requirements: "Title should be concise and follow Conventional Commits when feasible."
+      mode: "off"
     description:
-      mode: "warning"
+      mode: "off"
     docstrings:
       mode: "off"
 
