@@ -51,8 +51,8 @@ pub struct ReadConfigurationArgs {
     /// read-configuration command. Included for CLI parity with specification.
     #[allow(dead_code)]
     pub user_data_folder: Option<PathBuf>,
-    pub terminal_columns: Option<u16>,
-    pub terminal_rows: Option<u16>,
+    pub terminal_columns: Option<u32>,
+    pub terminal_rows: Option<u32>,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub override_config_path: Option<PathBuf>,
