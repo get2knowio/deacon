@@ -45,6 +45,8 @@ API_TOKEN=abc123xyz
     cmd.current_dir(&temp_dir).args([
         "--config",
         base_config.to_str().unwrap(),
+        "--workspace-folder",
+        temp_dir.path().to_str().unwrap(),
         "--override-config",
         override_config.to_str().unwrap(),
         "--secrets-file",
@@ -100,6 +102,8 @@ fn test_cli_with_multiple_secrets_files() {
     cmd.current_dir(&temp_dir).args([
         "--config",
         base_config.to_str().unwrap(),
+        "--workspace-folder",
+        temp_dir.path().to_str().unwrap(),
         "--secrets-file",
         secrets1.to_str().unwrap(),
         "--secrets-file",
@@ -137,6 +141,8 @@ fn test_cli_missing_secrets_file_continues() {
     cmd.current_dir(&temp_dir).args([
         "--config",
         base_config.to_str().unwrap(),
+        "--workspace-folder",
+        temp_dir.path().to_str().unwrap(),
         "--secrets-file",
         missing_secrets.to_str().unwrap(),
         "read-configuration",
