@@ -79,7 +79,8 @@ jobs:
           CODEX_REFRESH_TOKEN: ${{ secrets.CODEX_REFRESH_TOKEN }}
         run: |
           mkdir -p ~/.codex
-          cat > ~/.codex/auth.json <<'JSON'
+          # Write OAuth tokens to Codex auth.json (secrets will be masked in logs)
+          cat > ~/.codex/auth.json <<JSON
           {
             "OPENAI_API_KEY": null,
             "tokens": {
@@ -91,6 +92,7 @@ jobs:
             "last_refresh": "2025-10-01T19:24:20.220933559Z"
           }
           JSON
+          chmod 600 ~/.codex/auth.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -99,10 +101,10 @@ jobs:
 
       - name: Run Codex CLI
         id: run_codex
-        env:
-          CODEX_HOME: ${{ env.HOME }}/.codex
         run: |
           set -euo pipefail
+          # Ensure Codex home exists and auth.json is present
+          test -f "$HOME/.codex/auth.json" || { echo "Missing $HOME/.codex/auth.json"; exit 1; }
           OUTPUT_FILE="$(mktemp)"
           # Invoke Codex CLI via npx, feeding the prompt on stdin and writing the last message to OUTPUT_FILE.
           npx -y @openai/codex@latest exec \
