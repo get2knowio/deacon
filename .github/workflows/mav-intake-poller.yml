@@ -5,8 +5,8 @@ name: maverick-intake-poller
 
 on:
   # Scheduled polling interval. Adjust the cron as needed.
-  schedule:
-    - cron: "*/5 * * * *"
+  # schedule:
+  #   - cron: "*/5 * * * *"
   # Allow manual dispatch to run on demand.
   workflow_dispatch:
 
