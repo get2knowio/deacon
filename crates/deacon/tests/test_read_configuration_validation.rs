@@ -9,7 +9,7 @@ use tempfile::TempDir;
 
 #[test]
 fn test_selector_requirement_no_selectors() {
-    // When no selector flags are provided, should fail with exact message
+    // When no selector flags are provided (only --config), should fail with exact message
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("devcontainer.json");
     fs::write(&config_path, r#"{"name": "test", "image": "ubuntu:22.04"}"#).unwrap();
@@ -19,8 +19,29 @@ fn test_selector_requirement_no_selectors() {
         .arg("--config")
         .arg(&config_path);
 
-    // Should succeed because --config provides an implicit selector
-    // (this test documents current behavior - config path counts as a selector)
+    // Should fail because --config alone does not satisfy the selector requirement
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Missing required argument: One of --container-id, --id-label or --workspace-folder is required.",
+        ));
+}
+
+#[test]
+fn test_selector_requirement_with_workspace_folder() {
+    // When --workspace-folder is provided along with --config, should succeed
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("devcontainer.json");
+    fs::write(&config_path, r#"{"name": "test", "image": "ubuntu:22.04"}"#).unwrap();
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("read-configuration")
+        .arg("--config")
+        .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path());
+
+    // Should succeed because --workspace-folder satisfies the selector requirement
     cmd.assert().success();
 }
 
@@ -35,6 +56,8 @@ fn test_id_label_invalid_format_missing_equals() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--id-label")
         .arg("invalid");
 
@@ -54,6 +77,8 @@ fn test_id_label_invalid_format_empty_name() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--id-label")
         .arg("=value");
 
@@ -73,6 +98,8 @@ fn test_id_label_invalid_format_empty_value() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--id-label")
         .arg("name=");
 
@@ -112,6 +139,8 @@ fn test_terminal_dimensions_only_columns() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--terminal-columns")
         .arg("80");
 
@@ -131,6 +160,8 @@ fn test_terminal_dimensions_only_rows() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--terminal-rows")
         .arg("24");
 
@@ -150,6 +181,8 @@ fn test_terminal_dimensions_both_provided() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--terminal-columns")
         .arg("80")
         .arg("--terminal-rows")
@@ -168,7 +201,9 @@ fn test_terminal_dimensions_neither_provided() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("read-configuration")
         .arg("--config")
-        .arg(&config_path);
+        .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path());
 
     cmd.assert().success();
 }
@@ -184,6 +219,8 @@ fn test_additional_features_invalid_json() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--additional-features")
         .arg("not valid json");
 
@@ -203,6 +240,8 @@ fn test_additional_features_not_object() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--additional-features")
         .arg(r#"["not", "an", "object"]"#);
 
@@ -222,6 +261,8 @@ fn test_additional_features_valid_object() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--additional-features")
         .arg(r#"{"ghcr.io/devcontainers/features/node:1": "lts"}"#);
 
@@ -237,7 +278,9 @@ fn test_config_not_found_exact_message() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("read-configuration")
         .arg("--config")
-        .arg(&missing_path);
+        .arg(&missing_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path());
 
     let path_str = missing_path.display().to_string();
     cmd.assert()
@@ -258,7 +301,9 @@ fn test_config_non_object_root() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("read-configuration")
         .arg("--config")
-        .arg(&config_path);
+        .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path());
 
     cmd.assert().failure().stderr(predicate::str::contains(
         "must contain a JSON object literal.",
@@ -276,6 +321,8 @@ fn test_no_stdout_on_validation_error() {
     cmd.arg("read-configuration")
         .arg("--config")
         .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--id-label")
         .arg("invalid"); // Invalid format
 
@@ -292,7 +339,9 @@ fn test_no_stdout_on_config_parse_error() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("read-configuration")
         .arg("--config")
-        .arg(&config_path);
+        .arg(&config_path)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path());
 
     cmd.assert().failure().stdout(predicate::str::is_empty()); // No stdout
 }

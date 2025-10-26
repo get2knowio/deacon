@@ -464,24 +464,13 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         args.secrets_files.len()
     );
 
-    // Selector validation per spec:
+    // Selector validation per spec (§2, §9):
     // At least one of --container-id, --id-label, or --workspace-folder is required.
-    // Practical behavior (spec notes): workspace-folder often defaults to current directory,
-    // so this error is not typically encountered. To align with e2e flows and spec intent,
-    // treat the implicit CWD as satisfying the selector requirement when no explicit selector
-    // or config is provided.
+    // Note: --config alone does NOT satisfy this requirement.
     let has_container_id = args.container_id.is_some();
     let has_id_label = !args.id_label.is_empty();
     let has_workspace_folder = args.workspace_folder.is_some();
-    let has_config = args.config_path.is_some() || args.override_config_path.is_some();
-    let implicit_cwd_counts_as_workspace =
-        !has_container_id && !has_id_label && !has_workspace_folder && !has_config;
-    if !implicit_cwd_counts_as_workspace
-        && !has_container_id
-        && !has_id_label
-        && !has_workspace_folder
-        && !has_config
-    {
+    if !has_container_id && !has_id_label && !has_workspace_folder {
         anyhow::bail!(
             "Missing required argument: One of --container-id, --id-label or --workspace-folder is required."
         );
@@ -1028,7 +1017,7 @@ API_KEY=another-secret
             user_data_folder: None,
             terminal_columns: None,
             terminal_rows: None,
-            workspace_folder: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
             secrets_files: vec![],
@@ -1399,7 +1388,7 @@ API_KEY=another-secret
             user_data_folder: None,
             terminal_columns: None,
             terminal_rows: None,
-            workspace_folder: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
             secrets_files: vec![],
