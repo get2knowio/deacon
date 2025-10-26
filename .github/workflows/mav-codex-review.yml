@@ -136,7 +136,9 @@ jobs:
             --cd "$GITHUB_WORKSPACE" \
             --output-last-message "$OUTPUT_FILE" < "$PROMPT_FILE"
           # Expose final message as a single-line base64 output to avoid multiline delimiter issues
-          echo "final-message-b64=$(base64 -w0 \"$OUTPUT_FILE\")" >> "$GITHUB_OUTPUT"
+          # Use an intermediate variable to avoid nested quoting pitfalls that can introduce literal quotes
+          b64=$(base64 -w0 "$OUTPUT_FILE")
+          echo "final-message-b64=$b64" >> "$GITHUB_OUTPUT"
           rm -f "$OUTPUT_FILE" "$PROMPT_FILE"
 
   post_feedback:
