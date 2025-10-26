@@ -1,0 +1,47 @@
+name: maverick-intake-poller
+
+# Polls for items in the "Ready for Takeoff" status and moves them to "In Flight".
+# Creates a Copilot agent task and (optionally) posts a kickoff comment.
+
+on:
+  # Scheduled polling interval. Adjust the cron as needed.
+  schedule:
+    - cron: "*/5 * * * *"
+  # Allow manual dispatch to run on demand.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+env:
+  # Organization and project configuration. Update these values to your org and project.
+  ORG: get2knowio
+  PROJECT_NUMBER: "1"
+  # Status option names. These should match the names (including emoji) of your project Status field.
+  STATUS_READY: "Ready for Takeoff"
+  STATUS_INFLIGHT: "In Flight"
+  # Comment posted to kick off Copilot work. Customize as needed.
+  COPILOT_KICKOFF: "@copilot please start working on this issue"
+
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run intake poller
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORG: ${{ env.ORG }}
+          PROJECT_NUMBER: ${{ env.PROJECT_NUMBER }}
+          STATUS_READY: ${{ env.STATUS_READY }}
+          STATUS_INFLIGHT: ${{ env.STATUS_INFLIGHT }}
+          COPILOT_KICKOFF: ${{ env.COPILOT_KICKOFF }}
+        run: |
+          # Poll the project and move items from Ready for Takeoff to In Flight.
+          python .github/workflow-scripts/maverick/intake_poller.py
