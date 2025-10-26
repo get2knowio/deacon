@@ -241,7 +241,11 @@ fn test_e2e_basic_config_read() {
     harness.create_devcontainer_config(config_content);
 
     // Run read-configuration command
-    let result = harness.run_deacon_command(["read-configuration"]);
+    let result = harness.run_deacon_command([
+        "read-configuration",
+        "--workspace-folder",
+        harness.workspace_path.to_str().unwrap(),
+    ]);
 
     // Assert command succeeded and ran quickly
     result.assert_success().assert_duration_under(TEST_TIMEOUT);
@@ -297,7 +301,11 @@ fn test_e2e_variable_substitution() {
     harness.create_devcontainer_config(config_content);
 
     // Run read-configuration command
-    let result = harness.run_deacon_command(["read-configuration"]);
+    let result = harness.run_deacon_command([
+        "read-configuration",
+        "--workspace-folder",
+        harness.workspace_path.to_str().unwrap(),
+    ]);
 
     // Assert command succeeded
     result.assert_success().assert_duration_under(TEST_TIMEOUT);
@@ -363,7 +371,11 @@ fn test_e2e_features_configuration() {
     harness.create_devcontainer_config(config_content);
 
     // Run read-configuration command
-    let result = harness.run_deacon_command(["read-configuration"]);
+    let result = harness.run_deacon_command([
+        "read-configuration",
+        "--workspace-folder",
+        harness.workspace_path.to_str().unwrap(),
+    ]);
 
     // Assert command succeeded
     result.assert_success().assert_duration_under(TEST_TIMEOUT);
@@ -423,7 +435,11 @@ fn test_e2e_plugin_customizations() {
     harness.create_devcontainer_config(config_content);
 
     // Run read-configuration command
-    let result = harness.run_deacon_command(["read-configuration"]);
+    let result = harness.run_deacon_command([
+        "read-configuration",
+        "--workspace-folder",
+        harness.workspace_path.to_str().unwrap(),
+    ]);
 
     // Assert command succeeded
     result.assert_success().assert_duration_under(TEST_TIMEOUT);
@@ -481,7 +497,13 @@ fn test_e2e_lifecycle_simulation() {
     harness.create_devcontainer_config(config_content);
 
     // Run read-configuration with debug logging to verify lifecycle processing
-    let result = harness.run_deacon_command(["read-configuration", "--log-level", "debug"]);
+    let result = harness.run_deacon_command([
+        "read-configuration",
+        "--workspace-folder",
+        harness.workspace_path.to_str().unwrap(),
+        "--log-level",
+        "debug",
+    ]);
 
     // Assert command succeeded
     result.assert_success().assert_duration_under(TEST_TIMEOUT);
@@ -591,7 +613,11 @@ fn test_e2e_performance_under_30s() {
     let total_start = Instant::now();
 
     for i in 0..3 {
-        let result = harness.run_deacon_command(["read-configuration"]);
+        let result = harness.run_deacon_command([
+            "read-configuration",
+            "--workspace-folder",
+            harness.workspace_path.to_str().unwrap(),
+        ]);
 
         // Each run should succeed and be fast
         result
@@ -630,7 +656,11 @@ fn test_e2e_error_handling() {
     let harness = DeaconTestHarness::new();
 
     // Test 1: Missing configuration file
-    let result = harness.run_deacon_command(["read-configuration"]);
+    let result = harness.run_deacon_command([
+        "read-configuration",
+        "--workspace-folder",
+        harness.workspace_path.to_str().unwrap(),
+    ]);
     result
         .assert_failure()
         // Spec-exact message for missing config per task 294
@@ -641,7 +671,11 @@ fn test_e2e_error_handling() {
     let invalid_config = r#"{ "name": "invalid" missing comma }"#;
     harness.create_devcontainer_config(invalid_config);
 
-    let result = harness.run_deacon_command(["read-configuration"]);
+    let result = harness.run_deacon_command([
+        "read-configuration",
+        "--workspace-folder",
+        harness.workspace_path.to_str().unwrap(),
+    ]);
     result
         .assert_failure()
         .assert_stderr_contains("JSON parsing error");

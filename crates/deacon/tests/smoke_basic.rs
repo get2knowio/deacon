@@ -466,6 +466,8 @@ fn test_read_configuration_fixtures_breadth() {
     let assert = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .assert()
         .success();
 

@@ -28,6 +28,8 @@ fn test_read_configuration_json_purity() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .output()?;
 
     assert!(
@@ -74,6 +76,8 @@ fn test_json_output_purity_with_debug_logging() -> Result<()> {
         .arg("--log-level")
         .arg("debug")
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .output()?;
 
     assert!(
@@ -121,6 +125,8 @@ fn test_stderr_log_separation() -> Result<()> {
         .arg("--log-level")
         .arg("info")
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .output()?;
 
     assert!(
@@ -167,6 +173,8 @@ fn test_single_json_document_output() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .output()?;
 
     assert!(
