@@ -29,6 +29,8 @@ fn test_workspace_field_included() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .output()?;
 
     assert!(
@@ -89,6 +91,8 @@ fn test_configuration_field_always_included() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .output()?;
 
     assert!(output.status.success());
@@ -106,6 +110,8 @@ fn test_configuration_field_always_included() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--include-merged-configuration")
         .output()?;
 
@@ -143,6 +149,8 @@ fn test_features_configuration_with_flag() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .output()?;
 
     assert!(output.status.success());
@@ -159,6 +167,8 @@ fn test_features_configuration_with_flag() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--include-features-configuration")
         .output()?;
 
@@ -205,6 +215,8 @@ fn test_merged_configuration_with_flag() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .output()?;
 
     assert!(output.status.success());
@@ -221,6 +233,8 @@ fn test_merged_configuration_with_flag() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--include-merged-configuration")
         .output()?;
 
@@ -256,6 +270,8 @@ fn test_features_configuration_included_with_merged() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--include-merged-configuration")
         .output()?;
 
@@ -297,6 +313,8 @@ fn test_complete_output_structure() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("--include-features-configuration")
         .arg("--include-merged-configuration")
         .output()?;
@@ -360,6 +378,8 @@ fn test_workspace_field_structure() -> Result<()> {
     let output = cmd
         .current_dir(&temp_dir)
         .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .output()?;
 
     assert!(output.status.success());
