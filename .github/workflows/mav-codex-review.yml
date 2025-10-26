@@ -53,24 +53,24 @@ jobs:
             ${{ steps.pr_info.outputs.base_ref }} \
             +refs/pull/${{ github.event.issue.number }}/head
 
-      # - name: Set up Rust
-      #   uses: dtolnay/rust-toolchain@stable
-      #   with:
-      #     components: clippy,rustfmt
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
 
-      # - name: Cache cargo registry and build
-      #   uses: actions/cache@v4
-      #   with:
-      #     path: |
-      #       ~/.cargo/registry
-      #       ~/.cargo/git
-      #       target
-      #     key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      #     restore-keys: |
-      #       ${{ runner.os }}-cargo-
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
-      # - name: Pre-fetch Rust dependencies (no network needed later)
-      #   run: cargo fetch --locked
+      - name: Pre-fetch Rust dependencies (no network needed later)
+        run: cargo fetch --locked
 
       - name: Recreate Codex auth.json
         env:
@@ -156,7 +156,6 @@ jobs:
           ${{ steps.pr_info.outputs.title }}
           ${{ steps.pr_info.outputs.body }}
           PROMPT
-          fi
 
           # Invoke Codex CLI via npx, feeding the prompt from PROMPT_FILE and writing the last message to OUTPUT_FILE.
           npx -y @openai/codex@latest exec \
