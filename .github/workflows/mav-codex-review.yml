@@ -101,16 +101,20 @@ jobs:
 
       - name: Run Codex CLI
         id: run_codex
+        env:
+          # Optional repo variable to speed testing: set CODEX_USE_SIMPLE_PROMPT=true in Repository Variables to use a tiny prompt
+          CODEX_USE_SIMPLE_PROMPT: ${{ vars.CODEX_USE_SIMPLE_PROMPT }}
         run: |
           set -euo pipefail
           # Ensure Codex home exists and auth.json is present
           test -f "$HOME/.codex/auth.json" || { echo "Missing $HOME/.codex/auth.json"; exit 1; }
           OUTPUT_FILE="$(mktemp)"
-          # Invoke Codex CLI via npx, feeding the prompt on stdin and writing the last message to OUTPUT_FILE.
-          npx -y @openai/codex@latest exec \
-            --skip-git-repo-check \
-            --cd "$GITHUB_WORKSPACE" \
-            --output-last-message "$OUTPUT_FILE" <<'PROMPT'
+          PROMPT_FILE="$(mktemp)"
+
+          if [ "${CODEX_USE_SIMPLE_PROMPT:-true}" = "true" ]; then
+            echo "Write a three-line haiku about code review. Keep it concise." > "$PROMPT_FILE"
+          else
+            cat > "$PROMPT_FILE" <<'PROMPT'
           This is PR #${{ github.event.issue.number }} for ${{ github.repository }}.
 
           Review ONLY the changes introduced by the PR, so consider:
@@ -124,9 +128,16 @@ jobs:
           ${{ steps.pr_info.outputs.title }}
           ${{ steps.pr_info.outputs.body }}
           PROMPT
+          fi
+
+          # Invoke Codex CLI via npx, feeding the prompt from PROMPT_FILE and writing the last message to OUTPUT_FILE.
+          npx -y @openai/codex@latest exec \
+            --skip-git-repo-check \
+            --cd "$GITHUB_WORKSPACE" \
+            --output-last-message "$OUTPUT_FILE" < "$PROMPT_FILE"
           # Expose final message as a single-line base64 output to avoid multiline delimiter issues
           echo "final-message-b64=$(base64 -w0 \"$OUTPUT_FILE\")" >> "$GITHUB_OUTPUT"
-          rm -f "$OUTPUT_FILE"
+          rm -f "$OUTPUT_FILE" "$PROMPT_FILE"
 
   post_feedback:
     runs-on: ubuntu-latest
