@@ -124,12 +124,12 @@ jobs:
           ${{ steps.pr_info.outputs.title }}
           ${{ steps.pr_info.outputs.body }}
           PROMPT
-
-          # Expose final message as a step output for downstream job usage.
+          # Expose final message as a step output for downstream job usage using a unique delimiter
+          DELIM="EOF_$(date +%s)_$RANDOM"
           {
-            echo 'final-message<<EOF'
+            echo "final-message<<$DELIM"
             cat "$OUTPUT_FILE"
-            echo EOF
+            echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
           rm -f "$OUTPUT_FILE"
 
