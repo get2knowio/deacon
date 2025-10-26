@@ -111,17 +111,45 @@ jobs:
           OUTPUT_FILE="$(mktemp)"
           PROMPT_FILE="$(mktemp)"
 
-          if [ "${CODEX_USE_SIMPLE_PROMPT:-true}" = "true" ]; then
-            echo "Write a three-line haiku about code review. Keep it concise." > "$PROMPT_FILE"
-          else
-            cat > "$PROMPT_FILE" <<'PROMPT'
+          cat > "$PROMPT_FILE" <<'PROMPT'
           This is PR #${{ github.event.issue.number }} for ${{ github.repository }}.
 
-          Review ONLY the changes introduced by the PR, so consider:
-          git log --oneline ${{ steps.pr_info.outputs.base_sha }}...${{ steps.pr_info.outputs.head_sha }}
+          You are the sole, very senior engineer reviewing this PR. Treat this as the only review gate before merge.
+          Carefully read the entire PR diff and conversation and take your time to be thorough.
 
-          Suggest any improvements, potential bugs, or issues.
-          Be concise and specific in your feedback.
+          Review focus and priorities (in order):
+          1) Correctness and spec alignment: Verify the changes faithfully implement the requested task and PR intent
+            (title/description/linked issues) and conform to repository specifications and docs (e.g., CLI/spec files
+            under docs/). Call out any mismatches, missing behaviors, or ambiguous semantics.
+          2) Code quality and maintainability: Assess readability, naming, structure, modularity, error handling,
+            logging, public API impact, idiomatic style for the language used (Rust here), and absence of unsafe code
+            (or fully justified safety invariants if present). Check adherence to project conventions.
+          3) Tests and verification: Ensure appropriate unit/integration/doctests exist, are deterministic, and cover
+            happy paths and key edge cases. Identify coverage gaps and recommend specific tests. If CI results are
+            referenced, note failures and likely causes; otherwise, specify how to reproduce locally and the expected
+            assertions.
+          4) Performance and resource use: Flag unnecessary allocations/clones, blocking I/O in async paths, N+1
+            patterns, suboptimal algorithms, and scalability risks. Suggest concrete, low-risk improvements.
+          5) Security, reliability, and UX: Identify input validation gaps, panics, weak/opaque error messages, secret
+            or credential handling issues, injection/file/network risks, backward-compatibility and migration
+            concerns.
+
+          Output requirements (produce exactly these two sections and nothing else):
+          - A prioritized, bulleted list of concrete issues that must be resolved before merge. For each item include:
+            - [Severity: blocking|major|minor] and Category (Correctness, Tests, Style, Performance, Security, Docs, CI).
+            - What is wrong and why it matters.
+            - Where: file path and line/hunk reference when possible.
+            - The minimal, specific fix or verification steps (tiny inline code snippets allowed).
+            - If no issues, add a single bullet: "No issues found; approved as-is."
+          - Bulleted, line-level review notes tied to specific files/lines where helpful. Keep each bullet single-issue,
+            with a crisp recommendation or micro-fix. Avoid platitudes; prefer precise guidance.
+
+          Review guidance:
+          - Be exhaustive and specific; assume a junior author and prefer explicit steps over vague advice.
+          - Do not rewrite large code blocks; keep examples minimal and focused.
+          - Cite concrete project rules when applicable (formatting, clippy/lints, test conventions, docs expectations).
+          - If information is missing to judge an item, state your assumption and what evidence to look for (e.g., a test
+            or doc), and classify as blocking if it affects correctness.
 
           Pull request title and body:
           ----
