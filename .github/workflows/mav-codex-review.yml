@@ -21,7 +21,7 @@ jobs:
       )
     runs-on: ubuntu-latest
     outputs:
-      final_message: ${{ steps.run_codex.outputs.final-message }}
+      final_message_b64: ${{ steps.run_codex.outputs.final-message-b64 }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -124,19 +124,14 @@ jobs:
           ${{ steps.pr_info.outputs.title }}
           ${{ steps.pr_info.outputs.body }}
           PROMPT
-          # Expose final message as a step output for downstream job usage using a unique delimiter
-          DELIM="EOF_$(date +%s)_$RANDOM"
-          {
-            echo "final-message<<$DELIM"
-            cat "$OUTPUT_FILE"
-            echo "$DELIM"
-          } >> "$GITHUB_OUTPUT"
+          # Expose final message as a single-line base64 output to avoid multiline delimiter issues
+          echo "final-message-b64=$(base64 -w0 \"$OUTPUT_FILE\")" >> "$GITHUB_OUTPUT"
           rm -f "$OUTPUT_FILE"
 
   post_feedback:
     runs-on: ubuntu-latest
     needs: codex
-    if: needs.codex.outputs.final_message != ''
+    if: needs.codex.outputs.final_message_b64 != ''
     permissions:
       issues: write
       pull-requests: write
@@ -144,13 +139,15 @@ jobs:
       - name: Report Codex feedback
         uses: actions/github-script@v7
         env:
-          CODEX_FINAL_MESSAGE: ${{ needs.codex.outputs.final_message }}
+          CODEX_FINAL_MESSAGE_B64: ${{ needs.codex.outputs.final_message_b64 }}
         with:
           github-token: ${{ github.token }}
           script: |
+            const b64 = process.env.CODEX_FINAL_MESSAGE_B64 || '';
+            const body = Buffer.from(b64, 'base64').toString('utf8');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: process.env.CODEX_FINAL_MESSAGE,
+              body,
             });
