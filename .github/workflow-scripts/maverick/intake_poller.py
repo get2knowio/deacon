@@ -144,15 +144,57 @@ def main() -> None:
     }
     """
     data = json.loads(gh_graphql(query, org=org, number=project_number))
-    project = data["data"]["organization"]["projectV2"]
+    # Surface GraphQL errors early with a clear message
+    if data.get("errors"):
+        msgs = "; ".join(e.get("message", "") for e in data["errors"]) or "unknown GraphQL error"
+        raise SystemExit(f"::error::GraphQL error while loading project: {msgs}")
+
+    org_data = (data.get("data") or {}).get("organization") or {}
+    project = org_data.get("projectV2")
+    if not project:
+        # Provide a helpful hint by listing visible org projects and their numbers
+        try:
+            list_q = """
+            query($org:String!){
+              organization(login:$org){
+                projectsV2(first:50){
+                  nodes{ number title closed }
+                }
+              }
+            }
+            """
+            listing = json.loads(gh_graphql(list_q, org=org))
+            nodes = (
+                ((listing.get("data") or {}).get("organization") or {}).get("projectsV2") or {}
+            ).get("nodes") or []
+            if nodes:
+                visible = ", ".join(
+                    f"{n.get('number')} - {n.get('title')}{' (closed)' if n.get('closed') else ''}"
+                    for n in nodes if n
+                )
+                print(f"Visible org projects for '{org}': {visible}")
+        except Exception:
+            # Best-effort hint; ignore failures here
+            pass
+        raise SystemExit(
+            "::error::Project not found or not accessible. Verify ORG and PROJECT_NUMBER, and ensure GH_TOKEN (PAT) has org Projects access and the user is a member with visibility to this project."
+        )
+
+    fields_conn = project.get("fields")
+    items_conn = project.get("items")
+    if fields_conn is None or items_conn is None:
+        raise SystemExit(
+            "::error::Project fields or items are not accessible. Token may lack Projects v2 read access."
+        )
 
     # Locate the Status field (single select) and resolve option IDs using normalization
+    status_nodes = (fields_conn.get("nodes") or [])
     status_field = next(
-        n for n in project["fields"]["nodes"] if n and n.get("name") == "Status" and n.get("options") is not None
+        n for n in status_nodes if n and n.get("name") == "Status" and n.get("options") is not None
     )
     # Locate optional PR field to store PR id (create as NUMBER if missing)
     pr_field = None
-    for fld in project["fields"]["nodes"]:
+    for fld in status_nodes:
         if not fld or not fld.get("name"):
             continue
         if normalize(fld["name"]) == "pr":
@@ -202,7 +244,7 @@ def main() -> None:
         raise SystemExit("::error::Could not resolve Status option IDs. Check Status option names.")
 
     # Gate: If ANY item on the project is in one of the gate statuses, do nothing
-    for item in project["items"]["nodes"]:
+    for item in (items_conn.get("nodes") or []):
         for fv in item["fieldValues"]["nodes"] or []:
             if fv.get("optionId") in opt_gate:
                 print(
@@ -212,7 +254,7 @@ def main() -> None:
 
     # Find candidate ISSUES belonging to this repository with Status == Ready
     candidates: List[Tuple[str, int]] = []  # (item_id, issue_number)
-    for item in project["items"]["nodes"]:
+    for item in (items_conn.get("nodes") or []):
         content = item["content"]
         if not content:
             continue
