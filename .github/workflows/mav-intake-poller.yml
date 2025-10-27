@@ -60,20 +60,22 @@ jobs:
       - name: Run intake poller
         env:
           GH_PAT: ${{ secrets.ORG_PROJECTS_TOKEN }}
+          # Make sure the bot/script can read GH_TOKEN (script expects GH_TOKEN)
+          GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
           ORG: ${{ env.ORG }}
           PROJECT_NUMBER: ${{ env.PROJECT_NUMBER }}
           STATUS_READY: ${{ env.STATUS_READY }}
           STATUS_INFLIGHT: ${{ env.STATUS_INFLIGHT }}
           COPILOT_KICKOFF: ${{ env.COPILOT_KICKOFF }}
         run: |
-          # Verify token is available
-          if [ -z "$GH_PAT" ]; then
-            echo "ERROR: GH_OAUTH_TOKEN secret is not set"
+          # Verify token is available (the poller expects GH_TOKEN)
+          if [ -z "$GH_TOKEN" ]; then
+            echo "ERROR: GH_TOKEN is not set"
             echo "This workflow requires an OAuth token with the following scopes:"
             echo "  - repo (full control)"
             echo "  - read:org, write:org (for Projects v2)"
             exit 1
           fi
-          
-          # Now run the poller with GH_TOKEN set for the script
+
+          # Now run the poller (GH_TOKEN will be in the environment for the script)
           python .github/workflow-scripts/maverick/intake_poller.py
