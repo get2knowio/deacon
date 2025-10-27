@@ -420,23 +420,34 @@ def main() -> None:
 
     # 3. Update Status to In Flight only if we successfully started work
     if started:
-        mutation = """
-        mutation($project:ID!,$item:ID!,$field:ID!,$option:ID!){
-          updateProjectV2ItemFieldValue(input:{
-            projectId:$project,
-            itemId:$item,
-            fieldId:$field,
-            value:{ singleSelectOptionId:$option }
-          }){ projectV2Item{ id } }
-        }
-        """
-        gh_graphql(
-            mutation,
-            project=project["id"],
-            item=item_id,
-            field=status_field["id"],
-            option=opt_inflight,
-        )
+        print(f"Updating project status to '{status_inflight}'...")
+        try:
+            mutation = """
+            mutation($project:ID!,$item:ID!,$field:ID!,$option:ID!){
+              updateProjectV2ItemFieldValue(input:{
+                projectId:$project,
+                itemId:$item,
+                fieldId:$field,
+                value:{ singleSelectOptionId:$option }
+              }){ projectV2Item{ id } }
+            }
+            """
+            result = gh_graphql(
+                mutation,
+                project=project["id"],
+                item=item_id,
+                field=status_field["id"],
+                option=opt_inflight,
+            )
+            # Check for GraphQL errors in response
+            result_data = json.loads(result)
+            if result_data.get("errors"):
+                msgs = "; ".join(e.get("message", "") for e in result_data["errors"]) or "unknown error"
+                print(f"✗ Failed to update status: {msgs}")
+            else:
+                print(f"✓ Status updated to '{status_inflight}'")
+        except Exception as e:
+            print(f"✗ Error updating status: {e}")
     else:
         print("No action taken (agent task not configured or failed)")
 
