@@ -335,6 +335,7 @@ def main() -> None:
 
         # Create the agent task in the current repository context without following logs
         # to keep this poller responsive.
+        print("Creating Copilot agent task...")
         result = subprocess.run(
             ["gh", "agent-task", "create", "-F", "-", "-R", f"{owner}/{repo}"],
             input=desc,
@@ -346,18 +347,19 @@ def main() -> None:
         m = re.search(r"https?://\S+", result.stdout or "")
         if m:
             session_url = m.group(0).strip()
+            print(f"✓ Created agent task: {session_url}")
         started = True
     except subprocess.CalledProcessError as e:
-        # Non-fatal if agent task creation fails - show stderr for debugging
-        print(f"agent-task creation failed with exit code {e.returncode}")
+        # Fatal - agent task creation is the primary purpose
+        print(f"✗ agent-task creation failed with exit code {e.returncode}")
         if e.stdout:
             print(f"stdout: {e.stdout}")
         if e.stderr:
             print(f"stderr: {e.stderr}")
-        print("Leaving Status unchanged")
+        print("ERROR: Cannot proceed without agent task. Status will remain unchanged.")
     except FileNotFoundError as e:
-        print(f"gh CLI not found: {e}; leaving Status unchanged")
-
+        print(f"✗ gh CLI not found: {e}")
+        print("ERROR: Cannot proceed without gh CLI. Status will remain unchanged.")
     # 2. Post kickoff comment with the session URL if available
     if started and session_url:
         gh_command("issue", "comment", str(number), "--body", f"Assigned to copilot session: {session_url}")

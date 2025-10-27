@@ -39,13 +39,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Authenticate gh CLI
-        env:
-          GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
-        run: |
-          # Authenticate gh CLI with the PAT token
-          echo "$GH_TOKEN" | gh auth login --with-token
-
       - name: Run intake poller
         env:
           GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
@@ -55,5 +48,16 @@ jobs:
           STATUS_INFLIGHT: ${{ env.STATUS_INFLIGHT }}
           COPILOT_KICKOFF: ${{ env.COPILOT_KICKOFF }}
         run: |
+          # Verify token is available
+          if [ -z "$GH_TOKEN" ]; then
+            echo "ERROR: ORG_PROJECTS_TOKEN secret is not set"
+            echo "This workflow requires a Personal Access Token (classic) with the following scopes:"
+            echo "  - repo (full control)"
+            echo "  - read:org, write:org (for Projects v2)"
+            echo "  - user (for agent-task creation)"
+            exit 1
+          fi
+          
           # Poll the project and move items from Ready for Takeoff to In Flight.
+          # Creates a Copilot agent task for the selected issue.
           python .github/workflow-scripts/maverick/intake_poller.py
