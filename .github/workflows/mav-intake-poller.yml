@@ -41,14 +41,18 @@ jobs:
 
       - name: Configure gh CLI authentication
         env:
-          GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
+          GH_OAUTH_TOKEN: ${{ secrets.GH_OAUTH_TOKEN }}
+          GH_OAUTH_USER: ${{ secrets.GH_OAUTH_USER }}
         run: |
           mkdir -p ~/.config/gh
           cat > ~/.config/gh/hosts.yml <<EOF
           github.com:
-              user: token
-              oauth_token: $GH_TOKEN
               git_protocol: https
+              users:
+                  ${GH_OAUTH_USER}:
+                      oauth_token: ${GH_OAUTH_TOKEN}
+              user: ${GH_OAUTH_USER}
+              oauth_token: ${GH_OAUTH_TOKEN}
           EOF
           cat > ~/.config/gh/config.yml <<'CONFIGEOF'
           version: 1
