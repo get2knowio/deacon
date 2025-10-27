@@ -75,13 +75,10 @@ jobs:
 
       - name: Run intake poller
         env:
-          # GH_PAT for GraphQL (Projects v2) - has 'project' scope
-          GH_PAT: ${{ secrets.ORG_PROJECTS_TOKEN }}
-          # GH_TOKEN for gh CLI commands - needs 'workflow' scope for gh agent-task
-          GH_TOKEN: ${{ secrets.GH_OAUTH_TOKEN }}
-          # Also set GITHUB_TOKEN for compatibility
-          GITHUB_TOKEN: ${{ secrets.GH_OAUTH_TOKEN }}
-          # Set GH_HOST to ensure gh uses the correct host
+          # GH_TOKEN for gh CLI - has 'workflow' scope for agent-task, set via hosts.yml
+          # Python GraphQL needs 'project' scope so we use GH_PROJECTS_TOKEN
+          GH_PROJECTS_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
+          # Set GH_HOST
           GH_HOST: github.com
           ORG: ${{ env.ORG }}
           PROJECT_NUMBER: ${{ env.PROJECT_NUMBER }}
@@ -89,22 +86,18 @@ jobs:
           STATUS_INFLIGHT: ${{ env.STATUS_INFLIGHT }}
           COPILOT_KICKOFF: ${{ env.COPILOT_KICKOFF }}
         run: |
-          # Verify tokens are available
-          if [ -z "$GH_TOKEN" ]; then
-            echo "ERROR: GH_TOKEN is not set"
-            exit 1
-          fi
-          if [ -z "$GH_PAT" ]; then
-            echo "ERROR: GH_PAT is not set (needed for Projects v2 access)"
+          # Verify token is available
+          if [ -z "$GH_PROJECTS_TOKEN" ]; then
+            echo "ERROR: GH_PROJECTS_TOKEN is not set"
             exit 1
           fi
 
-          # Debug: verify gh sees the token with correct scopes
+          # Debug: verify gh sees the OAuth token from hosts.yml (has workflow scope)
           echo "::group::Pre-flight gh auth check"
           gh auth status || true
           echo "::endgroup::"
 
-          # Now run the poller
-          # - GH_PAT will be used for GraphQL/Projects v2 (read:project scope)
-          # - GH_TOKEN will be used for gh CLI commands (workflow scope)
+          # Run the poller
+          # - GH_PROJECTS_TOKEN for GraphQL (has project scope)
+          # - gh CLI uses token from ~/.config/gh/hosts.yml (has workflow scope for agent-task)
           python .github/workflow-scripts/maverick/intake_poller.py

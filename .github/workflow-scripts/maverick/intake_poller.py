@@ -40,11 +40,11 @@ def gh_graphql(query: str, **vars: Any) -> str:
     """Call the GitHub GraphQL API directly and return raw JSON string.
 
     Removes dependency on an external shell helper and avoids shell quoting
-    issues. Requires GH_TOKEN to be set in the environment.
+    issues. Requires GH_PROJECTS_TOKEN or GH_TOKEN to be set in the environment.
     """
-    token = os.environ.get("GH_TOKEN")
+    token = os.environ.get("GH_PROJECTS_TOKEN") or os.environ.get("GH_TOKEN")
     if not token:
-        raise SystemExit("::error::GH_TOKEN not set")
+        raise SystemExit("::error::GH_PROJECTS_TOKEN or GH_TOKEN not set")
 
     # Coerce common numeric variables to int to satisfy GraphQL types (e.g., Int!)
     variables: Dict[str, Any] = {}
