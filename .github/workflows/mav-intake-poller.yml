@@ -62,6 +62,8 @@ jobs:
           GH_PAT: ${{ secrets.ORG_PROJECTS_TOKEN }}
           # Make sure the bot/script can read GH_TOKEN (script expects GH_TOKEN)
           GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
+          # Also set GITHUB_TOKEN so `gh` CLI (and other tools) can pick up the token
+          GITHUB_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
           ORG: ${{ env.ORG }}
           PROJECT_NUMBER: ${{ env.PROJECT_NUMBER }}
           STATUS_READY: ${{ env.STATUS_READY }}
