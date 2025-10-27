@@ -39,6 +39,13 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Authenticate gh CLI
+        env:
+          GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
+        run: |
+          # Authenticate gh CLI with the PAT token
+          echo "$GH_TOKEN" | gh auth login --with-token
+
       - name: Run intake poller
         env:
           GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
