@@ -80,6 +80,8 @@ jobs:
           GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
           # Also set GITHUB_TOKEN so `gh` CLI (and other tools) can pick up the token
           GITHUB_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
+          # Set GH_HOST to ensure gh uses the correct host
+          GH_HOST: github.com
           ORG: ${{ env.ORG }}
           PROJECT_NUMBER: ${{ env.PROJECT_NUMBER }}
           STATUS_READY: ${{ env.STATUS_READY }}
@@ -94,6 +96,11 @@ jobs:
             echo "  - read:org, write:org (for Projects v2)"
             exit 1
           fi
+
+          # Debug: verify gh sees the token
+          echo "::group::Pre-flight gh auth check"
+          gh auth status || true
+          echo "::endgroup::"
 
           # Now run the poller (GH_TOKEN will be in the environment for the script)
           python .github/workflow-scripts/maverick/intake_poller.py
