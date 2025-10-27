@@ -41,7 +41,7 @@ jobs:
 
       - name: Run intake poller
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
           ORG: ${{ env.ORG }}
           PROJECT_NUMBER: ${{ env.PROJECT_NUMBER }}
           STATUS_READY: ${{ env.STATUS_READY }}
