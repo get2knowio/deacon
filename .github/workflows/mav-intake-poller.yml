@@ -43,8 +43,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
         run: |
-          # Authenticate gh CLI using token from environment
-          echo "$GH_TOKEN" | gh auth login --with-token
+          mkdir -p ~/.config/gh
+          # Write OAuth token to gh hosts.yml
+          cat > ~/.config/gh/hosts.yml <<EOF
+          github.com:
+              oauth_token: $GH_TOKEN
+              git_protocol: https
+          EOF
+          chmod 600 ~/.config/gh/hosts.yml
 
       - name: Run intake poller
         env:
