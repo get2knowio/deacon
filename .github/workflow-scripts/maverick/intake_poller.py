@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib import request, error
 
 
-def gh_graphql(query: str, **vars: str) -> str:
+def gh_graphql(query: str, **vars: Any) -> str:
     """Call the GitHub GraphQL API directly and return raw JSON string.
 
     Removes dependency on an external shell helper and avoids shell quoting
@@ -85,6 +85,66 @@ def normalize(text: str) -> str:
     return "".join(ch for ch in text if ch.isalnum() or ch.isspace()).lower()
 
 
+def fetch_all_items(project_id: str) -> List[Dict[str, Any]]:
+        """Fetch all ProjectV2 items via pagination (100 per page).
+
+        Returns a list of item nodes with the fields required by the poller.
+        """
+        items: List[Dict[str, Any]] = []
+        after: Optional[str] = None
+        while True:
+                q = """
+                query($id:ID!,$after:String){
+                    node(id:$id){
+                        ... on ProjectV2{
+                            items(first:100, after:$after){
+                                nodes{
+                                    id
+                                    content{
+                                        __typename
+                                        ... on Issue {
+                                            id
+                                            number
+                                            repository { name owner { login } }
+                                        }
+                                        ... on PullRequest {
+                                            id
+                                            number
+                                            repository { name owner { login } }
+                                        }
+                                    }
+                                    fieldValues(first:50){
+                                        nodes{
+                                            ... on ProjectV2ItemFieldSingleSelectValue {
+                                                field { ... on ProjectV2SingleSelectField { id name } }
+                                                name
+                                                optionId
+                                            }
+                                        }
+                                    }
+                                }
+                                pageInfo { hasNextPage endCursor }
+                            }
+                        }
+                    }
+                }
+                """
+                resp = json.loads(gh_graphql(q, id=project_id, after=after))
+                if resp.get("errors"):
+                        msgs = "; ".join(e.get("message", "") for e in resp["errors"]) or "unknown GraphQL error"
+                        raise SystemExit(f"::error::GraphQL error while listing items: {msgs}")
+                node = (resp.get("data") or {}).get("node") or {}
+                items_conn = (node.get("items") or {})
+                items.extend(items_conn.get("nodes") or [])
+                page = items_conn.get("pageInfo") or {}
+                if not page.get("hasNextPage"):
+                        break
+                after = page.get("endCursor")
+                if not after:
+                        break
+        return items
+
+
 def main() -> None:
     org = os.environ["ORG"]
     project_number = os.environ["PROJECT_NUMBER"]
@@ -93,56 +153,29 @@ def main() -> None:
     repo_env = os.environ.get("GITHUB_REPOSITORY")
     if not repo_env:
         raise SystemExit("::error::GITHUB_REPOSITORY not set")
-    owner, repo = repo_env.split("/")
+        owner, repo = repo_env.split("/")
 
-    kickoff = os.environ.get("COPILOT_KICKOFF", "").strip()
+        kickoff = os.environ.get("COPILOT_KICKOFF", "").strip()
 
-    # Preflight: verify token and Projects v2 access early for clearer errors
-    preflight_check(org, project_number)
+        # Preflight: verify token and Projects v2 access early for clearer errors
+        preflight_check(org, project_number)
 
-    # Fetch project details including items and status options
-    query = """
-    query($org:String!,$number:Int!){
-      organization(login:$org){
-        projectV2(number:$number){
-          id
-          fields(first:50){
-            nodes{
-              ... on ProjectV2SingleSelectField { id name options{ id name } }
-              ... on ProjectV2Field { id name }
+        # Fetch project details (id and fields). Items will be fetched with pagination.
+        query = """
+        query($org:String!,$number:Int!){
+            organization(login:$org){
+                projectV2(number:$number){
+                    id
+                    fields(first:50){
+                        nodes{
+                            ... on ProjectV2SingleSelectField { id name options{ id name } }
+                            ... on ProjectV2Field { id name }
+                        }
+                    }
+                }
             }
-          }
-          items(first:200){
-            nodes{
-              id
-              content{
-                __typename
-                ... on Issue {
-                  id
-                  number
-                  repository { name owner { login } }
-                }
-                ... on PullRequest {
-                  id
-                  number
-                  repository { name owner { login } }
-                }
-              }
-              fieldValues(first:50){
-                nodes{
-                  ... on ProjectV2ItemFieldSingleSelectValue {
-                    field { ... on ProjectV2SingleSelectField { id name } }
-                    name
-                    optionId
-                  }
-                }
-              }
-            }
-          }
         }
-      }
-    }
-    """
+        """
     data = json.loads(gh_graphql(query, org=org, number=project_number))
     # Surface GraphQL errors early with a clear message
     if data.get("errors"):
@@ -181,10 +214,9 @@ def main() -> None:
         )
 
     fields_conn = project.get("fields")
-    items_conn = project.get("items")
-    if fields_conn is None or items_conn is None:
+    if fields_conn is None:
         raise SystemExit(
-            "::error::Project fields or items are not accessible. Token may lack Projects v2 read access."
+            "::error::Project fields are not accessible. Token may lack Projects v2 read access."
         )
 
     # Locate the Status field (single select) and resolve option IDs using normalization
@@ -243,8 +275,11 @@ def main() -> None:
     if not opt_ready or not opt_inflight:
         raise SystemExit("::error::Could not resolve Status option IDs. Check Status option names.")
 
+    # Fetch all items with pagination (100 per page)
+    items = fetch_all_items(project_id=project["id"])
+
     # Gate: If ANY item on the project is in one of the gate statuses, do nothing
-    for item in (items_conn.get("nodes") or []):
+    for item in items:
         for fv in item["fieldValues"]["nodes"] or []:
             if fv.get("optionId") in opt_gate:
                 print(
@@ -254,7 +289,7 @@ def main() -> None:
 
     # Find candidate ISSUES belonging to this repository with Status == Ready
     candidates: List[Tuple[str, int]] = []  # (item_id, issue_number)
-    for item in (items_conn.get("nodes") or []):
+    for item in items:
         content = item["content"]
         if not content:
             continue
