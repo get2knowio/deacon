@@ -347,9 +347,16 @@ def main() -> None:
         if m:
             session_url = m.group(0).strip()
         started = True
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        # Non-fatal if agent task creation fails
-        print(f"agent-task creation skipped/failed ({e}); leaving Status unchanged")
+    except subprocess.CalledProcessError as e:
+        # Non-fatal if agent task creation fails - show stderr for debugging
+        print(f"agent-task creation failed with exit code {e.returncode}")
+        if e.stdout:
+            print(f"stdout: {e.stdout}")
+        if e.stderr:
+            print(f"stderr: {e.stderr}")
+        print("Leaving Status unchanged")
+    except FileNotFoundError as e:
+        print(f"gh CLI not found: {e}; leaving Status unchanged")
 
     # 2. Post kickoff comment with the session URL if available
     if started and session_url:
