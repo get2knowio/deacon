@@ -75,8 +75,9 @@ jobs:
 
       - name: Run intake poller
         env:
+          # GH_PAT for GraphQL (Projects v2) - has 'project' scope
           GH_PAT: ${{ secrets.ORG_PROJECTS_TOKEN }}
-          # Use GH_OAUTH_TOKEN for GH_TOKEN so gh CLI uses the token with workflow scope
+          # GH_TOKEN for gh CLI commands - needs 'workflow' scope for gh agent-task
           GH_TOKEN: ${{ secrets.GH_OAUTH_TOKEN }}
           # Also set GITHUB_TOKEN for compatibility
           GITHUB_TOKEN: ${{ secrets.GH_OAUTH_TOKEN }}
@@ -88,19 +89,22 @@ jobs:
           STATUS_INFLIGHT: ${{ env.STATUS_INFLIGHT }}
           COPILOT_KICKOFF: ${{ env.COPILOT_KICKOFF }}
         run: |
-          # Verify token is available (the poller expects GH_TOKEN)
+          # Verify tokens are available
           if [ -z "$GH_TOKEN" ]; then
             echo "ERROR: GH_TOKEN is not set"
-            echo "This workflow requires an OAuth token with the following scopes:"
-            echo "  - repo (full control)"
-            echo "  - read:org, write:org (for Projects v2)"
+            exit 1
+          fi
+          if [ -z "$GH_PAT" ]; then
+            echo "ERROR: GH_PAT is not set (needed for Projects v2 access)"
             exit 1
           fi
 
-          # Debug: verify gh sees the token
+          # Debug: verify gh sees the token with correct scopes
           echo "::group::Pre-flight gh auth check"
           gh auth status || true
           echo "::endgroup::"
 
-          # Now run the poller (GH_TOKEN will be in the environment for the script)
+          # Now run the poller
+          # - GH_PAT will be used for GraphQL/Projects v2 (read:project scope)
+          # - GH_TOKEN will be used for gh CLI commands (workflow scope)
           python .github/workflow-scripts/maverick/intake_poller.py
