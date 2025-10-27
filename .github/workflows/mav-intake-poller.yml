@@ -39,6 +39,24 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Configure gh CLI authentication
+        env:
+          GH_OAUTH_TOKEN: ${{ secrets.GH_OAUTH_TOKEN }}
+          GH_OAUTH_USER: ${{ secrets.GH_OAUTH_USER }}
+        run: |
+          mkdir -p ~/.config/gh
+          # Write OAuth token to gh hosts.yml (secrets will be masked in logs)
+          cat > ~/.config/gh/hosts.yml <<YAML
+          github.com:
+              git_protocol: https
+              users:
+                  ${GH_OAUTH_USER}:
+                      oauth_token: ${GH_OAUTH_TOKEN}
+              user: ${GH_OAUTH_USER}
+              oauth_token: ${GH_OAUTH_TOKEN}
+          YAML
+          chmod 600 ~/.config/gh/hosts.yml
+
       - name: Run intake poller
         env:
           GH_PAT: ${{ secrets.ORG_PROJECTS_TOKEN }}
@@ -50,21 +68,12 @@ jobs:
         run: |
           # Verify token is available
           if [ -z "$GH_PAT" ]; then
-            echo "ERROR: ORG_PROJECTS_TOKEN secret is not set"
-            echo "This workflow requires a Personal Access Token (classic) with the following scopes:"
+            echo "ERROR: GH_OAUTH_TOKEN secret is not set"
+            echo "This workflow requires an OAuth token with the following scopes:"
             echo "  - repo (full control)"
             echo "  - read:org, write:org (for Projects v2)"
-            echo "  - user (for agent-task creation)"
             exit 1
           fi
           
-          # Unset GH_TOKEN temporarily so gh auth login can work
-          unset GH_TOKEN
-          
-          # Configure gh CLI to use the PAT for authentication
-          # This is required for gh agent-task which needs OAuth-style auth
-          echo "$GH_PAT" | gh auth login --with-token
-          
           # Now run the poller with GH_TOKEN set for the script
-          export GH_TOKEN="$GH_PAT"
           python .github/workflow-scripts/maverick/intake_poller.py
