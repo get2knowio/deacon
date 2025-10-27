@@ -68,6 +68,10 @@ jobs:
           CONFIGEOF
           chmod 600 ~/.config/gh/hosts.yml
           chmod 644 ~/.config/gh/config.yml
+          # Verify gh authentication
+          echo "::group::gh auth status"
+          gh auth status || true
+          echo "::endgroup::"
 
       - name: Run intake poller
         env:
