@@ -76,10 +76,10 @@ jobs:
       - name: Run intake poller
         env:
           GH_PAT: ${{ secrets.ORG_PROJECTS_TOKEN }}
-          # Make sure the bot/script can read GH_TOKEN (script expects GH_TOKEN)
-          GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
-          # Also set GITHUB_TOKEN so `gh` CLI (and other tools) can pick up the token
-          GITHUB_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
+          # Use GH_OAUTH_TOKEN for GH_TOKEN so gh CLI uses the token with workflow scope
+          GH_TOKEN: ${{ secrets.GH_OAUTH_TOKEN }}
+          # Also set GITHUB_TOKEN for compatibility
+          GITHUB_TOKEN: ${{ secrets.GH_OAUTH_TOKEN }}
           # Set GH_HOST to ensure gh uses the correct host
           GH_HOST: github.com
           ORG: ${{ env.ORG }}
