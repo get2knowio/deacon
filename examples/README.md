@@ -5,7 +5,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 ### Index
 
 - Build: Dockerfile builds, platform targeting, build args, secrets & SSH (`build/`)
-- CLI: CLI-specific features and flags including port forwarding and custom container names (`cli/`)
+- CLI: CLI-specific features and flags including port forwarding, custom container names, and read-configuration (`cli/`)
 - Configuration: basic, variable substitution, extends chain, and nested variables (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, variables, skip flags, progress events, and redaction (`container-lifecycle/`)
 - Doctor: environment diagnostics including host requirements and storage checks (`doctor/`)
@@ -41,6 +41,18 @@ Validate a configuration example:
 ```sh
 cd examples/configuration/basic
 deacon config validate . --json
+```
+
+Read configuration with features:
+```sh
+cd examples/cli/read-configuration/with-features
+deacon read-configuration --workspace-folder . --config devcontainer.json --include-features-configuration
+```
+
+Read configuration with merged config:
+```sh
+cd examples/cli/read-configuration/with-merged
+deacon read-configuration --workspace-folder . --config devcontainer.json --include-merged-configuration
 ```
 
 Start a container with custom name:
