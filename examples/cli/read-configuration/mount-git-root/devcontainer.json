@@ -1,0 +1,4 @@
+{
+  "name": "mount-git-root-example",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+}

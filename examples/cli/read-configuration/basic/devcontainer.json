@@ -1,0 +1,8 @@
+{
+  "name": "basic-example",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "containerEnv": {
+    "EXAMPLE_VAR": "hello"
+  }
+}

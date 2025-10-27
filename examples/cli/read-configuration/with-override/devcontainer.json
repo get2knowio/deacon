@@ -1,0 +1,7 @@
+{
+  "name": "base-config",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "containerEnv": {
+    "BASE_VAR": "base-value"
+  }
+}

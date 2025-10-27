@@ -1,0 +1,5 @@
+{
+  "name": "with-features-example",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {}
+}

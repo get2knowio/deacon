@@ -1,0 +1,6 @@
+{
+  "name": "override-config",
+  "containerEnv": {
+    "OVERRIDE_VAR": "override-value"
+  }
+}
