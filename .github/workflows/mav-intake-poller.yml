@@ -41,18 +41,10 @@ jobs:
 
       - name: Configure gh CLI authentication
         env:
-          GH_OAUTH_TOKEN: ${{ secrets.GH_OAUTH_TOKEN }}
-          GH_OAUTH_USER: ${{ secrets.GH_OAUTH_USER }}
+          GH_TOKEN: ${{ secrets.ORG_PROJECTS_TOKEN }}
         run: |
-          mkdir -p ~/.config/gh
-          # Write OAuth token to gh hosts.yml (secrets will be masked in logs)
-          cat > ~/.config/gh/hosts.yml <<YAML
-          github.com:
-              user: ${GH_OAUTH_USER}
-              oauth_token: ${GH_OAUTH_TOKEN}
-              git_protocol: https
-          YAML
-          chmod 600 ~/.config/gh/hosts.yml
+          # Authenticate gh CLI using token from environment
+          echo "$GH_TOKEN" | gh auth login --with-token
 
       - name: Run intake poller
         env:
