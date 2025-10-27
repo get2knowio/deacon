@@ -46,7 +46,7 @@ jobs:
         run: |
           mkdir -p ~/.config/gh
           # Write OAuth token to gh hosts.yml (secrets will be masked in logs)
-          cat > ~/.config/gh/hosts.yml <<'YAML'
+          cat > ~/.config/gh/hosts.yml <<YAML
           github.com:
               user: ${GH_OAUTH_USER}
               oauth_token: ${GH_OAUTH_TOKEN}
