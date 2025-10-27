@@ -31,14 +31,48 @@ import re
 from urllib.parse import urlparse
 import os
 import subprocess
+import shutil
 from typing import Any, Dict, List, Optional, Tuple
+from urllib import request, error
 
 
 def gh_graphql(query: str, **vars: str) -> str:
-    """Call the GraphQL API via the helper script and return raw JSON."""
-    args = [f"-F {k}='{v}'" for k, v in vars.items()]
-    cmd = ["bash", "-lc", f".github/workflow-scripts/lib/gh_graphql.sh -f query=$'" + query + "' " + " ".join(args)]
-    return subprocess.check_output(cmd, text=True)
+    """Call the GitHub GraphQL API directly and return raw JSON string.
+
+    Removes dependency on an external shell helper and avoids shell quoting
+    issues. Requires GH_TOKEN to be set in the environment.
+    """
+    token = os.environ.get("GH_TOKEN")
+    if not token:
+        raise SystemExit("::error::GH_TOKEN not set")
+
+    # Coerce common numeric variables to int to satisfy GraphQL types (e.g., Int!)
+    variables: Dict[str, Any] = {}
+    for k, v in vars.items():
+        if k.lower() == "number" and isinstance(v, str) and v.isdigit():
+            variables[k] = int(v)
+        else:
+            variables[k] = v
+
+    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+    req = request.Request(
+        url="https://api.github.com/graphql",
+        data=body,
+        headers={
+            "Authorization": f"bearer {token}",
+            "Accept": "application/json",
+            # Required for Projects (v2) GraphQL access
+            "GraphQL-Features": "projects_next_graphql",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with request.urlopen(req) as resp:
+            return resp.read().decode("utf-8")
+    except error.HTTPError as e:
+        details = e.read().decode("utf-8", errors="ignore") if hasattr(e, "read") else str(e)
+        raise SystemExit(f"::error::GraphQL HTTP {e.code}: {details}")
 
 
 def gh_command(*args: str) -> None:
@@ -62,6 +96,9 @@ def main() -> None:
     owner, repo = repo_env.split("/")
 
     kickoff = os.environ.get("COPILOT_KICKOFF", "").strip()
+
+    # Preflight: verify token and Projects v2 access early for clearer errors
+    preflight_check(org, project_number)
 
     # Fetch project details including items and status options
     query = """
@@ -204,6 +241,9 @@ def main() -> None:
     session_url: Optional[str] = None
     try:
         # Build a task description from the issue content
+        # Ensure gh CLI is available before attempting agent-task
+        if shutil.which("gh") is None:
+            raise FileNotFoundError("gh CLI not found on PATH")
         issue_json = subprocess.check_output(
             ["gh", "issue", "view", str(number), "--json", "title,body,url"],
             text=True,
@@ -230,9 +270,9 @@ def main() -> None:
         if m:
             session_url = m.group(0).strip()
         started = True
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         # Non-fatal if agent task creation fails
-        print("agent-task creation failed; leaving Status unchanged")
+        print(f"agent-task creation skipped/failed ({e}); leaving Status unchanged")
 
     # 2. Post kickoff comment with the session URL if available
     if started and session_url:
@@ -313,6 +353,40 @@ def main() -> None:
         )
     else:
         print("No action taken (agent task not configured or failed)")
+
+
+def preflight_check(org: str, project_number: str) -> None:
+    """Run quick checks to ensure GH_TOKEN is present and Projects v2 is accessible.
+
+    Emits friendly errors early instead of failing deeper in the workflow.
+    """
+    # 1) Token present and valid
+    try:
+        viewer_q = """
+        query{ viewer { login } }
+        """
+        data = json.loads(gh_graphql(viewer_q))
+        if not data.get("data", {}).get("viewer", {}).get("login"):
+            raise SystemExit("::error::GH_TOKEN appears invalid: no viewer login returned")
+    except SystemExit:
+        # Re-raise with same message; gh_graphql prints detailed HTTP context
+        raise
+
+    # 2) Minimal Projects v2 access (org + project id only)
+    try:
+        probe = """
+        query($org:String!,$number:Int!){
+          organization(login:$org){ projectV2(number:$number){ id } }
+        }
+        """
+        resp = json.loads(gh_graphql(probe, org=org, number=project_number))
+        if resp.get("errors"):
+            msgs = "; ".join(e.get("message", "") for e in resp["errors"]) or "unknown error"
+            raise SystemExit(
+                f"::error::Token lacks access to organization projects or Projects v2 is disabled: {msgs}"
+            )
+    except SystemExit:
+        raise
 
 
 if __name__ == "__main__":
