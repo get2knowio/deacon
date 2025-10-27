@@ -58,10 +58,13 @@ jobs:
             exit 1
           fi
           
+          # Unset GH_TOKEN temporarily so gh auth login can work
+          unset GH_TOKEN
+          
           # Configure gh CLI to use the PAT for authentication
           # This is required for gh agent-task which needs OAuth-style auth
           echo "$GH_PAT" | gh auth login --with-token
           
-          # Now run the poller with GH_TOKEN set
+          # Now run the poller with GH_TOKEN set for the script
           export GH_TOKEN="$GH_PAT"
           python .github/workflow-scripts/maverick/intake_poller.py
