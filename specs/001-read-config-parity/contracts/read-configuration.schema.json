@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://get2know.io/deacon/schemas/read-configuration-output.json",
+  "title": "ReadConfigurationOutput",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "configuration": {
+      "type": "object"
+    },
+    "featuresConfiguration": {
+      "type": "object"
+    },
+    "mergedConfiguration": {
+      "type": "object"
+    }
+  },
+  "required": ["configuration"]
+}
