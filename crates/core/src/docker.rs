@@ -120,17 +120,32 @@ pub fn derive_container_workspace_folder(mounts: &[Mount]) -> Option<String> {
         }
     }
 
-    // Second pass: prefix matches (e.g., /workspaces/myproject)
+    // Second pass: prefix matches with boundary check (e.g., /workspaces/myproject)
+    // Track the longest matching destination to avoid false positives like "/workspace-temp"
+    let mut best_match: Option<String> = None;
+    let mut best_match_len = 0;
+
     for mount in mounts {
         if mount.mount_type == "bind" {
             let dest = &mount.destination;
-            if workspace_patterns
-                .iter()
-                .any(|&pattern| dest.starts_with(pattern))
-            {
-                return Some(dest.clone());
+            for &pattern in workspace_patterns.iter() {
+                if dest.starts_with(pattern) {
+                    // Check boundary: next character after pattern must be '/' or end of string
+                    let pattern_len = pattern.len();
+                    let is_valid_match = dest.len() == pattern_len
+                        || dest.as_bytes().get(pattern_len) == Some(&b'/');
+
+                    if is_valid_match && dest.len() > best_match_len {
+                        best_match = Some(dest.clone());
+                        best_match_len = dest.len();
+                    }
+                }
             }
         }
+    }
+
+    if let Some(best) = best_match {
+        return Some(best);
     }
 
     // Third pass: Look for the longest bind mount destination (heuristic: workspace is often the main mount)
