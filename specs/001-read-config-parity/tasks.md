@@ -24,10 +24,10 @@ Organization: Tasks are grouped by user story to enable independent implementati
 
 Purpose: Ensure flags, logging, and scaffolding align with the spec and repo rules
 
-- [ ] T001 [P] Audit and update CLI flag help text for read-configuration in `crates/deacon/src/cli.rs` (include --include-merged-configuration, --include-features-configuration, --container-id, --id-label, --terminal-rows/columns pairing, --user-data-folder notes)
-- [ ] T002 [P] Add spec reference comment header to `crates/deacon/src/commands/read_configuration.rs` pointing to `docs/subcommand-specs/read-configuration/SPEC.md` and `specs/001-read-config-parity/spec.md`
-- [ ] T003 [P] Confirm logging writes to stderr only in both text and JSON modes in `crates/core/src/logging.rs`; add a brief module doc note about stdout/stderr separation
-- [ ] T004 [P] Create integration test scaffold `crates/deacon/tests/integration_read_configuration.rs` with helper to run the command and parse stdout JSON safely
+- [X] T001 [P] Audit and update CLI flag help text for read-configuration in `crates/deacon/src/cli.rs` (include --include-merged-configuration, --include-features-configuration, --container-id, --id-label, --terminal-rows/columns pairing, --user-data-folder notes)
+- [X] T002 [P] Add spec reference comment header to `crates/deacon/src/commands/read_configuration.rs` pointing to `docs/subcommand-specs/read-configuration/SPEC.md` and `specs/001-read-config-parity/spec.md`
+- [X] T003 [P] Confirm logging writes to stderr only in both text and JSON modes in `crates/core/src/logging.rs`; add a brief module doc note about stdout/stderr separation
+- [X] T004 [P] Create integration test scaffold `crates/deacon/tests/integration_read_configuration.rs` with helper to run the command and parse stdout JSON safely
 
 ---
 
@@ -35,13 +35,13 @@ Purpose: Ensure flags, logging, and scaffolding align with the spec and repo rul
 
 Purpose: Core validation and output contract must be solid before story work
 
-- [ ] T005 Enforce single-JSON-to-stdout for read-configuration by routing all prints via `deacon_core::io::Output` in `crates/deacon/src/commands/read_configuration.rs` (verify no stray println! or eprintln! on success path)
-- [ ] T006 [P] Align selector requirement error message to spec wording in `crates/deacon/src/commands/read_configuration.rs` (FR-001)
-- [ ] T007 [P] Validate `--id-label` format with `<name>=<value>` and precise error text in `crates/core/src/container.rs::ContainerSelector::parse_labels` (FR-002)
-- [ ] T008 [P] Enforce terminal dimension pairing and positive values in `crates/deacon/src/cli.rs` and `crates/deacon/src/commands/read_configuration.rs` (FR-003)
-- [ ] T009 Compute `${devcontainerId}` deterministically from sorted labels (order-insensitive) using `compute_dev_container_id` in `crates/core/src/container.rs`; ensure call sites set it pre-container in `crates/deacon/src/commands/read_configuration.rs` (FR-005)
-- [ ] T010 [P] Set `containerWorkspaceFolder` and `${containerEnv:*}` substitution context when a container is selected in `crates/deacon/src/commands/read_configuration.rs` (FR-006)
-- [ ] T011 [P] Confirm stdout contract fields and omissions: always `configuration`, optional `featuresConfiguration`, optional `mergedConfiguration` in `crates/deacon/src/commands/read_configuration.rs` (FR-007/FR-008/FR-009/FR-010)
+- [X] T005 Enforce single-JSON-to-stdout for read-configuration by routing all prints via `deacon_core::io::Output` in `crates/deacon/src/commands/read_configuration.rs` (verify no stray println! or eprintln! on success path)
+- [X] T006 [P] Align selector requirement error message to spec wording in `crates/deacon/src/commands/read_configuration.rs` (FR-001)
+- [X] T007 [P] Validate `--id-label` format with `<name>=<value>` and precise error text in `crates/core/src/container.rs::ContainerSelector::parse_labels` (FR-002)
+- [X] T008 [P] Enforce terminal dimension pairing and positive values in `crates/deacon/src/cli.rs` and `crates/deacon/src/commands/read_configuration.rs` (FR-003)
+- [X] T009 Compute `${devcontainerId}` deterministically from sorted labels (order-insensitive) using `compute_dev_container_id` in `crates/core/src/container.rs`; ensure call sites set it pre-container in `crates/deacon/src/commands/read_configuration.rs` (FR-005)
+- [X] T010 [P] Set `containerWorkspaceFolder` and `${containerEnv:*}` substitution context when a container is selected in `crates/deacon/src/commands/read_configuration.rs` (FR-006)
+- [X] T011 [P] Confirm stdout contract fields and omissions: always `configuration`, optional `featuresConfiguration`, optional `mergedConfiguration` in `crates/deacon/src/commands/read_configuration.rs` (FR-007/FR-008/FR-009/FR-010)
 
 Checkpoint: Foundation ready — user story implementation can now begin
 
@@ -55,14 +55,14 @@ Independent Test: Run with `--workspace-folder` only, then add `--include-merged
 
 ### Tests for User Story 1 (OPTIONAL)
 
-- [ ] T012 [P] [US1] Add acceptance test: stdout contains only `{ configuration: ... }` when run with `--workspace-folder` in `crates/deacon/tests/integration_read_configuration.rs`
-- [ ] T013 [P] [US1] Add acceptance test: stdout contains `configuration` + `mergedConfiguration` when `--include-merged-configuration` is provided in `crates/deacon/tests/integration_read_configuration.rs`
+- [X] T012 [P] [US1] Add acceptance test: stdout contains only `{ configuration: ... }` when run with `--workspace-folder` in `crates/deacon/tests/integration_read_configuration.rs`
+- [X] T013 [P] [US1] Add acceptance test: stdout contains `configuration` + `mergedConfiguration` when `--include-merged-configuration` is provided in `crates/deacon/tests/integration_read_configuration.rs`
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] Ensure `ReadConfigurationOutput` omits absent sections and serializes with camelCase in `crates/deacon/src/commands/read_configuration.rs`
-- [ ] T015 [US1] Verify `Output::write_json` is the only stdout writer and logs use tracing (stderr) in `crates/deacon/src/commands/read_configuration.rs`
-- [ ] T016 [US1] Update CLI help and docs for the subcommand in `crates/deacon/src/cli.rs` to reflect exact flags and behavior per SPEC.md
+- [X] T014 [US1] Ensure `ReadConfigurationOutput` omits absent sections and serializes with camelCase in `crates/deacon/src/commands/read_configuration.rs`
+- [X] T015 [US1] Verify `Output::write_json` is the only stdout writer and logs use tracing (stderr) in `crates/deacon/src/commands/read_configuration.rs`
+- [X] T016 [US1] Update CLI help and docs for the subcommand in `crates/deacon/src/cli.rs` to reflect exact flags and behavior per SPEC.md
 
 Checkpoint: US1 independently functional and demoable
 
@@ -76,15 +76,15 @@ Independent Test: With a running container and labels, run with `--container-id`
 
 ### Tests for User Story 2 (OPTIONAL)
 
-- [ ] T017 [P] [US2] Add test: label order does not change `${devcontainerId}` in `crates/deacon/tests/integration_read_configuration.rs`
-- [ ] T018 [P] [US2] Add test: with `--container-id` and `--include-merged-configuration`, error if inspect fails (no fallback) in `crates/deacon/tests/integration_read_configuration.rs`
+- [X] T017 [P] [US2] Add test: label order does not change `${devcontainerId}` in `crates/deacon/tests/integration_read_configuration.rs`
+- [X] T018 [P] [US2] Add test: with `--container-id` and `--include-merged-configuration`, error if inspect fails (no fallback) in `crates/deacon/tests/integration_read_configuration.rs`
 
 ### Implementation for User Story 2
 
-- [ ] T019 [P] [US2] Prefer `--container-id` over `--id-label` in `crates/core/src/container.rs::resolve_container` and ensure consistent behavior (FR-001 precedence)
-- [ ] T020 [P] [US2] Apply beforeContainerSubstitute to set `${devcontainerId}` then containerSubstitute for `${containerEnv:*}`/`${containerWorkspaceFolder}` in `crates/deacon/src/commands/read_configuration.rs` (ensure order)
-- [ ] T021 [US2] Implement `containerWorkspaceFolder` derivation from container mounts/config in `crates/core/src/docker.rs` and wire into substitution context in `crates/deacon/src/commands/read_configuration.rs`
-- [ ] T022 [US2] When `--include-merged-configuration` with a selected container, compose merged metadata using container inspect; on inspect failure, return error (FR-009 failure mode) in `crates/deacon/src/commands/read_configuration.rs`
+- [X] T019 [P] [US2] Prefer `--container-id` over `--id-label` in `crates/core/src/container.rs::resolve_container` and ensure consistent behavior (FR-001 precedence)
+- [X] T020 [P] [US2] Apply beforeContainerSubstitute to set `${devcontainerId}` then containerSubstitute for `${containerEnv:*}`/`${containerWorkspaceFolder}` in `crates/deacon/src/commands/read_configuration.rs` (ensure order)
+- [X] T021 [US2] Implement `containerWorkspaceFolder` derivation from container mounts/config in `crates/core/src/docker.rs` and wire into substitution context in `crates/deacon/src/commands/read_configuration.rs`
+- [X] T022 [US2] When `--include-merged-configuration` with a selected container, compose merged metadata using container inspect; on inspect failure, return error (FR-009 failure mode) in `crates/deacon/src/commands/read_configuration.rs`
 
 Checkpoint: US2 independently functional and demoable
 
@@ -98,15 +98,15 @@ Independent Test: With a config referencing Features, run with `--include-featur
 
 ### Tests for User Story 3 (OPTIONAL)
 
-- [ ] T023 [P] [US3] Add test: `featuresConfiguration` present when `--include-features-configuration` is set in `crates/deacon/tests/integration_read_configuration.rs`
-- [ ] T024 [P] [US3] Add test: deep-merge `--additional-features` with precedence over base in `crates/deacon/tests/integration_read_configuration.rs`
+- [X] T023 [P] [US3] Add test: `featuresConfiguration` present when `--include-features-configuration` is set in `crates/deacon/tests/integration_read_configuration.rs`
+- [X] T024 [P] [US3] Add test: deep-merge `--additional-features` with precedence over base in `crates/deacon/tests/integration_read_configuration.rs`
 
 ### Implementation for User Story 3
 
-- [ ] T025 [P] [US3] Validate and reject non-object `--additional-features` JSON early with clear error in `crates/deacon/src/commands/read_configuration.rs` (FR-008)
-- [ ] T026 [US3] Implement deep-merge semantics for additional features via `FeatureMerger` (CLI values take precedence) in `crates/deacon/src/commands/read_configuration.rs` and `crates/core/src/features.rs`
-- [ ] T027 [US3] Honor `--skip-feature-auto-mapping` for legacy string feature IDs in `crates/deacon/src/commands/read_configuration.rs`
-- [ ] T028 [US3] When both merged and no container selected, derive merged metadata from features (imageBuildInfo → metadata) in `crates/deacon/src/commands/read_configuration.rs` (FR-009 non-container path)
+- [X] T025 [P] [US3] Validate and reject non-object `--additional-features` JSON early with clear error in `crates/deacon/src/commands/read_configuration.rs` (FR-008)
+- [X] T026 [US3] Implement deep-merge semantics for additional features via `FeatureMerger` (CLI values take precedence) in `crates/deacon/src/commands/read_configuration.rs` and `crates/core/src/features.rs`
+- [X] T027 [US3] Honor `--skip-feature-auto-mapping` for legacy string feature IDs in `crates/deacon/src/commands/read_configuration.rs`
+- [X] T028 [US3] When both merged and no container selected, derive merged metadata from features (imageBuildInfo → metadata) in `crates/deacon/src/commands/read_configuration.rs` (FR-009 non-container path)
 
 Checkpoint: US3 independently functional and demoable
 
@@ -116,10 +116,10 @@ Checkpoint: US3 independently functional and demoable
 
 Purpose: Documentation, schema, smoke test updates, and hardening
 
-- [ ] T029 [P] Update `docs/subcommand-specs/read-configuration/SPEC.md` references if flags/wording adjusted (docs-only change)
-- [ ] T030 Update or add smoke assertions in `crates/deacon/tests/smoke_basic.rs` to reflect strict stdout JSON and new flags when relevant
-- [ ] T031 [P] Ensure contracts alignment with `specs/001-read-config-parity/contracts/read-configuration.schema.json` in serialization of `ReadConfigurationOutput` (camelCase, optional fields)
-- [ ] T032 Add brief note to `examples/observability/json-logs/` README if log behavior changed (stderr-only)
+- [X] T029 [P] Update `docs/subcommand-specs/read-configuration/SPEC.md` references if flags/wording adjusted (docs-only change)
+- [X] T030 Update or add smoke assertions in `crates/deacon/tests/smoke_basic.rs` to reflect strict stdout JSON and new flags when relevant
+- [X] T031 [P] Ensure contracts alignment with `specs/001-read-config-parity/contracts/read-configuration.schema.json` in serialization of `ReadConfigurationOutput` (camelCase, optional fields)
+- [X] T032 Add brief note to `examples/observability/json-logs/` README if log behavior changed (stderr-only)
 
 ---
 

@@ -2,6 +2,7 @@
 - Source of truth: follow the `docs/subcommand-specs/*/SPEC.md` files; no silent fallbacks—fail fast if unimplemented.
 - Build: `cargo build --verbose`; Run CLI: `cargo run -- --help`.
 - Test (all): `cargo test --verbose -- --test-threads=1`; doctests: `cargo test --doc`.
+- Fast loop: `make dev-fast` (fmt-check + clippy + unit/bins/examples + doctests; skips slow integration/smoke)
 - Test (crate): `cargo test -p deacon`; `cargo test -p deacon-core`.
 - Test (single unit): `cargo test -p deacon <name_substring>`.
 - Test (single integration): `cargo test -p deacon --test integration_build_args <test_name>`.
@@ -18,3 +19,4 @@
 - Commits/PRs: Conventional Commits; keep build green locally after every change.
 - Safety: no `unsafe` code; review new deps carefully.
 - Copilot rules: follow `.github/copilot-instructions.md` (run build/test/fmt/clippy after every change).
+	- Use the Fast Loop by default during spec-phase; run `make test`/`make release-check` periodically and before PRs.

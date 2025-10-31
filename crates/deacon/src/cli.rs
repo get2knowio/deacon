@@ -264,7 +264,7 @@ pub enum Commands {
         #[arg(long)]
         container_id: Option<String>,
         /// Identify container by labels (KEY=VALUE format, can be specified multiple times).
-        /// Must match pattern <name>=<value> with non-empty name and value.
+        /// Used to locate the container if --container-id is not provided. If neither --container-id nor --id-label is set, one is inferred from --workspace-folder.
         #[arg(long, action = clap::ArgAction::Append)]
         id_label: Vec<String>,
         /// Mount workspace git root (default: true)

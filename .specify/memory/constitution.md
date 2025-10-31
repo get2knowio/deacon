@@ -1,13 +1,15 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 → 1.0.1
-- Modified principles: None (non-semantic cleanup)
-- Added sections: None
-- Removed sections: Residual template block (placeholder-based constitution skeleton)
+- Version change: 1.2.0 → 1.3.0
+- Modified principles:
+  - II. Keep the Build Green (clarified fast vs full test cadence)
+- Added sections:
+  - Agentic Fast Loop Mode (local-only)
+- Removed sections: None
 - Templates requiring updates/alignment:
-  - ✅ .specify/templates/plan-template.md (aligned; no changes required)
-  - ✅ .specify/templates/spec-template.md (aligned; no changes required)
-  - ✅ .specify/templates/tasks-template.md (aligned; no changes required)
+  - ✅ .specify/templates/plan-template.md (no changes required)
+  - ✅ .specify/templates/spec-template.md (no changes required)
+  - ✅ .specify/templates/tasks-template.md (no changes required)
 - Follow-up TODOs: None
 -->
 
@@ -23,12 +25,19 @@ substitution) MUST be preserved. Any requested change conflicting with the spec 
 spec updates before implementation; examples and fixtures MUST be kept in sync.
 
 ### II. Keep the Build Green (Non‑Negotiable)
-All code changes MUST pass the full local CI checklist after every change, not just before commits:
-- `cargo build --verbose` succeeds
-- `cargo test --verbose -- --test-threads=1` passes (including smoke tests and doctests)
-- `cargo fmt --all` followed by `cargo fmt --all -- --check` shows no changes required
-- `cargo clippy --all-targets -- -D warnings` reports zero warnings
-Public behavior changes MUST update tests and examples accordingly.
+All code changes MUST keep the build green with an explicit cadence for quick vs. full checks:
+- Fast Loop (default during spec‑phase, local only):
+  - `cargo fmt --all && cargo fmt --all -- --check`
+  - `cargo clippy --all-targets -- -D warnings`
+  - Fast tests only: unit/bins/examples + doctests (e.g., `make dev-fast`)
+- Full Gate (periodic and before push/PR):
+  - `cargo build --verbose`
+  - `cargo test -- --test-threads=1` (all tests, including integration and smoke as applicable)
+  - `cargo test --doc`
+  - `cargo fmt --all && cargo fmt --all -- --check`
+  - `cargo clippy --all-targets -- -D warnings`
+Public behavior changes MUST update tests and examples accordingly. Use non‑smoke (`make test-non-smoke`) or
+smoke‑only (`make test-smoke`) runs during development when touching relevant areas, and always run a full gate before PR.
 
 ### III. No Silent Fallbacks — Fail Fast
 Production code MUST NOT silently downgrade, noop, or substitute mock/stub implementations when capabilities (OCI,
@@ -70,7 +79,17 @@ Conventional Commits; labels drive release notes; examples and fixtures MUST rem
 - Doctests MUST compile and run; add missing trait imports, `Default` impls, or public visibility as needed.
 - Examples under `examples/` and fixtures under `fixtures/` are living documentation; update them when user‑facing
   flags, schemas, or outputs change; keep `examples/README.md` curated and aligned with spec terminology.
+- Use ast-grep tool (command 'sg') for searching or rewriting code instead of find or grep.
+- Use context7 MCP server for retrieving up-to-date documentation for libraries and packages.
+- Use github MCP server for interacting with GitHub repositories, managing issues, pull requests, and code searches.
 - Observability: prefer structured fields over string concatenation; ensure spans cover multi‑step workflows.
+
+### Agentic Fast Loop Mode (local‑only)
+
+- Use `make dev-fast` for rapid iterations; it avoids Docker‑heavy suites and long‑running integration tests.
+- Recommended cadence: run `make test-non-smoke` every few iterations if you touched parsing/validation; run
+  `make test-smoke` when touching Docker lifecycle; run `make release-check` before commits/PRs.
+- This preserves the “keep build green” principle while reducing iteration time.
 
 ## Governance
 
@@ -86,4 +105,4 @@ Conventional Commits; labels drive release notes; examples and fixtures MUST rem
   SHALL block merges on violations of Principles II–V or on missing updates to tests/examples.
 <!-- Cleanup: removed residual template; no behavioral changes -->
 
-**Version**: 1.0.1 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-10-31
+**Version**: 1.3.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-10-31

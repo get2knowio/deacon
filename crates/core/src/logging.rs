@@ -3,6 +3,8 @@
 //! This module provides structured logging, tracing, and observability utilities.
 //! It supports both traditional text-based logging and optional JSON formatting,
 //! controlled at runtime via environment variables and CLI flags (no feature flags).
+//!
+//! All logging output is directed to stderr to preserve stdout for command output.
 
 use crate::redaction::RedactionConfig;
 use anyhow::Result;

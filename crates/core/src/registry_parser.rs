@@ -6,9 +6,9 @@ use anyhow::Result;
 
 /// Parse a registry reference into its components
 /// Supports formats like:
-/// - ghcr.io/devcontainers/node:18
-/// - registry.com/namespace/name
-/// - namespace/name (assumes default registry)
+/// - ghcr.io/devcontainers/features/node:18
+/// - registry.com/namespace/subnamespace/name
+/// - namespace/subnamespace/name (assumes default registry)
 /// - simple-name (assumes default registry and namespace)
 pub fn parse_registry_reference(
     registry_ref: &str,
@@ -54,21 +54,44 @@ pub fn parse_registry_reference(
                 ))
             }
         }
-        3 => {
-            // Format: registry/namespace/name[:tag]
-            let (name, tag) = parse_name_and_tag(parts[2]);
-            Ok((
-                parts[0].to_string(),
-                parts[1].to_string(),
-                name.to_string(),
-                tag.map(|t| t.to_string()),
-            ))
+        _ => {
+            // Format: registry/namespace/.../name[:tag] or namespace/.../name[:tag]
+            // Check if the first part looks like a registry (contains a dot)
+            if parts[0].contains('.') {
+                // First part is registry, rest is namespace + name
+                let registry = parts[0];
+                let remaining_parts = &parts[1..];
+                let (namespace, name_and_tag) = parse_namespace_and_name(remaining_parts);
+                let (name, tag) = parse_name_and_tag(name_and_tag);
+                Ok((
+                    registry.to_string(),
+                    namespace,
+                    name.to_string(),
+                    tag.map(|t| t.to_string()),
+                ))
+            } else {
+                // No registry, first parts are namespace, last is name
+                let (namespace, name_and_tag) = parse_namespace_and_name(&parts);
+                let (name, tag) = parse_name_and_tag(name_and_tag);
+                Ok((
+                    default_registry.to_string(),
+                    namespace,
+                    name.to_string(),
+                    tag.map(|t| t.to_string()),
+                ))
+            }
         }
-        _ => Err(anyhow::anyhow!(
-            "Invalid registry reference format: {}. Expected format: [registry/][namespace/]name[:tag]",
-            registry_ref
-        )),
     }
+}
+
+/// Parse namespace and name from parts, where namespace can have multiple levels
+/// Returns (namespace, name_and_tag)
+fn parse_namespace_and_name<'a>(parts: &[&'a str]) -> (String, &'a str) {
+    // Last part is always name[:tag], everything before is namespace
+    let name_and_tag = parts[parts.len() - 1];
+    let namespace_parts = &parts[..parts.len() - 1];
+    let namespace = namespace_parts.join("/");
+    (namespace, name_and_tag)
 }
 
 /// Parse name and tag from a name[:tag] string
@@ -96,11 +119,27 @@ mod tests {
         assert_eq!(name, "node");
         assert_eq!(tag, Some("18".to_string()));
 
+        // Test registry + multi-level namespace + name
+        let (registry, namespace, name, tag) =
+            parse_registry_reference("ghcr.io/devcontainers/features/node:1").unwrap();
+        assert_eq!(registry, "ghcr.io");
+        assert_eq!(namespace, "devcontainers/features");
+        assert_eq!(name, "node");
+        assert_eq!(tag, Some("1".to_string()));
+
         // Test registry + name (use default namespace)
         let (registry, namespace, name, tag) =
             parse_registry_reference("ghcr.io/myfeature").unwrap();
         assert_eq!(registry, "ghcr.io");
         assert_eq!(namespace, "devcontainers");
+        assert_eq!(name, "myfeature");
+        assert_eq!(tag, None);
+
+        // Test multi-level namespace + name (use default registry)
+        let (registry, namespace, name, tag) =
+            parse_registry_reference("myorg/myproject/myfeature").unwrap();
+        assert_eq!(registry, "ghcr.io");
+        assert_eq!(namespace, "myorg/myproject");
         assert_eq!(name, "myfeature");
         assert_eq!(tag, None);
 
