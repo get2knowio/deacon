@@ -437,3 +437,9 @@ Until explicitly scheduled, treat these as roadmap items; do not create scaffold
 
 ---
 If you are an AI assistant operating on this repository: remain concise, cite spec section names when relevant, and prefer patches over prose when user intent is clear.
+
+## Active Technologies
+- Rust (stable channel per rust-toolchain.toml) + clap (CLI args), serde/serde_json (JSON), tracing (logs), thiserror (errors) (001-read-config-parity)
+
+## Recent Changes
+- 001-read-config-parity: Added Rust (stable channel per rust-toolchain.toml) + clap (CLI args), serde/serde_json (JSON), tracing (logs), thiserror (errors)
