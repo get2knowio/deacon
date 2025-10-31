@@ -9,7 +9,7 @@ These instructions guide AI assistance (e.g. GitHub Copilot / Chat) when proposi
 4. Avoid introducing unsafe code. If absolutely necessary, justify with a comment explaining safety invariants.
 5. **CRITICAL: Keep build green** - ALL code changes MUST pass the complete CI pipeline locally before submission. **Run checks after EVERY code change, not just before committing**:
    - `cargo build --verbose` (must compile successfully)
-   - `cargo test --verbose -- --test-threads=1` (all tests must pass)
+   - `cargo test --quiet -- --test-threads=1` (all tests must pass)
    - `cargo fmt --all` (format code immediately after changes)
    - `cargo fmt --all -- --check` (verify no formatting changes needed)
    - `cargo clippy --all-targets -- -D warnings` (no clippy warnings allowed)
@@ -17,6 +17,7 @@ These instructions guide AI assistance (e.g. GitHub Copilot / Chat) when proposi
   - Provide a fully working implementation, OR
   - Emit a clear, user-facing error (e.g., `Not implemented yet: OCI resolution`) and abort the workflow.
   Mocks and fakes are permitted ONLY inside tests. Do not wire mocks into runtime code paths or auto-detect-and-skip behavior; explicit failure is required to prevent hidden divergence from the spec.
+7. **Ignore Legacy Task IDs**: Any 3-digit task IDs referenced in source code comments or documentation are from a legacy task list and are no longer valid. Do not attempt to resolve, update, or reference these IDs in any generated code, documentation, or analysis.
 
 ## Scope & Architecture Alignment
 The long-term goal is a Rust implementation of a DevContainer-like CLI. Align concepts with the spec's domains (configuration resolution, feature system, template system, Docker/OCI integration, lifecycle execution). For any new major subsystem:
@@ -54,6 +55,11 @@ The long-term goal is a Rust implementation of a DevContainer-like CLI. Align co
 - Group commands under a `commands` module with one file per top-level subcommand.
 - Store integration tests under `crates/deacon/tests/` using descriptive filenames (`integration_<feature>.rs`).
 
+## Development Tools
+- Use ast-grep tool (command 'sg') for searching or rewriting code instead of find or grep.
+- Use context7 MCP server for retrieving up-to-date documentation for libraries and packages.
+- Use github MCP server for interacting with GitHub repositories, managing issues, pull requests, and code searches.
+
 ## Pull Request Guidance (AI Generated or Assisted)
 When proposing a change:
 1. Brief summary (1–2 sentences) of intent referencing spec section(s).
@@ -61,7 +67,7 @@ When proposing a change:
 3. Risk assessment: breaking changes, API shifts, perf impact.
 4. **Verification: MANDATORY CI validation** - ALL commands must pass locally after EVERY change:
    - `cargo build --verbose` ✅
-   - `cargo test --verbose -- --test-threads=1` ✅ 
+   - `cargo test --quiet -- --test-threads=1` ✅ 
    - `cargo fmt --all` (format immediately) ✅
    - `cargo fmt --all -- --check` (verify formatting) ✅
    - `cargo clippy --all-targets -- -D warnings` ✅
@@ -77,7 +83,7 @@ When proposing a change:
 - When adding a new user-facing subcommand or changing flags/output, extend the smoke tests accordingly.
 
 Add to Pre-submission Checklist:
-- `cargo test --verbose` passes including smoke tests ✅
+- `cargo test --quiet` passes including smoke tests ✅
 - If behavior changed, corresponding assertions in `smoke_basic.rs` updated ✅
 
 ## Dependency Management
@@ -147,21 +153,27 @@ Add to Pre-submission Checklist:
 ```bash
 # Run this exact sequence after EVERY code change AND before every commit:
 cargo build --verbose
-cargo test --verbose -- --test-threads=1
+cargo test --quiet -- --test-threads=1
 cargo test --doc  # Verify all doctests pass
 cargo fmt --all
 cargo fmt --all -- --check  # Must show "no changes required"
 cargo clippy --all-targets -- -D warnings
 ```
 
+### Agentic Fast Loop Mode (local-only)
+- Use `make dev-fast` for rapid iterations; it avoids Docker-heavy suites and long-running integration tests.
+- Recommended cadence: run `make test-non-smoke` every few iterations if you touched parsing/validation; run `make test-smoke` when touching Docker lifecycle; run `make release-check` before commits/PRs.
+- This preserves the “keep build green” principle while reducing iteration time.
+
 **Iterative Development Workflow**:
 1. Make a small code change (add function, modify logic, etc.)
-2. **Immediately** run `cargo fmt --all` 
-3. Run `cargo build --verbose` to check compilation
-4. Run relevant tests with `cargo test --verbose -- --test-threads=1`
-5. Run `cargo clippy --all-targets -- -D warnings` 
-6. Only proceed to next change if ALL steps pass
-7. Before final commit, run the complete checklist above
+2. **Immediately** run `cargo fmt --all`
+3. Pick your test cadence:
+  - Fast Loop (default during spec-phase): `make dev-fast` (fmt-check + clippy + unit/bins/examples + doctests; skips slow integration/smoke)
+  - Full Loop (periodic/at milestones): `make test` (all tests, serial) or `make release-check` (full gate)
+4. If using Fast Loop, still run a Full Loop when you change CLI behavior or runtime paths, add/modify integration tests, or before pushing a branch/PR.
+5. Only proceed to next change if your chosen loop passes.
+6. Before final commit, run the complete checklist above.
 
 > **CRITICAL**: Never make multiple changes before validating each one. Always fix formatting and clippy issues immediately after each small change. Do not accumulate technical debt or "fix it later" - the CI will fail and block the PR.
 
