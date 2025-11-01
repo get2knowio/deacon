@@ -3,6 +3,11 @@
 ## Summary
 Close the implementation gap for the “features publish” subcommand so it fully matches the documented behavior. This includes semantic version tagging, collection metadata publishing, idempotent re-runs, authentication, and a spec-compliant CLI interface and outputs.
 
+## Clarifications
+### Session 2025-11-01
+- Q: What are the “latest” tag movement rules during publish? → A: Move latest for stable (non‑pre‑release) versions; do not move it for pre‑releases.
+- Q: What is the JSON output top‑level structure for publish results? → A: A single root object with `features: []`, optional `collection`, and a `summary` section. Each feature result includes: `featureId`, `version`, `digest`, `publishedTags`, `skippedTags`, `movedLatest`, `registry`, `namespace`.
+
 ## Problem & Outcome
 - Problem: Current behavior only publishes a single tag, lacks collection metadata publishing, conflates `--registry` and namespace, and isn’t idempotent. JSON output is incomplete for downstream automation.
 - Desired Outcome: A compliant, user-friendly publish flow that:
@@ -37,7 +42,7 @@ Close the implementation gap for the “features publish” subcommand so it ful
 1) First publish of a new version
 - Given a packaged feature at version X.Y.Z
 - When the user runs `features publish [target] --registry ghcr.io --namespace owner/repo`
-- Then the system publishes tags: `X`, `X.Y`, `X.Y.Z`, and `latest` (if not already present)
+- Then the system publishes tags: `X`, `X.Y`, `X.Y.Z`, and `latest` (stable versions only; pre‑releases do not move `latest`)
 - And outputs JSON that includes `featureId`, `digest`, and `publishedTags`
 
 2) Re‑publish same version (idempotent)
@@ -72,8 +77,9 @@ FR2. Packaging Preconditions
 - FR2.2: The operation fails if no features are discovered after packaging.
 
 FR3. Semantic Version Tagging
-- FR3.1: For version `X.Y.Z`, the desired tags are `X`, `X.Y`, `X.Y.Z`, and `latest`.
+- FR3.1: For version `X.Y.Z`, the desired tags are `X`, `X.Y`, `X.Y.Z`; add `latest` for stable (non‑pre‑release) versions only.
 - FR3.2: Version must be a valid semantic version; otherwise the command exits with a validation error.
+- FR3.3: Pre‑release versions (e.g., with identifiers like `-rc`, `-beta`) MUST NOT create or move the `latest` tag.
 
 FR4. Tag Existence & Idempotency
 - FR4.1: Before pushing, the system lists currently published tags for the feature repository.
@@ -91,15 +97,52 @@ FR6. Authentication & Security
 
 FR7. Outputs & Exit Codes
 - FR7.1: Text mode logs show planned tags and which ones were newly published vs. skipped.
-- FR7.2: JSON output contains at minimum: `featureId`, `digest`, and `publishedTags` for each processed feature.
+- FR7.2: JSON output is a single root object with the following structure:
+  - FR7.2.1: `features` (array) — each item includes:
+    - `featureId` (string)
+    - `version` (string)
+    - `digest` (string)
+    - `publishedTags` (array of strings)
+    - `skippedTags` (array of strings)
+    - `movedLatest` (boolean)
+    - `registry` (string)
+    - `namespace` (string)
+  - FR7.2.2: `collection` (object, optional) — if collection metadata is published, includes:
+    - `digest` (string)
+  - FR7.2.3: `summary` (object) — includes totals:
+    - `features` (number)
+    - `publishedTags` (number)
+    - `skippedTags` (number)
 - FR7.3: Exit code is `0` on success (including all‑skipped), `1` on fatal error.
 
+Example (stable release):
+
+```json
+{
+  "features": [
+    {
+      "featureId": "ghcr.io/owner/repo/my-feature",
+      "version": "1.2.3",
+      "digest": "sha256:...",
+      "publishedTags": ["1", "1.2", "1.2.3", "latest"],
+      "skippedTags": [],
+      "movedLatest": true,
+      "registry": "ghcr.io",
+      "namespace": "owner/repo"
+    }
+  ],
+  "collection": { "digest": "sha256:..." },
+  "summary": { "features": 1, "publishedTags": 4, "skippedTags": 0 }
+}
+```
+
 ## Success Criteria (Measurable)
-- SC1: A new version publish emits exactly the four semantic tags when they don’t already exist (100% of runs in tests).
+- SC1: A new stable (non‑pre‑release) version publish emits exactly the four semantic tags when they don’t already exist (100% of runs in tests).
 - SC2: Re‑publishing the same version performs no uploads and completes under 10 seconds in a local test environment.
 - SC3: Invalid semantic versions are rejected with a clear message and exit code `1` in 100% of such cases in tests.
-- SC4: JSON output includes `featureId`, `digest`, and `publishedTags` for each feature in 100% of test runs.
+- SC4: JSON output is a root object with `features[]` (containing `featureId`, `version`, `digest`, `publishedTags`, `skippedTags`, `movedLatest`, `registry`, `namespace`), optional `collection.digest`, and a `summary` with totals in 100% of test runs.
 - SC5: Collection metadata is present and discoverable by consumers after publish in 100% of successful publishes.
+- SC6: Publishing a pre‑release version does not update the `latest` tag in 100% of such cases in tests.
 
 ## Key Entities & Data
 - Feature: identified by `id` and `version` from the packaged manifest.
@@ -115,6 +158,7 @@ FR7. Outputs & Exit Codes
 - Network & registry transient failures should surface as actionable errors; retries may be implemented by underlying clients.
 - Mixed existing and new tags in a single run must only publish the missing set.
 - Namespace and IDs are validated to avoid malformed registry paths.
+- Pre‑release versions must never update or create the `latest` tag.
 
 ## Risks & Mitigations
 - Risk: Inconsistent registry capabilities. Mitigation: adhere to standard v2 endpoints and give clear errors if unsupported.
@@ -125,11 +169,13 @@ FR7. Outputs & Exit Codes
 - Communicate the CLI flag change and update examples and tests.
 
 ## Acceptance Tests (High‑Level)
-- First publish creates tags `X`, `X.Y`, `X.Y.Z`, `latest` and outputs JSON with `publishedTags`.
+- First publish of a stable version creates tags `X`, `X.Y`, `X.Y.Z`, `latest` and outputs JSON with the specified root object shape (includes `features[]`, optional `collection`, and `summary`).
 - Re‑publish same version exits successfully, uploads nothing, logs skip, JSON reflects no new tags.
 - Invalid version exits with error and message.
 - Auth via supported mechanisms allows publish to a private registry.
 - Collection metadata is pushed and discoverable.
+  - JSON includes `collection.digest` when collection is published.
+- Pre‑release publish creates only `X`, `X.Y`, `X.Y.Z` and does not move or create `latest`.
 
 ## References
 - Features Publish Subcommand Spec: `docs/subcommand-specs/features-publish/SPEC.md`
