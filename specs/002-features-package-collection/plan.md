@@ -15,8 +15,10 @@ Close the implementation gaps for the `features package` subcommand to support b
 **Testing**: `cargo test`, `assert_cmd` for CLI flows; unit tests for detection/validation; integration tests for end-to-end packaging  
 **Target Platform**: Cross-platform (Linux/macOS/Windows), validated in CI; dev container default Linux  
 **Project Type**: CLI subcommand in Rust workspace (`crates/deacon` for CLI, shared logic in future `crates/core`)  
-**Performance Goals**: Deterministic artifacts; handle typical collections (10–50 features) within seconds; avoid unnecessary IO  
+**Performance Goals**: Deterministic artifacts; handle typical collections (10–50 features) within seconds; avoid unnecessary IO. Deterministic tar/gzip is implemented via tar header normalization (mtime/uid/gid/mode/uname/gname) and fixed gzip parameters (mtime=0, fixed level/strategy).  
 **Constraints**: No network operations; fail fast on invalid inputs; keep build green (fmt, clippy, tests)  
+    - CLI guard rejects global JSON mode for this subcommand with an actionable error message.
+    - Artifact naming uses `<featureId>-<version>.tgz` with a sanitizer: map invalid characters to `-`, collapse repeats, trim leading/trailing hyphens; error if result is empty or version missing.
 **Scale/Scope**: Local repos with single feature or collections under `src/` (dozens of features); large directories supported but not optimized for parallelism (non-goal)
 
 ## Constitution Check
@@ -28,6 +30,7 @@ Close the implementation gaps for the `features package` subcommand to support b
 - III. No Silent Fallbacks: Invalid single/collection fails with explicit errors; no hidden skips. PASS
 - IV. Idiomatic, Safe Rust: No `unsafe`; `thiserror`, `tracing`, traits for future backends. PASS
 - V. Observability & Output Contracts: Text-only output, logs via stderr, clear messages; collection JSON written deterministically. PASS
+ - Coverage is governed by FR‑8 (Functional Requirements). The prior SC‑5 duplication was removed to avoid drift.
 
 ## Project Structure
 

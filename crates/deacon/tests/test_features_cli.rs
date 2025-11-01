@@ -164,22 +164,20 @@ fn test_features_package() {
         feature_dir.to_str().unwrap(),
         "--output",
         output_dir.to_str().unwrap(),
-        "--json",
     ]);
 
     let output = cmd.output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Parse JSON output using helper function
-    let json = extract_json_from_output(&stdout).unwrap();
-    assert_eq!(json["command"], "package");
-    assert_eq!(json["status"], "success");
-    assert!(json["digest"].as_str().unwrap().starts_with("sha256:"));
-    assert!(json["size"].as_u64().unwrap() > 0);
+    // Parse text output - should contain the expected fields
+    assert!(stdout.contains("Command: package"));
+    assert!(stdout.contains("Status: success"));
+    assert!(stdout.contains("Digest: sha256:"));
+    assert!(stdout.contains("Message:"));
 
     // Check that files were created
-    assert!(output_dir.join("test-feature.tar").exists());
-    assert!(output_dir.join("test-feature-manifest.json").exists());
+    assert!(output_dir.join("test-feature-1.0.0.tgz").exists());
+    assert!(output_dir.join("devcontainer-collection.json").exists());
 
     // Verify package reproducibility - run again and check digest is the same
     let mut cmd2 = Command::cargo_bin("deacon").unwrap();
@@ -189,15 +187,25 @@ fn test_features_package() {
         feature_dir.to_str().unwrap(),
         "--output",
         output_dir.to_str().unwrap(),
-        "--json",
     ]);
 
     let output2 = cmd2.output().unwrap();
     let stdout2 = String::from_utf8_lossy(&output2.stdout);
-    let json2 = extract_json_from_output(&stdout2).unwrap();
+
+    // Extract digests from both outputs
+    let digest1 = stdout
+        .lines()
+        .find(|line| line.starts_with("Digest: "))
+        .and_then(|line| line.strip_prefix("Digest: "))
+        .unwrap();
+    let digest2 = stdout2
+        .lines()
+        .find(|line| line.starts_with("Digest: "))
+        .and_then(|line| line.strip_prefix("Digest: "))
+        .unwrap();
 
     // Digest should be the same for reproducible builds
-    assert_eq!(json["digest"], json2["digest"]);
+    assert_eq!(digest1, digest2);
 }
 
 /// Test features package command with invalid feature
@@ -222,7 +230,7 @@ fn test_features_package_with_invalid_feature() {
 
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("Failed to parse feature metadata"));
+        .stderr(predicate::str::contains("Cannot determine packaging mode"));
 }
 
 /// Test features publish command with dry run

@@ -24,9 +24,9 @@ Notes
 
 Purpose: Prepare dependencies and skeletons to keep the build green while implementing.
 
-- [ ] T001 Add gzip dependency for packaging in crates/deacon/Cargo.toml (flate2 = "1")
-- [ ] T002 Verify tar/sha2/serde_json deps in crates/deacon/Cargo.toml (no changes if present)
-- [ ] T003 [P] Create placeholder docs reference in specs/002-features-package-collection/contracts/openapi.yaml (no code changes; for schema mapping)  
+- [x] T001 Add gzip dependency for packaging in crates/deacon/Cargo.toml (flate2 = "1")
+- [x] T002 Verify tar/sha2/serde_json deps in crates/deacon/Cargo.toml (no changes if present)
+- [x] T003 [P] Create placeholder docs reference in specs/002-features-package-collection/contracts/openapi.yaml (no code changes; for schema mapping)  
 
 ---
 
@@ -34,13 +34,13 @@ Purpose: Prepare dependencies and skeletons to keep the build green while implem
 
 Purpose: Core helpers and data types used by all user stories. CRITICAL: complete before story work.
 
-- [ ] T004 Define `CollectionMetadata` and `FeatureDescriptor` structs in crates/deacon/src/commands/features.rs (near package logic)
-- [ ] T005 Implement helper `detect_mode(target: &Path) -> Result<Single|Collection>` in crates/deacon/src/commands/features.rs
-- [ ] T006 Implement helper `validate_single(target: &Path) -> Result<FeatureMetadata>` in crates/deacon/src/commands/features.rs
-- [ ] T007 Implement helper `enumerate_and_validate_collection(src: &Path) -> Result<Vec<(feature_id, path, FeatureMetadata)>>` in crates/deacon/src/commands/features.rs
-- [ ] T008 Implement helper `write_collection_metadata(output: &Path, descriptors: &[FeatureDescriptor])` in crates/deacon/src/commands/features.rs
-- [ ] T009 Implement helper `create_feature_tgz(src_dir: &Path, out_dir: &Path, feature_id: &str) -> Result<(digest, size)>` using tar+flate2 in crates/deacon/src/commands/features.rs
-- [ ] T010 [P] Unit tests for helpers (detect/validate/metadata/archiving) in crates/deacon/tests/unit_features_package.rs
+- [x] T004 Define `CollectionMetadata` and `FeatureDescriptor` structs in crates/deacon/src/commands/features.rs (near package logic)
+- [x] T005 Implement helper `detect_mode(target: &Path) -> Result<Single|Collection>` in crates/deacon/src/commands/features.rs
+- [x] T006 Implement helper `validate_single(target: &Path) -> Result<FeatureMetadata>` in crates/deacon/src/commands/features.rs
+- [x] T007: Implement helper `enumerate_and_validate_collection(src: &Path) -> Result<Vec<(feature_id, path, FeatureMetadata)>>`
+- [x] T008: Implement helper `write_collection_metadata(metadata: &CollectionMetadata, dest: &Path) -> Result<()>`
+- [x] T009: Implement helper `create_feature_tgz(src: &Path, dest: &Path) -> Result<String>`
+- [x] T010: Create comprehensive unit tests for all helper functions
 
 Checkpoint: Foundation ready — proceed to user stories.
 
@@ -54,13 +54,13 @@ Independent Test: Running `deacon features package <feature-path> -o ./output` p
 
 ### Tests (required by spec FR-8)
 
-- [ ] T011 [P] [US1] Integration test: single feature packaging in crates/deacon/tests/integration_features_package.rs
+- [x] T011 [P] [US1] Integration test: single feature packaging in crates/deacon/tests/integration_features_package.rs
 
 ### Implementation
 
-- [ ] T012 [US1] Wire CLI defaults: make `path` positional default to `.`; `--output` default `./output`; remove `--json` for package in crates/deacon/src/cli.rs
-- [ ] T013 [US1] Implement single-mode flow in execute_features_package: detect single, validate metadata, create `.tgz`, build descriptors, write `devcontainer-collection.json` in crates/deacon/src/commands/features.rs
-- [ ] T014 [US1] Text-only output: print human-readable list of created artifacts; ensure no JSON mode for package in crates/deacon/src/commands/features.rs
+- [x] T012 [US1] Wire CLI defaults: make `path` positional default to `.`; `--output` default `./output`; remove `--json` for package in crates/deacon/src/cli.rs
+- [x] T013 [US1] Implement single-mode flow in execute_features_package: detect single, validate metadata, create `.tgz`, build descriptors, write `devcontainer-collection.json` in crates/deacon/src/commands/features.rs
+- [x] T014 [US1] Text-only output: print human-readable list of created artifacts; ensure no JSON mode for package in crates/deacon/src/commands/features.rs
 
 Checkpoint: US1 packaging works and is independently testable.
 
@@ -74,13 +74,13 @@ Independent Test: Running `deacon features package <collection-root> -o ./output
 
 ### Tests
 
-- [ ] T015 [P] [US2] Integration test: package a multi-feature collection with valid features in crates/deacon/tests/integration_features_package.rs
+- [x] T015 [P] [US2] Integration test: package a multi-feature collection with valid features in crates/deacon/tests/integration_features_package.rs
 
 ### Implementation
 
-- [ ] T016 [US2] Implement collection mode detection and enumeration in crates/deacon/src/commands/features.rs
-- [ ] T017 [US2] For each feature: validate metadata, create `.tgz`, accumulate descriptors; write single `devcontainer-collection.json` in crates/deacon/src/commands/features.rs
-- [ ] T018 [US2] Ensure deterministic artifact naming and stable ordering of features in crates/deacon/src/commands/features.rs
+- [x] T016 [US2] Implement collection mode detection and enumeration in crates/deacon/src/commands/features.rs
+- [x] T017 [US2] For each feature: validate metadata, create `.tgz`, accumulate descriptors; write single `devcontainer-collection.json` in crates/deacon/src/commands/features.rs
+- [x] T018 [US2] Ensure deterministic artifact naming and stable ordering of features in crates/deacon/src/commands/features.rs
 
 Checkpoint: US2 collection packaging works and is independently testable.
 
@@ -94,12 +94,12 @@ Independent Test: Pre-populated output folder is emptied; only new artifacts rem
 
 ### Tests
 
-- [ ] T019 [P] [US3] Integration test: pre-fill output folder, run with `--force-clean-output-folder`, assert only new artifacts in crates/deacon/tests/integration_features_package.rs
+- [X] T019 [P] [US3] Integration test: pre-fill output folder, run with `--force-clean-output-folder`, assert only new artifacts in crates/deacon/tests/integration_features_package.rs
 
 ### Implementation
 
-- [ ] T020 [US3] Add `--force-clean-output-folder` flag to feature package CLI in crates/deacon/src/cli.rs
-- [ ] T021 [US3] Implement clean step (safe delete of contents) before packaging in crates/deacon/src/commands/features.rs
+- [X] T020 [US3] Add `--force-clean-output-folder` flag to feature package CLI in crates/deacon/src/cli.rs
+- [X] T021 [US3] Implement clean step (safe delete of contents) before packaging in crates/deacon/src/commands/features.rs
 
 ---
 
@@ -111,12 +111,12 @@ Independent Test: Omitting target uses `.`; logs state single vs collection mode
 
 ### Tests
 
-- [ ] T022 [P] [US4] Integration test: omit target; verify text output and artifacts in crates/deacon/tests/integration_features_package.rs
+- [x] T022 [P] [US4] Integration test: omit target; verify text output and artifacts in crates/deacon/tests/integration_features_package.rs
 
 ### Implementation
 
-- [ ] T023 [US4] Ensure positional `path` is optional with default `.` for package in crates/deacon/src/cli.rs
-- [ ] T024 [US4] Add explicit log lines: mode detection and artifact listing (stdout) in crates/deacon/src/commands/features.rs
+- [x] T023 [US4] Ensure positional `path` is optional with default `.` for package in crates/deacon/src/cli.rs
+- [x] T024 [US4] Add explicit log lines: mode detection and artifact listing (stdout) in crates/deacon/src/commands/features.rs
 
 ---
 
@@ -128,15 +128,15 @@ Independent Test: Each error scenario returns non-zero exit and prints actionabl
 
 ### Tests
 
-- [ ] T025 [P] [US5] Unit tests: invalid single (missing/corrupt devcontainer-feature.json) in crates/deacon/tests/unit_features_package.rs
-- [ ] T026 [P] [US5] Unit tests: empty collection under src/ in crates/deacon/tests/unit_features_package.rs
-- [ ] T027 [P] [US5] Integration test: mixed valid/invalid subfolders → fail, list invalids, no artifacts in crates/deacon/tests/integration_features_package.rs
+- [x] T025 [P] [US5] Unit tests: invalid single (missing/corrupt devcontainer-feature.json) in crates/deacon/tests/unit_features_package.rs
+- [x] T026 [P] [US5] Unit tests: empty collection under src/ in crates/deacon/tests/unit_features_package.rs
+- [x] T027 [P] [US5] Integration test: mixed valid/invalid subfolders → fail, list invalids, no artifacts in crates/deacon/tests/integration_features_package.rs
 
 ### Implementation
 
-- [ ] T028 [US5] Return structured errors for invalid single feature in crates/deacon/src/commands/features.rs
-- [ ] T029 [US5] Detect empty collections and error with guidance in crates/deacon/src/commands/features.rs
-- [ ] T030 [US5] Mixed collection behavior: abort run, list invalid subfolders, produce no artifacts in crates/deacon/src/commands/features.rs
+- [x] T028 [US5] Return structured errors for invalid single feature in crates/deacon/src/commands/features.rs
+- [x] T029 [US5] Detect empty collections and error with guidance in crates/deacon/src/commands/features.rs
+- [x] T030 [US5] Mixed collection behavior: abort run, list invalid subfolders, produce no artifacts in crates/deacon/src/commands/features.rs
 
 ---
 
@@ -148,12 +148,12 @@ Independent Test: Validate produced JSON structure matches `contracts/openapi.ya
 
 ### Tests
 
-- [ ] T031 [P] [US6] Unit test: `devcontainer-collection.json` structure and fields in crates/deacon/tests/unit_features_package.rs
+- [x] T031 [P] [US6] Unit test: `devcontainer-collection.json` structure and fields in crates/deacon/tests/unit_features_package.rs
 
 ### Implementation
 
-- [ ] T032 [US6] Populate `FeatureDescriptor` fields (id, version, name, description, options, installsAfter, dependsOn) in crates/deacon/src/commands/features.rs
-- [ ] T033 [US6] Write `sourceInformation.source = "devcontainer-cli"` in metadata in crates/deacon/src/commands/features.rs
+- [x] T032 [US6] Populate `FeatureDescriptor` fields (id, version, name, description, options, installsAfter, dependsOn) in crates/deacon/src/commands/features.rs
+- [x] T033 [US6] Write `sourceInformation.source = "devcontainer-cli"` in metadata in crates/deacon/src/commands/features.rs
 
 ---
 
@@ -161,9 +161,26 @@ Independent Test: Validate produced JSON structure matches `contracts/openapi.ya
 
 Purpose: Small refinements to improve quality and maintainability.
 
-- [ ] T034 [P] Update quickstart docs with final CLI usage in specs/002-features-package-collection/quickstart.md
-- [ ] T035 Code cleanup and comments for new helpers in crates/deacon/src/commands/features.rs
-- [ ] T036 [P] Ensure CI green: fmt, clippy, tests pass (no warnings) across workspace (Makefile targets)
+- [x] T034 [P] Update quickstart docs with final CLI usage in specs/002-features-package-collection/quickstart.md
+- [x] T035 Code cleanup and comments for new helpers in crates/deacon/src/commands/features.rs
+- [x] T036 [P] Ensure CI green: fmt, clippy, tests pass (no warnings) across workspace (Makefile targets)
+
+---
+
+## Phase N+1: Determinism & Output Contracts
+
+Purpose: Ensure byte-for-byte reproducibility and explicit output-mode behavior; finalize artifact naming.
+
+- [x] T037 Deterministic tar headers: normalize `mtime=0`, `uid/gid=0`, empty `uname/gname`, and normalized modes; sort entries lexicographically in crates/deacon/src/commands/features.rs
+- [x] T038 Deterministic gzip: set gzip `mtime=0` and fixed compression level/strategy in crates/deacon/src/commands/features.rs
+- [x] T039 [P] Unit test: two consecutive runs produce identical SHA256 for same inputs (single and collection) in crates/deacon/tests/unit_features_package.rs
+- [x] T040 CLI guard: detect global JSON mode and exit with error "JSON output is not supported for features package" in crates/deacon/src/cli.rs
+- [x] T041 [P] Integration test: invoking with global `--json` fails with the prescribed message in crates/deacon/tests/integration_features_package.rs
+- [x] T042 Implement artifact name builder with sanitizer (`<featureId>-<version>.tgz`; sanitize `[a-z0-9-]`) in crates/deacon/src/commands/features.rs
+- [x] T043 [P] Unit tests: naming cases (mixed case, invalid chars collapse, leading/trailing hyphens trim, missing version → error) in crates/deacon/tests/unit_features_package.rs
+- [x] T044 [P] Integration test: Non‑ASCII filenames round-trip in archive (success path) in crates/deacon/tests/integration_features_package.rs
+- [x] T045 [P] Unit test: read-only output directory → error `Output folder not writable: <path>` in crates/deacon/tests/unit_features_package.rs
+- [x] T046 [P] Integration test: deep nesting → success or explicit path-length error identifying offending path in crates/deacon/tests/integration_features_package.rs
 
 ---
 

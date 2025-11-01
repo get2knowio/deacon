@@ -380,13 +380,14 @@ pub enum FeatureCommands {
     /// Package features for distribution
     Package {
         /// Path to feature directory to package
+        #[arg(default_value = ".")]
         path: String,
         /// Output directory for the package
-        #[arg(long)]
+        #[arg(long, default_value = "./output")]
         output: String,
-        /// Output in JSON format
+        /// Force clean output folder before writing artifacts
         #[arg(long)]
-        json: bool,
+        force_clean_output_folder: bool,
     },
     /// Pull features from registry
     Pull {
@@ -971,6 +972,15 @@ impl Cli {
             }
             Some(Commands::Features { command }) => {
                 use crate::commands::features::{execute_features, FeaturesArgs};
+
+                // Check for unsupported JSON output mode on package command
+                if let crate::cli::FeatureCommands::Package { .. } = &command {
+                    if matches!(self.log_format, Some(LogFormat::Json)) {
+                        return Err(anyhow::anyhow!(
+                            "JSON output is not supported for features package"
+                        ));
+                    }
+                }
 
                 let args = FeaturesArgs {
                     command,
