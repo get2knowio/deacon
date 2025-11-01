@@ -92,6 +92,9 @@ pub struct Feature {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<HashMap<String, serde_json::Value>>,
+    /// Source reference preserving registry/namespace/tag (e.g., "oci://ghcr.io/devcontainers/features/node:1.2.3")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// Source information for features
@@ -348,6 +351,7 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
         let feature = Feature {
             id: resolved.id.clone(),
             options,
+            source: Some(resolved.source.clone()),
         };
 
         features_by_registry
@@ -463,8 +467,10 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                 // or storing it in the FeaturesConfiguration. For now, we'll fetch it.
                 // TODO: Consider caching metadata in FeaturesConfiguration to avoid refetching
 
-                // Parse the feature reference to get registry, namespace, name, tag
-                let (registry_url, namespace, name, tag) = parse_registry_reference(&feature.id)?;
+                // Parse the feature reference - prefer the preserved source field if available
+                let reference_to_parse = feature.source.as_ref().unwrap_or(&feature.id);
+                let (registry_url, namespace, name, tag) =
+                    parse_registry_reference(reference_to_parse)?;
 
                 // Use the provided fetcher with configured timeout and retries
                 let feature_ref = deacon_core::oci::FeatureRef::new(
@@ -499,10 +505,8 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                         .push(serde_json::Value::String(mount.clone()));
                 }
 
-                // Init flag
-                if let Some(init) = metadata.init {
-                    derived_config.privileged = Some(init); // Note: DevContainerConfig doesn't have init, using privileged as placeholder
-                }
+                // TODO: Support metadata.init properly when DevContainerConfig gains an init field
+                // For now, metadata.init is not mapped to avoid incorrectly enabling privileged mode
 
                 // Privileged flag
                 if let Some(privileged) = metadata.privileged {
