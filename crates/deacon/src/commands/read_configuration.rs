@@ -2,16 +2,19 @@
 //!
 //! Implements the `deacon read-configuration` subcommand for reading and displaying
 //! DevContainer configuration with variable substitution and extends resolution.
+//!
+//! Spec: docs/subcommand-specs/read-configuration/SPEC.md
+//! Implementation: specs/001-read-config-parity/spec.md
 
-use anyhow::Result;
-use deacon_core::config::ConfigLoader;
+use anyhow::{Context, Result};
+use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::container::ContainerSelector;
 
 use deacon_core::features::{
     FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger, OptionValue, ResolvedFeature,
 };
 use deacon_core::io::Output;
-use deacon_core::oci::{default_fetcher, FeatureRef};
+use deacon_core::oci::{default_fetcher_with_config, FeatureRef};
 use deacon_core::redaction::{RedactionConfig, SecretRegistry};
 use deacon_core::registry_parser::parse_registry_reference;
 use deacon_core::secrets::SecretsCollection;
@@ -89,6 +92,9 @@ pub struct Feature {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<HashMap<String, serde_json::Value>>,
+    /// Source reference preserving registry/namespace/tag (e.g., "oci://ghcr.io/devcontainers/features/node:1.2.3")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// Source information for features
@@ -193,10 +199,11 @@ fn resolve_workspace_configuration(
 }
 
 /// Resolve features configuration from the DevContainer config
-async fn resolve_features_configuration(
+async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     config: &deacon_core::config::DevContainerConfig,
     additional_features: Option<&str>,
     _skip_feature_auto_mapping: bool,
+    fetcher: &deacon_core::oci::FeatureFetcher<C>,
 ) -> Result<FeaturesConfiguration> {
     use anyhow::Context;
 
@@ -221,8 +228,8 @@ async fn resolve_features_configuration(
 
         let merge_config = FeatureMergeConfig::new(
             Some(additional_features_str.to_string()),
-            false, // Don't prefer CLI features by default
-            None,  // No install order override in this context
+            true, // CLI features take precedence over config features
+            None, // No install order override in this context
         );
         config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
     }
@@ -238,9 +245,7 @@ async fn resolve_features_configuration(
     }
     let features_map = features_map_opt.unwrap();
 
-    // Resolve features from registries to obtain metadata
-    let fetcher =
-        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+    // Use provided fetcher to resolve features from registries
     let mut resolved_features = Vec::with_capacity(features_map.len());
 
     for (feature_id, feature_value) in features_map {
@@ -346,6 +351,7 @@ async fn resolve_features_configuration(
         let feature = Feature {
             id: resolved.id.clone(),
             options,
+            source: Some(resolved.source.clone()),
         };
 
         features_by_registry
@@ -377,75 +383,193 @@ async fn resolve_features_configuration(
 /// `mergedConfiguration = mergeConfiguration(base_config, imageMetadata)`
 ///
 /// Where imageMetadata comes from:
-/// - Container inspection (when container_id is provided) - **Blocked by #288**
+/// - Container inspection (when container_id is provided) - extracts devcontainer.metadata label
 /// - Features metadata computation (when no container) - **Blocked by #289**
 ///
 /// ## Current Implementation Status
 ///
-/// This is a placeholder implementation until dependencies are resolved:
-/// - Issue #288: Container discovery and metadata extraction
-/// - Issue #289: Features resolution and metadata derivation
+/// Container-based merge is implemented. Features-based merge is a placeholder.
 ///
-/// For now, this returns a merged configuration with metadata indicating
-/// the merge sources (similar to extends chain tracking), but does NOT yet
-/// include actual container or features metadata.
 #[instrument(skip_all)]
-fn compute_merged_configuration(
+async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
     base_config: &deacon_core::config::DevContainerConfig,
-    container_id: Option<&str>,
+    container_info: Option<&deacon_core::docker::ContainerInfo>,
+    container_context: Option<&SubstitutionContext>,
     features_config: Option<&FeaturesConfiguration>,
+    secrets: Option<&SecretsCollection>,
+    fetcher: &deacon_core::oci::FeatureFetcher<C>,
 ) -> Result<serde_json::Value> {
     debug!(
-        "Computing merged configuration: container_id={:?}, has_features={}",
-        container_id,
+        "Computing merged configuration: has_container={:?}, has_features={}",
+        container_info.is_some(),
         features_config.is_some()
     );
 
-    // TODO(#288): When container_id is provided, extract image metadata from container:
-    // 1. Inspect container using Docker API
-    // 2. Read devcontainer.metadata label
-    // 3. Parse metadata into DevContainerConfig-like structure
-    // 4. Apply containerSubstitute to metadata
-    //
-    // Pseudocode from spec:
-    // ```
-    // imageMetadata = getImageMetadataFromContainer(container, configuration, featuresConfiguration, idLabels, output).config
-    // imageMetadata = imageMetadata.map(cfg => containerSubstitute(...))
-    // ```
+    if let Some(container_info) = container_info {
+        // Container-based merge: extract devcontainer.metadata label
+        let metadata_label = container_info.labels.get("devcontainer.metadata");
+        let metadata_str = metadata_label.ok_or_else(|| {
+            anyhow::anyhow!(
+                "Container '{}' does not have required 'devcontainer.metadata' label. \
+                 Cannot compute merged configuration without container metadata.",
+                container_info.id
+            )
+        })?;
 
-    if let Some(_container_id) = container_id {
-        debug!(
-            "Container-based merge requested but not yet implemented (blocked by #288). \
-             Returning base config as merged config."
-        );
-        // TODO(#288): Replace with actual container metadata extraction
-        // For now, return the base config
-        return Ok(serde_json::to_value(base_config)?);
+        debug!("Found devcontainer.metadata label: {}", metadata_str);
+
+        // Parse the metadata JSON
+        let metadata_value: serde_json::Value =
+            serde_json::from_str(metadata_str).with_context(|| {
+                format!(
+                    "Failed to parse devcontainer.metadata JSON from container '{}': {}",
+                    container_info.id, metadata_str
+                )
+            })?;
+
+        // Convert to DevContainerConfig
+        let metadata_config: deacon_core::config::DevContainerConfig =
+            serde_json::from_value(metadata_value)
+                .with_context(|| {
+                    format!(
+                        "Failed to deserialize devcontainer.metadata into DevContainerConfig from container '{}'",
+                        container_info.id
+                    )
+                })?;
+
+        // Apply container substitution to the metadata
+        let container_context = container_context.ok_or_else(|| {
+            anyhow::anyhow!("Container context required for container-based merged configuration")
+        })?;
+        let (substituted_metadata, _) =
+            metadata_config.apply_variable_substitution(container_context);
+
+        // Merge base config with substituted metadata
+        let merged = deacon_core::config::ConfigMerger::merge_configs(&[
+            base_config.clone(),
+            substituted_metadata,
+        ]);
+
+        debug!("Container-based merged configuration computed successfully");
+        Ok(serde_json::to_value(&merged)?)
+    } else if features_config.is_some() {
+        debug!("Computing features-based merged configuration");
+
+        // Extract features configuration
+        let features_config = features_config.unwrap();
+
+        // Derive configuration from features metadata
+        let mut derived_config = deacon_core::config::DevContainerConfig::default();
+
+        for feature_set in &features_config.feature_sets {
+            for feature in &feature_set.features {
+                // We need to get the feature metadata - this requires fetching it again
+                // or storing it in the FeaturesConfiguration. For now, we'll fetch it.
+                // TODO: Consider caching metadata in FeaturesConfiguration to avoid refetching
+
+                // Parse the feature reference - prefer the preserved source field if available
+                let reference_to_parse = feature.source.as_ref().unwrap_or(&feature.id);
+                let (registry_url, namespace, name, tag) =
+                    parse_registry_reference(reference_to_parse)?;
+
+                // Use the provided fetcher with configured timeout and retries
+                let feature_ref = deacon_core::oci::FeatureRef::new(
+                    registry_url.clone(),
+                    namespace.clone(),
+                    name.clone(),
+                    tag.clone(),
+                );
+
+                let downloaded = fetcher.fetch_feature(&feature_ref).await.map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to fetch feature '{}' for merged config: {}",
+                        feature.id,
+                        e
+                    )
+                })?;
+
+                let metadata = &downloaded.metadata;
+
+                // Merge feature metadata into derived config
+                // Container environment variables
+                for (key, value) in &metadata.container_env {
+                    derived_config
+                        .container_env
+                        .insert(key.clone(), value.clone());
+                }
+
+                // Mounts - convert Vec<String> to Vec<serde_json::Value>
+                for mount in &metadata.mounts {
+                    derived_config
+                        .mounts
+                        .push(serde_json::Value::String(mount.clone()));
+                }
+
+                // TODO: Support metadata.init properly when DevContainerConfig gains an init field
+                // For now, metadata.init is not mapped to avoid incorrectly enabling privileged mode
+
+                // Privileged flag
+                if let Some(privileged) = metadata.privileged {
+                    derived_config.privileged = Some(privileged);
+                }
+
+                // Capabilities to add
+                derived_config.cap_add.extend(metadata.cap_add.clone());
+
+                // Security options
+                derived_config
+                    .security_opt
+                    .extend(metadata.security_opt.clone());
+
+                // Entrypoint override - DevContainerConfig doesn't have entrypoint field
+                // if let Some(entrypoint) = &metadata.entrypoint {
+                //     derived_config.entrypoint = Some(entrypoint.clone());
+                // }
+
+                // Lifecycle commands
+                if let Some(cmd) = &metadata.on_create_command {
+                    derived_config.on_create_command = Some(cmd.clone());
+                }
+                if let Some(cmd) = &metadata.update_content_command {
+                    derived_config.update_content_command = Some(cmd.clone());
+                }
+                if let Some(cmd) = &metadata.post_create_command {
+                    derived_config.post_create_command = Some(cmd.clone());
+                }
+                if let Some(cmd) = &metadata.post_start_command {
+                    derived_config.post_start_command = Some(cmd.clone());
+                }
+                if let Some(cmd) = &metadata.post_attach_command {
+                    derived_config.post_attach_command = Some(cmd.clone());
+                }
+            }
+        }
+
+        // Apply variable substitution to the derived config
+        let mut substitution_context = SubstitutionContext::new(Path::new("."))?;
+        if let Some(secrets) = secrets {
+            for (key, value) in secrets.as_env_vars() {
+                substitution_context
+                    .local_env
+                    .insert(key.clone(), value.clone());
+            }
+        }
+        let (substituted_derived, _) =
+            derived_config.apply_variable_substitution(&substitution_context);
+
+        // Merge base config with derived feature metadata
+        let merged = deacon_core::config::ConfigMerger::merge_configs(&[
+            base_config.clone(),
+            substituted_derived,
+        ]);
+
+        debug!("Features-based merged configuration computed successfully");
+        Ok(serde_json::to_value(&merged)?)
+    } else {
+        // No container and no features: merged config is same as base config
+        debug!("No metadata sources available; merged config equals base config");
+        Ok(serde_json::to_value(base_config)?)
     }
-
-    // TODO(#289): When no container but features are present, derive metadata from features:
-    // 1. Compute imageBuildInfo from config and features
-    // 2. Derive devcontainer metadata using getDevcontainerMetadata
-    //
-    // Pseudocode from spec:
-    // ```
-    // imageBuildInfo = getImageBuildInfo(params, configuration)
-    // imageMetadata = getDevcontainerMetadata(imageBuildInfo.metadata, configuration, featuresConfiguration).config
-    // ```
-
-    if features_config.is_some() {
-        debug!(
-            "Features-based merge requested but not yet implemented (blocked by #289). \
-             Returning base config as merged config."
-        );
-        // TODO(#289): Replace with actual features metadata derivation
-        // For now, return the base config
-        return Ok(serde_json::to_value(base_config)?);
-    }
-
-    // No container and no features: merged config is same as base config
-    debug!("No metadata sources available; merged config equals base config");
-    Ok(serde_json::to_value(base_config)?)
 }
 
 /// Execute the read-configuration command
@@ -509,17 +633,26 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     // Create output helper with redaction support
     let mut output = Output::new(args.redaction_config.clone(), &args.secret_registry);
 
+    // Determine if we're in container-only mode (only container selectors, no config/workspace)
+    let container_only_mode = args.config_path.is_none()
+        && args.workspace_folder.is_none()
+        && args.override_config_path.is_none();
+
     // Determine workspace folder
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
-    // Always try to resolve workspace configuration
+    // Always try to resolve workspace configuration (unless container-only mode)
     // Per spec: workspace is omitted only if it cannot be resolved
-    let workspace_config = resolve_workspace_configuration(
-        workspace_folder,
-        args.config_path.as_deref(),
-        args.mount_workspace_git_root,
-    )
-    .ok();
+    let workspace_config = if container_only_mode {
+        None
+    } else {
+        resolve_workspace_configuration(
+            workspace_folder,
+            args.config_path.as_deref(),
+            args.mount_workspace_git_root,
+        )
+        .ok()
+    };
 
     // Load secrets if provided
     let secrets = if !args.secrets_files.is_empty() {
@@ -529,7 +662,15 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     };
 
     // Load configuration
-    let (config, substitution_report) = if let Some(config_path) = args.config_path.as_ref() {
+    let (config, substitution_report) = if container_only_mode {
+        // Per spec line 104: "If only container selection flags are provided (no config or workspace),
+        // proceed with an empty base config {} and a substitution function seeded with host env/paths."
+        let empty_config = DevContainerConfig::default();
+        let substitution_context = SubstitutionContext::new(workspace_folder)?;
+        let (substituted_config, report) =
+            empty_config.apply_variable_substitution(&substitution_context);
+        (substituted_config, report)
+    } else if let Some(config_path) = args.config_path.as_ref() {
         use deacon_core::errors::{ConfigError, DeaconError};
 
         // For non-merged config, still apply overrides and substitution
@@ -562,7 +703,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
 
         // Apply variable substitution with secrets
         let mut substitution_context = SubstitutionContext::new(workspace_folder)?;
-        if let Some(ref secrets) = secrets {
+        if let Some(secrets) = &secrets {
             for (key, value) in secrets.as_env_vars() {
                 substitution_context
                     .local_env
@@ -604,7 +745,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
 
         // Apply variable substitution with secrets
         let mut substitution_context = SubstitutionContext::new(workspace_folder)?;
-        if let Some(ref secrets) = secrets {
+        if let Some(secrets) = &secrets {
             for (key, value) in secrets.as_env_vars() {
                 substitution_context
                     .local_env
@@ -622,7 +763,9 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     );
 
     // Container discovery and container-aware substitutions
-    let (config, container_id_labels, container_env) = if args.container_id.is_some()
+    let (config, container_id_labels, container_env, container_info, container_context) = if args
+        .container_id
+        .is_some()
         || !args.id_label.is_empty()
     {
         // Discover container using provided selectors
@@ -637,7 +780,32 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         )?;
         selector.validate()?;
 
-        // Resolve container
+        // Extract id-labels (use provided labels or extract from container)
+        let id_labels: Vec<(String, String)> = if !args.id_label.is_empty() {
+            // Use provided labels (already parsed and validated above)
+            ContainerSelector::parse_labels(&args.id_label)?
+        } else {
+            // For container_id only, we'll extract labels from container if found
+            vec![]
+        };
+
+        // Compute devcontainerId from id-labels (before container lookup)
+        let dev_container_id = deacon_core::container::compute_dev_container_id(&id_labels);
+        debug!("Computed devcontainerId: {}", dev_container_id);
+
+        // Apply beforeContainerSubstitute: ${devcontainerId}
+        let mut before_context = SubstitutionContext::new(workspace_folder)?;
+        before_context.devcontainer_id = dev_container_id.clone();
+        if let Some(secrets) = &secrets {
+            for (key, value) in secrets.as_env_vars() {
+                before_context.local_env.insert(key.clone(), value.clone());
+            }
+        }
+
+        let (config_after_before, _before_report) =
+            config.apply_variable_substitution(&before_context);
+
+        // Now try to resolve container for additional substitutions
         match deacon_core::container::resolve_container(&docker, &selector).await? {
             Some(container_info) => {
                 debug!(
@@ -645,12 +813,11 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                     container_info.id, container_info.labels
                 );
 
-                // Extract id-labels (use provided labels or extract from container)
-                let id_labels: Vec<(String, String)> = if !args.id_label.is_empty() {
-                    // Use provided labels (already parsed and validated above)
-                    ContainerSelector::parse_labels(&args.id_label)?
+                // Extract id-labels from container if we didn't have them from command line
+                let final_id_labels = if !id_labels.is_empty() {
+                    id_labels
                 } else {
-                    // Extract relevant labels from container (all labels in this case)
+                    // Extract relevant labels from container
                     container_info
                         .labels
                         .iter()
@@ -658,30 +825,16 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                         .collect()
                 };
 
-                // Compute devcontainerId from id-labels
-                let dev_container_id = deacon_core::container::compute_dev_container_id(&id_labels);
-                debug!("Computed devcontainerId: {}", dev_container_id);
-
-                // Apply beforeContainerSubstitute: ${devcontainerId}
-                let mut before_context = SubstitutionContext::new(workspace_folder)?;
-                before_context.devcontainer_id = dev_container_id.clone();
-                if let Some(ref secrets) = secrets {
-                    for (key, value) in secrets.as_env_vars() {
-                        before_context.local_env.insert(key.clone(), value.clone());
-                    }
-                }
-
-                let (config_after_before, _before_report) =
-                    config.apply_variable_substitution(&before_context);
-
                 // Apply containerSubstitute: ${containerEnv:VAR}, ${containerWorkspaceFolder}
                 let mut container_context = SubstitutionContext::new(workspace_folder)?;
                 container_context.devcontainer_id = dev_container_id;
                 container_context.container_env = Some(container_info.env.clone());
-                // TODO: Extract containerWorkspaceFolder from container config
-                // For now, we don't set it as it requires parsing container mounts/config
+                // Extract containerWorkspaceFolder from container mounts
+                let container_workspace_folder =
+                    deacon_core::docker::derive_container_workspace_folder(&container_info.mounts);
+                container_context.container_workspace_folder = container_workspace_folder;
 
-                if let Some(ref secrets) = secrets {
+                if let Some(secrets) = &secrets {
                     for (key, value) in secrets.as_env_vars() {
                         container_context
                             .local_env
@@ -694,37 +847,64 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
 
                 (
                     config_final,
-                    Some(id_labels),
+                    Some(final_id_labels),
                     Some(container_info.env.clone()),
+                    Some(container_info),
+                    Some(container_context),
                 )
             }
             None => {
-                // Container not found - fail with clear error
-                return Err(anyhow::anyhow!(
-                        "Dev container not found. Container ID or labels did not match any running containers."
-                    ));
+                // Container not found
+                debug!("Container not found for selector: {:?}", selector);
+
+                // If merged configuration is requested, we need container metadata, so fail
+                if args.include_merged_configuration {
+                    return Err(anyhow::anyhow!(
+                            "Dev container not found. Container ID or labels did not match any running containers. \
+                             Cannot compute merged configuration without container metadata."
+                        ));
+                }
+
+                // Otherwise, succeed with devcontainerId substituted but no container-specific variables
+                debug!("Proceeding without container-specific substitutions (merged config not requested)");
+                (config_after_before, Some(id_labels), None, None, None)
             }
         }
     } else {
         // No container discovery requested
         debug!("No container discovery requested");
-        (config, None, None)
+        (config, None, None, None, None)
     };
 
     // Store container metadata for potential use (currently just for debugging)
-    if let Some(ref id_labels) = container_id_labels {
+    if let Some(id_labels) = &container_id_labels {
         debug!("Container id-labels: {:?}", id_labels);
     }
-    if let Some(ref env) = container_env {
+    if let Some(env) = &container_env {
         debug!("Container has {} environment variables", env.len());
     }
 
-    // Resolve features if requested
+    // Create fetcher with tight timeouts for features resolution
+    // Per FR-009: Use 2s timeout and exactly 1 retry for predictable performance
+    use deacon_core::retry::{JitterStrategy, RetryConfig};
+    use std::time::Duration;
+
+    let retry_config = RetryConfig::new(
+        1,                          // max_attempts: exactly 1 retry
+        Duration::from_millis(100), // base_delay: small backoff
+        Duration::from_secs(1),     // max_delay
+        JitterStrategy::FullJitter,
+    );
+
+    let fetcher = default_fetcher_with_config(Some(Duration::from_secs(2)), retry_config)
+        .map_err(|e| anyhow::anyhow!("Failed to create OCI fetcher: {}", e))?;
+
+    // Resolve features if requested or needed for merged config
     // Per spec: Features are needed for:
     // 1. When --include-features-configuration is set (explicit request)
     // 2. When --include-merged-configuration is set WITHOUT a container
     //    (to derive metadata from features per issue #289)
-    let features_configuration = if args.include_features_configuration
+    let features_configuration_for_output = if args.include_features_configuration
         || (args.include_merged_configuration && args.container_id.is_none())
     {
         Some(
@@ -732,6 +912,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                 &config,
                 args.additional_features.as_deref(),
                 args.skip_feature_auto_mapping,
+                &fetcher,
             )
             .await?,
         )
@@ -743,20 +924,34 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     // Per spec: mergedConfiguration = mergeConfiguration(base_config, imageMetadata)
     // where imageMetadata comes from container OR features
     let merged_configuration = if args.include_merged_configuration {
-        Some(compute_merged_configuration(
-            &config,
-            args.container_id.as_deref(),
-            features_configuration.as_ref(),
-        )?)
+        // We may need features for merged config computation even if not outputting them
+        let features_for_merge = features_configuration_for_output.as_ref();
+
+        Some(
+            compute_merged_configuration(
+                &config,
+                container_info.as_ref(),
+                container_context.as_ref(),
+                features_for_merge,
+                secrets.as_ref(),
+                &fetcher,
+            )
+            .await?,
+        )
     } else {
         None
     };
 
     // Build output payload
     let output_payload = ReadConfigurationOutput {
-        configuration: serde_json::to_value(&config)?,
+        configuration: if container_only_mode {
+            // Per spec line 310: "Only container flags provided (no config/workspace): returns { configuration: {}, ... }"
+            serde_json::Value::Object(serde_json::Map::new())
+        } else {
+            serde_json::to_value(&config)?
+        },
         workspace: workspace_config,
-        features_configuration,
+        features_configuration: features_configuration_for_output,
         merged_configuration,
     };
 
@@ -1043,7 +1238,7 @@ API_KEY=another-secret
         fs::write(&config_path, config_content).unwrap();
 
         let args = ReadConfigurationArgs {
-            include_merged_configuration: false,
+            include_merged_configuration: true, // Set to true to test failure when container not found
             include_features_configuration: false,
             container_id: Some("abc123".to_string()),
             id_label: vec![],

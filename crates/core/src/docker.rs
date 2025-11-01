@@ -34,6 +34,8 @@ pub struct ContainerInfo {
     pub env: HashMap<String, String>,
     /// Container labels (from Config.Labels)
     pub labels: HashMap<String, String>,
+    /// Container mounts (from Mounts array)
+    pub mounts: Vec<Mount>,
 }
 
 /// Represents an exposed port from a container
@@ -58,6 +60,109 @@ pub struct PortMapping {
     pub protocol: String,
     /// Host IP
     pub host_ip: String,
+}
+
+/// Represents a mount point in a container
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mount {
+    /// Mount type (bind, volume, tmpfs)
+    pub mount_type: String,
+    /// Source path (host path for bind mounts, volume name for volumes)
+    pub source: Option<String>,
+    /// Destination path in container
+    pub destination: String,
+    /// Mount mode (rw, ro)
+    pub mode: Option<String>,
+    /// Whether the mount is read-write
+    pub rw: Option<bool>,
+    /// Mount propagation mode
+    pub propagation: Option<String>,
+    /// Volume name (for named volumes)
+    pub name: Option<String>,
+    /// Volume driver (for volumes)
+    pub driver: Option<String>,
+}
+
+/// Derive the container workspace folder from container mounts
+///
+/// This function implements heuristics to identify the workspace mount from
+/// a container's mount information. It looks for bind mounts that are likely
+/// to be workspace directories based on common patterns.
+///
+/// # Arguments
+/// * `mounts` - Slice of Mount structs representing container mounts
+///
+/// # Returns
+/// * `Some(String)` - The container path of the identified workspace folder
+/// * `None` - No workspace folder could be identified
+pub fn derive_container_workspace_folder(mounts: &[Mount]) -> Option<String> {
+    // Priority 1: Look for mounts with destination paths that match common workspace patterns
+    let workspace_patterns = [
+        "/workspaces/",
+        "/workspace",
+        "/src",
+        "/app",
+        "/project",
+        "/code",
+    ];
+
+    // First pass: exact matches for common workspace destinations
+    for mount in mounts {
+        if mount.mount_type == "bind" {
+            let dest = &mount.destination;
+            if workspace_patterns
+                .iter()
+                .any(|&pattern| dest == pattern.trim_end_matches('/'))
+            {
+                return Some(dest.clone());
+            }
+        }
+    }
+
+    // Second pass: prefix matches with boundary check (e.g., /workspaces/myproject)
+    // Track the longest matching destination to avoid false positives like "/workspace-temp"
+    let mut best_match: Option<String> = None;
+    let mut best_match_len = 0;
+
+    for mount in mounts {
+        if mount.mount_type == "bind" {
+            let dest = &mount.destination;
+            for &pattern in workspace_patterns.iter() {
+                if dest.starts_with(pattern) {
+                    // Check boundary: next character after pattern must be '/' or end of string
+                    let pattern_len = pattern.len();
+                    let is_valid_match = dest.len() == pattern_len
+                        || dest.as_bytes().get(pattern_len) == Some(&b'/');
+
+                    if is_valid_match && dest.len() > best_match_len {
+                        best_match = Some(dest.clone());
+                        best_match_len = dest.len();
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(best) = best_match {
+        return Some(best);
+    }
+
+    // Third pass: Look for the longest bind mount destination (heuristic: workspace is often the main mount)
+    let mut longest_bind_mount: Option<&Mount> = None;
+    for mount in mounts {
+        if mount.mount_type == "bind" {
+            if let Some(current_longest) = longest_bind_mount {
+                if mount.destination.len() > current_longest.destination.len() {
+                    longest_bind_mount = Some(mount);
+                }
+            } else {
+                longest_bind_mount = Some(mount);
+            }
+        }
+    }
+
+    longest_bind_mount.map(|mount| mount.destination.clone())
 }
 
 /// Configuration for executing commands in containers
@@ -393,6 +498,7 @@ impl CliRuntime {
                 port_mappings: vec![],  // Not available in list format
                 env: HashMap::new(),    // Not available in list format (requires inspect)
                 labels: HashMap::new(), // Not available in list format (requires inspect)
+                mounts: vec![],         // Not available in list format (requires inspect)
             };
             result.push(container_info);
         }
@@ -473,6 +579,44 @@ impl CliRuntime {
             })
             .unwrap_or_default();
 
+        // Parse mounts from Mounts array
+        let mounts = container
+            .get("Mounts")
+            .and_then(|mounts| mounts.as_array())
+            .map(|mounts_array| {
+                mounts_array
+                    .iter()
+                    .filter_map(|mount| {
+                        Some(Mount {
+                            mount_type: mount.get("Type")?.as_str()?.to_string(),
+                            source: mount
+                                .get("Source")
+                                .and_then(|s| s.as_str())
+                                .map(|s| s.to_string()),
+                            destination: mount.get("Destination")?.as_str()?.to_string(),
+                            mode: mount
+                                .get("Mode")
+                                .and_then(|m| m.as_str())
+                                .map(|m| m.to_string()),
+                            rw: mount.get("RW").and_then(|rw| rw.as_bool()),
+                            propagation: mount
+                                .get("Propagation")
+                                .and_then(|p| p.as_str())
+                                .map(|p| p.to_string()),
+                            name: mount
+                                .get("Name")
+                                .and_then(|n| n.as_str())
+                                .map(|n| n.to_string()),
+                            driver: mount
+                                .get("Driver")
+                                .and_then(|d| d.as_str())
+                                .map(|d| d.to_string()),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let container_info = ContainerInfo {
             id: container
                 .get("Id")
@@ -506,6 +650,7 @@ impl CliRuntime {
             port_mappings,
             env,
             labels,
+            mounts,
         };
 
         Ok(Some(container_info))
@@ -634,6 +779,7 @@ impl Docker for CliRuntime {
                     port_mappings: vec![],  // Not available in list format
                     env: HashMap::new(),    // Not available in list format (requires inspect)
                     labels: HashMap::new(), // Not available in list format (requires inspect)
+                    mounts: vec![],         // Not available in list format (requires inspect)
                 };
                 containers.push(container_info);
             }
@@ -717,6 +863,44 @@ impl Docker for CliRuntime {
                 })
                 .unwrap_or_default();
 
+            // Parse mounts from Mounts array
+            let mounts = container
+                .get("Mounts")
+                .and_then(|mounts| mounts.as_array())
+                .map(|mounts_array| {
+                    mounts_array
+                        .iter()
+                        .filter_map(|mount| {
+                            Some(Mount {
+                                mount_type: mount.get("Type")?.as_str()?.to_string(),
+                                source: mount
+                                    .get("Source")
+                                    .and_then(|s| s.as_str())
+                                    .map(|s| s.to_string()),
+                                destination: mount.get("Destination")?.as_str()?.to_string(),
+                                mode: mount
+                                    .get("Mode")
+                                    .and_then(|m| m.as_str())
+                                    .map(|m| m.to_string()),
+                                rw: mount.get("RW").and_then(|rw| rw.as_bool()),
+                                propagation: mount
+                                    .get("Propagation")
+                                    .and_then(|p| p.as_str())
+                                    .map(|p| p.to_string()),
+                                name: mount
+                                    .get("Name")
+                                    .and_then(|n| n.as_str())
+                                    .map(|n| n.to_string()),
+                                driver: mount
+                                    .get("Driver")
+                                    .and_then(|d| d.as_str())
+                                    .map(|d| d.to_string()),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let container_info = ContainerInfo {
                 id: container
                     .get("Id")
@@ -750,6 +934,7 @@ impl Docker for CliRuntime {
                 port_mappings,
                 env,
                 labels,
+                mounts,
             };
 
             Ok(Some(container_info))
@@ -1500,6 +1685,7 @@ pub mod mock {
                 port_mappings: vec![], // Not implemented for mock
                 env: container.env.clone(),
                 labels: container.labels.clone(),
+                mounts: vec![], // Not implemented for mock
             }
         }
 
@@ -1987,6 +2173,7 @@ mod tests {
             port_mappings: vec![],
             env: HashMap::new(),
             labels: HashMap::new(),
+            mounts: vec![],
         };
 
         let serialized = serde_json::to_string(&container).unwrap();
@@ -2319,5 +2506,315 @@ mod tests {
         // Verify container is gone
         let result = mock_docker.get_container_image(&container_id).await;
         assert!(result.is_err());
+    }
+
+    // Tests for derive_container_workspace_folder heuristic
+
+    #[test]
+    fn test_derive_container_workspace_folder_exact_workspace() {
+        let mounts = vec![Mount {
+            mount_type: "bind".to_string(),
+            source: Some("/home/user/project".to_string()),
+            destination: "/workspace".to_string(),
+            mode: Some("rw".to_string()),
+            rw: Some(true),
+            propagation: None,
+            name: None,
+            driver: None,
+        }];
+
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, Some("/workspace".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_workspaces_prefix() {
+        let mounts = vec![Mount {
+            mount_type: "bind".to_string(),
+            source: Some("/home/user/project".to_string()),
+            destination: "/workspaces/myproject".to_string(),
+            mode: Some("rw".to_string()),
+            rw: Some(true),
+            propagation: None,
+            name: None,
+            driver: None,
+        }];
+
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, Some("/workspaces/myproject".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_src() {
+        let mounts = vec![Mount {
+            mount_type: "bind".to_string(),
+            source: Some("/home/user/project".to_string()),
+            destination: "/src".to_string(),
+            mode: Some("rw".to_string()),
+            rw: Some(true),
+            propagation: None,
+            name: None,
+            driver: None,
+        }];
+
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, Some("/src".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_app() {
+        let mounts = vec![Mount {
+            mount_type: "bind".to_string(),
+            source: Some("/home/user/project".to_string()),
+            destination: "/app".to_string(),
+            mode: Some("rw".to_string()),
+            rw: Some(true),
+            propagation: None,
+            name: None,
+            driver: None,
+        }];
+
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, Some("/app".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_project() {
+        let mounts = vec![Mount {
+            mount_type: "bind".to_string(),
+            source: Some("/home/user/project".to_string()),
+            destination: "/project".to_string(),
+            mode: Some("rw".to_string()),
+            rw: Some(true),
+            propagation: None,
+            name: None,
+            driver: None,
+        }];
+
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, Some("/project".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_code() {
+        let mounts = vec![Mount {
+            mount_type: "bind".to_string(),
+            source: Some("/home/user/project".to_string()),
+            destination: "/code".to_string(),
+            mode: Some("rw".to_string()),
+            rw: Some(true),
+            propagation: None,
+            name: None,
+            driver: None,
+        }];
+
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, Some("/code".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_multi_mount_longest_bind() {
+        // Multiple bind mounts - should select the longest destination path (heuristic)
+        let mounts = vec![
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/home/user".to_string()),
+                destination: "/home".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/home/user/project".to_string()),
+                destination: "/mnt/long/path/to/workspace".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/var/cache".to_string()),
+                destination: "/cache".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+        ];
+
+        let result = derive_container_workspace_folder(&mounts);
+        // Should select the longest bind mount destination
+        assert_eq!(result, Some("/mnt/long/path/to/workspace".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_priority_over_length() {
+        // Workspace pattern should take priority over longest bind mount
+        let mounts = vec![
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/var/lib/docker".to_string()),
+                destination: "/very/long/path/that/is/not/workspace".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/home/user/project".to_string()),
+                destination: "/workspace".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+        ];
+
+        let result = derive_container_workspace_folder(&mounts);
+        // Should prefer /workspace pattern even though other path is longer
+        assert_eq!(result, Some("/workspace".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_with_volumes() {
+        // Mix of volume and bind mounts - should only consider bind mounts
+        let mounts = vec![
+            Mount {
+                mount_type: "volume".to_string(),
+                source: None,
+                destination: "/var/lib/data".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: Some("data-volume".to_string()),
+                driver: Some("local".to_string()),
+            },
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/home/user/project".to_string()),
+                destination: "/app".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+        ];
+
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, Some("/app".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_no_mounts() {
+        let mounts = vec![];
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_only_volumes() {
+        let mounts = vec![Mount {
+            mount_type: "volume".to_string(),
+            source: None,
+            destination: "/var/lib/data".to_string(),
+            mode: Some("rw".to_string()),
+            rw: Some(true),
+            propagation: None,
+            name: Some("data-volume".to_string()),
+            driver: Some("local".to_string()),
+        }];
+
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_no_matching_pattern() {
+        // Bind mount that doesn't match any workspace pattern
+        let mounts = vec![Mount {
+            mount_type: "bind".to_string(),
+            source: Some("/etc/config".to_string()),
+            destination: "/etc/app".to_string(),
+            mode: Some("ro".to_string()),
+            rw: Some(false),
+            propagation: None,
+            name: None,
+            driver: None,
+        }];
+
+        let result = derive_container_workspace_folder(&mounts);
+        // Falls back to longest bind mount heuristic
+        assert_eq!(result, Some("/etc/app".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_workspaces_exact_vs_prefix() {
+        // Test that /workspaces/ prefix takes priority over exact /workspace
+        let mounts = vec![
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/home/user/other".to_string()),
+                destination: "/workspace".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/home/user/project".to_string()),
+                destination: "/workspaces/myproject".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+        ];
+
+        let result = derive_container_workspace_folder(&mounts);
+        // Should match the first one found in order (exact match phase)
+        assert_eq!(result, Some("/workspace".to_string()));
+    }
+
+    #[test]
+    fn test_derive_container_workspace_folder_prefix_match_priority() {
+        // Test prefix matching when no exact matches exist
+        let mounts = vec![
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/var/cache".to_string()),
+                destination: "/cache".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+            Mount {
+                mount_type: "bind".to_string(),
+                source: Some("/home/user/project".to_string()),
+                destination: "/workspaces/nested/project".to_string(),
+                mode: Some("rw".to_string()),
+                rw: Some(true),
+                propagation: None,
+                name: None,
+                driver: None,
+            },
+        ];
+
+        let result = derive_container_workspace_folder(&mounts);
+        assert_eq!(result, Some("/workspaces/nested/project".to_string()));
     }
 }

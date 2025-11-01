@@ -18,6 +18,19 @@ run: ## Run CLI
 test: ## Run all tests
 	cargo test -- --test-threads=1
 
+test-fast: ## Fast tests only: unit + bins + examples + doctests (no integration suites)
+	@set -euo pipefail; \
+	# Run unit/bins/examples in parallel (faster) \
+	cargo test --workspace --lib --bins --examples; \
+	# Run doctests separately \
+	cargo test --doc
+
+dev-fast: ## Fast local loop: fmt-check + clippy + fast tests (skip slow integration/smoke)
+	@set -euo pipefail; \
+	cargo fmt --all && cargo fmt --all -- --check; \
+	cargo clippy --all-targets -- -D warnings; \
+	$(MAKE) test-fast
+
 test-non-smoke: ## Run unit tests + non-smoke integration tests (matches CI 'test' job)
 		@set -euo pipefail; \
 		NON_SMOKE_TESTS=$$(find crates -type f -path '*/tests/*.rs' -not -name 'smoke_*.rs' -printf '%f\n' | sed 's/\.rs$$//' | sort -u); \

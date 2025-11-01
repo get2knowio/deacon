@@ -1,0 +1,7 @@
+{
+  "name": "rc-extends-leaf",
+  "extends": "../mid/devcontainer.json",
+  "remoteEnv": {
+    "LEAF": "1"
+  }
+}

@@ -50,7 +50,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tar::Archive;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
@@ -395,9 +395,37 @@ pub struct ReqwestClient {
 }
 
 impl ReqwestClient {
-    /// Create a new ReqwestClient with default configuration
+    /// Create a new ReqwestClient with default configuration (no timeout)
     pub fn new() -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::with_timeout(None)
+    }
+
+    /// Create a new ReqwestClient with custom timeout configuration
+    ///
+    /// # Arguments
+    /// * `timeout` - Optional timeout for all requests. If None, no timeout is applied.
+    ///
+    /// # Examples
+    /// ```
+    /// use deacon_core::oci::ReqwestClient;
+    /// use std::time::Duration;
+    ///
+    /// // Create client with 2 second timeout
+    /// let client = ReqwestClient::with_timeout(Some(Duration::from_secs(2)));
+    /// ```
+    pub fn with_timeout(
+        timeout: Option<Duration>,
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut client_builder = reqwest::Client::builder();
+
+        // Configure timeout if specified
+        if let Some(timeout_duration) = timeout {
+            client_builder = client_builder.timeout(timeout_duration);
+            debug!(
+                "Configured HTTP client with timeout: {:?}",
+                timeout_duration
+            );
+        }
 
         // Configure custom CA certificates if specified
         if let Ok(ca_bundle_path) = env::var("DEACON_CUSTOM_CA_BUNDLE") {
@@ -2024,6 +2052,50 @@ pub fn default_fetcher() -> Result<FeatureFetcher<ReqwestClient>> {
         message: format!("Failed to create HTTP client: {}", e),
     })?;
     Ok(FeatureFetcher::new(client))
+}
+
+/// Create a feature fetcher with custom timeout and retry configuration
+///
+/// This function is useful for operations that need predictable performance guarantees,
+/// such as the read-configuration command which should minimize latency.
+///
+/// # Arguments
+/// * `timeout` - Timeout for each HTTP request (e.g., 2 seconds)
+/// * `retry_config` - Retry configuration (max attempts, backoff delays)
+///
+/// # Examples
+/// ```
+/// use deacon_core::oci::default_fetcher_with_config;
+/// use deacon_core::retry::RetryConfig;
+/// use std::time::Duration;
+///
+/// // Create fetcher with 2s timeout and 1 retry
+/// let retry_config = RetryConfig::new(
+///     1, // max_attempts (1 retry after initial attempt)
+///     Duration::from_millis(100), // base_delay
+///     Duration::from_secs(1), // max_delay
+///     deacon_core::retry::JitterStrategy::FullJitter,
+/// );
+/// let fetcher = default_fetcher_with_config(
+///     Some(Duration::from_secs(2)),
+///     retry_config,
+/// );
+/// ```
+pub fn default_fetcher_with_config(
+    timeout: Option<Duration>,
+    retry_config: RetryConfig,
+) -> Result<FeatureFetcher<ReqwestClient>> {
+    let client =
+        ReqwestClient::with_timeout(timeout).map_err(|e| FeatureError::Authentication {
+            message: format!("Failed to create HTTP client with timeout: {}", e),
+        })?;
+
+    let cache_dir = get_features_cache_dir()?;
+    Ok(FeatureFetcher::with_retry_config(
+        client,
+        cache_dir,
+        retry_config,
+    ))
 }
 
 /// Mock HTTP client for testing

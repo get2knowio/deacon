@@ -122,10 +122,8 @@ fn test_id_label_valid_format() {
         .arg("--id-label")
         .arg("app=myapp");
 
-    // Should fail with container not found, not validation error
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("not found").or(predicate::str::contains("Docker")));
+    // Should succeed with valid id-label format, even if no container is found
+    cmd.assert().success();
 }
 
 #[test]

@@ -9,18 +9,13 @@ use std::time::Duration;
 use tracing::{debug, instrument, warn};
 
 /// Jitter strategy for retry delays
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum JitterStrategy {
     /// Full jitter: random delay between 0 and calculated delay
+    #[default]
     FullJitter,
     /// Equal jitter: half calculated delay plus random half  
     EqualJitter,
-}
-
-impl Default for JitterStrategy {
-    fn default() -> Self {
-        Self::FullJitter
-    }
 }
 
 /// Configuration for retry behavior

@@ -486,6 +486,7 @@ mod tests {
             }],
             env: HashMap::new(),
             labels: HashMap::new(),
+            mounts: vec![],
         };
 
         // This should generate a warning for port 9999 which is not configured

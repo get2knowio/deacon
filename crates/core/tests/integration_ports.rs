@@ -98,6 +98,7 @@ fn test_port_event_generation_with_attributes() {
         ],
         env: HashMap::new(),
         labels: HashMap::new(),
+        mounts: vec![],
     };
 
     // Process container ports without emitting events (for testing)
@@ -216,6 +217,7 @@ fn test_port_attribute_fallback_behavior() {
         }],
         env: HashMap::new(),
         labels: HashMap::new(),
+        mounts: vec![],
     };
 
     let events =
@@ -254,6 +256,7 @@ fn test_exposed_ports_without_mappings() {
         port_mappings: vec![], // No port mappings - port is exposed but not forwarded
         env: HashMap::new(),
         labels: HashMap::new(),
+        mounts: vec![],
     };
 
     let events =
@@ -310,6 +313,7 @@ fn test_port_event_redaction() {
         }],
         env: HashMap::new(),
         labels: HashMap::new(),
+        mounts: vec![],
     };
 
     let mut port_attrs = HashMap::new();

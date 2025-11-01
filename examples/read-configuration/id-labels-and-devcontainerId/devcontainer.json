@@ -1,0 +1,7 @@
+{
+  "name": "rc-${devcontainerId}",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "remoteEnv": {
+    "DEVCONTAINER_ID_SAMPLE": "${devcontainerId}"
+  }
+}

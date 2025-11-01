@@ -1,0 +1,10 @@
+{
+  // Demonstrates variable substitution
+  "name": "rc-vars-${localWorkspaceFolderBasename}",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "remoteEnv": {
+    "FROM_LOCAL_ENV": "${localEnv:MY_VAR:default-value}",
+    "WS_BASENAME": "${localWorkspaceFolderBasename}"
+  }
+}

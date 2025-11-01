@@ -11,21 +11,16 @@ use std::path::PathBuf;
 use tracing::{debug, instrument};
 
 /// Strategy for merging entrypoints when conflicts occur
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum EntrypointMergeStrategy {
     /// Wrap the original entrypoint with feature hooks (default)
+    #[default]
     Wrap,
     /// Ignore feature entrypoints, use only compose/image entrypoint
     Ignore,
     /// Replace with feature entrypoint completely
     Replace,
-}
-
-impl Default for EntrypointMergeStrategy {
-    fn default() -> Self {
-        Self::Wrap
-    }
 }
 
 impl std::fmt::Display for EntrypointMergeStrategy {
