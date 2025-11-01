@@ -75,6 +75,9 @@ FR1. CLI Interface
 FR2. Packaging Preconditions
 - FR2.1: If packaged artifacts are not present for the target, the system packages to a temporary directory before publishing.
 - FR2.2: The operation fails if no features are discovered after packaging.
+  - Error contract: exit code `1`; no JSON body on stdout in JSON mode; an actionable message is written to stderr:
+    - Message template: `No features found to publish in "<target>" (after packaging).`
+  - Validation occurs before any network calls.
 
 FR3. Semantic Version Tagging
 - FR3.1: For version `X.Y.Z`, the desired tags are `X`, `X.Y`, `X.Y.Z`; add `latest` for stable (non‑pre‑release) versions only.
@@ -88,7 +91,7 @@ FR4. Tag Existence & Idempotency
 
 FR5. Collection Metadata Publishing
 - FR5.1: The system locates `devcontainer-collection.json` in the packaged output.
-- FR5.2: The collection metadata is published to the collection ref `<registry>/<namespace>`.
+- FR5.2: The collection metadata is published under the collection reference `<registry>/<namespace>:collection` using media type `application/vnd.devcontainer.collection+json`. The artifact MUST be addressed as a distinct tag (`:collection`) at the collection repository root.
 - FR5.3: Publish proceeds even if some features were already present (idempotent behavior applies).
 
 FR6. Authentication & Security
@@ -114,6 +117,9 @@ FR7. Outputs & Exit Codes
     - `publishedTags` (number)
     - `skippedTags` (number)
 - FR7.3: Exit code is `0` on success (including all‑skipped), `1` on fatal error.
+ - FR7.4: Stdout/stderr separation (Constitution V):
+   - JSON mode (`--output json`): stdout contains only the single JSON document; all logs/diagnostics go to stderr.
+   - On fatal errors: stdout is empty; the error message is written to stderr.
 
 Example (stable release):
 
@@ -159,6 +165,9 @@ Example (stable release):
 - Mixed existing and new tags in a single run must only publish the missing set.
 - Namespace and IDs are validated to avoid malformed registry paths.
 - Pre‑release versions must never update or create the `latest` tag.
+ - Collection artifact specifics:
+   - Ref and tag: `<registry>/<namespace>:collection`
+   - Media type: `application/vnd.devcontainer.collection+json`
 
 ## Risks & Mitigations
 - Risk: Inconsistent registry capabilities. Mitigation: adhere to standard v2 endpoints and give clear errors if unsupported.

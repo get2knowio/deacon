@@ -463,6 +463,15 @@ impl ReqwestClient {
     }
 
     /// Load authentication from environment variables
+    ///
+    /// This function loads authentication credentials from environment variables with the following priority:
+    /// 1. `DEACON_REGISTRY_TOKEN` - Bearer token authentication (highest priority)
+    /// 2. `DEACON_REGISTRY_USER` + `DEACON_REGISTRY_PASS` - Basic authentication
+    ///
+    /// # Security Notes
+    /// - All sensitive values (tokens, passwords) are automatically added to the global redaction registry
+    /// - Redacted values will not appear in logs, error messages, or any output
+    /// - This prevents accidental leakage of credentials in debugging or error scenarios
     fn load_auth_from_env(
         auth: &mut RegistryAuth,
     ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -490,6 +499,17 @@ impl ReqwestClient {
     }
 
     /// Load authentication from Docker config.json
+    ///
+    /// This function loads authentication credentials from Docker's config.json file
+    /// located at `~/.docker/config.json` (or `%USERPROFILE%\.docker\config.json` on Windows).
+    ///
+    /// Supports both encoded auth strings and separate username/password fields.
+    /// Registry-specific credentials override default credentials.
+    ///
+    /// # Security Notes
+    /// - Passwords extracted from Docker config are treated as sensitive
+    /// - All credential values are automatically redacted in logs and error messages
+    /// - This follows Docker's standard credential handling practices
     fn load_auth_from_docker_config(
         auth: &mut RegistryAuth,
     ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -2040,6 +2060,123 @@ impl<C: HttpClient> FeatureFetcher<C> {
             name
         );
         Ok(results)
+    }
+
+    /// Publish collection metadata as an OCI artifact
+    ///
+    /// This publishes the devcontainer-collection.json as an OCI artifact to the
+    /// collection repository `<registry>/<namespace>` with tag `collection`.
+    /// The collection JSON is stored as the config blob with media type
+    /// `application/vnd.devcontainer.collection+json`.
+    ///
+    /// # Arguments
+    /// * `registry` - The registry hostname (e.g., "ghcr.io")
+    /// * `namespace` - The namespace/repository path (e.g., "owner/repo")
+    /// * `collection_json` - The collection metadata as JSON bytes
+    ///
+    /// # Returns
+    /// The digest of the published manifest
+    #[instrument(level = "info", skip(self, collection_json))]
+    pub async fn publish_collection_metadata(
+        &self,
+        registry: &str,
+        namespace: &str,
+        collection_json: Bytes,
+    ) -> Result<String> {
+        info!(
+            "Publishing collection metadata to {}/{}",
+            registry, namespace
+        );
+
+        // Calculate digest for the collection JSON
+        let mut hasher = Sha256::new();
+        hasher.update(&collection_json);
+        let config_digest = format!("sha256:{:x}", hasher.finalize());
+        let config_size = collection_json.len() as u64;
+
+        // Upload the collection JSON as a blob
+        self.upload_blob_generic(registry, namespace, &config_digest, collection_json)
+            .await
+            .map_err(|e| match e {
+                crate::errors::DeaconError::Feature(f) => f,
+                _ => FeatureError::Oci {
+                    message: format!("Upload collection blob error: {}", e),
+                },
+            })?;
+
+        // Create manifest for the collection artifact
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.devcontainer.collection+json",
+                "size": config_size,
+                "digest": config_digest
+            },
+            "layers": [],
+            "annotations": {
+                "org.opencontainers.image.title": "DevContainer Collection",
+                "org.opencontainers.image.description": "DevContainer feature and template collection metadata"
+            }
+        });
+
+        let manifest_bytes =
+            Bytes::from(serde_json::to_vec(&manifest).map_err(FeatureError::Json)?);
+
+        // Upload manifest to the collection tag
+        let manifest_url = format!("https://{}/v2/{}/manifests/collection", registry, namespace);
+
+        debug!("Uploading collection manifest to: {}", manifest_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Content-Type".to_string(),
+            "application/vnd.oci.image.manifest.v1+json".to_string(),
+        );
+
+        // Retry manifest upload with exponential backoff
+        retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let data = manifest_bytes.clone();
+                let headers = headers.clone();
+                async move {
+                    client
+                        .put_with_headers(url, data, headers)
+                        .await
+                        .map_err(|e| {
+                            let error_msg = e.to_string();
+                            if error_msg.contains("Authentication failed") {
+                                FeatureError::Authentication {
+                                    message: format!(
+                                        "Failed to authenticate for collection manifest upload: {}",
+                                        e
+                                    ),
+                                }
+                            } else {
+                                FeatureError::Oci {
+                                    message: format!("Failed to upload collection manifest: {}", e),
+                                }
+                            }
+                        })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
+
+        // Calculate digest of the manifest
+        let mut hasher = Sha256::new();
+        hasher.update(&manifest_bytes);
+        let manifest_digest = format!("sha256:{:x}", hasher.finalize());
+
+        info!(
+            "Successfully published collection metadata with digest {}",
+            manifest_digest
+        );
+        Ok(manifest_digest)
     }
 }
 

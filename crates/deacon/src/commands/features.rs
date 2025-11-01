@@ -4,16 +4,20 @@
 //! DevContainer features. Follows the CLI specification for feature management.
 
 use crate::cli::FeatureCommands;
+use crate::commands::features_publish_output::{
+    PublishCollectionResult, PublishFeatureResult, PublishOutput, PublishSummary,
+};
 use anyhow::{Context, Result};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::features::parse_feature_metadata;
 use deacon_core::features::{
-    parse_feature_metadata, FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger,
-    FeatureMetadata, OptionValue, ResolvedFeature,
+    FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger, FeatureMetadata, OptionValue,
+    ResolvedFeature,
 };
 use deacon_core::observability::{feature_plan_span, TimedSpan};
 use deacon_core::oci::{default_fetcher, FeatureRef};
 use deacon_core::registry_parser::parse_registry_reference;
-use futures::stream::{self, StreamExt};
+use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -64,20 +68,23 @@ pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
         FeatureCommands::Publish {
             path,
             registry,
+            namespace,
             dry_run,
             json,
             username,
             password_stdin,
         } => {
-            execute_features_publish(
+            let output = execute_features_publish(
                 &path,
                 &registry,
+                &namespace,
                 dry_run,
-                json,
                 username.as_deref(),
                 password_stdin,
             )
-            .await
+            .await?;
+            output_publish_result(&output, json)?;
+            Ok(())
         }
         FeatureCommands::Info {
             mode,
@@ -508,6 +515,11 @@ async fn execute_features_test(path: &str, json: bool) -> Result<()> {
     let metadata = parse_feature_metadata(&metadata_path)
         .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
 
+    // Validate the metadata
+    metadata
+        .validate()
+        .map_err(|e| anyhow::anyhow!("Invalid feature metadata: {}", e))?;
+
     info!(
         "Testing feature: {} ({})",
         metadata.id,
@@ -559,6 +571,11 @@ async fn execute_features_package(path: &str, output_dir: &str, json: bool) -> R
     let metadata_path = feature_path.join("devcontainer-feature.json");
     let metadata = parse_feature_metadata(&metadata_path)
         .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
+
+    // Validate the metadata
+    metadata
+        .validate()
+        .map_err(|e| anyhow::anyhow!("Invalid feature metadata: {}", e))?;
 
     info!(
         "Packaging feature: {} ({})",
@@ -628,11 +645,11 @@ async fn execute_features_pull(registry_ref: &str, json: bool) -> Result<()> {
 async fn execute_features_publish(
     path: &str,
     registry: &str,
+    namespace: &str,
     dry_run: bool,
-    json: bool,
     username: Option<&str>,
     password_stdin: bool,
-) -> Result<()> {
+) -> Result<PublishOutput> {
     debug!(
         "Publishing feature at path: {} to registry: {} (dry_run: {})",
         path, registry, dry_run
@@ -652,8 +669,17 @@ async fn execute_features_publish(
 
     // Parse feature metadata
     let metadata_path = feature_path.join("devcontainer-feature.json");
-    let metadata = parse_feature_metadata(&metadata_path)
-        .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
+    let metadata = match parse_feature_metadata(&metadata_path) {
+        Ok(m) => m,
+        Err(_) => {
+            anyhow::bail!("No features found to publish");
+        }
+    };
+
+    // Validate the metadata
+    if metadata.validate().is_err() {
+        anyhow::bail!("No features found to publish");
+    }
 
     info!(
         "Publishing feature: {} ({})",
@@ -661,70 +687,209 @@ async fn execute_features_publish(
         metadata.name.as_deref().unwrap_or("No name")
     );
 
-    if dry_run {
-        info!("Dry run mode - would publish to registry: {}", registry);
+    // Validate feature version is SemVer
+    let version = metadata.version.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("Feature version is required for publishing. Please specify a version in devcontainer-feature.json")
+    })?;
 
-        let result = FeaturesResult {
-            command: "publish".to_string(),
-            status: "success".to_string(),
-            digest: Some(
-                "sha256:dryrun0000000000000000000000000000000000000000000000000000000000"
-                    .to_string(),
-            ),
-            size: None,
-            message: Some(format!("Dry run completed - would publish to {}", registry)),
-            cache_path: None,
-        };
-
-        output_result(&result, json)?;
-        return Ok(());
+    // Validate the version is valid SemVer
+    use deacon_core::semver_utils;
+    if semver_utils::parse_version(version).is_none() {
+        anyhow::bail!("Invalid semantic version '{}'. Version must be a valid SemVer (e.g., '1.2.3', '2.0.0-rc.1')", version);
     }
 
-    // Parse registry reference from the registry parameter
-    // Format: [registry]/[namespace]/[name]:[tag]
-    let (registry_url, namespace, name, tag) = parse_registry_reference(registry)?;
+    if dry_run {
+        info!(
+            "Dry run mode - would publish to registry: {} namespace: {}",
+            registry, namespace
+        );
+
+        let output = PublishOutput {
+            features: vec![],
+            collection: None,
+            summary: PublishSummary {
+                features: 0,
+                published_tags: 0,
+                skipped_tags: 0,
+            },
+        };
+
+        return Ok(output);
+    }
+
+    // Create OCI client for tag listing and publishing
+    let fetcher =
+        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+
+    // Use the provided registry and namespace, with feature name from metadata
+    let registry_url = registry.to_string();
+    let name = metadata.id.clone();
+    let tag = Some(version.to_string()); // Use validated version as tag
 
     let feature_ref = FeatureRef::new(
         registry_url.clone(),
-        namespace.clone(),
+        namespace.to_string(),
         name.clone(),
         tag.clone(),
     );
 
-    // Create feature package
+    // Compute publish plan: determine which tags need to be published
+    let (desired_tags, existing_tags, to_publish_tags) =
+        compute_publish_plan(&fetcher, &feature_ref, version)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to compute publish plan: {}", e))?;
+
+    info!(
+        "Publish plan: {} desired tags, {} existing tags, {} to publish",
+        desired_tags.len(),
+        existing_tags.len(),
+        to_publish_tags.len()
+    );
+
+    // Create feature package to get digest (needed even if all tags exist)
     let temp_dir = tempfile::tempdir()?;
-    let (_digest, _size) =
+    let (digest, _size) =
         create_feature_package(feature_path, temp_dir.path(), &metadata.id).await?;
 
-    // Read the created tar file for publishing
-    let tar_path = temp_dir.path().join(format!("{}.tar", metadata.id));
-    let tar_data = std::fs::read(&tar_path)?;
+    if !to_publish_tags.is_empty() {
+        // Publish with multiple tags if needed
+        let _results = fetcher
+            .publish_feature_multi_tag(
+                registry_url.clone(),
+                namespace.to_string(),
+                name.clone(),
+                to_publish_tags.clone(),
+                std::fs::read(temp_dir.path().join(format!("{}.tar", metadata.id)))?.into(),
+                &metadata,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to publish feature: {}", e))?;
 
-    // Create OCI client and publish to registry
-    let fetcher =
-        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+        info!(
+            "Successfully published {} tags for {}/{}",
+            _results.len(),
+            registry_url,
+            namespace
+        );
+    } else {
+        info!("All desired tags already exist, skipping publish");
+    }
 
-    info!("Publishing to OCI registry: {}", feature_ref.reference());
-    let publish_result = fetcher
-        .publish_feature(&feature_ref, tar_data.into(), &metadata)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to publish feature: {}", e))?;
+    // Construct PublishFeatureResult
+    let published_tags = to_publish_tags.clone();
+    let skipped_tags: Vec<String> = desired_tags
+        .iter()
+        .filter(|tag| !to_publish_tags.contains(tag))
+        .cloned()
+        .collect();
+    let moved_latest = published_tags.contains(&"latest".to_string());
 
-    let result = FeaturesResult {
-        command: "publish".to_string(),
-        status: "success".to_string(),
-        digest: Some(publish_result.digest),
-        size: Some(publish_result.size),
-        message: Some(format!(
-            "Successfully published {} to {}",
-            feature_ref.reference(),
-            registry_url
-        )),
-        cache_path: None,
+    let feature_result = PublishFeatureResult {
+        feature_id: metadata.id.clone(),
+        version: version.to_string(),
+        digest: digest.clone(),
+        published_tags,
+        skipped_tags: skipped_tags.clone(),
+        moved_latest,
+        registry: registry_url.clone(),
+        namespace: namespace.to_string(),
     };
 
-    output_result(&result, json)?;
-    Ok(())
+    // Check for and publish collection metadata if present
+    let collection_result = {
+        let collection_path = feature_path.join("devcontainer-collection.json");
+        if collection_path.exists() {
+            info!(
+                "Found collection metadata at: {}",
+                collection_path.display()
+            );
+
+            // Read collection metadata
+            let collection_content = std::fs::read_to_string(&collection_path)
+                .map_err(|e| anyhow::anyhow!("Failed to read collection metadata: {}", e))?;
+
+            // Parse as JSON to validate
+            let _: serde_json::Value = serde_json::from_str(&collection_content)
+                .map_err(|e| anyhow::anyhow!("Invalid collection metadata JSON: {}", e))?;
+
+            // Publish collection metadata
+            let collection_digest = fetcher
+                .publish_collection_metadata(
+                    &registry_url,
+                    namespace,
+                    collection_content.into_bytes().into(),
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to publish collection metadata: {}", e))?;
+
+            info!(
+                "Successfully published collection metadata with digest: {}",
+                collection_digest
+            );
+
+            Some(PublishCollectionResult {
+                digest: collection_digest,
+            })
+        } else {
+            info!("No collection metadata found (devcontainer-collection.json not present)");
+            None
+        }
+    };
+
+    let output = PublishOutput {
+        features: vec![feature_result],
+        collection: collection_result,
+        summary: PublishSummary {
+            features: 1,
+            published_tags: to_publish_tags.len(),
+            skipped_tags: skipped_tags.len(),
+        },
+    };
+
+    Ok(output)
+}
+
+/// Compute tags to publish by comparing desired tags against existing tags from registry
+///
+/// This function determines which semantic version tags need to be published by:
+/// 1. Computing desired tags from the feature version (X, X.Y, X.Y.Z, latest for stable)
+/// 2. Listing existing tags from the registry
+/// 3. Returning the difference (tags that don't exist yet)
+///
+/// # Arguments
+/// * `fetcher` - OCI client for registry operations
+/// * `feature_ref` - Reference to the feature repository
+/// * `version` - Feature version string (must be valid SemVer)
+///
+/// # Returns
+/// A tuple of (desired_tags, existing_tags, to_publish_tags)
+///
+/// # Errors
+/// Returns an error if the version is invalid or registry operations fail
+async fn compute_publish_plan(
+    fetcher: &deacon_core::oci::FeatureFetcher<deacon_core::oci::ReqwestClient>,
+    feature_ref: &deacon_core::oci::FeatureRef,
+    version: &str,
+) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
+    use deacon_core::semver_utils;
+
+    // Compute desired tags from version
+    let desired_tags = semver_utils::compute_semantic_tags(version);
+
+    // List existing tags from registry
+    let existing_tags = fetcher
+        .list_tags(feature_ref)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to list existing tags: {}", e))?;
+
+    // Compute tags that need to be published (desired - existing)
+    let to_publish: Vec<String> = desired_tags
+        .iter()
+        .filter(|tag| !existing_tags.contains(tag))
+        .cloned()
+        .collect();
+
+    Ok((desired_tags, existing_tags, to_publish))
 }
 
 /// Execute features info command
@@ -742,6 +907,11 @@ async fn execute_features_info(mode: &str, feature: &str, json: bool) -> Result<
         let metadata_path = feature_path.join("devcontainer-feature.json");
         let metadata = parse_feature_metadata(&metadata_path)
             .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
+
+        // Validate the metadata
+        metadata
+            .validate()
+            .map_err(|e| anyhow::anyhow!("Invalid feature metadata: {}", e))?;
 
         info!("Loading feature info from local path: {}", feature);
         (metadata, None, None, None, None, None)
@@ -1272,6 +1442,45 @@ fn output_result(result: &FeaturesResult, json: bool) -> Result<()> {
         }
         if let Some(ref message) = result.message {
             println!("Message: {}", message);
+        }
+    }
+    Ok(())
+}
+
+/// Output publish result in the specified format
+fn output_publish_result(result: &PublishOutput, json: bool) -> Result<()> {
+    if json {
+        let json_output = serde_json::to_string_pretty(result)?;
+        println!("{}", json_output);
+    } else {
+        println!("Feature Publish Summary:");
+        println!("Features processed: {}", result.summary.features);
+        println!("Tags published: {}", result.summary.published_tags);
+        println!("Tags skipped: {}", result.summary.skipped_tags);
+
+        if !result.features.is_empty() {
+            println!("\nPublished Features:");
+            for feature in &result.features {
+                println!(
+                    "  {}@{} ({})",
+                    feature.feature_id, feature.version, feature.registry
+                );
+                println!("    Digest: {}", feature.digest);
+                if !feature.published_tags.is_empty() {
+                    println!("    Published tags: {}", feature.published_tags.join(", "));
+                }
+                if !feature.skipped_tags.is_empty() {
+                    println!("    Skipped tags: {}", feature.skipped_tags.join(", "));
+                }
+                if feature.moved_latest {
+                    println!("    Moved latest tag");
+                }
+            }
+        }
+
+        if let Some(collection) = &result.collection {
+            println!("\nCollection Metadata:");
+            println!("  Digest: {}", collection.digest);
         }
     }
     Ok(())

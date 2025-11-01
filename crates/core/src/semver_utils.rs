@@ -127,7 +127,8 @@ pub fn sort_tags_descending(tags: &mut [String]) {
 
 /// Compute semantic version tags from a version string
 ///
-/// Returns `[major, major.minor, major.minor.patch, latest]`
+/// Returns `[major, major.minor, major.minor.patch]` and optionally `latest` for stable versions.
+/// Pre-release versions (with pre-release identifiers) do not include `latest`.
 ///
 /// # Examples
 ///
@@ -137,8 +138,8 @@ pub fn sort_tags_descending(tags: &mut [String]) {
 /// let tags = compute_semantic_tags("1.2.3");
 /// assert_eq!(tags, vec!["1", "1.2", "1.2.3", "latest"]);
 ///
-/// let tags = compute_semantic_tags("v2.5.1");
-/// assert_eq!(tags, vec!["2", "2.5", "2.5.1", "latest"]);
+/// let tags = compute_semantic_tags("2.0.0-rc.1");
+/// assert_eq!(tags, vec!["2", "2.0", "2.0.0-rc.1"]);
 ///
 /// // Invalid versions return only "latest"
 /// let tags = compute_semantic_tags("invalid");
@@ -151,12 +152,18 @@ pub fn compute_semantic_tags(version: &str) -> Vec<String> {
     }
 
     let version = version.unwrap();
-    vec![
+    let mut tags = vec![
         format!("{}", version.major),
         format!("{}.{}", version.major, version.minor),
-        format!("{}.{}.{}", version.major, version.minor, version.patch),
-        "latest".to_string(),
-    ]
+        version.to_string(),
+    ];
+
+    // Only include "latest" for stable releases (no pre-release identifiers)
+    if version.pre.is_empty() {
+        tags.push("latest".to_string());
+    }
+
+    tags
 }
 
 /// Compare two version tags
@@ -261,6 +268,16 @@ mod tests {
         assert_eq!(tags[1], "2.5");
         assert_eq!(tags[2], "2.5.1");
         assert_eq!(tags[3], "latest");
+    }
+
+    #[test]
+    fn test_compute_semantic_tags_pre_release() {
+        let tags = compute_semantic_tags("1.2.3-rc.1");
+        assert_eq!(tags.len(), 3);
+        assert_eq!(tags[0], "1");
+        assert_eq!(tags[1], "1.2");
+        assert_eq!(tags[2], "1.2.3-rc.1");
+        // No "latest" for pre-release
     }
 
     #[test]

@@ -251,6 +251,8 @@ fn test_features_publish_dry_run() {
         feature_dir.to_str().unwrap(),
         "--registry",
         "ghcr.io/test",
+        "--namespace",
+        "testuser",
         "--dry-run",
         "--json",
     ]);
@@ -260,13 +262,15 @@ fn test_features_publish_dry_run() {
 
     // Parse JSON output using helper function
     let json = extract_json_from_output(&stdout).unwrap();
-    assert_eq!(json["command"], "publish");
-    assert_eq!(json["status"], "success");
-    assert!(json["digest"]
-        .as_str()
-        .unwrap()
-        .starts_with("sha256:dryrun"));
-    assert!(json["message"].as_str().unwrap().contains("ghcr.io/test"));
+
+    // For dry run, features array should be empty
+    assert!(json["features"].is_array());
+    assert_eq!(json["features"].as_array().unwrap().len(), 0);
+
+    // Check summary
+    assert_eq!(json["summary"]["features"], 0);
+    assert_eq!(json["summary"]["publishedTags"], 0);
+    assert_eq!(json["summary"]["skippedTags"], 0);
 }
 
 /// Test features publish command without dry run (should fail)
@@ -290,11 +294,13 @@ fn test_features_publish_without_dry_run() {
         feature_dir.to_str().unwrap(),
         "--registry",
         "ghcr.io/test",
+        "--namespace",
+        "testuser",
     ]);
 
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("Failed to publish feature"));
+        .stderr(predicate::str::contains("Failed to compute publish plan"));
 }
 
 /// Test features command help output

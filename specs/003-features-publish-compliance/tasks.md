@@ -22,24 +22,25 @@ Organization: Tasks are grouped by user story so each story can be implemented a
 
 Purpose: Prepare structures and utilities used across stories (no user-facing behavior yet).
 
-- [ ] T001 [P] Create publish output models matching schema in `crates/deacon/src/commands/features_publish_output.rs`
-- [ ] T002 [P] Update semantic tag utility to exclude `latest` for pre-releases in `crates/core/src/semver_utils.rs`
-- [ ] T003 [P] Add helper to compute desired vs existing tags using list endpoint in `crates/deacon/src/commands/features.rs`
-- [ ] T004 Ensure contract file is referenced in code comments for JSON output (`specs/003-features-publish-compliance/contracts/publish-output.schema.json`)
+- [X] T001 [P] Create publish output models matching schema in `crates/deacon/src/commands/features_publish_output.rs`
+- [X] T002 [P] Update semantic tag utility to exclude `latest` for pre-releases in `crates/core/src/semver_utils.rs`
+- [X] T003 [P] Add helper to compute desired vs existing tags using list endpoint in `crates/deacon/src/commands/features.rs`
+- [X] T004 Ensure contract file is referenced in code comments for JSON output (`specs/003-features-publish-compliance/contracts/publish-output.schema.json`)
 
----
+✅ **Phase 1 Complete**: All shared infrastructure is ready. Code compiles, tests pass, and clippy warnings are resolved. Ready to proceed to Phase 2 (Foundational).
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
 Purpose: Core wiring and APIs that user stories depend on (must be done before any story).
 
-- [ ] T005 Add `--namespace` flag and default `--registry ghcr.io` in CLI parse (required) in `crates/deacon/src/cli.rs`
-- [ ] T006 [P] Thread new flags through dispatcher to features command in `crates/deacon/src/cli.rs`
-- [ ] T007 [P] Refactor `execute_features_publish` signature to accept `namespace` and default registry in `crates/deacon/src/commands/features.rs`
-- [ ] T008 [P] Implement tag listing via `FeatureFetcher::list_tags` and diff computation in `crates/deacon/src/commands/features.rs`
-- [ ] T009 Implement JSON-only-to-stdout and logs-to-stderr discipline for publish path in `crates/deacon/src/commands/features.rs`
-- [ ] T010 [P] Introduce collection publish helper in core (`publish_collection_metadata`) in `crates/core/src/oci.rs` (use OCI artifact media type)
-- [ ] T011 Ensure auth sources (env + Docker config) are honored; document redaction notes in code in `crates/core/src/oci.rs`
+- [X] T005 Add `--namespace` flag and default `--registry ghcr.io` in CLI parse (required) in `crates/deacon/src/cli.rs`
+- [X] T006 [P] Thread new flags through dispatcher to features command in `crates/deacon/src/cli.rs`
+- [X] T007 [P] Refactor `execute_features_publish` signature to accept `namespace` and default registry in `crates/deacon/src/commands/features.rs`
+- [X] T008 [P] Implement tag listing via `FeatureFetcher::list_tags` and diff computation in `crates/deacon/src/commands/features.rs`
+- [X] T009 Implement JSON-only-to-stdout and logs-to-stderr discipline for publish path in `crates/deacon/src/commands/features.rs`
+- [X] T009a [P] Add integration test asserting JSON-only stdout and logs-to-stderr in JSON mode for success and for fatal error (stdout empty) in `crates/deacon/tests/integration_features_publish.rs`
+- [X] T010 [P] Introduce collection publish helper in core (`publish_collection_metadata`) in `crates/core/src/oci.rs` (use OCI artifact media type)
+- [X] T011 Ensure auth sources (env + Docker config) are honored; document redaction notes in code in `crates/core/src/oci.rs`
 
 Checkpoint: Foundation ready — user story implementation can now begin.
 
@@ -53,12 +54,13 @@ Independent Test: Running `deacon features publish ./path --namespace owner/repo
 
 ### Implementation
 
-- [ ] T012 [P] [US1] Validate feature version is SemVer; compute desired tags in `crates/deacon/src/commands/features.rs`
-- [ ] T013 [P] [US1] Package feature if artifacts are missing in `crates/deacon/src/commands/features.rs` (reuse `create_feature_package`)
-- [ ] T014 [US1] Retrieve existing tags via `list_tags`, compute `to_publish` (stable adds `latest`) in `crates/deacon/src/commands/features.rs`
-- [ ] T015 [US1] Publish missing tags using `publish_feature_multi_tag` in `crates/core/src/oci.rs` (call site in `features.rs`)
-- [ ] T016 [US1] Build JSON output object (features[], collection?, summary) using models in `crates/deacon/src/commands/features_publish_output.rs`
-- [ ] T017 [US1] Print single JSON document to stdout; log human text to stderr in `crates/deacon/src/commands/features.rs`
+- [X] T012 [P] [US1] Validate feature version is SemVer; compute desired tags in `crates/deacon/src/commands/features.rs`
+- [X] T013 [P] [US1] Package feature if artifacts are missing in `crates/deacon/src/commands/features.rs` (reuse `create_feature_package`)
+- [X] T014 [US1] Retrieve existing tags via `list_tags`, compute `to_publish` (stable adds `latest`) in `crates/deacon/src/commands/features.rs`
+- [X] T015 [US1] Publish missing tags using `publish_feature_multi_tag` in `crates/core/src/oci.rs` (call site in `features.rs`)
+- [X] T016 [US1] Build JSON output object (features[], collection?, summary) using models in `crates/deacon/src/commands/features_publish_output.rs`
+- [X] T017 [US1] Print single JSON document to stdout; log human text to stderr in `crates/deacon/src/commands/features.rs`
+- [X] T017a [US1] Add negative-path test for "no features discovered after packaging" (FR2.2): assert exit code `1`, stderr contains `No features found to publish`, stdout is empty in JSON mode in `crates/deacon/tests/integration_features_publish.rs`
 
 Checkpoint: US1 fully functional and independently verifiable with JSON output.
 
@@ -72,9 +74,10 @@ Independent Test: When all desired tags exist, command exits 0, performs no uplo
 
 ### Implementation
 
-- [ ] T018 [P] [US2] Use `list_tags` result to detect existing; short-circuit when `to_publish` is empty in `crates/deacon/src/commands/features.rs`
-- [ ] T019 [US2] Populate `skippedTags` and `summary.skippedTags` correctly in `crates/deacon/src/commands/features.rs`
-- [ ] T020 [US2] Ensure end-to-end path completes under ~10s locally by avoiding unnecessary network calls in `crates/deacon/src/commands/features.rs`
+- [X] T018 [P] [US2] Use `list_tags` result to detect existing; short-circuit when `to_publish` is empty in `crates/deacon/src/commands/features.rs`
+- [X] T019 [US2] Populate `skippedTags` and `summary.skippedTags` correctly in `crates/deacon/src/commands/features.rs`
+- [X] T020 [US2] Ensure end-to-end path completes under ~10s locally by avoiding unnecessary network calls in `crates/deacon/src/commands/features.rs`
+ - [X] T020a [US2] Add test for all‑skipped case: assert exit code `0`, correct `skippedTags` rollup, and single JSON document to stdout in `crates/deacon/tests/integration_features_publish.rs`
 
 Checkpoint: US2 independently verifiable — no-op publish returns success with accurate JSON.
 
@@ -88,8 +91,9 @@ Independent Test: Feature with invalid version triggers validation error before 
 
 ### Implementation
 
-- [ ] T021 [P] [US3] Add version validation and error path before packaging in `crates/deacon/src/commands/features.rs`
-- [ ] T022 [US3] Ensure non-zero exit and helpful message (stderr) with no JSON body in `crates/deacon/src/commands/features.rs`
+- [X] T021 [P] [US3] Add version validation and error path before packaging in `crates/deacon/src/commands/features.rs`
+- [X] T022 [US3] Ensure non-zero exit and helpful message (stderr) with no JSON body in `crates/deacon/src/commands/features.rs`
+ - [X] T022a [US3] Add test asserting invalid semver: exit code `1`; stdout empty in JSON mode; stderr includes "Invalid semantic version" in `crates/deacon/tests/integration_features_publish.rs`
 
 Checkpoint: US3 independently verifiable — invalid input fails fast.
 
@@ -103,9 +107,9 @@ Independent Test: With credentials present (env or Docker config), publish succe
 
 ### Implementation
 
-- [ ] T023 [P] [US4] Ensure `ReqwestClient` auth precedence (env > docker config) is used by publish path in `crates/core/src/oci.rs`
-- [ ] T024 [US4] Add minimal CLI docs for env vars in help text (no new flags) in `crates/deacon/src/cli.rs`
-- [ ] T025 [US4] Verify secret redaction registry is used for any captured values in `crates/core/src/logging.rs` and `crates/core/src/oci.rs`
+- [X] T023 [P] [US4] Ensure `ReqwestClient` auth precedence (env > docker config) is used by publish path in `crates/core/src/oci.rs`
+- [X] T024 [US4] Add minimal CLI docs for env vars in help text (no new flags) in `crates/deacon/src/cli.rs`
+- [X] T025 [US4] Verify secret redaction registry is used for any captured values in `crates/core/src/logging.rs` and `crates/core/src/oci.rs`
 
 Checkpoint: US4 independently verifiable — private publish works without secret leakage.
 
@@ -119,9 +123,9 @@ Independent Test: If collection metadata exists, command publishes it and JSON i
 
 ### Implementation
 
-- [ ] T026 [P] [US5] Detect `devcontainer-collection.json` in packaged output in `crates/deacon/src/commands/features.rs`
-- [ ] T027 [P] [US5] Implement `publish_collection_metadata` using blob+manifest flow in `crates/core/src/oci.rs`
-- [ ] T028 [US5] Wire call from publish command and set `collection.digest` in output in `crates/deacon/src/commands/features.rs`
+- [X] T026 [P] [US5] Detect `devcontainer-collection.json` in packaged output in `crates/deacon/src/commands/features.rs`
+- [X] T027 [P] [US5] Implement `publish_collection_metadata` using blob+manifest flow in `crates/core/src/oci.rs` with media type `application/vnd.devcontainer.collection+json` targeting `<registry>/<namespace>:collection`
+- [X] T028 [US5] Wire call from publish command and set `collection.digest` in output in `crates/deacon/src/commands/features.rs`
 
 Checkpoint: US5 independently verifiable — collection metadata is published and discoverable.
 
