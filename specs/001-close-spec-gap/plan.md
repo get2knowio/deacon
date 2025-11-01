@@ -1,7 +1,7 @@
 # Implementation Plan: Close Spec Gap (Features Plan)
 
-**Branch**: `001-close-spec-gap` | **Date**: 2025-11-01 | **Spec**: /workspaces/deacon/specs/001-close-spec-gap/spec.md
-**Input**: Feature specification from `/workspaces/deacon/specs/001-close-spec-gap/spec.md`
+**Branch**: `001-close-spec-gap` | **Date**: 2025-11-01 | **Spec**: /workspaces/001-features-plan-cmd/specs/001-close-spec-gap/spec.md
+**Input**: Feature specification from `/workspaces/001-features-plan-cmd/specs/001-close-spec-gap/spec.md`
 
 **Note**: This plan is produced by the /speckit.plan workflow and will be kept small and incremental per repository conventions.
 
@@ -70,7 +70,7 @@ specs/001-close-spec-gap/
   contracts/      # Phase 1
 ```
 
-**Structure Decision**: Use existing Rust workspace with binary crate at `crates/deacon` and shared logic in `crates/core`. Feature documentation and contracts live under `/workspaces/deacon/specs/001-close-spec-gap/`.
+**Structure Decision**: Use existing Rust workspace with binary crate at `crates/deacon` and shared logic in `crates/core`. Feature documentation and contracts live under `/workspaces/001-features-plan-cmd/specs/001-close-spec-gap/`.
 
 ## Complexity Tracking
 
