@@ -1,0 +1,14 @@
+{
+  "id": "extra",
+  "version": "0.0.1",
+  "name": "Extra Local Feature",
+  "description": "Local feature to be added via --additional-features.",
+  "options": {
+    "flag": {
+      "type": "boolean",
+      "default": false,
+      "description": "Demo boolean option"
+    }
+  },
+  "installsAfter": []
+}

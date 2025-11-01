@@ -17,6 +17,17 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 - Registry: OCI registry operations including dry-run publish workflows (`registry/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
+ - Read-Configuration: configuration reading examples (`read-configuration/`)
+   - `read-configuration/basic/` — Minimal config discovery and output
+   - `read-configuration/with-variables/` — Variable substitution for local env and workspace folder
+   - `read-configuration/extends-chain/` — Chained `extends` across base/mid/leaf configs
+   - `read-configuration/override-config/` — Apply an override with `--override-config`
+   - `read-configuration/features-minimal/` — Local Feature with `--include-features-configuration`
+   - `read-configuration/features-additional/` — Inject a Feature via `--additional-features`
+   - `read-configuration/compose/` — Config referencing a Docker Compose file
+   - `read-configuration/legacy-normalization/` — Legacy `containerEnv` normalized to `remoteEnv`
+   - `read-configuration/id-labels-and-devcontainerId/` — `${devcontainerId}` via `--id-label`
+
 ### Quick Start
 Build a basic Dockerfile with build args:
 ```sh
