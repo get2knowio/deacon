@@ -1,0 +1,131 @@
+openapi: 3.0.3
+info:
+  title: Deacon Features Info (Conceptual)
+  version: 0.1.0
+  description: Conceptual API contract mirroring CLI modes for documentation and JSON schema reuse.
+servers:
+  - url: https://example.invalid
+paths:
+  /features/info/manifest:
+    get:
+      summary: Get OCI manifest and canonical identifier
+      parameters:
+        - in: query
+          name: ref
+          schema:
+            type: string
+          required: true
+          description: Feature reference (local path or OCI ref)
+      responses:
+        '200':
+          description: Manifest and canonical id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManifestResponse'
+        '400':
+          description: Invalid ref
+        '404':
+          description: Manifest not found or auth required
+  /features/info/tags:
+    get:
+      summary: List published tags for a feature
+      parameters:
+        - in: query
+          name: ref
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Published tags
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagsResponse'
+        '404':
+          description: No tags found or inaccessible registry
+  /features/info/verbose:
+    get:
+      summary: Combined manifest + tags (graph omitted)
+      parameters:
+        - in: query
+          name: ref
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Combined output (no errors)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerboseResponse'
+        '207':
+          description: Partial data with errors (CLI exits 1 in JSON mode)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerboseResponse'
+components:
+  schemas:
+    OCIManifest:
+      type: object
+      required: [schemaVersion, mediaType, config, layers]
+      properties:
+        schemaVersion:
+          type: integer
+        mediaType:
+          type: string
+        config:
+          type: object
+          required: [mediaType, digest, size]
+          properties:
+            mediaType: { type: string }
+            digest: { type: string, pattern: '^[a-z0-9]+:[a-f0-9]{64}$' }
+            size: { type: integer, minimum: 0 }
+        layers:
+          type: array
+          items:
+            type: object
+            required: [mediaType, digest, size]
+            properties:
+              mediaType: { type: string }
+              digest: { type: string, pattern: '^[a-z0-9]+:[a-f0-9]{64}$' }
+              size: { type: integer, minimum: 0 }
+    ManifestResponse:
+      type: object
+      required: [manifest, canonicalId]
+      properties:
+        manifest:
+          $ref: '#/components/schemas/OCIManifest'
+        canonicalId:
+          type: [string, 'null']
+          description: Always present; null for local refs
+    TagsResponse:
+      type: object
+      required: [publishedTags]
+      properties:
+        publishedTags:
+          type: array
+          items:
+            type: string
+    VerboseResponse:
+      type: object
+      required: [canonicalId]
+      properties:
+        manifest:
+          $ref: '#/components/schemas/OCIManifest'
+        canonicalId:
+          type: [string, 'null']
+        publishedTags:
+          type: array
+          items:
+            type: string
+        errors:
+          type: object
+          additionalProperties: false
+          properties:
+            manifest: { type: string }
+            tags: { type: string }
+            dependencies: { type: string }

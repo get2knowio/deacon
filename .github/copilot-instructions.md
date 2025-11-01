@@ -452,6 +452,8 @@ If you are an AI assistant operating on this repository: remain concise, cite sp
 
 ## Active Technologies
 - Rust (stable channel per rust-toolchain.toml) + clap (CLI args), serde/serde_json (JSON), tracing (logs), thiserror (errors) (001-read-config-parity)
+- Rust (stable, Edition 2021) + clap (CLI), tracing (logs), serde/serde_json (JSON), thiserror (errors), reqwest (HTTP with rustls), tokio (async) (004-close-features-info-gap)
+- N/A (read‑only network/file operations) (004-close-features-info-gap)
 
 ## Recent Changes
 - 001-read-config-parity: Added Rust (stable channel per rust-toolchain.toml) + clap (CLI args), serde/serde_json (JSON), tracing (logs), thiserror (errors)
