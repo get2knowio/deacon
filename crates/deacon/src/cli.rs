@@ -388,6 +388,9 @@ pub enum FeatureCommands {
         /// Force clean output folder before writing artifacts
         #[arg(long)]
         force_clean_output_folder: bool,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
     /// Pull features from registry
     Pull {

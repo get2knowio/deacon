@@ -20,57 +20,189 @@ use std::path::{Path, PathBuf};
 use tempfile;
 use tracing::{debug, info};
 
-/// Packaging mode for feature detection
+/// Packaging mode for feature detection and processing.
+///
+/// Determines how feature directories are structured and should be packaged.
+/// This enum represents the two supported DevContainer feature organization patterns.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub enum PackagingMode {
-    /// Single feature directory with devcontainer-feature.json at root
+    /// Single feature directory with `devcontainer-feature.json` at root.
+    ///
+    /// Used when the directory contains a single feature with its metadata file
+    /// (`devcontainer-feature.json`) located at the root of the directory.
+    /// This is the simplest feature organization pattern.
     Single,
-    /// Collection of features under src/ subdirectories
+    /// Collection of features under `src/` subdirectories.
+    ///
+    /// Used when the directory contains multiple features organized as a collection,
+    /// where each feature resides in its own subdirectory under `src/`, each containing
+    /// its own `devcontainer-feature.json` metadata file. The root directory should
+    /// contain a `devcontainer-collection.json` file describing the collection.
     Collection,
 }
 
-/// Collection metadata structure for devcontainer-collection.json
+/// Collection metadata structure for `devcontainer-collection.json`.
+///
+/// This structure represents the metadata file generated during feature packaging
+/// for collections (when multiple features are organized under `src/` subdirectories).
+/// The metadata file describes the collection and includes descriptors for each packaged feature.
+///
+/// # JSON Serialization
+///
+/// Fields use serde rename attributes to match the expected JSON schema:
+/// - `source_information` → `"sourceInformation"` in JSON
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::collections::BTreeMap;
+/// use deacon::commands::features::{CollectionMetadata, SourceInformation, FeatureDescriptor};
+///
+/// // Create collection metadata for packaging output
+/// let mut features = BTreeMap::new();
+/// features.insert(
+///     "my-feature".to_string(),
+///     FeatureDescriptor {
+///         id: "my-feature".to_string(),
+///         version: "1.0.0".to_string(),
+///         name: Some("My Feature".to_string()),
+///         description: Some("A sample feature".to_string()),
+///         options: None,
+///         installs_after: None,
+///         depends_on: None,
+///     }
+/// );
+///
+/// let collection = CollectionMetadata {
+///     source_information: SourceInformation {
+///         source: "devcontainer-cli".to_string(),
+///     },
+///     features,
+/// };
+///
+/// // Serialize to JSON (pretty-printed)
+/// let json = serde_json::to_string_pretty(&collection).unwrap();
+/// println!("{}", json);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct CollectionMetadata {
-    /// Source information
+    /// Source information identifying the tool that generated this collection.
+    ///
+    /// In JSON: serialized as `"sourceInformation"`.
+    /// Typically contains a [`SourceInformation`] with source set to `"devcontainer-cli"`.
     #[serde(rename = "sourceInformation")]
     pub source_information: SourceInformation,
-    /// Map of feature descriptors keyed by feature ID
+
+    /// Map of feature descriptors keyed by feature ID.
+    ///
+    /// Each entry describes a packaged feature in the collection with its metadata
+    /// (ID, version, name, description, options, and dependencies).
+    /// Keys match the feature IDs (directory names under `src/`).
     pub features: std::collections::BTreeMap<String, FeatureDescriptor>,
 }
 
-/// Source information for collection metadata
+/// Source information for collection metadata.
+///
+/// Identifies the tool or system that generated the collection metadata.
+/// This is embedded in [`CollectionMetadata`] to track provenance.
+///
+/// # Examples
+///
+/// ```
+/// use deacon::commands::features::SourceInformation;
+///
+/// let source_info = SourceInformation {
+///     source: "devcontainer-cli".to_string(),
+/// };
+///
+/// assert_eq!(source_info.source, "devcontainer-cli");
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct SourceInformation {
-    /// Source identifier (always "devcontainer-cli" for this implementation)
+    /// Source identifier.
+    ///
+    /// Always set to `"devcontainer-cli"` for collections packaged by this implementation.
     pub source: String,
 }
 
-/// Feature descriptor for collection metadata
+/// Feature descriptor for collection metadata.
+///
+/// Describes a single feature within a collection, including its ID, version, name,
+/// description, options, and dependency relationships. This structure is used as values
+/// in the `features` map of [`CollectionMetadata`].
+///
+/// # JSON Serialization
+///
+/// Fields use serde attributes for proper JSON schema compliance:
+/// - `installs_after` → `"installsAfter"` in JSON
+/// - `depends_on` → `"dependsOn"` in JSON
+/// - Optional fields are omitted from JSON when `None` (via `skip_serializing_if`)
+///
+/// # Examples
+///
+/// ```
+/// use deacon::commands::features::FeatureDescriptor;
+///
+/// let descriptor = FeatureDescriptor {
+///     id: "rust".to_string(),
+///     version: "1.0.0".to_string(),
+///     name: Some("Rust Toolchain".to_string()),
+///     description: Some("Installs Rust and Cargo".to_string()),
+///     options: None,
+///     installs_after: Some(vec!["common-utils".to_string()]),
+///     depends_on: None,
+/// };
+///
+/// // Serialize to verify JSON structure
+/// let json = serde_json::to_string_pretty(&descriptor).unwrap();
+/// assert!(json.contains("\"installsAfter\""));
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct FeatureDescriptor {
-    /// Feature identifier
+    /// Feature identifier.
+    ///
+    /// Must match the feature's directory name and the `id` field in its
+    /// `devcontainer-feature.json` metadata file.
     pub id: String,
-    /// Feature version
+
+    /// Feature version.
+    ///
+    /// Semantic version string for the feature (e.g., `"1.0.0"`).
     pub version: String,
-    /// Optional feature name
+
+    /// Optional human-readable feature name.
+    ///
+    /// Omitted from JSON serialization if `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Optional feature description
+
+    /// Optional feature description.
+    ///
+    /// Brief explanation of what the feature does. Omitted from JSON if `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Optional feature options
+
+    /// Optional feature options/configuration schema.
+    ///
+    /// JSON value representing the feature's configurable options.
+    /// Omitted from JSON serialization if `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<serde_json::Value>,
-    /// Optional installs after dependencies
+
+    /// Optional installation order dependencies.
+    ///
+    /// In JSON: serialized as `"installsAfter"`.
+    /// List of feature IDs that must be installed before this feature.
+    /// Omitted from JSON if `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "installsAfter")]
     pub installs_after: Option<Vec<String>>,
-    /// Optional depends on dependencies
+
+    /// Optional hard dependencies.
+    ///
+    /// In JSON: serialized as `"dependsOn"`.
+    /// Map of feature IDs to configuration options that this feature requires.
+    /// Omitted from JSON if `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "dependsOn")]
     pub depends_on: Option<serde_json::Value>,
@@ -157,10 +289,38 @@ fn detect_mode(target: &Path) -> Result<PackagingMode> {
     ))
 }
 
-/// Validate single feature directory and return metadata
+/// Validates a single feature directory and returns its parsed metadata.
 ///
-/// Checks that devcontainer-feature.json exists and is valid, returning parsed metadata.
-#[allow(dead_code)]
+/// This function performs comprehensive validation of a feature directory:
+/// - Verifies that `devcontainer-feature.json` exists in the target directory
+/// - Confirms the metadata file is a regular file (not a directory or symlink)
+/// - Parses and validates the JSON metadata structure
+/// - Ensures required fields (particularly `version`) are present for packaging
+///
+/// # Arguments
+///
+/// * `target` - Path to the feature directory to validate
+///
+/// # Returns
+///
+/// * `Ok(FeatureMetadata)` - Parsed and validated feature metadata
+/// * `Err(_)` - If the metadata file is missing, invalid, or lacks required fields
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// use deacon::commands::features::validate_single;
+///
+/// let feature_path = Path::new("/path/to/feature");
+/// match validate_single(feature_path) {
+///     Ok(metadata) => {
+///         println!("Feature '{}' validated successfully", metadata.id);
+///         println!("Version: {:?}", metadata.version);
+///     }
+///     Err(e) => eprintln!("Validation failed: {}", e),
+/// }
+/// ```
 pub fn validate_single(target: &Path) -> Result<FeatureMetadata> {
     let feature_json = target.join("devcontainer-feature.json");
 
@@ -199,12 +359,48 @@ pub fn validate_single(target: &Path) -> Result<FeatureMetadata> {
     Ok(metadata)
 }
 
-/// Enumerate and validate all features in a collection
+/// Enumerate and validate all features in a collection directory.
 ///
-/// Scans src/ directory for valid feature subdirectories, validates each one,
-/// and returns a vector of (feature_id, path, metadata) tuples.
-/// Fails if any subdirectory is invalid.
-#[allow(dead_code)]
+/// Scans the `src/` directory for valid feature subdirectories, validates each feature's
+/// structure and metadata, and returns a vector of `(feature_id, path, metadata)` tuples.
+///
+/// # Arguments
+///
+/// * `src` - Path to the `src/` directory containing feature subdirectories
+///
+/// # Returns
+///
+/// * `Ok(Vec<(String, PathBuf, FeatureMetadata)>)` - Sorted vector of validated features, each containing:
+///   - Feature ID (directory name)
+///   - Full path to the feature directory
+///   - Parsed feature metadata from `devcontainer-feature.json`
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The `src/` directory does not exist or is not a directory
+/// - Any subdirectory is invalid (missing metadata, malformed JSON, etc.)
+/// - Feature ID in `devcontainer-feature.json` doesn't match directory name
+/// - No valid features are found in the collection
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// # use anyhow::Result;
+/// # fn main() -> Result<()> {
+/// let src_dir = Path::new("my-collection/src");
+/// let features = deacon::commands::features::enumerate_and_validate_collection(src_dir)?;
+///
+/// for (feature_id, path, metadata) in features {
+///     println!("Found feature: {} at {:?}", feature_id, path);
+///     if let Some(version) = &metadata.version {
+///         println!("  Version: {}", version);
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub fn enumerate_and_validate_collection(
     src: &Path,
 ) -> Result<Vec<(String, PathBuf, FeatureMetadata)>> {
@@ -292,10 +488,30 @@ pub fn enumerate_and_validate_collection(
     Ok(features)
 }
 
-/// Write collection metadata to devcontainer-collection.json
+/// Write collection metadata to a JSON file.
 ///
-/// Serializes the CollectionMetadata struct to JSON and writes it to the destination path.
-#[allow(dead_code)]
+/// Serializes the provided [`CollectionMetadata`] to pretty-printed JSON and writes it
+/// to the specified destination path. If the parent directory does not exist, it will
+/// be created automatically.
+///
+/// # Parameters
+///
+/// * `metadata` - The collection metadata to serialize and write
+/// * `dest` - The destination path where the JSON file will be written
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if:
+/// - The parent directory cannot be created
+/// - The metadata cannot be serialized to JSON
+/// - The file cannot be written to disk
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - Parent directory creation fails due to permissions or I/O errors
+/// - JSON serialization fails (unlikely with valid CollectionMetadata)
+/// - File write fails due to permissions, disk space, or I/O errors
 pub fn write_collection_metadata(metadata: &CollectionMetadata, dest: &Path) -> Result<()> {
     // Create parent directory if it doesn't exist
     if let Some(parent) = dest.parent() {
@@ -506,7 +722,8 @@ pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
             path,
             output,
             force_clean_output_folder,
-        } => execute_features_package(&path, &output, force_clean_output_folder).await,
+            json,
+        } => execute_features_package(&path, &output, force_clean_output_folder, json).await,
         FeatureCommands::Pull { registry_ref, json } => {
             execute_features_pull(&registry_ref, json).await
         }
@@ -1001,6 +1218,7 @@ async fn execute_features_package(
     path: &str,
     output_dir: &str,
     force_clean_output_folder: bool,
+    json: bool,
 ) -> Result<()> {
     debug!(
         "Packaging feature at path: {} to output: {}",
@@ -1112,7 +1330,7 @@ async fn execute_features_package(
                 cache_path: None,
             };
 
-            output_result(&result, false)?;
+            output_result(&result, json)?;
 
             Ok(())
         }
@@ -1212,7 +1430,7 @@ async fn execute_features_package(
                 cache_path: None,
             };
 
-            output_result(&result, false)?;
+            output_result(&result, json)?;
 
             Ok(())
         }
