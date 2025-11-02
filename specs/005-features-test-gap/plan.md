@@ -20,10 +20,12 @@ Close the behavior and output gaps for the `features test` subcommand per the sp
 **Performance Goals**: Deterministic, serial execution; predictable runtime for small suites (minutes). Parallelization is deferred.  
 **Constraints**: Follow Constitution v1.3.0 — keep build green, no silent fallbacks, strict stdout/stderr contracts, idiomatic safe Rust  
 **Scale/Scope**: Collections with dozens of tests; sequential container launches; no persistent state  
+**Platform Semantics**: Case-sensitive discovery and filtering across platforms; normalize path separators; support spaces in paths and feature IDs; default base image is `ubuntu:focal` unless overridden by `--base-image`.
 
 NEEDS CLARIFICATION (addressed in research):
 - Whether to introduce limited parallelism for scenarios (decision: defer; keep serial for now)
 - Exact container runtime trait surface for test labeling/cleanup (decision: reuse existing runtime helpers; expand later if needed)
+- Randomization flag semantics for `--permit-randomization` (decision: defer; emit explicit "Not implemented yet: randomization" error when provided to comply with Constitution III)
 
 ## Constitution Check (pre‑design)
 
