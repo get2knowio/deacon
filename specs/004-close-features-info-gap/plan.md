@@ -1,7 +1,7 @@
 # Implementation Plan: Features Info GAP Closure
 
-**Branch**: `004-close-features-info-gap` | **Date**: 2025-11-01 | **Spec**: `/workspaces/deacon/specs/004-close-features-info-gap/spec.md`
-**Input**: Feature specification from `/specs/004-close-features-info-gap/spec.md`
+**Branch**: `004-close-features-info-gap` | **Date**: 2025-11-01 | **Spec**: `specs/004-close-features-info-gap/spec.md`
+**Input**: Feature specification from `specs/004-close-features-info-gap/spec.md`
 
 **Note**: Generated via speckit plan workflow.
 

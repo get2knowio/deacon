@@ -1,0 +1,7 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Features Info - Manifest",
+  "type": "object",
+  "additionalProperties": true,
+  "description": "Opaque manifest object as returned by registry or derived from local devcontainer-feature.json"
+}

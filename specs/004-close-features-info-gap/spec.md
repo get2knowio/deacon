@@ -5,6 +5,8 @@
 **Status**: Draft  
 **Input**: User description: "Close the GAP in the features-info SPEC"
 
+Note: In this repository, the CLI binary is named `deacon`. All examples below use `deacon features info ...`.
+
 ## Clarifications
 
 ### Session 2025-11-01
@@ -35,7 +37,7 @@ Users and CI systems can retrieve the OCI manifest and canonical identifier for 
 
 **Why this priority**: Core verification capability; required by spec and used by CI for validation.
 
-**Independent Test**: Run `devcontainer features info manifest <ref>` and verify manifest JSON and canonicalId in text and JSON modes independently of other modes.
+**Independent Test**: Run `deacon features info manifest <ref>` and verify manifest JSON and canonicalId in text and JSON modes independently of other modes.
 
 **Acceptance Scenarios**:
 
@@ -52,7 +54,7 @@ Users can list all published tags for a feature to select a desired version.
 
 **Why this priority**: Essential discovery function for consumers; required by spec.
 
-**Independent Test**: Run `devcontainer features info tags <ref>` and verify output shape and error handling in both formats.
+**Independent Test**: Run `deacon features info tags <ref>` and verify output shape and error handling in both formats.
 
 **Acceptance Scenarios**:
 
@@ -68,7 +70,7 @@ Authors can view a dependency tree of a feature as Mermaid syntax to understand 
 
 **Why this priority**: Aids reasoning about installation order and transitive relationships; aligns with design but not critical for machine consumption.
 
-**Independent Test**: Run `devcontainer features info dependencies <ref>` in text mode and verify a boxed Mermaid graph is printed with a render hint; confirm no JSON output is produced.
+**Independent Test**: Run `deacon features info dependencies <ref>` in text mode and verify a boxed Mermaid graph is printed with a render hint; confirm no JSON output is produced.
 
 **Acceptance Scenarios**:
 
@@ -83,14 +85,14 @@ Users can see manifest + canonicalId, published tags, and dependency graph in on
 
 **Why this priority**: Improves ergonomics by aggregating outputs; not blocking for core functionality.
 
-**Independent Test**: Run `devcontainer features info verbose <ref>` and validate that text output contains all three boxed sections; in JSON mode only includes `manifest`, `canonicalId`, and `publishedTags`.
+**Independent Test**: Run `deacon features info verbose <ref>` and validate that text output contains all three boxed sections; in JSON mode only includes `manifest`, `canonicalId`, and `publishedTags`.
 
 **Acceptance Scenarios**:
 
 1. **Given** a valid ref, **When** running in text mode, **Then** the CLI outputs three boxed sections in order: Manifest/Canonical Identifier, Published Tags, Dependency Tree.
 2. **Given** the same ref, **When** running with `--output-format json`, **Then** output is a single JSON object union of manifest/canonicalId and publishedTags; no dependency graph is included.
 3. **Given** a valid ref where dependency graph generation fails, **When** running with `--output-format json`, **Then** output includes successfully retrieved fields (manifest/canonicalId and/or publishedTags as applicable), plus an `errors` object containing a `dependencies` key with a brief message, and the process exits with code 1.
-3. **Given** a valid ref where at least one sub-mode fails (e.g., tags listing times out), **When** running with `--output-format json`, **Then** output includes the successfully retrieved fields and an `errors` object keyed by sub-mode (e.g., `{"errors": {"tags": "<message>"}}`) and the process exits with code 1.
+4. **Given** a valid ref where at least one sub-mode fails (e.g., tags listing times out), **When** running with `--output-format json`, **Then** output includes the successfully retrieved fields and an `errors` object keyed by sub-mode (e.g., `{"errors": {"tags": "<message>"}}`) and the process exits with code 1.
 
 ---
 
@@ -116,7 +118,7 @@ Users can see manifest + canonicalId, published tags, and dependency graph in on
 ### Functional Requirements
 
 - **FR-001 (CLI flags)**: Provide `--output-format <text|json>` (default: text) and `--log-level <info|debug|trace>` flags; remove/replace legacy `--json` boolean.
-- **FR-002 (Manifest mode)**: Fetch the OCI manifest for registry refs; for local refs read available metadata. On success, output boxed Manifest (text) and JSON `{manifest}` (json mode). Errors: `{}` and exit 1 (json mode).
+- **FR-002 (Manifest mode)**: Fetch the OCI manifest for registry refs; for local refs read available metadata from `devcontainer-feature.json` in the feature directory. On success, output boxed Manifest (text) and JSON `{manifest}` (json mode). Errors: `{}` and exit 1 (json mode).
   - JSON key stability: Always include `canonicalId` key; for local refs (no digest), set `canonicalId` to `null`.
 - **FR-003 (Canonical ID)**: Calculate canonical identifier from the registry response digest: `{registry}/{namespace}/{name}@{sha256:...}`; print as a separate boxed section (text) and as `canonicalId` in JSON mode. For local refs or when no digest is available, include `"canonicalId": null` in JSON; in text mode indicate `N/A`.
 - **FR-004 (Tags mode)**: Query the registry tags list endpoint `/v2/<name>/tags/list` with pagination via `Link` headers; per-request timeout 10s; stop after at most 10 pages or 1000 tags (whichever comes first). On success, output boxed "Published Tags" (text) and `{ "publishedTags": [...] }` (json). Empty/missing: `{}` with exit 1 (json mode).
@@ -128,7 +130,7 @@ Users can see manifest + canonicalId, published tags, and dependency graph in on
 - **FR-008 (Error handling & exit codes)**: For any error in JSON mode, print `{}` and exit 1; in text mode, print human-readable error and exit 1. Success exit code is 0.
   - Exception: In verbose JSON mode, follow FR-006 partial failure policy (return partial fields with `errors` and exit 1) instead of `{}`.
 - **FR-009 (Auth & security)**: Support bearer-token auth flows per OCI Distribution Spec; never print secrets in output; respect Docker config env.
-- **FR-010 (Deterministic output)**: Sort tag lists consistently (registry order if provided; otherwise ascending lexicographic). Ensure JSON keys and formatting are stable.
+- **FR-010 (Deterministic output)**: Sort tag lists consistently (registry order if provided; otherwise ascending lexicographic across the full union). Tie-breakers: when registry returns paged results with unspecified order, perform a stable ascending lexicographic sort on the aggregated set. Ensure JSON keys and formatting are stable across runs.
 
 ### Key Entities *(include if feature involves data)*
 

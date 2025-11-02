@@ -123,6 +123,26 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 
 ---
 
+## Phase R: Remediation from Analysis
+
+**Purpose**: Address analysis findings (test gating, auth coverage, local refs, CLI flags tests, docs/contracts clarifications).
+
+- [ ] T027 [P] Add network test gating helper to newly added networked CLI tests (skip unless `DEACON_NETWORK_TESTS=1`). Apply within each new test file under `crates/deacon/tests/`.
+- [ ] T028 Update CI to enable `DEACON_NETWORK_TESTS=1` for jobs running networked tests in `.github/workflows/ci.yml` (test/smoke jobs).
+- [ ] T029 Implement bearer-token auth and error mapping in `crates/core/src/oci.rs` (401/403 → typed error; redact secrets in logs).
+- [ ] T030 Add core auth tests with mocks in `crates/core/tests/integration_oci_auth.rs` (no network usage).
+- [ ] T031 Add CLI auth failure test stubs in `crates/deacon/tests/integration_features_info_auth.rs` (gated by `DEACON_NETWORK_TESTS`).
+- [ ] T032 Implement local ref handling to read `devcontainer-feature.json` (core helper and CLI wiring).
+- [ ] T033 Add CLI tests for local refs in `crates/deacon/tests/integration_features_info_local.rs` (canonicalId null).
+- [ ] T034 Add CLI flag tests for `features info` (`--output-format`, `--log-level`, legacy `--json` rejection) in `crates/deacon/tests/cli_flags_features_info.rs`.
+- [ ] T035 Normalize command naming in spec and tests to `deacon` (docs only).
+- [ ] T036 Fix path references in `plan.md` and `tasks.md` to use relative paths (docs only).
+- [ ] T037 Add JSON Schemas for outputs under `specs/004-close-features-info-gap/contracts/` (`features-info.manifest.json`, `features-info.tags.json`, `features-info.verbose.json`).
+- [ ] T038 Clarify sorting tie-breakers and local metadata source in `spec.md` (FR‑010; FR‑002/FR‑003).
+- [ ] T039 Add timeout tests with mocks in `crates/core/tests/oci_timeout.rs`.
+- [ ] T040 Extend JSON purity tests to include log-level variations and modes for features info (reuse `crates/deacon/tests/json_output_purity.rs` or add separate file if needed).
+- [ ] T041 Fix duplicate numbering in US4 acceptance scenarios in `spec.md`.
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -192,7 +212,7 @@ graph TD
 
 ## Report
 
-- Output path: /workspaces/deacon/specs/004-close-features-info-gap/tasks.md
+- Output path: specs/004-close-features-info-gap/tasks.md
 - Total tasks: 26
 - Task counts by user story:
   - US1: 6 (T010–T015)
