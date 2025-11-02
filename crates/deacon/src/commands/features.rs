@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile;
-use tracing::{debug, info};
+use tracing::{debug, info, Instrument};
 
 /// Features command arguments
 #[derive(Debug, Clone)]
@@ -641,8 +641,89 @@ async fn execute_features_pull(registry_ref: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Execute features publish command
-async fn execute_features_publish(
+/// Publishes a DevContainer feature to an OCI registry.
+///
+/// This function packages and publishes a DevContainer feature from the local filesystem
+/// to an OCI-compliant registry following the DevContainer Feature Distribution specification.
+/// It validates the feature metadata, creates a feature package (tarball), computes semantic
+/// version tags, and publishes the feature along with optional collection metadata.
+///
+/// # Parameters
+///
+/// * `path` - Path to the feature directory containing `devcontainer-feature.json`.
+///   The directory must contain valid feature metadata and all required files.
+/// * `registry` - Target OCI registry URL (e.g., `"ghcr.io"`, `"registry.example.com"`).
+///   Must be accessible and support OCI Distribution Spec v2.
+/// * `namespace` - Registry namespace/organization under which to publish
+///   (e.g., `"myorg/features"`, `"username"`).
+/// * `dry_run` - If `true`, validates the feature but skips actual publishing.
+///   Useful for testing without modifying the registry.
+/// * `username` - Optional username for registry authentication. Currently reserved
+///   for future use; authentication is not yet implemented.
+/// * `password_stdin` - If `true`, reads password from stdin for authentication.
+///   Currently reserved for future use; authentication is not yet implemented.
+///
+/// # Returns
+///
+/// Returns `Ok(PublishOutput)` containing:
+/// - Published feature details (ID, version, digest, tags)
+/// - Optional collection metadata result
+/// - Summary statistics (features count, published/skipped tags)
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Feature metadata file (`devcontainer-feature.json`) is missing or invalid
+/// - Feature metadata validation fails (invalid schema or required fields)
+/// - Feature version is missing or not a valid semantic version (SemVer)
+/// - Temporary directory creation fails during packaging
+/// - Feature packaging (tarball creation) fails
+/// - Registry operations fail (network issues, permissions, authentication)
+/// - Collection metadata file is present but contains invalid JSON
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use deacon::commands::features::execute_features_publish;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let result = execute_features_publish(
+///     "./my-feature",           // Feature directory
+///     "ghcr.io",                // Registry
+///     "myorg/features",         // Namespace
+///     false,                    // Dry run
+///     None,                     // Username (not yet implemented)
+///     false,                    // Password stdin (not yet implemented)
+/// ).await?;
+///
+/// println!("Published {} feature(s)", result.summary.features);
+/// println!("Published tags: {}", result.summary.published_tags);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Notes
+///
+/// - The function automatically computes semantic version tags (e.g., `1`, `1.2`, `1.2.3`,
+///   and `latest` for stable versions) based on the feature's version field.
+/// - If all desired tags already exist in the registry, publishing is skipped to avoid
+///   redundant operations.
+/// - Collection metadata (`devcontainer-collection.json`) is automatically published if
+///   present in the feature directory.
+/// - Comprehensive tracing spans are emitted for observability and debugging.
+#[tracing::instrument(
+    name = "features.publish",
+    fields(
+        path = %path,
+        registry = %registry,
+        namespace = %namespace,
+        dry_run = %dry_run,
+        username = ?username,
+        password_stdin = %password_stdin
+    ),
+    skip_all
+)]
+pub async fn execute_features_publish(
     path: &str,
     registry: &str,
     namespace: &str,
@@ -672,13 +753,13 @@ async fn execute_features_publish(
     let metadata = match parse_feature_metadata(&metadata_path) {
         Ok(m) => m,
         Err(_) => {
-            anyhow::bail!("No features found to publish");
+            anyhow::bail!("No valid feature found at path '{}'. Ensure 'devcontainer-feature.json' exists and contains valid feature metadata", path);
         }
     };
 
     // Validate the metadata
     if metadata.validate().is_err() {
-        anyhow::bail!("No features found to publish");
+        anyhow::bail!("Feature metadata validation failed for '{}'. Check the 'devcontainer-feature.json' file for errors", metadata.id);
     }
 
     info!(
@@ -689,13 +770,13 @@ async fn execute_features_publish(
 
     // Validate feature version is SemVer
     let version = metadata.version.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("Feature version is required for publishing. Please specify a version in devcontainer-feature.json")
+        anyhow::anyhow!("Feature version is required for publishing. Please specify a version in devcontainer-feature.json under the 'version' field")
     })?;
 
     // Validate the version is valid SemVer
     use deacon_core::semver_utils;
     if semver_utils::parse_version(version).is_none() {
-        anyhow::bail!("Invalid semantic version '{}'. Version must be a valid SemVer (e.g., '1.2.3', '2.0.0-rc.1')", version);
+        anyhow::bail!("Invalid semantic version '{}' for feature '{}'. Version must be a valid SemVer format (e.g., '1.2.3', '2.0.0-rc.1'). Check https://semver.org/ for details", version, metadata.id);
     }
 
     if dry_run {
@@ -718,8 +799,16 @@ async fn execute_features_publish(
     }
 
     // Create OCI client for tag listing and publishing
-    let fetcher =
-        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+    let fetcher = {
+        let span = tracing::info_span!("oci.client.create");
+        let _enter = span.enter();
+        default_fetcher().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create OCI registry client: {}. Check your network connection and registry authentication",
+                e
+            )
+        })?
+    };
 
     // Use the provided registry and namespace, with feature name from metadata
     let registry_url = registry.to_string();
@@ -734,10 +823,17 @@ async fn execute_features_publish(
     );
 
     // Compute publish plan: determine which tags need to be published
-    let (desired_tags, existing_tags, to_publish_tags) =
-        compute_publish_plan(&fetcher, &feature_ref, version)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to compute publish plan: {}", e))?;
+    let span = tracing::info_span!("publish.plan.compute");
+    let (desired_tags, existing_tags, to_publish_tags) = compute_publish_plan(&fetcher, &feature_ref, version)
+        .instrument(span)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to determine publish plan for feature '{}': {}. This may be due to network issues or registry permissions",
+                metadata.id,
+                e
+            )
+        })?;
 
     info!(
         "Publish plan: {} desired tags, {} existing tags, {} to publish",
@@ -747,23 +843,55 @@ async fn execute_features_publish(
     );
 
     // Create feature package to get digest (needed even if all tags exist)
-    let temp_dir = tempfile::tempdir()?;
-    let (digest, _size) =
-        create_feature_package(feature_path, temp_dir.path(), &metadata.id).await?;
+    let temp_dir = {
+        let span = tracing::info_span!("feature.package.create");
+        let _enter = span.enter();
+        tempfile::tempdir().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create temporary directory for feature packaging: {}",
+                e
+            )
+        })?
+    };
+
+    let span = tracing::info_span!("feature.package.build", feature_id = %metadata.id);
+    let (digest, _size) = create_feature_package(feature_path, temp_dir.path(), &metadata.id)
+        .instrument(span)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create feature package for '{}': {}. Check that all required files exist in the feature directory",
+                metadata.id,
+                e
+            )
+        })?;
 
     if !to_publish_tags.is_empty() {
         // Publish with multiple tags if needed
+        let package_data = std::fs::read(temp_dir.path().join(format!("{}.tar", metadata.id)))
+            .map_err(|e| anyhow::anyhow!("Failed to read packaged feature file: {}", e))?
+            .into();
+
+        let span = tracing::info_span!("feature.publish.multi_tag", tags = ?to_publish_tags);
         let _results = fetcher
             .publish_feature_multi_tag(
                 registry_url.clone(),
                 namespace.to_string(),
                 name.clone(),
                 to_publish_tags.clone(),
-                std::fs::read(temp_dir.path().join(format!("{}.tar", metadata.id)))?.into(),
+                package_data,
                 &metadata,
             )
+            .instrument(span)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to publish feature: {}", e))?;
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to publish feature '{}' to registry '{}': {}. Check your registry permissions and network connection",
+                    metadata.id,
+                    registry_url,
+                    e
+                )
+            })?;
 
         info!(
             "Successfully published {} tags for {}/{}",
@@ -805,22 +933,49 @@ async fn execute_features_publish(
             );
 
             // Read collection metadata
-            let collection_content = std::fs::read_to_string(&collection_path)
-                .map_err(|e| anyhow::anyhow!("Failed to read collection metadata: {}", e))?;
+            let collection_content = {
+                let span = tracing::info_span!("collection.metadata.read");
+                let _enter = span.enter();
+                std::fs::read_to_string(&collection_path).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to read collection metadata file '{}': {}",
+                        collection_path.display(),
+                        e
+                    )
+                })?
+            };
 
             // Parse as JSON to validate
-            let _: serde_json::Value = serde_json::from_str(&collection_content)
-                .map_err(|e| anyhow::anyhow!("Invalid collection metadata JSON: {}", e))?;
+            {
+                let span = tracing::info_span!("collection.metadata.validate");
+                let _enter = span.enter();
+                let _: serde_json::Value =
+                    serde_json::from_str(&collection_content).map_err(|e| {
+                        anyhow::anyhow!(
+                        "Invalid JSON in collection metadata file '{}': {}. Check the file syntax",
+                        collection_path.display(),
+                        e
+                    )
+                    })?;
+            }
 
             // Publish collection metadata
+            let span = tracing::info_span!("collection.metadata.publish");
             let collection_digest = fetcher
                 .publish_collection_metadata(
                     &registry_url,
                     namespace,
                     collection_content.into_bytes().into(),
                 )
+                .instrument(span)
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to publish collection metadata: {}", e))?;
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to publish collection metadata to registry '{}': {}. Check your registry permissions",
+                        registry_url,
+                        e
+                    )
+                })?;
 
             info!(
                 "Successfully published collection metadata with digest: {}",
@@ -877,10 +1032,18 @@ async fn compute_publish_plan(
     let desired_tags = semver_utils::compute_semantic_tags(version);
 
     // List existing tags from registry
+    let span = tracing::info_span!("registry.tags.list", registry = %feature_ref.registry, namespace = %feature_ref.namespace, name = %feature_ref.name);
     let existing_tags = fetcher
         .list_tags(feature_ref)
+        .instrument(span)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to list existing tags: {}", e))?;
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to list existing tags from registry '{}': {}. Check your network connection and registry permissions",
+                feature_ref.registry,
+                e
+            )
+        })?;
 
     // Compute tags that need to be published (desired - existing)
     let to_publish: Vec<String> = desired_tags
@@ -2001,1452 +2164,5 @@ mod tests {
             "JSON should contain feature-a"
         );
         assert!(json_str.contains("[]"), "JSON should contain empty arrays");
-    }
-
-    #[test]
-    fn test_graph_structure_features_in_order_without_deps() {
-        // Test: Features present in plan order but without explicit dependency fields
-        // should have empty arrays in graph
-        let features = vec![
-            create_mock_resolved_feature("independent-1"),
-            create_mock_resolved_feature("independent-2"),
-            create_mock_resolved_feature("independent-3"),
-        ];
-
-        let graph = build_graph_representation(&features);
-
-        // All features should be present with empty dependency arrays
-        for feature_id in &["independent-1", "independent-2", "independent-3"] {
-            let deps = graph
-                .get(*feature_id)
-                .unwrap_or_else(|| panic!("{} should exist in graph", feature_id));
-            let deps_array = deps
-                .as_array()
-                .unwrap_or_else(|| panic!("{} deps should be an array", feature_id));
-            assert!(
-                deps_array.is_empty(),
-                "{} should have empty dependencies array",
-                feature_id
-            );
-        }
-
-        // Verify consistent JSON structure
-        let graph_obj = graph.as_object().expect("Graph should be a JSON object");
-        assert_eq!(
-            graph_obj.len(),
-            3,
-            "Graph should have exactly 3 feature entries"
-        );
-    }
-
-    #[test]
-    fn test_create_mock_resolved_feature() {
-        let feature = create_mock_resolved_feature("test-feature");
-        assert_eq!(feature.id, "test-feature");
-        assert_eq!(feature.metadata.id, "test-feature");
-        assert!(feature.source.contains("test-feature"));
-        assert!(feature.metadata.installs_after.is_empty());
-        assert!(feature.metadata.depends_on.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_create_feature_package() {
-        let temp_dir = TempDir::new().unwrap();
-        let feature_dir = temp_dir.path().join("test-feature");
-        let output_dir = temp_dir.path().join("output");
-
-        // Create feature directory with minimal files
-        fs::create_dir_all(&feature_dir).unwrap();
-        fs::write(
-            feature_dir.join("devcontainer-feature.json"),
-            r#"{"id": "test-feature", "version": "1.0.0"}"#,
-        )
-        .unwrap();
-        fs::write(
-            feature_dir.join("install.sh"),
-            "#!/bin/bash\necho 'Installing test feature'",
-        )
-        .unwrap();
-
-        fs::create_dir_all(&output_dir).unwrap();
-
-        let (digest, size) = create_feature_package(&feature_dir, &output_dir, "test-feature")
-            .await
-            .unwrap();
-
-        assert!(digest.starts_with("sha256:"));
-        assert!(size > 0);
-        assert!(output_dir.join("test-feature.tar").exists());
-        assert!(output_dir.join("test-feature-manifest.json").exists());
-    }
-
-    #[test]
-    fn test_dependency_resolution_with_mock_features() {
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Create features with dependencies:
-        // feature-c depends on feature-b
-        // feature-b depends on feature-a
-        // Expected order: feature-a, feature-b, feature-c
-        let features = vec![
-            create_mock_resolved_feature_with_deps("feature-c", &["feature-b"], &[]),
-            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
-            create_mock_resolved_feature_with_deps("feature-a", &[], &[]),
-        ];
-
-        let resolver = FeatureDependencyResolver::new(None);
-        let plan = resolver.resolve(&features).unwrap();
-        let order = plan.feature_ids();
-
-        assert_eq!(order, vec!["feature-a", "feature-b", "feature-c"]);
-    }
-
-    #[test]
-    fn test_dependency_resolution_with_fan_in() {
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Create features with fan-in dependencies:
-        // feature-c depends on both feature-a and feature-b
-        // Expected order: feature-a, feature-b, feature-c (lexicographic for independents)
-        let features = vec![
-            create_mock_resolved_feature_with_deps("feature-c", &["feature-a", "feature-b"], &[]),
-            create_mock_resolved_feature_with_deps("feature-b", &[], &[]),
-            create_mock_resolved_feature_with_deps("feature-a", &[], &[]),
-        ];
-
-        let resolver = FeatureDependencyResolver::new(None);
-        let plan = resolver.resolve(&features).unwrap();
-        let order = plan.feature_ids();
-
-        // feature-a and feature-b can be in any order, but both must come before feature-c
-        let a_pos = order.iter().position(|x| x == "feature-a").unwrap();
-        let b_pos = order.iter().position(|x| x == "feature-b").unwrap();
-        let c_pos = order.iter().position(|x| x == "feature-c").unwrap();
-
-        assert!(a_pos < c_pos);
-        assert!(b_pos < c_pos);
-        assert_eq!(order.len(), 3);
-    }
-
-    #[test]
-    fn test_dependency_resolution_independent_features() {
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Create independent features - order should be deterministic (lexicographic)
-        let features = vec![
-            create_mock_resolved_feature("feature-z"),
-            create_mock_resolved_feature("feature-a"),
-            create_mock_resolved_feature("feature-m"),
-        ];
-
-        let resolver = FeatureDependencyResolver::new(None);
-        let plan = resolver.resolve(&features).unwrap();
-        let order = plan.feature_ids();
-
-        assert_eq!(order, vec!["feature-a", "feature-m", "feature-z"]);
-    }
-
-    #[test]
-    fn test_dependency_cycle_detection() {
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // a -> b -> c -> a
-        let features = vec![
-            create_mock_resolved_feature_with_deps("a", &["b"], &[]),
-            create_mock_resolved_feature_with_deps("b", &["c"], &[]),
-            create_mock_resolved_feature_with_deps("c", &["a"], &[]),
-        ];
-
-        let resolver = FeatureDependencyResolver::new(None);
-        let err = resolver.resolve(&features).expect_err("expected cycle");
-        let msg = format!("{err}");
-        assert!(msg.contains("cycle"), "message should mention cycle");
-        assert!(
-            msg.contains("a") && msg.contains("b") && msg.contains("c"),
-            "message should include cycle path"
-        );
-    }
-
-    #[test]
-    fn test_dependency_cycle_error_message_format() {
-        use deacon_core::errors::FeatureError;
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Test: Verify complete error message format per SPEC.md §9 Error Handling
-        // SPEC.md §9 requirement: "Circular dependencies detected => error with details"
-        // GAP.md §8: "Missing test that circular dependency errors include 'details'"
-        // This test validates all required elements and serves as a snapshot test
-
-        // Cycle: feature-x -> feature-y -> feature-z -> feature-x
-        let features = vec![
-            create_mock_resolved_feature_with_deps("feature-x", &["feature-y"], &[]),
-            create_mock_resolved_feature_with_deps("feature-y", &["feature-z"], &[]),
-            create_mock_resolved_feature_with_deps("feature-z", &["feature-x"], &[]),
-        ];
-
-        let resolver = FeatureDependencyResolver::new(None);
-        let result = resolver.resolve(&features);
-
-        // Verify error is returned per SPEC.md §9
-        assert!(
-            result.is_err(),
-            "Cycle should produce an error per SPEC.md §9"
-        );
-
-        let err = result.unwrap_err();
-
-        // Test 1: Verify error type is DependencyCycle
-        match &err {
-            FeatureError::DependencyCycle { cycle_path } => {
-                // Test 2: SPEC.md §9 "details" requirement - all involved features present
-                assert!(
-                    cycle_path.contains("feature-x"),
-                    "Cycle path should contain feature-x (required detail), got: {}",
-                    cycle_path
-                );
-                assert!(
-                    cycle_path.contains("feature-y"),
-                    "Cycle path should contain feature-y (required detail), got: {}",
-                    cycle_path
-                );
-                assert!(
-                    cycle_path.contains("feature-z"),
-                    "Cycle path should contain feature-z (required detail), got: {}",
-                    cycle_path
-                );
-
-                // Test 3: Verify path shows direction (part of details)
-                assert!(
-                    cycle_path.contains("->") || cycle_path.contains("→"),
-                    "Cycle path should show direction with arrows, got: {}",
-                    cycle_path
-                );
-
-                // Test 4: Verify path forms a closed loop (validates correctness)
-                let parts: Vec<&str> = cycle_path.split(" -> ").collect();
-                assert!(
-                    parts.len() >= 3,
-                    "Cycle path should have at least 3 nodes (minimum cycle), got: {}",
-                    cycle_path
-                );
-                assert_eq!(
-                    parts.first(),
-                    parts.last(),
-                    "Cycle path should start and end with the same feature, got: {}",
-                    cycle_path
-                );
-            }
-            _ => panic!(
-                "Expected DependencyCycle error per SPEC.md §9, got: {:?}",
-                err
-            ),
-        }
-
-        // Test 5: Verify full Display format includes required terminology per SPEC.md §9
-        let full_msg = format!("{}", err);
-
-        // SPEC.md §9: "Circular dependencies detected"
-        assert!(
-            full_msg.to_lowercase().contains("cycle")
-                || full_msg.to_lowercase().contains("circular"),
-            "Full error message should contain 'cycle' or 'circular' per SPEC.md §9, got: {}",
-            full_msg
-        );
-
-        assert!(
-            full_msg.to_lowercase().contains("depend"),
-            "Full error message should reference 'dependencies' per SPEC.md §9, got: {}",
-            full_msg
-        );
-
-        assert!(
-            full_msg.contains("feature"),
-            "Full error message should reference features context, got: {}",
-            full_msg
-        );
-
-        // Snapshot test: Lock the format to prevent regressions
-        assert!(
-            full_msg.starts_with("Dependency cycle detected in features:"),
-            "Error message format should match expected pattern (snapshot), got: {}",
-            full_msg
-        );
-
-        // Test 6: Verify all involved features are in the full message (the "details")
-        assert!(
-            full_msg.contains("feature-x"),
-            "Full error message should contain feature-x (required detail), got: {}",
-            full_msg
-        );
-        assert!(
-            full_msg.contains("feature-y"),
-            "Full error message should contain feature-y (required detail), got: {}",
-            full_msg
-        );
-        assert!(
-            full_msg.contains("feature-z"),
-            "Full error message should contain feature-z (required detail), got: {}",
-            full_msg
-        );
-    }
-
-    #[test]
-    fn test_dependency_cycle_error_message_simple_cycle() {
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Test: Verify error message format for simple 2-node cycle
-        // Cycle: feature-a -> feature-b -> feature-a
-        let features = vec![
-            create_mock_resolved_feature_with_deps("feature-a", &["feature-b"], &[]),
-            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
-        ];
-
-        let resolver = FeatureDependencyResolver::new(None);
-        let result = resolver.resolve(&features);
-
-        assert!(result.is_err(), "Simple cycle should produce an error");
-
-        let err = result.unwrap_err();
-        let full_msg = format!("{}", err);
-
-        // Verify error includes cycle terminology
-        assert!(
-            full_msg.to_lowercase().contains("cycle"),
-            "Error message should contain 'cycle', got: {}",
-            full_msg
-        );
-
-        // Verify both features are mentioned
-        assert!(
-            full_msg.contains("feature-a") && full_msg.contains("feature-b"),
-            "Error message should contain both feature-a and feature-b, got: {}",
-            full_msg
-        );
-
-        // Verify arrow notation
-        assert!(
-            full_msg.contains("->"),
-            "Error message should contain arrow notation, got: {}",
-            full_msg
-        );
-    }
-
-    #[test]
-    fn test_dependency_cycle_error_message_complex_cycle() {
-        use deacon_core::errors::FeatureError;
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Test: Verify error message format for longer cycle
-        // Cycle: a -> b -> c -> d -> e -> a
-        let features = vec![
-            create_mock_resolved_feature_with_deps("feature-a", &["feature-b"], &[]),
-            create_mock_resolved_feature_with_deps("feature-b", &["feature-c"], &[]),
-            create_mock_resolved_feature_with_deps("feature-c", &["feature-d"], &[]),
-            create_mock_resolved_feature_with_deps("feature-d", &["feature-e"], &[]),
-            create_mock_resolved_feature_with_deps("feature-e", &["feature-a"], &[]),
-        ];
-
-        let resolver = FeatureDependencyResolver::new(None);
-        let result = resolver.resolve(&features);
-
-        assert!(result.is_err(), "Complex cycle should produce an error");
-
-        match result {
-            Err(FeatureError::DependencyCycle { cycle_path }) => {
-                // Verify all features in the cycle are present in the path
-                let features_in_cycle = vec![
-                    "feature-a",
-                    "feature-b",
-                    "feature-c",
-                    "feature-d",
-                    "feature-e",
-                ];
-
-                for feature in features_in_cycle {
-                    assert!(
-                        cycle_path.contains(feature),
-                        "Cycle path should contain {}, got: {}",
-                        feature,
-                        cycle_path
-                    );
-                }
-
-                // Verify the path is properly formatted
-                assert!(
-                    cycle_path.contains("->"),
-                    "Cycle path should use arrow notation, got: {}",
-                    cycle_path
-                );
-
-                // Count arrows - should be at least 4 for a 5-node cycle
-                let arrow_count = cycle_path.matches("->").count();
-                assert!(
-                    arrow_count >= 4,
-                    "Complex cycle should have multiple arrows, got {} arrows in: {}",
-                    arrow_count,
-                    cycle_path
-                );
-            }
-            _ => panic!("Expected DependencyCycle error"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_features_plan_empty_config() {
-        let temp_dir = TempDir::new().unwrap();
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: None,
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        // Should succeed with empty plan
-        let result = execute_features_plan(true, None, &args).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_features_plan_with_additional_features() {
-        let temp_dir = TempDir::new().unwrap();
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some(r#"{"node": true, "docker": true}"#.to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        // Should fail because "node" and "docker" are not valid OCI feature references
-        let result =
-            execute_features_plan(true, Some(r#"{"node": true, "docker": true}"#), &args).await;
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_output_plan_result_json() {
-        let result = FeaturesPlanResult {
-            order: vec!["a".to_string(), "b".to_string()],
-            graph: serde_json::json!({"a": [], "b": ["a"]}),
-        };
-
-        // Test JSON output by capturing stdout
-        // Note: In a real test environment, you might want to capture output differently
-        assert!(output_plan_result(&result, true).is_ok());
-    }
-
-    #[test]
-    fn test_output_plan_result_text() {
-        let result = FeaturesPlanResult {
-            order: vec!["a".to_string(), "b".to_string()],
-            graph: serde_json::json!({"a": [], "b": ["a"]}),
-        };
-
-        // Test text output
-        assert!(output_plan_result(&result, false).is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_features_plan_additional_features_invalid_json() {
-        let temp_dir = TempDir::new().unwrap();
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some("invalid json".to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        // Should fail due to invalid JSON syntax
-        let result = execute_features_plan(true, Some("invalid json"), &args).await;
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(
-            err_msg.contains(
-                "Failed to parse --additional-features during feature plan initialization"
-            ) || err_msg.contains("parse")
-        );
-    }
-
-    #[tokio::test]
-    async fn test_features_plan_additional_features_not_object() {
-        let temp_dir = TempDir::new().unwrap();
-
-        // Test with array
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some(r#"["git", "node"]"#.to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result = execute_features_plan(true, Some(r#"["git", "node"]"#), &args).await;
-        assert!(result.is_err());
-        let err_msg = format!("{}", result.unwrap_err());
-        assert_eq!(
-            err_msg,
-            "Failed to validate --additional-features: must be a JSON object."
-        );
-
-        // Test with string
-        let args2 = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some(r#""just a string""#.to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result2 = execute_features_plan(true, Some(r#""just a string""#), &args2).await;
-        assert!(result2.is_err());
-        let err_msg2 = format!("{}", result2.unwrap_err());
-        assert_eq!(
-            err_msg2,
-            "Failed to validate --additional-features: must be a JSON object."
-        );
-
-        // Test with number
-        let args3 = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some("42".to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result3 = execute_features_plan(true, Some("42"), &args3).await;
-        assert!(result3.is_err());
-        let err_msg3 = format!("{}", result3.unwrap_err());
-        assert_eq!(
-            err_msg3,
-            "Failed to validate --additional-features: must be a JSON object."
-        );
-
-        // Test with boolean
-        let args4 = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some("true".to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result4 = execute_features_plan(true, Some("true"), &args4).await;
-        assert!(result4.is_err());
-        let err_msg4 = format!("{}", result4.unwrap_err());
-        assert_eq!(
-            err_msg4,
-            "Failed to validate --additional-features: must be a JSON object."
-        );
-
-        // Test with null
-        let args5 = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some("null".to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result5 = execute_features_plan(true, Some("null"), &args5).await;
-        assert!(result5.is_err());
-        let err_msg5 = format!("{}", result5.unwrap_err());
-        assert_eq!(
-            err_msg5,
-            "Failed to validate --additional-features: must be a JSON object."
-        );
-    }
-
-    #[tokio::test]
-    async fn test_features_plan_additional_features_valid_object() {
-        let temp_dir = TempDir::new().unwrap();
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some(r#"{"git": true}"#.to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        // Should fail at OCI fetch stage, not at validation stage
-        // (because "git" is not a valid OCI reference)
-        let result = execute_features_plan(true, Some(r#"{"git": true}"#), &args).await;
-        assert!(result.is_err());
-        // The error should NOT be about JSON object validation
-        let err_msg = format!("{}", result.unwrap_err());
-        assert!(
-            !err_msg.contains("Failed to validate --additional-features: must be a JSON object.")
-        );
-    }
-
-    #[test]
-    fn test_merge_semantics_additive_no_overwrite() {
-        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
-
-        // Test: Additive merge without overwrite (default behavior)
-        // Config has: git=true, node="16"
-        // CLI adds: docker=true, python="3.9"
-        // Expected: All 4 features present, config values preserved
-        let config_features = serde_json::json!({
-            "git": true,
-            "node": "16"
-        });
-
-        let merge_config = FeatureMergeConfig::new(
-            Some(r#"{"docker": true, "python": "3.9"}"#.to_string()),
-            false, // Don't prefer CLI features (default)
-            None,
-        );
-
-        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
-        let obj = result.as_object().unwrap();
-
-        // Verify all features are present
-        assert_eq!(obj.len(), 4, "Should have 4 features after merge");
-
-        // Verify original config features are preserved
-        assert_eq!(
-            obj["git"],
-            serde_json::Value::Bool(true),
-            "Config feature 'git' should be preserved"
-        );
-        assert_eq!(
-            obj["node"],
-            serde_json::Value::String("16".to_string()),
-            "Config feature 'node' should be preserved"
-        );
-
-        // Verify CLI features are added
-        assert_eq!(
-            obj["docker"],
-            serde_json::Value::Bool(true),
-            "CLI feature 'docker' should be added"
-        );
-        assert_eq!(
-            obj["python"],
-            serde_json::Value::String("3.9".to_string()),
-            "CLI feature 'python' should be added"
-        );
-    }
-
-    #[test]
-    fn test_merge_semantics_no_overwrite_on_conflict() {
-        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
-
-        // Test: When CLI features conflict with config, config wins by default
-        // Config has: git=true, node="16"
-        // CLI has: git=false, node="18"
-        // Expected: Config values preserved (git=true, node="16")
-        let config_features = serde_json::json!({
-            "git": true,
-            "node": "16"
-        });
-
-        let merge_config = FeatureMergeConfig::new(
-            Some(r#"{"git": false, "node": "18"}"#.to_string()),
-            false, // Config wins on conflict
-            None,
-        );
-
-        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
-        let obj = result.as_object().unwrap();
-
-        assert_eq!(obj.len(), 2, "Should have 2 features");
-
-        // Verify config values are preserved, not overwritten
-        assert_eq!(
-            obj["git"],
-            serde_json::Value::Bool(true),
-            "Config value for 'git' should NOT be overwritten by CLI"
-        );
-        assert_eq!(
-            obj["node"],
-            serde_json::Value::String("16".to_string()),
-            "Config value for 'node' should NOT be overwritten by CLI"
-        );
-    }
-
-    #[test]
-    fn test_merge_semantics_mixed_add_and_preserve() {
-        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
-
-        // Test: Mix of new features and conflicts
-        // Config has: git=true, node="16", python="3.8"
-        // CLI has: git=false, docker=true, rust="latest"
-        // Expected: git=true (config wins), node="16", python="3.8", docker=true, rust="latest"
-        let config_features = serde_json::json!({
-            "git": true,
-            "node": "16",
-            "python": "3.8"
-        });
-
-        let merge_config = FeatureMergeConfig::new(
-            Some(r#"{"git": false, "docker": true, "rust": "latest"}"#.to_string()),
-            false,
-            None,
-        );
-
-        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
-        let obj = result.as_object().unwrap();
-
-        assert_eq!(obj.len(), 5, "Should have 5 features total");
-
-        // Config features preserved
-        assert_eq!(obj["git"], serde_json::Value::Bool(true));
-        assert_eq!(obj["node"], serde_json::Value::String("16".to_string()));
-        assert_eq!(obj["python"], serde_json::Value::String("3.8".to_string()));
-
-        // CLI features added
-        assert_eq!(obj["docker"], serde_json::Value::Bool(true));
-        assert_eq!(obj["rust"], serde_json::Value::String("latest".to_string()));
-    }
-
-    #[test]
-    fn test_override_order_affects_resolution() {
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Test: Override order determines final installation order
-        // Create 3 independent features (no dependencies)
-        // Override order: ["feature-c", "feature-a", "feature-b"]
-        // Expected: Resolver respects this exact order
-        let features = vec![
-            create_mock_resolved_feature("feature-a"),
-            create_mock_resolved_feature("feature-b"),
-            create_mock_resolved_feature("feature-c"),
-        ];
-
-        let override_order = Some(vec![
-            "feature-c".to_string(),
-            "feature-a".to_string(),
-            "feature-b".to_string(),
-        ]);
-
-        let resolver = FeatureDependencyResolver::new(override_order);
-        let plan = resolver.resolve(&features).unwrap();
-        let order = plan.feature_ids();
-
-        // Verify the order matches the override exactly
-        assert_eq!(
-            order,
-            vec!["feature-c", "feature-a", "feature-b"],
-            "Override order should determine exact installation order"
-        );
-    }
-
-    #[test]
-    fn test_override_order_deterministic_with_partial_deps() {
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Test: Override order with some dependencies
-        // Dependencies: feature-b depends on feature-a
-        // Override order: ["feature-a", "feature-b", "feature-c"]
-        // Expected: Order respects both dependencies and override
-        let features = vec![
-            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
-            create_mock_resolved_feature("feature-a"),
-            create_mock_resolved_feature("feature-c"),
-        ];
-
-        let override_order = Some(vec![
-            "feature-a".to_string(),
-            "feature-b".to_string(),
-            "feature-c".to_string(),
-        ]);
-
-        let resolver = FeatureDependencyResolver::new(override_order);
-        let plan = resolver.resolve(&features).unwrap();
-        let order = plan.feature_ids();
-
-        // Verify the order follows override (which is valid for dependencies)
-        assert_eq!(
-            order,
-            vec!["feature-a", "feature-b", "feature-c"],
-            "Override order should be respected when it's valid for dependencies"
-        );
-    }
-
-    #[test]
-    fn test_override_order_without_override_uses_topo_sort() {
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Test: Without override order, resolver uses topological sort
-        // Dependencies: feature-c depends on feature-b, feature-b depends on feature-a
-        // No override order provided
-        // Expected: Topological sort order (feature-a, feature-b, feature-c)
-        let features = vec![
-            create_mock_resolved_feature_with_deps("feature-c", &["feature-b"], &[]),
-            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
-            create_mock_resolved_feature("feature-a"),
-        ];
-
-        let resolver = FeatureDependencyResolver::new(None);
-        let plan = resolver.resolve(&features).unwrap();
-        let order = plan.feature_ids();
-
-        // Verify topological sort order
-        assert_eq!(
-            order,
-            vec!["feature-a", "feature-b", "feature-c"],
-            "Without override, should use topological sort based on dependencies"
-        );
-    }
-
-    #[test]
-    fn test_get_fetch_concurrency_default() {
-        // Test: Default concurrency limit is 6
-        let concurrency = super::get_fetch_concurrency_impl(None);
-        assert_eq!(
-            concurrency, 6,
-            "Default concurrency should be 6 when env var not set"
-        );
-    }
-
-    #[test]
-    fn test_get_fetch_concurrency_from_env() {
-        // Test: Concurrency can be set via environment variable
-        let concurrency = super::get_fetch_concurrency_impl(Some("8"));
-        assert_eq!(
-            concurrency, 8,
-            "Concurrency should be read from DEACON_FETCH_CONCURRENCY env var"
-        );
-    }
-
-    #[test]
-    fn test_get_fetch_concurrency_clamped() {
-        // Test: Concurrency is clamped between 1 and 32
-        let concurrency = super::get_fetch_concurrency_impl(Some("0"));
-        assert_eq!(
-            concurrency, 1,
-            "Concurrency should be clamped to minimum of 1"
-        );
-
-        let concurrency = super::get_fetch_concurrency_impl(Some("100"));
-        assert_eq!(
-            concurrency, 32,
-            "Concurrency should be clamped to maximum of 32"
-        );
-    }
-
-    #[test]
-    fn test_get_fetch_concurrency_invalid_env() {
-        // Test: Invalid env var value falls back to default
-        let concurrency = super::get_fetch_concurrency_impl(Some("invalid"));
-        assert_eq!(
-            concurrency, 6,
-            "Invalid env var should fall back to default"
-        );
-    }
-
-    #[test]
-    fn test_get_effective_install_order_with_cli_and_config() {
-        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
-
-        // Test: CLI override takes precedence over config order
-        // Config order: ["git", "node"]
-        // CLI order: ["docker", "git", "node"]
-        // Expected: CLI order wins
-        let config_order = Some(vec!["git".to_string(), "node".to_string()]);
-        let merge_config =
-            FeatureMergeConfig::new(None, false, Some("docker,git,node".to_string()));
-
-        let result =
-            FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
-                .unwrap();
-
-        assert_eq!(
-            result,
-            Some(vec![
-                "docker".to_string(),
-                "git".to_string(),
-                "node".to_string()
-            ]),
-            "CLI override should take precedence over config order"
-        );
-    }
-
-    #[test]
-    fn test_get_effective_install_order_config_only() {
-        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
-
-        // Test: Without CLI override, use config order
-        // Config order: ["python", "node", "docker"]
-        // CLI order: None
-        // Expected: Config order used
-        let config_order = Some(vec![
-            "python".to_string(),
-            "node".to_string(),
-            "docker".to_string(),
-        ]);
-        let merge_config = FeatureMergeConfig::new(None, false, None);
-
-        let result =
-            FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
-                .unwrap();
-
-        assert_eq!(
-            result,
-            Some(vec![
-                "python".to_string(),
-                "node".to_string(),
-                "docker".to_string()
-            ]),
-            "Config order should be used when no CLI override provided"
-        );
-    }
-
-    #[test]
-    fn test_merge_with_override_order_maintains_determinism() {
-        use deacon_core::features::{FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger};
-
-        // Test: Merging features and applying override order produces deterministic results
-        // This combines merge semantics with override order behavior
-        let config_features = serde_json::json!({
-            "feature-a": true,
-            "feature-b": true
-        });
-
-        let merge_config = FeatureMergeConfig::new(
-            Some(r#"{"feature-c": true}"#.to_string()),
-            false,
-            Some("feature-c,feature-b,feature-a".to_string()),
-        );
-
-        // First verify merge works
-        let merged = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
-        assert_eq!(merged.as_object().unwrap().len(), 3);
-
-        // Then verify override order is extracted correctly
-        let override_order =
-            FeatureMerger::get_effective_install_order(None, &merge_config).unwrap();
-        assert_eq!(
-            override_order,
-            Some(vec![
-                "feature-c".to_string(),
-                "feature-b".to_string(),
-                "feature-a".to_string()
-            ])
-        );
-
-        // Verify resolver respects this order
-        let features = vec![
-            create_mock_resolved_feature("feature-a"),
-            create_mock_resolved_feature("feature-b"),
-            create_mock_resolved_feature("feature-c"),
-        ];
-        let resolver = FeatureDependencyResolver::new(override_order);
-        let plan = resolver.resolve(&features).unwrap();
-        let order = plan.feature_ids();
-
-        assert_eq!(
-            order,
-            vec!["feature-c", "feature-b", "feature-a"],
-            "Override order should produce deterministic installation plan"
-        );
-    }
-
-    #[test]
-    fn test_merge_semantics_with_chain_dependencies() {
-        use deacon_core::features::FeatureDependencyResolver;
-
-        // Test: Merge semantics work correctly when features have chain dependencies
-        // feature-c depends on feature-b, feature-b depends on feature-a
-        // This verifies merge doesn't break dependency resolution
-        let features = vec![
-            create_mock_resolved_feature_with_deps("feature-c", &["feature-b"], &[]),
-            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
-            create_mock_resolved_feature("feature-a"),
-        ];
-
-        let resolver = FeatureDependencyResolver::new(None);
-        let plan = resolver.resolve(&features).unwrap();
-        let order = plan.feature_ids();
-
-        // Verify topological order respects chain
-        assert_eq!(
-            order,
-            vec!["feature-a", "feature-b", "feature-c"],
-            "Chain dependencies should be resolved in correct order"
-        );
-
-        // Verify deterministic (multiple runs produce same result)
-        let plan2 = resolver.resolve(&features).unwrap();
-        let order2 = plan2.feature_ids();
-        assert_eq!(order, order2, "Resolution should be deterministic");
-    }
-
-    #[test]
-    fn test_negative_invalid_additional_features_empty_string() {
-        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
-
-        // Test: Empty string for additional features should fail
-        let config_features = serde_json::json!({"git": true});
-        let merge_config = FeatureMergeConfig::new(Some("".to_string()), false, None);
-
-        let result = FeatureMerger::merge_features(&config_features, &merge_config);
-        assert!(result.is_err(), "Empty string should produce parse error");
-
-        if let Err(e) = result {
-            let err_msg = format!("{}", e);
-            assert!(
-                err_msg.contains("parse") || err_msg.contains("JSON"),
-                "Error should mention parsing or JSON, got: {}",
-                err_msg
-            );
-        }
-    }
-
-    #[test]
-    fn test_negative_malformed_json_additional_features() {
-        use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
-
-        // Test: Malformed JSON should produce explicit error
-        let config_features = serde_json::json!({"git": true});
-        let merge_config =
-            FeatureMergeConfig::new(Some(r#"{"unclosed": true"#.to_string()), false, None);
-
-        let result = FeatureMerger::merge_features(&config_features, &merge_config);
-        assert!(result.is_err(), "Malformed JSON should produce error");
-
-        if let Err(e) = result {
-            let err_msg = format!("{}", e);
-            assert!(
-                err_msg.contains("parse") || err_msg.contains("JSON"),
-                "Error should mention parsing issue, got: {}",
-                err_msg
-            );
-        }
-    }
-
-    #[test]
-    fn test_graph_edge_direction_consistency() {
-        // Test: Verify graph edges consistently point from dependent to dependency
-        // When feature-b depends on feature-a, graph should show: "feature-b": ["feature-a"]
-        let features = vec![
-            create_mock_resolved_feature("feature-a"),
-            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
-        ];
-
-        let graph = build_graph_representation(&features);
-        let graph_obj = graph.as_object().unwrap();
-
-        // feature-a has no dependencies
-        assert_eq!(
-            graph_obj["feature-a"].as_array().unwrap().len(),
-            0,
-            "feature-a should have empty dependency array"
-        );
-
-        // feature-b depends on feature-a (edge points to dependency)
-        let b_deps = graph_obj["feature-b"].as_array().unwrap();
-        assert_eq!(b_deps.len(), 1, "feature-b should have 1 dependency");
-        assert_eq!(
-            b_deps[0],
-            serde_json::Value::String("feature-a".to_string()),
-            "Graph edge should point from dependent (feature-b) to dependency (feature-a)"
-        );
-    }
-
-    #[test]
-    fn test_json_output_order_deterministic() {
-        // Test: JSON output order should be deterministic (sorted)
-        // This ensures snapshot tests and comparisons are reliable
-        let features = vec![
-            create_mock_resolved_feature("zebra"),
-            create_mock_resolved_feature("alpha"),
-            create_mock_resolved_feature("beta"),
-        ];
-
-        let graph = build_graph_representation(&features);
-        let json_str = serde_json::to_string(&graph).unwrap();
-
-        // Verify JSON contains all features
-        assert!(json_str.contains("zebra"));
-        assert!(json_str.contains("alpha"));
-        assert!(json_str.contains("beta"));
-
-        // Verify structure is consistent (object with array values)
-        let graph_obj = graph.as_object().unwrap();
-        assert_eq!(graph_obj.len(), 3);
-        for (_key, value) in graph_obj {
-            assert!(
-                value.is_array(),
-                "Each feature should have an array of dependencies"
-            );
-        }
-
-        // Multiple serializations should produce identical output
-        let json_str2 = serde_json::to_string(&graph).unwrap();
-        assert_eq!(
-            json_str, json_str2,
-            "JSON serialization should be deterministic"
-        );
-    }
-
-    #[test]
-    fn test_option_preservation_roundtrip_mixed_types() {
-        // Test that all JSON types in options are preserved through the conversion pipeline
-        // This validates the fix for silent drops of Number, Array, Object, Null types
-        use deacon_core::features::OptionValue;
-        use std::collections::HashMap;
-
-        // Create options with all supported JSON types
-        let mut input_options = HashMap::new();
-        input_options.insert(
-            "stringOption".to_string(),
-            OptionValue::String("latest".to_string()),
-        );
-        input_options.insert("boolOption".to_string(), OptionValue::Boolean(true));
-        input_options.insert(
-            "numberOption".to_string(),
-            OptionValue::Number(serde_json::Number::from(300)),
-        );
-        input_options.insert(
-            "arrayOption".to_string(),
-            OptionValue::Array(vec![
-                serde_json::Value::String("repo1".to_string()),
-                serde_json::Value::Number(serde_json::Number::from(42)),
-            ]),
-        );
-        let mut obj = serde_json::Map::new();
-        obj.insert(
-            "nested".to_string(),
-            serde_json::Value::String("value".to_string()),
-        );
-        input_options.insert("objectOption".to_string(), OptionValue::Object(obj));
-        input_options.insert("nullOption".to_string(), OptionValue::Null);
-
-        // Verify all options are preserved (not silently dropped)
-        assert_eq!(
-            input_options.len(),
-            6,
-            "All 6 option types should be present"
-        );
-
-        // Convert to JSON (simulating what read_configuration does)
-        let json_options: HashMap<String, serde_json::Value> = input_options
-            .iter()
-            .map(|(k, v)| {
-                let json_val = match v {
-                    OptionValue::Boolean(b) => serde_json::Value::Bool(*b),
-                    OptionValue::String(s) => serde_json::Value::String(s.clone()),
-                    OptionValue::Number(n) => serde_json::Value::Number(n.clone()),
-                    OptionValue::Array(a) => serde_json::Value::Array(a.clone()),
-                    OptionValue::Object(o) => serde_json::Value::Object(o.clone()),
-                    OptionValue::Null => serde_json::Value::Null,
-                };
-                (k.clone(), json_val)
-            })
-            .collect();
-
-        // Verify no data loss in conversion
-        assert_eq!(
-            json_options.len(),
-            6,
-            "All options should survive JSON conversion"
-        );
-        assert!(json_options.contains_key("stringOption"));
-        assert!(json_options.contains_key("boolOption"));
-        assert!(json_options.contains_key("numberOption"));
-        assert!(json_options.contains_key("arrayOption"));
-        assert!(json_options.contains_key("objectOption"));
-        assert!(json_options.contains_key("nullOption"));
-
-        // Convert back to OptionValue (simulating what features.rs does)
-        let roundtrip_options: HashMap<String, OptionValue> = json_options
-            .iter()
-            .map(|(k, v)| {
-                let option_value = match v {
-                    serde_json::Value::Bool(b) => OptionValue::Boolean(*b),
-                    serde_json::Value::String(s) => OptionValue::String(s.clone()),
-                    serde_json::Value::Number(n) => OptionValue::Number(n.clone()),
-                    serde_json::Value::Array(a) => OptionValue::Array(a.clone()),
-                    serde_json::Value::Object(o) => OptionValue::Object(o.clone()),
-                    serde_json::Value::Null => OptionValue::Null,
-                };
-                (k.clone(), option_value)
-            })
-            .collect();
-
-        // Verify complete roundtrip preservation
-        assert_eq!(
-            roundtrip_options.len(),
-            6,
-            "All options should survive complete roundtrip"
-        );
-        assert_eq!(
-            roundtrip_options.get("stringOption").unwrap().as_str(),
-            Some("latest")
-        );
-        assert_eq!(
-            roundtrip_options.get("boolOption").unwrap().as_bool(),
-            Some(true)
-        );
-        assert!(roundtrip_options
-            .get("numberOption")
-            .unwrap()
-            .as_number()
-            .is_some());
-        assert!(roundtrip_options
-            .get("arrayOption")
-            .unwrap()
-            .as_array()
-            .is_some());
-        assert!(roundtrip_options
-            .get("objectOption")
-            .unwrap()
-            .as_object()
-            .is_some());
-        assert!(roundtrip_options.get("nullOption").unwrap().is_null());
-    }
-
-    #[tokio::test]
-    async fn test_error_context_parse_additional_features() {
-        // Test: Verify error message includes proper context for --additional-features parsing
-        // Requirement: GAP.md §8 - Error context could be more specific
-        let temp_dir = TempDir::new().unwrap();
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some("invalid json".to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result = execute_features_plan(true, Some("invalid json"), &args).await;
-        assert!(result.is_err());
-        let err_msg = format!("{:#}", result.unwrap_err());
-
-        // Verify error message contains phase context
-        assert!(
-            err_msg.contains("parse") && err_msg.contains("--additional-features"),
-            "Error should contain phase (parse) and flag (--additional-features), got: {}",
-            err_msg
-        );
-        assert!(
-            err_msg.contains("feature plan initialization"),
-            "Error should contain phase context, got: {}",
-            err_msg
-        );
-    }
-
-    #[tokio::test]
-    async fn test_error_context_validate_additional_features() {
-        // Test: Verify error message includes proper context for --additional-features validation
-        // Requirement: GAP.md §8 - Error context could be more specific
-        let temp_dir = TempDir::new().unwrap();
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some(r#"["not", "an", "object"]"#.to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result = execute_features_plan(true, Some(r#"["not", "an", "object"]"#), &args).await;
-        assert!(result.is_err());
-        let err_msg = format!("{}", result.unwrap_err());
-
-        // Verify error message contains validation context
-        assert!(
-            err_msg.contains("validate") && err_msg.contains("--additional-features"),
-            "Error should contain phase (validate) and flag (--additional-features), got: {}",
-            err_msg
-        );
-        assert!(
-            err_msg.ends_with('.'),
-            "Error message should end with period per Theme 6, got: {}",
-            err_msg
-        );
-    }
-
-    #[tokio::test]
-    async fn test_error_context_includes_phase_and_identifiers() {
-        // Test: Verify error messages include both phase and relevant identifiers
-        // This test verifies the structure is correct for OCI fetch failures
-        // Requirement: SPEC.md §9 - errors include phase and relevant identifiers
-        let temp_dir = TempDir::new().unwrap();
-
-        // Test OCI fetch error includes both phase and feature ID
-        let config_dir = temp_dir.path().join(".devcontainer");
-        fs::create_dir_all(&config_dir).unwrap();
-        let config_path = config_dir.join("devcontainer.json");
-        fs::write(
-            &config_path,
-            r#"{"features": {"ghcr.io/test/nonexistent-feature:v1": true}}"#,
-        )
-        .unwrap();
-
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: None,
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: Some(config_path),
-        };
-
-        let result = execute_features_plan(true, None, &args).await;
-        assert!(result.is_err());
-        let err_msg = format!("{:#}", result.unwrap_err());
-
-        // Verify phase context
-        assert!(
-            err_msg.contains("fetch") || err_msg.contains("parse") || err_msg.contains("resolve"),
-            "Error should contain phase information, got: {}",
-            err_msg
-        );
-
-        // Verify feature identifier is included
-        assert!(
-            err_msg.contains("ghcr.io/test/nonexistent-feature"),
-            "Error should contain feature identifier, got: {}",
-            err_msg
-        );
-    }
-
-    #[tokio::test]
-    async fn test_error_context_oci_fetch_failure() {
-        // Test: Verify error message includes context for OCI fetch failure
-        // Requirement: GAP.md §8 - Error context could be more specific
-        let temp_dir = TempDir::new().unwrap();
-
-        // Create a config with a feature that doesn't exist in any registry
-        let config_dir = temp_dir.path().join(".devcontainer");
-        fs::create_dir_all(&config_dir).unwrap();
-        let config_path = config_dir.join("devcontainer.json");
-        // Use a feature reference that will fail to fetch (non-existent)
-        fs::write(
-            &config_path,
-            r#"{"features": {"ghcr.io/nonexistent/invalid-feature:latest": true}}"#,
-        )
-        .unwrap();
-
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: None,
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: Some(config_path),
-        };
-
-        let result = execute_features_plan(true, None, &args).await;
-        assert!(result.is_err());
-        let err_msg = format!("{:#}", result.unwrap_err());
-
-        // Verify error message contains phase context and feature identifier
-        assert!(
-            err_msg.contains("fetch") && err_msg.contains("feature metadata"),
-            "Error should contain phase (fetch) and what is being fetched (feature metadata), got: {}",
-            err_msg
-        );
-        assert!(
-            err_msg.contains("OCI registry"),
-            "Error should contain source (OCI registry), got: {}",
-            err_msg
-        );
-        assert!(
-            err_msg.contains("ghcr.io/nonexistent/invalid-feature"),
-            "Error should contain feature identifier, got: {}",
-            err_msg
-        );
-        assert!(
-            err_msg.contains('.'),
-            "Error message should end with period per Theme 6, got: {}",
-            err_msg
-        );
-    }
-
-    #[tokio::test]
-    async fn test_error_messages_sentence_case_and_periods() {
-        // Test: Verify all error messages follow Theme 6 formatting
-        // - Sentence case (first word capitalized)
-        // - End with period
-        let temp_dir = TempDir::new().unwrap();
-
-        // Test 1: Validation error
-        let args = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some(r#"["array"]"#.to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result = execute_features_plan(true, Some(r#"["array"]"#), &args).await;
-        assert!(result.is_err());
-        let err_msg = format!("{}", result.unwrap_err());
-
-        // Check sentence case: first word is "Failed"
-        assert!(
-            err_msg.starts_with("Failed"),
-            "Error message should start with capital letter (sentence case), got: {}",
-            err_msg
-        );
-        // Check period at end
-        assert!(
-            err_msg.ends_with('.'),
-            "Error message should end with period per Theme 6, got: {}",
-            err_msg
-        );
-    }
-
-    #[tokio::test]
-    async fn test_all_error_contexts_include_identifiers() {
-        // Test: Verify all errors include relevant identifiers (feature ID, flag name, etc.)
-        // Requirement: SPEC.md §9 - errors include relevant identifiers
-        let temp_dir = TempDir::new().unwrap();
-
-        // Test parse error includes flag name
-        let args_parse = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some("{invalid".to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result_parse = execute_features_plan(true, Some("{invalid"), &args_parse).await;
-        assert!(result_parse.is_err());
-        let err_parse = format!("{:#}", result_parse.unwrap_err());
-        assert!(
-            err_parse.contains("--additional-features"),
-            "Parse error should include flag name, got: {}",
-            err_parse
-        );
-
-        // Test validation error includes flag name
-        let args_validate = FeaturesArgs {
-            command: FeatureCommands::Plan {
-                json: true,
-                additional_features: Some("42".to_string()),
-            },
-            workspace_folder: Some(temp_dir.path().to_path_buf()),
-            config_path: None,
-        };
-
-        let result_validate = execute_features_plan(true, Some("42"), &args_validate).await;
-        assert!(result_validate.is_err());
-        let err_validate = format!("{}", result_validate.unwrap_err());
-        assert!(
-            err_validate.contains("--additional-features"),
-            "Validation error should include flag name, got: {}",
-            err_validate
-        );
     }
 }

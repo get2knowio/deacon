@@ -398,6 +398,9 @@ pub enum FeatureCommands {
     },
     /// Publish features to registry
     ///
+    /// Publishes a packaged feature to an OCI registry with semantic tags.
+    /// Requires --namespace flag to specify the target namespace (owner/repo format).
+    ///
     /// Authentication can be provided via environment variables:
     /// - DEACON_REGISTRY_TOKEN: Bearer token authentication
     /// - DEACON_REGISTRY_USER + DEACON_REGISTRY_PASS: Basic authentication

@@ -135,10 +135,10 @@ Checkpoint: US5 independently verifiable — collection metadata is published an
 
 Purpose: Align docs, examples, and small hardening improvements.
 
-- [ ] T029 [P] Update CLI help and Quickstart with new flags and examples in `specs/003-features-publish-compliance/quickstart.md`
-- [ ] T030 [P] Add example JSON snippet aligned to schema in `examples/registry/dry-run-publish/README.md`
-- [ ] T031 Harden error messages and add tracing spans (`features.publish`) in `crates/deacon/src/commands/features.rs`
-- [ ] T032 Ensure output schema stays stable and reference it in rustdoc in `crates/deacon/src/commands/features_publish_output.rs`
+- [X] T029 [P] Update CLI help and Quickstart with new flags and examples in `specs/003-features-publish-compliance/quickstart.md`
+- [X] T030 [P] Add example JSON snippet aligned to schema in `examples/registry/dry-run-publish/README.md`
+- [X] T031 Harden error messages and add tracing spans (`features.publish`) in `crates/deacon/src/commands/features.rs`
+- [X] T032 Ensure output schema stays stable and reference it in rustdoc in `crates/deacon/src/commands/features_publish_output.rs`
 
 ---
 
