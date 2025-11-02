@@ -1,0 +1,9 @@
+{
+  "name": "Features Plan — Simple Chain",
+  "image": "mcr.microsoft.com/devcontainers/base:alpine",
+  "features": {
+    "./feature-a": {},
+    "./feature-b": {},
+    "./feature-c": {}
+  }
+}
