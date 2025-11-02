@@ -296,35 +296,39 @@ async fn execute_features_plan(
 
                         // Fetch feature metadata from OCI registry
                         let downloaded = fetcher.fetch_feature(&feature_ref).await.map_err(|e| {
-                            // Map OCI fetch errors to categorized FeatureError variants
+                            // Pattern match on DeaconError to access the concrete error variant
                             let error_msg = format!(
                                 "Failed to fetch feature metadata from OCI registry for feature '{}'",
                                 feature_id
                             );
-                            let full_error = format!("{}: {}", error_msg, e);
-
-                            // Categorize the error based on the underlying cause
-                            if full_error.to_lowercase().contains("auth")
-                                || full_error.to_lowercase().contains("unauthorized")
-                                || full_error.to_lowercase().contains("forbidden")
-                                || full_error.to_lowercase().contains("credential")
-                            {
-                                DeaconError::Feature(FeatureError::Authentication {
-                                    message: full_error,
-                                })
-                            } else if full_error.to_lowercase().contains("network")
-                                || full_error.to_lowercase().contains("connection")
-                                || full_error.to_lowercase().contains("timeout")
-                                || full_error.to_lowercase().contains("dns")
-                            {
-                                DeaconError::Feature(FeatureError::Download {
-                                    message: full_error,
-                                })
-                            } else {
-                                // Default to OCI registry error for other cases
-                                DeaconError::Feature(FeatureError::Oci {
-                                    message: full_error,
-                                })
+                            match e {
+                                DeaconError::Feature(feature_err) => {
+                                    // Map specific FeatureError variants to categorized errors with context
+                                    match feature_err {
+                                        FeatureError::Authentication { message } => {
+                                            DeaconError::Feature(FeatureError::Authentication {
+                                                message: format!("{}: {}", error_msg, message),
+                                            })
+                                        }
+                                        FeatureError::Download { message } => {
+                                            DeaconError::Feature(FeatureError::Download {
+                                                message: format!("{}: {}", error_msg, message),
+                                            })
+                                        }
+                                        _ => {
+                                            // For all other FeatureError variants, wrap as OCI error
+                                            DeaconError::Feature(FeatureError::Oci {
+                                                message: format!("{}: {}", error_msg, feature_err),
+                                            })
+                                        }
+                                    }
+                                }
+                                other => {
+                                    // For non-Feature DeaconErrors, wrap as OCI error
+                                    DeaconError::Feature(FeatureError::Oci {
+                                        message: format!("{}: {}", error_msg, other),
+                                    })
+                                }
                             }
                         })?;
 
