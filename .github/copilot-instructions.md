@@ -8,10 +8,10 @@ These instructions guide AI assistance (e.g. GitHub Copilot / Chat) when proposi
 3. Maintain idiomatic, modern Rust (Edition 2021) with clear module boundaries and test coverage for new logic.
 4. Avoid introducing unsafe code. If absolutely necessary, justify with a comment explaining safety invariants.
 5. **CRITICAL: Keep build green** - ALL code changes MUST pass the complete CI pipeline locally before submission. **Run checks after EVERY code change, not just before committing**:
-   - `cargo build --verbose` (must compile successfully)
+   - `cargo build --quiet` (must compile successfully)
    - `cargo test --quiet -- --test-threads=1` (all tests must pass)
-   - `cargo fmt --all` (format code immediately after changes)
-   - `cargo fmt --all -- --check` (verify no formatting changes needed)
+   - `cargo fmt --all --quiet` (format code immediately after changes)
+   - `cargo fmt --all --quiet -- --check` (verify no formatting changes needed)
    - `cargo clippy --all-targets -- -D warnings` (no clippy warnings allowed)
 6. **No Silent Fallbacks / Stubbed Behavior**: Production (non-test) code MUST NOT transparently downgrade, noop, or silently substitute mock/stub implementations when a capability (e.g., OCI / registry resolution, container runtime, feature install backend) is unavailable or unimplemented. Either:
   - Provide a fully working implementation, OR
@@ -66,10 +66,10 @@ When proposing a change:
 2. List of modified files and rationale.
 3. Risk assessment: breaking changes, API shifts, perf impact.
 4. **Verification: MANDATORY CI validation** - ALL commands must pass locally after EVERY change:
-   - `cargo build --verbose` ✅
+   - `cargo build --quiet` ✅
    - `cargo test --quiet -- --test-threads=1` ✅ 
-   - `cargo fmt --all` (format immediately) ✅
-   - `cargo fmt --all -- --check` (verify formatting) ✅
+   - `cargo fmt --all --quiet` (format immediately) ✅
+   - `cargo fmt --all --quiet -- --check` (verify formatting) ✅
    - `cargo clippy --all-targets -- -D warnings` ✅
 5. Follow-ups / deferred work (explicit list) if any.
 
@@ -116,12 +116,12 @@ Add to Pre-submission Checklist:
 - Run with `-D warnings` flag to treat warnings as errors locally
 - Use `#[allow(clippy::...)]` sparingly and only with justification
 
-### Test Failures (`cargo test --verbose`)
+### Test Failures (`cargo test --quiet`)
 - Ensure all tests pass locally before submission
 - Update tests when changing functionality
 - Write deterministic tests that don't depend on external state
 
-### Build Failures (`cargo build --verbose`)
+### Build Failures (`cargo build --quiet`)
 - Code must compile cleanly on stable Rust
 - Check for missing imports, type errors, unused dependencies
 - Verify workspace configuration is correct
@@ -152,11 +152,11 @@ Add to Pre-submission Checklist:
 **Pre-submission Checklist**:
 ```bash
 # Run this exact sequence after EVERY code change AND before every commit:
-cargo build --verbose
+cargo build --quiet
 cargo test --quiet -- --test-threads=1
 cargo test --doc  # Verify all doctests pass
-cargo fmt --all
-cargo fmt --all -- --check  # Must show "no changes required"
+cargo fmt --all --quiet
+cargo fmt --all --quiet -- --check  # Must show "no changes required"
 cargo clippy --all-targets -- -D warnings
 ```
 
