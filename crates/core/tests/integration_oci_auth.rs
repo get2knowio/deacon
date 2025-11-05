@@ -106,6 +106,21 @@ impl HttpClient for AuthMockHttpClient {
         Err(format!("No mock response for URL: {}", url).into())
     }
 
+    async fn get_with_headers_and_response(
+        &self,
+        url: &str,
+        headers: HashMap<String, String>,
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
+        // Use get_with_headers for the body, and return a simple response
+        self.get_with_headers(url, headers)
+            .await
+            .map(|body| HttpResponse {
+                status: 200,
+                headers: HashMap::new(),
+                body,
+            })
+    }
+
     async fn head(
         &self,
         _url: &str,
@@ -516,6 +531,22 @@ impl HttpClient for MockAuthReqwestClient {
         }
 
         self.mock_client.get_with_headers(url, headers).await
+    }
+
+    async fn get_with_headers_and_response(
+        &self,
+        url: &str,
+        mut headers: HashMap<String, String>,
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
+        // Add authentication header if available
+        let credentials = self.get_credentials_for_url(url);
+        if let Some(auth_header) = credentials.to_auth_header() {
+            headers.insert("Authorization".to_string(), auth_header);
+        }
+
+        self.mock_client
+            .get_with_headers_and_response(url, headers)
+            .await
     }
 
     async fn head(

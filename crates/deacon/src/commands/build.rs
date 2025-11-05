@@ -1913,30 +1913,43 @@ mod tests {
 
     #[test]
     fn test_secret_ssh_require_buildkit_validation() {
-        // Test that secrets require BuildKit
+        // Test that BuildKitOption::Never always returns false
         let args_with_secret = BuildArgs {
             secret: vec!["id=test".to_string()],
             buildkit: Some(BuildKitOption::Never),
             ..BuildArgs::default()
         };
 
-        // This would be tested in the actual execute_docker_build function
-        // For unit testing, we just verify the logic
         let use_buildkit = should_use_buildkit(args_with_secret.buildkit.as_ref());
-        assert!(!use_buildkit);
+        assert!(
+            !use_buildkit,
+            "BuildKitOption::Never should always return false"
+        );
         assert!(!args_with_secret.secret.is_empty());
         assert_eq!(args_with_secret.buildkit, Some(BuildKitOption::Never));
 
-        // Test that SSH requires BuildKit
+        // Test that None respects DOCKER_BUILDKIT environment variable
         let args_with_ssh = BuildArgs {
             ssh: vec!["default".to_string()],
-            buildkit: None, // No BuildKit specified, will default to false
+            buildkit: None,
             ..BuildArgs::default()
         };
 
-        let use_buildkit = should_use_buildkit(args_with_ssh.buildkit.as_ref());
-        assert!(!use_buildkit);
+        // When buildkit is None, should_use_buildkit respects DOCKER_BUILDKIT env var
+        // We just verify the args are set up correctly; actual behavior depends on env
         assert!(!args_with_ssh.ssh.is_empty());
+
+        // Test explicit Never option with SSH
+        let args_ssh_never = BuildArgs {
+            ssh: vec!["default".to_string()],
+            buildkit: Some(BuildKitOption::Never),
+            ..BuildArgs::default()
+        };
+        let use_buildkit_never = should_use_buildkit(args_ssh_never.buildkit.as_ref());
+        assert!(
+            !use_buildkit_never,
+            "BuildKitOption::Never should return false even with SSH"
+        );
     }
 
     #[test]

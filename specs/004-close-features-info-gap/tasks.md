@@ -24,7 +24,7 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 
 **Purpose**: Lightweight documentation scaffolding to support acceptance tracking.
 
-- [ ] T001 [P] Create acceptance checklist doc in specs/004-close-features-info-gap/checklists/features-info.md
+- [X] T001 [P] Create acceptance checklist doc in specs/004-close-features-info-gap/checklists/features-info.md
 
 ---
 
@@ -32,14 +32,14 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 
 **Purpose**: Core utilities, data contracts, and CLI flag surface required by all stories.
 
-- [ ] T002 [P] Create text module stub in crates/core/src/text/mod.rs
-- [ ] T003 [P] Implement boxed text utility (Unicode headers) in crates/core/src/text/boxing.rs
-- [ ] T004 Expose text module from core lib (add `pub mod text;`) in crates/core/src/lib.rs
-- [ ] T005 Add `get_manifest_with_digest` (returns manifest + sha256 digest of body) in crates/core/src/oci.rs
-- [ ] T006 Implement tag pagination with Link headers and page/total cap (10 pages/1000 tags) in crates/core/src/oci.rs
-- [ ] T007 [P] Define Features Info data contracts (VerboseJson, PublishedTags, etc.) in crates/core/src/features_info.rs
-- [ ] T008 [P] Replace `--json` with `--output-format <text|json>` for `features info` in crates/deacon/src/cli.rs
-- [ ] T009 [P] Add unit tests for data contracts and helper serialization in crates/core/tests/features_info_models.rs
+- [X] T002 [P] Create text module stub in crates/core/src/text/mod.rs
+- [X] T003 [P] Implement boxed text utility (Unicode headers) in crates/core/src/text/boxing.rs
+- [X] T004 Expose text module from core lib (add `pub mod text;`) in crates/core/src/lib.rs
+- [X] T005 Add `get_manifest_with_digest` (returns manifest + sha256 digest of body) in crates/core/src/oci.rs
+- [X] T006 Implement tag pagination with Link headers and page/total cap (10 pages/1000 tags) in crates/core/src/oci.rs
+- [X] T007 [P] Define Features Info data contracts (VerboseJson, PublishedTags, etc.) in crates/core/src/features_info.rs
+- [X] T008 [P] Replace `--json` with `--output-format <text|json>` for `features info` in crates/deacon/src/cli.rs
+- [X] T009 [P] Add unit tests for data contracts and helper serialization in crates/core/tests/features_info_models.rs
 
 **Checkpoint**: Foundation ready — user story phases can now proceed independently (US1/US2 in parallel; US3 independent; US4 depends on US1–US3).
 
@@ -52,8 +52,8 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 **Independent Test**: Run `deacon features info manifest <ref>` and validate text (boxed sections) and JSON output contract.
 
 ### Tests (write first)
-- [ ] T010 [P] [US1] Unit test: canonicalId computation from manifest bytes digest in crates/core/tests/canonical_id.rs
-- [ ] T011 [P] [US1] CLI smoke tests: text + JSON outputs and error `{}` cases in crates/deacon/tests/integration_features_info_manifest.rs
+- [X] T010 [P] [US1] Unit test: canonicalId computation from manifest bytes digest in crates/core/tests/canonical_id.rs
+- [X] T011 [P] [US1] CLI smoke tests: text + JSON outputs and error `{}` cases in crates/deacon/tests/integration_features_info_manifest.rs
 
 ### Implementation
 - [ ] T012 [US1] Implement `manifest` mode using `default_fetcher_with_config(10s)` in crates/deacon/src/commands/features.rs

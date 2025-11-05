@@ -1,16 +1,16 @@
 # AGENTS: Quick Guide for AI Assistants
 - Source of truth: follow the `docs/subcommand-specs/*/SPEC.md` files; no silent fallbacks—fail fast if unimplemented.
-- Build: `cargo build --verbose`; Run CLI: `cargo run -- --help`.
-- Test (all): `cargo test --verbose -- --test-threads=1`; doctests: `cargo test --doc`.
+- Build: `cargo build --quiet`; Run CLI: `cargo run -- --help`.
+- Test (all): `cargo test --quiet -- --test-threads=1`; doctests: `cargo test --doc`.
 - Fast loop: `make dev-fast` (fmt-check + clippy + unit/bins/examples + doctests; skips slow integration/smoke)
 - Test (crate): `cargo test -p deacon`; `cargo test -p deacon-core`.
 - Test (single unit): `cargo test -p deacon <name_substring>`.
 - Test (single integration): `cargo test -p deacon --test integration_build_args <test_name>`.
 - Lint: `cargo clippy --all-targets -- -D warnings` (zero warnings).
 - Format: `cargo fmt --all` && `cargo fmt --all -- --check` (no trailing whitespace).
-- Coverage (optional): `cargo llvm-cov --workspace --open`.
+- **CRITICAL CI**: Run after EVERY change: build, test, fmt, clippy. Keep build green locally.
 - Features: core: `json-logs`; deacon: `docker` (default), `config`.
-- Imports order: std, external crates, then local (`crate`/`super`); let rustfmt organize.
+- Imports: std, external crates, then local (`crate`/`super`); let rustfmt organize.
 - Naming: modules/files `snake_case`; types/traits `CamelCase`; fns/vars `snake_case`.
 - Types: prefer explicit public types; avoid unnecessary clones; use `&str` over `String` when borrowing.
 - Errors: use `thiserror` enums in core; `anyhow` only at binary boundaries; add context with `anyhow::Context`.
@@ -19,4 +19,4 @@
 - Commits/PRs: Conventional Commits; keep build green locally after every change.
 - Safety: no `unsafe` code; review new deps carefully.
 - Copilot rules: follow `.github/copilot-instructions.md` (run build/test/fmt/clippy after every change).
-	- Use the Fast Loop by default during spec-phase; run `make test`/`make release-check` periodically and before PRs.
+- Use Fast Loop by default during spec-phase; run `make test`/`make release-check` periodically and before PRs.

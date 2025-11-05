@@ -422,9 +422,9 @@ pub enum FeatureCommands {
         mode: String,
         /// Feature path (local directory) or registry reference
         feature: String,
-        /// Output in JSON format
-        #[arg(long)]
-        json: bool,
+        /// Output format (text or json)
+        #[arg(long, value_enum, default_value = "text")]
+        output_format: OutputFormat,
     },
     /// Generate feature installation plan
     Plan {
