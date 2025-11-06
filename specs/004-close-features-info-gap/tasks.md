@@ -56,10 +56,10 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 - [X] T011 [P] [US1] CLI smoke tests: text + JSON outputs and error `{}` cases in crates/deacon/tests/integration_features_info_manifest.rs
 
 ### Implementation
-- [ ] T012 [US1] Implement `manifest` mode using `default_fetcher_with_config(10s)` in crates/deacon/src/commands/features.rs
-- [ ] T013 [US1] Enforce JSON contract: stable keys; `{}` + exit 1 on errors; `canonicalId: null` for local refs in crates/deacon/src/commands/features.rs
-- [ ] T014 [US1] Canonical ID helper wiring to `get_manifest_with_digest` in crates/core/src/oci.rs
-- [ ] T015 [US1] Use core text boxing to print "Manifest" and "Canonical Identifier" sections in crates/deacon/src/commands/features.rs
+- [X] T012 [US1] Implement `manifest` mode using `default_fetcher_with_config(10s)` in crates/deacon/src/commands/features.rs
+- [X] T013 [US1] Enforce JSON contract: stable keys; `{}` + exit 1 on errors; `canonicalId: null` for local refs in crates/deacon/src/commands/features.rs
+- [X] T014 [US1] Canonical ID helper wiring to `get_manifest_with_digest` in crates/core/src/oci.rs
+- [X] T015 [US1] Use core text boxing to print "Manifest" and "Canonical Identifier" sections in crates/deacon/src/commands/features.rs
 
 **Checkpoint**: US1 independently demonstrable (text + JSON).
 
@@ -72,11 +72,11 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 **Independent Test**: Run `deacon features info tags <ref>` and validate text (boxed list) and JSON output `{ "publishedTags": [...] }`.
 
 ### Tests (write first)
-- [ ] T016 [P] [US2] Unit test: pagination parsing and caps (10 pages/1000 tags) in crates/core/tests/integration_oci_enhancements.rs
-- [ ] T017 [P] [US2] CLI smoke tests: text + JSON outputs and `{}` + exit 1 on error in crates/deacon/tests/integration_features_info_tags.rs
+- [X] T016 [P] [US2] Unit test: pagination parsing and caps (10 pages/1000 tags) in crates/core/tests/integration_oci_enhancements.rs
+- [X] T017 [P] [US2] CLI smoke tests: text + JSON outputs and `{}` + exit 1 on error in crates/deacon/tests/integration_features_info_tags.rs
 
 ### Implementation
-- [ ] T018 [US2] Implement `tags` mode using paginated `list_tags` (sorted deterministically) in crates/deacon/src/commands/features.rs
+- [X] T018 [US2] Implement `tags` mode using paginated `list_tags` (sorted deterministically) in crates/deacon/src/commands/features.rs
 
 **Checkpoint**: US2 independently demonstrable.
 
@@ -89,11 +89,11 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 **Independent Test**: Run `deacon features info dependencies <ref>` and validate boxed Mermaid `graph TD` output; JSON mode yields `{}` + exit 1.
 
 ### Tests (write first)
-- [ ] T019 [P] [US3] CLI smoke test: dependency graph (text-only) in crates/deacon/tests/integration_features_info_dependencies.rs
+- [X] T019 [P] [US3] CLI smoke test: dependency graph (text-only) in crates/deacon/tests/integration_features_info_dependencies.rs
 
 ### Implementation
-- [ ] T020 [US3] Implement Mermaid graph builder and boxed section "Dependency Tree (Render with https://mermaid.live/)" in crates/deacon/src/commands/features.rs
-- [ ] T021 [US3] Enforce JSON mode behavior for dependencies: `{}` + exit 1 in crates/deacon/src/commands/features.rs
+- [X] T020 [US3] Implement Mermaid graph builder and boxed section "Dependency Tree (Render with https://mermaid.live/)" in crates/deacon/src/commands/features.rs
+- [X] T021 [US3] Enforce JSON mode behavior for dependencies: `{}` + exit 1 in crates/deacon/src/commands/features.rs
 
 **Checkpoint**: US3 independently demonstrable (text-only).
 
@@ -106,10 +106,10 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 **Independent Test**: Run `deacon features info verbose <ref>`; verify text has all three boxed sections; JSON omits graph and returns `errors` map + exit 1 on any sub-mode failure.
 
 ### Tests (write first)
-- [ ] T022 [P] [US4] CLI smoke tests: verbose text + JSON partial-failure scenarios in crates/deacon/tests/integration_features_info_verbose.rs
+- [X] T022 [P] [US4] CLI smoke tests: verbose text + JSON partial-failure scenarios in crates/deacon/tests/integration_features_info_verbose.rs
 
 ### Implementation
-- [ ] T023 [US4] Implement verbose aggregator with partial-failure policy and exit 1 on any error in crates/deacon/src/commands/features.rs
+- [X] T023 [US4] Implement verbose aggregator with partial-failure policy and exit 1 on any error in crates/deacon/src/commands/features.rs
 
 **Checkpoint**: US4 independently demonstrable.
 
@@ -117,9 +117,9 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 
 ## Phase N: Polish & Cross-Cutting Concerns
 
-- [ ] T024 [P] Add tracing spans and fields: `feature.info.manifest|tags|dependencies|verbose` in crates/deacon/src/commands/features.rs
-- [ ] T025 [P] Update validation steps/examples in specs/004-close-features-info-gap/quickstart.md
-- [ ] T026 Ensure JSON output purity (stdout-only) coverage for features info in crates/deacon/tests/json_output_purity.rs
+- [X] T024 [P] Add tracing spans and fields: `feature.info.manifest|tags|dependencies|verbose` in crates/deacon/src/commands/features.rs
+- [X] T025 [P] Update validation steps/examples in specs/004-close-features-info-gap/quickstart.md
+- [X] T026 Ensure JSON output purity (stdout-only) coverage for features info in crates/deacon/tests/json_output_purity.rs
 
 ---
 
@@ -127,8 +127,8 @@ description: "Tasks to close behavior/output gaps in Features Info subcommand"
 
 **Purpose**: Address analysis findings (test gating, auth coverage, local refs, CLI flags tests, docs/contracts clarifications).
 
-- [ ] T027 [P] Add network test gating helper to newly added networked CLI tests (skip unless `DEACON_NETWORK_TESTS=1`). Apply within each new test file under `crates/deacon/tests/`.
-- [ ] T028 Update CI to enable `DEACON_NETWORK_TESTS=1` for jobs running networked tests in `.github/workflows/ci.yml` (test/smoke jobs).
+- [X] T027 [P] Add network test gating helper to newly added networked CLI tests (skip unless `DEACON_NETWORK_TESTS=1`). Apply within each new test file under `crates/deacon/tests/`.
+- [X] T028 Update CI to enable `DEACON_NETWORK_TESTS=1` for jobs running networked tests in `.github/workflows/ci.yml` (test/smoke jobs).
 - [ ] T029 Implement bearer-token auth and error mapping in `crates/core/src/oci.rs` (401/403 → typed error; redact secrets in logs).
 - [ ] T030 Add core auth tests with mocks in `crates/core/tests/integration_oci_auth.rs` (no network usage).
 - [ ] T031 Add CLI auth failure test stubs in `crates/deacon/tests/integration_features_info_auth.rs` (gated by `DEACON_NETWORK_TESTS`).
