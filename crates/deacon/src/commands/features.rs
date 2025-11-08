@@ -1,5 +1,7 @@
 //! Features command implementation
 //!
+//! Features command implementation
+//!
 //! Implements the `deacon features` subcommands for testing, packaging, and publishing
 //! DevContainer features. Follows the CLI specification for feature management.
 
