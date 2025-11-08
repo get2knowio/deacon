@@ -2,13 +2,20 @@
 //!
 //! Implements the `deacon features` subcommands for testing, packaging, and publishing
 //! DevContainer features. Follows the CLI specification for feature management.
+//!
+//! ## Feature Planning
+//!
+//! The `features plan` subcommand implements the specification defined in:
+//! - [`docs/subcommand-specs/features-plan/SPEC.md`](../docs/subcommand-specs/features-plan/SPEC.md)
+//! - [`docs/subcommand-specs/features-plan/DATA-STRUCTURES.md`](../docs/subcommand-specs/features-plan/DATA-STRUCTURES.md)
 
 use crate::cli::FeatureCommands;
 use anyhow::{Context, Result};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::errors::{DeaconError, FeatureError};
 use deacon_core::features::{
-    parse_feature_metadata, FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger,
-    FeatureMetadata, OptionValue, ResolvedFeature,
+    canonicalize_feature_id, parse_feature_metadata, FeatureDependencyResolver, FeatureMergeConfig,
+    FeatureMerger, FeatureMetadata, OptionValue, ResolvedFeature,
 };
 use deacon_core::observability::{feature_plan_span, TimedSpan};
 use deacon_core::oci::{default_fetcher, FeatureRef};
@@ -767,7 +774,8 @@ pub struct FeaturesPlanResult {
 }
 
 /// Error message for local feature paths
-const LOCAL_FEATURE_ERROR_MSG: &str = "Local features are not supported by 'features plan'. Use registry references (e.g., ghcr.io/owner/feature)";
+const LOCAL_FEATURE_ERROR_MSG: &str =
+    "Local feature paths are not supported by 'features plan'—use a registry reference";
 
 /// Default concurrency limit for parallel OCI metadata fetching
 const DEFAULT_FETCH_CONCURRENCY: usize = 6;
@@ -870,11 +878,21 @@ async fn execute_features_plan(
 
             let merge_config = FeatureMergeConfig::new(
                 Some(additional_features_str.to_string()),
-                false, // Don't prefer CLI features by default
-                None,  // No install order override in this context
+                true, // Prefer CLI features for planner precedence
+                None, // No install order override in this context
             );
             config.features = FeatureMerger::merge_features(&config.features, &merge_config)
                 .context("Failed to merge additional features with devcontainer configuration.")?;
+        }
+
+        // Canonicalize feature IDs after merging
+        if let Some(features_obj) = config.features.as_object_mut() {
+            let mut canonicalized = serde_json::Map::new();
+            for (key, value) in features_obj.iter() {
+                let canonical_key = canonicalize_feature_id(key);
+                canonicalized.insert(canonical_key, value.clone());
+            }
+            config.features = serde_json::Value::Object(canonicalized);
         }
 
         // Extract features from config
@@ -943,11 +961,41 @@ async fn execute_features_plan(
                         );
 
                         // Fetch feature metadata from OCI registry
-                        let downloaded = fetcher.fetch_feature(&feature_ref).await.with_context(|| {
-                            format!(
-                                "Failed to fetch feature metadata from OCI registry for feature '{}'.",
+                        let downloaded = fetcher.fetch_feature(&feature_ref).await.map_err(|e| {
+                            // Pattern match on DeaconError to access the concrete error variant
+                            let error_msg = format!(
+                                "Failed to fetch feature metadata from OCI registry for feature '{}'",
                                 feature_id
-                            )
+                            );
+                            match e {
+                                DeaconError::Feature(feature_err) => {
+                                    // Map specific FeatureError variants to categorized errors with context
+                                    match feature_err {
+                                        FeatureError::Authentication { message } => {
+                                            DeaconError::Feature(FeatureError::Authentication {
+                                                message: format!("{}: {}", error_msg, message),
+                                            })
+                                        }
+                                        FeatureError::Download { message } => {
+                                            DeaconError::Feature(FeatureError::Download {
+                                                message: format!("{}: {}", error_msg, message),
+                                            })
+                                        }
+                                        _ => {
+                                            // For all other FeatureError variants, wrap as OCI error
+                                            DeaconError::Feature(FeatureError::Oci {
+                                                message: format!("{}: {}", error_msg, feature_err),
+                                            })
+                                        }
+                                    }
+                                }
+                                other => {
+                                    // For non-Feature DeaconErrors, wrap as OCI error
+                                    DeaconError::Feature(FeatureError::Oci {
+                                        message: format!("{}: {}", error_msg, other),
+                                    })
+                                }
+                            }
                         })?;
 
                         // Extract per-feature options from config entry if present

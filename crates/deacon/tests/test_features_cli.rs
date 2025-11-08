@@ -755,7 +755,7 @@ fn test_features_plan_cli_rejects_local_paths() {
         cmd.assert()
             .failure()
             .stderr(predicate::str::contains(
-                "Local features are not supported by 'features plan'",
+                "Local feature paths are not supported by 'features plan'",
             ))
             .stderr(predicate::str::contains(expected_feature_key));
     }

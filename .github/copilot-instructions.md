@@ -452,6 +452,7 @@ If you are an AI assistant operating on this repository: remain concise, cite sp
 
 ## Active Technologies
 - Rust (stable channel per rust-toolchain.toml) + clap (CLI args), serde/serde_json (JSON), tracing (logs), thiserror (errors) (001-read-config-parity)
+- Rust (stable toolchain per `rust-toolchain.toml`, Edition 2021) + clap (CLI), serde/serde_json (parsing/JSON), thiserror (errors), tracing (logs)
 - Rust (stable toolchain, Edition 2021) + `tar` (archiving), `flate2` (gzip), `serde`/`serde_json` (metadata), `clap` (CLI), `tracing` (logs), `thiserror` (errors) (002-features-package-collection)
 - Local filesystem (read sources, write artifacts) (002-features-package-collection)
 
