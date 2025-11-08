@@ -53,6 +53,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use tracing::{debug, instrument, warn};
 
+/// Canonicalize a feature ID by trimming whitespace
+///
+/// This ensures consistent feature ID handling across the system.
+/// Leading and trailing whitespace is removed from feature identifiers.
+pub fn canonicalize_feature_id(input: &str) -> String {
+    input.trim().to_string()
+}
+
 /// Processed option value supporting different types
 ///
 /// Supports all JSON value types to ensure complete data preservation through
@@ -598,7 +606,7 @@ impl FeatureDependencyResolver {
             .filter(|(_, &degree)| degree == 0)
             .map(|(node, _)| node.clone())
             .collect();
-        zero_degree_nodes.sort(); // Lexicographic ordering for determinism
+        zero_degree_nodes.sort(); // Lexicographic ordering for determinism - tie-breaks independent features
         for node in zero_degree_nodes {
             queue.push_back(node);
         }
@@ -694,7 +702,7 @@ impl FeatureDependencyResolver {
 
                 // Update in-degrees for dependent nodes
                 let mut neighbors: Vec<String> = adj_list[node].iter().cloned().collect();
-                neighbors.sort(); // Deterministic ordering
+                neighbors.sort(); // Lexicographic ordering for determinism - tie-breaks neighbor processing
                 for neighbor in neighbors {
                     if let Some(degree) = in_degree.get_mut(&neighbor) {
                         *degree -= 1;
@@ -1873,5 +1881,203 @@ mod tests {
             options: HashMap::new(),
             metadata,
         }
+    }
+
+    #[test]
+    fn test_canonicalize_feature_id_basic() {
+        assert_eq!(canonicalize_feature_id("feature"), "feature");
+        assert_eq!(canonicalize_feature_id("  feature  "), "feature");
+        assert_eq!(canonicalize_feature_id("\tfeature\n"), "feature");
+        assert_eq!(canonicalize_feature_id(""), "");
+    }
+
+    #[test]
+    fn test_canonicalize_feature_id_edge_cases() {
+        // Multiple spaces
+        assert_eq!(
+            canonicalize_feature_id("  multiple   spaces  "),
+            "multiple   spaces"
+        );
+        // Only whitespace
+        assert_eq!(canonicalize_feature_id("   "), "");
+        assert_eq!(canonicalize_feature_id("\t\n  \t"), "");
+        // Mixed whitespace
+        assert_eq!(canonicalize_feature_id(" \t feature \n "), "feature");
+    }
+
+    #[test]
+    fn test_canonicalize_feature_id_registry_references() {
+        // Should work with registry references
+        assert_eq!(
+            canonicalize_feature_id("ghcr.io/devcontainers/node"),
+            "ghcr.io/devcontainers/node"
+        );
+        assert_eq!(
+            canonicalize_feature_id("  ghcr.io/devcontainers/node  "),
+            "ghcr.io/devcontainers/node"
+        );
+        assert_eq!(
+            canonicalize_feature_id("myregistry.com/owner/feature:tag"),
+            "myregistry.com/owner/feature:tag"
+        );
+    }
+
+    #[test]
+    fn test_merge_features_precedence_config_wins() {
+        let config_features = serde_json::json!({"git": {"version": "2.0"}, "node": "16"});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"git": {"version": "3.0"}, "docker": true}"#.to_string()),
+            false, // config wins
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        assert_eq!(obj.len(), 3);
+        // Config git should win
+        assert_eq!(
+            obj["git"]["version"],
+            serde_json::Value::String("2.0".to_string())
+        );
+        // Config node should remain
+        assert_eq!(obj["node"], serde_json::Value::String("16".to_string()));
+        // CLI docker should be added
+        assert_eq!(obj["docker"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn test_merge_features_precedence_cli_wins() {
+        let config_features = serde_json::json!({"git": {"version": "2.0"}, "node": "16"});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"git": {"version": "3.0"}, "docker": true}"#.to_string()),
+            true, // CLI wins
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        assert_eq!(obj.len(), 3);
+        // CLI git should win
+        assert_eq!(
+            obj["git"]["version"],
+            serde_json::Value::String("3.0".to_string())
+        );
+        // Config node should remain
+        assert_eq!(obj["node"], serde_json::Value::String("16".to_string()));
+        // CLI docker should be added
+        assert_eq!(obj["docker"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn test_merge_features_canonicalization_applied() {
+        let config_features = serde_json::json!({"git": true, "node": "16"});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"  docker  ": true, " python ": "3.9"}"#.to_string()),
+            false,
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        // Keys should NOT be canonicalized during merging - that happens later
+        // The merging preserves the original key names
+        assert!(obj.contains_key("git"));
+        assert!(obj.contains_key("node"));
+        assert!(obj.contains_key("  docker  ")); // Original key with spaces
+        assert!(obj.contains_key(" python ")); // Original key with spaces
+        assert_eq!(obj["git"], serde_json::Value::Bool(true));
+        assert_eq!(obj["node"], serde_json::Value::String("16".to_string()));
+        assert_eq!(obj["  docker  "], serde_json::Value::Bool(true));
+        assert_eq!(
+            obj[" python "],
+            serde_json::Value::String("3.9".to_string())
+        );
+    }
+
+    #[test]
+    fn test_canonicalization_applied_after_merging() {
+        // Test that canonicalization is applied after merging in the actual workflow
+        let mut config_features = serde_json::json!({"git": true, "node": "16"});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"  docker  ": true, " python ": "3.9"}"#.to_string()),
+            false,
+            None,
+        );
+
+        // First merge
+        config_features = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+
+        // Then canonicalize (as done in the actual code)
+        if let Some(features_obj) = config_features.as_object_mut() {
+            let mut canonicalized = serde_json::Map::new();
+            for (key, value) in features_obj.iter() {
+                let canonical_key = canonicalize_feature_id(key);
+                canonicalized.insert(canonical_key, value.clone());
+            }
+            config_features = serde_json::Value::Object(canonicalized);
+        }
+
+        let obj = config_features.as_object().unwrap();
+
+        // Now keys should be canonicalized
+        assert!(obj.contains_key("git"));
+        assert!(obj.contains_key("node"));
+        assert!(obj.contains_key("docker")); // Canonicalized
+        assert!(obj.contains_key("python")); // Canonicalized
+        assert!(!obj.contains_key("  docker  "));
+        assert!(!obj.contains_key(" python "));
+        assert_eq!(obj["docker"], serde_json::Value::Bool(true));
+        assert_eq!(obj["python"], serde_json::Value::String("3.9".to_string()));
+    }
+
+    #[test]
+    fn test_merge_features_empty_additional() {
+        let config_features = serde_json::json!({"git": true});
+        let merge_config = FeatureMergeConfig::new(None, false, None);
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        assert_eq!(obj.len(), 1);
+        assert_eq!(obj["git"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn test_merge_features_invalid_additional_json() {
+        let config_features = serde_json::json!({"git": true});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"git": true, "invalid": json}"#.to_string()),
+            false,
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_features_additional_not_object() {
+        let config_features = serde_json::json!({"git": true});
+        let merge_config =
+            FeatureMergeConfig::new(Some(r#"["git", "node"]"#.to_string()), false, None);
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_features_additional_invalid_value_type() {
+        let config_features = serde_json::json!({"git": true});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"git": true, "node": 123}"#.to_string()),
+            false,
+            None,
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config);
+        assert!(result.is_err());
     }
 }

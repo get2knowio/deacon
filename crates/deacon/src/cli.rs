@@ -427,11 +427,15 @@ pub enum FeatureCommands {
         json: bool,
     },
     /// Generate feature installation plan
+    ///
+    /// Note: Variable substitution is not performed during planning; feature IDs are treated as opaque strings;
+    /// option values pass through unchanged and are not normalized or transformed.
     Plan {
         /// Output in JSON format
         #[arg(long, default_value_t = true, action = ArgAction::Set)]
         json: bool,
-        /// Additional features to install (JSON map of id -> value/options)
+        /// Additional features to install (JSON object map of id -> value/options)
+        /// Accepts a JSON object like {"ghcr.io/devcontainers/node": "18", "git": true}
         #[arg(long)]
         additional_features: Option<String>,
     },
