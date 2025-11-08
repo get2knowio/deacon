@@ -2,6 +2,12 @@
 //!
 //! Implements the `deacon features` subcommands for testing, packaging, and publishing
 //! DevContainer features. Follows the CLI specification for feature management.
+//!
+//! ## Feature Planning
+//!
+//! The `features plan` subcommand implements the specification defined in:
+//! - [`docs/subcommand-specs/features-plan/SPEC.md`](../docs/subcommand-specs/features-plan/SPEC.md)
+//! - [`docs/subcommand-specs/features-plan/DATA-STRUCTURES.md`](../docs/subcommand-specs/features-plan/DATA-STRUCTURES.md)
 
 use crate::cli::FeatureCommands;
 use crate::commands::features_publish_output::{
@@ -9,10 +15,10 @@ use crate::commands::features_publish_output::{
 };
 use anyhow::{Context, Result};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
-use deacon_core::features::parse_feature_metadata;
+use deacon_core::errors::{DeaconError, FeatureError};
 use deacon_core::features::{
-    FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger, FeatureMetadata, OptionValue,
-    ResolvedFeature,
+    canonicalize_feature_id, parse_feature_metadata, FeatureDependencyResolver, FeatureMergeConfig,
+    FeatureMerger, FeatureMetadata, OptionValue, ResolvedFeature,
 };
 use deacon_core::observability::{feature_plan_span, TimedSpan};
 use deacon_core::oci::{default_fetcher, FeatureRef};
@@ -23,6 +29,669 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile;
 use tracing::{debug, info, Instrument};
+
+/// Packaging mode for feature detection and processing.
+///
+/// Determines how feature directories are structured and should be packaged.
+/// This enum represents the two supported DevContainer feature organization patterns.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PackagingMode {
+    /// Single feature directory with `devcontainer-feature.json` at root.
+    ///
+    /// Used when the directory contains a single feature with its metadata file
+    /// (`devcontainer-feature.json`) located at the root of the directory.
+    /// This is the simplest feature organization pattern.
+    Single,
+    /// Collection of features under `src/` subdirectories.
+    ///
+    /// Used when the directory contains multiple features organized as a collection,
+    /// where each feature resides in its own subdirectory under `src/`, each containing
+    /// its own `devcontainer-feature.json` metadata file. The root directory should
+    /// contain a `devcontainer-collection.json` file describing the collection.
+    Collection,
+}
+
+/// Collection metadata structure for `devcontainer-collection.json`.
+///
+/// This structure represents the metadata file generated during feature packaging
+/// for collections (when multiple features are organized under `src/` subdirectories).
+/// The metadata file describes the collection and includes descriptors for each packaged feature.
+///
+/// # JSON Serialization
+///
+/// Fields use serde rename attributes to match the expected JSON schema:
+/// - `source_information` → `"sourceInformation"` in JSON
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::collections::BTreeMap;
+/// use deacon::commands::features::{CollectionMetadata, SourceInformation, FeatureDescriptor};
+///
+/// // Create collection metadata for packaging output
+/// let mut features = BTreeMap::new();
+/// features.insert(
+///     "my-feature".to_string(),
+///     FeatureDescriptor {
+///         id: "my-feature".to_string(),
+///         version: "1.0.0".to_string(),
+///         name: Some("My Feature".to_string()),
+///         description: Some("A sample feature".to_string()),
+///         options: None,
+///         installs_after: None,
+///         depends_on: None,
+///     }
+/// );
+///
+/// let collection = CollectionMetadata {
+///     source_information: SourceInformation {
+///         source: "devcontainer-cli".to_string(),
+///     },
+///     features,
+/// };
+///
+/// // Serialize to JSON (pretty-printed)
+/// let json = serde_json::to_string_pretty(&collection).unwrap();
+/// println!("{}", json);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionMetadata {
+    /// Source information identifying the tool that generated this collection.
+    ///
+    /// In JSON: serialized as `"sourceInformation"`.
+    /// Typically contains a [`SourceInformation`] with source set to `"devcontainer-cli"`.
+    #[serde(rename = "sourceInformation")]
+    pub source_information: SourceInformation,
+
+    /// Map of feature descriptors keyed by feature ID.
+    ///
+    /// Each entry describes a packaged feature in the collection with its metadata
+    /// (ID, version, name, description, options, and dependencies).
+    /// Keys match the feature IDs (directory names under `src/`).
+    pub features: std::collections::BTreeMap<String, FeatureDescriptor>,
+}
+
+/// Source information for collection metadata.
+///
+/// Identifies the tool or system that generated the collection metadata.
+/// This is embedded in [`CollectionMetadata`] to track provenance.
+///
+/// # Examples
+///
+/// ```
+/// use deacon::commands::features::SourceInformation;
+///
+/// let source_info = SourceInformation {
+///     source: "devcontainer-cli".to_string(),
+/// };
+///
+/// assert_eq!(source_info.source, "devcontainer-cli");
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceInformation {
+    /// Source identifier.
+    ///
+    /// Always set to `"devcontainer-cli"` for collections packaged by this implementation.
+    pub source: String,
+}
+
+/// Feature descriptor for collection metadata.
+///
+/// Describes a single feature within a collection, including its ID, version, name,
+/// description, options, and dependency relationships. This structure is used as values
+/// in the `features` map of [`CollectionMetadata`].
+///
+/// # JSON Serialization
+///
+/// Fields use serde attributes for proper JSON schema compliance:
+/// - `installs_after` → `"installsAfter"` in JSON
+/// - `depends_on` → `"dependsOn"` in JSON
+/// - Optional fields are omitted from JSON when `None` (via `skip_serializing_if`)
+///
+/// # Examples
+///
+/// ```
+/// use deacon::commands::features::FeatureDescriptor;
+///
+/// let descriptor = FeatureDescriptor {
+///     id: "rust".to_string(),
+///     version: "1.0.0".to_string(),
+///     name: Some("Rust Toolchain".to_string()),
+///     description: Some("Installs Rust and Cargo".to_string()),
+///     options: None,
+///     installs_after: Some(vec!["common-utils".to_string()]),
+///     depends_on: None,
+/// };
+///
+/// // Serialize to verify JSON structure
+/// let json = serde_json::to_string_pretty(&descriptor).unwrap();
+/// assert!(json.contains("\"installsAfter\""));
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureDescriptor {
+    /// Feature identifier.
+    ///
+    /// Must match the feature's directory name and the `id` field in its
+    /// `devcontainer-feature.json` metadata file.
+    pub id: String,
+
+    /// Feature version.
+    ///
+    /// Semantic version string for the feature (e.g., `"1.0.0"`).
+    pub version: String,
+
+    /// Optional human-readable feature name.
+    ///
+    /// Omitted from JSON serialization if `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// Optional feature description.
+    ///
+    /// Brief explanation of what the feature does. Omitted from JSON if `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Optional feature options/configuration schema.
+    ///
+    /// JSON value representing the feature's configurable options.
+    /// Omitted from JSON serialization if `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<serde_json::Value>,
+
+    /// Optional installation order dependencies.
+    ///
+    /// In JSON: serialized as `"installsAfter"`.
+    /// List of feature IDs that must be installed before this feature.
+    /// Omitted from JSON if `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "installsAfter")]
+    pub installs_after: Option<Vec<String>>,
+
+    /// Optional hard dependencies.
+    ///
+    /// In JSON: serialized as `"dependsOn"`.
+    /// Map of feature IDs to configuration options that this feature requires.
+    /// Omitted from JSON if `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "dependsOn")]
+    pub depends_on: Option<serde_json::Value>,
+}
+
+/// Sanitize a feature ID for use in artifact names
+///
+/// Maps invalid characters to `-`, collapses repeats, trims leading/trailing hyphens.
+/// Only allows `[a-z0-9-]` characters (underscores are converted to hyphens).
+/// Returns an error if the result would be empty.
+fn sanitize_feature_id(feature_id: &str) -> Result<String> {
+    // Replace invalid characters with hyphens (including underscores)
+    let sanitized = feature_id
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+
+    // Collapse multiple consecutive hyphens
+    let collapsed = sanitized
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<&str>>()
+        .join("-");
+
+    // Trim leading/trailing hyphens
+    let trimmed = collapsed.trim_matches('-');
+
+    if trimmed.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Feature ID '{}' results in empty sanitized name",
+            feature_id
+        ));
+    }
+
+    Ok(trimmed.to_string())
+}
+
+/// Build artifact name for a feature package
+///
+/// Format: `<featureId>-<version>.tgz` where featureId is sanitized.
+/// Returns an error if version is missing or sanitization results in empty string.
+fn build_artifact_name(feature_id: &str, version: &Option<String>) -> Result<String> {
+    let version = version.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Feature '{}' is missing required version for artifact naming",
+            feature_id
+        )
+    })?;
+
+    let sanitized_id = sanitize_feature_id(feature_id)?;
+    Ok(format!("{}-{}.tgz", sanitized_id, version))
+}
+
+/// Detect packaging mode for a given path
+///
+/// Returns PackagingMode::Single if devcontainer-feature.json exists at root,
+/// PackagingMode::Collection if src/ directory exists with feature subdirectories.
+/// Fails if neither condition is met.
+fn detect_mode(target: &Path) -> Result<PackagingMode> {
+    // Check for single feature mode: devcontainer-feature.json at root
+    let feature_json = target.join("devcontainer-feature.json");
+    if feature_json.exists() && feature_json.is_file() {
+        return Ok(PackagingMode::Single);
+    }
+
+    // Check for collection mode: src/ directory exists
+    let src_dir = target.join("src");
+    if src_dir.exists() && src_dir.is_dir() {
+        return Ok(PackagingMode::Collection);
+    }
+
+    // Neither condition met - cannot determine mode
+    Err(anyhow::anyhow!(
+        "Cannot determine packaging mode for path '{}'. Expected either:\n\
+         - devcontainer-feature.json at root (single feature mode)\n\
+         - src/ directory with feature subdirectories (collection mode)",
+        target.display()
+    ))
+}
+
+/// Validates a single feature directory and returns its parsed metadata.
+///
+/// This function performs comprehensive validation of a feature directory:
+/// - Verifies that `devcontainer-feature.json` exists in the target directory
+/// - Confirms the metadata file is a regular file (not a directory or symlink)
+/// - Parses and validates the JSON metadata structure
+/// - Ensures required fields (particularly `version`) are present for packaging
+///
+/// # Arguments
+///
+/// * `target` - Path to the feature directory to validate
+///
+/// # Returns
+///
+/// * `Ok(FeatureMetadata)` - Parsed and validated feature metadata
+/// * `Err(_)` - If the metadata file is missing, invalid, or lacks required fields
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// use deacon::commands::features::validate_single;
+///
+/// let feature_path = Path::new("/path/to/feature");
+/// match validate_single(feature_path) {
+///     Ok(metadata) => {
+///         println!("Feature '{}' validated successfully", metadata.id);
+///         println!("Version: {:?}", metadata.version);
+///     }
+///     Err(e) => eprintln!("Validation failed: {}", e),
+/// }
+/// ```
+pub fn validate_single(target: &Path) -> Result<FeatureMetadata> {
+    let feature_json = target.join("devcontainer-feature.json");
+
+    // Check file exists
+    if !feature_json.exists() {
+        return Err(anyhow::anyhow!(
+            "devcontainer-feature.json not found in '{}'",
+            target.display()
+        ));
+    }
+
+    // Check it's a file (not a directory)
+    if !feature_json.is_file() {
+        return Err(anyhow::anyhow!(
+            "devcontainer-feature.json exists but is not a file in '{}'",
+            target.display()
+        ));
+    }
+
+    // Parse and validate metadata
+    let metadata = parse_feature_metadata(&feature_json).with_context(|| {
+        format!(
+            "Failed to parse devcontainer-feature.json in '{}'",
+            target.display()
+        )
+    })?;
+
+    // Validate required fields for packaging
+    if metadata.version.is_none() {
+        return Err(anyhow::anyhow!(
+            "Feature '{}' is missing required 'version' field in devcontainer-feature.json",
+            metadata.id
+        ));
+    }
+
+    Ok(metadata)
+}
+
+/// Enumerate and validate all features in a collection directory.
+///
+/// Scans the `src/` directory for valid feature subdirectories, validates each feature's
+/// structure and metadata, and returns a vector of `(feature_id, path, metadata)` tuples.
+///
+/// # Arguments
+///
+/// * `src` - Path to the `src/` directory containing feature subdirectories
+///
+/// # Returns
+///
+/// * `Ok(Vec<(String, PathBuf, FeatureMetadata)>)` - Sorted vector of validated features, each containing:
+///   - Feature ID (directory name)
+///   - Full path to the feature directory
+///   - Parsed feature metadata from `devcontainer-feature.json`
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The `src/` directory does not exist or is not a directory
+/// - Any subdirectory is invalid (missing metadata, malformed JSON, etc.)
+/// - Feature ID in `devcontainer-feature.json` doesn't match directory name
+/// - No valid features are found in the collection
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// # use anyhow::Result;
+/// # fn main() -> Result<()> {
+/// let src_dir = Path::new("my-collection/src");
+/// let features = deacon::commands::features::enumerate_and_validate_collection(src_dir)?;
+///
+/// for (feature_id, path, metadata) in features {
+///     println!("Found feature: {} at {:?}", feature_id, path);
+///     if let Some(version) = &metadata.version {
+///         println!("  Version: {}", version);
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
+pub fn enumerate_and_validate_collection(
+    src: &Path,
+) -> Result<Vec<(String, PathBuf, FeatureMetadata)>> {
+    // Check that src directory exists
+    if !src.exists() {
+        return Err(anyhow::anyhow!(
+            "src/ directory not found in '{}'",
+            src.display()
+        ));
+    }
+
+    if !src.is_dir() {
+        return Err(anyhow::anyhow!(
+            "src/ exists but is not a directory in '{}'",
+            src.display()
+        ));
+    }
+
+    // Read directory entries
+    let entries = std::fs::read_dir(src)
+        .with_context(|| format!("Failed to read src/ directory '{}'", src.display()))?;
+
+    let mut features = Vec::new();
+    let mut invalid_features = Vec::new();
+
+    for entry in entries {
+        let entry = entry
+            .with_context(|| format!("Failed to read directory entry in '{}'", src.display()))?;
+        let path = entry.path();
+
+        // Skip non-directories
+        if !path.is_dir() {
+            continue;
+        }
+
+        // Get feature ID from directory name
+        let feature_id = match path.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name.to_string(),
+            None => {
+                invalid_features.push(format!("Invalid directory name: '{}'", path.display()));
+                continue;
+            }
+        };
+
+        // Validate the feature
+        match validate_single(&path) {
+            Ok(metadata) => {
+                // Verify feature ID matches directory name
+                if metadata.id != feature_id {
+                    invalid_features.push(format!(
+                        "Feature ID '{}' in devcontainer-feature.json does not match directory name '{}' in '{}'",
+                        metadata.id, feature_id, path.display()
+                    ));
+                    continue;
+                }
+                features.push((feature_id, path, metadata));
+            }
+            Err(e) => {
+                invalid_features.push(format!("{}: {}", path.display(), e));
+                continue;
+            }
+        }
+    }
+
+    // If any features were invalid, fail the entire operation
+    if !invalid_features.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Found {} invalid feature(s) in collection:\n{}",
+            invalid_features.len(),
+            invalid_features.join("\n")
+        ));
+    }
+
+    // Check if collection is empty
+    if features.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No valid features found in src/ directory '{}'",
+            src.display()
+        ));
+    }
+
+    // Sort features by ID for deterministic ordering
+    features.sort_by(|a, b| a.0.cmp(&b.0));
+
+    Ok(features)
+}
+
+/// Write collection metadata to a JSON file.
+///
+/// Serializes the provided [`CollectionMetadata`] to pretty-printed JSON and writes it
+/// to the specified destination path. If the parent directory does not exist, it will
+/// be created automatically.
+///
+/// # Parameters
+///
+/// * `metadata` - The collection metadata to serialize and write
+/// * `dest` - The destination path where the JSON file will be written
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if:
+/// - The parent directory cannot be created
+/// - The metadata cannot be serialized to JSON
+/// - The file cannot be written to disk
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - Parent directory creation fails due to permissions or I/O errors
+/// - JSON serialization fails (unlikely with valid CollectionMetadata)
+/// - File write fails due to permissions, disk space, or I/O errors
+pub fn write_collection_metadata(metadata: &CollectionMetadata, dest: &Path) -> Result<()> {
+    // Create parent directory if it doesn't exist
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory '{}'", parent.display()))?;
+    }
+
+    // Serialize to JSON with pretty printing
+    let json = serde_json::to_string_pretty(metadata)
+        .with_context(|| "Failed to serialize collection metadata to JSON")?;
+
+    // Write to file
+    std::fs::write(dest, json).with_context(|| {
+        format!(
+            "Failed to write collection metadata to '{}'",
+            dest.display()
+        )
+    })?;
+
+    Ok(())
+}
+
+/// Create a .tgz archive from a feature directory and return SHA256 digest
+///
+/// Creates a compressed tar archive from the source directory, writing it to dest.
+/// Returns the SHA256 digest of the archive content.
+/// The archive will contain the feature files with paths relative to the source directory.
+///
+/// # Archive Structure
+/// The tar archive contains all files from the source directory with relative paths.
+/// For example, if source is `/path/to/feature/` containing `install.sh` and `devcontainer-feature.json`,
+/// the archive will contain `install.sh` and `devcontainer-feature.json` at the root level.
+///
+/// # Compression
+/// Uses gzip compression with default compression level for balance of speed and size.
+///
+/// # Determinism
+/// For reproducible builds, this function should be enhanced to:
+/// - Set consistent mtime (0) for all tar headers
+/// - Sort files lexicographically
+/// - Use deterministic gzip settings
+#[allow(dead_code)]
+pub fn create_feature_tgz(src: &Path, dest: &Path) -> Result<String> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+
+    // Create parent directory if it doesn't exist
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory '{}'", parent.display()))?;
+    }
+
+    // Create the output file
+    let file = std::fs::File::create(dest)
+        .with_context(|| format!("Failed to create archive file '{}'", dest.display()))?;
+
+    // Create gzip encoder with deterministic settings
+    let encoder = flate2::GzBuilder::new()
+        .mtime(0) // Deterministic: Unix epoch
+        .write(file, Compression::default());
+
+    // Create tar builder
+    let mut tar_builder = tar::Builder::new(encoder);
+
+    // Add all files from the source directory
+    // We need to walk the directory and add files with relative paths
+    fn add_files_to_tar(
+        tar_builder: &mut tar::Builder<GzEncoder<std::fs::File>>,
+        src: &Path,
+        base_path: &Path,
+    ) -> Result<()> {
+        // Collect all entries first to sort them lexicographically
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(src)
+            .with_context(|| format!("Failed to read directory '{}'", src.display()))?
+        {
+            let entry = entry.with_context(|| {
+                format!("Failed to read directory entry in '{}'", src.display())
+            })?;
+            entries.push(entry);
+        }
+
+        // Sort entries lexicographically by file name for deterministic ordering
+        entries.sort_by_key(|e| e.file_name());
+
+        for entry in entries {
+            let path = entry.path();
+
+            // Get relative path from base
+            let relative_path = path.strip_prefix(base_path).with_context(|| {
+                format!(
+                    "Failed to make path '{}' relative to '{}'",
+                    path.display(),
+                    base_path.display()
+                )
+            })?;
+
+            if path.is_dir() {
+                // Recursively add directory contents
+                add_files_to_tar(tar_builder, &path, base_path)?;
+            } else {
+                // Add file to archive with proper metadata
+                let mut file = std::fs::File::open(&path).with_context(|| {
+                    format!("Failed to open file '{}' for archiving", path.display())
+                })?;
+
+                let mut header = tar::Header::new_gnu();
+                header.set_size(
+                    file.metadata()
+                        .with_context(|| {
+                            format!("Failed to get metadata for '{}'", path.display())
+                        })?
+                        .len(),
+                );
+                header.set_mode(0o644); // Standard file permissions
+                header.set_uid(0); // Deterministic: root user
+                header.set_gid(0); // Deterministic: root group
+                header.set_mtime(0); // Deterministic: Unix epoch
+                header.set_username("root")?; // Deterministic: root user
+                header.set_groupname("root")?; // Deterministic: root group
+
+                tar_builder
+                    .append_data(&mut header, relative_path, &mut file)
+                    .with_context(|| {
+                        format!("Failed to add file '{}' to archive", path.display())
+                    })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    // Add all files from the source directory
+    add_files_to_tar(&mut tar_builder, src, src)?;
+
+    // Finish the tar archive
+    let encoder = tar_builder
+        .into_inner()
+        .with_context(|| "Failed to finish tar archive creation")?;
+
+    // Finish gzip compression and get the file back
+    let mut file = encoder
+        .finish()
+        .with_context(|| "Failed to finish gzip compression")?;
+
+    // Calculate SHA256 digest by reading the entire file
+    file.flush()
+        .with_context(|| "Failed to flush archive file")?;
+    file.sync_all()
+        .with_context(|| "Failed to sync archive file")?;
+
+    // Re-open file to calculate digest
+    let mut file = std::fs::File::open(dest).with_context(|| {
+        format!(
+            "Failed to re-open archive file '{}' for digest calculation",
+            dest.display()
+        )
+    })?;
+
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher)
+        .with_context(|| format!("Failed to calculate SHA256 digest for '{}'", dest.display()))?;
+
+    let digest = hasher.finalize();
+    let digest_hex = format!("sha256:{:x}", digest);
+
+    Ok(digest_hex)
+}
 
 /// Features command arguments
 #[derive(Debug, Clone)]
@@ -59,9 +728,12 @@ pub struct FeaturesResult {
 pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
     match args.command {
         FeatureCommands::Test { path, json } => execute_features_test(&path, json).await,
-        FeatureCommands::Package { path, output, json } => {
-            execute_features_package(&path, &output, json).await
-        }
+        FeatureCommands::Package {
+            path,
+            output,
+            force_clean_output_folder,
+            json,
+        } => execute_features_package(&path, &output, force_clean_output_folder, json).await,
         FeatureCommands::Pull { registry_ref, json } => {
             execute_features_pull(&registry_ref, json).await
         }
@@ -108,7 +780,8 @@ pub struct FeaturesPlanResult {
 }
 
 /// Error message for local feature paths
-const LOCAL_FEATURE_ERROR_MSG: &str = "Local features are not supported by 'features plan'. Use registry references (e.g., ghcr.io/owner/feature)";
+const LOCAL_FEATURE_ERROR_MSG: &str =
+    "Local feature paths are not supported by 'features plan'—use a registry reference";
 
 /// Default concurrency limit for parallel OCI metadata fetching
 const DEFAULT_FETCH_CONCURRENCY: usize = 6;
@@ -211,11 +884,21 @@ async fn execute_features_plan(
 
             let merge_config = FeatureMergeConfig::new(
                 Some(additional_features_str.to_string()),
-                false, // Don't prefer CLI features by default
-                None,  // No install order override in this context
+                true, // Prefer CLI features for planner precedence
+                None, // No install order override in this context
             );
             config.features = FeatureMerger::merge_features(&config.features, &merge_config)
                 .context("Failed to merge additional features with devcontainer configuration.")?;
+        }
+
+        // Canonicalize feature IDs after merging
+        if let Some(features_obj) = config.features.as_object_mut() {
+            let mut canonicalized = serde_json::Map::new();
+            for (key, value) in features_obj.iter() {
+                let canonical_key = canonicalize_feature_id(key);
+                canonicalized.insert(canonical_key, value.clone());
+            }
+            config.features = serde_json::Value::Object(canonicalized);
         }
 
         // Extract features from config
@@ -284,11 +967,41 @@ async fn execute_features_plan(
                         );
 
                         // Fetch feature metadata from OCI registry
-                        let downloaded = fetcher.fetch_feature(&feature_ref).await.with_context(|| {
-                            format!(
-                                "Failed to fetch feature metadata from OCI registry for feature '{}'.",
+                        let downloaded = fetcher.fetch_feature(&feature_ref).await.map_err(|e| {
+                            // Pattern match on DeaconError to access the concrete error variant
+                            let error_msg = format!(
+                                "Failed to fetch feature metadata from OCI registry for feature '{}'",
                                 feature_id
-                            )
+                            );
+                            match e {
+                                DeaconError::Feature(feature_err) => {
+                                    // Map specific FeatureError variants to categorized errors with context
+                                    match feature_err {
+                                        FeatureError::Authentication { message } => {
+                                            DeaconError::Feature(FeatureError::Authentication {
+                                                message: format!("{}: {}", error_msg, message),
+                                            })
+                                        }
+                                        FeatureError::Download { message } => {
+                                            DeaconError::Feature(FeatureError::Download {
+                                                message: format!("{}: {}", error_msg, message),
+                                            })
+                                        }
+                                        _ => {
+                                            // For all other FeatureError variants, wrap as OCI error
+                                            DeaconError::Feature(FeatureError::Oci {
+                                                message: format!("{}: {}", error_msg, feature_err),
+                                            })
+                                        }
+                                    }
+                                }
+                                other => {
+                                    // For non-Feature DeaconErrors, wrap as OCI error
+                                    DeaconError::Feature(FeatureError::Oci {
+                                        message: format!("{}: {}", error_msg, other),
+                                    })
+                                }
+                            }
                         })?;
 
                         // Extract per-feature options from config entry if present
@@ -391,12 +1104,14 @@ async fn execute_features_plan(
 /// Create a mock resolved feature for demonstration (temporary)
 /// In a real implementation, this would fetch the actual feature metadata
 #[cfg(test)]
+#[allow(dead_code)]
 fn create_mock_resolved_feature(feature_id: &str) -> ResolvedFeature {
     create_mock_resolved_feature_with_deps(feature_id, &[], &[])
 }
 
 /// Create a mock resolved feature with specified dependencies
 #[cfg(test)]
+#[allow(dead_code)]
 fn create_mock_resolved_feature_with_deps(
     feature_id: &str,
     installs_after: &[&str],
@@ -558,7 +1273,12 @@ async fn execute_features_test(path: &str, json: bool) -> Result<()> {
 }
 
 /// Execute features package command
-async fn execute_features_package(path: &str, output_dir: &str, json: bool) -> Result<()> {
+async fn execute_features_package(
+    path: &str,
+    output_dir: &str,
+    force_clean_output_folder: bool,
+    json: bool,
+) -> Result<()> {
     debug!(
         "Packaging feature at path: {} to output: {}",
         path, output_dir
@@ -567,40 +1287,213 @@ async fn execute_features_package(path: &str, output_dir: &str, json: bool) -> R
     let feature_path = Path::new(path);
     let output_path = Path::new(output_dir);
 
-    // Parse feature metadata
-    let metadata_path = feature_path.join("devcontainer-feature.json");
-    let metadata = parse_feature_metadata(&metadata_path)
-        .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
+    // Step 1: Detect packaging mode
+    let mode = detect_mode(feature_path)?;
 
-    // Validate the metadata
-    metadata
-        .validate()
-        .map_err(|e| anyhow::anyhow!("Invalid feature metadata: {}", e))?;
+    // Log detected mode
+    match &mode {
+        PackagingMode::Single => {
+            info!(
+                "Detected single feature mode for path: {}",
+                feature_path.display()
+            );
+            println!("Mode: single");
+        }
+        PackagingMode::Collection => {
+            info!(
+                "Detected collection mode for path: {}",
+                feature_path.display()
+            );
+            println!("Mode: collection");
+        }
+    }
 
-    info!(
-        "Packaging feature: {} ({})",
-        metadata.id,
-        metadata.name.as_deref().unwrap_or("No name")
-    );
+    // Step 2: Clean output directory if requested
+    if force_clean_output_folder && output_path.exists() {
+        debug!("Cleaning output directory: {}", output_path.display());
+        std::fs::remove_dir_all(output_path)?;
+    }
 
-    // Create output directory if it doesn't exist
-    std::fs::create_dir_all(output_path)?;
+    match mode {
+        PackagingMode::Single => {
+            // Step 3: Validate single feature
+            let metadata = validate_single(feature_path)?;
 
-    // Create tar archive of feature directory
-    let (digest, size) = create_feature_package(feature_path, output_path, &metadata.id).await?;
+            // Step 4: Create output directory
+            std::fs::create_dir_all(output_path)?;
 
-    let result = FeaturesResult {
-        command: "package".to_string(),
-        status: "success".to_string(),
-        digest: Some(digest),
-        size: Some(size),
-        message: Some(format!("Feature packaged successfully to {}", output_dir)),
-        cache_path: None,
-    };
+            // Step 5: Create .tgz archive
+            let (digest, tar_filename, size) =
+                create_feature_package(feature_path, output_path, &metadata).await?;
 
-    output_result(&result, json)?;
+            // Step 6: Build feature descriptors
+            let feature_descriptor = FeatureDescriptor {
+                id: metadata.id.clone(),
+                version: metadata
+                    .version
+                    .clone()
+                    .unwrap_or_else(|| "latest".to_string()),
+                name: metadata.name.clone(),
+                description: metadata.description.clone(),
+                options: if metadata.options.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::to_value(&metadata.options).unwrap_or(serde_json::Value::Null))
+                },
+                installs_after: if metadata.installs_after.is_empty() {
+                    None
+                } else {
+                    Some(metadata.installs_after.clone())
+                },
+                depends_on: if metadata.depends_on.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::Value::Object(
+                        metadata.depends_on.clone().into_iter().collect(),
+                    ))
+                },
+            };
 
-    Ok(())
+            let mut features_map = std::collections::BTreeMap::new();
+            features_map.insert(metadata.id.clone(), feature_descriptor);
+
+            let collection_metadata = CollectionMetadata {
+                source_information: SourceInformation {
+                    source: "devcontainer-cli".to_string(),
+                },
+                features: features_map,
+            };
+
+            // Step 6: Write devcontainer-collection.json
+            let collection_path = output_path.join("devcontainer-collection.json");
+            write_collection_metadata(&collection_metadata, &collection_path)?;
+
+            // Log created artifacts
+            info!("Created artifacts:");
+            info!("  - {}", tar_filename);
+            info!("  - devcontainer-collection.json");
+            println!("Created artifacts:");
+            println!("  - {}", tar_filename);
+            println!("  - devcontainer-collection.json");
+
+            // Step 7: Output results
+            let result = FeaturesResult {
+                command: "package".to_string(),
+                status: "success".to_string(),
+                digest: Some(digest),
+                size: Some(size),
+                message: Some(format!(
+                    "Successfully packaged feature '{}' to {}",
+                    metadata.id, output_dir
+                )),
+                cache_path: None,
+            };
+
+            output_result(&result, json)?;
+
+            Ok(())
+        }
+        PackagingMode::Collection => {
+            // Step 3: Enumerate and validate all features in collection
+            let src_path = feature_path.join("src");
+            let features = enumerate_and_validate_collection(&src_path)?;
+
+            // Step 4: Create output directory
+            std::fs::create_dir_all(output_path)?;
+
+            // Step 5: Package each feature and collect descriptors
+            let mut collection_features = std::collections::BTreeMap::new();
+            let mut total_size = 0u64;
+            let mut artifact_names = Vec::new();
+
+            for (feature_id, feature_path, metadata) in features {
+                // Create .tgz archive for this feature
+                let (digest, tar_filename, size) =
+                    create_feature_package(&feature_path, output_path, &metadata).await?;
+                total_size += size;
+                artifact_names.push(tar_filename);
+
+                // Build feature descriptor
+                let feature_descriptor = FeatureDescriptor {
+                    id: metadata.id.clone(),
+                    version: metadata
+                        .version
+                        .clone()
+                        .unwrap_or_else(|| "latest".to_string()),
+                    name: metadata.name.clone(),
+                    description: metadata.description.clone(),
+                    options: if metadata.options.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            serde_json::to_value(&metadata.options)
+                                .unwrap_or(serde_json::Value::Null),
+                        )
+                    },
+                    installs_after: if metadata.installs_after.is_empty() {
+                        None
+                    } else {
+                        Some(metadata.installs_after.clone())
+                    },
+                    depends_on: if metadata.depends_on.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::Object(
+                            metadata.depends_on.clone().into_iter().collect(),
+                        ))
+                    },
+                };
+
+                collection_features.insert(feature_id, feature_descriptor);
+
+                info!(
+                    "Packaged feature '{}' (digest: {}, size: {} bytes)",
+                    metadata.id, digest, size
+                );
+            }
+
+            // Step 6: Write collection metadata
+            let collection_metadata = CollectionMetadata {
+                source_information: SourceInformation {
+                    source: "devcontainer-cli".to_string(),
+                },
+                features: collection_features,
+            };
+
+            let collection_path = output_path.join("devcontainer-collection.json");
+            write_collection_metadata(&collection_metadata, &collection_path)?;
+
+            // Log created artifacts
+            info!("Created artifacts:");
+            for artifact_name in &artifact_names {
+                info!("  - {}", artifact_name);
+            }
+            info!("  - devcontainer-collection.json");
+            println!("Created artifacts:");
+            for artifact_name in &artifact_names {
+                println!("  - {}", artifact_name);
+            }
+            println!("  - devcontainer-collection.json");
+
+            // Step 7: Output results
+            let result = FeaturesResult {
+                command: "package".to_string(),
+                status: "success".to_string(),
+                digest: None, // No single digest for collection
+                size: Some(total_size),
+                message: Some(format!(
+                    "Successfully packaged {} feature(s) from collection to {}",
+                    collection_metadata.features.len(),
+                    output_dir
+                )),
+                cache_path: None,
+            };
+
+            output_result(&result, json)?;
+
+            Ok(())
+        }
+    }
 }
 
 /// Execute features pull command
@@ -855,7 +1748,7 @@ pub async fn execute_features_publish(
     };
 
     let span = tracing::info_span!("feature.package.build", feature_id = %metadata.id);
-    let (digest, _size) = create_feature_package(feature_path, temp_dir.path(), &metadata.id)
+    let (digest, _tar_filename, _size) = create_feature_package(feature_path, temp_dir.path(), &metadata)
         .instrument(span)
         .await
         .map_err(|e| {
@@ -868,7 +1761,7 @@ pub async fn execute_features_publish(
 
     if !to_publish_tags.is_empty() {
         // Publish with multiple tags if needed
-        let package_data = std::fs::read(temp_dir.path().join(format!("{}.tar", metadata.id)))
+        let package_data = std::fs::read(temp_dir.path().join(_tar_filename))
             .map_err(|e| anyhow::anyhow!("Failed to read packaged feature file: {}", e))?
             .into();
 
@@ -1526,28 +2419,33 @@ async fn run_feature_test_in_container(
     }
 }
 
-/// Create a feature package (tar archive with OCI manifest stub)
+/// Create a feature package (gzipped tar archive with OCI manifest stub)
 async fn create_feature_package(
     feature_path: &Path,
     output_path: &Path,
-    feature_id: &str,
-) -> Result<(String, u64)> {
+    metadata: &FeatureMetadata,
+) -> Result<(String, String, u64)> {
+    use flate2::{write::GzEncoder, Compression};
     use sha2::{Digest, Sha256};
     use std::fs::File;
     use std::io::{Read, Write};
     use tar::Builder;
 
-    debug!("Creating feature package for: {}", feature_id);
+    debug!("Creating feature package for: {}", metadata.id);
 
-    // Create tar archive
-    let tar_filename = format!("{}.tar", feature_id);
+    // Build artifact name with version
+    let tar_filename = build_artifact_name(&metadata.id, &metadata.version)?;
+
+    // Create gzipped tar archive
     let tar_path = output_path.join(&tar_filename);
     let tar_file = File::create(&tar_path)?;
-    let mut builder = Builder::new(tar_file);
+    let encoder = GzEncoder::new(tar_file, Compression::default());
+    let mut builder = Builder::new(encoder);
 
     // Add all files from feature directory to tar
     builder.append_dir_all(".", feature_path)?;
-    builder.finish()?;
+    let encoder = builder.into_inner()?;
+    encoder.finish()?;
 
     // Calculate digest and size
     let mut file = File::open(&tar_path)?;
@@ -1568,13 +2466,13 @@ async fn create_feature_package(
             "digest": "sha256:placeholder"
         },
         "layers": [{
-            "mediaType": "application/vnd.oci.image.layer.v1.tar",
+            "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
             "size": size,
             "digest": digest.clone()
         }]
     });
 
-    let manifest_path = output_path.join(format!("{}-manifest.json", feature_id));
+    let manifest_path = output_path.join(format!("{}-manifest.json", metadata.id));
     let mut manifest_file = File::create(manifest_path)?;
     manifest_file.write_all(serde_json::to_string_pretty(&manifest)?.as_bytes())?;
 
@@ -1583,7 +2481,7 @@ async fn create_feature_package(
         tar_filename, digest, size
     );
 
-    Ok((digest, size))
+    Ok((digest, tar_filename, size))
 }
 
 /// Output result in the specified format
@@ -1650,7 +2548,7 @@ fn output_publish_result(result: &PublishOutput, json: bool) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_features_package {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
@@ -2164,5 +3062,653 @@ mod tests {
             "JSON should contain feature-a"
         );
         assert!(json_str.contains("[]"), "JSON should contain empty arrays");
+    }
+
+    #[test]
+    fn test_validate_single_missing_devcontainer_feature_json() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature_dir = temp_dir.path().join("test-feature");
+        fs::create_dir_all(&feature_dir).unwrap();
+
+        // Don't create devcontainer-feature.json
+        let result = validate_single(&feature_dir);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("devcontainer-feature.json not found"));
+        assert!(err_msg.contains(&feature_dir.display().to_string()));
+    }
+
+    #[test]
+    fn test_validate_single_devcontainer_feature_json_is_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature_dir = temp_dir.path().join("test-feature");
+        fs::create_dir_all(&feature_dir).unwrap();
+
+        // Create devcontainer-feature.json as a directory instead of file
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::create_dir(&json_path).unwrap();
+
+        let result = validate_single(&feature_dir);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("devcontainer-feature.json exists but is not a file"));
+        assert!(err_msg.contains(&feature_dir.display().to_string()));
+    }
+
+    #[test]
+    fn test_validate_single_corrupt_devcontainer_feature_json() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature_dir = temp_dir.path().join("test-feature");
+        fs::create_dir_all(&feature_dir).unwrap();
+
+        // Create invalid JSON
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::write(
+            &json_path,
+            r#"{"id": "test", "version": "1.0.0", invalid json"#,
+        )
+        .unwrap();
+
+        let result = validate_single(&feature_dir);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Failed to parse devcontainer-feature.json"));
+        assert!(err_msg.contains(&feature_dir.display().to_string()));
+    }
+
+    #[test]
+    fn test_validate_single_missing_version() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature_dir = temp_dir.path().join("test-feature");
+        fs::create_dir_all(&feature_dir).unwrap();
+
+        // Create valid JSON but missing version
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::write(
+            &json_path,
+            r#"{"id": "test-feature", "name": "Test Feature"}"#,
+        )
+        .unwrap();
+
+        let result = validate_single(&feature_dir);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Feature 'test-feature' is missing required 'version' field"));
+    }
+
+    #[test]
+    fn test_validate_single_valid_feature() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature_dir = temp_dir.path().join("test-feature");
+        fs::create_dir_all(&feature_dir).unwrap();
+
+        // Create valid feature
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::write(
+            &json_path,
+            r#"{"id": "test-feature", "version": "1.0.0", "name": "Test Feature"}"#,
+        )
+        .unwrap();
+
+        let result = validate_single(&feature_dir);
+        assert!(result.is_ok());
+        let metadata = result.unwrap();
+        assert_eq!(metadata.id, "test-feature");
+        assert_eq!(metadata.version, Some("1.0.0".to_string()));
+        assert_eq!(metadata.name, Some("Test Feature".to_string()));
+    }
+
+    #[test]
+    fn test_enumerate_and_validate_collection_src_directory_not_found() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_path = temp_dir.path().join("src");
+
+        // Don't create src directory
+        let result = enumerate_and_validate_collection(&src_path);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("src/ directory not found"));
+        assert!(err_msg.contains(&src_path.display().to_string()));
+    }
+
+    #[test]
+    fn test_enumerate_and_validate_collection_src_is_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_path = temp_dir.path().join("src");
+
+        // Create src as a file instead of directory
+        fs::write(&src_path, "not a directory").unwrap();
+
+        let result = enumerate_and_validate_collection(&src_path);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("src/ exists but is not a directory"));
+        assert!(err_msg.contains(&src_path.display().to_string()));
+    }
+
+    #[test]
+    fn test_enumerate_and_validate_collection_empty_src_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_path = temp_dir.path().join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        // Leave src directory empty
+        let result = enumerate_and_validate_collection(&src_path);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("No valid features found in src/ directory"));
+        assert!(err_msg.contains(&src_path.display().to_string()));
+    }
+
+    #[test]
+    fn test_enumerate_and_validate_collection_invalid_feature() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_path = temp_dir.path().join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        // Create a feature directory with invalid JSON
+        let feature_dir = src_path.join("invalid-feature");
+        fs::create_dir_all(&feature_dir).unwrap();
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::write(&json_path, r#"{"id": "invalid", invalid json"#).unwrap();
+
+        let result = enumerate_and_validate_collection(&src_path);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Found 1 invalid feature(s) in collection"));
+        assert!(err_msg.contains("Failed to parse devcontainer-feature.json"));
+    }
+
+    #[test]
+    fn test_enumerate_and_validate_collection_mixed_valid_invalid() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_path = temp_dir.path().join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        // Create a valid feature
+        let valid_dir = src_path.join("feature-a");
+        fs::create_dir_all(&valid_dir).unwrap();
+        let valid_json = valid_dir.join("devcontainer-feature.json");
+        fs::write(&valid_json, r#"{"id": "feature-a", "version": "1.0.0"}"#).unwrap();
+
+        // Create an invalid feature
+        let invalid_dir = src_path.join("invalid-feature");
+        fs::create_dir_all(&invalid_dir).unwrap();
+        let invalid_json = invalid_dir.join("devcontainer-feature.json");
+        fs::write(
+            &invalid_json,
+            r#"{"id": "invalid", "version": missing quote"#,
+        )
+        .unwrap();
+
+        let result = enumerate_and_validate_collection(&src_path);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Found 1 invalid feature(s) in collection"));
+        assert!(err_msg.contains("Failed to parse devcontainer-feature.json"));
+    }
+
+    #[test]
+    fn test_enumerate_and_validate_collection_valid_features() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_path = temp_dir.path().join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        // Create first valid feature
+        let feature1_dir = src_path.join("feature-a");
+        fs::create_dir_all(&feature1_dir).unwrap();
+        let json1_path = feature1_dir.join("devcontainer-feature.json");
+        fs::write(&json1_path, r#"{"id": "feature-a", "version": "1.0.0"}"#).unwrap();
+
+        // Create second valid feature
+        let feature2_dir = src_path.join("feature-b");
+        fs::create_dir_all(&feature2_dir).unwrap();
+        let json2_path = feature2_dir.join("devcontainer-feature.json");
+        fs::write(&json2_path, r#"{"id": "feature-b", "version": "2.0.0"}"#).unwrap();
+
+        let result = enumerate_and_validate_collection(&src_path);
+        assert!(result.is_ok());
+        let features = result.unwrap();
+
+        // Should have 2 features, sorted by ID
+        assert_eq!(features.len(), 2);
+        assert_eq!(features[0].0, "feature-a");
+        assert_eq!(features[1].0, "feature-b");
+        assert_eq!(features[0].1, feature1_dir);
+        assert_eq!(features[1].1, feature2_dir);
+        assert_eq!(features[0].2.id, "feature-a");
+        assert_eq!(features[1].2.id, "feature-b");
+    }
+
+    #[test]
+    fn test_enumerate_and_validate_collection_feature_id_mismatch() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_path = temp_dir.path().join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        // Create feature where directory name doesn't match ID in JSON
+        let feature_dir = src_path.join("directory-name");
+        fs::create_dir_all(&feature_dir).unwrap();
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::write(&json_path, r#"{"id": "different-id", "version": "1.0.0"}"#).unwrap();
+
+        let result = enumerate_and_validate_collection(&src_path);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Found 1 invalid feature(s) in collection"));
+        assert!(err_msg.contains("Feature ID 'different-id' in devcontainer-feature.json does not match directory name 'directory-name'"));
+    }
+
+    #[test]
+    fn test_detect_mode_single_feature() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature_dir = temp_dir.path().join("test-feature");
+        fs::create_dir_all(&feature_dir).unwrap();
+
+        // Create devcontainer-feature.json at root
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::write(&json_path, r#"{"id": "test", "version": "1.0.0"}"#).unwrap();
+
+        let result = detect_mode(&feature_dir);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), PackagingMode::Single);
+    }
+
+    #[test]
+    fn test_detect_mode_collection() {
+        let temp_dir = TempDir::new().unwrap();
+        let collection_dir = temp_dir.path().join("collection");
+        fs::create_dir_all(&collection_dir).unwrap();
+
+        // Create src/ directory
+        let src_dir = collection_dir.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+
+        let result = detect_mode(&collection_dir);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), PackagingMode::Collection);
+    }
+
+    #[test]
+    fn test_detect_mode_neither() {
+        let temp_dir = TempDir::new().unwrap();
+        let empty_dir = temp_dir.path().join("empty");
+        fs::create_dir_all(&empty_dir).unwrap();
+
+        // Don't create devcontainer-feature.json or src/
+        let result = detect_mode(&empty_dir);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Cannot determine packaging mode"));
+        assert!(err_msg.contains("devcontainer-feature.json at root"));
+        assert!(err_msg.contains("src/ directory"));
+        assert!(err_msg.contains(&empty_dir.display().to_string()));
+    }
+
+    #[test]
+    fn test_write_collection_metadata_structure() {
+        use serde_json::Value;
+
+        let temp_dir = TempDir::new().unwrap();
+        let metadata_path = temp_dir.path().join("devcontainer-collection.json");
+
+        // Create test data
+        let mut features = std::collections::BTreeMap::new();
+        features.insert(
+            "test-feature".to_string(),
+            FeatureDescriptor {
+                id: "test-feature".to_string(),
+                version: "1.0.0".to_string(),
+                name: Some("Test Feature".to_string()),
+                description: Some("A test feature".to_string()),
+                options: Some(serde_json::json!({"option1": "value1"})),
+                installs_after: Some(vec!["dep1".to_string()]),
+                depends_on: Some(serde_json::json!({"dep2": {"version": "2.0.0"}})),
+            },
+        );
+
+        let collection_metadata = CollectionMetadata {
+            source_information: SourceInformation {
+                source: "devcontainer-cli".to_string(),
+            },
+            features,
+        };
+
+        // Write metadata
+        let result = write_collection_metadata(&collection_metadata, &metadata_path);
+        assert!(result.is_ok());
+
+        // Read and parse the written JSON
+        let json_content = fs::read_to_string(&metadata_path).unwrap();
+        let parsed: Value = serde_json::from_str(&json_content).unwrap();
+
+        // Validate structure according to OpenAPI contract
+        assert!(parsed.is_object());
+        let obj = parsed.as_object().unwrap();
+
+        // Required fields
+        assert!(obj.contains_key("sourceInformation"));
+        assert!(obj.contains_key("features"));
+
+        // sourceInformation structure
+        let source_info = obj.get("sourceInformation").unwrap();
+        assert!(source_info.is_object());
+        let source_obj = source_info.as_object().unwrap();
+        assert!(source_obj.contains_key("source"));
+        assert_eq!(source_obj.get("source").unwrap(), "devcontainer-cli");
+
+        // features structure
+        let features_obj = obj.get("features").unwrap();
+        assert!(features_obj.is_object());
+        let features_map = features_obj.as_object().unwrap();
+        assert!(features_map.contains_key("test-feature"));
+
+        // Feature descriptor structure
+        let feature = features_map.get("test-feature").unwrap();
+        assert!(feature.is_object());
+        let feature_obj = feature.as_object().unwrap();
+
+        // Required fields for FeatureDescriptor
+        assert!(feature_obj.contains_key("id"));
+        assert!(feature_obj.contains_key("version"));
+        assert_eq!(feature_obj.get("id").unwrap(), "test-feature");
+        assert_eq!(feature_obj.get("version").unwrap(), "1.0.0");
+
+        // Optional fields
+        assert_eq!(feature_obj.get("name").unwrap(), "Test Feature");
+        assert_eq!(feature_obj.get("description").unwrap(), "A test feature");
+        assert!(feature_obj.contains_key("options"));
+        assert!(feature_obj.contains_key("installsAfter"));
+        assert!(feature_obj.contains_key("dependsOn"));
+    }
+
+    #[tokio::test]
+    async fn test_deterministic_packaging_single_feature() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature_dir = temp_dir.path().join("test-feature");
+        let output_dir1 = temp_dir.path().join("output1");
+        let output_dir2 = temp_dir.path().join("output2");
+
+        // Create output directories
+        fs::create_dir_all(&output_dir1).unwrap();
+        fs::create_dir_all(&output_dir2).unwrap();
+
+        // Create a test feature with some content
+        fs::create_dir_all(&feature_dir).unwrap();
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::write(
+            &json_path,
+            r#"{"id": "test-feature", "version": "1.0.0", "name": "Test Feature"}"#,
+        )
+        .unwrap();
+
+        // Create some test files with content
+        let install_script = feature_dir.join("install.sh");
+        fs::write(
+            &install_script,
+            "#!/bin/bash\necho 'Installing test feature'\n",
+        )
+        .unwrap();
+
+        let readme = feature_dir.join("README.md");
+        fs::write(
+            &readme,
+            "# Test Feature\n\nThis is a test feature for determinism.\n",
+        )
+        .unwrap();
+
+        // Package the feature twice to different output directories
+        let metadata = validate_single(&feature_dir).unwrap();
+        let (digest1, _, _) = create_feature_package(&feature_dir, &output_dir1, &metadata)
+            .await
+            .unwrap();
+        let (digest2, _, _) = create_feature_package(&feature_dir, &output_dir2, &metadata)
+            .await
+            .unwrap();
+
+        // Verify the digests are identical
+        assert_eq!(
+            digest1, digest2,
+            "SHA256 digests should be identical for deterministic packaging"
+        );
+
+        // Also verify the actual file contents are identical
+        let tar_path1 = output_dir1
+            .join(build_artifact_name("test-feature", &Some("1.0.0".to_string())).unwrap());
+        let tar_path2 = output_dir2
+            .join(build_artifact_name("test-feature", &Some("1.0.0".to_string())).unwrap());
+
+        let content1 = fs::read(&tar_path1).unwrap();
+        let content2 = fs::read(&tar_path2).unwrap();
+
+        assert_eq!(
+            content1, content2,
+            "Tar file contents should be byte-for-byte identical"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_deterministic_packaging_collection() {
+        let temp_dir = TempDir::new().unwrap();
+        let collection_dir = temp_dir.path().join("collection");
+        let src_dir = collection_dir.join("src");
+        let output_dir1 = temp_dir.path().join("output1");
+        let output_dir2 = temp_dir.path().join("output2");
+
+        // Create output directories
+        fs::create_dir_all(&output_dir1).unwrap();
+        fs::create_dir_all(&output_dir2).unwrap();
+
+        // Create collection structure
+        fs::create_dir_all(&src_dir).unwrap();
+
+        // Create first feature
+        let feature1_dir = src_dir.join("feature-a");
+        fs::create_dir_all(&feature1_dir).unwrap();
+        let json1_path = feature1_dir.join("devcontainer-feature.json");
+        fs::write(&json1_path, r#"{"id": "feature-a", "version": "1.0.0"}"#).unwrap();
+        let install1 = feature1_dir.join("install.sh");
+        fs::write(&install1, "#!/bin/bash\necho 'Feature A'\n").unwrap();
+
+        // Create second feature
+        let feature2_dir = src_dir.join("feature-b");
+        fs::create_dir_all(&feature2_dir).unwrap();
+        let json2_path = feature2_dir.join("devcontainer-feature.json");
+        fs::write(&json2_path, r#"{"id": "feature-b", "version": "2.0.0"}"#).unwrap();
+        let install2 = feature2_dir.join("install.sh");
+        fs::write(&install2, "#!/bin/bash\necho 'Feature B'\n").unwrap();
+
+        // Package the collection twice
+        let features = enumerate_and_validate_collection(&src_dir).unwrap();
+
+        // Package first feature twice
+        let (digest1_a, _, _) =
+            create_feature_package(&features[0].1, &output_dir1, &features[0].2)
+                .await
+                .unwrap();
+        let (digest2_a, _, _) =
+            create_feature_package(&features[0].1, &output_dir2, &features[0].2)
+                .await
+                .unwrap();
+        assert_eq!(
+            digest1_a, digest2_a,
+            "Feature A digests should be identical"
+        );
+
+        // Package second feature twice
+        let (digest1_b, _, _) =
+            create_feature_package(&features[1].1, &output_dir1, &features[1].2)
+                .await
+                .unwrap();
+        let (digest2_b, _, _) =
+            create_feature_package(&features[1].1, &output_dir2, &features[1].2)
+                .await
+                .unwrap();
+        assert_eq!(
+            digest1_b, digest2_b,
+            "Feature B digests should be identical"
+        );
+
+        // Verify file contents are identical
+        let tar_name_a = build_artifact_name("feature-a", &Some("1.0.0".to_string())).unwrap();
+        let tar_name_b = build_artifact_name("feature-b", &Some("2.0.0".to_string())).unwrap();
+
+        let content1_a = fs::read(output_dir1.join(&tar_name_a)).unwrap();
+        let content2_a = fs::read(output_dir2.join(&tar_name_a)).unwrap();
+        assert_eq!(
+            content1_a, content2_a,
+            "Feature A tar contents should be identical"
+        );
+
+        let content1_b = fs::read(output_dir1.join(&tar_name_b)).unwrap();
+        let content2_b = fs::read(output_dir2.join(&tar_name_b)).unwrap();
+        assert_eq!(
+            content1_b, content2_b,
+            "Feature B tar contents should be identical"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_feature_id_mixed_case() {
+        // Mixed case should be preserved (only invalid chars are replaced)
+        let result = sanitize_feature_id("MyFeature").unwrap();
+        assert_eq!(result, "MyFeature");
+    }
+
+    #[test]
+    fn test_sanitize_feature_id_invalid_chars_collapse() {
+        // Invalid characters should be replaced with hyphens
+        let result = sanitize_feature_id("my_feature@test").unwrap();
+        assert_eq!(result, "my-feature-test");
+
+        // Underscores should be converted to hyphens
+        let result = sanitize_feature_id("my_feature_name").unwrap();
+        assert_eq!(result, "my-feature-name");
+
+        // Multiple invalid chars should collapse to single hyphen
+        let result = sanitize_feature_id("my___feature").unwrap();
+        assert_eq!(result, "my-feature");
+
+        // Mixed invalid chars
+        let result = sanitize_feature_id("my@#$%feature").unwrap();
+        assert_eq!(result, "my-feature");
+    }
+
+    #[test]
+    fn test_sanitize_feature_id_leading_trailing_hyphens_trim() {
+        // Leading hyphens should be trimmed
+        let result = sanitize_feature_id("-my-feature").unwrap();
+        assert_eq!(result, "my-feature");
+
+        // Trailing hyphens should be trimmed
+        let result = sanitize_feature_id("my-feature-").unwrap();
+        assert_eq!(result, "my-feature");
+
+        // Both leading and trailing hyphens should be trimmed
+        let result = sanitize_feature_id("-my-feature-").unwrap();
+        assert_eq!(result, "my-feature");
+
+        // Multiple leading/trailing hyphens should be trimmed
+        let result = sanitize_feature_id("--my-feature--").unwrap();
+        assert_eq!(result, "my-feature");
+    }
+
+    #[test]
+    fn test_sanitize_feature_id_only_invalid_chars() {
+        // Feature ID that results in empty string after sanitization should error
+        let result = sanitize_feature_id("@@@");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("results in empty sanitized name"));
+        assert!(err_msg.contains("'@@@'"));
+    }
+
+    #[test]
+    fn test_sanitize_feature_id_only_hyphens() {
+        // Feature ID consisting only of hyphens should error
+        let result = sanitize_feature_id("---");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("results in empty sanitized name"));
+        assert!(err_msg.contains("'---'"));
+    }
+
+    #[test]
+    fn test_sanitize_feature_id_complex_case() {
+        // Complex case with mixed valid/invalid chars, underscores, and leading/trailing hyphens
+        let result = sanitize_feature_id("-my_complex@feature-name_").unwrap();
+        assert_eq!(result, "my-complex-feature-name");
+    }
+
+    #[test]
+    fn test_build_artifact_name_missing_version() {
+        // Missing version should result in error
+        let result = build_artifact_name("test-feature", &None);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("missing required version for artifact naming"));
+        assert!(err_msg.contains("'test-feature'"));
+    }
+
+    #[test]
+    fn test_build_artifact_name_with_version() {
+        // Valid case should produce correct artifact name
+        let result = build_artifact_name("my-feature", &Some("1.2.3".to_string())).unwrap();
+        assert_eq!(result, "my-feature-1.2.3.tgz");
+    }
+
+    #[test]
+    fn test_build_artifact_name_with_sanitization() {
+        // Feature ID should be sanitized in artifact name
+        let result = build_artifact_name("my@feature_name", &Some("1.0.0".to_string())).unwrap();
+        assert_eq!(result, "my-feature-name-1.0.0.tgz");
+    }
+
+    #[test]
+    fn test_build_artifact_name_empty_after_sanitization() {
+        // If sanitization results in empty string, should error
+        let result = build_artifact_name("@@@", &Some("1.0.0".to_string()));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("results in empty sanitized name"));
+    }
+
+    #[test]
+    fn test_create_feature_package_readonly_output_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature_dir = temp_dir.path().join("test-feature");
+        let output_dir = temp_dir.path().join("readonly-output");
+
+        // Create feature directory
+        fs::create_dir_all(&feature_dir).unwrap();
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::write(&json_path, r#"{"id": "test-feature", "version": "1.0.0"}"#).unwrap();
+        let install_path = feature_dir.join("install.sh");
+        fs::write(&install_path, "#!/bin/bash\necho 'test'").unwrap();
+
+        // Create output directory and make it read-only
+        fs::create_dir_all(&output_dir).unwrap();
+        let mut perms = fs::metadata(&output_dir).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o444); // Read-only
+            fs::set_permissions(&output_dir, perms).unwrap();
+        }
+
+        // Attempt to create package - should fail
+        let metadata = validate_single(&feature_dir).unwrap();
+        let result = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(create_feature_package(&feature_dir, &output_dir, &metadata));
+
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        // On Unix systems, this will be a permission denied error
+        #[cfg(unix)]
+        assert!(err_msg.contains("Permission denied") || err_msg.contains("permission"));
+        // On other systems, just check that it failed
+        #[cfg(not(unix))]
+        assert!(!err_msg.is_empty());
     }
 }

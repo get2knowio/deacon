@@ -380,10 +380,14 @@ pub enum FeatureCommands {
     /// Package features for distribution
     Package {
         /// Path to feature directory to package
+        #[arg(default_value = ".")]
         path: String,
         /// Output directory for the package
-        #[arg(long)]
+        #[arg(long, default_value = "./output")]
         output: String,
+        /// Force clean output folder before writing artifacts
+        #[arg(long)]
+        force_clean_output_folder: bool,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -438,11 +442,15 @@ pub enum FeatureCommands {
         json: bool,
     },
     /// Generate feature installation plan
+    ///
+    /// Note: Variable substitution is not performed during planning; feature IDs are treated as opaque strings;
+    /// option values pass through unchanged and are not normalized or transformed.
     Plan {
         /// Output in JSON format
         #[arg(long, default_value_t = true, action = ArgAction::Set)]
         json: bool,
-        /// Additional features to install (JSON map of id -> value/options)
+        /// Additional features to install (JSON object map of id -> value/options)
+        /// Accepts a JSON object like {"ghcr.io/devcontainers/node": "18", "git": true}
         #[arg(long)]
         additional_features: Option<String>,
     },
@@ -982,6 +990,15 @@ impl Cli {
             }
             Some(Commands::Features { command }) => {
                 use crate::commands::features::{execute_features, FeaturesArgs};
+
+                // Check for unsupported JSON output mode on package command
+                if let crate::cli::FeatureCommands::Package { .. } = &command {
+                    if matches!(self.log_format, Some(LogFormat::Json)) {
+                        return Err(anyhow::anyhow!(
+                            "JSON output is not supported for features package"
+                        ));
+                    }
+                }
 
                 let args = FeaturesArgs {
                     command,

@@ -1,0 +1,5 @@
+{
+	"name": "Features Plan — Empty Example",
+	"image": "mcr.microsoft.com/devcontainers/base:alpine",
+	"features": {}
+}
