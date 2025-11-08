@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+# Disable automatic test discovery to prevent support module from being treated as a test
+autotests = false
+
 [dependencies]
 deacon-core.workspace = true
 clap.workspace = true
@@ -34,3 +37,216 @@ tempfile = "3.12"
 serial_test = "3"
 zip = "2.4"
 serde_json = "1.0"
+
+# Explicit test targets (autotests = false to exclude support/ directory)
+[[test]]
+name = "cli_flags_features_info"
+path = "tests/cli_flags_features_info.rs"
+
+[[test]]
+name = "integration_build"
+path = "tests/integration_build.rs"
+
+[[test]]
+name = "integration_build_args"
+path = "tests/integration_build_args.rs"
+
+[[test]]
+name = "integration_cli"
+path = "tests/integration_cli.rs"
+
+[[test]]
+name = "integration_compose_enhancements"
+path = "tests/integration_compose_enhancements.rs"
+
+[[test]]
+name = "integration_custom_container_name"
+path = "tests/integration_custom_container_name.rs"
+
+[[test]]
+name = "integration_doctor"
+path = "tests/integration_doctor.rs"
+
+[[test]]
+name = "integration_down"
+path = "tests/integration_down.rs"
+
+[[test]]
+name = "integration_e2e"
+path = "tests/integration_e2e.rs"
+
+[[test]]
+name = "integration_exec"
+path = "tests/integration_exec.rs"
+
+[[test]]
+name = "integration_exec_id_label"
+path = "tests/integration_exec_id_label.rs"
+
+[[test]]
+name = "integration_features_info_auth"
+path = "tests/integration_features_info_auth.rs"
+
+[[test]]
+name = "integration_features_info_dependencies"
+path = "tests/integration_features_info_dependencies.rs"
+
+[[test]]
+name = "integration_features_info_local"
+path = "tests/integration_features_info_local.rs"
+
+[[test]]
+name = "integration_features_info_manifest"
+path = "tests/integration_features_info_manifest.rs"
+
+[[test]]
+name = "integration_features_info_tags"
+path = "tests/integration_features_info_tags.rs"
+
+[[test]]
+name = "integration_features_info_verbose"
+path = "tests/integration_features_info_verbose.rs"
+
+[[test]]
+name = "integration_features_package"
+path = "tests/integration_features_package.rs"
+
+[[test]]
+name = "integration_features_publish"
+path = "tests/integration_features_publish.rs"
+
+[[test]]
+name = "integration_host_requirements"
+path = "tests/integration_host_requirements.rs"
+
+[[test]]
+name = "integration_override_secrets_cli"
+path = "tests/integration_override_secrets_cli.rs"
+
+[[test]]
+name = "integration_port_forwarding"
+path = "tests/integration_port_forwarding.rs"
+
+[[test]]
+name = "integration_progress"
+path = "tests/integration_progress.rs"
+
+[[test]]
+name = "integration_read_configuration"
+path = "tests/integration_read_configuration.rs"
+
+[[test]]
+name = "integration_read_configuration_output"
+path = "tests/integration_read_configuration_output.rs"
+
+[[test]]
+name = "integration_runtime_selection"
+path = "tests/integration_runtime_selection.rs"
+
+[[test]]
+name = "integration_template_apply"
+path = "tests/integration_template_apply.rs"
+
+[[test]]
+name = "integration_up_initialize_command"
+path = "tests/integration_up_initialize_command.rs"
+
+[[test]]
+name = "integration_up_traditional"
+path = "tests/integration_up_traditional.rs"
+
+[[test]]
+name = "integration_vulnerability_scan"
+path = "tests/integration_vulnerability_scan.rs"
+
+[[test]]
+name = "json_output_purity"
+path = "tests/json_output_purity.rs"
+
+[[test]]
+name = "parity_build"
+path = "tests/parity_build.rs"
+
+[[test]]
+name = "parity_exec"
+path = "tests/parity_exec.rs"
+
+[[test]]
+name = "parity_read_configuration"
+path = "tests/parity_read_configuration.rs"
+
+[[test]]
+name = "parity_up_exec"
+path = "tests/parity_up_exec.rs"
+
+[[test]]
+name = "parity_utils"
+path = "tests/parity_utils.rs"
+
+[[test]]
+name = "runtime_unavailable_integration"
+path = "tests/runtime_unavailable_integration.rs"
+
+[[test]]
+name = "smoke_basic"
+path = "tests/smoke_basic.rs"
+
+[[test]]
+name = "smoke_compose_edges"
+path = "tests/smoke_compose_edges.rs"
+
+[[test]]
+name = "smoke_doctor_text"
+path = "tests/smoke_doctor_text.rs"
+
+[[test]]
+name = "smoke_down"
+path = "tests/smoke_down.rs"
+
+[[test]]
+name = "smoke_exec"
+path = "tests/smoke_exec.rs"
+
+[[test]]
+name = "smoke_exec_stdin"
+path = "tests/smoke_exec_stdin.rs"
+
+[[test]]
+name = "smoke_lifecycle"
+path = "tests/smoke_lifecycle.rs"
+
+[[test]]
+name = "smoke_run_user_commands"
+path = "tests/smoke_run_user_commands.rs"
+
+[[test]]
+name = "smoke_spinner"
+path = "tests/smoke_spinner.rs"
+
+[[test]]
+name = "smoke_up_idempotent"
+path = "tests/smoke_up_idempotent.rs"
+
+[[test]]
+name = "test_additional_features"
+path = "tests/test_additional_features.rs"
+
+[[test]]
+name = "test_features_cli"
+path = "tests/test_features_cli.rs"
+
+[[test]]
+name = "test_read_configuration_validation"
+path = "tests/test_read_configuration_validation.rs"
+
+[[test]]
+name = "test_templates_cli"
+path = "tests/test_templates_cli.rs"
+
+[[test]]
+name = "test_utils"
+path = "tests/test_utils.rs"
+
+[[test]]
+name = "unit_features_package"
+path = "tests/unit_features_package.rs"
