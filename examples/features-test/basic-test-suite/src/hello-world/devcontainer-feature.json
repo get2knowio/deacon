@@ -1,0 +1,13 @@
+{
+  "id": "hello-world",
+  "version": "1.0.0",
+  "name": "Hello World Feature",
+  "description": "A simple greeting feature for testing",
+  "options": {
+    "greeting": {
+      "type": "string",
+      "default": "Hello",
+      "description": "The greeting message to use"
+    }
+  }
+}
