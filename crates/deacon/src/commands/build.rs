@@ -1935,9 +1935,46 @@ mod tests {
             ..BuildArgs::default()
         };
 
-        // When buildkit is None, should_use_buildkit respects DOCKER_BUILDKIT env var
-        // We just verify the args are set up correctly; actual behavior depends on env
         assert!(!args_with_ssh.ssh.is_empty());
+        assert_eq!(args_with_ssh.buildkit, None);
+
+        // Test behavior with DOCKER_BUILDKIT unset (should default to false)
+        std::env::remove_var("DOCKER_BUILDKIT");
+        assert!(
+            !should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+            "should_use_buildkit should return false when DOCKER_BUILDKIT is unset and buildkit is None"
+        );
+
+        // Test behavior with DOCKER_BUILDKIT=1 (should return true)
+        std::env::set_var("DOCKER_BUILDKIT", "1");
+        assert!(
+            should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+            "should_use_buildkit should return true when DOCKER_BUILDKIT=1 and buildkit is None"
+        );
+
+        // Test behavior with DOCKER_BUILDKIT=true (should return true)
+        std::env::set_var("DOCKER_BUILDKIT", "true");
+        assert!(
+            should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+            "should_use_buildkit should return true when DOCKER_BUILDKIT=true and buildkit is None"
+        );
+
+        // Test behavior with DOCKER_BUILDKIT=0 (should return false)
+        std::env::set_var("DOCKER_BUILDKIT", "0");
+        assert!(
+            !should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+            "should_use_buildkit should return false when DOCKER_BUILDKIT=0 and buildkit is None"
+        );
+
+        // Test behavior with DOCKER_BUILDKIT=false (should return false)
+        std::env::set_var("DOCKER_BUILDKIT", "false");
+        assert!(
+            !should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+            "should_use_buildkit should return false when DOCKER_BUILDKIT=false and buildkit is None"
+        );
+
+        // Clean up - remove the env var
+        std::env::remove_var("DOCKER_BUILDKIT");
 
         // Test explicit Never option with SSH
         let args_ssh_never = BuildArgs {

@@ -2396,15 +2396,15 @@ fn output_verbose_info_aggregated(
             // Output all three boxed sections
             // 1. Manifest section
             if let Some(manifest) = manifest {
-                if let Some(canonical_id) = canonical_id {
-                    println!(
-                        "{}",
-                        boxed_section("Manifest", &serde_json::to_string_pretty(manifest)?)
-                    );
-                    println!();
-                    println!("{}", boxed_section("Canonical Identifier", canonical_id));
-                    println!();
-                }
+                println!(
+                    "{}",
+                    boxed_section("Manifest", &serde_json::to_string_pretty(manifest)?)
+                );
+                println!();
+            }
+            if let Some(canonical_id) = canonical_id {
+                println!("{}", boxed_section("Canonical Identifier", canonical_id));
+                println!();
             }
 
             // 2. Published Tags section

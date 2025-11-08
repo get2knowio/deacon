@@ -15,6 +15,7 @@ use tokio::time::sleep;
 #[derive(Debug, Clone)]
 pub struct SlowMockHttpClient {
     responses: Arc<Mutex<HashMap<String, (Duration, Bytes)>>>,
+    responses_with_headers: Arc<Mutex<HashMap<String, (Duration, HttpResponse)>>>,
 }
 
 impl Default for SlowMockHttpClient {
@@ -27,12 +28,24 @@ impl SlowMockHttpClient {
     pub fn new() -> Self {
         Self {
             responses: Arc::new(Mutex::new(HashMap::new())),
+            responses_with_headers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     /// Add a response that will be delayed by the specified duration
     pub async fn add_slow_response(&self, url: String, delay: Duration, response: Bytes) {
         let mut responses = self.responses.lock().await;
+        responses.insert(url, (delay, response));
+    }
+
+    /// Add a response with headers that will be delayed by the specified duration
+    pub async fn add_slow_response_with_headers(
+        &self,
+        url: String,
+        delay: Duration,
+        response: HttpResponse,
+    ) {
+        let mut responses = self.responses_with_headers.lock().await;
         responses.insert(url, (delay, response));
     }
 }
@@ -65,15 +78,28 @@ impl HttpClient for SlowMockHttpClient {
     async fn get_with_headers_and_response(
         &self,
         url: &str,
-        headers: HashMap<String, String>,
+        _headers: HashMap<String, String>,
     ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
-        self.get_with_headers(url, headers)
-            .await
-            .map(|body| HttpResponse {
+        // Check for responses with headers first
+        let responses_with_headers = self.responses_with_headers.lock().await;
+        if let Some((delay, response)) = responses_with_headers.get(url) {
+            sleep(*delay).await;
+            return Ok(response.clone());
+        }
+        drop(responses_with_headers);
+
+        // Fall back to regular responses without headers
+        let responses = self.responses.lock().await;
+        if let Some((delay, body)) = responses.get(url) {
+            sleep(*delay).await;
+            return Ok(HttpResponse {
                 status: 200,
                 headers: HashMap::new(),
-                body,
-            })
+                body: body.clone(),
+            });
+        }
+
+        Err(format!("No mock response for URL: {}", url).into())
     }
 
     async fn head(
@@ -287,7 +313,7 @@ async fn test_pagination_timeout_accumulation() {
     // Test that multiple paginated requests don't accumulate timeouts beyond reasonable limits
     let client = SlowMockHttpClient::new();
 
-    // Set up multiple pages that each take 2 seconds (within individual timeout but could accumulate)
+    // Set up multiple pages with Link headers for proper pagination
     for page in 0..5 {
         let tags_url = if page == 0 {
             "https://test.registry/v2/test/feature/tags/list".to_string()
@@ -303,13 +329,39 @@ async fn test_pagination_timeout_accumulation() {
             "tags": [format!("{}.0.0", page), format!("{}.1.0", page)]
         });
 
-        client
-            .add_slow_response(
-                tags_url,
-                Duration::from_secs(2),
-                Bytes::from(tags_response.to_string()),
-            )
-            .await;
+        // For pages 0-3, add Link header to next page
+        if page < 4 {
+            let next_page = page + 1;
+            let next_url = format!(
+                "https://test.registry/v2/test/feature/tags/list?page={}",
+                next_page
+            );
+            let link_header = format!("<{}>; rel=\"next\"", next_url);
+
+            let mut headers = HashMap::new();
+            headers.insert("Link".to_string(), link_header);
+
+            client
+                .add_slow_response_with_headers(
+                    tags_url,
+                    Duration::from_secs(2),
+                    HttpResponse {
+                        status: 200,
+                        headers,
+                        body: Bytes::from(tags_response.to_string()),
+                    },
+                )
+                .await;
+        } else {
+            // Last page - no Link header
+            client
+                .add_slow_response(
+                    tags_url,
+                    Duration::from_secs(2),
+                    Bytes::from(tags_response.to_string()),
+                )
+                .await;
+        }
     }
 
     let fetcher = FeatureFetcher::new(client);
