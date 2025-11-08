@@ -1,0 +1,9 @@
+{
+  "name": "multi-sample-collection",
+  "version": "0.1.0",
+  "features": [
+    { "id": "alpha", "path": "features/alpha" },
+    { "id": "beta", "path": "features/beta" }
+  ],
+  "documentationURL": "https://example.com/multi-collection"
+}

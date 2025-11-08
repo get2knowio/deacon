@@ -1,0 +1,7 @@
+{
+  "id": "sample-feature",
+  "version": "1.2.3",
+  "name": "Sample Feature",
+  "description": "A minimal feature used in publish examples",
+  "documentationURL": "https://example.com/sample-feature"
+}

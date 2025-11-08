@@ -347,6 +347,24 @@ impl FeatureMetadata {
 }
 
 /// Parse feature metadata from a devcontainer-feature.json file
+///
+/// This function only parses the JSON structure from the file. **Callers are responsible
+/// for validating the returned metadata** by calling [`FeatureMetadata::validate()`] before
+/// using it in production code paths.
+///
+/// # Example
+/// ```no_run
+/// use deacon_core::features::parse_feature_metadata;
+/// use std::path::Path;
+///
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let path = Path::new("devcontainer-feature.json");
+/// let metadata = parse_feature_metadata(path)?;
+/// // Always validate before use
+/// metadata.validate()?;
+/// # Ok(())
+/// # }
+/// ```
 #[instrument(level = "debug")]
 pub fn parse_feature_metadata(path: &Path) -> Result<FeatureMetadata> {
     debug!("Parsing feature metadata from: {}", path.display());
@@ -369,7 +387,7 @@ pub fn parse_feature_metadata(path: &Path) -> Result<FeatureMetadata> {
         })?;
 
     debug!(
-        "Parsed feature: id={}, name={:?}",
+        "Parsed feature: id={:?}, name={:?}",
         metadata.id, metadata.name
     );
 
@@ -383,8 +401,8 @@ pub fn parse_feature_metadata(path: &Path) -> Result<FeatureMetadata> {
         debug!("Feature has lifecycle commands");
     }
 
-    // Validate metadata
-    metadata.validate()?;
+    // Note: Validation is now done separately by the caller
+    // metadata.validate()?;
 
     Ok(metadata)
 }
@@ -1511,11 +1529,13 @@ mod tests {
         temp_file.write_all(invalid_feature.as_bytes()).unwrap();
 
         let result = parse_feature_metadata(temp_file.path());
-        assert!(result.is_err());
+        assert!(result.is_ok()); // Parsing should succeed
 
-        if let Err(crate::errors::DeaconError::Feature(FeatureError::Validation { message })) =
-            result
-        {
+        let metadata = result.unwrap();
+        let validation_result = metadata.validate();
+        assert!(validation_result.is_err());
+
+        if let Err(FeatureError::Validation { message }) = validation_result {
             assert!(message.contains("Feature id is required"));
         } else {
             panic!("Expected validation error for empty id");

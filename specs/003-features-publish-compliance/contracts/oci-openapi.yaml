@@ -1,0 +1,124 @@
+openapi: 3.0.3
+info:
+  title: OCI Registry Interactions for Features Publish
+  version: 0.1.0
+  description: Minimal subset of OCI Distribution Spec v2 used by `features publish`.
+servers:
+  - url: https://{registry}
+    variables:
+      registry:
+        default: ghcr.io
+paths:
+  /v2/{name}/tags/list:
+    get:
+      summary: List tags for repository
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: n
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: last
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  tags:
+                    type: array
+                    items:
+                      type: string
+  /v2/{name}/blobs/{digest}:
+    head:
+      summary: Check if blob exists
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: digest
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200': { description: Exists }
+        '404': { description: Not found }
+  /v2/{name}/blobs/uploads/:
+    post:
+      summary: Initiate blob upload
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Accepted; Location header indicates upload URL
+          headers:
+            Location:
+              schema:
+                type: string
+  /v2/{name}/blobs/uploads/{uuid}:
+    put:
+      summary: Complete blob upload
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: digest
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '201': { description: Created }
+        '204': { description: No Content }
+  /v2/{name}/manifests/{reference}:
+    put:
+      summary: Put manifest by tag
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: reference
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/vnd.oci.image.manifest.v1+json: { schema: { type: object } }
+          application/vnd.docker.distribution.manifest.v2+json: { schema: { type: object } }
+      responses:
+        '201': { description: Created }
+        '202': { description: Accepted }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '404': { description: Not found }

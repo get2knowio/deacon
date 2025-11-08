@@ -401,12 +401,23 @@ pub enum FeatureCommands {
         json: bool,
     },
     /// Publish features to registry
+    ///
+    /// Publishes a packaged feature to an OCI registry with semantic tags.
+    /// Requires --namespace flag to specify the target namespace (owner/repo format).
+    ///
+    /// Authentication can be provided via environment variables:
+    /// - DEACON_REGISTRY_TOKEN: Bearer token authentication
+    /// - DEACON_REGISTRY_USER + DEACON_REGISTRY_PASS: Basic authentication
+    /// - Docker config.json credentials are also supported
     Publish {
         /// Path to feature directory to publish
         path: String,
         /// Target registry URL
-        #[arg(long)]
+        #[arg(long, default_value = "ghcr.io")]
         registry: String,
+        /// Target namespace (owner/repo format)
+        #[arg(long)]
+        namespace: String,
         /// Dry run (don't actually publish)
         #[arg(long)]
         dry_run: bool,

@@ -10,6 +10,9 @@
 //! - [`docs/subcommand-specs/features-plan/DATA-STRUCTURES.md`](../docs/subcommand-specs/features-plan/DATA-STRUCTURES.md)
 
 use crate::cli::FeatureCommands;
+use crate::commands::features_publish_output::{
+    PublishCollectionResult, PublishFeatureResult, PublishOutput, PublishSummary,
+};
 use anyhow::{Context, Result};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::errors::{DeaconError, FeatureError};
@@ -20,12 +23,12 @@ use deacon_core::features::{
 use deacon_core::observability::{feature_plan_span, TimedSpan};
 use deacon_core::oci::{default_fetcher, FeatureRef};
 use deacon_core::registry_parser::parse_registry_reference;
-use futures::stream::{self, StreamExt};
+use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile;
-use tracing::{debug, info};
+use tracing::{debug, info, Instrument};
 
 /// Packaging mode for feature detection and processing.
 ///
@@ -737,20 +740,23 @@ pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
         FeatureCommands::Publish {
             path,
             registry,
+            namespace,
             dry_run,
             json,
             username,
             password_stdin,
         } => {
-            execute_features_publish(
+            let output = execute_features_publish(
                 &path,
                 &registry,
+                &namespace,
                 dry_run,
-                json,
                 username.as_deref(),
                 password_stdin,
             )
-            .await
+            .await?;
+            output_publish_result(&output, json)?;
+            Ok(())
         }
         FeatureCommands::Info {
             mode,
@@ -1224,6 +1230,11 @@ async fn execute_features_test(path: &str, json: bool) -> Result<()> {
     let metadata = parse_feature_metadata(&metadata_path)
         .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
 
+    // Validate the metadata
+    metadata
+        .validate()
+        .map_err(|e| anyhow::anyhow!("Invalid feature metadata: {}", e))?;
+
     info!(
         "Testing feature: {} ({})",
         metadata.id,
@@ -1523,15 +1534,96 @@ async fn execute_features_pull(registry_ref: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Execute features publish command
-async fn execute_features_publish(
+/// Publishes a DevContainer feature to an OCI registry.
+///
+/// This function packages and publishes a DevContainer feature from the local filesystem
+/// to an OCI-compliant registry following the DevContainer Feature Distribution specification.
+/// It validates the feature metadata, creates a feature package (tarball), computes semantic
+/// version tags, and publishes the feature along with optional collection metadata.
+///
+/// # Parameters
+///
+/// * `path` - Path to the feature directory containing `devcontainer-feature.json`.
+///   The directory must contain valid feature metadata and all required files.
+/// * `registry` - Target OCI registry URL (e.g., `"ghcr.io"`, `"registry.example.com"`).
+///   Must be accessible and support OCI Distribution Spec v2.
+/// * `namespace` - Registry namespace/organization under which to publish
+///   (e.g., `"myorg/features"`, `"username"`).
+/// * `dry_run` - If `true`, validates the feature but skips actual publishing.
+///   Useful for testing without modifying the registry.
+/// * `username` - Optional username for registry authentication. Currently reserved
+///   for future use; authentication is not yet implemented.
+/// * `password_stdin` - If `true`, reads password from stdin for authentication.
+///   Currently reserved for future use; authentication is not yet implemented.
+///
+/// # Returns
+///
+/// Returns `Ok(PublishOutput)` containing:
+/// - Published feature details (ID, version, digest, tags)
+/// - Optional collection metadata result
+/// - Summary statistics (features count, published/skipped tags)
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Feature metadata file (`devcontainer-feature.json`) is missing or invalid
+/// - Feature metadata validation fails (invalid schema or required fields)
+/// - Feature version is missing or not a valid semantic version (SemVer)
+/// - Temporary directory creation fails during packaging
+/// - Feature packaging (tarball creation) fails
+/// - Registry operations fail (network issues, permissions, authentication)
+/// - Collection metadata file is present but contains invalid JSON
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use deacon::commands::features::execute_features_publish;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let result = execute_features_publish(
+///     "./my-feature",           // Feature directory
+///     "ghcr.io",                // Registry
+///     "myorg/features",         // Namespace
+///     false,                    // Dry run
+///     None,                     // Username (not yet implemented)
+///     false,                    // Password stdin (not yet implemented)
+/// ).await?;
+///
+/// println!("Published {} feature(s)", result.summary.features);
+/// println!("Published tags: {}", result.summary.published_tags);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Notes
+///
+/// - The function automatically computes semantic version tags (e.g., `1`, `1.2`, `1.2.3`,
+///   and `latest` for stable versions) based on the feature's version field.
+/// - If all desired tags already exist in the registry, publishing is skipped to avoid
+///   redundant operations.
+/// - Collection metadata (`devcontainer-collection.json`) is automatically published if
+///   present in the feature directory.
+/// - Comprehensive tracing spans are emitted for observability and debugging.
+#[tracing::instrument(
+    name = "features.publish",
+    fields(
+        path = %path,
+        registry = %registry,
+        namespace = %namespace,
+        dry_run = %dry_run,
+        username = ?username,
+        password_stdin = %password_stdin
+    ),
+    skip_all
+)]
+pub async fn execute_features_publish(
     path: &str,
     registry: &str,
+    namespace: &str,
     dry_run: bool,
-    json: bool,
     username: Option<&str>,
     password_stdin: bool,
-) -> Result<()> {
+) -> Result<PublishOutput> {
     debug!(
         "Publishing feature at path: {} to registry: {} (dry_run: {})",
         path, registry, dry_run
@@ -1551,8 +1643,17 @@ async fn execute_features_publish(
 
     // Parse feature metadata
     let metadata_path = feature_path.join("devcontainer-feature.json");
-    let metadata = parse_feature_metadata(&metadata_path)
-        .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
+    let metadata = match parse_feature_metadata(&metadata_path) {
+        Ok(m) => m,
+        Err(_) => {
+            anyhow::bail!("No valid feature found at path '{}'. Ensure 'devcontainer-feature.json' exists and contains valid feature metadata", path);
+        }
+    };
+
+    // Validate the metadata
+    if metadata.validate().is_err() {
+        anyhow::bail!("Feature metadata validation failed for '{}'. Check the 'devcontainer-feature.json' file for errors", metadata.id);
+    }
 
     info!(
         "Publishing feature: {} ({})",
@@ -1560,70 +1661,291 @@ async fn execute_features_publish(
         metadata.name.as_deref().unwrap_or("No name")
     );
 
-    if dry_run {
-        info!("Dry run mode - would publish to registry: {}", registry);
+    // Validate feature version is SemVer
+    let version = metadata.version.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("Feature version is required for publishing. Please specify a version in devcontainer-feature.json under the 'version' field")
+    })?;
 
-        let result = FeaturesResult {
-            command: "publish".to_string(),
-            status: "success".to_string(),
-            digest: Some(
-                "sha256:dryrun0000000000000000000000000000000000000000000000000000000000"
-                    .to_string(),
-            ),
-            size: None,
-            message: Some(format!("Dry run completed - would publish to {}", registry)),
-            cache_path: None,
-        };
-
-        output_result(&result, json)?;
-        return Ok(());
+    // Validate the version is valid SemVer
+    use deacon_core::semver_utils;
+    if semver_utils::parse_version(version).is_none() {
+        anyhow::bail!("Invalid semantic version '{}' for feature '{}'. Version must be a valid SemVer format (e.g., '1.2.3', '2.0.0-rc.1'). Check https://semver.org/ for details", version, metadata.id);
     }
 
-    // Parse registry reference from the registry parameter
-    // Format: [registry]/[namespace]/[name]:[tag]
-    let (registry_url, namespace, name, tag) = parse_registry_reference(registry)?;
+    if dry_run {
+        info!(
+            "Dry run mode - would publish to registry: {} namespace: {}",
+            registry, namespace
+        );
+
+        let output = PublishOutput {
+            features: vec![],
+            collection: None,
+            summary: PublishSummary {
+                features: 0,
+                published_tags: 0,
+                skipped_tags: 0,
+            },
+        };
+
+        return Ok(output);
+    }
+
+    // Create OCI client for tag listing and publishing
+    let fetcher = {
+        let span = tracing::info_span!("oci.client.create");
+        let _enter = span.enter();
+        default_fetcher().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create OCI registry client: {}. Check your network connection and registry authentication",
+                e
+            )
+        })?
+    };
+
+    // Use the provided registry and namespace, with feature name from metadata
+    let registry_url = registry.to_string();
+    let name = metadata.id.clone();
+    let tag = Some(version.to_string()); // Use validated version as tag
 
     let feature_ref = FeatureRef::new(
         registry_url.clone(),
-        namespace.clone(),
+        namespace.to_string(),
         name.clone(),
         tag.clone(),
     );
 
-    // Create feature package
-    let temp_dir = tempfile::tempdir()?;
-    let (_digest, tar_filename, _size) =
-        create_feature_package(feature_path, temp_dir.path(), &metadata).await?;
-
-    // Read the created tar file for publishing
-    let tar_path = temp_dir.path().join(tar_filename);
-    let tar_data = std::fs::read(&tar_path)?;
-
-    // Create OCI client and publish to registry
-    let fetcher =
-        default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
-
-    info!("Publishing to OCI registry: {}", feature_ref.reference());
-    let publish_result = fetcher
-        .publish_feature(&feature_ref, tar_data.into(), &metadata)
+    // Compute publish plan: determine which tags need to be published
+    let span = tracing::info_span!("publish.plan.compute");
+    let (desired_tags, existing_tags, to_publish_tags) = compute_publish_plan(&fetcher, &feature_ref, version)
+        .instrument(span)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to publish feature: {}", e))?;
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to determine publish plan for feature '{}': {}. This may be due to network issues or registry permissions",
+                metadata.id,
+                e
+            )
+        })?;
 
-    let result = FeaturesResult {
-        command: "publish".to_string(),
-        status: "success".to_string(),
-        digest: Some(publish_result.digest),
-        size: Some(publish_result.size),
-        message: Some(format!(
-            "Successfully published {} to {}",
-            feature_ref.reference(),
-            registry_url
-        )),
-        cache_path: None,
+    info!(
+        "Publish plan: {} desired tags, {} existing tags, {} to publish",
+        desired_tags.len(),
+        existing_tags.len(),
+        to_publish_tags.len()
+    );
+
+    // Create feature package to get digest (needed even if all tags exist)
+    let temp_dir = {
+        let span = tracing::info_span!("feature.package.create");
+        let _enter = span.enter();
+        tempfile::tempdir().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create temporary directory for feature packaging: {}",
+                e
+            )
+        })?
     };
 
-    output_result(&result, json)?;
-    Ok(())
+    let span = tracing::info_span!("feature.package.build", feature_id = %metadata.id);
+    let (digest, _tar_filename, _size) = create_feature_package(feature_path, temp_dir.path(), &metadata)
+        .instrument(span)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create feature package for '{}': {}. Check that all required files exist in the feature directory",
+                metadata.id,
+                e
+            )
+        })?;
+
+    if !to_publish_tags.is_empty() {
+        // Publish with multiple tags if needed
+        let package_data = std::fs::read(temp_dir.path().join(_tar_filename))
+            .map_err(|e| anyhow::anyhow!("Failed to read packaged feature file: {}", e))?
+            .into();
+
+        let span = tracing::info_span!("feature.publish.multi_tag", tags = ?to_publish_tags);
+        let _results = fetcher
+            .publish_feature_multi_tag(
+                registry_url.clone(),
+                namespace.to_string(),
+                name.clone(),
+                to_publish_tags.clone(),
+                package_data,
+                &metadata,
+            )
+            .instrument(span)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to publish feature '{}' to registry '{}': {}. Check your registry permissions and network connection",
+                    metadata.id,
+                    registry_url,
+                    e
+                )
+            })?;
+
+        info!(
+            "Successfully published {} tags for {}/{}",
+            _results.len(),
+            registry_url,
+            namespace
+        );
+    } else {
+        info!("All desired tags already exist, skipping publish");
+    }
+
+    // Construct PublishFeatureResult
+    let published_tags = to_publish_tags.clone();
+    let skipped_tags: Vec<String> = desired_tags
+        .iter()
+        .filter(|tag| !to_publish_tags.contains(tag))
+        .cloned()
+        .collect();
+    let moved_latest = published_tags.contains(&"latest".to_string());
+
+    let feature_result = PublishFeatureResult {
+        feature_id: metadata.id.clone(),
+        version: version.to_string(),
+        digest: digest.clone(),
+        published_tags,
+        skipped_tags: skipped_tags.clone(),
+        moved_latest,
+        registry: registry_url.clone(),
+        namespace: namespace.to_string(),
+    };
+
+    // Check for and publish collection metadata if present
+    let collection_result = {
+        let collection_path = feature_path.join("devcontainer-collection.json");
+        if collection_path.exists() {
+            info!(
+                "Found collection metadata at: {}",
+                collection_path.display()
+            );
+
+            // Read collection metadata
+            let collection_content = {
+                let span = tracing::info_span!("collection.metadata.read");
+                let _enter = span.enter();
+                std::fs::read_to_string(&collection_path).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to read collection metadata file '{}': {}",
+                        collection_path.display(),
+                        e
+                    )
+                })?
+            };
+
+            // Parse as JSON to validate
+            {
+                let span = tracing::info_span!("collection.metadata.validate");
+                let _enter = span.enter();
+                let _: serde_json::Value =
+                    serde_json::from_str(&collection_content).map_err(|e| {
+                        anyhow::anyhow!(
+                        "Invalid JSON in collection metadata file '{}': {}. Check the file syntax",
+                        collection_path.display(),
+                        e
+                    )
+                    })?;
+            }
+
+            // Publish collection metadata
+            let span = tracing::info_span!("collection.metadata.publish");
+            let collection_digest = fetcher
+                .publish_collection_metadata(
+                    &registry_url,
+                    namespace,
+                    collection_content.into_bytes().into(),
+                )
+                .instrument(span)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to publish collection metadata to registry '{}': {}. Check your registry permissions",
+                        registry_url,
+                        e
+                    )
+                })?;
+
+            info!(
+                "Successfully published collection metadata with digest: {}",
+                collection_digest
+            );
+
+            Some(PublishCollectionResult {
+                digest: collection_digest,
+            })
+        } else {
+            info!("No collection metadata found (devcontainer-collection.json not present)");
+            None
+        }
+    };
+
+    let output = PublishOutput {
+        features: vec![feature_result],
+        collection: collection_result,
+        summary: PublishSummary {
+            features: 1,
+            published_tags: to_publish_tags.len(),
+            skipped_tags: skipped_tags.len(),
+        },
+    };
+
+    Ok(output)
+}
+
+/// Compute tags to publish by comparing desired tags against existing tags from registry
+///
+/// This function determines which semantic version tags need to be published by:
+/// 1. Computing desired tags from the feature version (X, X.Y, X.Y.Z, latest for stable)
+/// 2. Listing existing tags from the registry
+/// 3. Returning the difference (tags that don't exist yet)
+///
+/// # Arguments
+/// * `fetcher` - OCI client for registry operations
+/// * `feature_ref` - Reference to the feature repository
+/// * `version` - Feature version string (must be valid SemVer)
+///
+/// # Returns
+/// A tuple of (desired_tags, existing_tags, to_publish_tags)
+///
+/// # Errors
+/// Returns an error if the version is invalid or registry operations fail
+async fn compute_publish_plan(
+    fetcher: &deacon_core::oci::FeatureFetcher<deacon_core::oci::ReqwestClient>,
+    feature_ref: &deacon_core::oci::FeatureRef,
+    version: &str,
+) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
+    use deacon_core::semver_utils;
+
+    // Compute desired tags from version
+    let desired_tags = semver_utils::compute_semantic_tags(version);
+
+    // List existing tags from registry
+    let span = tracing::info_span!("registry.tags.list", registry = %feature_ref.registry, namespace = %feature_ref.namespace, name = %feature_ref.name);
+    let existing_tags = fetcher
+        .list_tags(feature_ref)
+        .instrument(span)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to list existing tags from registry '{}': {}. Check your network connection and registry permissions",
+                feature_ref.registry,
+                e
+            )
+        })?;
+
+    // Compute tags that need to be published (desired - existing)
+    let to_publish: Vec<String> = desired_tags
+        .iter()
+        .filter(|tag| !existing_tags.contains(tag))
+        .cloned()
+        .collect();
+
+    Ok((desired_tags, existing_tags, to_publish))
 }
 
 /// Execute features info command
@@ -1641,6 +1963,11 @@ async fn execute_features_info(mode: &str, feature: &str, json: bool) -> Result<
         let metadata_path = feature_path.join("devcontainer-feature.json");
         let metadata = parse_feature_metadata(&metadata_path)
             .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
+
+        // Validate the metadata
+        metadata
+            .validate()
+            .map_err(|e| anyhow::anyhow!("Invalid feature metadata: {}", e))?;
 
         info!("Loading feature info from local path: {}", feature);
         (metadata, None, None, None, None, None)
@@ -2181,11 +2508,561 @@ fn output_result(result: &FeaturesResult, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// Output publish result in the specified format
+fn output_publish_result(result: &PublishOutput, json: bool) -> Result<()> {
+    if json {
+        let json_output = serde_json::to_string_pretty(result)?;
+        println!("{}", json_output);
+    } else {
+        println!("Feature Publish Summary:");
+        println!("Features processed: {}", result.summary.features);
+        println!("Tags published: {}", result.summary.published_tags);
+        println!("Tags skipped: {}", result.summary.skipped_tags);
+
+        if !result.features.is_empty() {
+            println!("\nPublished Features:");
+            for feature in &result.features {
+                println!(
+                    "  {}@{} ({})",
+                    feature.feature_id, feature.version, feature.registry
+                );
+                println!("    Digest: {}", feature.digest);
+                if !feature.published_tags.is_empty() {
+                    println!("    Published tags: {}", feature.published_tags.join(", "));
+                }
+                if !feature.skipped_tags.is_empty() {
+                    println!("    Skipped tags: {}", feature.skipped_tags.join(", "));
+                }
+                if feature.moved_latest {
+                    println!("    Moved latest tag");
+                }
+            }
+        }
+
+        if let Some(collection) = &result.collection {
+            println!("\nCollection Metadata:");
+            println!("  Digest: {}", collection.digest);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod unit_features_package {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_is_local_path() {
+        // Relative paths
+        assert!(is_local_path("./feature"));
+        assert!(is_local_path("../feature"));
+        assert!(is_local_path("./path/to/feature"));
+        assert!(is_local_path("../path/to/feature"));
+
+        // Absolute Unix paths
+        assert!(is_local_path("/abs/path"));
+        assert!(is_local_path("/feature"));
+
+        // Windows paths
+        assert!(is_local_path("C:\\path"));
+        assert!(is_local_path("D:/path"));
+        assert!(is_local_path("E:\\feature"));
+
+        // Valid registry references (should NOT be detected as local paths)
+        assert!(!is_local_path("ghcr.io/devcontainers/node"));
+        assert!(!is_local_path("myteam/myfeature"));
+        assert!(!is_local_path("myfeature"));
+        assert!(!is_local_path("ghcr.io/devcontainers/node:18"));
+        assert!(!is_local_path("feature-name"));
+        assert!(!is_local_path("my-feature"));
+    }
+
+    #[tokio::test]
+    async fn test_features_plan_rejects_local_paths() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test with relative path ./feature
+        let config_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        fs::write(&config_path, r#"{"features": {"./my-feature": true}}"#).unwrap();
+
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path.clone()),
+        };
+
+        let result = execute_features_plan(true, None, &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains(LOCAL_FEATURE_ERROR_MSG));
+        assert!(err_msg.contains("./my-feature"));
+
+        // Test with absolute path
+        fs::write(&config_path, r#"{"features": {"/abs/path/feature": true}}"#).unwrap();
+
+        let args2 = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path.clone()),
+        };
+
+        let result2 = execute_features_plan(true, None, &args2).await;
+        assert!(result2.is_err());
+        let err_msg2 = format!("{}", result2.unwrap_err());
+        assert!(err_msg2.contains(LOCAL_FEATURE_ERROR_MSG));
+        assert!(err_msg2.contains("/abs/path/feature"));
+
+        // Test with parent relative path
+        fs::write(
+            &config_path,
+            r#"{"features": {"../another-feature": true}}"#,
+        )
+        .unwrap();
+
+        let args3 = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path.clone()),
+        };
+
+        let result3 = execute_features_plan(true, None, &args3).await;
+        assert!(result3.is_err());
+        let err_msg3 = format!("{}", result3.unwrap_err());
+        assert!(err_msg3.contains(LOCAL_FEATURE_ERROR_MSG));
+        assert!(err_msg3.contains("../another-feature"));
+    }
+
+    #[tokio::test]
+    async fn test_features_plan_additional_features_with_local_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: Some(r#"{"./local-feature": true}"#.to_string()),
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: None,
+        };
+
+        let result = execute_features_plan(true, Some(r#"{"./local-feature": true}"#), &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains(LOCAL_FEATURE_ERROR_MSG));
+        assert!(err_msg.contains("./local-feature"));
+    }
+
+    #[tokio::test]
+    async fn test_features_plan_mixed_local_and_registry() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test with mixed features: one local, one registry
+        // The map iteration order may vary, but at least one local path should be detected
+        let config_dir = temp_dir.path().join(".devcontainer");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+        fs::write(
+            &config_path,
+            r#"{"features": {"./local-feature": true, "ghcr.io/devcontainers/node": true}}"#,
+        )
+        .unwrap();
+
+        let args = FeaturesArgs {
+            command: FeatureCommands::Plan {
+                json: true,
+                additional_features: None,
+            },
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path.clone()),
+        };
+
+        let result = execute_features_plan(true, None, &args).await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains(LOCAL_FEATURE_ERROR_MSG));
+        // Should detect the local path and error
+        assert!(err_msg.contains("./local-feature") || err_msg.contains("Feature key:"));
+    }
+
+    #[test]
+    fn test_features_result_json_serialization() {
+        let result = FeaturesResult {
+            command: "test".to_string(),
+            status: "success".to_string(),
+            digest: Some("sha256:abc123".to_string()),
+            size: Some(1024),
+            message: Some("Test completed".to_string()),
+            cache_path: None,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"command\":\"test\""));
+        assert!(json.contains("\"status\":\"success\""));
+        assert!(json.contains("\"digest\":\"sha256:abc123\""));
+    }
+
+    #[test]
+    fn test_features_plan_result_serialization() {
+        let result = FeaturesPlanResult {
+            order: vec!["feature-a".to_string(), "feature-b".to_string()],
+            graph: serde_json::json!({
+                "feature-a": [],
+                "feature-b": ["feature-a"]
+            }),
+        };
+
+        let json = serde_json::to_string_pretty(&result).unwrap();
+        assert!(json.contains("\"order\""));
+        assert!(json.contains("\"graph\""));
+        assert!(json.contains("feature-a"));
+        assert!(json.contains("feature-b"));
+    }
+
+    #[test]
+    fn test_build_graph_representation() {
+        use deacon_core::features::{FeatureMetadata, ResolvedFeature};
+        use std::collections::HashMap;
+
+        let mut depends_on = HashMap::new();
+        depends_on.insert("feature-a".to_string(), serde_json::Value::Bool(true));
+
+        let feature = ResolvedFeature {
+            id: "feature-b".to_string(),
+            source: "test://feature-b".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "feature-b".to_string(),
+                version: Some("1.0.0".to_string()),
+                name: Some("Feature B".to_string()),
+                description: None,
+                documentation_url: None,
+                license_url: None,
+                options: HashMap::new(),
+                container_env: HashMap::new(),
+                mounts: vec![],
+                init: None,
+                privileged: None,
+                cap_add: vec![],
+                security_opt: vec![],
+                entrypoint: None,
+                installs_after: vec!["feature-a".to_string()],
+                depends_on,
+                on_create_command: None,
+                update_content_command: None,
+                post_create_command: None,
+                post_start_command: None,
+                post_attach_command: None,
+            },
+        };
+
+        let graph = build_graph_representation(&[feature]);
+        // Check that feature-b has dependencies
+        if let Some(deps) = graph.get("feature-b") {
+            if let Some(deps_array) = deps.as_array() {
+                assert!(!deps_array.is_empty());
+                assert!(deps_array.contains(&serde_json::Value::String("feature-a".to_string())));
+            } else {
+                panic!("Dependencies should be an array");
+            }
+        } else {
+            panic!("feature-b should exist in graph");
+        }
+    }
+
+    #[test]
+    fn test_graph_structure_no_dependencies() {
+        // Test: Feature with no dependencies should have empty array in graph
+        let feature = create_mock_resolved_feature("feature-standalone");
+
+        let graph = build_graph_representation(&[feature]);
+
+        // Verify the feature exists in the graph with an empty dependencies array
+        let deps = graph
+            .get("feature-standalone")
+            .expect("Feature should exist in graph");
+        let deps_array = deps.as_array().expect("Dependencies should be an array");
+        assert!(
+            deps_array.is_empty(),
+            "Feature with no dependencies should have empty array"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_simple_chain() {
+        // Test: Simple dependency chain A->B where B depends on A
+        // Graph should show: { "feature-a": [], "feature-b": ["feature-a"] }
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]);
+
+        let graph = build_graph_representation(&[feature_a, feature_b]);
+
+        // Verify feature-a has no dependencies
+        let deps_a = graph.get("feature-a").expect("feature-a should exist");
+        let deps_a_array = deps_a.as_array().expect("Dependencies should be an array");
+        assert!(
+            deps_a_array.is_empty(),
+            "feature-a should have no dependencies"
+        );
+
+        // Verify feature-b depends on feature-a
+        let deps_b = graph.get("feature-b").expect("feature-b should exist");
+        let deps_b_array = deps_b.as_array().expect("Dependencies should be an array");
+        assert_eq!(deps_b_array.len(), 1, "feature-b should have 1 dependency");
+        assert!(
+            deps_b_array.contains(&serde_json::Value::String("feature-a".to_string())),
+            "feature-b should depend on feature-a"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_combined_installs_after_and_depends_on() {
+        // Test: Feature with both installsAfter and dependsOn should union them
+        // If both specify different dependencies, all should appear
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature("feature-b");
+        let feature_c = create_mock_resolved_feature_with_deps(
+            "feature-c",
+            &["feature-a"], // installsAfter
+            &["feature-b"], // dependsOn
+        );
+
+        let graph = build_graph_representation(&[feature_a, feature_b, feature_c]);
+
+        // Verify feature-c has both dependencies
+        let deps_c = graph.get("feature-c").expect("feature-c should exist");
+        let deps_c_array = deps_c.as_array().expect("Dependencies should be an array");
+        assert_eq!(
+            deps_c_array.len(),
+            2,
+            "feature-c should have 2 dependencies"
+        );
+        assert!(
+            deps_c_array.contains(&serde_json::Value::String("feature-a".to_string())),
+            "feature-c should have feature-a from installsAfter"
+        );
+        assert!(
+            deps_c_array.contains(&serde_json::Value::String("feature-b".to_string())),
+            "feature-c should have feature-b from dependsOn"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_union_deduplication() {
+        // Test: If same dependency appears in both installsAfter and dependsOn,
+        // it should appear only once (deduplication)
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature_with_deps(
+            "feature-b",
+            &["feature-a"], // installsAfter
+            &["feature-a"], // dependsOn (same)
+        );
+
+        let graph = build_graph_representation(&[feature_a, feature_b]);
+
+        // Verify feature-b has feature-a only once
+        let deps_b = graph.get("feature-b").expect("feature-b should exist");
+        let deps_b_array = deps_b.as_array().expect("Dependencies should be an array");
+        assert_eq!(
+            deps_b_array.len(),
+            1,
+            "Duplicate dependency should be deduplicated"
+        );
+        assert!(
+            deps_b_array.contains(&serde_json::Value::String("feature-a".to_string())),
+            "feature-b should depend on feature-a"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_fan_in() {
+        // Test: Fan-in pattern where C depends on both A and B
+        // Graph should show: { "feature-c": ["feature-a", "feature-b"] }
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature("feature-b");
+        let feature_c =
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-a", "feature-b"], &[]);
+
+        let graph = build_graph_representation(&[feature_a, feature_b, feature_c]);
+
+        // Verify feature-c depends on both feature-a and feature-b
+        let deps_c = graph.get("feature-c").expect("feature-c should exist");
+        let deps_c_array = deps_c.as_array().expect("Dependencies should be an array");
+        assert_eq!(
+            deps_c_array.len(),
+            2,
+            "feature-c should have 2 dependencies"
+        );
+        assert!(
+            deps_c_array.contains(&serde_json::Value::String("feature-a".to_string())),
+            "feature-c should depend on feature-a"
+        );
+        assert!(
+            deps_c_array.contains(&serde_json::Value::String("feature-b".to_string())),
+            "feature-c should depend on feature-b"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_deterministic_ordering() {
+        // Test: Dependencies should be in deterministic (lexicographic) order
+        let feature_a = create_mock_resolved_feature("feature-a");
+        let feature_b = create_mock_resolved_feature("feature-b");
+        let feature_c = create_mock_resolved_feature("feature-c");
+        // Add dependencies in non-lexicographic order
+        let feature_d = create_mock_resolved_feature_with_deps(
+            "feature-d",
+            &["feature-c", "feature-a", "feature-b"], // Not sorted
+            &[],
+        );
+
+        let graph = build_graph_representation(&[feature_a, feature_b, feature_c, feature_d]);
+
+        // Verify dependencies are in lexicographic order
+        let deps_d = graph.get("feature-d").expect("feature-d should exist");
+        let deps_d_array = deps_d.as_array().expect("Dependencies should be an array");
+        assert_eq!(
+            deps_d_array.len(),
+            3,
+            "feature-d should have 3 dependencies"
+        );
+
+        // Extract dependency strings in order
+        let dep_strings: Vec<String> = deps_d_array
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+
+        assert_eq!(
+            dep_strings,
+            vec!["feature-a", "feature-b", "feature-c"],
+            "Dependencies should be in lexicographic order"
+        );
+    }
+
+    #[test]
+    fn test_graph_structure_cycle_detection_error_shape() {
+        use deacon_core::errors::FeatureError;
+        use deacon_core::features::FeatureDependencyResolver;
+
+        // Test: Verify cycle detection returns proper error structure
+        // Cycle: a -> b -> c -> a
+        let features = vec![
+            create_mock_resolved_feature_with_deps("feature-a", &["feature-b"], &[]),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-c"], &[]),
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-a"], &[]),
+        ];
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let result = resolver.resolve(&features);
+
+        // Verify error type matches spec
+        assert!(result.is_err(), "Cycle should produce an error");
+
+        match result {
+            Err(FeatureError::DependencyCycle { cycle_path }) => {
+                // Verify error message contains cycle information
+                assert!(
+                    cycle_path.contains("feature-a"),
+                    "Cycle path should contain feature-a"
+                );
+                assert!(
+                    cycle_path.contains("feature-b"),
+                    "Cycle path should contain feature-b"
+                );
+                assert!(
+                    cycle_path.contains("feature-c"),
+                    "Cycle path should contain feature-c"
+                );
+                // Verify it's formatted as a path with arrows
+                assert!(
+                    cycle_path.contains("->") || cycle_path.contains("→"),
+                    "Cycle path should show direction with arrows"
+                );
+            }
+            _ => panic!("Expected DependencyCycle error, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_graph_structure_complete_json_output() {
+        // Test: Verify complete JSON output structure matches DATA-STRUCTURES.md spec
+        let features = vec![
+            create_mock_resolved_feature("feature-a"),
+            create_mock_resolved_feature_with_deps("feature-b", &["feature-a"], &[]),
+            create_mock_resolved_feature_with_deps("feature-c", &["feature-a", "feature-b"], &[]),
+        ];
+
+        let graph = build_graph_representation(&features);
+
+        // Verify it's a JSON object
+        assert!(graph.is_object(), "Graph should be a JSON object");
+
+        // Verify all features are present
+        assert!(
+            graph.get("feature-a").is_some(),
+            "feature-a should be in graph"
+        );
+        assert!(
+            graph.get("feature-b").is_some(),
+            "feature-b should be in graph"
+        );
+        assert!(
+            graph.get("feature-c").is_some(),
+            "feature-c should be in graph"
+        );
+
+        // Verify structure: feature-a has no deps
+        let deps_a = graph.get("feature-a").unwrap();
+        assert!(deps_a.is_array(), "Dependencies should be an array");
+        assert_eq!(
+            deps_a.as_array().unwrap().len(),
+            0,
+            "feature-a has no dependencies"
+        );
+
+        // Verify structure: feature-b depends on feature-a
+        let deps_b = graph.get("feature-b").unwrap().as_array().unwrap();
+        assert_eq!(deps_b.len(), 1, "feature-b has 1 dependency");
+        assert_eq!(
+            deps_b[0],
+            serde_json::Value::String("feature-a".to_string()),
+            "feature-b depends on feature-a"
+        );
+
+        // Verify structure: feature-c depends on both (sorted)
+        let deps_c = graph.get("feature-c").unwrap().as_array().unwrap();
+        assert_eq!(deps_c.len(), 2, "feature-c has 2 dependencies");
+        assert_eq!(
+            deps_c[0],
+            serde_json::Value::String("feature-a".to_string()),
+            "First dep should be feature-a (sorted)"
+        );
+        assert_eq!(
+            deps_c[1],
+            serde_json::Value::String("feature-b".to_string()),
+            "Second dep should be feature-b (sorted)"
+        );
+
+        // Verify JSON serialization matches expected format
+        let json_str = serde_json::to_string_pretty(&graph).unwrap();
+        assert!(
+            json_str.contains("\"feature-a\""),
+            "JSON should contain feature-a"
+        );
+        assert!(json_str.contains("[]"), "JSON should contain empty arrays");
+    }
 
     #[test]
     fn test_validate_single_missing_devcontainer_feature_json() {
