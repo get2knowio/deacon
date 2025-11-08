@@ -21,12 +21,16 @@ use deacon_core::features::{
     FeatureMerger, FeatureMetadata, OptionValue, ResolvedFeature,
 };
 use deacon_core::observability::{feature_plan_span, TimedSpan};
-use deacon_core::oci::{default_fetcher, FeatureRef};
+use deacon_core::oci::{default_fetcher, default_fetcher_with_config, FeatureRef, Manifest};
 use deacon_core::registry_parser::parse_registry_reference;
+use deacon_core::retry::{JitterStrategy, RetryConfig};
+use deacon_core::text::boxing::boxed_section;
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tempfile;
 use tracing::{debug, info, Instrument};
 
@@ -761,8 +765,8 @@ pub async fn execute_features(args: FeaturesArgs) -> Result<()> {
         FeatureCommands::Info {
             mode,
             feature,
-            json,
-        } => execute_features_info(&mode, &feature, json).await,
+            output_format,
+        } => execute_features_info(&mode, &feature, output_format).await,
         FeatureCommands::Plan {
             json,
             ref additional_features,
@@ -1949,30 +1953,104 @@ async fn compute_publish_plan(
 }
 
 /// Execute features info command
-async fn execute_features_info(mode: &str, feature: &str, json: bool) -> Result<()> {
+async fn execute_features_info(
+    mode: &str,
+    feature: &str,
+    output_format: crate::cli::OutputFormat,
+) -> Result<()> {
     debug!("Getting feature info for: {} (mode: {})", feature, mode);
 
-    // Determine if this is a local path or OCI reference
-    // Check if it's a path by trying to see if it exists as a directory
+    // Attempt to execute the command
+    let result = execute_features_info_inner(mode, feature, output_format.clone()).await;
+
+    // Handle errors with appropriate output
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            match output_format {
+                crate::cli::OutputFormat::Json => {
+                    // Output empty JSON object on error
+                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({}))?);
+                    // Exit with error code
+                    std::process::exit(1);
+                }
+                crate::cli::OutputFormat::Text => {
+                    // For text mode, propagate the error normally
+                    Err(e)
+                }
+            }
+        }
+    }
+}
+
+/// Inner implementation of features info execution
+async fn execute_features_info_inner(
+    mode: &str,
+    feature: &str,
+    output_format: crate::cli::OutputFormat,
+) -> Result<()> {
+    let start = std::time::Instant::now();
+    debug!("Getting feature info for: {} (mode: {})", feature, mode);
+
+    // Determine if this is a local path
     let path = Path::new(feature);
     let is_local = path.exists() && path.is_dir();
 
-    let (metadata, registry_url, namespace, name, tag, digest) = if is_local {
-        // Load from local path
-        let feature_path = Path::new(feature);
-        let metadata_path = feature_path.join("devcontainer-feature.json");
-        let metadata = parse_feature_metadata(&metadata_path)
-            .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
+    if is_local {
+        // For local features, handle manifest mode specially
+        if mode == "manifest" {
+            let manifest_span = tracing::span!(
+                target: "deacon::features",
+                tracing::Level::INFO,
+                "feature.info.manifest",
+                feature_path = %feature,
+                mode = "manifest",
+                output_format = ?output_format,
+                is_local = true,
+                fetch_ms = tracing::field::Empty
+            );
+            let _manifest_guard = manifest_span.enter();
 
-        // Validate the metadata
-        metadata
-            .validate()
-            .map_err(|e| anyhow::anyhow!("Invalid feature metadata: {}", e))?;
+            let feature_path = Path::new(feature);
+            let metadata_path = feature_path.join("devcontainer-feature.json");
+            let metadata = parse_feature_metadata(&metadata_path)
+                .map_err(|e| anyhow::anyhow!("Failed to parse feature metadata: {}", e))?;
 
-        info!("Loading feature info from local path: {}", feature);
-        (metadata, None, None, None, None, None)
+            info!("Loading feature info from local path: {}", feature);
+
+            manifest_span.record("fetch_ms", start.elapsed().as_millis() as u64);
+
+            match output_format {
+                crate::cli::OutputFormat::Json => {
+                    // For local features, include manifest JSON from metadata and null canonical ID
+                    let output = serde_json::json!({
+                        "manifest": metadata,
+                        "canonicalId": serde_json::Value::Null,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                    Ok(())
+                }
+                crate::cli::OutputFormat::Text => {
+                    println!(
+                        "{}",
+                        boxed_section("Manifest", &serde_json::to_string_pretty(&metadata)?)
+                    );
+                    println!();
+                    println!(
+                        "{}",
+                        boxed_section("Canonical Identifier", "(local feature)")
+                    );
+                    Ok(())
+                }
+            }
+        } else {
+            Err(anyhow::anyhow!(
+                "Mode '{}' requires registry access. Local features only support 'manifest' mode.",
+                mode
+            ))
+        }
     } else {
-        // Parse the feature reference and fetch from OCI
+        // Parse registry reference
         let (registry_url, namespace, name, tag) = parse_registry_reference(feature)?;
 
         let feature_ref = FeatureRef::new(
@@ -1982,394 +2060,380 @@ async fn execute_features_info(mode: &str, feature: &str, json: bool) -> Result<
             tag.clone(),
         );
 
-        // Create OCI client and fetch feature metadata
-        let fetcher =
-            default_fetcher().map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
+        // Create OCI client with 10s timeout
+        let retry_config = RetryConfig::new(
+            1,                          // max_attempts (1 retry after initial attempt)
+            Duration::from_millis(100), // base_delay
+            Duration::from_secs(1),     // max_delay
+            JitterStrategy::FullJitter,
+        );
+        let fetcher = default_fetcher_with_config(Some(Duration::from_secs(10)), retry_config)
+            .map_err(|e| anyhow::anyhow!("Failed to create OCI client: {}", e))?;
 
-        info!("Fetching feature info from: {}", feature_ref.reference());
+        // Handle different modes
+        match mode {
+            "manifest" => {
+                let manifest_span = tracing::span!(
+                    target: "deacon::features",
+                    tracing::Level::INFO,
+                    "feature.info.manifest",
+                    feature_ref = %feature_ref.reference(),
+                    mode = "manifest",
+                    output_format = ?output_format,
+                    fetch_ms = tracing::field::Empty
+                );
+                let _manifest_guard = manifest_span.enter();
 
-        let downloaded_feature = fetcher
-            .fetch_feature(&feature_ref)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to fetch feature: {}", e))?;
+                info!("Fetching manifest from: {}", feature_ref.reference());
+                let manifest = fetcher
+                    .get_manifest(&feature_ref)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to fetch manifest: {}", e))?;
+                let canonical_id = deacon_core::oci::canonical_id(&manifest)
+                    .map_err(|e| anyhow::anyhow!("Failed to compute canonical ID: {}", e))?;
 
-        (
-            downloaded_feature.metadata,
-            Some(registry_url),
-            Some(namespace),
-            Some(name),
-            tag,
-            Some(downloaded_feature.digest),
-        )
-    };
+                manifest_span.record("fetch_ms", start.elapsed().as_millis() as u64);
+                output_manifest_info_oci(&manifest, &canonical_id, output_format)
+            }
+            "tags" => {
+                let tags_span = tracing::span!(
+                    target: "deacon::features",
+                    tracing::Level::INFO,
+                    "feature.info.tags",
+                    feature_ref = %feature_ref.reference(),
+                    mode = "tags",
+                    output_format = ?output_format,
+                    fetch_ms = tracing::field::Empty
+                );
+                let _tags_guard = tags_span.enter();
 
-    // Generate output based on mode
-    match mode {
-        "manifest" => output_manifest_info(&metadata, json),
-        "tags" => {
-            output_tags_info(
-                &metadata,
-                registry_url.as_deref(),
-                namespace.as_deref(),
-                name.as_deref(),
-                json,
-            )
-            .await
+                let result = output_tags_info(
+                    None, // No metadata needed for tags
+                    Some(&registry_url),
+                    Some(&namespace),
+                    Some(&name),
+                    output_format,
+                    &fetcher,
+                )
+                .await;
+
+                tags_span.record("fetch_ms", start.elapsed().as_millis() as u64);
+                result
+            }
+            "dependencies" => {
+                let deps_span = tracing::span!(
+                    target: "deacon::features",
+                    tracing::Level::INFO,
+                    "feature.info.dependencies",
+                    feature_ref = %feature_ref.reference(),
+                    mode = "dependencies",
+                    output_format = ?output_format,
+                    fetch_ms = tracing::field::Empty
+                );
+                let _deps_guard = deps_span.enter();
+
+                // Reject JSON mode immediately per spec (T021) to avoid unnecessary network call
+                if matches!(output_format, crate::cli::OutputFormat::Json) {
+                    return Err(anyhow::anyhow!(
+                        "dependencies mode only supports text output"
+                    ));
+                }
+
+                // Now fetch the feature to get metadata
+                info!(
+                    "Fetching feature metadata from: {}",
+                    feature_ref.reference()
+                );
+                let downloaded = fetcher
+                    .fetch_feature(&feature_ref)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to fetch feature: {}", e))?;
+
+                deps_span.record("fetch_ms", start.elapsed().as_millis() as u64);
+                output_dependencies_info(&downloaded.metadata, output_format)
+            }
+            "verbose" => {
+                let verbose_span = tracing::span!(
+                    target: "deacon::features",
+                    tracing::Level::INFO,
+                    "feature.info.verbose",
+                    feature_ref = %feature_ref.reference(),
+                    mode = "verbose",
+                    output_format = ?output_format,
+                    fetch_ms = tracing::field::Empty
+                );
+                let _verbose_guard = verbose_span.enter();
+
+                // Aggregate all information with partial-failure policy
+                use std::collections::HashMap;
+                let mut errors: HashMap<String, String> = HashMap::new();
+
+                // Execute manifest mode
+                let manifest_result = fetcher.get_manifest(&feature_ref).await;
+                let canonical_id_result = manifest_result
+                    .as_ref()
+                    .ok()
+                    .map(deacon_core::oci::canonical_id)
+                    .transpose();
+
+                if let Err(e) = &manifest_result {
+                    errors.insert("manifest".to_string(), e.to_string());
+                }
+                if let Err(e) = &canonical_id_result {
+                    errors.insert("manifest".to_string(), e.to_string());
+                }
+
+                // Execute tags mode
+                let tags_result = fetcher.list_tags(&feature_ref).await;
+                if let Err(e) = &tags_result {
+                    errors.insert("tags".to_string(), e.to_string());
+                }
+
+                // Execute dependencies mode
+                let feature_result = fetcher.fetch_feature(&feature_ref).await;
+                if let Err(e) = &feature_result {
+                    errors.insert("dependencies".to_string(), e.to_string());
+                }
+
+                output_verbose_info_aggregated(
+                    manifest_result.ok().as_ref(),
+                    canonical_id_result.as_ref().ok().and_then(|s| s.as_deref()),
+                    tags_result.ok().as_ref(),
+                    feature_result.ok().as_ref().map(|d| &d.metadata),
+                    &errors,
+                    output_format,
+                )?;
+
+                verbose_span.record("fetch_ms", start.elapsed().as_millis() as u64);
+
+                // Return error if any sub-mode failed (partial-failure policy)
+                // Exit directly to avoid double JSON output from error handler
+                if !errors.is_empty() {
+                    std::process::exit(1);
+                } else {
+                    Ok(())
+                }
+            }
+            _ => Err(anyhow::anyhow!(
+                "Invalid mode '{}'. Valid modes are: manifest, tags, dependencies, verbose",
+                mode
+            )),
         }
-        "dependencies" => output_dependencies_info(&metadata, json),
-        "verbose" => output_verbose_info(
-            &metadata,
-            registry_url.as_deref(),
-            namespace.as_deref(),
-            name.as_deref(),
-            tag.as_deref(),
-            digest.as_deref(),
-            json,
-        ),
-        _ => Err(anyhow::anyhow!(
-            "Invalid mode '{}'. Valid modes are: manifest, tags, dependencies, verbose",
-            mode
-        )),
     }
 }
 
-/// Output manifest information (metadata only)
-fn output_manifest_info(metadata: &FeatureMetadata, json: bool) -> Result<()> {
-    if json {
-        // Convert HashMaps to BTreeMaps for deterministic ordering
-        let options: BTreeMap<_, _> = metadata.options.iter().collect();
-        let container_env: BTreeMap<_, _> = metadata.container_env.iter().collect();
-        let depends_on: BTreeMap<_, _> = metadata.depends_on.iter().collect();
-
-        let manifest = serde_json::json!({
-            "id": metadata.id,
-            "version": metadata.version,
-            "name": metadata.name,
-            "description": metadata.description,
-            "documentationURL": metadata.documentation_url,
-            "licenseURL": metadata.license_url,
-            "options": options,
-            "containerEnv": container_env,
-            "mounts": metadata.mounts,
-            "init": metadata.init,
-            "privileged": metadata.privileged,
-            "capAdd": metadata.cap_add,
-            "securityOpt": metadata.security_opt,
-            "entrypoint": metadata.entrypoint,
-            "installsAfter": metadata.installs_after,
-            "dependsOn": depends_on,
-            "onCreateCommand": metadata.on_create_command,
-            "updateContentCommand": metadata.update_content_command,
-            "postCreateCommand": metadata.post_create_command,
-            "postStartCommand": metadata.post_start_command,
-            "postAttachCommand": metadata.post_attach_command,
-        });
-        println!("{}", serde_json::to_string_pretty(&manifest)?);
-    } else {
-        println!("Feature Manifest:");
-        println!("  ID: {}", metadata.id);
-        if let Some(ref version) = metadata.version {
-            println!("  Version: {}", version);
+/// Output manifest information (OCI manifest)
+fn output_manifest_info_oci(
+    manifest: &Manifest,
+    canonical_id: &str,
+    output_format: crate::cli::OutputFormat,
+) -> Result<()> {
+    match output_format {
+        crate::cli::OutputFormat::Json => {
+            let output = serde_json::json!({
+                "manifest": manifest,
+                "canonicalId": canonical_id,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
-        if let Some(ref name) = metadata.name {
-            println!("  Name: {}", name);
-        }
-        if let Some(ref desc) = metadata.description {
-            println!("  Description: {}", desc);
-        }
-        if let Some(ref doc_url) = metadata.documentation_url {
-            println!("  Documentation: {}", doc_url);
-        }
-        if let Some(ref license_url) = metadata.license_url {
-            println!("  License: {}", license_url);
-        }
-        if !metadata.options.is_empty() {
-            println!("  Options: {} defined", metadata.options.len());
-        }
-        if !metadata.installs_after.is_empty() {
-            println!("  Installs After: {:?}", metadata.installs_after);
-        }
-        if !metadata.depends_on.is_empty() {
-            println!("  Dependencies: {:?}", metadata.depends_on.keys());
+        crate::cli::OutputFormat::Text => {
+            println!(
+                "{}",
+                boxed_section("Manifest", &serde_json::to_string_pretty(manifest)?)
+            );
+            println!();
+            println!("{}", boxed_section("Canonical Identifier", canonical_id));
         }
     }
     Ok(())
 }
 
-/// Output tags information (available versions)
-async fn output_tags_info(
-    metadata: &FeatureMetadata,
+/// Format tags list for display
+fn format_tags_list(tags: &[String]) -> String {
+    if tags.is_empty() {
+        "(no tags found)".to_string()
+    } else {
+        tags.iter()
+            .map(|tag| format!("  - {}", tag))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Generate Mermaid graph from feature metadata
+fn generate_mermaid_graph(metadata: &FeatureMetadata) -> String {
+    let mut lines = vec!["graph TD".to_string()];
+
+    // Add edges for installsAfter dependencies
+    for dep in &metadata.installs_after {
+        lines.push(format!("    {} --> {}", metadata.id, dep));
+    }
+
+    // Add edges for dependsOn dependencies
+    for dep in metadata.depends_on.keys() {
+        lines.push(format!("    {} --> {}", metadata.id, dep));
+    }
+
+    // If no dependencies, indicate that
+    if metadata.installs_after.is_empty() && metadata.depends_on.is_empty() {
+        lines.push(format!(
+            "    {}[\"{}\\n(no dependencies)\"]",
+            metadata.id, metadata.id
+        ));
+    }
+
+    lines.join("\n")
+}
+
+/// Output tags information from OCI registry
+async fn output_tags_info<C: deacon_core::oci::HttpClient>(
+    _metadata: Option<&FeatureMetadata>,
     registry_url: Option<&str>,
     namespace: Option<&str>,
     name: Option<&str>,
-    json: bool,
+    output_format: crate::cli::OutputFormat,
+    fetcher: &deacon_core::oci::FeatureFetcher<C>,
 ) -> Result<()> {
-    // For local features, we can only show the current version
-    let tags = if let (Some(_registry), Some(_ns), Some(_n)) = (registry_url, namespace, name) {
-        // Note: This is a placeholder - in a full implementation, we would
-        // query the OCI registry for available tags
-        // For now, we'll just return the current version if available
-        vec![metadata
-            .version
-            .clone()
-            .unwrap_or_else(|| "latest".to_string())]
-    } else {
-        // Local feature - only current version
-        vec![metadata
-            .version
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string())]
-    };
+    let registry_url =
+        registry_url.ok_or_else(|| anyhow::anyhow!("Registry URL required for tags mode"))?;
+    let namespace = namespace.ok_or_else(|| anyhow::anyhow!("Namespace required for tags mode"))?;
+    let name = name.ok_or_else(|| anyhow::anyhow!("Name required for tags mode"))?;
 
-    if json {
-        let output = serde_json::json!({
-            "id": metadata.id,
-            "tags": tags,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        println!("Available Tags for '{}':", metadata.id);
-        for tag in tags {
-            println!("  - {}", tag);
+    let feature_ref = deacon_core::oci::FeatureRef::new(
+        registry_url.to_string(),
+        namespace.to_string(),
+        name.to_string(),
+        Some("latest".to_string()), // tag not needed for listing
+    );
+
+    let mut tags = fetcher
+        .list_tags(&feature_ref)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to list tags: {}", e))?;
+
+    // Sort tags lexicographically for deterministic output
+    tags.sort();
+
+    match output_format {
+        crate::cli::OutputFormat::Json => {
+            let output = serde_json::json!({
+                "publishedTags": tags,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        crate::cli::OutputFormat::Text => {
+            println!(
+                "{}",
+                boxed_section("Published Tags", &format_tags_list(&tags))
+            );
         }
     }
     Ok(())
 }
 
 /// Output dependencies information
-fn output_dependencies_info(metadata: &FeatureMetadata, json: bool) -> Result<()> {
-    if json {
-        let deps = serde_json::json!({
-            "id": metadata.id,
-            "installsAfter": metadata.installs_after,
-            "dependsOn": metadata.depends_on,
-        });
-        println!("{}", serde_json::to_string_pretty(&deps)?);
-    } else {
-        println!("Dependencies for '{}':", metadata.id);
-        if !metadata.installs_after.is_empty() {
-            println!("  Installs After:");
-            for feature in &metadata.installs_after {
-                println!("    - {}", feature);
-            }
-        } else {
-            println!("  Installs After: (none)");
+fn output_dependencies_info(
+    metadata: &FeatureMetadata,
+    output_format: crate::cli::OutputFormat,
+) -> Result<()> {
+    match output_format {
+        crate::cli::OutputFormat::Json => {
+            // Dependencies mode is text-only per spec
+            Err(anyhow::anyhow!(
+                "Dependencies mode does not support JSON output"
+            ))
         }
-
-        if !metadata.depends_on.is_empty() {
-            println!("  Depends On:");
-            for (feature, options) in &metadata.depends_on {
-                println!("    - {}: {}", feature, options);
-            }
-        } else {
-            println!("  Depends On: (none)");
+        crate::cli::OutputFormat::Text => {
+            let mermaid = generate_mermaid_graph(metadata);
+            println!(
+                "{}",
+                boxed_section(
+                    "Dependency Tree (Render with https://mermaid.live/)",
+                    &mermaid
+                )
+            );
+            Ok(())
         }
     }
-    Ok(())
 }
 
-/// Output verbose information (all available details)
-fn output_verbose_info(
-    metadata: &FeatureMetadata,
-    registry_url: Option<&str>,
-    namespace: Option<&str>,
-    name: Option<&str>,
-    tag: Option<&str>,
-    digest: Option<&str>,
-    json: bool,
+/// Output verbose information (aggregated from all modes)
+/// Implements FR-006 with partial-failure policy
+fn output_verbose_info_aggregated(
+    manifest: Option<&Manifest>,
+    canonical_id: Option<&str>,
+    tags: Option<&Vec<String>>,
+    metadata: Option<&FeatureMetadata>,
+    errors: &std::collections::HashMap<String, String>,
+    output_format: crate::cli::OutputFormat,
 ) -> Result<()> {
-    if json {
-        // Convert HashMaps to BTreeMaps for deterministic ordering
-        let options: BTreeMap<_, _> = metadata.options.iter().collect();
-        let container_env: BTreeMap<_, _> = metadata.container_env.iter().collect();
-        let depends_on: BTreeMap<_, _> = metadata.depends_on.iter().collect();
+    match output_format {
+        crate::cli::OutputFormat::Json => {
+            let mut output = serde_json::json!({});
 
-        let mut info = serde_json::json!({
-            "id": metadata.id,
-            "version": metadata.version,
-            "name": metadata.name,
-            "description": metadata.description,
-            "documentationURL": metadata.documentation_url,
-            "licenseURL": metadata.license_url,
-            "options": options,
-            "containerEnv": container_env,
-            "mounts": metadata.mounts,
-            "init": metadata.init,
-            "privileged": metadata.privileged,
-            "capAdd": metadata.cap_add,
-            "securityOpt": metadata.security_opt,
-            "entrypoint": metadata.entrypoint,
-            "installsAfter": metadata.installs_after,
-            "dependsOn": depends_on,
-            "onCreateCommand": metadata.on_create_command,
-            "updateContentCommand": metadata.update_content_command,
-            "postCreateCommand": metadata.post_create_command,
-            "postStartCommand": metadata.post_start_command,
-            "postAttachCommand": metadata.post_attach_command,
-        });
-
-        // Add OCI-specific fields if available
-        if let Some(registry) = registry_url {
-            info["registry"] = serde_json::json!(registry);
-        }
-        if let Some(ns) = namespace {
-            info["namespace"] = serde_json::json!(ns);
-        }
-        if let Some(n) = name {
-            info["featureName"] = serde_json::json!(n);
-        }
-        if let Some(t) = tag {
-            info["tag"] = serde_json::json!(t);
-        }
-        if let Some(d) = digest {
-            info["digest"] = serde_json::json!(d);
-        }
-
-        println!("{}", serde_json::to_string_pretty(&info)?);
-    } else {
-        println!("=== Feature Information (Verbose) ===");
-        println!("\nBasic Information:");
-        println!("  ID: {}", metadata.id);
-        if let Some(ref version) = metadata.version {
-            println!("  Version: {}", version);
-        }
-        if let Some(ref name) = metadata.name {
-            println!("  Name: {}", name);
-        }
-        if let Some(ref desc) = metadata.description {
-            println!("  Description: {}", desc);
-        }
-        if let Some(ref doc_url) = metadata.documentation_url {
-            println!("  Documentation: {}", doc_url);
-        }
-        if let Some(ref license_url) = metadata.license_url {
-            println!("  License: {}", license_url);
-        }
-
-        if let Some(registry) = registry_url {
-            println!("\nRegistry Information:");
-            println!("  Registry: {}", registry);
-            if let Some(ns) = namespace {
-                println!("  Namespace: {}", ns);
+            // Include only manifest, canonicalId, and publishedTags per spec
+            // (no dependency graph in JSON mode)
+            if let Some(manifest) = manifest {
+                output["manifest"] = serde_json::json!(manifest);
             }
-            if let Some(n) = name {
-                println!("  Name: {}", n);
+            if let Some(canonical_id) = canonical_id {
+                output["canonicalId"] = serde_json::json!(canonical_id);
             }
-            if let Some(t) = tag {
-                println!("  Tag: {}", t);
+            if let Some(tags) = tags {
+                output["publishedTags"] = serde_json::json!(tags);
             }
-            if let Some(d) = digest {
-                println!("  Digest: {}", d);
-            }
-        }
 
-        if !metadata.options.is_empty() {
-            println!("\nOptions:");
-            for (key, option) in &metadata.options {
-                println!("  {}:", key);
-                match option {
-                    deacon_core::features::FeatureOption::Boolean {
-                        default,
-                        description,
-                    } => {
-                        println!("    Type: boolean");
-                        if let Some(def) = default {
-                            println!("    Default: {}", def);
-                        }
-                        if let Some(desc) = description {
-                            println!("    Description: {}", desc);
-                        }
-                    }
-                    deacon_core::features::FeatureOption::String {
-                        default,
-                        description,
-                        r#enum,
-                        proposals,
-                    } => {
-                        println!("    Type: string");
-                        if let Some(def) = default {
-                            println!("    Default: {}", def);
-                        }
-                        if let Some(desc) = description {
-                            println!("    Description: {}", desc);
-                        }
-                        if let Some(values) = r#enum {
-                            println!("    Allowed values: {:?}", values);
-                        }
-                        if let Some(props) = proposals {
-                            println!("    Proposals: {:?}", props);
-                        }
-                    }
+            // Include errors if any sub-mode failed
+            if !errors.is_empty() {
+                // Convert HashMap to BTreeMap for deterministic ordering
+                let errors_sorted: BTreeMap<_, _> = errors.iter().collect();
+                output["errors"] = serde_json::json!(errors_sorted);
+            }
+
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        crate::cli::OutputFormat::Text => {
+            // Output all three boxed sections
+            // 1. Manifest section
+            if let Some(manifest) = manifest {
+                println!(
+                    "{}",
+                    boxed_section("Manifest", &serde_json::to_string_pretty(manifest)?)
+                );
+                println!();
+            }
+            if let Some(canonical_id) = canonical_id {
+                println!("{}", boxed_section("Canonical Identifier", canonical_id));
+                println!();
+            }
+
+            // 2. Published Tags section
+            if let Some(tags) = tags {
+                println!(
+                    "{}",
+                    boxed_section("Published Tags", &format_tags_list(tags))
+                );
+                println!();
+            }
+
+            // 3. Dependency Tree section
+            if let Some(metadata) = metadata {
+                let mermaid = generate_mermaid_graph(metadata);
+                println!(
+                    "{}",
+                    boxed_section(
+                        "Dependency Tree (Render with https://mermaid.live/)",
+                        &mermaid
+                    )
+                );
+            }
+
+            // Output errors to stderr if any
+            if !errors.is_empty() {
+                eprintln!("\nErrors encountered:");
+                for (mode, error) in errors {
+                    eprintln!("  {}: {}", mode, error);
                 }
-            }
-        }
-
-        if !metadata.installs_after.is_empty() || !metadata.depends_on.is_empty() {
-            println!("\nDependencies:");
-            if !metadata.installs_after.is_empty() {
-                println!("  Installs After:");
-                for feature in &metadata.installs_after {
-                    println!("    - {}", feature);
-                }
-            }
-            if !metadata.depends_on.is_empty() {
-                println!("  Depends On:");
-                for (feature, options) in &metadata.depends_on {
-                    println!("    - {}: {}", feature, options);
-                }
-            }
-        }
-
-        if !metadata.container_env.is_empty() {
-            println!("\nContainer Environment Variables:");
-            for (key, value) in &metadata.container_env {
-                println!("  {}: {}", key, value);
-            }
-        }
-
-        if !metadata.mounts.is_empty() {
-            println!("\nMounts:");
-            for mount in &metadata.mounts {
-                println!("  - {}", mount);
-            }
-        }
-
-        if metadata.init.is_some()
-            || metadata.privileged.is_some()
-            || !metadata.cap_add.is_empty()
-            || !metadata.security_opt.is_empty()
-        {
-            println!("\nContainer Options:");
-            if let Some(init) = metadata.init {
-                println!("  Init: {}", init);
-            }
-            if let Some(privileged) = metadata.privileged {
-                println!("  Privileged: {}", privileged);
-            }
-            if !metadata.cap_add.is_empty() {
-                println!("  Capabilities: {:?}", metadata.cap_add);
-            }
-            if !metadata.security_opt.is_empty() {
-                println!("  Security Options: {:?}", metadata.security_opt);
-            }
-        }
-
-        if metadata.has_lifecycle_commands() {
-            println!("\nLifecycle Commands:");
-            if let Some(ref cmd) = metadata.on_create_command {
-                println!("  onCreate: {}", cmd);
-            }
-            if let Some(ref cmd) = metadata.update_content_command {
-                println!("  updateContent: {}", cmd);
-            }
-            if let Some(ref cmd) = metadata.post_create_command {
-                println!("  postCreate: {}", cmd);
-            }
-            if let Some(ref cmd) = metadata.post_start_command {
-                println!("  postStart: {}", cmd);
-            }
-            if let Some(ref cmd) = metadata.post_attach_command {
-                println!("  postAttach: {}", cmd);
             }
         }
     }

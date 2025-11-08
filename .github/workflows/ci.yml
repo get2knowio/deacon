@@ -29,6 +29,9 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Enable network tests for integration tests that require OCI registry access
+      DEACON_NETWORK_TESTS: "1"
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -48,6 +51,9 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Enable network tests for integration tests that require OCI registry access
+      DEACON_NETWORK_TESTS: "1"
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -68,6 +74,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true  # Non-blocking while we stabilize Podman support
+    env:
+      # Enable network tests for integration tests that require OCI registry access
+      DEACON_NETWORK_TESTS: "1"
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -121,6 +130,9 @@ jobs:
     name: Coverage (ubuntu)
     needs: lint
     runs-on: ubuntu-latest
+    env:
+      # Enable network tests for integration tests that require OCI registry access
+      DEACON_NETWORK_TESTS: "1"
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

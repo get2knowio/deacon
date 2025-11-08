@@ -9,6 +9,7 @@ use deacon_core::oci::{
     semver_utils, CollectionFeature, CollectionMetadata, CollectionSourceInfo, FeatureFetcher,
     FeatureRef, MockHttpClient, TagList,
 };
+use std::collections::HashMap;
 use tempfile::TempDir;
 
 /// Create a minimal valid tar archive containing a devcontainer feature
@@ -138,8 +139,7 @@ async fn test_get_manifest_by_digest() {
 
 #[tokio::test]
 async fn test_list_tags_pagination() {
-    // Test pagination support for tag listing
-    // Note: Current implementation doesn't handle Link headers yet, but test structure is ready
+    // Test pagination support for tag listing with Link headers
     let mock_client = MockHttpClient::new();
     let temp_dir = TempDir::new().unwrap();
     let fetcher =
@@ -152,29 +152,206 @@ async fn test_list_tags_pagination() {
         None,
     );
 
-    // Mock the tags list response with pagination headers
-    // TODO: Implement Link header handling in list_tags method
+    // Mock page 1 with Link header pointing to page 2
     let tags_url = "https://ghcr.io/v2/devcontainers/node/tags/list";
-    let tag_list = TagList {
+    let page1_tags = TagList {
         name: "devcontainers/node".to_string(),
-        tags: vec![
-            "1.0.0".to_string(),
-            "1.1.0".to_string(),
-            "2.0.0".to_string(),
-        ],
+        tags: vec!["1.0.0".to_string(), "1.1.0".to_string()],
     };
-    let tags_json = serde_json::to_vec(&tag_list).unwrap();
+    let page1_json = serde_json::to_vec(&page1_tags).unwrap();
+
+    let mut page1_headers = HashMap::new();
+    page1_headers.insert(
+        "Link".to_string(),
+        "<https://ghcr.io/v2/devcontainers/node/tags/list?last=1.1.0>; rel=\"next\"".to_string(),
+    );
+
+    let page1_response = deacon_core::oci::HttpResponse {
+        status: 200,
+        headers: page1_headers,
+        body: bytes::Bytes::from(page1_json),
+    };
 
     mock_client
-        .add_response(tags_url.to_string(), Bytes::from(tags_json))
+        .add_response_with_headers(tags_url.to_string(), page1_response)
+        .await;
+
+    // Mock page 2 with Link header pointing to page 3
+    let page2_url = "https://ghcr.io/v2/devcontainers/node/tags/list?last=1.1.0";
+    let page2_tags = TagList {
+        name: "devcontainers/node".to_string(),
+        tags: vec!["2.0.0".to_string(), "2.1.0".to_string()],
+    };
+    let page2_json = serde_json::to_vec(&page2_tags).unwrap();
+
+    let mut page2_headers = HashMap::new();
+    page2_headers.insert(
+        "Link".to_string(),
+        "<https://ghcr.io/v2/devcontainers/node/tags/list?last=2.1.0>; rel=\"next\"".to_string(),
+    );
+
+    let page2_response = deacon_core::oci::HttpResponse {
+        status: 200,
+        headers: page2_headers,
+        body: bytes::Bytes::from(page2_json),
+    };
+
+    mock_client
+        .add_response_with_headers(page2_url.to_string(), page2_response)
+        .await;
+
+    // Mock page 3 with no Link header (end of pagination)
+    let page3_url = "https://ghcr.io/v2/devcontainers/node/tags/list?last=2.1.0";
+    let page3_tags = TagList {
+        name: "devcontainers/node".to_string(),
+        tags: vec!["3.0.0".to_string()],
+    };
+    let page3_json = serde_json::to_vec(&page3_tags).unwrap();
+
+    let page3_response = deacon_core::oci::HttpResponse {
+        status: 200,
+        headers: HashMap::new(),
+        body: bytes::Bytes::from(page3_json),
+    };
+
+    mock_client
+        .add_response_with_headers(page3_url.to_string(), page3_response)
         .await;
 
     let result = fetcher.list_tags(&feature_ref).await;
     assert!(result.is_ok());
 
     let tags = result.unwrap();
-    assert_eq!(tags.len(), 3);
-    // TODO: Add test for multi-page retrieval when Link header support is added
+    assert_eq!(tags.len(), 5);
+    assert!(tags.contains(&"1.0.0".to_string()));
+    assert!(tags.contains(&"1.1.0".to_string()));
+    assert!(tags.contains(&"2.0.0".to_string()));
+    assert!(tags.contains(&"2.1.0".to_string()));
+    assert!(tags.contains(&"3.0.0".to_string()));
+}
+
+#[tokio::test]
+async fn test_list_tags_pagination_page_limit() {
+    // Test that pagination stops after 10 pages even if more pages are available
+    let mock_client = MockHttpClient::new();
+    let temp_dir = TempDir::new().unwrap();
+    let fetcher =
+        FeatureFetcher::with_cache_dir(mock_client.clone(), temp_dir.path().to_path_buf());
+
+    let feature_ref = FeatureRef::new(
+        "ghcr.io".to_string(),
+        "devcontainers".to_string(),
+        "node".to_string(),
+        None,
+    );
+
+    let base_url = "https://ghcr.io/v2/devcontainers/node/tags/list";
+
+    // Create 11 pages (1 base + 10 more than max allowed)
+    // Each page with 10 tags to ensure we hit the tag limit or page limit
+    for page_num in 0..11 {
+        let url = if page_num == 0 {
+            base_url.to_string()
+        } else {
+            format!("{}?page={}", base_url, page_num)
+        };
+
+        let mut tags = Vec::new();
+        for i in 0..10 {
+            tags.push(format!("tag-{}-{}", page_num, i));
+        }
+
+        let tag_list = TagList {
+            name: "devcontainers/node".to_string(),
+            tags,
+        };
+        let json = serde_json::to_vec(&tag_list).unwrap();
+
+        let mut headers = HashMap::new();
+        // Add Link header for all but the last page
+        if page_num < 10 {
+            let next_url = format!("{}?page={}", base_url, page_num + 1);
+            headers.insert("Link".to_string(), format!("<{}>; rel=\"next\"", next_url));
+        }
+
+        let response = deacon_core::oci::HttpResponse {
+            status: 200,
+            headers,
+            body: bytes::Bytes::from(json),
+        };
+
+        mock_client.add_response_with_headers(url, response).await;
+    }
+
+    let result = fetcher.list_tags(&feature_ref).await;
+    assert!(result.is_ok());
+
+    let tags = result.unwrap();
+    // Should have exactly 10 pages * 10 tags = 100 tags (max 10 pages)
+    assert_eq!(tags.len(), 100, "Should stop at 10 pages limit");
+}
+
+#[tokio::test]
+async fn test_list_tags_pagination_tag_limit() {
+    // Test that pagination stops after 1000 tags even if more are available
+    let mock_client = MockHttpClient::new();
+    let temp_dir = TempDir::new().unwrap();
+    let fetcher =
+        FeatureFetcher::with_cache_dir(mock_client.clone(), temp_dir.path().to_path_buf());
+
+    let feature_ref = FeatureRef::new(
+        "ghcr.io".to_string(),
+        "devcontainers".to_string(),
+        "node".to_string(),
+        None,
+    );
+
+    let base_url = "https://ghcr.io/v2/devcontainers/node/tags/list";
+
+    // Create 3 pages: 400 + 400 + 300 tags = 1100 total
+    // Should stop at 1000
+    for page_num in 0..3 {
+        let url = if page_num == 0 {
+            base_url.to_string()
+        } else {
+            format!("{}?page={}", base_url, page_num)
+        };
+
+        let mut tags = Vec::new();
+        let tags_in_page = if page_num < 2 { 400 } else { 300 };
+
+        for i in 0..tags_in_page {
+            tags.push(format!("tag-{}-{}", page_num, i));
+        }
+
+        let tag_list = TagList {
+            name: "devcontainers/node".to_string(),
+            tags,
+        };
+        let json = serde_json::to_vec(&tag_list).unwrap();
+
+        let mut headers = HashMap::new();
+        // Add Link header for all but the last page
+        if page_num < 2 {
+            let next_url = format!("{}?page={}", base_url, page_num + 1);
+            headers.insert("Link".to_string(), format!("<{}>; rel=\"next\"", next_url));
+        }
+
+        let response = deacon_core::oci::HttpResponse {
+            status: 200,
+            headers,
+            body: bytes::Bytes::from(json),
+        };
+
+        mock_client.add_response_with_headers(url, response).await;
+    }
+
+    let result = fetcher.list_tags(&feature_ref).await;
+    assert!(result.is_ok());
+
+    let tags = result.unwrap();
+    // Should have exactly 1000 tags (stopped at limit)
+    assert_eq!(tags.len(), 1000, "Should stop at 1000 tag limit");
 }
 
 #[tokio::test]
@@ -591,4 +768,116 @@ fn test_semver_utils_compare_versions() {
         semver_utils::compare_versions("invalid", "1.0.0"),
         Ordering::Less
     );
+}
+
+#[tokio::test]
+async fn test_get_manifest_with_digest() {
+    // Create mock HTTP client
+    let mock_client = MockHttpClient::new();
+    let temp_dir = TempDir::new().unwrap();
+    let fetcher =
+        FeatureFetcher::with_cache_dir(mock_client.clone(), temp_dir.path().to_path_buf());
+
+    // Create feature reference
+    let feature_ref = FeatureRef::new(
+        "ghcr.io".to_string(),
+        "devcontainers".to_string(),
+        "node".to_string(),
+        Some("1.0.0".to_string()),
+    );
+
+    // Mock the manifest response
+    let manifest_url = "https://ghcr.io/v2/devcontainers/node/manifests/1.0.0";
+    let manifest_json = r#"{
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "layers": [
+            {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                "size": 1024,
+                "digest": "sha256:abc123"
+            }
+        ]
+    }"#;
+
+    mock_client
+        .add_response(manifest_url.to_string(), Bytes::from(manifest_json))
+        .await;
+
+    // Call get_manifest_with_digest
+    let result = fetcher.get_manifest_with_digest(&feature_ref).await;
+    assert!(
+        result.is_ok(),
+        "Expected successful manifest fetch with digest"
+    );
+
+    let (manifest, digest) = result.unwrap();
+
+    // Verify manifest was parsed correctly
+    assert_eq!(manifest["schemaVersion"], 2);
+    assert_eq!(manifest["layers"].as_array().unwrap().len(), 1);
+    assert_eq!(manifest["layers"][0]["digest"], "sha256:abc123");
+
+    // Verify digest is valid hex string (64 chars for SHA256)
+    assert_eq!(
+        digest.len(),
+        64,
+        "SHA256 digest should be 64 hex characters"
+    );
+    assert!(
+        digest.chars().all(|c| c.is_ascii_hexdigit()),
+        "Digest should only contain hex characters"
+    );
+}
+
+#[tokio::test]
+async fn test_get_manifest_with_digest_same_manifest_same_digest() {
+    // Test that the same manifest always produces the same digest (deterministic)
+    let mock_client = MockHttpClient::new();
+    let temp_dir = TempDir::new().unwrap();
+    let fetcher =
+        FeatureFetcher::with_cache_dir(mock_client.clone(), temp_dir.path().to_path_buf());
+
+    let feature_ref = FeatureRef::new(
+        "ghcr.io".to_string(),
+        "devcontainers".to_string(),
+        "node".to_string(),
+        Some("1.0.0".to_string()),
+    );
+
+    let manifest_url = "https://ghcr.io/v2/devcontainers/node/manifests/1.0.0";
+    let manifest_json = r#"{
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "layers": [
+            {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                "size": 1024,
+                "digest": "sha256:abc123"
+            }
+        ]
+    }"#;
+
+    mock_client
+        .add_response(manifest_url.to_string(), Bytes::from(manifest_json))
+        .await;
+
+    // Fetch twice
+    let (manifest1, digest1) = fetcher
+        .get_manifest_with_digest(&feature_ref)
+        .await
+        .expect("First fetch should succeed");
+    let (manifest2, digest2) = fetcher
+        .get_manifest_with_digest(&feature_ref)
+        .await
+        .expect("Second fetch should succeed");
+
+    // Verify digests are identical
+    assert_eq!(
+        digest1, digest2,
+        "Same manifest should always produce same digest"
+    );
+
+    // Verify manifests are identical
+    assert_eq!(manifest1, manifest2, "Manifests should be identical");
 }
