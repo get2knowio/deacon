@@ -1,5 +1,16 @@
 # Features Plan Data Structures
 
+## Behavior Notes
+
+### Input Validation
+- `--additional-features` must be a JSON object (map); arrays, strings, numbers, booleans, and null values are rejected with a descriptive error.
+- Feature IDs are validated to ensure they are registry references; local paths (starting with `./`, `../`, `/`, or `file://`) are rejected with guidance to use registry references instead.
+
+### Determinism and Ordering
+- The `order` array is deterministically computed using topological sort with lexicographic tie-breakers for independent features.
+- The `graph` object contains only direct dependencies (union of `installsAfter` and `dependsOn`), deduplicated and sorted lexicographically by feature ID.
+- All outputs are stable across multiple runs with the same inputs.
+
 ## Plan Output (JSON)
 ```json
 {

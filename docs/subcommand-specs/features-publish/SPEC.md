@@ -70,9 +70,13 @@ FUNCTION execute_subcommand(input) -> ExecutionResult:
         else:
             log_warn('Version already exists; skipping')
 
-    // Publish collection metadata
-    collection_ref = make_collection_ref(input.registry, input.namespace)
-    push_collection_metadata(collection_ref, join(out_dir, 'devcontainer-collection.json'))
+  // Publish collection metadata to <registry>/<namespace>:collection
+  collection_ref = make_collection_ref(input.registry, input.namespace, tag="collection")
+  push_collection_metadata(
+    collection_ref,
+    join(out_dir, 'devcontainer-collection.json'),
+    media_type='application/vnd.devcontainer.collection+json'
+  )
 
     RETURN Success
 END FUNCTION
@@ -97,7 +101,9 @@ END FUNCTION
   - For version `X.Y.Z`, publish tags `[X, X.Y, X.Y.Z, latest]` if not already published.
 
 ### File System
-- Reads artifacts from output folder; reads `devcontainer-collection.json`.
+- Reads artifacts from output folder; reads `devcontainer-collection.json` for collection publishing.
+  - Collection publish target: `<registry>/<namespace>:collection`
+  - Media type: `application/vnd.devcontainer.collection+json`
 
 ## 8. Data Flow Diagrams
 
@@ -133,8 +139,24 @@ END FUNCTION
 
 ## 10. Output Specifications
 - Text Mode: Logs steps (“Fetching published versions…”, “Publishing tags: …”). Shows success or warns when version exists.
-- JSON Mode: The TS CLI prints human‑readable logs; for structured output, emit summary like `{ publishedTags: string[], digest: string }` per feature.
-- Exit Codes: `0` success (even if versions already existed), `1` on fatal error.
+- JSON Mode: Emit a single root object:
+  - `features`: array of per-feature objects:
+    - `featureId` (string)
+    - `version` (string)
+    - `digest` (string)
+    - `publishedTags` (string[])
+    - `skippedTags` (string[])
+    - `movedLatest` (boolean)
+    - `registry` (string)
+    - `namespace` (string)
+  - `collection` (object, optional): `{ "digest": string }` when collection metadata is published
+  - `summary` (object): `{ "features": number, "publishedTags": number, "skippedTags": number }`
+- Exit Codes:
+  - `0`: success (including all‑skipped)
+  - `1`: fatal error (e.g., invalid semver, no features discovered, auth failure)
+- Stdout/Stderr:
+  - In JSON mode, stdout contains only the JSON document; all logs to stderr.
+  - On fatal errors, stdout is empty and the error is written to stderr.
 
 ## 11. Performance Considerations
 - Sequential publish per feature; can be parallelized carefully (avoid tag conflicts on same repo).

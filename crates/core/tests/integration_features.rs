@@ -80,7 +80,11 @@ fn test_parse_invalid_fixture() {
         Path::new("../../fixtures/features/invalid-schema/devcontainer-feature.json");
     let result = parse_feature_metadata(fixture_path);
 
-    assert!(result.is_err());
+    assert!(result.is_ok()); // Parsing should succeed
+
+    let metadata = result.unwrap();
+    let validation_result = metadata.validate();
+    assert!(validation_result.is_err());
     // Should fail validation because id is empty and default value doesn't match enum
 }
 
