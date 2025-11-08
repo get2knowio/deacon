@@ -17,6 +17,9 @@ pub mod env_probe;
 pub mod errors;
 pub mod feature_installer;
 pub mod features;
+/// Feature testing infrastructure for dev container features.
+/// Provides functionality for discovering and executing tests for dev container features.
+pub mod features_test;
 pub mod host_requirements;
 pub mod io;
 pub mod lifecycle;

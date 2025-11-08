@@ -10,7 +10,7 @@ use tempfile::TempDir;
 
 /// Helper function to extract JSON from mixed output (logs + JSON)
 fn extract_json_from_output(output: &str) -> Result<serde_json::Value, serde_json::Error> {
-    // Try to find JSON by looking for complete JSON objects
+    // Try to find JSON by looking for complete JSON objects or arrays
     // Skip lines that look like log messages (contain timestamp patterns)
     for line in output.lines() {
         let trimmed = line.trim();
@@ -18,7 +18,14 @@ fn extract_json_from_output(output: &str) -> Result<serde_json::Value, serde_jso
         if trimmed.contains("Z ") || trimmed.contains("\x1b[") || trimmed.is_empty() {
             continue;
         }
+        // Try to parse objects
         if trimmed.starts_with('{') && trimmed.ends_with('}') {
+            if let Ok(json) = serde_json::from_str(trimmed) {
+                return Ok(json);
+            }
+        }
+        // Try to parse arrays
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
             if let Ok(json) = serde_json::from_str(trimmed) {
                 return Ok(json);
             }
@@ -29,8 +36,16 @@ fn extract_json_from_output(output: &str) -> Result<serde_json::Value, serde_jso
     let lines: Vec<&str> = output.lines().collect();
     for i in (0..lines.len()).rev() {
         let line = lines[i].trim();
+        // Try objects
         if line.starts_with('{') {
             // Collect all lines from this point onwards and try to parse as JSON
+            let json_part = lines[i..].join("\n");
+            if let Ok(json) = serde_json::from_str(&json_part) {
+                return Ok(json);
+            }
+        }
+        // Try arrays
+        if line.starts_with('[') {
             let json_part = lines[i..].join("\n");
             if let Ok(json) = serde_json::from_str(&json_part) {
                 return Ok(json);
@@ -58,17 +73,20 @@ fn fixture_path(relative_path: &str) -> std::path::PathBuf {
 #[test]
 fn test_features_test_with_valid_feature() {
     let temp_dir = TempDir::new().unwrap();
-    let feature_dir = temp_dir.path().join("test-feature");
+    let project_dir = temp_dir.path();
 
-    // Create feature directory with minimal files
-    fs::create_dir_all(&feature_dir).unwrap();
+    // Create project structure with src/ and test/ directories
+    let src_dir = project_dir.join("src").join("test-feature");
+    fs::create_dir_all(&src_dir).unwrap();
+
+    // Create feature metadata and install script
     fs::write(
-        feature_dir.join("devcontainer-feature.json"),
+        src_dir.join("devcontainer-feature.json"),
         r#"{"id": "test-feature", "version": "1.0.0", "name": "Test Feature"}"#,
     )
     .unwrap();
     fs::write(
-        feature_dir.join("install.sh"),
+        src_dir.join("install.sh"),
         "#!/bin/bash\necho 'Installing test feature'\nexit 0",
     )
     .unwrap();
@@ -77,37 +95,79 @@ fn test_features_test_with_valid_feature() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(feature_dir.join("install.sh"))
+        let mut perms = fs::metadata(src_dir.join("install.sh"))
             .unwrap()
             .permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(feature_dir.join("install.sh"), perms).unwrap();
+        fs::set_permissions(src_dir.join("install.sh"), perms).unwrap();
+    }
+
+    // Create test directory with test script
+    let test_dir = project_dir.join("test").join("test-feature");
+    fs::create_dir_all(&test_dir).unwrap();
+    fs::write(
+        test_dir.join("test.sh"),
+        "#!/bin/bash\necho 'Running test'\nexit 0",
+    )
+    .unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(test_dir.join("test.sh"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(test_dir.join("test.sh"), perms).unwrap();
     }
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.args(["features", "test", feature_dir.to_str().unwrap(), "--json"]);
+    cmd.args(["features", "test", project_dir.to_str().unwrap(), "--json"]);
 
     let output = cmd.output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Parse JSON output using helper function
+    // Parse JSON output - expect array of test results
     let json = extract_json_from_output(&stdout).unwrap();
-    assert_eq!(json["command"], "test");
-    // Note: status might be "failure" if Docker is not available, which is expected in CI
-    assert!(json["status"] == "success" || json["status"] == "failure");
+    assert!(json.is_array(), "Expected JSON array of test results");
+    let results = json.as_array().unwrap();
+    assert!(!results.is_empty(), "Expected at least one test result");
+
+    // Verify result structure
+    for result in results {
+        assert!(result["test_name"].is_string());
+        assert!(result["result"].is_boolean());
+    }
 }
 
 /// Test features test command with missing feature metadata
 #[test]
 fn test_features_test_with_missing_metadata() {
     let temp_dir = TempDir::new().unwrap();
-    let feature_dir = temp_dir.path().join("test-feature");
+    let project_dir = temp_dir.path();
 
-    // Create feature directory without devcontainer-feature.json
-    fs::create_dir_all(&feature_dir).unwrap();
+    // Create project structure with src/ and test/ directories
+    let src_dir = project_dir.join("src").join("test-feature");
+    fs::create_dir_all(&src_dir).unwrap();
+
+    // Create install script but no devcontainer-feature.json
+    fs::write(
+        src_dir.join("install.sh"),
+        "#!/bin/bash\necho 'Installing test feature'\nexit 0",
+    )
+    .unwrap();
+
+    // Create test directory with test script
+    let test_dir = project_dir.join("test").join("test-feature");
+    fs::create_dir_all(&test_dir).unwrap();
+    fs::write(
+        test_dir.join("test.sh"),
+        "#!/bin/bash\necho 'Running test'\nexit 0",
+    )
+    .unwrap();
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.args(["features", "test", feature_dir.to_str().unwrap()]);
+    cmd.args(["features", "test", project_dir.to_str().unwrap()]);
 
     cmd.assert()
         .failure()
@@ -118,18 +178,30 @@ fn test_features_test_with_missing_metadata() {
 #[test]
 fn test_features_test_with_missing_install_script() {
     let temp_dir = TempDir::new().unwrap();
-    let feature_dir = temp_dir.path().join("test-feature");
+    let project_dir = temp_dir.path();
 
-    // Create feature directory with metadata but no install.sh
-    fs::create_dir_all(&feature_dir).unwrap();
+    // Create project structure with src/ and test/ directories
+    let src_dir = project_dir.join("src").join("test-feature");
+    fs::create_dir_all(&src_dir).unwrap();
+
+    // Create feature metadata but no install.sh
     fs::write(
-        feature_dir.join("devcontainer-feature.json"),
+        src_dir.join("devcontainer-feature.json"),
         r#"{"id": "test-feature", "version": "1.0.0"}"#,
     )
     .unwrap();
 
+    // Create test directory with test script
+    let test_dir = project_dir.join("test").join("test-feature");
+    fs::create_dir_all(&test_dir).unwrap();
+    fs::write(
+        test_dir.join("test.sh"),
+        "#!/bin/bash\necho 'Running test'\nexit 0",
+    )
+    .unwrap();
+
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.args(["features", "test", feature_dir.to_str().unwrap()]);
+    cmd.args(["features", "test", project_dir.to_str().unwrap()]);
 
     cmd.assert()
         .failure()

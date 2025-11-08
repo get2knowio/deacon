@@ -7,7 +7,7 @@ Tracks: #345, depends on: #351
 - [x] Core Logic Implementation
 
 ## Description
-Add duplicate install test: run feature install twice and verify idempotency per spec, reporting a separate result named `feature-id (duplicate)`.
+Add duplicate install test: run feature install twice and verify idempotency per spec, reporting a separate result named `feature-id (duplicate/idempotence)`.
 
 ## Specification Reference
 - SPEC.md §5 Core Execution Logic; §10 Output

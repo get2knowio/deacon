@@ -221,7 +221,7 @@ Command::new("docker")
     "result": false
   },
   {
-    "testName": "feature-id (duplicate)",
+    "testName": "feature-id (duplicate/idempotence)",
     "result": true
   }
 ]
