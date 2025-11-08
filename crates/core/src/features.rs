@@ -347,6 +347,24 @@ impl FeatureMetadata {
 }
 
 /// Parse feature metadata from a devcontainer-feature.json file
+///
+/// This function only parses the JSON structure from the file. **Callers are responsible
+/// for validating the returned metadata** by calling [`FeatureMetadata::validate()`] before
+/// using it in production code paths.
+///
+/// # Example
+/// ```no_run
+/// use deacon_core::features::parse_feature_metadata;
+/// use std::path::Path;
+///
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let path = Path::new("devcontainer-feature.json");
+/// let metadata = parse_feature_metadata(path)?;
+/// // Always validate before use
+/// metadata.validate()?;
+/// # Ok(())
+/// # }
+/// ```
 #[instrument(level = "debug")]
 pub fn parse_feature_metadata(path: &Path) -> Result<FeatureMetadata> {
     debug!("Parsing feature metadata from: {}", path.display());

@@ -1003,6 +1003,9 @@ impl<C: HttpClient> FeatureFetcher<C> {
                 },
             })?;
 
+            // Validate metadata before use
+            metadata.validate()?;
+
             info!("Successfully fetched feature: {}", metadata.id);
             Ok((
                 DownloadedFeature {
@@ -1808,6 +1811,9 @@ impl<C: HttpClient> FeatureFetcher<C> {
     ) -> Result<DownloadedFeature> {
         let metadata_path = cached_dir.join("devcontainer-feature.json");
         let metadata = parse_feature_metadata(&metadata_path)?;
+
+        // Validate metadata before use
+        metadata.validate()?;
 
         Ok(DownloadedFeature {
             path: cached_dir,

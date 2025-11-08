@@ -308,7 +308,7 @@ fn test_features_publish_without_dry_run() {
 
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("Failed to compute publish plan"));
+        .stderr(predicate::str::contains("Failed to determine publish plan"));
 }
 
 /// Test features command help output
