@@ -858,6 +858,8 @@ fn classify_network_error(error: &FeatureError) -> RetryDecision {
         FeatureError::Oci { .. } => RetryDecision::Retry,
         // Authentication errors should be retried once to allow credential refresh
         FeatureError::Authentication { .. } => RetryDecision::Retry,
+        // Don't retry auth failures - they require correct credentials
+        FeatureError::Unauthorized { .. } | FeatureError::Forbidden { .. } => RetryDecision::Stop,
         // Don't retry parsing, validation, or other logical errors
         FeatureError::Parsing { .. }
         | FeatureError::Validation { .. }

@@ -24,10 +24,10 @@
 
 ## User Story 4 - Combined verbose view
 
-- [ ] Given a valid ref, when running in text mode, then the CLI outputs three boxed sections in order: Manifest/Canonical Identifier, Published Tags, Dependency Tree.
-- [ ] Given the same ref, when running with `--output-format json`, then output is a single JSON object union of manifest/canonicalId and publishedTags; no dependency graph is included.
-- [ ] Given a valid ref where dependency graph generation fails, when running with `--output-format json`, then output includes successfully retrieved fields (manifest/canonicalId and/or publishedTags as applicable), plus an `errors` object containing a `dependencies` key with a brief message, and the process exits with code 1.
-- [ ] Given a valid ref where at least one sub-mode fails (e.g., tags listing times out), when running with `--output-format json`, then output includes the successfully retrieved fields and an `errors` object keyed by sub-mode (e.g., `{"errors": {"tags": "<message>"}}`) and the process exits with code 1.
+- [X] Given a valid ref, when running in text mode, then the CLI outputs three boxed sections in order: Manifest/Canonical Identifier, Published Tags, Dependency Tree.
+- [X] Given the same ref, when running with `--output-format json`, then output is a single JSON object union of manifest/canonicalId and publishedTags; no dependency graph is included.
+- [X] Given a valid ref where dependency graph generation fails, when running with `--output-format json`, then output includes successfully retrieved fields (manifest/canonicalId and/or publishedTags as applicable), plus an `errors` object containing a `dependencies` key with a brief message, and the process exits with code 1.
+- [X] Given a valid ref where at least one sub-mode fails (e.g., tags listing times out), when running with `--output-format json`, then output includes the successfully retrieved fields and an `errors` object keyed by sub-mode (e.g., `{"errors": {"tags": "<message>"}}`) and the process exits with code 1.
 
 ## Edge Cases
 

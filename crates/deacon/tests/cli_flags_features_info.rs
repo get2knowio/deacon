@@ -1,0 +1,264 @@
+//! Integration tests for `features info` CLI flag handling
+//!
+//! These tests verify that the `features info` subcommand properly handles
+//! various CLI flags including --output-format, --log-level, and validation
+//! of flag combinations.
+
+use assert_cmd::Command;
+use predicates::prelude::*;
+use serde_json::Value;
+
+/// Helper to check if network tests should run
+fn should_run_network_tests() -> bool {
+    std::env::var("DEACON_NETWORK_TESTS")
+        .map(|v| v == "1" || v.to_lowercase() == "true")
+        .unwrap_or(false)
+}
+
+#[test]
+fn test_output_format_text() {
+    if !should_run_network_tests() {
+        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+        return;
+    }
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features")
+        .arg("info")
+        .arg("manifest")
+        .arg("ghcr.io/devcontainers/features/node:1")
+        .arg("--output-format")
+        .arg("text");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Manifest"))
+        .stdout(predicate::str::contains("Canonical Identifier"));
+}
+
+#[test]
+fn test_output_format_json() {
+    if !should_run_network_tests() {
+        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+        return;
+    }
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features")
+        .arg("info")
+        .arg("manifest")
+        .arg("ghcr.io/devcontainers/features/node:1")
+        .arg("--output-format")
+        .arg("json");
+
+    let output = cmd.assert().success();
+
+    // Verify valid JSON
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
+
+    // Verify structure
+    assert!(json.is_object());
+    let obj = json.as_object().unwrap();
+    assert!(obj.contains_key("manifest"));
+    assert!(obj.contains_key("canonicalId"));
+}
+
+#[test]
+fn test_output_format_invalid() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features")
+        .arg("info")
+        .arg("manifest")
+        .arg("ghcr.io/devcontainers/features/node:1")
+        .arg("--output-format")
+        .arg("invalid");
+
+    cmd.assert().failure().stderr(
+        predicate::str::contains("invalid value 'invalid'").or(predicate::str::contains("error")),
+    );
+}
+
+#[test]
+fn test_log_level_info() {
+    if !should_run_network_tests() {
+        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+        return;
+    }
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features")
+        .arg("info")
+        .arg("manifest")
+        .arg("ghcr.io/devcontainers/features/node:1")
+        .arg("--log-level")
+        .arg("info")
+        .arg("--output-format")
+        .arg("text");
+
+    cmd.assert().success();
+}
+
+#[test]
+fn test_log_level_debug() {
+    if !should_run_network_tests() {
+        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+        return;
+    }
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features")
+        .arg("info")
+        .arg("manifest")
+        .arg("ghcr.io/devcontainers/features/node:1")
+        .arg("--log-level")
+        .arg("debug")
+        .arg("--output-format")
+        .arg("text");
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("DEBUG").or(predicate::str::is_empty()));
+}
+
+#[test]
+fn test_log_level_trace() {
+    if !should_run_network_tests() {
+        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+        return;
+    }
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features")
+        .arg("info")
+        .arg("manifest")
+        .arg("ghcr.io/devcontainers/features/node:1")
+        .arg("--log-level")
+        .arg("trace")
+        .arg("--output-format")
+        .arg("text");
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("TRACE").or(predicate::str::is_empty()));
+}
+
+#[test]
+fn test_log_level_invalid() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features")
+        .arg("info")
+        .arg("manifest")
+        .arg("ghcr.io/devcontainers/features/node:1")
+        .arg("--log-level")
+        .arg("invalid");
+
+    cmd.assert().failure().stderr(
+        predicate::str::contains("invalid value 'invalid'").or(predicate::str::contains("error")),
+    );
+}
+
+#[test]
+fn test_json_output_with_different_log_levels() {
+    if !should_run_network_tests() {
+        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+        return;
+    }
+
+    // Test that JSON output is pure (only JSON on stdout) regardless of log level
+    for log_level in &["info", "debug", "trace"] {
+        let mut cmd = Command::cargo_bin("deacon").unwrap();
+        cmd.arg("features")
+            .arg("info")
+            .arg("manifest")
+            .arg("ghcr.io/devcontainers/features/node:1")
+            .arg("--output-format")
+            .arg("json")
+            .arg("--log-level")
+            .arg(*log_level);
+
+        let output = cmd.assert().success();
+
+        // Stdout should contain ONLY valid JSON
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        let json_result: Result<Value, _> = serde_json::from_str(&stdout);
+
+        assert!(
+            json_result.is_ok(),
+            "JSON output should be valid for log-level={}. Output: {}",
+            log_level,
+            stdout
+        );
+
+        // Verify no log messages leaked into stdout
+        assert!(
+            !stdout.contains("INFO") && !stdout.contains("DEBUG") && !stdout.contains("TRACE"),
+            "Log messages should not appear in JSON stdout for log-level={}",
+            log_level
+        );
+    }
+}
+
+#[test]
+fn test_missing_required_mode() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features")
+        .arg("info")
+        .arg("ghcr.io/devcontainers/features/node:1");
+
+    cmd.assert().failure().stderr(
+        predicate::str::contains("required arguments").or(predicate::str::contains("MODE")),
+    );
+}
+
+#[test]
+fn test_missing_required_feature() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features").arg("info").arg("manifest");
+
+    cmd.assert().failure().stderr(
+        predicate::str::contains("required arguments").or(predicate::str::contains("FEATURE")),
+    );
+}
+
+#[test]
+fn test_invalid_mode() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features")
+        .arg("info")
+        .arg("invalid-mode")
+        .arg("ghcr.io/devcontainers/features/node:1");
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid-mode").or(predicate::str::contains("error")));
+}
+
+#[test]
+fn test_help_flag() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features").arg("info").arg("--help");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("features info"))
+        .stdout(predicate::str::contains("MODE"))
+        .stdout(predicate::str::contains("FEATURE"))
+        .stdout(predicate::str::contains("--output-format"))
+        .stdout(predicate::str::contains("--log-level"));
+}
+
+#[test]
+fn test_all_modes_listed_in_help() {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("features").arg("info").arg("--help");
+
+    let output = cmd.assert().success();
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+
+    // Verify all modes are documented
+    assert!(stdout.contains("manifest"));
+    assert!(stdout.contains("tags"));
+    assert!(stdout.contains("dependencies"));
+    assert!(stdout.contains("verbose"));
+}

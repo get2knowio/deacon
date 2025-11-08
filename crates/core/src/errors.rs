@@ -142,7 +142,15 @@ pub enum FeatureError {
     #[error("Feature dependency resolution error: {message}")]
     DependencyResolution { message: String },
 
-    /// Authentication error
+    /// Authentication error (HTTP 401 Unauthorized)
+    #[error("Authentication failed: {message}")]
+    Unauthorized { message: String },
+
+    /// Authorization error (HTTP 403 Forbidden)
+    #[error("Authorization denied: {message}")]
+    Forbidden { message: String },
+
+    /// Generic authentication/authorization error (for backward compatibility)
     #[error("Authentication error: {message}")]
     Authentication { message: String },
 }

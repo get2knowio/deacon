@@ -1,4 +1,4 @@
-//! Integration tests for `deacon features info manifest` subcommand
+//! Integration tests for `deacon features info tags` subcommand
 //!
 //! Tests text and JSON output formats, plus error handling for invalid refs.
 
@@ -6,10 +6,11 @@ mod support;
 use assert_cmd::Command;
 use support::{extract_json_from_output, skip_if_no_network_tests};
 
-/// Test manifest mode with valid remote feature (text output)
+/// Test tags mode with valid remote feature (text output)
 /// Requires network access - gated by DEACON_NETWORK_TESTS=1
 #[test]
-fn test_manifest_remote_text() {
+fn test_tags_remote_text() {
+    // Skip test unless network tests are enabled
     if skip_if_no_network_tests() {
         return;
     }
@@ -18,8 +19,8 @@ fn test_manifest_remote_text() {
     cmd.args([
         "features",
         "info",
-        "manifest",
-        "ghcr.io/devcontainers/features/node:1",
+        "tags",
+        "ghcr.io/devcontainers/features/node",
         "--output-format",
         "text",
     ]);
@@ -27,22 +28,19 @@ fn test_manifest_remote_text() {
     let output = cmd.output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Should succeed and contain manifest information
+    // Should succeed and contain published tags
     assert!(output.status.success(), "Command should succeed");
     assert!(
-        stdout.contains("Manifest"),
-        "Should contain 'Manifest' section"
-    );
-    assert!(
-        stdout.contains("Canonical Identifier"),
-        "Should contain 'Canonical Identifier' section"
+        stdout.contains("Published Tags"),
+        "Should contain 'Published Tags' section"
     );
 }
 
-/// Test manifest mode with valid remote feature (JSON output)
+/// Test tags mode with valid remote feature (JSON output)
 /// Requires network access - gated by DEACON_NETWORK_TESTS=1
 #[test]
-fn test_manifest_remote_json() {
+fn test_tags_remote_json() {
+    // Skip test unless network tests are enabled
     if skip_if_no_network_tests() {
         return;
     }
@@ -51,8 +49,8 @@ fn test_manifest_remote_json() {
     cmd.args([
         "features",
         "info",
-        "manifest",
-        "ghcr.io/devcontainers/features/node:1",
+        "tags",
+        "ghcr.io/devcontainers/features/node",
         "--output-format",
         "json",
     ]);
@@ -66,41 +64,31 @@ fn test_manifest_remote_json() {
     // Parse JSON output
     let json = extract_json_from_output(&stdout).unwrap();
 
-    // Verify JSON contract: { manifest, canonicalId }
+    // Verify JSON contract: { "publishedTags": [...] }
     assert!(
-        json.get("manifest").is_some(),
-        "Should have 'manifest' field"
-    );
-    assert!(
-        json.get("canonicalId").is_some(),
-        "Should have 'canonicalId' field"
+        json.get("publishedTags").is_some(),
+        "Should have 'publishedTags' field"
     );
 
-    // Verify manifest is an object
-    assert!(json["manifest"].is_object(), "Manifest should be an object");
+    // Verify publishedTags is an array
+    let tags = json["publishedTags"].as_array().unwrap();
+    assert!(!tags.is_empty(), "Should have at least one tag");
 
-    // Verify canonicalId is a string starting with sha256:
-    let canonical_id = json["canonicalId"].as_str().unwrap();
-    assert!(
-        canonical_id.starts_with("sha256:"),
-        "Canonical ID should start with 'sha256:'"
-    );
-    assert_eq!(
-        canonical_id.len(),
-        71,
-        "Canonical ID should be 71 characters (sha256: + 64 hex)"
-    );
+    // Verify all tags are strings
+    for tag in tags {
+        assert!(tag.is_string(), "All tags should be strings");
+    }
 }
 
-/// Test manifest mode with invalid registry reference (should return {} + exit 1)
+/// Test tags mode with invalid registry reference (should return {} + exit 1)
 #[test]
-fn test_manifest_invalid_ref() {
+fn test_tags_invalid_ref() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.args([
         "features",
         "info",
-        "manifest",
-        "invalid.registry.example.com/nonexistent/feature:latest",
+        "tags",
+        "invalid.registry.example.com/nonexistent/feature",
         "--output-format",
         "json",
     ]);
@@ -123,14 +111,14 @@ fn test_manifest_invalid_ref() {
     );
 }
 
-/// Test manifest mode with malformed reference (should return {} + exit 1)
+/// Test tags mode with malformed reference (should return {} + exit 1)
 #[test]
-fn test_manifest_malformed_ref() {
+fn test_tags_malformed_ref() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.args([
         "features",
         "info",
-        "manifest",
+        "tags",
         "not-a-valid-reference",
         "--output-format",
         "json",
@@ -154,26 +142,21 @@ fn test_manifest_malformed_ref() {
     );
 }
 
-/// Test manifest mode with local feature (canonicalId should be null)
+/// Test tags mode with deterministic sorting
+/// Requires network access - gated by DEACON_NETWORK_TESTS=1
 #[test]
-fn test_manifest_local_feature() {
-    // Use a fixture from the workspace
-    let fixture_path = {
-        let current_dir = std::env::current_dir().unwrap();
-        let workspace_root = if current_dir.ends_with("crates/deacon") {
-            current_dir.parent().unwrap().parent().unwrap()
-        } else {
-            &current_dir
-        };
-        workspace_root.join("fixtures/features/minimal")
-    };
+fn test_tags_deterministic_sorting() {
+    // Skip test unless network tests are enabled
+    if skip_if_no_network_tests() {
+        return;
+    }
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.args([
         "features",
         "info",
-        "manifest",
-        fixture_path.to_str().unwrap(),
+        "tags",
+        "ghcr.io/devcontainers/features/node",
         "--output-format",
         "json",
     ]);
@@ -182,28 +165,22 @@ fn test_manifest_local_feature() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Should succeed
-    assert!(
-        output.status.success(),
-        "Command should succeed for local feature"
-    );
+    assert!(output.status.success(), "Command should succeed");
 
     // Parse JSON output
     let json = extract_json_from_output(&stdout).unwrap();
+    let tags = json["publishedTags"].as_array().unwrap();
 
-    // Verify JSON contract: { manifest, canonicalId: null }
-    assert!(
-        json.get("manifest").is_some(),
-        "Should have 'manifest' field"
-    );
-    assert_eq!(
-        json.get("canonicalId"),
-        Some(&serde_json::Value::Null),
-        "Canonical ID should be null for local features"
-    );
+    // Verify tags are sorted (lexicographically)
+    let tag_strings: Vec<String> = tags
+        .iter()
+        .map(|t| t.as_str().unwrap().to_string())
+        .collect();
+    let mut sorted_tags = tag_strings.clone();
+    sorted_tags.sort();
 
-    // Verify manifest content
     assert_eq!(
-        json["manifest"]["id"], "minimal-feature",
-        "Should have correct feature ID"
+        tag_strings, sorted_tags,
+        "Tags should be sorted deterministically"
     );
 }

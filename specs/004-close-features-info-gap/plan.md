@@ -29,7 +29,7 @@ NEEDS CLARIFICATION: None — requirements are fully specified by the feature sp
 
 ## Constitution Check
 
-Gates derived from `/workspaces/deacon/.specify/memory/constitution.md`:
+Gates derived from `.specify/memory/constitution.md`:
 
 - I. Spec‑Parity as Source of Truth: PASS — aligns with `docs/CLI-SPEC.md` and subcommand spec; any divergence will be flagged in PR.
 - II. Keep the Build Green: PASS — plan adheres to mandatory fmt, clippy, tests; updates will include tests/examples.
