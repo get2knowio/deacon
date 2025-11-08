@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Features Info - Manifest Output",
+  "type": "object",
+  "description": "Manifest and canonical ID output contract for features info manifest mode",
+  "required": ["manifest", "canonicalId"],
+  "properties": {
+    "manifest": {
+      "type": "object",
+      "description": "Opaque manifest object as returned by registry or derived from local devcontainer-feature.json",
+      "additionalProperties": true
+    },
+    "canonicalId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical identifier with registry, path, and digest (e.g., 'ghcr.io/owner/feature@sha256:abc123...')"
+        },
+        {
+          "type": "null",
+          "description": "Null for local feature paths without OCI digest"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

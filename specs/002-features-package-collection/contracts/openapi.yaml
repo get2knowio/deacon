@@ -1,0 +1,58 @@
+openapi: 3.0.3
+info:
+  title: Deacon Features Package — Schemas
+  version: 0.1.0
+  description: |
+    Schema contracts for metadata artifacts produced by the `features package` subcommand.
+    No HTTP endpoints are defined; this document captures component schemas only.
+paths: {}
+components:
+  schemas:
+    CollectionMetadata:
+      type: object
+      required:
+        - sourceInformation
+        - features
+      properties:
+        sourceInformation:
+          $ref: '#/components/schemas/SourceInformation'
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureDescriptor'
+
+    SourceInformation:
+      type: object
+      required:
+        - source
+      properties:
+        source:
+          type: string
+          enum: [devcontainer-cli]
+
+    FeatureDescriptor:
+      type: object
+      required:
+        - id
+        - version
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+          description: Version string; typically semver.
+        name:
+          type: string
+        description:
+          type: string
+        options:
+          type: object
+          additionalProperties: true
+        installsAfter:
+          type: array
+          items:
+            type: string
+        dependsOn:
+          type: array
+          items:
+            type: string

@@ -20,6 +20,7 @@
   - `--additional-features <JSON>`: Merge additional features (map of id → value/options) into config before planning.
 - Argument Validation Rules:
   - `--additional-features` must be a JSON object (map). Parse errors are fatal.
+  - Feature IDs must be registry references; local paths (starting with `./`, `../`, `/`, or `file://`) are rejected with a clear error message.
 
 ## 3. Input Processing Pipeline
 
@@ -69,14 +70,18 @@ FUNCTION execute_subcommand(parsed) -> ExecutionResult:
 
     resolver = dependency_resolver(override_order=config.overrideFeatureInstallOrder)
     plan = resolver.resolve(resolved)
-    order = plan.feature_ids()
-    graph = build_graph(resolved)  // union of installsAfter and dependsOn
+    order = plan.feature_ids()  // Deterministic topological sort with lexicographic tie-breakers
+    graph = build_graph(resolved)  // Direct dependencies only: union of installsAfter and dependsOn, deduped and sorted lexicographically
 
     // Phase 4: Post-execution
     emit_json_or_text(order, graph, parsed.json)
     RETURN Success
 END FUNCTION
 ```
+
+**Determinism Notes:**
+- The `order` array is produced by a deterministic topological sort with lexicographic tie-breakers for independent features.
+- The `graph` object contains direct dependencies only (union of `installsAfter` and `dependsOn` arrays), deduplicated and sorted lexicographically by feature ID.
 
 ## 6. State Management
 - None; read‑only fetch of metadata from registries.
@@ -126,6 +131,7 @@ END FUNCTION
 ## 10. Output Specifications
 - JSON Mode (default):
   - `{ "order": ["<featureId>"...], "graph": { "<id>": ["dep1", ...] } }`
+- Schema: See `/workspaces/001-features-plan-cmd/specs/001-close-spec-gap/contracts/plan.schema.json` for JSON schema validation.
 - Text Mode:
   - Human‑readable header, order list, and pretty‑printed graph JSON.
 - Exit Codes: `0` success; `1` on failure (e.g., fetch/resolve errors).

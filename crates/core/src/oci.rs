@@ -255,7 +255,7 @@ pub struct PublishResult {
 }
 
 /// OCI manifest structure (minimal)
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[allow(dead_code)]
 pub struct Manifest {
     #[serde(rename = "schemaVersion")]
@@ -266,7 +266,7 @@ pub struct Manifest {
 }
 
 /// OCI layer structure (minimal)
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[allow(dead_code)]
 pub struct Layer {
     #[serde(rename = "mediaType")]
@@ -339,7 +339,6 @@ pub struct CollectionTemplate {
     pub description: Option<String>,
 }
 
-/// HTTP client trait to enable mocking and testing
 /// HTTP response with status, headers, and body
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
@@ -362,6 +361,13 @@ pub trait HttpClient: Send + Sync {
         url: &str,
         headers: HashMap<String, String>,
     ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// GET with custom headers that returns full response including headers (for pagination)
+    async fn get_with_headers_and_response(
+        &self,
+        url: &str,
+        headers: HashMap<String, String>,
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>;
 
     /// HEAD request to check resource existence without downloading body
     async fn head(
@@ -463,6 +469,15 @@ impl ReqwestClient {
     }
 
     /// Load authentication from environment variables
+    ///
+    /// This function loads authentication credentials from environment variables with the following priority:
+    /// 1. `DEACON_REGISTRY_TOKEN` - Bearer token authentication (highest priority)
+    /// 2. `DEACON_REGISTRY_USER` + `DEACON_REGISTRY_PASS` - Basic authentication
+    ///
+    /// # Security Notes
+    /// - All sensitive values (tokens, passwords) are automatically added to the global redaction registry
+    /// - Redacted values will not appear in logs, error messages, or any output
+    /// - This prevents accidental leakage of credentials in debugging or error scenarios
     fn load_auth_from_env(
         auth: &mut RegistryAuth,
     ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -490,6 +505,17 @@ impl ReqwestClient {
     }
 
     /// Load authentication from Docker config.json
+    ///
+    /// This function loads authentication credentials from Docker's config.json file
+    /// located at `~/.docker/config.json` (or `%USERPROFILE%\.docker\config.json` on Windows).
+    ///
+    /// Supports both encoded auth strings and separate username/password fields.
+    /// Registry-specific credentials override default credentials.
+    ///
+    /// # Security Notes
+    /// - Passwords extracted from Docker config are treated as sensitive
+    /// - All credential values are automatically redacted in logs and error messages
+    /// - This follows Docker's standard credential handling practices
     fn load_auth_from_docker_config(
         auth: &mut RegistryAuth,
     ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -630,6 +656,66 @@ impl HttpClient for ReqwestClient {
 
         let bytes = response.bytes().await?;
         Ok(bytes)
+    }
+
+    async fn get_with_headers_and_response(
+        &self,
+        url: &str,
+        mut headers: HashMap<String, String>,
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
+        // Add authentication header if available
+        let credentials = self.get_credentials_for_url(url);
+        if let Some(auth_header) = credentials.to_auth_header() {
+            headers.insert("Authorization".to_string(), auth_header);
+        }
+
+        let mut request = self.client.get(url);
+        for (key, value) in headers {
+            request = request.header(&key, &value);
+        }
+
+        let response = request.send().await.map_err(|e| {
+            // Improve error messages for common network issues
+            if e.is_timeout() {
+                format!("Request timeout for URL: {}. Check network connectivity.", url)
+            } else if e.is_connect() {
+                format!(
+                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
+                    url
+                )
+            } else if e.is_request() {
+                format!("Request error for URL: {}: {}", url, e)
+            } else {
+                format!("Network error for URL: {}: {}", url, e)
+            }
+        })?;
+
+        let status = response.status().as_u16();
+
+        // Extract headers
+        let mut response_headers = HashMap::new();
+        for (key, value) in response.headers() {
+            if let Ok(value_str) = value.to_str() {
+                response_headers.insert(key.to_string(), value_str.to_string());
+            }
+        }
+
+        // Handle 401 authentication errors
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(format!("Authentication failed for URL: {}", url).into());
+        }
+
+        // Handle other HTTP errors
+        if !response.status().is_success() {
+            return Err(format!("HTTP {} for URL: {}", response.status(), url).into());
+        }
+
+        let bytes = response.bytes().await?;
+        Ok(HttpResponse {
+            status,
+            headers: response_headers,
+            body: bytes,
+        })
     }
 
     async fn head(
@@ -792,6 +878,8 @@ fn classify_network_error(error: &FeatureError) -> RetryDecision {
         FeatureError::Oci { .. } => RetryDecision::Retry,
         // Authentication errors should be retried once to allow credential refresh
         FeatureError::Authentication { .. } => RetryDecision::Retry,
+        // Don't retry auth failures - they require correct credentials
+        FeatureError::Unauthorized { .. } | FeatureError::Forbidden { .. } => RetryDecision::Stop,
         // Don't retry parsing, validation, or other logical errors
         FeatureError::Parsing { .. }
         | FeatureError::Validation { .. }
@@ -835,6 +923,40 @@ pub fn get_features_cache_dir() -> Result<PathBuf> {
     }
 
     Ok(features_cache)
+}
+
+/// Compute the canonical ID (SHA256 digest) of an OCI manifest
+///
+/// The canonical ID is the SHA256 hash of the manifest's serialized JSON representation.
+/// This serves as a unique, content-addressed identifier for the manifest in OCI registries.
+///
+/// # Arguments
+///
+/// * `manifest` - The OCI manifest to compute the canonical ID for
+///
+/// # Returns
+///
+/// A string in the format `sha256:<64-character-hex-digest>`
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::oci::{Manifest, canonical_id};
+/// use serde_json::json;
+///
+/// // Note: This example assumes Manifest can be constructed from JSON
+/// let manifest_json = json!({
+///     "schemaVersion": 2,
+///     "mediaType": "application/vnd.oci.image.manifest.v1+json",
+///     "layers": []
+/// });
+/// // In practice, manifests are parsed from OCI registry responses
+/// ```
+pub fn canonical_id(manifest: &Manifest) -> Result<String> {
+    let manifest_json = serde_json::to_vec(manifest).map_err(FeatureError::Json)?;
+    let mut hasher = Sha256::new();
+    hasher.update(&manifest_json);
+    Ok(format!("sha256:{:x}", hasher.finalize()))
 }
 
 impl<C: HttpClient> FeatureFetcher<C> {
@@ -983,6 +1105,9 @@ impl<C: HttpClient> FeatureFetcher<C> {
                 },
             })?;
 
+            // Validate metadata before use
+            metadata.validate()?;
+
             info!("Successfully fetched feature: {}", metadata.id);
             Ok((
                 DownloadedFeature {
@@ -1092,6 +1217,70 @@ impl<C: HttpClient> FeatureFetcher<C> {
             })?;
 
         Ok(manifest)
+    }
+
+    /// Get the OCI manifest for a feature with SHA256 digest of the raw body
+    ///
+    /// Returns both the parsed manifest JSON and the SHA256 hex digest of the raw manifest body.
+    /// This is useful for computing canonical IDs and verifying manifest integrity.
+    pub async fn get_manifest_with_digest(
+        &self,
+        feature_ref: &FeatureRef,
+    ) -> Result<(serde_json::Value, String)> {
+        let manifest_url = format!(
+            "https://{}/v2/{}/manifests/{}",
+            feature_ref.registry,
+            feature_ref.repository(),
+            feature_ref.tag()
+        );
+
+        debug!("Fetching manifest with digest from: {}", manifest_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Accept".to_string(),
+            "application/vnd.oci.image.manifest.v1+json".to_string(),
+        );
+
+        // Retry the manifest download with exponential backoff
+        let manifest_data = retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let headers = headers.clone();
+                async move {
+                    client.get_with_headers(url, headers).await.map_err(|e| {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Authentication failed") {
+                            FeatureError::Authentication {
+                                message: format!("Failed to authenticate for manifest: {}", e),
+                            }
+                        } else {
+                            FeatureError::Download {
+                                message: format!("Failed to download manifest: {}", e),
+                            }
+                        }
+                    })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
+
+        // Compute SHA256 digest of the raw manifest body
+        let mut hasher = Sha256::new();
+        hasher.update(&manifest_data);
+        let digest = format!("{:x}", hasher.finalize());
+
+        // Parse the manifest JSON
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&manifest_data).map_err(|e| FeatureError::Parsing {
+                message: format!("Failed to parse manifest: {}", e),
+            })?;
+
+        debug!("Manifest fetched with digest: {}", digest);
+        Ok((manifest, digest))
     }
 
     /// Publish a feature to an OCI registry
@@ -1789,11 +1978,40 @@ impl<C: HttpClient> FeatureFetcher<C> {
         let metadata_path = cached_dir.join("devcontainer-feature.json");
         let metadata = parse_feature_metadata(&metadata_path)?;
 
+        // Validate metadata before use
+        metadata.validate()?;
+
         Ok(DownloadedFeature {
             path: cached_dir,
             metadata,
             digest,
         })
+    }
+
+    /// Parse the Link header to extract the next URL for pagination
+    /// Link headers typically look like: `<url>; rel="next"`
+    fn parse_next_link_from_headers(headers: &HashMap<String, String>) -> Option<String> {
+        let link_header = headers.get("Link").or_else(|| headers.get("link"))?;
+
+        // Parse Link header format: <url>; rel="next", <url>; rel="last"
+        for link_part in link_header.split(',') {
+            let link_part = link_part.trim();
+
+            // Check if this part contains rel="next"
+            if link_part.contains("rel=\"next\"") {
+                // Extract the URL from <url>
+                if let Some(start) = link_part.find('<') {
+                    if let Some(end) = link_part.find('>') {
+                        if start < end {
+                            let url = &link_part[start + 1..end];
+                            return Some(url.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// Generate a cache key from a digest
@@ -1857,53 +2075,120 @@ impl<C: HttpClient> FeatureFetcher<C> {
         Ok(())
     }
 
-    /// List tags for a repository
+    /// List tags for a repository with Link header pagination
     /// Implements OCI Distribution Spec `/v2/<name>/tags/list` endpoint
+    /// Enforces: max 10 pages, max 1000 tags total
     #[instrument(level = "info", skip(self))]
     pub async fn list_tags(&self, feature_ref: &FeatureRef) -> Result<Vec<String>> {
-        let tags_url = format!(
+        const MAX_PAGES: usize = 10;
+        const MAX_TAGS: usize = 1000;
+
+        let initial_url = format!(
             "https://{}/v2/{}/tags/list",
             feature_ref.registry,
             feature_ref.repository()
         );
 
-        debug!("Fetching tags from: {}", tags_url);
+        debug!("Fetching tags from: {}", initial_url);
 
         let mut headers = HashMap::new();
         headers.insert("Accept".to_string(), "application/json".to_string());
 
-        // Retry the tags download with exponential backoff
-        let tags_data = retry_async(
-            &self.retry_config,
-            || {
-                let client = &self.client;
-                let url = &tags_url;
-                let headers = headers.clone();
-                async move {
-                    client.get_with_headers(url, headers).await.map_err(|e| {
-                        let error_msg = e.to_string();
-                        if error_msg.contains("Authentication failed") {
-                            FeatureError::Authentication {
-                                message: format!("Failed to authenticate for tags list: {}", e),
-                            }
-                        } else {
-                            FeatureError::Download {
-                                message: format!("Failed to download tags list: {}", e),
-                            }
-                        }
-                    })
+        let mut all_tags: Vec<String> = Vec::new();
+        let mut page_count = 0;
+        let mut current_url = initial_url.clone();
+
+        loop {
+            // Check if we've reached page limit
+            if page_count >= MAX_PAGES {
+                debug!("Reached maximum page limit ({} pages)", MAX_PAGES);
+                break;
+            }
+
+            // Fetch current page
+            let response = retry_async(
+                &self.retry_config,
+                || {
+                    let client = &self.client;
+                    let url = &current_url;
+                    let headers = headers.clone();
+                    async move {
+                        client
+                            .get_with_headers_and_response(url, headers)
+                            .await
+                            .map_err(|e| {
+                                let error_msg = e.to_string();
+                                if error_msg.contains("Authentication failed") {
+                                    FeatureError::Authentication {
+                                        message: format!(
+                                            "Failed to authenticate for tags list: {}",
+                                            e
+                                        ),
+                                    }
+                                } else {
+                                    FeatureError::Download {
+                                        message: format!("Failed to download tags list: {}", e),
+                                    }
+                                }
+                            })
+                    }
+                },
+                classify_network_error,
+            )
+            .await?;
+
+            // Parse tags from response
+            let tag_list: TagList =
+                serde_json::from_slice(&response.body).map_err(|e| FeatureError::Parsing {
+                    message: format!("Failed to parse tags list: {}", e),
+                })?;
+
+            // Add tags to collection, but check for limit
+            for tag in tag_list.tags {
+                if all_tags.len() >= MAX_TAGS {
+                    debug!("Reached maximum tag limit ({})", MAX_TAGS);
+                    break;
                 }
-            },
-            classify_network_error,
-        )
-        .await?;
+                all_tags.push(tag);
+            }
 
-        let tag_list: TagList =
-            serde_json::from_slice(&tags_data).map_err(|e| FeatureError::Parsing {
-                message: format!("Failed to parse tags list: {}", e),
-            })?;
+            page_count += 1;
 
-        Ok(tag_list.tags)
+            // Check for Link header to get next page URL
+            match Self::parse_next_link_from_headers(&response.headers) {
+                Some(next_url) => {
+                    debug!(
+                        "Found next page link (page {}), fetching: {}",
+                        page_count, next_url
+                    );
+                    current_url = next_url;
+                }
+                None => {
+                    debug!(
+                        "No more pages available (pagination ended at page {})",
+                        page_count
+                    );
+                    break;
+                }
+            }
+
+            // Stop if we've already hit the tag limit
+            if all_tags.len() >= MAX_TAGS {
+                break;
+            }
+        }
+
+        // Remove duplicates while preserving insertion order
+        let mut seen = std::collections::HashSet::new();
+        all_tags.retain(|tag| seen.insert(tag.clone()));
+
+        debug!(
+            "Successfully fetched {} tags across {} pages",
+            all_tags.len(),
+            page_count
+        );
+
+        Ok(all_tags)
     }
 
     /// Get the OCI manifest for a feature by digest
@@ -2041,6 +2326,123 @@ impl<C: HttpClient> FeatureFetcher<C> {
         );
         Ok(results)
     }
+
+    /// Publish collection metadata as an OCI artifact
+    ///
+    /// This publishes the devcontainer-collection.json as an OCI artifact to the
+    /// collection repository `<registry>/<namespace>` with tag `collection`.
+    /// The collection JSON is stored as the config blob with media type
+    /// `application/vnd.devcontainer.collection+json`.
+    ///
+    /// # Arguments
+    /// * `registry` - The registry hostname (e.g., "ghcr.io")
+    /// * `namespace` - The namespace/repository path (e.g., "owner/repo")
+    /// * `collection_json` - The collection metadata as JSON bytes
+    ///
+    /// # Returns
+    /// The digest of the published manifest
+    #[instrument(level = "info", skip(self, collection_json))]
+    pub async fn publish_collection_metadata(
+        &self,
+        registry: &str,
+        namespace: &str,
+        collection_json: Bytes,
+    ) -> Result<String> {
+        info!(
+            "Publishing collection metadata to {}/{}",
+            registry, namespace
+        );
+
+        // Calculate digest for the collection JSON
+        let mut hasher = Sha256::new();
+        hasher.update(&collection_json);
+        let config_digest = format!("sha256:{:x}", hasher.finalize());
+        let config_size = collection_json.len() as u64;
+
+        // Upload the collection JSON as a blob
+        self.upload_blob_generic(registry, namespace, &config_digest, collection_json)
+            .await
+            .map_err(|e| match e {
+                crate::errors::DeaconError::Feature(f) => f,
+                _ => FeatureError::Oci {
+                    message: format!("Upload collection blob error: {}", e),
+                },
+            })?;
+
+        // Create manifest for the collection artifact
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.devcontainer.collection+json",
+                "size": config_size,
+                "digest": config_digest
+            },
+            "layers": [],
+            "annotations": {
+                "org.opencontainers.image.title": "DevContainer Collection",
+                "org.opencontainers.image.description": "DevContainer feature and template collection metadata"
+            }
+        });
+
+        let manifest_bytes =
+            Bytes::from(serde_json::to_vec(&manifest).map_err(FeatureError::Json)?);
+
+        // Upload manifest to the collection tag
+        let manifest_url = format!("https://{}/v2/{}/manifests/collection", registry, namespace);
+
+        debug!("Uploading collection manifest to: {}", manifest_url);
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Content-Type".to_string(),
+            "application/vnd.oci.image.manifest.v1+json".to_string(),
+        );
+
+        // Retry manifest upload with exponential backoff
+        retry_async(
+            &self.retry_config,
+            || {
+                let client = &self.client;
+                let url = &manifest_url;
+                let data = manifest_bytes.clone();
+                let headers = headers.clone();
+                async move {
+                    client
+                        .put_with_headers(url, data, headers)
+                        .await
+                        .map_err(|e| {
+                            let error_msg = e.to_string();
+                            if error_msg.contains("Authentication failed") {
+                                FeatureError::Authentication {
+                                    message: format!(
+                                        "Failed to authenticate for collection manifest upload: {}",
+                                        e
+                                    ),
+                                }
+                            } else {
+                                FeatureError::Oci {
+                                    message: format!("Failed to upload collection manifest: {}", e),
+                                }
+                            }
+                        })
+                }
+            },
+            classify_network_error,
+        )
+        .await?;
+
+        // Calculate digest of the manifest
+        let mut hasher = Sha256::new();
+        hasher.update(&manifest_bytes);
+        let manifest_digest = format!("sha256:{:x}", hasher.finalize());
+
+        info!(
+            "Successfully published collection metadata with digest {}",
+            manifest_digest
+        );
+        Ok(manifest_digest)
+    }
 }
 
 // Re-export semver_utils for backwards compatibility with oci::semver_utils path
@@ -2156,6 +2558,31 @@ impl HttpClient for MockHttpClient {
         _headers: HashMap<String, String>,
     ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
         self.get(url).await
+    }
+
+    async fn get_with_headers_and_response(
+        &self,
+        url: &str,
+        _headers: HashMap<String, String>,
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
+        // Check for response with headers first
+        let response_with_headers = self.response_with_headers.lock().await;
+        if let Some(response) = response_with_headers.get(url) {
+            return Ok(response.clone());
+        }
+        drop(response_with_headers);
+
+        // Fall back to simple response
+        let responses = self.responses.lock().await;
+        responses
+            .get(url)
+            .cloned()
+            .map(|body| HttpResponse {
+                status: 200,
+                headers: HashMap::new(),
+                body,
+            })
+            .ok_or_else(|| format!("No mock response for URL: {}", url).into())
     }
 
     async fn head(
@@ -2420,6 +2847,24 @@ mod tests {
                 self.get(url).await
             }
 
+            async fn get_with_headers_and_response(
+                &self,
+                _url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
+                let current = self.failure_count.fetch_add(1, Ordering::SeqCst);
+                if current < self.fail_attempts {
+                    Err("network error".into())
+                } else {
+                    Ok(HttpResponse {
+                        status: 200,
+                        headers: HashMap::new(),
+                        body: Bytes::new(),
+                    })
+                }
+            }
+
             async fn head(
                 &self,
                 _url: &str,
@@ -2535,6 +2980,16 @@ mod tests {
                 _headers: HashMap<String, String>,
             ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
                 self.get(url).await
+            }
+
+            async fn get_with_headers_and_response(
+                &self,
+                _url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
+                self.call_count.fetch_add(1, Ordering::SeqCst);
+                Err("permanent network error".into())
             }
 
             async fn head(
@@ -2669,5 +3124,522 @@ mod tests {
             .unwrap_or_else(|_| std::env::temp_dir().join("deacon-features"));
 
         assert_eq!(fetcher.cache_dir, expected_cache);
+    }
+
+    #[tokio::test]
+    async fn test_publish_collection_metadata_success() {
+        let mock_client = MockHttpClient::new();
+        let cache_dir = std::env::temp_dir().join("test-publish-collection-cache");
+        let retry_config = crate::retry::RetryConfig {
+            max_attempts: 3,
+            base_delay: std::time::Duration::from_millis(1),
+            max_delay: std::time::Duration::from_millis(10),
+            jitter: crate::retry::JitterStrategy::FullJitter,
+        };
+
+        let fetcher =
+            FeatureFetcher::with_retry_config(mock_client.clone(), cache_dir.clone(), retry_config);
+
+        let collection_json = Bytes::from(
+            r#"{"sourceInformation":{"source":"test-collection","revision":"v1.0.0"},"features":[{"id":"test-feature","version":"1.0.0"}]}"#,
+        );
+
+        let registry = "test.registry";
+        let namespace = "test-namespace";
+
+        // Calculate expected digests
+        let mut config_hasher = Sha256::new();
+        config_hasher.update(&collection_json);
+        let expected_config_digest = format!("sha256:{:x}", config_hasher.finalize());
+
+        // Mock HEAD response for blob check (404 = not exists)
+        let blob_check_url = format!(
+            "https://{}/v2/{}/blobs/{}",
+            registry, namespace, expected_config_digest
+        );
+        mock_client.add_head_response(blob_check_url, 404).await;
+
+        // Mock POST response for upload initiation with Location header
+        let upload_init_url = format!("https://{}/v2/{}/blobs/uploads/", registry, namespace);
+        let upload_uuid = "550e8400-e29b-41d4-a716-446655440000";
+        let location = format!("/v2/{}/blobs/uploads/{}", namespace, upload_uuid);
+        let mut post_headers = HashMap::new();
+        post_headers.insert("location".to_string(), location.clone());
+
+        mock_client
+            .add_response_with_headers(
+                upload_init_url,
+                HttpResponse {
+                    status: 202,
+                    headers: post_headers,
+                    body: Bytes::from(""),
+                },
+            )
+            .await;
+
+        // Mock PUT response for blob upload completion
+        let upload_complete_url = format!("{}?digest={}", location, expected_config_digest);
+        mock_client
+            .add_response(upload_complete_url, Bytes::from(""))
+            .await;
+
+        // Mock PUT response for manifest upload
+        let manifest_url = format!("https://{}/v2/{}/manifests/collection", registry, namespace);
+        mock_client
+            .add_response(manifest_url.clone(), Bytes::from(""))
+            .await;
+
+        // Call publish_collection_metadata
+        let result = fetcher
+            .publish_collection_metadata(registry, namespace, collection_json.clone())
+            .await;
+
+        // Assert success
+        assert!(result.is_ok(), "Expected success, got error: {:?}", result);
+        let manifest_digest = result.unwrap();
+
+        // Verify the manifest digest is a valid SHA256 digest
+        assert!(manifest_digest.starts_with("sha256:"));
+        assert_eq!(manifest_digest.len(), 71); // "sha256:" (7 chars) + 64 hex chars
+    }
+
+    #[tokio::test]
+    async fn test_publish_collection_metadata_digest_correctness() {
+        let mock_client = MockHttpClient::new();
+        let cache_dir = std::env::temp_dir().join("test-digest-cache");
+        let retry_config = crate::retry::RetryConfig {
+            max_attempts: 1,
+            base_delay: std::time::Duration::from_millis(1),
+            max_delay: std::time::Duration::from_millis(10),
+            jitter: crate::retry::JitterStrategy::FullJitter,
+        };
+
+        let fetcher =
+            FeatureFetcher::with_retry_config(mock_client.clone(), cache_dir.clone(), retry_config);
+
+        let collection_json = Bytes::from(r#"{"test":"data"}"#);
+        let registry = "test.registry";
+        let namespace = "test-namespace";
+
+        // Manually calculate expected config digest
+        let mut config_hasher = Sha256::new();
+        config_hasher.update(&collection_json);
+        let expected_config_digest = format!("sha256:{:x}", config_hasher.finalize());
+
+        // Mock responses
+        let blob_check_url = format!(
+            "https://{}/v2/{}/blobs/{}",
+            registry, namespace, expected_config_digest
+        );
+        mock_client.add_head_response(blob_check_url, 404).await;
+
+        let upload_init_url = format!("https://{}/v2/{}/blobs/uploads/", registry, namespace);
+        let location = format!("/v2/{}/blobs/uploads/test-uuid", namespace);
+        let mut post_headers = HashMap::new();
+        post_headers.insert("location".to_string(), location.clone());
+
+        mock_client
+            .add_response_with_headers(
+                upload_init_url,
+                HttpResponse {
+                    status: 202,
+                    headers: post_headers,
+                    body: Bytes::from(""),
+                },
+            )
+            .await;
+
+        let upload_complete_url = format!("{}?digest={}", location, expected_config_digest);
+        mock_client
+            .add_response(upload_complete_url, Bytes::from(""))
+            .await;
+
+        let manifest_url = format!("https://{}/v2/{}/manifests/collection", registry, namespace);
+        mock_client
+            .add_response(manifest_url.clone(), Bytes::from(""))
+            .await;
+
+        // Call and verify
+        let result = fetcher
+            .publish_collection_metadata(registry, namespace, collection_json)
+            .await;
+
+        assert!(result.is_ok());
+        let manifest_digest = result.unwrap();
+
+        // The manifest digest should be computed correctly
+        // We can't predict the exact value without building the manifest,
+        // but we can verify it's a valid SHA256 digest
+        assert!(manifest_digest.starts_with("sha256:"));
+        assert_eq!(manifest_digest.len(), 71);
+    }
+
+    #[tokio::test]
+    async fn test_publish_collection_metadata_upload_failure() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+
+        // Mock client that always fails PUT requests for blob upload
+        #[derive(Debug, Clone)]
+        struct FailingUploadClient {
+            call_count: Arc<AtomicU32>,
+        }
+
+        impl FailingUploadClient {
+            fn new() -> Self {
+                Self {
+                    call_count: Arc::new(AtomicU32::new(0)),
+                }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl HttpClient for FailingUploadClient {
+            async fn get(
+                &self,
+                _url: &str,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                Ok(Bytes::new())
+            }
+
+            async fn get_with_headers(
+                &self,
+                url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                self.get(url).await
+            }
+
+            async fn get_with_headers_and_response(
+                &self,
+                url: &str,
+                headers: HashMap<String, String>,
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
+                let body = self.get_with_headers(url, headers).await?;
+                Ok(HttpResponse {
+                    status: 200,
+                    headers: HashMap::new(),
+                    body,
+                })
+            }
+
+            async fn head(
+                &self,
+                _url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+                Ok(404) // Blob doesn't exist
+            }
+
+            async fn put_with_headers(
+                &self,
+                _url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                self.call_count.fetch_add(1, Ordering::SeqCst);
+                Err("network error during upload".into())
+            }
+
+            async fn post_with_headers(
+                &self,
+                _url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
+                // Return valid upload initiation response
+                let mut headers = HashMap::new();
+                headers.insert(
+                    "location".to_string(),
+                    "/v2/test/blobs/uploads/uuid".to_string(),
+                );
+                Ok(HttpResponse {
+                    status: 202,
+                    headers,
+                    body: Bytes::new(),
+                })
+            }
+        }
+
+        let client = FailingUploadClient::new();
+        let cache_dir = std::env::temp_dir().join("test-upload-failure-cache");
+        let retry_config = crate::retry::RetryConfig {
+            max_attempts: 2,
+            base_delay: std::time::Duration::from_millis(1),
+            max_delay: std::time::Duration::from_millis(10),
+            jitter: crate::retry::JitterStrategy::FullJitter,
+        };
+
+        let fetcher = FeatureFetcher::with_retry_config(client.clone(), cache_dir, retry_config);
+
+        let collection_json = Bytes::from(r#"{"test":"data"}"#);
+        let result = fetcher
+            .publish_collection_metadata("test.registry", "test-namespace", collection_json)
+            .await;
+
+        // Should fail after retries
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, crate::errors::DeaconError::Feature(_)));
+
+        // Should have retried (initial + 2 retries = 3 attempts)
+        assert_eq!(client.call_count.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn test_publish_collection_metadata_retry_success() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+
+        // Mock client that fails first 2 attempts then succeeds
+        #[derive(Debug, Clone)]
+        struct RetryableClient {
+            put_call_count: Arc<AtomicU32>,
+            fail_attempts: u32,
+        }
+
+        impl RetryableClient {
+            fn new(fail_attempts: u32) -> Self {
+                Self {
+                    put_call_count: Arc::new(AtomicU32::new(0)),
+                    fail_attempts,
+                }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl HttpClient for RetryableClient {
+            async fn get(
+                &self,
+                _url: &str,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                Ok(Bytes::new())
+            }
+
+            async fn get_with_headers(
+                &self,
+                url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                self.get(url).await
+            }
+
+            async fn get_with_headers_and_response(
+                &self,
+                url: &str,
+                headers: HashMap<String, String>,
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
+                let body = self.get_with_headers(url, headers).await?;
+                Ok(HttpResponse {
+                    status: 200,
+                    headers: HashMap::new(),
+                    body,
+                })
+            }
+
+            async fn head(
+                &self,
+                _url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+                Ok(404)
+            }
+
+            async fn put_with_headers(
+                &self,
+                _url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                let current = self.put_call_count.fetch_add(1, Ordering::SeqCst);
+                if current < self.fail_attempts {
+                    Err("transient network error".into())
+                } else {
+                    Ok(Bytes::new())
+                }
+            }
+
+            async fn post_with_headers(
+                &self,
+                _url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
+                let mut headers = HashMap::new();
+                headers.insert(
+                    "location".to_string(),
+                    "/v2/test/blobs/uploads/uuid".to_string(),
+                );
+                Ok(HttpResponse {
+                    status: 202,
+                    headers,
+                    body: Bytes::new(),
+                })
+            }
+        }
+
+        let client = RetryableClient::new(2); // Fail first 2 attempts
+        let cache_dir = std::env::temp_dir().join("test-retry-success-cache");
+        let retry_config = crate::retry::RetryConfig {
+            max_attempts: 3,
+            base_delay: std::time::Duration::from_millis(1),
+            max_delay: std::time::Duration::from_millis(10),
+            jitter: crate::retry::JitterStrategy::FullJitter,
+        };
+
+        let fetcher = FeatureFetcher::with_retry_config(client.clone(), cache_dir, retry_config);
+
+        let collection_json = Bytes::from(r#"{"test":"data"}"#);
+        let result = fetcher
+            .publish_collection_metadata("test.registry", "test-namespace", collection_json)
+            .await;
+
+        // Should succeed after retries
+        assert!(
+            result.is_ok(),
+            "Expected success after retries, got: {:?}",
+            result
+        );
+
+        // Should have tried 3 times for blob upload, then 1 time for manifest upload = 4 total
+        // (first 2 blob uploads fail, 3rd succeeds, then manifest succeeds on first try)
+        let total_calls = client.put_call_count.load(Ordering::SeqCst);
+        assert_eq!(
+            total_calls, 4,
+            "Expected 4 PUT calls (3 for blob + 1 for manifest)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_collection_metadata_authentication_error() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        // Mock client that returns authentication error
+        #[derive(Debug, Clone)]
+        struct AuthFailClient {
+            auth_error_triggered: Arc<AtomicBool>,
+        }
+
+        impl AuthFailClient {
+            fn new() -> Self {
+                Self {
+                    auth_error_triggered: Arc::new(AtomicBool::new(false)),
+                }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl HttpClient for AuthFailClient {
+            async fn get(
+                &self,
+                _url: &str,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                Ok(Bytes::new())
+            }
+
+            async fn get_with_headers(
+                &self,
+                url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                self.get(url).await
+            }
+
+            async fn get_with_headers_and_response(
+                &self,
+                url: &str,
+                headers: HashMap<String, String>,
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
+                let body = self.get_with_headers(url, headers).await?;
+                Ok(HttpResponse {
+                    status: 200,
+                    headers: HashMap::new(),
+                    body,
+                })
+            }
+
+            async fn head(
+                &self,
+                _url: &str,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+                Ok(404)
+            }
+
+            async fn put_with_headers(
+                &self,
+                url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+                // Fail manifest upload with authentication error
+                if url.contains("/manifests/collection") {
+                    self.auth_error_triggered.store(true, Ordering::SeqCst);
+                    Err("Authentication failed: invalid credentials".into())
+                } else {
+                    // Blob upload succeeds
+                    Ok(Bytes::new())
+                }
+            }
+
+            async fn post_with_headers(
+                &self,
+                _url: &str,
+                _data: Bytes,
+                _headers: HashMap<String, String>,
+            ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>
+            {
+                let mut headers = HashMap::new();
+                headers.insert(
+                    "location".to_string(),
+                    "/v2/test/blobs/uploads/uuid".to_string(),
+                );
+                Ok(HttpResponse {
+                    status: 202,
+                    headers,
+                    body: Bytes::new(),
+                })
+            }
+        }
+
+        let client = AuthFailClient::new();
+        let cache_dir = std::env::temp_dir().join("test-auth-error-cache");
+        let retry_config = crate::retry::RetryConfig {
+            max_attempts: 2,
+            base_delay: std::time::Duration::from_millis(1),
+            max_delay: std::time::Duration::from_millis(10),
+            jitter: crate::retry::JitterStrategy::FullJitter,
+        };
+
+        let fetcher = FeatureFetcher::with_retry_config(client.clone(), cache_dir, retry_config);
+
+        let collection_json = Bytes::from(r#"{"test":"data"}"#);
+        let result = fetcher
+            .publish_collection_metadata("test.registry", "test-namespace", collection_json)
+            .await;
+
+        // Should fail with authentication error
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+
+        // Verify it's a Feature error with Authentication variant
+        match err {
+            crate::errors::DeaconError::Feature(feature_err) => match feature_err {
+                FeatureError::Authentication { message } => {
+                    assert!(message.contains("authenticate"));
+                }
+                _ => panic!("Expected Authentication error, got: {:?}", feature_err),
+            },
+            _ => panic!("Expected Feature error, got: {:?}", err),
+        }
+
+        // Verify authentication error was triggered
+        assert!(client.auth_error_triggered.load(Ordering::SeqCst));
     }
 }

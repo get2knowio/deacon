@@ -1,0 +1,6 @@
+{
+  "id": "ümlaut-feature",
+  "version": "0.0.1",
+  "name": "Ümlaut Feature",
+  "description": "Feature with non-ASCII characters in the path and id to test Unicode path handling."
+}

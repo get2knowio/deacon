@@ -72,42 +72,67 @@ deacon features publish . \
 
 ```json
 {
-  "command": "publish",
-  "status": "success",
-  "digest": "sha256:dryrun0000000000000000000000000000000000000000000000000000000000",
-  "message": "Dry run completed - would publish to ghcr.io/example/my-feature"
+  "features": [
+    {
+      "featureId": "example/my-feature",
+      "version": "1.2.3",
+      "digest": "sha256:dryrun0000000000000000000000000000000000000000000000000000000000",
+      "publishedTags": ["1", "1.2", "1.2.3", "latest"],
+      "skippedTags": [],
+      "movedLatest": true,
+      "registry": "ghcr.io",
+      "namespace": "example"
+    }
+  ],
+  "summary": {
+    "features": 1,
+    "publishedTags": 4,
+    "skippedTags": 0
+  }
 }
 ```
 
 **Output Fields:**
-- `command`: Operation type (`"publish"`)
-- `status`: Operation result (`"success"` for dry-run)
-- `digest`: Placeholder SHA256 digest (prefixed with `dryrun` in dry-run mode)
-- `message`: Human-readable description of the operation
+- `features`: Array of feature publish results
+  - `featureId`: Feature identifier
+  - `version`: Semantic version
+  - `digest`: SHA256 digest (dry-run prefixed)
+  - `publishedTags`: Tags that would be published
+  - `skippedTags`: Tags that would be skipped
+  - `movedLatest`: Whether latest tag was moved
+  - `registry`: Target registry
+  - `namespace`: Target namespace
+- `summary`: Aggregate statistics
+  - `features`: Number of features processed
+  - `publishedTags`: Total tags to publish
+  - `skippedTags`: Total tags to skip
 
 ### Extract Specific Fields with jq
 
 ```sh
-# Get the target registry
+# Get the feature ID
 cd feature
 deacon features publish . \
-  --registry ghcr.io/example/my-feature \
+  --registry ghcr.io \
+  --namespace example \
   --dry-run \
-  --json 2>/dev/null | jq -r '.message'
+  --json 2>/dev/null | jq -r '.features[0].featureId'
 
-# Check operation status
+# Check published tags
 cd feature
 deacon features publish . \
-  --registry ghcr.io/example/my-feature \
+  --registry ghcr.io \
+  --namespace example \
   --dry-run \
-  --json 2>/dev/null | jq -r '.status'
+  --json 2>/dev/null | jq -r '.features[0].publishedTags[]'
 
-# Verify digest format (should start with sha256:dryrun)
+# Get summary statistics
 cd feature
 deacon features publish . \
-  --registry ghcr.io/example/my-feature \
+  --registry ghcr.io \
+  --namespace example \
   --dry-run \
-  --json 2>/dev/null | jq -r '.digest | startswith("sha256:dryrun")'
+  --json 2>/dev/null | jq '.summary'
 ```
 
 ### Multiple Registry Targets
@@ -119,78 +144,28 @@ cd feature
 
 # GitHub Container Registry
 deacon features publish . \
-  --registry ghcr.io/myorg/my-feature \
-  --dry-run --json 2>/dev/null | jq -r '.message'
+  --registry ghcr.io \
+  --namespace myorg/my-feature \
+  --dry-run --json 2>/dev/null | jq -r '.features[0].registry'
 
 # Docker Hub
 deacon features publish . \
-  --registry docker.io/myuser/my-feature \
-  --dry-run --json 2>/dev/null | jq -r '.message'
+  --registry docker.io \
+  --namespace myuser/my-feature \
+  --dry-run --json 2>/dev/null | jq -r '.features[0].registry'
 
 # Private registry
 deacon features publish . \
-  --registry registry.example.com/features/my-feature \
-  --dry-run --json 2>/dev/null | jq -r '.message'
+  --registry registry.example.com \
+  --namespace features/my-feature \
+  --dry-run --json 2>/dev/null | jq -r '.features[0].registry'
 ```
 
 ## Template Dry-Run Publish
 
-### Basic Dry-Run
+**Note**: Template publishing is not yet implemented in this feature. The template directory is included for future reference when template publishing is added.
 
-Preview what would be published for a template:
-
-```sh
-cd template
-deacon templates publish . \
-  --registry ghcr.io/example/my-template \
-  --dry-run
-```
-
-### Expected Output Fields
-
-```json
-{
-  "command": "publish",
-  "status": "success",
-  "digest": "sha256:dryrun0000000000000000000000000000000000000000000000000000000000",
-  "size": 1024,
-  "message": "Dry run completed - would publish to ghcr.io/example/my-template"
-}
-```
-
-**Output Fields:**
-- `command`: Operation type (`"publish"`)
-- `status`: Operation result (`"success"` for dry-run)
-- `digest`: Placeholder SHA256 digest (prefixed with `dryrun` in dry-run mode)
-- `size`: Estimated artifact size in bytes (placeholder in dry-run mode)
-- `message`: Human-readable description of the operation
-
-### Extract Specific Fields with jq
-
-```sh
-# Get the target registry
-cd template
-deacon templates publish . \
-  --registry ghcr.io/example/my-template \
-  --dry-run 2>/dev/null | jq -r '.message'
-
-# Check estimated size
-cd template
-deacon templates publish . \
-  --registry ghcr.io/example/my-template \
-  --dry-run 2>/dev/null | jq -r '.size'
-
-# Verify all fields
-cd template
-deacon templates publish . \
-  --registry ghcr.io/example/my-template \
-  --dry-run 2>/dev/null | jq '{
-  command: .command,
-  status: .status,
-  digest: .digest,
-  size: .size
-}'
-```
+The template publishing will follow a similar JSON output structure but with template-specific fields.
 
 ## CI/CD Integration
 
@@ -216,23 +191,20 @@ jobs:
         run: |
           cd examples/registry/dry-run-publish/feature
           deacon features publish . \
-            --registry ghcr.io/${{ github.repository }}/my-feature \
+            --registry ghcr.io \
+            --namespace ${{ github.repository }} \
             --dry-run \
             --json > publish-result.json
           
-          # Validate output
-          jq -e '.status == "success"' publish-result.json
-          jq -e '.digest | startswith("sha256:dryrun")' publish-result.json
+          # Validate output structure
+          jq -e '.features | length == 1' publish-result.json
+          jq -e '.summary.features == 1' publish-result.json
+          jq -e '.features[0].publishedTags | length > 0' publish-result.json
       
       - name: Dry-run publish template
         run: |
-          cd examples/registry/dry-run-publish/template
-          deacon templates publish . \
-            --registry ghcr.io/${{ github.repository }}/my-template \
-            --dry-run > publish-result.json
-          
-          # Validate output
-          jq -e '.status == "success"' publish-result.json
+          # Template publishing not yet implemented
+          echo "Template publishing will be added in a future feature"
 ```
 
 ## Comparison: Dry-Run vs. Actual Publish
@@ -241,12 +213,13 @@ jobs:
 ```sh
 cd feature
 deacon features publish . \
-  --registry ghcr.io/example/my-feature \
+  --registry ghcr.io \
+  --namespace example/my-feature \
   --dry-run \
   --json
 # ✓ No authentication required
 # ✓ No network access needed
-# ✓ Returns placeholder digest
+# ✓ Returns structured JSON with feature details
 # ✓ Validates local artifact structure
 ```
 
@@ -258,9 +231,8 @@ cd feature
 # - Network connectivity
 # - Push permissions to the registry
 deacon features publish . \
-  --registry ghcr.io/example/my-feature \
-  --username myuser \
-  --password-stdin \
+  --registry ghcr.io \
+  --namespace example/my-feature \
   --json
 # ✗ Requires authentication
 # ✗ Needs network access

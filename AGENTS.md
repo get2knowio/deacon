@@ -7,10 +7,10 @@
 - Test (single unit): `cargo test --quiet -p deacon <name_substring>`.
 - Test (single integration): `cargo test --quiet -p deacon --test integration_build_args <test_name>`.
 - Lint: `cargo clippy --all-targets -- -D warnings` (zero warnings).
-- Format: `cargo fmt --quiet --all` && `cargo fmt --quiet --all -- --check` (no trailing whitespace).
-- Coverage (optional): `cargo llvm-cov --workspace --open`.
+- Format: `cargo fmt --all` && `cargo fmt --all -- --check` (no trailing whitespace).
+- **CRITICAL CI**: Run after EVERY change: build, test, fmt, clippy. Keep build green locally.
 - Features: core: `json-logs`; deacon: `docker` (default), `config`.
-- Imports order: std, external crates, then local (`crate`/`super`); let rustfmt organize.
+- Imports: std, external crates, then local (`crate`/`super`); let rustfmt organize.
 - Naming: modules/files `snake_case`; types/traits `CamelCase`; fns/vars `snake_case`.
 - Types: prefer explicit public types; avoid unnecessary clones; use `&str` over `String` when borrowing.
 - Errors: use `thiserror` enums in core; `anyhow` only at binary boundaries; add context with `anyhow::Context`.
@@ -19,4 +19,4 @@
 - Commits/PRs: Conventional Commits; keep build green locally after every change.
 - Safety: no `unsafe` code; review new deps carefully.
 - Copilot rules: follow `.github/copilot-instructions.md` (run build/test/fmt/clippy after every change).
-	- Use the Fast Loop by default during spec-phase; run `make test`/`make release-check` periodically and before PRs.
+- Use Fast Loop by default during spec-phase; run `make test`/`make release-check` periodically and before PRs.

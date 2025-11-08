@@ -452,6 +452,14 @@ If you are an AI assistant operating on this repository: remain concise, cite sp
 
 ## Active Technologies
 - Rust (stable channel per rust-toolchain.toml) + clap (CLI args), serde/serde_json (JSON), tracing (logs), thiserror (errors) (001-read-config-parity)
+- Rust (stable toolchain per `rust-toolchain.toml`, Edition 2021) + clap (CLI), serde/serde_json (parsing/JSON), thiserror (errors), tracing (logs)
+- Rust (stable toolchain, Edition 2021) + `tar` (archiving), `flate2` (gzip), `serde`/`serde_json` (metadata), `clap` (CLI), `tracing` (logs), `thiserror` (errors) (002-features-package-collection)
+- Local filesystem (read sources, write artifacts) (002-features-package-collection)
+- Rust (Edition 2021; stable per `rust-toolchain.toml`) + `clap` (CLI), `serde`/`serde_json` (I/O), `tracing` (logs), `thiserror` (errors), HTTP client (reqwest-based), internal `RegistryClient`/`HttpClient` traits (core) (003-features-publish-compliance)
+- N/A (OCI registry as remote store) (003-features-publish-compliance)
+- Rust (Edition 2021), workspace rust-version 1.70, stable toolchain (rustfmt, clippy) + clap (CLI), serde/serde_json (I/O), tracing (logs), thiserror (errors), tokio (async), reqwest (HTTP, rustls TLS), semver (versioning) (003-features-publish-compliance)
+- Rust (stable, Edition 2021) + clap (CLI), tracing (logs), serde/serde_json (JSON), thiserror (errors), reqwest (HTTP with rustls), tokio (async) (004-close-features-info-gap)
+- N/A (read‑only network/file operations) (004-close-features-info-gap)
 - Rust (stable; per `rust-toolchain.toml`) + `clap` (CLI args), `serde`/`serde_json` (JSON), `tracing` (logs), `thiserror` (errors); Docker/engine integration via existing runtime helpers in the repo (005-features-test-gap)
 - N/A (ephemeral workspaces only) (005-features-test-gap)
 
