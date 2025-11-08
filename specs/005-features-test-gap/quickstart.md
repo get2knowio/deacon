@@ -35,17 +35,18 @@ devcontainer features test -p . --preserve-test-containers
 devcontainer features test -p . --json > results.json
 ```
 
-When `--json` is provided, stdout contains exactly a JSON array of:
+When `--json` is provided the command writes a single JSON array to stdout and writes all logs/diagnostics to stderr. The JSON array has the shape:
 
 ```json
 [
   { "testName": "node", "result": true },
-  { "testName": "node (duplicate)", "result": true },
+  { "testName": "node (duplicate/idempotence)", "result": true },
   { "testName": "python:basic", "result": false }
 ]
 ```
 
-Logs and diagnostics are written to stderr in all modes. If zero tests are selected/discovered, exit code is 0 and `--json` prints `[]`.
+If zero tests are selected or discovered (after applying flags/filters), the command exits with code 0 and writes exactly `[]` to stdout (no other text). Any human-readable logs (for example, "No tests found") are written to stderr only.
+
 
 ## Invalid Combinations (Fail Fast)
 

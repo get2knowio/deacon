@@ -34,3 +34,4 @@ release/
 Thumbs.db
 *.swp
 .vscode/
+*.pyc

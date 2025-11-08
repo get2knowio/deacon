@@ -33,7 +33,7 @@ Validation:
 - The script must exist and be executable by the container runtime.
 
 ### TestResult
-- testName: string (feature name, `feature (duplicate)`, or `feature:scenario`)
+- testName: string (feature name, `feature (duplicate/idempotence)`, or `feature:scenario`)
 - result: boolean (pass = true; fail = false)
 
 ### TestRun
