@@ -142,17 +142,17 @@ fn test_features_publish_json_stdout_empty_on_fatal_error() {
     );
 }
 
-/// Test that features publish fails with "No features found to publish" when no valid feature is discovered after packaging
+/// Test that features publish fails with validation error when feature has invalid (empty) id
 #[test]
 fn test_features_publish_no_features_discovered_after_packaging() {
     let temp_dir = TempDir::new().unwrap();
     let feature_dir = temp_dir.path().join("empty-feature");
 
-    // Create feature directory with devcontainer-feature.json that parses but has no valid id (invalid feature)
+    // Create feature directory with devcontainer-feature.json that parses but has empty id (invalid)
     fs::create_dir_all(&feature_dir).unwrap();
     fs::write(
         feature_dir.join("devcontainer-feature.json"),
-        r#"{"id": ""}"#, // Empty id - parses but invalid
+        r#"{"id": ""}"#, // Empty id - parses but fails validation
     )
     .unwrap();
 
@@ -188,10 +188,10 @@ fn test_features_publish_no_features_discovered_after_packaging() {
         stdout
     );
 
-    // Stderr should contain the specific error message
+    // Stderr should contain the validation error for empty ID
     assert!(
-        stderr.contains("No features found to publish"),
-        "Stderr should contain 'No features found to publish', got: '{}'",
+        stderr.contains("Feature metadata validation failed"),
+        "Stderr should contain 'Feature metadata validation failed', got: '{}'",
         stderr
     );
 }
