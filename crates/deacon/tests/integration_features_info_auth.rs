@@ -6,22 +6,17 @@
 //! **Network Tests**: These tests require network access and are gated by the
 //! `DEACON_NETWORK_TESTS` environment variable. Set `DEACON_NETWORK_TESTS=1` to run.
 
+mod support;
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
-
-/// Helper to check if network tests should run
-fn should_run_network_tests() -> bool {
-    std::env::var("DEACON_NETWORK_TESTS")
-        .map(|v| v == "1" || v.to_lowercase() == "true")
-        .unwrap_or(false)
-}
+use support::skip_if_no_network_tests;
 
 /// Test auth failure for manifest mode (text output)
 #[test]
 fn test_manifest_auth_failure_text() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -43,8 +38,7 @@ fn test_manifest_auth_failure_text() {
 /// Test auth failure for manifest mode (JSON output)
 #[test]
 fn test_manifest_auth_failure_json() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -72,8 +66,7 @@ fn test_manifest_auth_failure_json() {
 /// Test auth failure for tags mode (text output)
 #[test]
 fn test_tags_auth_failure_text() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -94,8 +87,7 @@ fn test_tags_auth_failure_text() {
 /// Test auth failure for tags mode (JSON output)
 #[test]
 fn test_tags_auth_failure_json() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -123,8 +115,7 @@ fn test_tags_auth_failure_json() {
 /// Test auth failure for verbose mode (text output)
 #[test]
 fn test_verbose_auth_failure_text() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -145,8 +136,7 @@ fn test_verbose_auth_failure_text() {
 /// Test auth failure for verbose mode (JSON output with partial failure)
 #[test]
 fn test_verbose_auth_failure_json_partial() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -184,9 +174,7 @@ fn test_verbose_auth_failure_json_partial() {
 /// Test 403 Forbidden error handling
 #[test]
 fn test_manifest_forbidden_error() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
-    }
+    if skip_if_no_network_tests() {}
 
     // This test is a placeholder - actual 403 testing requires a registry setup
     // that returns 403. For now, we just document the expected behavior.

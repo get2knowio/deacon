@@ -4,21 +4,16 @@
 //! various CLI flags including --output-format, --log-level, and validation
 //! of flag combinations.
 
+mod support;
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
-
-/// Helper to check if network tests should run
-fn should_run_network_tests() -> bool {
-    std::env::var("DEACON_NETWORK_TESTS")
-        .map(|v| v == "1" || v.to_lowercase() == "true")
-        .unwrap_or(false)
-}
+use support::skip_if_no_network_tests;
 
 #[test]
 fn test_output_format_text() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -38,8 +33,7 @@ fn test_output_format_text() {
 
 #[test]
 fn test_output_format_json() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -81,8 +75,7 @@ fn test_output_format_invalid() {
 
 #[test]
 fn test_log_level_info() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -101,8 +94,7 @@ fn test_log_level_info() {
 
 #[test]
 fn test_log_level_debug() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -123,8 +115,7 @@ fn test_log_level_debug() {
 
 #[test]
 fn test_log_level_trace() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
@@ -160,8 +151,7 @@ fn test_log_level_invalid() {
 
 #[test]
 fn test_json_output_with_different_log_levels() {
-    if !should_run_network_tests() {
-        eprintln!("Skipping network test (DEACON_NETWORK_TESTS not set)");
+    if skip_if_no_network_tests() {
         return;
     }
 
