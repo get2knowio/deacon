@@ -3,9 +3,9 @@
 - Build: `cargo build --quiet`; Run CLI: `cargo run -- --help`.
 - Test (all): `cargo test --quiet -- --test-threads=1`; doctests: `cargo test --doc`.
 - Fast loop: `make dev-fast` (fmt-check + clippy + unit/bins/examples + doctests; skips slow integration/smoke)
-- Test (crate): `cargo test -p deacon`; `cargo test -p deacon-core`.
-- Test (single unit): `cargo test -p deacon <name_substring>`.
-- Test (single integration): `cargo test -p deacon --test integration_build_args <test_name>`.
+- Test (crate): `cargo test --quiet -p deacon`; `cargo test --quiet -p deacon-core`.
+- Test (single unit): `cargo test --quiet -p deacon <name_substring>`.
+- Test (single integration): `cargo test --quiet -p deacon --test integration_build_args <test_name>`.
 - Lint: `cargo clippy --all-targets -- -D warnings` (zero warnings).
 - Format: `cargo fmt --all` && `cargo fmt --all -- --check` (no trailing whitespace).
 - **CRITICAL CI**: Run after EVERY change: build, test, fmt, clippy. Keep build green locally.

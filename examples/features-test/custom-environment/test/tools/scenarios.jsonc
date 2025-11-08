@@ -1,0 +1,4 @@
+[
+  {"name": "default-image"},
+  {"name": "explicit-alpine", "image": "alpine:latest"}
+]

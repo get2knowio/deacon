@@ -460,6 +460,8 @@ If you are an AI assistant operating on this repository: remain concise, cite sp
 - Rust (Edition 2021), workspace rust-version 1.70, stable toolchain (rustfmt, clippy) + clap (CLI), serde/serde_json (I/O), tracing (logs), thiserror (errors), tokio (async), reqwest (HTTP, rustls TLS), semver (versioning) (003-features-publish-compliance)
 - Rust (stable, Edition 2021) + clap (CLI), tracing (logs), serde/serde_json (JSON), thiserror (errors), reqwest (HTTP with rustls), tokio (async) (004-close-features-info-gap)
 - N/A (read‑only network/file operations) (004-close-features-info-gap)
+- Rust (stable; per `rust-toolchain.toml`) + `clap` (CLI args), `serde`/`serde_json` (JSON), `tracing` (logs), `thiserror` (errors); Docker/engine integration via existing runtime helpers in the repo (005-features-test-gap)
+- N/A (ephemeral workspaces only) (005-features-test-gap)
 
 ## Recent Changes
 - 001-read-config-parity: Added Rust (stable channel per rust-toolchain.toml) + clap (CLI args), serde/serde_json (JSON), tracing (logs), thiserror (errors)

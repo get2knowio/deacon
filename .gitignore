@@ -20,6 +20,18 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Additional Rust patterns
+release/
+*.rlib
+*.prof*
+.idea/
+*.log
+.env*
+
 /tmp*
 /artifacts/*
 **/.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+*.pyc
