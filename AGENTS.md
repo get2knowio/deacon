@@ -1,13 +1,13 @@
 # AGENTS: Quick Guide for AI Assistants
 - Source of truth: follow the `docs/subcommand-specs/*/SPEC.md` files; no silent fallbacks—fail fast if unimplemented.
-- Build: `cargo build --verbose`; Run CLI: `cargo run -- --help`.
-- Test (all): `cargo test --verbose -- --test-threads=1`; doctests: `cargo test --doc`.
+- Build: `cargo build --quiet`; Run CLI: `cargo run -- --help`.
+- Test (all): `cargo test --quiet -- --test-threads=1`; doctests: `cargo test --doc`.
 - Fast loop: `make dev-fast` (fmt-check + clippy + unit/bins/examples + doctests; skips slow integration/smoke)
-- Test (crate): `cargo test -p deacon`; `cargo test -p deacon-core`.
-- Test (single unit): `cargo test -p deacon <name_substring>`.
-- Test (single integration): `cargo test -p deacon --test integration_build_args <test_name>`.
+- Test (crate): `cargo test --quiet -p deacon`; `cargo test --quiet -p deacon-core`.
+- Test (single unit): `cargo test --quiet -p deacon <name_substring>`.
+- Test (single integration): `cargo test --quiet -p deacon --test integration_build_args <test_name>`.
 - Lint: `cargo clippy --all-targets -- -D warnings` (zero warnings).
-- Format: `cargo fmt --all` && `cargo fmt --all -- --check` (no trailing whitespace).
+- Format: `cargo fmt --quiet --all` && `cargo fmt --quiet --all -- --check` (no trailing whitespace).
 - Coverage (optional): `cargo llvm-cov --workspace --open`.
 - Features: core: `json-logs`; deacon: `docker` (default), `config`.
 - Imports order: std, external crates, then local (`crate`/`super`); let rustfmt organize.
