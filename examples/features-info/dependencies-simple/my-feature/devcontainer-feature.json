@@ -1,0 +1,11 @@
+{
+	"id": "my-feature",
+	"version": "1.0.0",
+	"name": "My Feature with Dependencies",
+	"description": "A feature demonstrating simple dependency relationships",
+	"dependsOn": {
+		"ghcr.io/devcontainers/features/common-utils": "latest",
+		"ghcr.io/devcontainers/features/git": "1"
+	},
+	"installsAfter": ["ghcr.io/devcontainers/features/common-utils"]
+}
