@@ -497,7 +497,7 @@ CI runs via GitHub Actions and uses the Makefile + cargo-nextest:
 - Other OS (macOS/Windows): runs unit + non‑smoke integration tests and separate smoke tests; macOS uses Colima for Docker
 
 Notes:
-- Networked integration tests are enabled in CI with `DEACON_NETWORK_TESTS=1`.
+- Networked integration tests run only in selected jobs (smoke and nextest-ci) via `DEACON_NETWORK_TESTS=1` to keep the fast test job hermetic.
 - Test grouping and concurrency are configured in `.config/nextest.toml`. See docs/testing/nextest.md for details.
 
 ## Test Coverage

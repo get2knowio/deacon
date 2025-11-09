@@ -46,9 +46,6 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      # Enable network tests for integration tests that require OCI registry access
-      DEACON_NETWORK_TESTS: "1"
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -112,6 +109,23 @@ jobs:
         sudo service docker start
         docker info
 
+    - name: Acquire GHCR bearer token (read-only)
+      run: |
+        set -euo pipefail
+        echo "Requesting multi-scope GHCR token..."
+        TOKEN_URL="https://ghcr.io/token?service=ghcr.io\
+        &scope=repository:devcontainers/features/node:pull\
+        &scope=repository:devcontainers/features/common-utils:pull\
+        &scope=repository:devcontainers/features/docker-in-docker:pull\
+        &scope=repository:devcontainers/features/python:pull\
+        &scope=repository:devcontainers/features/git:pull"
+        TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+        if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
+          echo "Failed to acquire GHCR token" >&2
+          exit 1
+        fi
+        echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
     - name: Run smoke test suite via Makefile
       run: make test-smoke
 
@@ -151,6 +165,23 @@ jobs:
       run: |
         sudo service docker start
         docker info
+
+    - name: Acquire GHCR bearer token (read-only)
+      run: |
+        set -euo pipefail
+        echo "Requesting multi-scope GHCR token..."
+        TOKEN_URL="https://ghcr.io/token?service=ghcr.io\
+        &scope=repository:devcontainers/features/node:pull\
+        &scope=repository:devcontainers/features/common-utils:pull\
+        &scope=repository:devcontainers/features/docker-in-docker:pull\
+        &scope=repository:devcontainers/features/python:pull\
+        &scope=repository:devcontainers/features/git:pull"
+        TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+        if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
+          echo "Failed to acquire GHCR token" >&2
+          exit 1
+        fi
+        echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
     - name: Run nextest CI profile
       run: make test-nextest-ci

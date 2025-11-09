@@ -270,6 +270,47 @@ jobs:
         echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
         echo "Using TMPDIR=$RUNNER_TEMP"
 
+    - name: Acquire GHCR bearer token (read-only) [macOS/Linux]
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Requesting multi-scope GHCR token..."
+        TOKEN_URL="https://ghcr.io/token?service=ghcr.io\
+        &scope=repository:devcontainers/features/node:pull\
+        &scope=repository:devcontainers/features/common-utils:pull\
+        &scope=repository:devcontainers/features/docker-in-docker:pull\
+        &scope=repository:devcontainers/features/python:pull\
+        &scope=repository:devcontainers/features/git:pull"
+        TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+        if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
+          echo "Failed to acquire GHCR token" >&2
+          exit 1
+        fi
+        echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+    - name: Acquire GHCR bearer token (read-only) [Windows]
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        $pair = "user:$env:GH_TOKEN"
+        # Anonymous token request (public repos)
+        $headers = @{}
+        $uri = "https://ghcr.io/token?service=ghcr.io"
+        $scopes = @(
+          "repository:devcontainers/features/node:pull",
+          "repository:devcontainers/features/common-utils:pull",
+          "repository:devcontainers/features/docker-in-docker:pull",
+          "repository:devcontainers/features/python:pull",
+          "repository:devcontainers/features/git:pull"
+        )
+        $query = ($scopes | ForEach-Object { "scope=$($_)" }) -join '&'
+        $full = "$uri&$query"
+        $resp = Invoke-RestMethod -Uri $full -Headers $headers -Method Get
+        if (-not $resp -or -not $resp.token) { Write-Error "Failed to acquire GHCR token"; exit 1 }
+        $token = $resp.token
+        Add-Content -Path $env:GITHUB_ENV -Value "DEACON_REGISTRY_TOKEN=$token"
+
     - name: Run nextest CI profile
       shell: bash
       run: make test-nextest-ci
