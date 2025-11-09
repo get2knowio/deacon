@@ -469,6 +469,13 @@ async fn create_test_container(
     name_suffix: &str,
 ) -> Result<String, crate::features_test::errors::Error> {
     debug!("Creating test container from image: {}", base_image);
+    // Build a unique container name to avoid collisions in parallel runs
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let unique_name = format!("deacon-test-{}-{}-{}", name_suffix, pid, nanos);
 
     // Use docker CLI to create container with label
     let output = std::process::Command::new("docker")
@@ -477,7 +484,7 @@ async fn create_test_container(
             "--label",
             "devcontainer.is_test_run=true",
             "--name",
-            &format!("deacon-test-{}", name_suffix),
+            &unique_name,
             base_image,
             "sleep",
             "infinity",

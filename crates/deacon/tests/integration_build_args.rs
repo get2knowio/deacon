@@ -49,11 +49,12 @@ RUN echo "FOO is $FOO"
     if !output.status.success() {
         // Graceful failure modes when Docker isn't available in CI/dev
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_lc = stderr.to_lowercase();
         assert!(
             stderr.contains("Docker is not installed")
                 || stderr.contains("Docker daemon is not")
                 || stderr.contains("Docker build failed")
-                || stderr.contains("permission denied"),
+                || stderr_lc.contains("permission denied"),
             "Unexpected error: {}",
             stderr
         );

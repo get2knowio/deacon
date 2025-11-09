@@ -11,11 +11,25 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+fn is_docker_available() -> bool {
+    std::process::Command::new("docker")
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 // Non-Docker tolerance scenario removed
 
 /// Test up idempotency: multiple up calls should not fail
 #[test]
 fn test_up_idempotency() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_up_idempotency: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create devcontainer.json with lifecycle hooks
@@ -88,6 +102,10 @@ fn test_up_idempotency() {
 /// Test --skip-non-blocking-commands flag behavior
 #[test]
 fn test_skip_non_blocking_commands() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_skip_non_blocking_commands: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create devcontainer.json with various lifecycle hooks
@@ -165,6 +183,10 @@ fn test_skip_non_blocking_commands() {
 /// Test up with different skip flag combinations
 #[test]
 fn test_skip_flag_combinations() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_skip_flag_combinations: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create minimal devcontainer.json

@@ -1418,8 +1418,10 @@ mod tests {
 
 /// Returns the default cache directory for Deacon, creating it if necessary.
 ///
-/// Chooses `$HOME/.deacon/cache` when the user's home directory can be determined;
-/// otherwise falls back to `./.deacon/cache` relative to the current working directory.
+/// Resolution order (first match wins):
+/// - Environment override `DEACON_CACHE_DIR`
+/// - `./.deacon/cache` relative to the current working directory
+///
 /// The directory is created with `create_dir_all` if it does not already exist.
 ///
 /// # Errors
@@ -1433,19 +1435,20 @@ mod tests {
 /// assert!(!dir.as_os_str().is_empty());
 /// ```
 pub fn get_cache_dir() -> Result<PathBuf> {
-    use directories_next::ProjectDirs;
+    // Environment override to support hermetic/test-friendly operation
+    if let Ok(dir) = std::env::var("DEACON_CACHE_DIR") {
+        let path = PathBuf::from(dir);
+        if !path.exists() {
+            std::fs::create_dir_all(&path)?;
+        }
+        return Ok(path);
+    }
 
-    let cache_dir = if let Some(proj_dirs) = ProjectDirs::from("io", "get2know", "deacon") {
-        proj_dirs.cache_dir().join("deacon").join("cache")
-    } else {
-        PathBuf::from(".deacon").join("cache")
-    };
-
-    // Ensure cache directory exists
+    // Default to a project-local cache directory to avoid writing outside the workspace
+    let cache_dir = PathBuf::from(".deacon").join("cache");
     if !cache_dir.exists() {
         std::fs::create_dir_all(&cache_dir)?;
     }
-
     Ok(cache_dir)
 }
 

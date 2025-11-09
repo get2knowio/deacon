@@ -62,3 +62,16 @@ pub fn extract_json_from_output(output: &str) -> Result<serde_json::Value, serde
     // Last resort - try the whole output
     serde_json::from_str(output)
 }
+
+/// Generate a unique, docker-safe resource name with a prefix.
+///
+/// Combines the prefix with the current process ID and a monotonic timestamp
+/// to reduce the chance of collisions when tests run in parallel.
+pub fn unique_name(prefix: &str) -> String {
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}-{}-{}", prefix, pid, nanos)
+}

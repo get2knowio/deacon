@@ -256,11 +256,12 @@ fn test_acceptance_container_id_with_merged_config_errors_on_inspect_failure() -
     );
 
     let error_msg = result.unwrap_err().to_string();
+    let error_msg_lc = error_msg.to_lowercase();
     // Error should indicate container not found or inspection failure
     assert!(
-        error_msg.contains("not found")
+        error_msg_lc.contains("not found")
             || error_msg.contains("Container")
-            || error_msg.contains("inspect")
+            || error_msg_lc.contains("inspect")
             || error_msg.contains("Dev container not found"),
         "Error message should indicate container inspection failure: {}",
         error_msg

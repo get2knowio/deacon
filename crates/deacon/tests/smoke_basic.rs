@@ -21,6 +21,16 @@ use tempfile::TempDir;
 mod test_utils;
 use test_utils::DeaconGuard;
 
+fn is_docker_available() -> bool {
+    std::process::Command::new("docker")
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 // No Docker error tolerance: smoke tests require Docker
 
 fn repo_root() -> PathBuf {
@@ -82,6 +92,10 @@ fn smoke_read_configuration_with_variables() {
 
 #[test]
 fn smoke_build_json_then_text() {
+    if !is_docker_available() {
+        eprintln!("Skipping smoke_build_json_then_text: Docker not available");
+        return;
+    }
     // Temp workspace with a simple Dockerfile under .devcontainer
     let tmp = TempDir::new().unwrap();
     let mut guard = DeaconGuard::new(tmp.path());
@@ -140,6 +154,10 @@ fn smoke_build_json_then_text() {
 
 #[test]
 fn smoke_up_then_exec_traditional() {
+    if !is_docker_available() {
+        eprintln!("Skipping smoke_up_then_exec_traditional: Docker not available");
+        return;
+    }
     // Use an nginx image that stays running to allow exec
     let tmp = TempDir::new().unwrap();
     let _guard = DeaconGuard::new(tmp.path());
@@ -226,6 +244,10 @@ fn smoke_doctor_json() {
 /// Test compose-based up path detection
 #[test]
 fn test_compose_based_up_path_detection() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_compose_based_up_path_detection: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
     let _guard = DeaconGuard::new(temp_dir.path());
 
@@ -274,6 +296,10 @@ services:
 /// Test exec environment and working directory behavior
 #[test]
 fn test_exec_environment_and_working_directory() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_environment_and_working_directory: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
     let _guard = DeaconGuard::new(temp_dir.path());
 
@@ -339,6 +365,10 @@ fn test_exec_environment_and_working_directory() {
 /// Test build arg handling with simple Dockerfile
 #[test]
 fn test_build_arg_handling() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_build_arg_handling: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
     let mut guard = DeaconGuard::new(temp_dir.path());
 
@@ -490,6 +520,10 @@ fn test_read_configuration_fixtures_breadth() {
 /// Optional: Full Docker workflow test (gated by environment variable)
 #[test]
 fn test_up_exec_happy_path() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_up_exec_happy_path: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
     let _guard = DeaconGuard::new(temp_dir.path());
 

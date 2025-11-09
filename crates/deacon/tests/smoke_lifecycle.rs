@@ -12,9 +12,23 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+fn is_docker_available() -> bool {
+    std::process::Command::new("docker")
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Test lifecycle phase order with marker files
 #[test]
 fn test_lifecycle_hooks_stable_order() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_lifecycle_hooks_stable_order: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create a devcontainer.json with lifecycle hooks that create numbered marker files
@@ -56,6 +70,10 @@ fn test_lifecycle_hooks_stable_order() {
 /// Test lifecycle resume behavior (restart only re-runs postStart/postAttach)
 #[test]
 fn test_lifecycle_resume_markers() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_lifecycle_resume_markers: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create devcontainer with resume-testable lifecycle hooks
@@ -100,6 +118,10 @@ fn test_lifecycle_resume_markers() {
 /// Test --skip-non-blocking-commands flag suppresses postStart and postAttach
 #[test]
 fn test_lifecycle_skip_non_blocking_commands() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_lifecycle_skip_non_blocking_commands: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     let devcontainer_config = r#"{
@@ -141,6 +163,10 @@ fn test_lifecycle_skip_non_blocking_commands() {
 /// Test secret masking in logs with --no-redact disabled (default behavior)
 #[test]
 fn test_secret_masking_in_lifecycle_logs() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_secret_masking_in_lifecycle_logs: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create devcontainer that outputs potentially sensitive information
@@ -216,6 +242,10 @@ fn test_secret_masking_in_lifecycle_logs() {
 /// Test simple in-container exec after up
 #[test]
 fn test_features_accessible_in_container() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_features_accessible_in_container: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create devcontainer without external features to avoid network

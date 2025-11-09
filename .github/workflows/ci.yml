@@ -68,6 +68,76 @@ jobs:
         sudo service docker start
         docker info
 
+  nextest-ci:
+    name: Nextest CI (ubuntu)
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Enable network tests for integration tests that require OCI registry access
+      DEACON_NETWORK_TESTS: "1"
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-nextest-
+          ${{ runner.os }}-cargo-
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
+
+    - name: Ensure Docker is running
+      run: |
+        sudo service docker start
+        docker info
+
+    - name: Run nextest CI profile
+      run: make test-nextest-ci
+
+    - name: Upload timing artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: nextest-ci-timing-ubuntu
+        path: artifacts/nextest/ci-timing.json
+        if-no-files-found: warn
+
+    - name: Generate timing comparison summary
+      if: always()
+      run: |
+        if [[ -f artifacts/nextest/ci-timing.json ]]; then
+          echo "## Nextest CI Timing Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          ci_duration=$(jq -r '.duration_seconds // 0' artifacts/nextest/ci-timing.json)
+          ci_timestamp=$(jq -r '.timestamp_utc // "N/A"' artifacts/nextest/ci-timing.json)
+          echo "- **Profile**: ci" >> $GITHUB_STEP_SUMMARY
+          echo "- **Duration**: ${ci_duration}s" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: ${ci_timestamp}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          # If baseline exists, show improvement
+          if [[ -f artifacts/nextest/baseline-timing.json ]]; then
+            baseline_duration=$(jq -r '.duration_seconds // 0' artifacts/nextest/baseline-timing.json)
+            if [[ $baseline_duration -gt 0 ]]; then
+              improvement=$(awk "BEGIN {printf \"%.1f\", (1 - $ci_duration / $baseline_duration) * 100}")
+              echo "- **Improvement**: ${improvement}% faster than baseline (${baseline_duration}s → ${ci_duration}s)" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+        fi
+
   test-podman:
     name: Podman runtime tests (ubuntu)
     needs: lint

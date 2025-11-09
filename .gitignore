@@ -30,6 +30,7 @@ release/
 
 /tmp*
 /artifacts/*
+!artifacts/nextest/
 **/.DS_Store
 Thumbs.db
 *.swp

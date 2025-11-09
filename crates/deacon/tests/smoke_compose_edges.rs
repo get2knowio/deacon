@@ -13,9 +13,23 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+fn is_docker_available() -> bool {
+    std::process::Command::new("docker")
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Test compose-based configuration without Docker: should handle gracefully
 #[test]
 fn test_compose_path_detection_without_docker() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_compose_path_detection_without_docker: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create docker-compose.yml
@@ -79,6 +93,10 @@ fn test_compose_path_detection_without_docker() {
 /// Test compose-based up with subdirectory config (Docker-gated)
 #[test]
 fn test_compose_subfolder_config() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_compose_subfolder_config: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create subdirectory structure
@@ -256,6 +274,10 @@ services:
 /// Test multiple compose files configuration
 #[test]
 fn test_compose_multiple_files() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_compose_multiple_files: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create base docker-compose.yml

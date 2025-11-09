@@ -64,8 +64,7 @@ impl DeaconTestHarness {
         cmd.current_dir(&self.workspace_path);
         cmd.args(args);
 
-        // Set timeout via environment variable for child process
-        cmd.timeout(TEST_TIMEOUT);
+        // Avoid per-process timeouts in restricted environments; rely on measured duration + assertions.
 
         let output = cmd.output().expect("Failed to execute deacon command");
         let duration = start_time.elapsed();

@@ -9,6 +9,9 @@ use serial_test::serial;
 use std::process::{Command as StdCommand, Stdio};
 use tempfile::TempDir;
 
+mod support;
+use support::unique_name;
+
 /// Helper to check if Docker is available
 fn is_docker_available() -> bool {
     StdCommand::new("docker")
@@ -201,7 +204,7 @@ fn test_exec_id_label_successful_unique_match() {
         return;
     }
 
-    let container_name = "deacon-test-unique-match";
+    let container_name = unique_name("deacon-test-unique-match");
 
     // Create a test container with unique labels
     let labels = &[
@@ -209,7 +212,7 @@ fn test_exec_id_label_successful_unique_match() {
         ("com.example.role", "test-container"),
     ];
 
-    match create_test_container(container_name, labels) {
+    match create_test_container(&container_name, labels) {
         Ok(_container_id) => {
             // Give container a moment to start
             std::thread::sleep(std::time::Duration::from_secs(1));
@@ -237,10 +240,10 @@ fn test_exec_id_label_successful_unique_match() {
             );
 
             // Cleanup
-            cleanup_container(container_name);
+            cleanup_container(&container_name);
         }
         Err(e) => {
-            cleanup_container(container_name);
+            cleanup_container(&container_name);
             eprintln!("Skipping test: Failed to create test container: {}", e);
             return;
         }
@@ -256,14 +259,14 @@ fn test_exec_id_label_ambiguous_match_lists_candidates() {
         return;
     }
 
-    let container1_name = "deacon-test-ambiguous-1";
-    let container2_name = "deacon-test-ambiguous-2";
+    let container1_name = unique_name("deacon-test-ambiguous-1");
+    let container2_name = unique_name("deacon-test-ambiguous-2");
 
     // Create two test containers with the same label
     let labels = &[("com.example.test", "ambiguous-match")];
 
-    let container1_result = create_test_container(container1_name, labels);
-    let container2_result = create_test_container(container2_name, labels);
+    let container1_result = create_test_container(&container1_name, labels);
+    let container2_result = create_test_container(&container2_name, labels);
 
     match (container1_result, container2_result) {
         (Ok(_id1), Ok(_id2)) => {
@@ -293,12 +296,12 @@ fn test_exec_id_label_ambiguous_match_lists_candidates() {
             );
 
             // Cleanup
-            cleanup_container(container1_name);
-            cleanup_container(container2_name);
+            cleanup_container(&container1_name);
+            cleanup_container(&container2_name);
         }
         _ => {
-            cleanup_container(container1_name);
-            cleanup_container(container2_name);
+            cleanup_container(&container1_name);
+            cleanup_container(&container2_name);
             eprintln!(
                 "Skipping test: Failed to create test containers (Docker may not be available)"
             );
