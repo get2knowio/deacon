@@ -18,14 +18,31 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Run Rust CI steps (lint)
-      uses: ./.github/actions/rust-ci-steps
+    - name: Install Rust toolchain (fmt + clippy)
+      uses: dtolnay/rust-toolchain@stable
       with:
-        job-type: lint
-        os-name: ubuntu
+        components: rustfmt,clippy
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    - name: Compile (check)
+      run: cargo check --workspace --all-targets
+    - name: Run clippy
+      run: cargo clippy --all-targets -- -D warnings
+    - name: Run doctests
+      run: cargo test --doc --workspace
 
   test:
-    name: Test (unit + integration) (ubuntu)
+    name: Test (nextest fast profile) (ubuntu)
     needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -35,16 +52,34 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Run Rust CI steps (checkout + toolchain + cache)
-      uses: ./.github/actions/rust-ci-steps
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
       with:
-        job-type: test
-        os-name: ubuntu
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-nextest-
+          ${{ runner.os }}-cargo-
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
 
     - name: Ensure Docker is running (Ubuntu)
       run: |
         sudo service docker start
         docker info
+
+    - name: Run nextest fast profile via Makefile
+      run: make test-nextest-fast
 
   smoke:
     name: Smoke tests (ubuntu)
@@ -57,16 +92,28 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Run Rust CI steps (checkout + toolchain + cache)
-      uses: ./.github/actions/rust-ci-steps
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
       with:
-        job-type: smoke
-        os-name: ubuntu
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
 
     - name: Ensure Docker is running
       run: |
         sudo service docker start
         docker info
+
+    - name: Run smoke test suite via Makefile
+      run: make test-smoke
 
   nextest-ci:
     name: Nextest CI (ubuntu)

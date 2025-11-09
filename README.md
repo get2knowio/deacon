@@ -486,6 +486,20 @@ If you have requirements around signed binaries and would like to help accelerat
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, testing guidelines, and contribution requirements.
 
+## Continuous Integration
+
+CI runs via GitHub Actions and uses the Makefile + cargo-nextest:
+
+- Lint: rustfmt check, cargo check, clippy, and doctests
+- Test (Ubuntu): `make test-nextest-fast` with Docker available
+- Smoke (Ubuntu): `make test-smoke` (serial, Docker required)
+- Nextest CI (Ubuntu/macOS): `make test-nextest-ci` with timing artifact `artifacts/nextest/ci-timing.json`
+- Other OS (macOS/Windows): runs unit + non‑smoke integration tests and separate smoke tests; macOS uses Colima for Docker
+
+Notes:
+- Networked integration tests are enabled in CI with `DEACON_NETWORK_TESTS=1`.
+- Test grouping and concurrency are configured in `.config/nextest.toml`. See docs/testing/nextest.md for details.
+
 ## Test Coverage
 
 We use cargo-llvm-cov (LLVM source-based coverage) locally and in CI.
