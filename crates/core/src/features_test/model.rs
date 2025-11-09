@@ -195,6 +195,7 @@ impl Scenario {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestResult {
     /// Test name (e.g. "feature:scenario" or "_global:scenario")
+    #[serde(rename = "testName")]
     test_name: String,
     /// true when the test passed (exit code 0)
     result: bool,
@@ -374,4 +375,66 @@ pub enum LogLevel {
     Debug,
     /// Most verbose trace logging
     Trace,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_result_serializes_with_camel_case_keys() {
+        let result = TestResult::new("a:b".to_string(), true);
+        let json = serde_json::to_string(&result).expect("serialization failed");
+
+        // Verify that the JSON contains camelCase key "testName"
+        assert!(
+            json.contains("\"testName\""),
+            "JSON should contain 'testName' key"
+        );
+        // Verify that the JSON does NOT contain snake_case key "test_name"
+        assert!(
+            !json.contains("\"test_name\""),
+            "JSON should not contain 'test_name' key"
+        );
+        // Verify that the JSON contains "result" key
+        assert!(
+            json.contains("\"result\""),
+            "JSON should contain 'result' key"
+        );
+
+        // Verify exact structure
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("parsing failed");
+        assert_eq!(parsed["testName"], "a:b");
+        assert_eq!(parsed["result"], true);
+    }
+
+    #[test]
+    fn test_result_array_serializes_correctly() {
+        let results = vec![
+            TestResult::new("feature1:scenario1".to_string(), true),
+            TestResult::new("feature2:scenario2".to_string(), false),
+        ];
+        let json = serde_json::to_string(&results).expect("serialization failed");
+
+        // Verify array structure
+        assert!(json.starts_with('['));
+        assert!(json.ends_with(']'));
+        assert!(json.contains("\"testName\""));
+        assert!(!json.contains("\"test_name\""));
+
+        // Verify exact structure
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).expect("parsing failed");
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0]["testName"], "feature1:scenario1");
+        assert_eq!(parsed[0]["result"], true);
+        assert_eq!(parsed[1]["testName"], "feature2:scenario2");
+        assert_eq!(parsed[1]["result"], false);
+    }
+
+    #[test]
+    fn test_empty_results_array_serializes_as_empty_json_array() {
+        let results: Vec<TestResult> = vec![];
+        let json = serde_json::to_string(&results).expect("serialization failed");
+        assert_eq!(json, "[]");
+    }
 }

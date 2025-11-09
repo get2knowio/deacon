@@ -133,9 +133,9 @@ fn test_features_test_with_valid_feature() {
     let results = json.as_array().unwrap();
     assert!(!results.is_empty(), "Expected at least one test result");
 
-    // Verify result structure
+    // Verify result structure - per spec, keys should be camelCase
     for result in results {
-        assert!(result["test_name"].is_string());
+        assert!(result["testName"].is_string());
         assert!(result["result"].is_boolean());
     }
 }

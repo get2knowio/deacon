@@ -633,6 +633,38 @@ pub fn create_feature_tgz(src: &Path, dest: &Path) -> Result<String> {
             })?;
 
             if path.is_dir() {
+                // Add directory entry with mode 0o755 before recursing
+                // Ensure directory path ends with / for tar convention
+                let dir_path = if relative_path.as_os_str().is_empty() {
+                    PathBuf::from("./")
+                } else {
+                    let p = relative_path.to_path_buf();
+                    let path_str = p.to_string_lossy().to_string();
+                    if !path_str.ends_with('/') {
+                        PathBuf::from(format!("{}/", path_str))
+                    } else {
+                        p
+                    }
+                };
+
+                let mut header = tar::Header::new_gnu();
+                header.set_path(&dir_path)?;
+                header.set_entry_type(tar::EntryType::Directory);
+                header.set_size(0);
+                header.set_mode(0o755); // Deterministic: directory permissions
+                header.set_mtime(0); // Deterministic: Unix epoch
+                header.set_uid(0); // Deterministic: root user
+                header.set_gid(0); // Deterministic: root group
+                header.set_username("")?; // Deterministic: empty username
+                header.set_groupname("")?; // Deterministic: empty groupname
+                header.set_cksum();
+
+                tar_builder
+                    .append(&header, &mut std::io::empty())
+                    .with_context(|| {
+                        format!("Failed to add directory '{}' to archive", path.display())
+                    })?;
+
                 // Recursively add directory contents
                 add_files_to_tar(tar_builder, &path, base_path)?;
             } else {
@@ -641,26 +673,41 @@ pub fn create_feature_tgz(src: &Path, dest: &Path) -> Result<String> {
                     format!("Failed to open file '{}' for archiving", path.display())
                 })?;
 
+                let metadata = file
+                    .metadata()
+                    .with_context(|| format!("Failed to get metadata for '{}'", path.display()))?;
+
                 let mut header = tar::Header::new_gnu();
-                header.set_size(
-                    file.metadata()
-                        .with_context(|| {
-                            format!("Failed to get metadata for '{}'", path.display())
-                        })?
-                        .len(),
-                );
-                header.set_mode(0o644); // Standard file permissions
+                header.set_path(relative_path)?;
+                header.set_size(metadata.len());
+
+                // Detect executable files on Unix and set appropriate mode
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = metadata.permissions().mode();
+                    // Check if any executable bit is set (owner, group, or other)
+                    if mode & 0o111 != 0 {
+                        header.set_mode(0o755); // Executable: rwxr-xr-x
+                    } else {
+                        header.set_mode(0o644); // Regular file: rw-r--r--
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    header.set_mode(0o644); // Default to regular file on non-Unix
+                }
+
+                header.set_mtime(0); // Deterministic: Unix epoch
                 header.set_uid(0); // Deterministic: root user
                 header.set_gid(0); // Deterministic: root group
-                header.set_mtime(0); // Deterministic: Unix epoch
-                header.set_username("root")?; // Deterministic: root user
-                header.set_groupname("root")?; // Deterministic: root group
+                header.set_username("")?; // Deterministic: empty username
+                header.set_groupname("")?; // Deterministic: empty groupname
+                header.set_cksum();
 
-                tar_builder
-                    .append_data(&mut header, relative_path, &mut file)
-                    .with_context(|| {
-                        format!("Failed to add file '{}' to archive", path.display())
-                    })?;
+                tar_builder.append(&header, &mut file).with_context(|| {
+                    format!("Failed to add file '{}' to archive", path.display())
+                })?;
             }
         }
 
@@ -2755,27 +2802,20 @@ async fn create_feature_package(
     output_path: &Path,
     metadata: &FeatureMetadata,
 ) -> Result<(String, String, u64)> {
-    use flate2::{write::GzEncoder, Compression};
     use sha2::{Digest, Sha256};
     use std::fs::File;
     use std::io::{Read, Write};
-    use tar::Builder;
 
     debug!("Creating feature package for: {}", metadata.id);
 
     // Build artifact name with version
     let tar_filename = build_artifact_name(&metadata.id, &metadata.version)?;
 
-    // Create gzipped tar archive
+    // Create gzipped tar archive using deterministic tarball creation
     let tar_path = output_path.join(&tar_filename);
-    let tar_file = File::create(&tar_path)?;
-    let encoder = GzEncoder::new(tar_file, Compression::default());
-    let mut builder = Builder::new(encoder);
 
-    // Add all files from feature directory to tar
-    builder.append_dir_all(".", feature_path)?;
-    let encoder = builder.into_inner()?;
-    encoder.finish()?;
+    // Use create_feature_tgz for deterministic archive creation (set mode, mtime, uid/gid/names)
+    let _ = create_feature_tgz(feature_path, &tar_path)?;
 
     // Calculate digest and size
     let mut file = File::open(&tar_path)?;
@@ -3874,6 +3914,305 @@ mod unit_features_package {
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_single_feature_packaging_file_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let feature_dir = temp_dir.path().join("test-feature");
+        let output_dir = temp_dir.path().join("output");
+
+        // Create output directory
+        fs::create_dir_all(&output_dir).unwrap();
+
+        // Create a test feature
+        fs::create_dir_all(&feature_dir).unwrap();
+        let json_path = feature_dir.join("devcontainer-feature.json");
+        fs::write(
+            &json_path,
+            r#"{"id": "test-feature", "version": "1.0.0", "name": "Test Feature"}"#,
+        )
+        .unwrap();
+
+        // Create install.sh as executable (0755)
+        let install_script = feature_dir.join("install.sh");
+        fs::write(
+            &install_script,
+            "#!/bin/bash\necho 'Installing test feature'\n",
+        )
+        .unwrap();
+        let mut perms = fs::metadata(&install_script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&install_script, perms).unwrap();
+
+        // Create a regular file (README.md)
+        let readme = feature_dir.join("README.md");
+        fs::write(&readme, "# Test Feature\n\nDocumentation here.\n").unwrap();
+
+        // Create a subdirectory with files
+        let subdir = feature_dir.join("scripts");
+        fs::create_dir_all(&subdir).unwrap();
+        let helper_script = subdir.join("helper.sh");
+        fs::write(&helper_script, "#!/bin/bash\necho 'Helper script'\n").unwrap();
+        let mut helper_perms = fs::metadata(&helper_script).unwrap().permissions();
+        helper_perms.set_mode(0o755);
+        fs::set_permissions(&helper_script, helper_perms).unwrap();
+
+        // Package the feature
+        let metadata = validate_single(&feature_dir).unwrap();
+        let (digest1, _, _) = create_feature_package(&feature_dir, &output_dir, &metadata)
+            .await
+            .unwrap();
+
+        // Open and inspect the tar archive
+        let tar_path = output_dir
+            .join(build_artifact_name("test-feature", &Some("1.0.0".to_string())).unwrap());
+        let tar_file = fs::File::open(&tar_path).unwrap();
+        let decoder = flate2::read::GzDecoder::new(tar_file);
+        let mut archive = tar::Archive::new(decoder);
+
+        let mut found_install_sh = false;
+        let mut found_readme = false;
+        let mut found_scripts_dir = false;
+        let mut found_helper_sh = false;
+
+        for entry_result in archive.entries().unwrap() {
+            let entry = entry_result.unwrap();
+            let path = entry.path().unwrap();
+            let header = entry.header();
+            let mode = header.mode().unwrap();
+
+            let path_str = path.to_string_lossy().to_string();
+
+            // Check directory modes
+            if header.entry_type() == tar::EntryType::Directory {
+                assert_eq!(
+                    mode, 0o755,
+                    "Directory '{}' should have mode 0o755, got 0o{:o}",
+                    path_str, mode
+                );
+                if path_str.starts_with("scripts") || path_str == "scripts/" {
+                    found_scripts_dir = true;
+                }
+            } else {
+                // Check file modes
+                if path_str == "install.sh" || path_str == "./install.sh" {
+                    assert_eq!(
+                        mode, 0o755,
+                        "install.sh should have mode 0o755 (executable), got 0o{:o}",
+                        mode
+                    );
+                    found_install_sh = true;
+                } else if path_str == "README.md" || path_str == "./README.md" {
+                    assert_eq!(
+                        mode, 0o644,
+                        "README.md should have mode 0o644 (regular file), got 0o{:o}",
+                        mode
+                    );
+                    found_readme = true;
+                } else if path_str.ends_with("helper.sh") {
+                    assert_eq!(
+                        mode, 0o755,
+                        "helper.sh should have mode 0o755 (executable), got 0o{:o}",
+                        mode
+                    );
+                    found_helper_sh = true;
+                } else if path_str == "devcontainer-feature.json"
+                    || path_str == "./devcontainer-feature.json"
+                {
+                    assert_eq!(
+                        mode, 0o644,
+                        "devcontainer-feature.json should have mode 0o644, got 0o{:o}",
+                        mode
+                    );
+                }
+            }
+        }
+
+        assert!(found_install_sh, "install.sh should be in the archive");
+        assert!(found_readme, "README.md should be in the archive");
+        assert!(
+            found_scripts_dir,
+            "scripts/ directory should be in the archive"
+        );
+        assert!(found_helper_sh, "helper.sh should be in the archive");
+
+        // Test reproducibility: package again and verify identical digest
+        let (digest2, _, _) = create_feature_package(&feature_dir, &output_dir, &metadata)
+            .await
+            .unwrap();
+        assert_eq!(
+            digest1, digest2,
+            "SHA256 digests should be identical for reproducible packaging"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_collection_packaging_file_modes_and_reproducibility() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let collection_dir = temp_dir.path().join("collection");
+        let src_dir = collection_dir.join("src");
+        let output_dir1 = temp_dir.path().join("output1");
+        let output_dir2 = temp_dir.path().join("output2");
+
+        // Create output directories
+        fs::create_dir_all(&output_dir1).unwrap();
+        fs::create_dir_all(&output_dir2).unwrap();
+
+        // Create collection structure
+        fs::create_dir_all(&src_dir).unwrap();
+
+        // Feature A with executable install.sh
+        let feature_a = src_dir.join("feature-a");
+        fs::create_dir_all(&feature_a).unwrap();
+        fs::write(
+            feature_a.join("devcontainer-feature.json"),
+            r#"{"id": "feature-a", "version": "1.0.0", "name": "Feature A"}"#,
+        )
+        .unwrap();
+        let install_a = feature_a.join("install.sh");
+        fs::write(&install_a, "#!/bin/bash\necho 'Installing A'\n").unwrap();
+        let mut perms_a = fs::metadata(&install_a).unwrap().permissions();
+        perms_a.set_mode(0o755);
+        fs::set_permissions(&install_a, perms_a).unwrap();
+
+        let readme_a = feature_a.join("README.md");
+        fs::write(&readme_a, "# Feature A\n").unwrap();
+
+        // Feature B with subdirectory containing executable
+        let feature_b = src_dir.join("feature-b");
+        fs::create_dir_all(&feature_b).unwrap();
+        fs::write(
+            feature_b.join("devcontainer-feature.json"),
+            r#"{"id": "feature-b", "version": "2.0.0", "name": "Feature B"}"#,
+        )
+        .unwrap();
+        let bin_dir = feature_b.join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let tool_script = bin_dir.join("tool.sh");
+        fs::write(&tool_script, "#!/bin/bash\necho 'Tool script'\n").unwrap();
+        let mut tool_perms = fs::metadata(&tool_script).unwrap().permissions();
+        tool_perms.set_mode(0o755);
+        fs::set_permissions(&tool_script, tool_perms).unwrap();
+
+        // Package both features twice
+        let metadata_a = validate_single(&feature_a).unwrap();
+        let metadata_b = validate_single(&feature_b).unwrap();
+
+        let (digest1_a, _, _) = create_feature_package(&feature_a, &output_dir1, &metadata_a)
+            .await
+            .unwrap();
+        let (digest2_a, _, _) = create_feature_package(&feature_a, &output_dir2, &metadata_a)
+            .await
+            .unwrap();
+
+        let (digest1_b, _, _) = create_feature_package(&feature_b, &output_dir1, &metadata_b)
+            .await
+            .unwrap();
+        let (digest2_b, _, _) = create_feature_package(&feature_b, &output_dir2, &metadata_b)
+            .await
+            .unwrap();
+
+        // Verify reproducibility
+        assert_eq!(
+            digest1_a, digest2_a,
+            "Feature A should produce identical digests"
+        );
+        assert_eq!(
+            digest1_b, digest2_b,
+            "Feature B should produce identical digests"
+        );
+
+        // Inspect Feature A tar for correct modes
+        let tar_path_a =
+            output_dir1.join(build_artifact_name("feature-a", &Some("1.0.0".to_string())).unwrap());
+        let tar_file_a = fs::File::open(&tar_path_a).unwrap();
+        let decoder_a = flate2::read::GzDecoder::new(tar_file_a);
+        let mut archive_a = tar::Archive::new(decoder_a);
+
+        let mut found_install_a = false;
+        let mut found_readme_a = false;
+
+        for entry_result in archive_a.entries().unwrap() {
+            let entry = entry_result.unwrap();
+            let path = entry.path().unwrap();
+            let header = entry.header();
+            let mode = header.mode().unwrap();
+            let path_str = path.to_string_lossy().to_string();
+
+            if header.entry_type() == tar::EntryType::Directory {
+                assert_eq!(
+                    mode, 0o755,
+                    "Directory '{}' in Feature A should have mode 0o755, got 0o{:o}",
+                    path_str, mode
+                );
+            } else if path_str == "install.sh" || path_str == "./install.sh" {
+                assert_eq!(
+                    mode, 0o755,
+                    "Feature A install.sh should be executable (0o755), got 0o{:o}",
+                    mode
+                );
+                found_install_a = true;
+            } else if path_str == "README.md" || path_str == "./README.md" {
+                assert_eq!(
+                    mode, 0o644,
+                    "Feature A README.md should be regular file (0o644), got 0o{:o}",
+                    mode
+                );
+                found_readme_a = true;
+            }
+        }
+
+        assert!(found_install_a, "Feature A install.sh should be in archive");
+        assert!(found_readme_a, "Feature A README.md should be in archive");
+
+        // Inspect Feature B tar for correct modes
+        let tar_path_b =
+            output_dir1.join(build_artifact_name("feature-b", &Some("2.0.0".to_string())).unwrap());
+        let tar_file_b = fs::File::open(&tar_path_b).unwrap();
+        let decoder_b = flate2::read::GzDecoder::new(tar_file_b);
+        let mut archive_b = tar::Archive::new(decoder_b);
+
+        let mut found_bin_dir = false;
+        let mut found_tool_sh = false;
+
+        for entry_result in archive_b.entries().unwrap() {
+            let entry = entry_result.unwrap();
+            let path = entry.path().unwrap();
+            let header = entry.header();
+            let mode = header.mode().unwrap();
+            let path_str = path.to_string_lossy().to_string();
+
+            if header.entry_type() == tar::EntryType::Directory {
+                assert_eq!(
+                    mode, 0o755,
+                    "Directory '{}' in Feature B should have mode 0o755, got 0o{:o}",
+                    path_str, mode
+                );
+                if path_str.starts_with("bin") || path_str == "bin/" {
+                    found_bin_dir = true;
+                }
+            } else if path_str.ends_with("tool.sh") {
+                assert_eq!(
+                    mode, 0o755,
+                    "Feature B tool.sh should be executable (0o755), got 0o{:o}",
+                    mode
+                );
+                found_tool_sh = true;
+            }
+        }
+
+        assert!(
+            found_bin_dir,
+            "Feature B bin/ directory should be in archive"
+        );
+        assert!(found_tool_sh, "Feature B tool.sh should be in archive");
+    }
+
     #[test]
     fn test_sanitize_feature_id_mixed_case() {
         // Mixed case should be preserved (only invalid chars are replaced)
@@ -4009,10 +4348,19 @@ mod unit_features_package {
             .block_on(create_feature_package(&feature_dir, &output_dir, &metadata));
 
         assert!(result.is_err());
-        let err_msg = format!("{}", result.unwrap_err());
+        let err = result.unwrap_err();
+        let err_msg = format!("{}", err);
+        let err_debug = format!("{:?}", err);
         // On Unix systems, this will be a permission denied error
         #[cfg(unix)]
-        assert!(err_msg.contains("Permission denied") || err_msg.contains("permission"));
+        assert!(
+            err_msg.contains("Permission denied")
+                || err_msg.contains("permission")
+                || err_debug.contains("Permission denied")
+                || err_debug.contains("PermissionDenied"),
+            "Expected permission error but got: {}",
+            err_msg
+        );
         // On other systems, just check that it failed
         #[cfg(not(unix))]
         assert!(!err_msg.is_empty());
