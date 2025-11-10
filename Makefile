@@ -137,38 +137,38 @@ test-nextest-bg-smoke: ## Run only smoke+parity tests in background (most likely
 	@FILTER="test(smoke_) | test(parity_)" $(MAKE) test-nextest-bg
 
 test-nextest-ci: ## Run CI test suite with cargo-nextest (two-pass: general + auth-failure tests without token)
-    @set -euo pipefail; \
-    ./scripts/nextest/assert-installed.sh; \
-    mkdir -p artifacts/nextest; \
-    echo "Running nextest with ci profile (phase 1: general tests)..."; \
-    start_time=$$(date +%s); \
-    # Exclude auth-failure tests from phase 1; they run in phase 2 with token unset
-    PHASE1_FILTER="not test(manifest_auth_failure_) & not test(tags_auth_failure_) & not test(verbose_auth_failure_)"; \
-    cargo nextest run --profile ci $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none "$$PHASE1_FILTER"; \
-    echo "Running nextest with ci profile (phase 2: auth-failure tests, token unset)..."; \
-    # Unset DEACON_REGISTRY_TOKEN for this invocation to force unauthenticated flows
-    if env -u DEACON_REGISTRY_TOKEN cargo nextest run --profile ci $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none "test(manifest_auth_failure_) | test(tags_auth_failure_) | test(verbose_auth_failure_)"; then \
-        end_time=$$(date +%s); \
-        duration=$$((end_time - start_time)); \
-        timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
-        echo "{\"profile\":\"ci\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":0}" > artifacts/nextest/ci-timing.json; \
-        echo "✓ Tests passed in $${duration}s. Timing data: artifacts/nextest/ci-timing.json"; \
-        if [[ -f artifacts/nextest/baseline-timing.json ]]; then \
-            baseline_duration=$$(jq -r '.duration_seconds // 0' artifacts/nextest/baseline-timing.json); \
-            if [[ $$baseline_duration -gt 0 ]]; then \
-                improvement=$$(awk "BEGIN {printf \"%.1f\", (1 - $$duration / $$baseline_duration) * 100}"); \
-                echo "⚡ Runtime improvement: $${improvement}% faster than baseline ($${baseline_duration}s → $${duration}s)"; \
-            fi; \
-        fi; \
-    else \
-        exit_code=$$?; \
-        end_time=$$(date +%s); \
-        duration=$$((end_time - start_time)); \
-        timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
-        echo "{\"profile\":\"ci\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":$$exit_code}" > artifacts/nextest/ci-timing.json; \
-        echo "✗ Tests failed after $${duration}s. Timing data: artifacts/nextest/ci-timing.json"; \
-        exit $$exit_code; \
-    fi
+	@set -euo pipefail; \
+	./scripts/nextest/assert-installed.sh; \
+	mkdir -p artifacts/nextest; \
+	echo "Running nextest with ci profile (phase 1: general tests)..."; \
+	start_time=$$(date +%s); \
+	# Exclude auth-failure tests from phase 1; they run in phase 2 with token unset
+	PHASE1_FILTER="not test(manifest_auth_failure_) & not test(tags_auth_failure_) & not test(verbose_auth_failure_)"; \
+	cargo nextest run --profile ci $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none "$$PHASE1_FILTER"; \
+	echo "Running nextest with ci profile (phase 2: auth-failure tests, token unset)..."; \
+	# Unset DEACON_REGISTRY_TOKEN for this invocation to force unauthenticated flows
+	if env -u DEACON_REGISTRY_TOKEN cargo nextest run --profile ci $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none "test(manifest_auth_failure_) | test(tags_auth_failure_) | test(verbose_auth_failure_)"; then \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"ci\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":0}" > artifacts/nextest/ci-timing.json; \
+		echo "✓ Tests passed in $${duration}s. Timing data: artifacts/nextest/ci-timing.json"; \
+		if [[ -f artifacts/nextest/baseline-timing.json ]]; then \
+			baseline_duration=$$(jq -r '.duration_seconds // 0' artifacts/nextest/baseline-timing.json); \
+			if [[ $$baseline_duration -gt 0 ]]; then \
+				improvement=$$(awk "BEGIN {printf \"%.1f\", (1 - $$duration / $$baseline_duration) * 100}"); \
+				echo "⚡ Runtime improvement: $${improvement}% faster than baseline ($${baseline_duration}s → $${duration}s)"; \
+			fi; \
+		fi; \
+	else \
+		exit_code=$$?; \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"ci\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":$$exit_code}" > artifacts/nextest/ci-timing.json; \
+		echo "✗ Tests failed after $${duration}s. Timing data: artifacts/nextest/ci-timing.json"; \
+		exit $$exit_code; \
+	fi
 
 test-nextest-audit: ## Audit test group assignments with cargo-nextest
 	@set -euo pipefail; \
