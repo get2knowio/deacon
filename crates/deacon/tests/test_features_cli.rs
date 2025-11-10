@@ -7,16 +7,8 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
-
-fn is_docker_available() -> bool {
-    std::process::Command::new("docker")
-        .arg("info")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
+mod support;
+use support::is_docker_available;
 
 /// Helper function to extract JSON from mixed output (logs + JSON)
 fn extract_json_from_output(output: &str) -> Result<serde_json::Value, serde_json::Error> {
@@ -220,7 +212,8 @@ fn test_features_test_with_missing_install_script() {
     cmd.assert().failure().stderr(
         predicate::str::contains("install.sh not found")
             .or(predicate::str::contains("Runtime unavailable"))
-            .or(predicate::str::contains("Docker")),
+            .or(predicate::str::contains("Docker not available"))
+            .or(predicate::str::contains("Docker unavailable")),
     );
 }
 

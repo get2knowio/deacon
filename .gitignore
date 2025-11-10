@@ -37,5 +37,6 @@ Thumbs.db
 .vscode/
 *.pyc
 audit.jsonl
+.deacon/cache/
 artifacts/nextest/ci-timing.json
 artifacts/nextest/full-timing.json

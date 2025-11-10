@@ -11,16 +11,8 @@
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
-
-fn is_docker_available() -> bool {
-    std::process::Command::new("docker")
-        .arg("info")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
+mod support;
+use support::is_docker_available;
 
 /// Test down command before any up: should succeed or gracefully handle "no container"
 #[test]

@@ -7,18 +7,7 @@ use std::process::{Command as StdCommand, Stdio};
 use tempfile::TempDir;
 
 mod support;
-use support::unique_name;
-
-/// Helper to check if Docker is available
-fn is_docker_available() -> bool {
-    StdCommand::new("docker")
-        .arg("info")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
+use support::{is_docker_available, unique_name};
 
 /// Helper to check if a container exists by name
 fn container_exists(name: &str) -> bool {

@@ -18,18 +18,10 @@ use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
+mod support;
 mod test_utils;
+use support::is_docker_available;
 use test_utils::DeaconGuard;
-
-fn is_docker_available() -> bool {
-    std::process::Command::new("docker")
-        .arg("info")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
 
 // No Docker error tolerance: smoke tests require Docker
 

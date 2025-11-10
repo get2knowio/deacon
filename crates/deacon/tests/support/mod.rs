@@ -75,3 +75,30 @@ pub fn unique_name(prefix: &str) -> String {
         .unwrap_or(0);
     format!("{}-{}-{}", prefix, pid, nanos)
 }
+
+/// Check if Docker is available for integration tests.
+///
+/// Returns `true` if Docker is installed and the daemon is running,
+/// `false` otherwise. Tests that require Docker should use this as
+/// a guard and skip if it returns `false`.
+///
+/// # Usage
+/// ```ignore
+/// #[test]
+/// fn test_with_docker() {
+///     if !is_docker_available() {
+///         eprintln!("Skipping test - Docker not available");
+///         return;
+///     }
+///     // ... test code that requires Docker
+/// }
+/// ```
+pub fn is_docker_available() -> bool {
+    std::process::Command::new("docker")
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}

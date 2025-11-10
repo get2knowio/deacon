@@ -263,11 +263,6 @@ async fn execute_compose_up(
 
     debug!("Created compose project: {:?}", project.name);
 
-    // Execute initializeCommand on host before any compose operations
-    if let Some(ref initialize) = config.initialize_command {
-        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
-    }
-
     // Check if project is already running
     if !args.remove_existing_container {
         match compose_manager.is_project_running(&project) {
@@ -297,6 +292,11 @@ async fn execute_compose_up(
         if let Err(e) = compose_manager.stop_project(&project) {
             warn!("Failed to stop existing project: {}", e);
         }
+    }
+
+    // Execute initializeCommand on host before starting the compose project
+    if let Some(ref initialize) = config.initialize_command {
+        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
     }
 
     // Start the compose project

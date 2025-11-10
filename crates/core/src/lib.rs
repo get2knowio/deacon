@@ -44,6 +44,7 @@ pub mod state;
 pub mod templates;
 pub mod text;
 pub mod user_mapping;
+pub mod util;
 pub mod variable;
 pub mod workspace;
 
