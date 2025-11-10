@@ -143,11 +143,11 @@ test-nextest-ci: ## Run CI test suite with cargo-nextest (two-pass: general + au
 	echo "Running nextest with ci profile (phase 1: general tests)..."; \
 	start_time=$$(date +%s); \
 	# Exclude auth-failure tests from phase 1; they run in phase 2 with token unset
-	PHASE1_FILTER="not test(manifest_auth_failure_) & not test(tags_auth_failure_) & not test(verbose_auth_failure_)"; \
+	PHASE1_FILTER="not ( test(manifest_auth_failure_) or test(tags_auth_failure_) or test(verbose_auth_failure_) )"; \
 	cargo nextest run --profile ci $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none "$$PHASE1_FILTER"; \
 	echo "Running nextest with ci profile (phase 2: auth-failure tests, token unset)..."; \
 	# Unset DEACON_REGISTRY_TOKEN for this invocation to force unauthenticated flows
-	if env -u DEACON_REGISTRY_TOKEN cargo nextest run --profile ci $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none "test(manifest_auth_failure_) | test(tags_auth_failure_) | test(verbose_auth_failure_)"; then \
+	if env -u DEACON_REGISTRY_TOKEN cargo nextest run --profile ci $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none "test(manifest_auth_failure_) or test(tags_auth_failure_) or test(verbose_auth_failure_)"; then \
 		end_time=$$(date +%s); \
 		duration=$$((end_time - start_time)); \
 		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
