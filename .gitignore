@@ -36,3 +36,6 @@ Thumbs.db
 *.swp
 .vscode/
 *.pyc
+audit.jsonl
+artifacts/nextest/ci-timing.json
+artifacts/nextest/full-timing.json
