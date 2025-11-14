@@ -11,9 +11,23 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+fn is_docker_available() -> bool {
+    std::process::Command::new("docker")
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Test exec stdin streaming basic pass-through
 #[test]
 fn test_exec_stdin_basic() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_stdin_basic: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create minimal devcontainer.json
@@ -84,6 +98,10 @@ fn test_exec_stdin_basic() {
 /// Test exec stdin streaming with Docker (Docker-gated)
 #[test]
 fn test_exec_stdin_streaming() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_stdin_streaming: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create minimal devcontainer.json
@@ -169,6 +187,10 @@ fn test_exec_stdin_streaming() {
 /// Test exec with different shell commands for stdin
 #[test]
 fn test_exec_stdin_shell_commands() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_stdin_shell_commands: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create minimal devcontainer.json

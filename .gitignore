@@ -30,8 +30,13 @@ release/
 
 /tmp*
 /artifacts/*
+!artifacts/nextest/
 **/.DS_Store
 Thumbs.db
 *.swp
 .vscode/
 *.pyc
+audit.jsonl
+artifacts/nextest/ci-timing.json
+artifacts/nextest/full-timing.json
+/crates/deacon/.deacon

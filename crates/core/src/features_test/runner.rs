@@ -469,6 +469,7 @@ async fn create_test_container(
     name_suffix: &str,
 ) -> Result<String, crate::features_test::errors::Error> {
     debug!("Creating test container from image: {}", base_image);
+    let unique_name = unique_identifier(&format!("deacon-test-{}", name_suffix));
 
     // Use docker CLI to create container with label
     let output = std::process::Command::new("docker")
@@ -477,7 +478,7 @@ async fn create_test_container(
             "--label",
             "devcontainer.is_test_run=true",
             "--name",
-            &format!("deacon-test-{}", name_suffix),
+            &unique_name,
             base_image,
             "sleep",
             "infinity",
@@ -523,6 +524,16 @@ async fn create_test_container(
     }
 
     Ok(container_id)
+}
+
+/// Generates a timestamp-based identifier for naming temporary resources.
+fn unique_identifier(prefix: &str) -> String {
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}-{}-{}", prefix, pid, nanos)
 }
 
 /// Executes a script inside a container.

@@ -264,15 +264,31 @@ async fn execute_compose_up(
     debug!("Created compose project: {:?}", project.name);
 
     // Check if project is already running
-    if !args.remove_existing_container && compose_manager.is_project_running(&project)? {
-        debug!("Compose project {} is already running", project.name);
-
-        // Get the primary container ID for potential exec operations
-        if let Some(container_id) = compose_manager.get_primary_container_id(&project)? {
-            debug!("Primary service container ID: {}", container_id);
+    if !args.remove_existing_container {
+        match compose_manager.is_project_running(&project) {
+            Ok(true) => {
+                debug!("Compose project {} is already running", project.name);
+                // Get the primary container ID for potential exec operations
+                if let Ok(Some(container_id)) = compose_manager.get_primary_container_id(&project) {
+                    debug!("Primary service container ID: {}", container_id);
+                }
+                return Ok(());
+            }
+            Ok(false) => {
+                // Not running, continue
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to determine compose project state (continuing): {}",
+                    e
+                );
+            }
         }
+    }
 
-        return Ok(());
+    // Execute initializeCommand on host before starting compose operations
+    if let Some(ref initialize) = config.initialize_command {
+        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
     }
 
     // Stop existing containers if requested
@@ -281,11 +297,6 @@ async fn execute_compose_up(
         if let Err(e) = compose_manager.stop_project(&project) {
             warn!("Failed to stop existing project: {}", e);
         }
-    }
-
-    // Execute initializeCommand on host before starting compose project
-    if let Some(ref initialize) = config.initialize_command {
-        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
     }
 
     // Start the compose project
@@ -425,13 +436,13 @@ async fn execute_container_up(
     // Initialize Docker client
     let docker = runtime;
 
-    // Check Docker availability
-    docker.ping().await?;
-
-    // Execute initializeCommand on host before container creation
+    // Execute initializeCommand on host before any container operations
     if let Some(ref initialize) = config.initialize_command {
         execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
     }
+
+    // Check Docker availability after host-side initialization
+    docker.ping().await?;
 
     // Emit container create begin event
     emit_progress_event(deacon_core::progress::ProgressEvent::ContainerCreateBegin {

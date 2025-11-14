@@ -779,8 +779,9 @@ impl Cli {
         }
         deacon_core::logging::init(log_format)?;
 
-        // Emit a debug log to help with testing
+        // Emit logs to help with testing and log-level verification
         tracing::debug!("CLI initialized with log level: {}", log_level);
+        tracing::trace!("Trace-level logging enabled (probe)");
 
         // Warn if redaction is disabled
         if self.no_redact {

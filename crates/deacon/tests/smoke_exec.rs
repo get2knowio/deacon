@@ -13,9 +13,23 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+fn is_docker_available() -> bool {
+    std::process::Command::new("docker")
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Test exec without TTY prints expected stdout
 #[test]
 fn test_exec_stdout_without_tty() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_stdout_without_tty: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create a simple devcontainer.json
@@ -86,6 +100,10 @@ fn test_exec_stdout_without_tty() {
 /// Test exec exit code propagation
 #[test]
 fn test_exec_exit_code_propagation() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_exit_code_propagation: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     let devcontainer_config = r#"{
@@ -154,6 +172,10 @@ fn test_exec_exit_code_propagation() {
 /// Test exec working directory behavior
 #[test]
 fn test_exec_working_directory() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_working_directory: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     let devcontainer_config = r#"{
@@ -224,6 +246,10 @@ fn test_exec_working_directory() {
 /// Test exec --env merges environment variables
 #[test]
 fn test_exec_env_merges() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_env_merges: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     let devcontainer_config = r#"{
@@ -304,6 +330,10 @@ fn test_exec_env_merges() {
 /// Test up with remoteEnv in config makes values available to lifecycle hooks
 #[test]
 fn test_up_remote_env_in_config() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_up_remote_env_in_config: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     let devcontainer_config = r#"{
@@ -369,6 +399,10 @@ fn test_up_remote_env_in_config() {
 /// Test exec with --config in subfolder works
 #[test]
 fn test_exec_subfolder_config() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_subfolder_config: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create config in a subfolder
@@ -434,6 +468,10 @@ fn test_exec_subfolder_config() {
 /// Test TTY detection behavior
 #[test]
 fn test_exec_tty_detection() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_exec_tty_detection: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     let devcontainer_config = r#"{

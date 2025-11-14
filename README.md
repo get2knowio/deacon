@@ -327,6 +327,116 @@ cargo run -- --help
 cargo test
 ```
 
+### Running Tests
+
+The project supports both traditional `cargo test` and parallel execution via [cargo-nextest](https://nexte.st/).
+
+#### Standard Test Commands (Serial Execution)
+```bash
+# Run all tests serially (default)
+make test
+
+# Fast feedback loop: unit + bins + examples + doctests (no integration)
+make test-fast
+
+# Development fast loop: fmt-check + clippy + fast tests
+make dev-fast
+```
+
+#### Parallel Test Execution with cargo-nextest
+
+For faster feedback, install [cargo-nextest](https://nexte.st/):
+```bash
+cargo install cargo-nextest --locked
+# Or follow: https://nexte.st/book/pre-built-binaries.html
+```
+
+Then use the nextest targets:
+```bash
+# Fast parallel tests (excludes smoke/parity tests)
+make test-nextest-fast
+
+# Full test suite with parallel execution and test grouping
+make test-nextest
+
+# CI-aligned conservative profile
+make test-nextest-ci
+```
+
+**Test Groups**: The project organizes tests into groups based on resource requirements:
+- **docker-exclusive**: Tests requiring exclusive Docker daemon access (serial)
+- **docker-shared**: Tests that can share Docker daemon (limited parallelism)
+- **fs-heavy**: Filesystem-intensive tests (limited parallelism)
+- **unit-default**: Fast unit tests with high parallelism
+- **smoke**: High-level integration tests (serial)
+- **parity**: Upstream CLI comparison tests (serial)
+
+Timing data is automatically captured in `artifacts/nextest/` for performance analysis.
+
+**Fallback Behavior**: If cargo-nextest is not installed, the Make targets will fail with clear installation instructions. Always keep the standard `make test` working as a fallback.
+
+#### Test Classification Checklist
+
+When adding new tests, classify them into the appropriate group:
+
+1. **Does the test use Docker?**
+   - No → `unit-default` or `fs-heavy`
+   - Yes → Continue to step 2
+
+2. **Does it require exclusive Docker daemon access?**
+   - Yes (manipulates daemon state) → `docker-exclusive`
+   - No (just runs containers) → `docker-shared`
+
+3. **Does it perform heavy filesystem operations?**
+   - Yes (large files, many I/O ops) → `fs-heavy`
+
+4. **Is it an end-to-end integration test?**
+   - Yes (validates complete workflow) → `smoke`
+   - Yes (compares with upstream CLI) → `parity`
+
+**Audit test assignments:**
+```bash
+# List all tests with their group classifications
+make test-nextest-audit
+```
+
+**Example test naming for automatic classification:**
+```rust
+// Docker-exclusive tests
+#[test]
+fn integration_lifecycle_full_up_down() { ... }
+
+// Docker-shared tests  
+#[test]
+fn integration_build_with_cache() { ... }
+
+// Smoke tests
+#[test]
+fn smoke_basic_workflow() { ... }
+```
+
+#### Troubleshooting Test Issues
+
+**Flaky tests in parallel execution:**
+- Test passes with `make test` but fails with `make test-nextest`
+- **Solution**: Reclassify to more conservative group (e.g., `docker-shared` → `docker-exclusive`)
+- Update test name or `.config/nextest.toml` filter
+- Verify with `make test-nextest-audit`
+- Validate with multiple runs of `make test-nextest`
+
+**Tests requiring specific order:**
+- **Preferred**: Refactor test to be independent
+- **If unavoidable**: Move to `smoke` group (serial execution)
+- Document the dependency in test comments
+
+**Slow tests:**
+- Profile to identify bottleneck
+- Consider splitting into smaller tests
+- Move inherently slow end-to-end tests to `smoke` group
+- Use `#[ignore]` for very slow tests: `cargo nextest run -- --ignored`
+
+For comprehensive troubleshooting, classification workflows, and remediation steps, see [docs/testing/nextest.md](docs/testing/nextest.md).
+
 ## Roadmap
 
 This CLI implements the DevContainer specification domains below and continues to expand coverage:
@@ -375,6 +485,20 @@ If you have requirements around signed binaries and would like to help accelerat
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, testing guidelines, and contribution requirements.
+
+## Continuous Integration
+
+CI runs via GitHub Actions and uses the Makefile + cargo-nextest:
+
+- Lint: rustfmt check, cargo check, clippy, and doctests
+- Test (Ubuntu): `make test-nextest-fast` with Docker available
+- Smoke (Ubuntu): `make test-smoke` (serial, Docker required)
+- Nextest CI (Ubuntu/macOS): `make test-nextest-ci` with timing artifact `artifacts/nextest/ci-timing.json`
+- Other OS (macOS/Windows): runs unit + non‑smoke integration tests and separate smoke tests; macOS uses Colima for Docker
+
+Notes:
+- Networked integration tests run only in selected jobs (smoke and nextest-ci) via `DEACON_NETWORK_TESTS=1` to keep the fast test job hermetic.
+- Test grouping and concurrency are configured in `.config/nextest.toml`. See docs/testing/nextest.md for details.
 
 ## Test Coverage
 

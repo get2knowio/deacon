@@ -4,10 +4,50 @@
 # Use bash for slightly more robust scripting in recipes
 SHELL := /usr/bin/env bash
 
+# Optional: override nextest concurrency from the command line
+# Usage examples:
+#   make test-nextest THREADS=8
+#   make test-nextest-ci THREADS=num-cpus
+# If unset, nextest uses profile defaults.
+THREAD_ARGS = $(if $(THREADS),-j $(THREADS),)
+
+# Optional: control output verbosity for test-nextest
+# Default: quiet (minimal output). To enable regular/verbose statuses:
+#   make test-nextest VERBOSE=1
+ifeq ($(VERBOSE),1)
+SHOW_PROGRESS ?= auto
+STATUS_LEVEL ?= pass
+else
+SHOW_PROGRESS ?= none
+STATUS_LEVEL ?= none
+endif
+OUTPUT_ARGS = --success-output never --failure-output immediate --show-progress $(SHOW_PROGRESS) --status-level $(STATUS_LEVEL)
+
 .DEFAULT_GOAL := help
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@echo "Deacon Makefile - Available Targets"
+	@echo ""
+	@echo "Build & Run:"
+	@grep -E '^(build|run):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@echo ""
+	@echo "Testing (Serial):"
+	@grep -E '^(test|test-fast|test-non-smoke|test-smoke|test-parity|test-parity-all|parity):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@echo ""
+	@echo "Testing (Parallel with cargo-nextest):"
+	@grep -E '^(test-nextest-fast|test-nextest|test-nextest-ci|test-nextest-bg|test-nextest-audit):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@echo ""
+	@echo "Code Quality:"
+	@grep -E '^(dev-fast|fmt|clippy|coverage):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@echo ""
+	@echo "Release Management:"
+	@grep -E '^(release-check|release-run|release-assets|macos-artifact):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@echo ""
+	@echo "Maintenance:"
+	@grep -E '^(clean|clean-branches):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@echo ""
+	@echo "For detailed nextest usage, see: docs/testing/nextest.md"
+	@echo "For timing artifact details, see: artifacts/nextest/README.md"
 
 build: ## Build (release)
 	cargo build --release
@@ -30,6 +70,118 @@ dev-fast: ## Fast local loop: fmt-check + clippy + fast tests (skip slow integra
 	cargo fmt --all && cargo fmt --all -- --check; \
 	cargo clippy --all-targets -- -D warnings; \
 	$(MAKE) test-fast
+
+test-nextest-fast: ## Run fast parallel tests with cargo-nextest (excludes smoke/parity)
+	@set -euo pipefail; \
+	./scripts/nextest/assert-installed.sh; \
+	mkdir -p artifacts/nextest; \
+	echo "Running nextest with dev-fast profile..."; \
+	start_time=$$(date +%s); \
+	if cargo nextest run --profile dev-fast $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none; then \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"dev-fast\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":0}" > artifacts/nextest/dev-fast-timing.json; \
+		echo "✓ Tests passed in $${duration}s. Timing data: artifacts/nextest/dev-fast-timing.json"; \
+	else \
+		exit_code=$$?; \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"dev-fast\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":$$exit_code}" > artifacts/nextest/dev-fast-timing.json; \
+		echo "✗ Tests failed after $${duration}s. Timing data: artifacts/nextest/dev-fast-timing.json"; \
+		exit $$exit_code; \
+	fi
+
+test-nextest: ## Run full test suite with cargo-nextest (VERBOSE=1 for regular output)
+	@set -euo pipefail; \
+	./scripts/nextest/assert-installed.sh; \
+	mkdir -p artifacts/nextest; \
+	echo "Running nextest with full profile..."; \
+	start_time=$$(date +%s); \
+	if cargo nextest run --profile full $(THREAD_ARGS) $(OUTPUT_ARGS); then \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"full\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":0}" > artifacts/nextest/full-timing.json; \
+		echo "✓ Tests passed in $${duration}s. Timing data: artifacts/nextest/full-timing.json"; \
+	else \
+		exit_code=$$?; \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"full\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":$$exit_code}" > artifacts/nextest/full-timing.json; \
+		echo "✗ Tests failed after $${duration}s. Timing data: artifacts/nextest/full-timing.json"; \
+		exit $$exit_code; \
+	fi
+
+test-nextest-bg: ## Run nextest in background (optional: FILTER='nextest expr'), logging to artifacts/nextest/full-bg-<ts>.log
+	@set -euo pipefail; \
+	./scripts/nextest/assert-installed.sh; \
+	mkdir -p artifacts/nextest; \
+	ts=$$(date -u +"%Y%m%dT%H%M%SZ"); \
+	log="artifacts/nextest/full-bg-$${ts}.log"; \
+	echo "Starting cargo-nextest (profile=full) in background..."; \
+	if [[ -n "$$FILTER" ]]; then echo "Filter: $$FILTER"; fi; \
+	echo "Log: $$log"; \
+	if [[ -n "$$FILTER" ]]; then \
+	  nohup cargo nextest run --profile full $(THREAD_ARGS) "$$FILTER" --success-output never --failure-output immediate --show-progress none --status-level none --final-status-reporter json > "$$log" 2>&1 & echo $$! > artifacts/nextest/full-bg.pid; \
+	else \
+	  nohup cargo nextest run --profile full $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none --status-level none --final-status-reporter json > "$$log" 2>&1 & echo $$! > artifacts/nextest/full-bg.pid; \
+	fi; \
+	echo "PID: $$(cat artifacts/nextest/full-bg.pid)"; \
+	echo "Tail: tail -f $$log"
+
+.PHONY: test-nextest-bg-smoke
+test-nextest-bg-smoke: ## Run only smoke+parity tests in background (most likely long-running)
+	@FILTER="test(smoke_) | test(parity_)" $(MAKE) test-nextest-bg
+
+test-nextest-ci: ## Run CI test suite with cargo-nextest (two-pass: general + auth-failure tests without token)
+	@set -euo pipefail; \
+	./scripts/nextest/assert-installed.sh; \
+	mkdir -p artifacts/nextest; \
+	echo "Running nextest with ci profile (phase 1: general tests)..."; \
+	start_time=$$(date +%s); \
+	# Exclude auth-failure tests from phase 1; they run in phase 2 with token unset
+	PHASE1_FILTER="not ( test(manifest_auth_failure_*) or test(tags_auth_failure_*) or test(verbose_auth_failure_*) )"; \
+	cargo nextest run --profile ci $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none --filter-expr "$$PHASE1_FILTER"; \
+	echo "Running nextest with ci profile (phase 2: auth-failure tests, token unset)..."; \
+	# Unset DEACON_REGISTRY_TOKEN for this invocation to force unauthenticated flows
+	if env -u DEACON_REGISTRY_TOKEN cargo nextest run --profile ci $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none --filter-expr "test(manifest_auth_failure_*) or test(tags_auth_failure_*) or test(verbose_auth_failure_*)"; then \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"ci\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":0}" > artifacts/nextest/ci-timing.json; \
+		echo "✓ Tests passed in $${duration}s. Timing data: artifacts/nextest/ci-timing.json"; \
+		if [[ -f artifacts/nextest/baseline-timing.json ]]; then \
+			baseline_duration=$$(jq -r '.duration_seconds // 0' artifacts/nextest/baseline-timing.json); \
+			if [[ $$baseline_duration -gt 0 ]]; then \
+				improvement=$$(awk "BEGIN {printf \"%.1f\", (1 - $$duration / $$baseline_duration) * 100}"); \
+				echo "⚡ Runtime improvement: $${improvement}% faster than baseline ($${baseline_duration}s → $${duration}s)"; \
+			fi; \
+		fi; \
+	else \
+		exit_code=$$?; \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"ci\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":$$exit_code}" > artifacts/nextest/ci-timing.json; \
+		echo "✗ Tests failed after $${duration}s. Timing data: artifacts/nextest/ci-timing.json"; \
+		exit $$exit_code; \
+	fi
+
+test-nextest-audit: ## Audit test group assignments with cargo-nextest
+	@set -euo pipefail; \
+	./scripts/nextest/assert-installed.sh; \
+	echo "Auditing test group assignments..."; \
+	echo ""; \
+	echo "=== Test Groups Configuration ==="; \
+	cargo nextest show-config test-groups; \
+	echo ""; \
+	echo "=== All Tests (with details) ==="; \
+	cargo nextest list --verbose; \
+	echo ""; \
+	echo "For detailed classification guidelines, see: docs/testing/nextest.md"
 
 test-non-smoke: ## Run unit tests + non-smoke integration tests (matches CI 'test' job)
 		@set -euo pipefail; \

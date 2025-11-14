@@ -6,6 +6,9 @@ use std::fs;
 use std::process::{Command as StdCommand, Stdio};
 use tempfile::TempDir;
 
+mod support;
+use support::unique_name;
+
 /// Helper to check if Docker is available
 fn is_docker_available() -> bool {
     StdCommand::new("docker")
@@ -43,10 +46,10 @@ fn cleanup_container(name: &str) {
 
 #[test]
 fn test_up_with_custom_container_name() {
-    let custom_name = "deacon-test-custom-name";
+    let custom_name = unique_name("deacon-test-custom");
 
     // Cleanup any existing container with this name
-    cleanup_container(custom_name);
+    cleanup_container(&custom_name);
 
     let temp_dir = TempDir::new().unwrap();
     let devcontainer_dir = temp_dir.path().join(".devcontainer");
@@ -68,14 +71,12 @@ fn test_up_with_custom_container_name() {
     // Test the up command with custom container name
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     let result = cmd
-        .args([
-            "up",
-            "--workspace-folder",
-            &temp_dir.path().to_string_lossy(),
-            "--container-name",
-            custom_name,
-            "--skip-post-create",
-        ])
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path().to_string_lossy().to_string())
+        .arg("--container-name")
+        .arg(&custom_name)
+        .arg("--skip-post-create")
         .assert();
 
     let output = result.get_output();
@@ -93,14 +94,14 @@ fn test_up_with_custom_container_name() {
         if exit_code == Some(0) {
             // Success case: container should exist with custom name
             assert!(
-                container_exists(custom_name),
+                container_exists(&custom_name),
                 "Container with custom name '{}' should exist after successful up command",
                 custom_name
             );
             eprintln!("✓ Container created with custom name: {}", custom_name);
 
             // Cleanup
-            cleanup_container(custom_name);
+            cleanup_container(&custom_name);
         } else {
             // Failure case: check for specific error patterns
             // (might be due to network issues, image pull failures, etc.)
@@ -108,7 +109,7 @@ fn test_up_with_custom_container_name() {
                 stderr.contains("docker")
                     || stderr.contains("Docker")
                     || stderr.contains("Error response from daemon")
-                    || stderr.contains(custom_name),
+                    || stderr.contains(&custom_name),
                 "Expected Docker-related error or mention of custom name in stderr on failure"
             );
         }

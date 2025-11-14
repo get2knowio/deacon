@@ -324,15 +324,12 @@ where
             }
         }
 
-        // Check Docker availability
-        docker_client.ping().await?;
-
         // Resolve target container using ContainerSelector priority:
         // 1. Direct container ID (--container-id)
         // 2. Label-based lookup (--id-label)
         // 3. Workspace-based resolution (default)
         let container_id = if args.container_id.is_some() || !args.id_label.is_empty() {
-            // Use ContainerSelector for direct ID or label-based lookup
+            // Use ContainerSelector for direct ID or label-based lookup and validate format early
             use deacon_core::container::{resolve_container, ContainerSelector};
 
             let selector = ContainerSelector::new(
@@ -341,6 +338,9 @@ where
                 None, // workspace_folder not used for direct/label selection
             )?;
             selector.validate()?;
+
+            // After successful validation of selector input, ensure Docker is available
+            docker_client.ping().await?;
 
             // Add to tracing span
             if let Some(ref cid) = selector.container_id {
@@ -379,6 +379,8 @@ where
             };
 
             debug!("Loaded configuration: {:?}", config.name);
+            // After confirming config exists, check Docker availability
+            docker_client.ping().await?;
             resolve_target_container(
                 docker_client,
                 workspace_folder,

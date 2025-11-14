@@ -135,11 +135,15 @@ RUST_LOG=debug cargo run -- --help
 
 ## CI/CD
 - **GitHub Actions** runs tests on every PR and push to main
-- **Ubuntu checks on PR/merge**: Lint, unit/integration, smoke, and coverage run on `ubuntu-latest`
-- **macOS/Windows checks (manual)**: Trigger the "CI (Other OS)" workflow via "Run workflow" in GitHub Actions to run macOS and Windows jobs on demand
+- **Ubuntu checks on PR/merge**:
+  - Lint: rustfmt check, cargo check, clippy, doctests
+  - Test: `make test-nextest-fast` (parallel via cargo-nextest)
+  - Smoke: `make test-smoke` (serial)
+  - Coverage: cargo-llvm-cov with LCOV upload (threshold enforced via `MIN_COVERAGE`)
+- **Nextest CI timing**: `make test-nextest-ci` produces `artifacts/nextest/ci-timing.json` for timing comparison
+- **macOS/Windows checks (manual)**: Trigger the "CI (Other OS)" workflow via "Run workflow" in GitHub Actions to run macOS and Windows jobs on demand (macOS uses Colima for Docker)
 - **Release builds** are automatically created on version tags (`v*.*.*`)
 - **Format and clippy checks** must pass for PR approval
-- **Composite action**: Common CI steps are extracted into `.github/actions/rust-ci-steps` to reduce duplication between workflows
 
 ### Running macOS/Windows CI manually
 To validate on other operating systems without gating PRs:

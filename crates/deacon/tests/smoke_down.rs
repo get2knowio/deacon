@@ -12,6 +12,16 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+fn is_docker_available() -> bool {
+    std::process::Command::new("docker")
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Test down command before any up: should succeed or gracefully handle "no container"
 #[test]
 fn test_down_before_up() {
@@ -58,6 +68,10 @@ fn test_down_before_up() {
 /// Test down command after up and idempotent behavior (Docker-gated)
 #[test]
 fn test_down_after_up_idempotent() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_down_after_up_idempotent: Docker not available");
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
 
     // Create minimal devcontainer.json

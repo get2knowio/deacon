@@ -39,3 +39,118 @@ jobs:
           name: deacon-macos-aarch64
           path: target/release/deacon
           if-no-files-found: error
+
+  nextest-ci-macos:
+    name: Nextest CI (macOS Apple Silicon)
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-nextest-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Install and start Docker (macOS via Colima)
+        shell: bash
+        run: |
+          brew install docker colima
+          colima start --runtime docker --cpu 2 --memory 4 --disk 60
+          docker context use colima
+          docker info
+
+      - name: Install Docker Compose plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.docker/cli-plugins
+          if ! docker compose version >/dev/null 2>&1; then
+            echo "Installing Docker Compose v2 plugin..."
+            COMPOSE_VERSION="v2.29.7"
+            curl -sSL -o ~/.docker/cli-plugins/docker-compose \
+              "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-darwin-aarch64"
+            chmod +x ~/.docker/cli-plugins/docker-compose
+          fi
+          docker compose version
+
+      - name: Set macOS TMPDIR for Colima mounts
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP"
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "Using TMPDIR=$RUNNER_TEMP"
+
+      - name: Acquire GHCR bearer token (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Requesting multi-scope GHCR token..."
+          TOKEN_URL="https://ghcr.io/token?service=ghcr.io\
+          &scope=repository:devcontainers/features/node:pull\
+          &scope=repository:devcontainers/features/common-utils:pull\
+          &scope=repository:devcontainers/features/docker-in-docker:pull\
+          &scope=repository:devcontainers/features/python:pull\
+          &scope=repository:devcontainers/features/git:pull"
+          TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+          if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
+            echo "Failed to acquire GHCR token" >&2
+            exit 1
+          fi
+          echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Run nextest CI profile
+        shell: bash
+        run: make test-nextest-ci
+
+      - name: Upload timing artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-ci-timing-macos-aarch64
+          path: artifacts/nextest/ci-timing.json
+          if-no-files-found: warn
+
+      - name: Generate timing comparison summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f artifacts/nextest/ci-timing.json ]]; then
+            echo "## Nextest CI Timing Results (macOS Apple Silicon)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            ci_duration=$(jq -r '.duration_seconds // 0' artifacts/nextest/ci-timing.json)
+            ci_timestamp=$(jq -r '.timestamp_utc // "N/A"' artifacts/nextest/ci-timing.json)
+            echo "- **Profile**: ci" >> $GITHUB_STEP_SUMMARY
+            echo "- **Duration**: ${ci_duration}s" >> $GITHUB_STEP_SUMMARY
+            echo "- **Timestamp**: ${ci_timestamp}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            # If baseline exists, show improvement
+            if [[ -f artifacts/nextest/baseline-timing.json ]]; then
+              baseline_duration=$(jq -r '.duration_seconds // 0' artifacts/nextest/baseline-timing.json)
+              if [[ $baseline_duration -gt 0 ]]; then
+                improvement=$(awk "BEGIN {printf \"%.1f\", (1 - $ci_duration / $baseline_duration) * 100}")
+                echo "- **Improvement**: ${improvement}% faster than baseline (${baseline_duration}s → ${ci_duration}s)" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          fi

@@ -1,0 +1,117 @@
+openapi: 3.1.0
+info:
+  title: Deacon Nextest Workflow
+  version: 0.1.0
+  description: |
+    Contract describing supported test execution entry points that wrap cargo-nextest.
+    Each path corresponds to a documented Make target or CI invocation.
+servers:
+  - url: file://Makefile
+    description: Local developer workspace entry point
+  - url: https://github.com/get2knowio/deacon/actions
+    description: GitHub Actions CI environment
+paths:
+  /cli/make/test-nextest-fast:
+    post:
+      summary: Run the fast developer cargo-nextest profile
+      x-cli-command: "make test-nextest-fast"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                report_format:
+                  type: string
+                  enum: [console, junit, json]
+                  default: console
+              additionalProperties: false
+      responses:
+        "200":
+          description: Test suite executed successfully with the dev-fast profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [passed]
+                  duration_seconds:
+                    type: number
+                    minimum: 0
+                  artifacts:
+                    type: array
+                    items:
+                      type: string
+        "412":
+          description: cargo-nextest binary missing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [error]
+                  message:
+                    type: string
+  /cli/make/test-nextest:
+    post:
+      summary: Run the full cargo-nextest profile locally
+      x-cli-command: "make test-nextest"
+      responses:
+        "200":
+          description: Full workspace tests completed via nextest
+        "412":
+          description: Preflight failure (missing cargo-nextest or Docker)
+  /ci/nextest:
+    post:
+      summary: GitHub Actions job executes the conservative CI profile
+      x-cli-command: "cargo nextest run --profile ci --final-status-reporter json"
+      requestBody:
+        required: false
+      responses:
+        "200":
+          description: CI test job completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [passed]
+                  timing_artifact:
+                    type: string
+                    format: uri
+        "424":
+          description: External dependency (Docker daemon) unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [failed]
+                  message:
+                    type: string
+components:
+  schemas:
+    TimingArtifact:
+      type: object
+      properties:
+        profile:
+          type: string
+        duration_seconds:
+          type: number
+          minimum: 0
+        timestamp_utc:
+          type: string
+          format: date-time
+      required:
+        - profile
+        - duration_seconds
+        - timestamp_utc
