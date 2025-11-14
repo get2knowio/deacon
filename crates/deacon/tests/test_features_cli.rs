@@ -138,8 +138,8 @@ fn test_features_test_with_valid_feature() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.args(["features", "test", project_dir.to_str().unwrap(), "--json"]);
 
-    let output = cmd.output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let assert = cmd.assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
 
     // Parse JSON output - expect array of test results
     let json = extract_json_from_output(&stdout).unwrap();

@@ -5,6 +5,7 @@
 //! audit logging with rotation.
 
 use anyhow::Result;
+use directories_next::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -1449,6 +1450,20 @@ pub fn get_cache_dir() -> Result<PathBuf> {
     if !cache_dir.exists() {
         std::fs::create_dir_all(&cache_dir)?;
     }
+
+    // Check for legacy system cache directory and warn user about the migration
+    if let Some(proj_dirs) = ProjectDirs::from("com", "deacon", "deacon") {
+        let old_cache_dir = proj_dirs.cache_dir();
+        if old_cache_dir.exists() {
+            warn!(
+                "Found existing cache at {}. Deacon now uses project-local cache at {}. \
+                 Consider migrating or removing the old cache directory.",
+                old_cache_dir.display(),
+                cache_dir.display()
+            );
+        }
+    }
+
     Ok(cache_dir)
 }
 
