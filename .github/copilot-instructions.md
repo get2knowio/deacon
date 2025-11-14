@@ -463,6 +463,8 @@ If you are an AI assistant operating on this repository: remain concise, cite sp
 - Rust (stable; per `rust-toolchain.toml`) + `clap` (CLI args), `serde`/`serde_json` (JSON), `tracing` (logs), `thiserror` (errors); Docker/engine integration via existing runtime helpers in the repo (005-features-test-gap)
 - N/A (ephemeral workspaces only) (005-features-test-gap)
 - Rust 1.70 (workspace toolchain), cargo-nextest 0.9.x + cargo-nextest, GNU Make, GitHub Actions, existing deacon/deacon-core crates (001-nextest-parallel-tests)
+- Rust 1.70 (workspace toolchain per `rust-toolchain.toml`) + `clap` for CLI parsing, `serde`/`serde_json` for metadata and output, Docker CLI/buildx via process invocation, internal traits/tools for features and configuration resolution (006-build-subcommand)
+- N/A (temporary filesystem artifacts only) (006-build-subcommand)
 
 ## Recent Changes
 - 001-read-config-parity: Added Rust (stable channel per rust-toolchain.toml) + clap (CLI args), serde/serde_json (JSON), tracing (logs), thiserror (errors)
