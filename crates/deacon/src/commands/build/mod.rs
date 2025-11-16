@@ -904,22 +904,23 @@ fn extract_build_config(
 
 /// Calculate configuration hash for caching
 fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) -> Result<String> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use sha2::{Digest, Sha256};
 
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = Sha256::new();
 
     // Hash the build config
-    build_config.dockerfile.hash(&mut hasher);
-    build_config.context.hash(&mut hasher);
-    build_config.target.hash(&mut hasher);
+    hasher.update(build_config.dockerfile.as_bytes());
+    hasher.update(build_config.context.as_bytes());
+    if let Some(target) = &build_config.target {
+        hasher.update(target.as_bytes());
+    }
 
     // Hash the options in a deterministic order
     let mut options: Vec<_> = build_config.options.iter().collect();
     options.sort_by_key(|(k, _)| *k);
     for (key, value) in options {
-        key.hash(&mut hasher);
-        value.hash(&mut hasher);
+        hasher.update(key.as_bytes());
+        hasher.update(value.as_bytes());
     }
 
     // Hash dockerfile content
@@ -928,7 +929,7 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
         .join(&build_config.dockerfile);
     if dockerfile_path.exists() {
         let dockerfile_content = std::fs::read_to_string(&dockerfile_path)?;
-        dockerfile_content.hash(&mut hasher);
+        hasher.update(dockerfile_content.as_bytes());
     }
 
     // Hash selected build context files (limit count for performance)
@@ -998,15 +999,15 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
         // Sort for deterministic hashing
         build_affecting_files.sort();
         for (path, size, mtime) in build_affecting_files {
-            path.hash(&mut hasher);
-            size.hash(&mut hasher);
-            mtime.hash(&mut hasher);
+            hasher.update(path.as_bytes());
+            hasher.update(&size.to_le_bytes());
+            hasher.update(&mtime.to_le_bytes());
         }
     }
 
-    let hash = hasher.finish();
-    // Zero-pad to ensure stable length (16 hex chars) so downstream slicing is safe
-    Ok(format!("{:016x}", hash))
+    let hash = hasher.finalize();
+    // Use first 16 hex chars for consistency with previous format
+    Ok(format!("{:016x}", u64::from_be_bytes(hash[0..8].try_into().unwrap())))
 }
 
 /// Check if a file is unlikely to affect the build
