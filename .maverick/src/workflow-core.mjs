@@ -154,8 +154,14 @@ export async function runWorkflow({
   logger = m => console.log(m)
 }) {
 
+  // Determine output directory and project root early (needed for cwd in phase commands)
+  const outDir = tasksPath ? path.dirname(tasksPath) : process.cwd()
+  const projectRoot = path.resolve(outDir, '..', '..')
+  const coderabbitPath = path.join(outDir, 'coderabbit.md')
+  const reviewPath = path.join(outDir, 'review.md')
+
   if (verbose) logger('Starting workflow with git checkout...')
-  // this is pure “business logic”
+  // this is pure "business logic"
   await run('git', ['checkout', '-B', branch])
 
   const phasesToRun = (phases || []).filter(p => (p.outstandingTasks ?? 0) > 0)
@@ -193,12 +199,6 @@ export async function runWorkflow({
       await new Promise(resolve => setTimeout(resolve, PHASE_SLEEP_SECONDS * 1000))
     }
   }
-
-  // Determine output directory (same directory as tasks.md)
-  const outDir = tasksPath ? path.dirname(tasksPath) : process.cwd()
-  const projectRoot = path.resolve(outDir, '..', '..')
-  const coderabbitPath = path.join(outDir, 'coderabbit.md')
-  const reviewPath = path.join(outDir, 'review.md')
 
   // Sleep before review phase
   if (verbose) logger(`Waiting ${PHASE_SLEEP_SECONDS}s before review phase...`)
