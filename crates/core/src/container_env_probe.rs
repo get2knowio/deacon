@@ -42,6 +42,34 @@ pub enum ContainerProbeMode {
     LoginInteractiveShell,
 }
 
+impl std::str::FromStr for ContainerProbeMode {
+    type Err = String;
+
+    /// Parse a string into a ContainerProbeMode.
+    ///
+    /// Accepts several common spellings (case-insensitive).
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok(ContainerProbeMode::None),
+            "loginshell" | "login-shell" | "login_shell" => Ok(ContainerProbeMode::LoginShell),
+            "logininteractiveshell"
+            | "login-interactive-shell"
+            | "login_interactive"
+            | "logininteractive" => Ok(ContainerProbeMode::LoginInteractiveShell),
+            "interactive" | "interactiveshell" | "interactive-shell" | "interactive_shell" => {
+                // Map legacy/ambiguous 'interactiveShell' to LoginShell for compatibility
+                Ok(ContainerProbeMode::LoginShell)
+            }
+            other => Err(format!("Unknown container probe mode: {}", other)),
+        }
+    }
+}
+
+/// Helper to parse common CLI-style probe strings (keeps a stable API surface)
+pub fn parse_container_probe_mode(s: &str) -> std::result::Result<ContainerProbeMode, String> {
+    s.parse()
+}
+
 /// Result of container environment probe
 #[derive(Debug, Clone)]
 pub struct ContainerProbeResult {
@@ -468,6 +496,44 @@ impl ContainerEnvironmentProber {
 
         result
     }
+
+    /// Build an effective environment for ExecConfig from the given sources.
+    ///
+    /// Rules:
+    /// - Start from `probed_env` (lowest precedence)
+    /// - Overlay `config_remote_env` (values are `Option<String>`; `None` means set empty string)
+    /// - Overlay `cli_env` (highest precedence)
+    /// - Preserve empty string values explicitly set
+    pub fn build_effective_env(
+        &self,
+        probed_env: &HashMap<String, String>,
+        config_remote_env: Option<&HashMap<String, Option<String>>>,
+        cli_env: &HashMap<String, String>,
+    ) -> HashMap<String, String> {
+        let mut result = probed_env.clone();
+
+        // Apply config.remoteEnv (Option<String> -> String, None -> empty string)
+        if let Some(remote) = config_remote_env {
+            for (k, v_opt) in remote {
+                match v_opt {
+                    Some(v) => {
+                        result.insert(k.clone(), v.clone());
+                    }
+                    None => {
+                        // Explicit null in remoteEnv should result in empty string override
+                        result.insert(k.clone(), String::new());
+                    }
+                }
+            }
+        }
+
+        // Apply CLI env overrides (highest precedence)
+        for (k, v) in cli_env {
+            result.insert(k.clone(), v.clone());
+        }
+
+        result
+    }
 }
 
 /// Get shell command for lifecycle execution
@@ -662,5 +728,66 @@ mod tests {
     fn test_get_shell_command_sh_fallback() {
         let cmd = get_shell_command_for_lifecycle("/bin/sh", "echo hello", true);
         assert_eq!(cmd, vec!["/bin/sh", "-lc", "echo hello"]);
+    }
+
+    #[test]
+    fn test_build_effective_env_precedence_and_empty_preservation() {
+        let prober = ContainerEnvironmentProber::new();
+
+        let mut probed_env = HashMap::new();
+        probed_env.insert("A".to_string(), "from_probed".to_string());
+        probed_env.insert("KEEP".to_string(), "keep_me".to_string());
+
+        let mut config_remote_env: HashMap<String, Option<String>> = HashMap::new();
+        // Config sets A to Some -> should override probed
+        config_remote_env.insert("A".to_string(), Some("from_config".to_string()));
+        // Config sets B to None -> should result in empty string
+        config_remote_env.insert("B".to_string(), None);
+
+        let mut cli_env = HashMap::new();
+        // CLI sets B to 'from_cli' -> CLI should override config's explicit empty
+        cli_env.insert("B".to_string(), "from_cli".to_string());
+        // CLI sets C to value -> should be present
+        cli_env.insert("C".to_string(), "from_cli_c".to_string());
+
+        let result = prober.build_effective_env(&probed_env, Some(&config_remote_env), &cli_env);
+
+        // A should come from config (overrides probed)
+        assert_eq!(result.get("A"), Some(&"from_config".to_string()));
+        // B should come from CLI (overrides config explicit None)
+        assert_eq!(result.get("B"), Some(&"from_cli".to_string()));
+        // C should be present from CLI
+        assert_eq!(result.get("C"), Some(&"from_cli_c".to_string()));
+        // KEEP should be preserved from probed since not overridden
+        assert_eq!(result.get("KEEP"), Some(&"keep_me".to_string()));
+    }
+
+    #[test]
+    fn test_parse_container_probe_mode_valid_inputs() {
+        // Valid variants map to expected enum
+        assert_eq!(
+            "none".parse::<ContainerProbeMode>().unwrap(),
+            ContainerProbeMode::None
+        );
+        assert_eq!(
+            "LoginShell".parse::<ContainerProbeMode>().unwrap(),
+            ContainerProbeMode::LoginShell
+        );
+        assert_eq!(
+            "login-interactive-shell"
+                .parse::<ContainerProbeMode>()
+                .unwrap(),
+            ContainerProbeMode::LoginInteractiveShell
+        );
+        assert_eq!(
+            "interactiveShell".parse::<ContainerProbeMode>().unwrap(),
+            ContainerProbeMode::LoginShell
+        );
+    }
+
+    #[test]
+    fn test_parse_container_probe_mode_invalid_input() {
+        let res = "i-should-fail".parse::<ContainerProbeMode>();
+        assert!(res.is_err());
     }
 }

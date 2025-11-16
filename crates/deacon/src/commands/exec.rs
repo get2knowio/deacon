@@ -570,7 +570,7 @@ where
                         Some(&container_info.labels),
                         workspace_folder,
                     ) {
-                        Ok(r) => r,
+                        Ok((resolved_config, _report)) => resolved_config,
                         Err(e) => {
                             tracing::warn!("Failed to resolve effective config with labels: {}", e);
                             base_config.clone()

@@ -4,7 +4,7 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::fs;
+
 use tempfile::TempDir;
 
 #[test]
@@ -39,7 +39,10 @@ fn test_exec_with_container_id_selection() {
         .expect("docker run failed");
 
     if !output.status.success() {
-        eprintln!("Failed to create test container: {}", String::from_utf8_lossy(&output.stderr));
+        eprintln!(
+            "Failed to create test container: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         return;
     }
 
@@ -58,7 +61,11 @@ fn test_exec_with_container_id_selection() {
         .stdout(predicate::str::contains("hello"));
 
     // Cleanup
-    let _ = StdCommand::new("docker").arg("rm").arg("-f").arg(&container_id).output();
+    let _ = StdCommand::new("docker")
+        .arg("rm")
+        .arg("-f")
+        .arg(&container_id)
+        .output();
 }
 
 #[test]
@@ -73,7 +80,9 @@ fn test_exec_with_id_label_selection_requires_validation() {
         .assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains("Unmatched argument format: id-label must match <name>=<value>."));
+        .stderr(predicate::str::contains(
+            "Unmatched argument format: id-label must match <name>=<value>.",
+        ));
 }
 
 #[test]

@@ -478,12 +478,16 @@ impl ComposeManager {
     ///
     /// ```no_run
     /// # use deacon_core::compose::{ComposeManager, ComposeProject};
+    /// # use std::path::PathBuf;
     /// # fn example() -> anyhow::Result<()> {
-    /// let manager = ComposeManager::new()?;
+    /// let manager = ComposeManager::new();
     /// let project = ComposeProject {
     ///     name: "my-project".to_string(),
-    ///     file: "docker-compose.yml".to_string(),
-    ///     working_directory: "/path/to/project".into(),
+    ///     base_path: PathBuf::from("/path/to/project"),
+    ///     compose_files: vec![PathBuf::from("docker-compose.yml")],
+    ///     service: "web".to_string(),
+    ///     run_services: Vec::new(),
+    ///     env_files: Vec::new(),
     /// };
     ///
     /// let output = manager.build_service(&project, "web")?;
@@ -531,12 +535,16 @@ impl ComposeManager {
     ///
     /// ```no_run
     /// # use deacon_core::compose::{ComposeManager, ComposeProject};
+    /// # use std::path::PathBuf;
     /// # fn example() -> anyhow::Result<()> {
-    /// let manager = ComposeManager::new()?;
+    /// let manager = ComposeManager::new();
     /// let project = ComposeProject {
     ///     name: "my-project".to_string(),
-    ///     file: "docker-compose.yml".to_string(),
-    ///     working_directory: "/path/to/project".into(),
+    ///     base_path: PathBuf::from("/path/to/project"),
+    ///     compose_files: vec![PathBuf::from("docker-compose.yml")],
+    ///     service: "web".to_string(),
+    ///     run_services: Vec::new(),
+    ///     env_files: Vec::new(),
     /// };
     ///
     /// if manager.validate_service_exists(&project, "web")? {

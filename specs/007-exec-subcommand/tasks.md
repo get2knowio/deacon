@@ -91,12 +91,12 @@ Goal: Allocate PTY when TTY or when `--log-format json` is set; allow terminal s
 Independent Test: `tty` reports presence in PTY mode; size flags reflected where applicable; non-PTY preserves separate streams.
 
 Tests (add first)
-- [ ] T021 [P] [US3] Unit: PTY decision logic (TTY detected or force when JSON) in `crates/deacon/src/commands/exec.rs` tests
+- [X] T021 [P] [US3] Unit: PTY decision logic (TTY detected or force when JSON) in `crates/deacon/src/commands/exec.rs` tests
 - [ ] T022 [P] [US3] Integration: non-TTY run preserves exit and streams in `crates/deacon/tests/integration_exec_pty.rs`
 
 Implementation
-- [ ] T023 [US3] Force PTY when `force_tty_if_json` true; otherwise require stdin/stdout TTY and not `--no-tty` in `crates/deacon/src/commands/exec.rs`
-- [ ] T024 [US3] Thread `terminal_columns/rows` into tracing and future PTY sizing (document limitation of Docker exec) in `crates/deacon/src/commands/exec.rs`
+- [X] T023 [US3] Force PTY when `force_tty_if_json` true; otherwise require stdin/stdout TTY and not `--no-tty` in `crates/deacon/src/commands/exec.rs`
+- [X] T024 [US3] Thread `terminal_columns/rows` into tracing and future PTY sizing (document limitation of Docker exec) in `crates/deacon/src/commands/exec.rs`
 
 Checkpoint: US3 independently verifiable in TTY and non-TTY sessions.
 
@@ -126,11 +126,11 @@ Checkpoint: US4 independently verifiable via negative scenarios.
 
 ## Phase N: Polish & Cross-Cutting Concerns
 
-- [ ] T029 [P] Update CLI help text for `exec` flags in `crates/deacon/src/cli.rs`
-- [ ] T030 [P] Extend `examples/exec/` quickstart with env/PTY examples in `examples/exec/README.md`
-- [ ] T031 Format, clippy, and doctests green (`make release-check`) across workspace
-- [ ] T032 [P] Update `docs/subcommand-specs/exec/SPEC.md` notes on PTY sizing limits (Docker exec)
-- [ ] T040 [P] Add parsing/wiring test for Docker tooling path flags (no external binary dependency)
+- [X] T029 [P] Update CLI help text for `exec` flags in `crates/deacon/src/cli.rs`
+- [X] T030 [P] Extend `examples/exec/` quickstart with env/PTY examples in `examples/exec/README.md`
+- [X] T031 Format, clippy, and doctests green (`make release-check`) across workspace
+- [X] T032 [P] Update `docs/subcommand-specs/exec/SPEC.md` notes on PTY sizing limits (Docker exec)
+- [X] T040 [P] Add parsing/wiring test for Docker tooling path flags (no external binary dependency)
 
 ---
 
