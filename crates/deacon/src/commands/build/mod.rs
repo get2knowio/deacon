@@ -441,7 +441,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             "They are mutually exclusive. Use --push to push to registry or --output to export locally",
         );
         if matches!(args.output_format, OutputFormat::Json) {
-            println!("{}", serde_json::to_string(&error)?);
+            eprintln!("{}", serde_json::to_string(&error)?);
         } else {
             eprintln!("Error: {}", error.message);
             if let Some(desc) = &error.description {
@@ -622,7 +622,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
                     "Docker Compose does not support this flag during build",
                 );
                 if matches!(args.output_format, OutputFormat::Json) {
-                    println!("{}", serde_json::to_string(&error)?);
+                    eprintln!("{}", serde_json::to_string(&error)?);
                 } else {
                     eprintln!("Error: {}", error.message);
                     if let Some(desc) = &error.description {

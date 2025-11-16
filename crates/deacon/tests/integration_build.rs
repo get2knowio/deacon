@@ -1026,13 +1026,14 @@ fn test_platform_requires_buildkit() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        // Check if the error is about BuildKit requirement
-        if stdout.contains("BuildKit is required for --platform")
-            || stderr.contains("BuildKit is required for --platform")
-        {
-            // This is expected if BuildKit is not available
-            // Expected behavior - BuildKit requirement properly enforced
-        }
+        // When the command fails, it must be due to BuildKit requirement
+        assert!(
+            stdout.contains("BuildKit is required for --platform")
+                || stderr.contains("BuildKit is required for --platform"),
+            "Expected BuildKit error message; stdout: {}, stderr: {}",
+            stdout,
+            stderr
+        );
     }
 }
 
@@ -1072,12 +1073,17 @@ fn test_cache_to_requires_buildkit() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        // Check if the error is about BuildKit requirement
-        if stdout.contains("BuildKit is required for --cache-to")
-            || stderr.contains("BuildKit is required for --cache-to")
-        {
-            // This is expected if BuildKit is not available
-            // Expected behavior - BuildKit requirement properly enforced
-        }
+        // When the command fails, it must be due to BuildKit requirement
+        assert!(
+            !output.status.success(),
+            "Expected build to fail when BuildKit is not available"
+        );
+        assert!(
+            stdout.contains("BuildKit is required for --cache-to")
+                || stderr.contains("BuildKit is required for --cache-to"),
+            "Expected BuildKit error message; stdout: {}, stderr: {}",
+            stdout,
+            stderr
+        );
     }
 }
