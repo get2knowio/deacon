@@ -1,0 +1,85 @@
+openapi: 3.1.0
+info:
+  title: Deacon Exec Contract (Conceptual)
+  version: 0.1.0
+  description: Conceptual API-style contract mirroring CLI exec semantics for validation and automation.
+paths:
+  /exec:
+    post:
+      summary: Execute a command inside a dev container
+      description: Mirrors CLI `exec` behavior for container selection, env merge, PTY, and exit semantics.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cmd]
+              properties:
+                containerId:
+                  type: string
+                  description: If provided, selects container directly (highest precedence)
+                idLabels:
+                  type: array
+                  items:
+                    type: string
+                    pattern: '^[^=]+=.+'
+                  description: One or more `name=value` filters
+                workspaceFolder:
+                  type: string
+                  description: Absolute path for discovery-based selection
+                remoteEnv:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: CLI-provided environment (values may be empty)
+                defaultUserEnvProbe:
+                  type: string
+                  enum: [loginInteractiveShell, loginShell, interactiveShell, none]
+                user:
+                  type: string
+                  description: Overrides config remoteUser when provided
+                dockerPath:
+                  type: string
+                dockerComposePath:
+                  type: string
+                containerDataFolder:
+                  type: string
+                containerSystemDataFolder:
+                  type: string
+                terminalColumns:
+                  type: integer
+                  minimum: 20
+                terminalRows:
+                  type: integer
+                  minimum: 5
+                logFormat:
+                  type: string
+                  enum: [text, json]
+                logLevel:
+                  type: string
+                  enum: [error, warn, info, debug, trace]
+                cmd:
+                  type: array
+                  items: { type: string }
+                  description: Command and args to execute
+      responses:
+        '200':
+          description: Execution completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exitCode:
+                    type: integer
+                  stdout:
+                    type: string
+                  stderr:
+                    type: string
+        '400':
+          description: Invalid input (e.g., missing selection flags)
+        '404':
+          description: Dev container config not found during discovery
+        '409':
+          description: Container not running or selection ambiguous
