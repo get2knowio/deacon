@@ -274,17 +274,21 @@ RUN echo "Testing labels"
         .output()
         .unwrap();
 
-    if inspect.status.success() {
-        let labels_json = String::from_utf8_lossy(&inspect.stdout);
-        assert!(
-            labels_json.contains("\"test.label1\":\"value1\""),
-            "Label test.label1=value1 should be present"
-        );
-        assert!(
-            labels_json.contains("\"test.label2\":\"value2\""),
-            "Label test.label2=value2 should be present"
-        );
-    }
+    assert!(
+        inspect.status.success(),
+        "docker inspect command should succeed; stderr: {}",
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+
+    let labels_json = String::from_utf8_lossy(&inspect.stdout);
+    assert!(
+        labels_json.contains("\"test.label1\":\"value1\""),
+        "Label test.label1=value1 should be present"
+    );
+    assert!(
+        labels_json.contains("\"test.label2\":\"value2\""),
+        "Label test.label2=value2 should be present"
+    );
 
     // Cleanup
     let _ = std::process::Command::new("docker")
