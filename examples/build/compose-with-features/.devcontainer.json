@@ -1,0 +1,7 @@
+{
+  "name": "compose-with-features",
+  "dockerComposeFile": ["docker-compose.yml"],
+  "service": "app",
+  "features": { "./features/hello": {} },
+  "remoteUser": "root"
+}

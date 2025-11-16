@@ -4,7 +4,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 
 ### Index
 
-- Build: Dockerfile builds, platform targeting, build args, secrets & SSH, Compose service targeting, image reference builds, multi-tag support, push/export workflows (`build/`)
+- Build: Dockerfile builds, platform targeting, build args, secrets & SSH, Compose service targeting, image reference builds, multi-tag + labels, push/export workflows, feature installation across modes, validation & error scenarios (`build/`)
 - CLI: CLI-specific features and flags including port forwarding and custom container names (`cli/`)
 - Configuration: basic, variable substitution, extends chain, and nested variables (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, variables, skip flags, progress events, and redaction (`container-lifecycle/`)
@@ -342,6 +342,27 @@ deacon config substitute --workspace-folder . --output-format json 2>&1 \
 
 ### Notes
 Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/subcommand-specs/*/SPEC.md` Container Build section. Additional examples showcase Compose service targeting (`compose-service-target/`), image reference builds (`image-reference/`), multi-tag support with `--image-name`, registry push with `--push`, and OCI archive export with `--output`. See `docs/subcommand-specs/build/SPEC.md` for complete build parity documentation.
+Specific build capability example directories (under `examples/build/`):
+
+- `basic-dockerfile/` – Minimal Dockerfile build
+- `platform-and-cache/` – Platform selection & cache control
+- `secrets-and-ssh/` – BuildKit secrets & SSH forwarding
+- `compose-service-target/` – Targeted Docker Compose service image
+- `image-reference/` – Extending a referenced base image
+- `multi-tags-and-labels/` – Multiple `--image-name` tags & custom `--label` injection
+- `output-archive/` – Exporting image as OCI archive via `--output`
+- `push/` – Publishing tags to a registry with `--push` (BuildKit required)
+- `push-output-conflict/` – Demonstrates mutual exclusion of `--push` and `--output`
+- `dockerfile-with-features/` – Feature install during Dockerfile build
+- `image-reference-with-features/` – Feature install atop base image
+- `compose-with-features/` – Feature install with Compose service build
+- `compose-unsupported-flags/` – Demonstrates pre-build rejection of unsupported flags
+- `compose-missing-service/` – Error when referenced service does not exist
+- `buildkit-gated-feature/` – Example of feature requiring BuildKit-only capability
+- `invalid-config-name/` – Validation failure for incorrect config filename
+- `duplicate-tags/` – Duplicate tag validation error scenario
+- `unwritable-output/` – Failing fast on unwritable `--output` destination
+
 
 Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/subcommand-specs/*/SPEC.md` Lifecycle Execution Workflow.
 

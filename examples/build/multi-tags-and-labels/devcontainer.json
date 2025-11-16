@@ -1,0 +1,7 @@
+{
+  "name": "multi-tags-and-labels",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {},
+  "customizations": {},
+  "remoteUser": "root"
+}
