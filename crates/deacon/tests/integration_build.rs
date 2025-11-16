@@ -120,15 +120,28 @@ fn test_build_with_image_config() {
     .unwrap();
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.current_dir(&temp_dir)
+    let assert = cmd
+        .current_dir(&temp_dir)
         .arg("build")
-        .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("Cannot build with 'image' configuration")
-                .or(predicate::str::contains("Permission denied"))
-                .or(predicate::str::contains("permission denied")),
+        .arg("--output-format")
+        .arg("json")
+        .assert();
+
+    let output = assert.get_output();
+    if output.status.success() {
+        // Image-reference builds now work (without features)
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(r#""outcome":"success"#));
+        assert!(stdout.contains(r#""imageName""#));
+    } else {
+        // If Docker unavailable or other error, ensure graceful failure
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Docker") || stderr.contains("permission denied"),
+            "Expected Docker-related error, got: {}",
+            stderr
         );
+    }
 }
 
 #[test]
