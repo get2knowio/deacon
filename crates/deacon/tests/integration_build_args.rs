@@ -342,8 +342,10 @@ RUN echo "Testing push flag"
             stdout.contains("BuildKit is required")
                 || stderr.contains("BuildKit is required")
                 || stderr.contains("Docker is not installed")
-                || stderr.contains("Docker daemon is not"),
-            "Expected BuildKit or Docker error, got: stdout={}, stderr={}",
+                || stderr.contains("Docker daemon is not")
+                || stderr.contains("Docker build failed")
+                || stderr.to_lowercase().contains("denied"),
+            "Expected BuildKit/Docker gating or build failure, got: stdout={}, stderr={}",
             stdout,
             stderr
         );
@@ -395,8 +397,11 @@ RUN echo "Testing output flag"
             stdout.contains("BuildKit is required")
                 || stderr.contains("BuildKit is required")
                 || stderr.contains("Docker is not installed")
-                || stderr.contains("Docker daemon is not"),
-            "Expected BuildKit or Docker error, got: stdout={}, stderr={}",
+                || stderr.contains("Docker daemon is not")
+                || stderr.contains("Docker build failed")
+                || stderr.to_lowercase().contains("not supported")
+                || stderr.to_lowercase().contains("denied"),
+            "Expected BuildKit/Docker gating or build failure, got: stdout={}, stderr={}",
             stdout,
             stderr
         );

@@ -133,11 +133,25 @@ fn smoke_build_json_then_text() {
         String::from_utf8_lossy(&out.stderr)
     );
     let s = String::from_utf8_lossy(&out.stdout);
-    assert!(s.contains("image_id"));
-    assert!(s.contains("build_duration"));
+    assert!(
+        s.contains("\"outcome\":\"success\""),
+        "JSON success payload missing outcome field: {}",
+        s
+    );
+    assert!(
+        s.contains("imageName"),
+        "JSON success payload missing imageName field: {}",
+        s
+    );
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&s) {
-        if let Some(id) = json.get("image_id").and_then(|v| v.as_str()) {
-            guard.register_image(id.to_string());
+        if let Some(image_field) = json.get("imageName") {
+            if let Some(single) = image_field.as_str() {
+                guard.register_image(single.to_string());
+            } else if let Some(arr) = image_field.as_array() {
+                for name in arr.iter().filter_map(|v| v.as_str()) {
+                    guard.register_image(name.to_string());
+                }
+            }
         }
     }
 
@@ -421,14 +435,19 @@ RUN echo "Building with version: $BUILD_VERSION, env: $BUILD_ENV"
     );
     // If successful, check JSON output includes expected fields
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("image_id"));
-    assert!(stdout.contains("build_duration"));
+    assert!(stdout.contains("\"outcome\":\"success\""));
+    assert!(stdout.contains("imageName"));
 
-    // Try to parse as JSON to validate structure
+    // Parse and register image tag(s)
     if let Ok(json) = serde_json::from_str::<Value>(&stdout) {
-        assert!(json.get("image_id").is_some());
-        if let Some(id) = json.get("image_id").and_then(|v| v.as_str()) {
-            guard.register_image(id.to_string());
+        if let Some(image_field) = json.get("imageName") {
+            if let Some(single) = image_field.as_str() {
+                guard.register_image(single.to_string());
+            } else if let Some(arr) = image_field.as_array() {
+                for name in arr.iter().filter_map(|v| v.as_str()) {
+                    guard.register_image(name.to_string());
+                }
+            }
         }
     }
 }

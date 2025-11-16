@@ -25,6 +25,17 @@ OUTPUT_ARGS = --success-output never --failure-output immediate --show-progress 
 
 .DEFAULT_GOAL := help
 
+.PHONY: install-nextest
+install-nextest: ## Install cargo-nextest if missing (auto)
+	@set -euo pipefail; \
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+	  echo "cargo-nextest already installed: $$(cargo nextest --version)"; \
+	else \
+	  echo "Installing cargo-nextest (locked)..."; \
+	  cargo install cargo-nextest --locked; \
+	  echo "Installed cargo-nextest: $$(cargo nextest --version)"; \
+	fi
+
 help: ## Show this help
 	@echo "Deacon Makefile - Available Targets"
 	@echo ""
@@ -71,7 +82,7 @@ dev-fast: ## Fast local loop: fmt-check + clippy + fast tests (skip slow integra
 	cargo clippy --all-targets -- -D warnings; \
 	$(MAKE) test-fast
 
-test-nextest-fast: ## Run fast parallel tests with cargo-nextest (excludes smoke/parity)
+test-nextest-fast: install-nextest ## Run fast parallel tests with cargo-nextest (excludes smoke/parity)
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \
 	mkdir -p artifacts/nextest; \
@@ -93,7 +104,7 @@ test-nextest-fast: ## Run fast parallel tests with cargo-nextest (excludes smoke
 		exit $$exit_code; \
 	fi
 
-test-nextest: ## Run full test suite with cargo-nextest (VERBOSE=1 for regular output)
+test-nextest: install-nextest ## Run full test suite with cargo-nextest (VERBOSE=1 for regular output)
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \
 	mkdir -p artifacts/nextest; \
@@ -115,7 +126,7 @@ test-nextest: ## Run full test suite with cargo-nextest (VERBOSE=1 for regular o
 		exit $$exit_code; \
 	fi
 
-test-nextest-bg: ## Run nextest in background (optional: FILTER='nextest expr'), logging to artifacts/nextest/full-bg-<ts>.log
+test-nextest-bg: install-nextest ## Run nextest in background (optional: FILTER='nextest expr'), logging to artifacts/nextest/full-bg-<ts>.log
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \
 	mkdir -p artifacts/nextest; \
@@ -136,7 +147,7 @@ test-nextest-bg: ## Run nextest in background (optional: FILTER='nextest expr'),
 test-nextest-bg-smoke: ## Run only smoke+parity tests in background (most likely long-running)
 	@FILTER="test(smoke_) | test(parity_)" $(MAKE) test-nextest-bg
 
-test-nextest-ci: ## Run CI test suite with cargo-nextest (two-pass: general + auth-failure tests without token)
+test-nextest-ci: install-nextest ## Run CI test suite with cargo-nextest (two-pass: general + auth-failure tests without token)
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \
 	mkdir -p artifacts/nextest; \
@@ -170,7 +181,7 @@ test-nextest-ci: ## Run CI test suite with cargo-nextest (two-pass: general + au
 		exit $$exit_code; \
 	fi
 
-test-nextest-audit: ## Audit test group assignments with cargo-nextest
+test-nextest-audit: install-nextest ## Audit test group assignments with cargo-nextest
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \
 	echo "Auditing test group assignments..."; \

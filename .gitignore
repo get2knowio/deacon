@@ -40,3 +40,5 @@ audit.jsonl
 artifacts/nextest/ci-timing.json
 artifacts/nextest/full-timing.json
 /crates/deacon/.deacon
+/artifacts/nextest
+/.deacon
