@@ -443,8 +443,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
         if matches!(args.output_format, OutputFormat::Json) {
             eprintln!("{}", serde_json::to_string(&error)?);
         } else {
-            eprintln!("Error: {}", error.message);
-            if let Some(desc) = &error.description {
+            eprintln!("Error: {}", error.message());
+            if let Some(desc) = error.description() {
                 eprintln!("{}", desc);
             }
         }
@@ -461,8 +461,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             if matches!(args.output_format, OutputFormat::Json) {
                 println!("{}", serde_json::to_string(&error)?);
             } else {
-                eprintln!("Error: {}", error.message);
-                if let Some(desc) = &error.description {
+                eprintln!("Error: {}", error.message());
+                if let Some(desc) = error.description() {
                     eprintln!("{}", desc);
                 }
             }
@@ -475,8 +475,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             if matches!(args.output_format, OutputFormat::Json) {
                 println!("{}", serde_json::to_string(&error)?);
             } else {
-                eprintln!("Error: {}", error.message);
-                if let Some(desc) = &error.description {
+                eprintln!("Error: {}", error.message());
+                if let Some(desc) = error.description() {
                     eprintln!("{}", desc);
                 }
             }
@@ -494,8 +494,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             if matches!(args.output_format, OutputFormat::Json) {
                 println!("{}", serde_json::to_string(&error)?);
             } else {
-                eprintln!("Error: {}", error.message);
-                if let Some(desc) = &error.description {
+                eprintln!("Error: {}", error.message());
+                if let Some(desc) = error.description() {
                     eprintln!("{}", desc);
                 }
             }
@@ -508,8 +508,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             if matches!(args.output_format, OutputFormat::Json) {
                 println!("{}", serde_json::to_string(&error)?);
             } else {
-                eprintln!("Error: {}", error.message);
-                if let Some(desc) = &error.description {
+                eprintln!("Error: {}", error.message());
+                if let Some(desc) = error.description() {
                     eprintln!("{}", desc);
                 }
             }
@@ -527,8 +527,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             if matches!(args.output_format, OutputFormat::Json) {
                 println!("{}", serde_json::to_string(&error)?);
             } else {
-                eprintln!("Error: {}", error.message);
-                if let Some(desc) = &error.description {
+                eprintln!("Error: {}", error.message());
+                if let Some(desc) = error.description() {
                     eprintln!("{}", desc);
                 }
             }
@@ -541,8 +541,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             if matches!(args.output_format, OutputFormat::Json) {
                 println!("{}", serde_json::to_string(&error)?);
             } else {
-                eprintln!("Error: {}", error.message);
-                if let Some(desc) = &error.description {
+                eprintln!("Error: {}", error.message());
+                if let Some(desc) = error.description() {
                     eprintln!("{}", desc);
                 }
             }
@@ -560,8 +560,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             if matches!(args.output_format, OutputFormat::Json) {
                 println!("{}", serde_json::to_string(&error)?);
             } else {
-                eprintln!("Error: {}", error.message);
-                if let Some(desc) = &error.description {
+                eprintln!("Error: {}", error.message());
+                if let Some(desc) = error.description() {
                     eprintln!("{}", desc);
                 }
             }
@@ -574,8 +574,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             if matches!(args.output_format, OutputFormat::Json) {
                 println!("{}", serde_json::to_string(&error)?);
             } else {
-                eprintln!("Error: {}", error.message);
-                if let Some(desc) = &error.description {
+                eprintln!("Error: {}", error.message());
+                if let Some(desc) = error.description() {
                     eprintln!("{}", desc);
                 }
             }
@@ -624,8 +624,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
                 if matches!(args.output_format, OutputFormat::Json) {
                     eprintln!("{}", serde_json::to_string(&error)?);
                 } else {
-                    eprintln!("Error: {}", error.message);
-                    if let Some(desc) = &error.description {
+                    eprintln!("Error: {}", error.message());
+                    if let Some(desc) = error.description() {
                         eprintln!("{}", desc);
                     }
                 }

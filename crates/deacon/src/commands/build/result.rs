@@ -21,24 +21,24 @@ use serde::{Deserialize, Serialize};
 /// }
 /// ```
 #[allow(dead_code)] // Used in Phase 3 implementation
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildSuccess {
     /// Always "success" for successful builds
-    pub outcome: String,
+    outcome: String,
 
     /// Deterministic fallback tag or list of tags when multiple provided.
     /// Can be either a single string or an array of strings.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub image_name: Option<ImageNameOutput>,
+    image_name: Option<ImageNameOutput>,
 
     /// Destination written when `--output` is used.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub export_path: Option<String>,
+    export_path: Option<String>,
 
     /// Indicates registry push was attempted and succeeded.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub pushed: Option<bool>,
+    pushed: Option<bool>,
 }
 
 impl BuildSuccess {
@@ -76,6 +76,30 @@ impl BuildSuccess {
         self.pushed = Some(pushed);
         self
     }
+
+    /// Returns the outcome field.
+    #[allow(dead_code)] // Public API accessor
+    pub fn outcome(&self) -> &str {
+        &self.outcome
+    }
+
+    /// Returns the image name, if any.
+    #[allow(dead_code)] // Public API accessor
+    pub fn image_name(&self) -> Option<&ImageNameOutput> {
+        self.image_name.as_ref()
+    }
+
+    /// Returns the export path, if any.
+    #[allow(dead_code)] // Public API accessor
+    pub fn export_path(&self) -> Option<&str> {
+        self.export_path.as_deref()
+    }
+
+    /// Returns whether the image was pushed.
+    #[allow(dead_code)] // Public API accessor
+    pub fn pushed(&self) -> Option<bool> {
+        self.pushed
+    }
 }
 
 impl Default for BuildSuccess {
@@ -90,7 +114,7 @@ impl Default for BuildSuccess {
 }
 
 /// Image name output can be either a single string or an array of strings.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ImageNameOutput {
     /// Single image name
@@ -113,17 +137,18 @@ pub enum ImageNameOutput {
 ///   "description": "Enable BuildKit or remove --push flag"  // optional
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BuildError {
     /// Always "error" for failed builds
-    pub outcome: String,
+    outcome: String,
 
     /// Short validation or failure message matching spec text
-    pub message: String,
+    message: String,
 
     /// Additional context for the error
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    description: Option<String>,
 }
 
 impl BuildError {
@@ -144,6 +169,32 @@ impl BuildError {
             message: message.into(),
             description: Some(description.into()),
         }
+    }
+
+    /// Returns the outcome field.
+    #[allow(dead_code)] // Public API accessor
+    pub fn outcome(&self) -> &str {
+        &self.outcome
+    }
+
+    /// Returns the error message.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Returns the error description, if any.
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+}
+
+impl std::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)?;
+        if let Some(desc) = &self.description {
+            write!(f, ": {}", desc)?;
+        }
+        Ok(())
     }
 }
 
