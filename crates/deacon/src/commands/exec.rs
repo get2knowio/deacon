@@ -7,8 +7,8 @@ use anyhow::Result;
 use deacon_core::compose::ComposeManager;
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::container::ContainerIdentity;
+use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::{CliDocker, Docker, ExecConfig};
-use deacon_core::errors::{ConfigError, DeaconError};
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::{debug, instrument};
@@ -41,6 +41,66 @@ pub struct ExecArgs {
     /// Path to docker-compose executable (legacy standalone binary)
     #[allow(dead_code)] // Future: Will be used for standalone docker-compose binary support
     pub docker_compose_path: String,
+    /// Force TTY allocation when global log-format is JSON
+    pub force_tty_if_json: bool,
+    /// Default user env probe mode (from global flag)
+    pub default_user_env_probe: Option<ContainerProbeMode>,
+    /// Container-side data folder path
+    #[allow(dead_code)] // Reserved for future use
+    pub container_data_folder: Option<std::path::PathBuf>,
+    /// Container-side system data folder path
+    #[allow(dead_code)] // Reserved for future use
+    pub container_system_data_folder: Option<std::path::PathBuf>,
+    /// Optional terminal columns hint for PTY sizing
+    #[allow(dead_code)] // Reserved for future use
+    pub terminal_columns: Option<u32>,
+    /// Optional terminal rows hint for PTY sizing
+    #[allow(dead_code)] // Reserved for future use
+    pub terminal_rows: Option<u32>,
+}
+
+/// Compute whether we should allocate a PTY for exec.
+/// Rules:
+/// - If `force_tty` is true, always allocate a PTY.
+/// - Otherwise, allocate a PTY only if `!no_tty` AND both stdin and stdout are TTYs.
+#[allow(dead_code)]
+pub(crate) fn compute_should_use_tty(
+    force_tty: bool,
+    no_tty: bool,
+    stdin_is_tty: bool,
+    stdout_is_tty: bool,
+) -> bool {
+    if force_tty {
+        true
+    } else {
+        !no_tty && stdin_is_tty && stdout_is_tty
+    }
+}
+
+/// Build an `ExecConfig` value from higher level inputs. This helper exists to
+/// make the PTY decision logic and produced config testable without executing
+/// the command (which would call `std::process::exit`).
+#[allow(dead_code)]
+pub(crate) fn build_exec_config(
+    args: &ExecArgs,
+    working_dir: String,
+    effective_env: HashMap<String, String>,
+    stdin_is_tty: bool,
+    stdout_is_tty: bool,
+) -> deacon_core::docker::ExecConfig {
+    let force_tty = args.force_tty_if_json;
+    let should_use_tty =
+        compute_should_use_tty(force_tty, args.no_tty, stdin_is_tty, stdout_is_tty);
+
+    deacon_core::docker::ExecConfig {
+        user: args.user.clone(),
+        working_dir: Some(working_dir),
+        env: effective_env,
+        tty: should_use_tty,
+        interactive: true,
+        detach: false,
+        silent: false,
+    }
 }
 
 /// Resolve the target container for the current workspace/config
@@ -370,10 +430,15 @@ where
             } else {
                 let config_location = ConfigLoader::discover_config(workspace_folder)?;
                 if !config_location.exists() {
-                    return Err(DeaconError::Config(ConfigError::NotFound {
-                        path: config_location.path().to_string_lossy().to_string(),
-                    })
-                    .into());
+                    let abs_path = config_location
+                        .path()
+                        .canonicalize()
+                        .unwrap_or_else(|_| config_location.path().to_path_buf());
+                    let path_str = abs_path.to_string_lossy().to_string();
+                    return Err(anyhow::anyhow!(
+                        "Dev container config ({}) not found.",
+                        path_str
+                    ));
                 }
                 ConfigLoader::load_from_path(config_location.path())?
             };
@@ -392,7 +457,13 @@ where
         };
 
         // Determine TTY allocation
-        let should_use_tty = !args.no_tty && CliDocker::is_tty();
+        // Force PTY when global `force_tty_if_json` is set (threaded from global log-format)
+        let force_tty = args.force_tty_if_json;
+        let should_use_tty = if force_tty {
+            true
+        } else {
+            !args.no_tty && CliDocker::is_tty()
+        };
 
         // Determine working directory - prioritize CLI argument over config
         let working_dir = if let Some(ref cli_workdir) = args.workdir {
@@ -422,13 +493,110 @@ where
             tracing::Span::current().record("user", user.as_str());
         }
 
+        // Build effective environment by probing, merging config (with labels) and CLI sources.
+        // 1) Probe container env according to requested/default probe mode
+        // 2) Load config.remote_env (with labels merged via resolve_effective_config when possible)
+        // 3) Merge: probed_env <- config_remote_env <- cli_env (CLI wins). Preserve explicit empty values.
+
+        // Determine probe mode (map from CLI/global default flag)
+        let probe_mode = args.default_user_env_probe.unwrap_or_default();
+
+        // Start with empty probed env, populate if probe runs successfully
+        let mut probed_env: HashMap<String, String> = HashMap::new();
+
+        if probe_mode != deacon_core::container_env_probe::ContainerProbeMode::None {
+            // Attempt to probe the container environment; log and continue on failure
+            let prober = deacon_core::container_env_probe::ContainerEnvironmentProber::new();
+            match docker_client.inspect_container(&container_id).await {
+                Ok(Some(_container_info)) => {
+                    // Use user override if provided, otherwise None
+                    let probe_user = args.user.as_deref();
+                    match prober
+                        .probe_container_environment(
+                            docker_client,
+                            &container_id,
+                            probe_mode,
+                            probe_user,
+                        )
+                        .await
+                    {
+                        Ok(res) => {
+                            probed_env = res.env_vars;
+                        }
+                        Err(e) => {
+                            tracing::warn!("Container environment probe failed: {}", e);
+                        }
+                    }
+                }
+                Ok(None) => {
+                    tracing::debug!("No container info available for probe; skipping probe");
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to inspect container for probe: {}", e);
+                }
+            }
+        }
+
+        // Load config.remote_env when we have workspace-based config; prefer resolved config
+        let mut config_remote_env: Option<HashMap<String, Option<String>>> = None;
+        if args.container_id.is_none() && args.id_label.is_empty() {
+            let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
+
+            // Load base config (with discovery)
+            let base_config = if let Some(config_path) = args.config_path.as_ref() {
+                ConfigLoader::load_from_path(config_path)?
+            } else {
+                let config_location = ConfigLoader::discover_config(workspace_folder)?;
+                if !config_location.exists() {
+                    let abs_path = config_location
+                        .path()
+                        .canonicalize()
+                        .unwrap_or_else(|_| config_location.path().to_path_buf());
+                    let path_str = abs_path.to_string_lossy().to_string();
+                    return Err(anyhow::anyhow!(
+                        "Dev container config ({}) not found.",
+                        path_str
+                    ));
+                }
+                ConfigLoader::load_from_path(config_location.path())?
+            };
+
+            // Try to inspect container labels to let resolve_effective_config incorporate image labels
+            let resolved = match docker_client.inspect_container(&container_id).await {
+                Ok(Some(container_info)) => {
+                    // Resolve effective config (labels win for deacon.remoteEnv.*)
+                    match deacon_core::config::ConfigMerger::resolve_effective_config(
+                        &base_config,
+                        Some(&container_info.labels),
+                        workspace_folder,
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::warn!("Failed to resolve effective config with labels: {}", e);
+                            base_config.clone()
+                        }
+                    }
+                }
+                Ok(None) => base_config.clone(),
+                Err(e) => {
+                    tracing::warn!("Failed to inspect container for config resolution: {}", e);
+                    base_config.clone()
+                }
+            };
+
+            config_remote_env = Some(resolved.remote_env.clone());
+        }
+
+        let effective_env = deacon_core::container_env_probe::ContainerEnvironmentProber::new()
+            .build_effective_env(&probed_env, config_remote_env.as_ref(), &env_map);
+
         // Create exec config
         // Always attach stdin (interactive) so piped/stdin data flows into the container,
         // independent of TTY allocation. TTY only controls pseudo‑terminal behavior.
         let exec_config = ExecConfig {
             user: args.user.clone(),
             working_dir: Some(working_dir.clone()),
-            env: env_map,
+            env: effective_env,
             tty: should_use_tty,
             interactive: true,
             detach: false,
@@ -559,6 +727,12 @@ mod tests {
             config_path: None,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
+            force_tty_if_json: false,
+            default_user_env_probe: None,
+            container_data_folder: None,
+            container_system_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
         };
 
         assert_eq!(args.workdir, Some("/custom/path".to_string()));
@@ -581,6 +755,12 @@ mod tests {
             config_path: None,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
+            force_tty_if_json: false,
+            default_user_env_probe: None,
+            container_data_folder: None,
+            container_system_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
         };
 
         assert_eq!(args.workdir, None);
@@ -596,10 +776,10 @@ mod tests {
 
         let result = resolve_target_container_by_labels(&mock_docker, &labels).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid id-label format"));
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid id-label format: 'INVALID_NO_EQUALS'. Expected KEY=VALUE"
+        );
     }
 
     #[tokio::test]
@@ -719,10 +899,59 @@ mod tests {
             config_path: None,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
+            force_tty_if_json: false,
+            default_user_env_probe: None,
+            container_data_folder: None,
+            container_system_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
         };
 
         assert_eq!(args.service, Some("redis".to_string()));
         assert_eq!(args.command, vec!["redis-cli", "ping"]);
+    }
+
+    #[test]
+    fn test_compute_should_use_tty_variants() {
+        // When forced, always true
+        assert!(compute_should_use_tty(true, false, false, false));
+        // When not forced, need !no_tty and both stdin/stdout TTY
+        assert!(compute_should_use_tty(false, false, true, true));
+        assert!(!compute_should_use_tty(false, true, true, true));
+        assert!(!compute_should_use_tty(false, false, false, true));
+        assert!(!compute_should_use_tty(false, false, true, false));
+    }
+
+    #[test]
+    fn test_build_exec_config_sets_tty_and_env() {
+        let mut env = HashMap::new();
+        env.insert("FOO".to_string(), "bar".to_string());
+
+        let args = ExecArgs {
+            user: Some("me".to_string()),
+            no_tty: false,
+            env: vec![],
+            workdir: Some("/path".to_string()),
+            container_id: None,
+            id_label: vec![],
+            service: None,
+            command: vec!["true".to_string()],
+            workspace_folder: None,
+            config_path: None,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            force_tty_if_json: false,
+            default_user_env_probe: None,
+            container_data_folder: None,
+            container_system_data_folder: None,
+            terminal_columns: Some(80),
+            terminal_rows: Some(24),
+        };
+
+        let exec_cfg = build_exec_config(&args, "/path".to_string(), env.clone(), true, true);
+        assert!(exec_cfg.tty);
+        assert_eq!(exec_cfg.user, Some("me".to_string()));
+        assert_eq!(exec_cfg.env.get("FOO"), Some(&"bar".to_string()));
     }
 
     #[test]
@@ -770,6 +999,12 @@ mod tests {
             config_path: None,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
+            force_tty_if_json: false,
+            default_user_env_probe: None,
+            container_data_folder: None,
+            container_system_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
         };
 
         assert_eq!(args.container_id, Some("abc123".to_string()));
@@ -793,6 +1028,12 @@ mod tests {
             config_path: None,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
+            force_tty_if_json: false,
+            default_user_env_probe: None,
+            container_data_folder: None,
+            container_system_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
         };
 
         assert!(!args.id_label.is_empty());
