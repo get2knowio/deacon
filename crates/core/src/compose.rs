@@ -453,6 +453,47 @@ impl ComposeManager {
         Ok(())
     }
 
+    /// Build compose service
+    #[instrument(skip(self))]
+    pub fn build_service(&self, project: &ComposeProject, service: &str) -> Result<String> {
+        let command = self.get_command(project);
+
+        debug!(
+            "Building compose project {} service {}",
+            project.name, service
+        );
+
+        let output = command.execute(&["build", service])?;
+
+        debug!(
+            "Compose project {} service {} built successfully",
+            project.name, service
+        );
+        Ok(output)
+    }
+
+    /// Validate that a service exists in compose project configuration
+    #[instrument(skip(self))]
+    pub fn validate_service_exists(&self, project: &ComposeProject, service: &str) -> Result<bool> {
+        let command = self.get_command(project);
+
+        // Use docker compose config --services to list all available services
+        let output = command.execute(&["config", "--services"])?;
+
+        let services: Vec<String> = output
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        debug!(
+            "Found services in compose project {}: {:?}",
+            project.name, services
+        );
+
+        Ok(services.contains(&service.to_string()))
+    }
+
     /// Get primary service container ID
     #[instrument(skip(self))]
     pub fn get_primary_container_id(&self, project: &ComposeProject) -> Result<Option<String>> {

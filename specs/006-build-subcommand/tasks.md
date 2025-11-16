@@ -20,8 +20,8 @@ description: "Task list for closing build subcommand parity gaps"
 
 **Purpose**: Establish documentation alignment before implementation begins.
 
-- [ ] T001 Update `docs/subcommand-specs/build/GAP.md` with parity targets covering tags, push/export, and compose modes.
-- [ ] T002 Add BuildKit gating validation steps to `specs/006-build-subcommand/quickstart.md` for future execution checks.
+- [X] T001 Update `docs/subcommand-specs/build/GAP.md` with parity targets covering tags, push/export, and compose modes. ✅
+- [X] T002 Add BuildKit gating validation steps to `specs/006-build-subcommand/quickstart.md` for future execution checks. ✅
 
 ---
 
@@ -29,11 +29,11 @@ description: "Task list for closing build subcommand parity gaps"
 
 **Purpose**: Core domain scaffolding required by all user stories.
 
-- [ ] T003 Define `BuildRequest`, `ImageArtifact`, `FeatureManifest`, and `ValidationEvent` structs in `crates/core/src/build/mod.rs` per `data-model.md`.
-- [ ] T004 [P] Re-export the new build module from `crates/core/src/lib.rs` to make domain types available to consumers.
-- [ ] T005 Create `BuildSuccess` and `BuildError` result structs aligned with `contracts/build-cli-contract.yaml` in `crates/deacon/src/commands/build/result.rs`.
-- [ ] T006 Introduce shared label and image-tag validation helpers in `crates/core/src/docker.rs` for reuse across build flows.
-- [ ] T006A Add BuildKit capability detection helpers in `crates/core/src/build/buildkit.rs` to flag feature metadata that requires BuildKit execution.
+- [X] T003 Define `BuildRequest`, `ImageArtifact`, `FeatureManifest`, and `ValidationEvent` structs in `crates/core/src/build/mod.rs` per `data-model.md`. ✅
+- [X] T004 [P] Re-export the new build module from `crates/core/src/lib.rs` to make domain types available to consumers. ✅
+- [X] T005 Create `BuildSuccess` and `BuildError` result structs aligned with `contracts/build-cli-contract.yaml` in `crates/deacon/src/commands/build/result.rs`. ✅
+- [X] T006 Introduce shared label and image-tag validation helpers in `crates/core/src/docker.rs` for reuse across build flows. ✅
+- [X] T006A Add BuildKit capability detection helpers in `crates/core/src/build/buildkit.rs` to flag feature metadata that requires BuildKit execution. ✅
 
 ---
 
@@ -45,16 +45,16 @@ description: "Task list for closing build subcommand parity gaps"
 
 ### Tests for User Story 1
 
-- [ ] T007 [P] [US1] Add CLI flag parsing assertions for `--image-name` and `--label` in `crates/deacon/tests/integration_build_args.rs`.
-- [ ] T008 [P] [US1] Extend JSON output purity checks for multi-tag success payloads in `crates/deacon/tests/json_output_purity.rs`.
+- [X] T007 [P] [US1] Add CLI flag parsing assertions for `--image-name` and `--label` in `crates/deacon/tests/integration_build_args.rs`. ✅
+- [X] T008 [P] [US1] Extend JSON output purity checks for multi-tag success payloads in `crates/deacon/tests/json_output_purity.rs`. ✅
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] Extend the build subcommand definition with repeatable `--image-name` and `--label` options in `crates/deacon/src/cli.rs`.
-- [ ] T009A [US2] Surface `--push` and `--output` switches in `crates/deacon/src/cli.rs`, updating CLI help text and ensuring mutual exclusivity is documented.
-- [ ] T010 [US1] Map image names and labels into `BuildArgs` and the new `BuildRequest` translation in `crates/deacon/src/commands/build.rs`.
-- [ ] T011 [US1] Enforce tag/label validation and inject devcontainer metadata labels during Dockerfile builds in `crates/deacon/src/commands/build.rs`.
-- [ ] T012 [US1] Serialize merged devcontainer metadata and user labels into the build artifact record within `crates/core/src/build/metadata.rs`.
+- [X] T009 [US1] Extend the build subcommand definition with repeatable `--image-name` and `--label` options in `crates/deacon/src/cli.rs`. ✅
+- [X] T009A [US2] Surface `--push` and `--output` switches in `crates/deacon/src/cli.rs`, updating CLI help text and ensuring mutual exclusivity is documented. ✅
+- [X] T010 [US1] Map image names and labels into `BuildArgs` and the new `BuildRequest` translation in `crates/deacon/src/commands/build.rs`. ✅
+- [X] T011 [US1] Enforce tag/label validation and inject devcontainer metadata labels during Dockerfile builds in `crates/deacon/src/commands/build.rs`. ✅
+- [X] T012 [US1] Serialize merged devcontainer metadata and user labels into the build artifact record within `crates/core/src/build/metadata.rs`. ✅
 
 **Checkpoint**: Tagged Dockerfile builds emit spec-compliant JSON with accurate labels and tags.
 
@@ -68,18 +68,18 @@ description: "Task list for closing build subcommand parity gaps"
 
 ### Tests for User Story 2
 
-- [ ] T013 [P] [US2] Cover BuildKit gating and mutually exclusive flag errors in `crates/deacon/tests/integration_build.rs`.
-- [ ] T013A [P] [US2] Assert CLI argument parsing and help output for `--push` and `--output` in `crates/deacon/tests/integration_build_args.rs`.
-- [ ] T014 [P] [US2] Verify pushed tags and exported artifact reporting in `crates/deacon/tests/parity_build.rs`.
-- [ ] T014A [P] [US2] Add regression coverage for BuildKit-only feature contexts in `crates/deacon/tests/parity_build.rs`.
+- [X] T013 [P] [US2] Cover BuildKit gating and mutually exclusive flag errors in `crates/deacon/tests/integration_build.rs`. ✅
+- [X] T013A [P] [US2] Assert CLI argument parsing and help output for `--push` and `--output` in `crates/deacon/tests/integration_build_args.rs`. ✅
+- [X] T014 [P] [US2] Verify pushed tags and exported artifact reporting in `crates/deacon/tests/parity_build.rs`. ✅
+- [X] T014A [P] [US2] Add regression coverage for BuildKit-only feature contexts in `crates/deacon/tests/parity_build.rs`. ✅
 
 ### Implementation for User Story 2
 
-- [ ] T015 [US2] Enforce `--push`/`--output` exclusivity and BuildKit requirement checks within `crates/deacon/src/commands/build.rs`.
-- [ ] T016 [US2] Extend Docker build execution to support push/export flows and capture statuses in `crates/core/src/docker.rs`.
-- [ ] T016A [US2] Integrate BuildKit-only detection from `crates/core/src/build/buildkit.rs` into the execution path, returning the documented fail-fast error when unavailable.
-- [ ] T017 [US2] Populate `pushed` and `exportPath` fields in the JSON success payload emitted from `crates/deacon/src/commands/build/result.rs`.
-- [ ] T018 [US2] Map validation failures to spec-defined `BuildError` responses in `crates/deacon/src/commands/build.rs`.
+- [X] T015 [US2] Enforce `--push`/`--output` exclusivity and BuildKit requirement checks within `crates/deacon/src/commands/build.rs`. ✅
+- [X] T016 [US2] Extend Docker build execution to support push/export flows and capture statuses in `crates/core/src/docker.rs`. ✅
+- [X] T016A [US2] Integrate BuildKit-only detection from `crates/core/src/build/buildkit.rs` into the execution path, returning the documented fail-fast error when unavailable. ✅
+- [X] T017 [US2] Populate `pushed` and `exportPath` fields in the JSON success payload emitted from `crates/deacon/src/commands/build/result.rs`. ✅
+- [X] T018 [US2] Map validation failures to spec-defined `BuildError` responses in `crates/deacon/src/commands/build.rs`. ✅
 
 **Checkpoint**: Push/export workflows succeed or fail fast with contract-compliant output and errors.
 
@@ -93,15 +93,15 @@ description: "Task list for closing build subcommand parity gaps"
 
 ### Tests for User Story 3
 
-- [ ] T019 [P] [US3] Add Compose build acceptance covering targeted service selection to `crates/deacon/tests/smoke_compose_edges.rs`.
-- [ ] T020 [P] [US3] Add image-reference build acceptance case to `crates/deacon/tests/parity_build.rs`.
+- [X] T019 [P] [US3] Add Compose build acceptance covering targeted service selection to `crates/deacon/tests/smoke_compose_edges.rs`. ✅
+- [X] T020 [P] [US3] Add image-reference build acceptance case to `crates/deacon/tests/parity_build.rs`. ✅
 
 ### Implementation for User Story 3
 
-- [ ] T021 [US3] Resolve Compose service targeting and unsupported flag preflight in `crates/core/src/compose.rs`.
-- [ ] T022 [US3] Integrate Compose execution path and validation into `execute_build` within `crates/deacon/src/commands/build.rs`.
-- [ ] T023 [US3] Enable image-reference builds with feature application and tagging in `crates/deacon/src/commands/build.rs`.
-- [ ] T024 [US3] Add Compose and image reference fixtures under `examples/build/compose-service-target/` and `fixtures/config/build/compose-service-target/` for parity tests.
+- [X] T021 [US3] Resolve Compose service targeting and unsupported flag preflight in `crates/core/src/compose.rs`. ✅
+- [X] T022 [US3] Integrate Compose execution path and validation into `execute_build` within `crates/deacon/src/commands/build.rs`. ✅
+- [X] T023 [US3] Enable image-reference builds with feature application and tagging in `crates/deacon/src/commands/build.rs`. ✅
+- [X] T024 [US3] Add Compose and image reference fixtures under `examples/build/compose-service-target/` and `fixtures/config/build/compose-service-target/` for parity tests. ✅
 
 **Checkpoint**: Compose and image-reference builds behave consistently with Dockerfile mode and honor validation rules.
 
@@ -111,9 +111,9 @@ description: "Task list for closing build subcommand parity gaps"
 
 **Purpose**: Documentation, examples, and release hygiene after user stories complete.
 
-- [ ] T025 [P] Update `docs/subcommand-specs/build/SPEC.md` with the completed flag set, validation messages, and success payload schemas.
-- [ ] T026 [P] Document new build scenarios in `examples/README.md`, linking the Compose and image-reference fixtures.
-- [ ] T027 Capture parity closure summary and release notes in `docs/CLI_PARITY.md`.
+- [X] T025 [P] Update `docs/subcommand-specs/build/SPEC.md` with the completed flag set, validation messages, and success payload schemas. ✅
+- [X] T026 [P] Document new build scenarios in `examples/README.md`, linking the Compose and image-reference fixtures. ✅
+- [X] T027 Capture parity closure summary and release notes in `docs/CLI_PARITY.md`. ✅
 
 ---
 

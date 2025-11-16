@@ -1,0 +1,4 @@
+{
+  "name": "Image Reference Example",
+  "image": "alpine:3.19"
+}

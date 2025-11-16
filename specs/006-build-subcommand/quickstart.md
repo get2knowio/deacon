@@ -24,11 +24,23 @@
    - When `--push` is set and BuildKit available, pass `--push` to buildx and report pushed tags.  
    - When `--output` is specified, honor the export spec and populate `exportPath` in the success payload.
 
-7. **Testing & Validation**  
+7. **BuildKit Gating Validation**  
+   - **Detection**: Use `docker buildx version` command to detect BuildKit availability before executing BuildKit-only operations.  
+   - **Gating Rules**:
+     - `--push` requires BuildKit → fail with: "BuildKit is required for --push. Enable BuildKit or remove --push flag."
+     - `--output` requires BuildKit → fail with: "BuildKit is required for --output. Enable BuildKit or remove --output flag."
+     - `--platform` requires BuildKit → fail with: "BuildKit is required for --platform. Enable BuildKit or remove --platform flag."
+     - `--cache-to` requires BuildKit → fail with: "BuildKit is required for --cache-to. Enable BuildKit or remove --cache-to flag."
+   - **Execution Path**: Integrate BuildKit detection helper from `crates/core/src/build/buildkit.rs` to return documented fail-fast errors when prerequisites fail.
+   - **Validation**: Test on both BuildKit-enabled and disabled hosts to confirm gating behavior matches specification.
+
+8. **Testing & Validation**  
    - Update or add unit tests for CLI parsing and validation rules.  
    - Expand integration/smoke tests under `crates/deacon/tests/` to cover Dockerfile, image, and Compose scenarios, including error cases.  
+   - Add specific test cases for BuildKit gating: verify error messages when BuildKit-only flags are used without BuildKit.
    - Run fast loop (`make dev-fast`) after each iteration and the full gate before submitting a PR.
 
-8. **Documentation & Examples**  
+9. **Documentation & Examples**  
    - Update affected examples under `examples/build/` to demonstrate new flags and behaviors.  
    - Ensure docs in `docs/subcommand-specs/build/` reflect any clarified workflows if discrepancies are resolved.
+   - Document BuildKit gating behavior and error messages in relevant specification files.

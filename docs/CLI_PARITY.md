@@ -78,7 +78,16 @@
   - Shutdown behaviors and defaults — confirm parity.
   - Port event behavior and prefixes — confirm exact output contract.
 - `build`
-  - ✅ **COMPLETE**: Additional build flags: cache-from/to, ssh, secrets, buildkit toggles are all implemented and tested.
+  - ✅ **COMPLETE**: Build subcommand parity closure (spec 006-build-subcommand)
+    - Multi-tag support: `--image-name` can be specified multiple times
+    - Custom labels: `--label` can be specified multiple times
+    - Registry push: `--push` with BuildKit support
+    - Artifact export: `--output` for OCI archives (mutually exclusive with `--push`)
+    - BuildKit gating: Clear error messages when BuildKit-only flags are used without BuildKit
+    - Compose mode: Targets configured service with validation for unsupported flags
+    - Image reference mode: Builds from base image with feature application and metadata
+    - JSON output contract: Success payloads with `imageName`, `pushed`, `exportPath` fields
+    - Error contract: Structured errors with `message` and `description` fields
   - Output format/verbosity flags — verify naming.
 - `exec`
   - TTY and stdin semantics — verify defaults and `--no-tty` naming.
@@ -157,10 +166,63 @@ Immediate parity tasks (no behavioral risk):
   - Compose: ensure multi-service port events and `exec` targeting across services are robust.
 
 6) Docker/Build options
-  - ✅ **COMPLETE**: Advanced build flags (cache-from/to, ssh, secrets) and BuildKit controls are implemented, tested, and validated.
+  - ✅ **COMPLETE**: Build subcommand parity fully closed (spec 006-build-subcommand)
+    - All missing flags implemented: `--image-name` (repeatable), `--label` (repeatable), `--push`, `--output`
+    - BuildKit gating logic enforces prerequisites for BuildKit-only flags
+    - Compose mode validates and rejects unsupported flags (`--platform`, `--push`, `--output`, `--cache-to`)
+    - Image reference builds work with feature application, tagging, and metadata injection
+    - JSON output contracts implemented for success and error payloads
+    - Multi-tag support with array output when multiple `--image-name` flags provided
+    - Push and export workflows fully functional with appropriate status reporting
+    - All acceptance tests passing; examples and documentation updated
+    - Delivered: Phases 1-5 complete (Setup, Foundational, US1-US3); Phase 6 (Polish) complete
 
 7) Security and redaction
   - Cryptographic hashing for secret registry; ensure redaction is applied to all outputs (progress, audit, PORT_EVENT) and respects `--no-redact`.
+
+**Release Notes: Build Subcommand Parity Closure (spec 006-build-subcommand)**
+
+Completed: 2025-11-15
+
+### Summary
+Closed all remaining gaps in the `deacon build` subcommand to achieve full parity with the reference TypeScript CLI. The implementation delivers:
+
+### New Features
+- **Multi-tag support**: Build and apply multiple tags to a single image using repeatable `--image-name` flags
+- **Custom labels**: Add metadata labels to images via repeatable `--label` flags
+- **Registry push**: Push built images directly to registries with `--push` (requires BuildKit)
+- **Artifact export**: Export images to OCI archives or other formats with `--output` (requires BuildKit, mutually exclusive with `--push`)
+- **Compose service targeting**: Build specific services from Docker Compose configurations
+- **Image reference builds**: Build from base images specified in `devcontainer.json` (image property)
+
+### Quality & Validation
+- **BuildKit gating**: Clear error messages when BuildKit-only flags are used without BuildKit availability
+- **Compose restrictions**: Validation prevents use of unsupported flags in Compose mode (`--platform`, `--push`, `--output`, `--cache-to`)
+- **JSON output contract**: Success payloads include `imageName` (string or array), optional `pushed` and `exportPath` fields
+- **Error contract**: Structured errors with `message` and optional `description` fields
+
+### Testing & Documentation
+- **Comprehensive test coverage**: All user stories validated through integration tests and smoke tests
+- **Examples**: Added `compose-service-target` and `image-reference` examples with READMEs
+- **Documentation**: Updated `docs/subcommand-specs/build/SPEC.md` with implementation status and output schemas
+- **Examples guide**: Enhanced `examples/README.md` with new build scenarios
+
+### Implementation Phases
+All planned phases completed:
+- Phase 1: Setup (documentation alignment)
+- Phase 2: Foundational (domain types and validation helpers)
+- Phase 3: User Story 1 - Tagged builds with metadata and labels (P1 MVP)
+- Phase 4: User Story 2 - Registry push and artifact export (P2)
+- Phase 5: User Story 3 - Multi-source configuration coverage (P3)
+- Phase 6: Polish and documentation
+
+### Breaking Changes
+None - all changes are additive.
+
+### Migration Notes
+None required - new flags are optional and backward compatible.
+
+---
 
 **Next Steps (actionable)**
 - Provide `devcontainer --help` output (global + each subcommand) to convert the checklist into a definitive parity matrix and exact patches.

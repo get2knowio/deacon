@@ -4,7 +4,7 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 
 ### Index
 
-- Build: Dockerfile builds, platform targeting, build args, secrets & SSH (`build/`)
+- Build: Dockerfile builds, platform targeting, build args, secrets & SSH, Compose service targeting, image reference builds, multi-tag support, push/export workflows (`build/`)
 - CLI: CLI-specific features and flags including port forwarding and custom container names (`cli/`)
 - Configuration: basic, variable substitution, extends chain, and nested variables (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, variables, skip flags, progress events, and redaction (`container-lifecycle/`)
@@ -48,6 +48,33 @@ Build with secrets (requires BuildKit):
 cd examples/build/secrets-and-ssh
 echo "test-secret" > /tmp/secret.txt
 deacon build --workspace-folder . --secret id=foo,src=/tmp/secret.txt
+```
+
+Build from a Compose service with custom tags:
+```sh
+cd examples/build/compose-service-target
+deacon build --workspace-folder . --image-name myapp:latest
+```
+
+Build from an image reference with labels:
+```sh
+cd examples/build/image-reference
+deacon build --workspace-folder . --image-name myimage:latest --label "version=1.0"
+```
+
+Build with multiple tags and push to registry (requires BuildKit):
+```sh
+cd examples/build/basic-dockerfile
+deacon build --workspace-folder . \
+  --image-name myrepo/app:latest \
+  --image-name myrepo/app:v1.0 \
+  --push
+```
+
+Build and export to OCI archive (requires BuildKit):
+```sh
+cd examples/build/basic-dockerfile
+deacon build --workspace-folder . --output type=oci,dest=app.tar
 ```
 
 Validate a configuration example:
@@ -314,7 +341,7 @@ deacon config substitute --workspace-folder . --output-format json 2>&1 \
 ```
 
 ### Notes
-Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/subcommand-specs/*/SPEC.md` Container Build section.
+Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/subcommand-specs/*/SPEC.md` Container Build section. Additional examples showcase Compose service targeting (`compose-service-target/`), image reference builds (`image-reference/`), multi-tag support with `--image-name`, registry push with `--push`, and OCI archive export with `--output`. See `docs/subcommand-specs/build/SPEC.md` for complete build parity documentation.
 
 Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/subcommand-specs/*/SPEC.md` Lifecycle Execution Workflow.
 

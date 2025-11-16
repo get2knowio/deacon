@@ -223,6 +223,18 @@ pub enum Commands {
         /// Environment file(s) to pass to docker compose (can be repeated)
         #[arg(long)]
         env_file: Vec<PathBuf>,
+        /// Image name(s) to apply as tags (can be repeated)
+        #[arg(long = "image-name")]
+        image_names: Vec<String>,
+        /// Metadata label to apply to the image in key=value format (can be repeated)
+        #[arg(long)]
+        label: Vec<String>,
+        /// Push image to registry after build (requires BuildKit)
+        #[arg(long)]
+        push: bool,
+        /// Export image to file or directory (BuildKit format: type=...,dest=...)
+        #[arg(long)]
+        output: Option<String>,
     },
 
     /// Execute command in running container
@@ -902,6 +914,10 @@ impl Cli {
                 feature_install_order,
                 ignore_host_requirements,
                 env_file,
+                image_names,
+                label,
+                push,
+                output,
             }) => {
                 use crate::commands::build::{execute_build, BuildArgs};
 
@@ -932,6 +948,10 @@ impl Cli {
                     docker_path: self.docker_path.clone(),
                     terminal_columns: self.terminal_columns,
                     terminal_rows: self.terminal_rows,
+                    image_names,
+                    label,
+                    push,
+                    output,
                 };
 
                 execute_build(args).await?;

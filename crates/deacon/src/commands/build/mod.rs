@@ -3,6 +3,8 @@
 //! Implements the `deacon build` subcommand for building DevContainer images.
 //! Follows the CLI specification for Docker integration.
 
+pub mod result;
+
 use crate::cli::{BuildKitOption, OutputFormat};
 use anyhow::{anyhow, Context, Result};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
@@ -48,6 +50,14 @@ pub struct BuildArgs {
     pub terminal_columns: Option<u32>,
     #[allow(dead_code)] // Future: Will be used for terminal output formatting
     pub terminal_rows: Option<u32>,
+    /// Image names to apply as tags
+    pub image_names: Vec<String>,
+    /// Metadata labels to apply in key=value format
+    pub label: Vec<String>,
+    /// Push image to registry after build
+    pub push: bool,
+    /// Export image to file or directory
+    pub output: Option<String>,
 }
 
 impl Default for BuildArgs {
@@ -79,6 +89,10 @@ impl Default for BuildArgs {
             docker_path: "docker".to_string(),
             terminal_columns: None,
             terminal_rows: None,
+            image_names: Vec::new(),
+            label: Vec::new(),
+            push: false,
+            output: None,
         }
     }
 }
@@ -393,6 +407,182 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
         Ok(())
     };
 
+    // Parse and validate labels from key=value format
+    let parsed_labels: Result<Vec<(String, String)>> = args
+        .label
+        .iter()
+        .map(|label_str| {
+            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
+            if parts.len() != 2 {
+                Err(anyhow!(
+                    "Invalid label format '{}'. Expected key=value",
+                    label_str
+                ))
+            } else {
+                // Validate label name
+                deacon_core::docker::validate_label_name(parts[0])
+                    .with_context(|| format!("Invalid label name in '{}'", label_str))?;
+                Ok((parts[0].to_string(), parts[1].to_string()))
+            }
+        })
+        .collect();
+    let labels = parsed_labels?;
+
+    // Validate image names
+    for image_name in &args.image_names {
+        deacon_core::docker::validate_image_tag(image_name)
+            .with_context(|| format!("Invalid image name: {}", image_name))?;
+    }
+
+    // Validate push/output mutual exclusivity early
+    if args.push && args.output.is_some() {
+        let error = result::BuildError::with_description(
+            "Cannot use both --push and --output",
+            "They are mutually exclusive. Use --push to push to registry or --output to export locally",
+        );
+        if matches!(args.output_format, OutputFormat::Json) {
+            println!("{}", serde_json::to_string(&error)?);
+        } else {
+            eprintln!("Error: {}", error.message);
+            if let Some(desc) = &error.description {
+                eprintln!("{}", desc);
+            }
+        }
+        return Err(anyhow!("Push and output are mutually exclusive"));
+    }
+
+    // Validate BuildKit requirements for --push
+    if args.push {
+        if let Err(e) = deacon_core::build::buildkit::is_buildkit_available() {
+            let error = result::BuildError::with_description(
+                "BuildKit is required for --push",
+                "Enable BuildKit or remove --push flag",
+            );
+            if matches!(args.output_format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string(&error)?);
+            } else {
+                eprintln!("Error: {}", error.message);
+                if let Some(desc) = &error.description {
+                    eprintln!("{}", desc);
+                }
+            }
+            return Err(anyhow!("BuildKit check failed: {}", e));
+        } else if !deacon_core::build::buildkit::is_buildkit_available()? {
+            let error = result::BuildError::with_description(
+                "BuildKit is required for --push",
+                "Enable BuildKit or remove --push flag",
+            );
+            if matches!(args.output_format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string(&error)?);
+            } else {
+                eprintln!("Error: {}", error.message);
+                if let Some(desc) = &error.description {
+                    eprintln!("{}", desc);
+                }
+            }
+            return Err(anyhow!("BuildKit is required for --push"));
+        }
+    }
+
+    // Validate BuildKit requirements for --output
+    if args.output.is_some() {
+        if let Err(e) = deacon_core::build::buildkit::is_buildkit_available() {
+            let error = result::BuildError::with_description(
+                "BuildKit is required for --output",
+                "Enable BuildKit or remove --output flag",
+            );
+            if matches!(args.output_format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string(&error)?);
+            } else {
+                eprintln!("Error: {}", error.message);
+                if let Some(desc) = &error.description {
+                    eprintln!("{}", desc);
+                }
+            }
+            return Err(anyhow!("BuildKit check failed: {}", e));
+        } else if !deacon_core::build::buildkit::is_buildkit_available()? {
+            let error = result::BuildError::with_description(
+                "BuildKit is required for --output",
+                "Enable BuildKit or remove --output flag",
+            );
+            if matches!(args.output_format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string(&error)?);
+            } else {
+                eprintln!("Error: {}", error.message);
+                if let Some(desc) = &error.description {
+                    eprintln!("{}", desc);
+                }
+            }
+            return Err(anyhow!("BuildKit is required for --output"));
+        }
+    }
+
+    // Validate BuildKit requirements for --platform
+    if args.platform.is_some() {
+        if let Err(e) = deacon_core::build::buildkit::is_buildkit_available() {
+            let error = result::BuildError::with_description(
+                "BuildKit is required for --platform",
+                "Enable BuildKit or remove --platform flag",
+            );
+            if matches!(args.output_format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string(&error)?);
+            } else {
+                eprintln!("Error: {}", error.message);
+                if let Some(desc) = &error.description {
+                    eprintln!("{}", desc);
+                }
+            }
+            return Err(anyhow!("BuildKit check failed: {}", e));
+        } else if !deacon_core::build::buildkit::is_buildkit_available()? {
+            let error = result::BuildError::with_description(
+                "BuildKit is required for --platform",
+                "Enable BuildKit or remove --platform flag",
+            );
+            if matches!(args.output_format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string(&error)?);
+            } else {
+                eprintln!("Error: {}", error.message);
+                if let Some(desc) = &error.description {
+                    eprintln!("{}", desc);
+                }
+            }
+            return Err(anyhow!("BuildKit is required for --platform"));
+        }
+    }
+
+    // Validate BuildKit requirements for --cache-to
+    if !args.cache_to.is_empty() {
+        if let Err(e) = deacon_core::build::buildkit::is_buildkit_available() {
+            let error = result::BuildError::with_description(
+                "BuildKit is required for --cache-to",
+                "Enable BuildKit or remove --cache-to flag",
+            );
+            if matches!(args.output_format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string(&error)?);
+            } else {
+                eprintln!("Error: {}", error.message);
+                if let Some(desc) = &error.description {
+                    eprintln!("{}", desc);
+                }
+            }
+            return Err(anyhow!("BuildKit check failed: {}", e));
+        } else if !deacon_core::build::buildkit::is_buildkit_available()? {
+            let error = result::BuildError::with_description(
+                "BuildKit is required for --cache-to",
+                "Enable BuildKit or remove --cache-to flag",
+            );
+            if matches!(args.output_format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string(&error)?);
+            } else {
+                eprintln!("Error: {}", error.message);
+                if let Some(desc) = &error.description {
+                    eprintln!("{}", desc);
+                }
+            }
+            return Err(anyhow!("BuildKit is required for --cache-to"));
+        }
+    }
+
     // Load configuration
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
@@ -412,6 +602,40 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     };
 
     debug!("Loaded configuration: {:?}", config.name);
+
+    // Validate compose mode restrictions
+    if config.uses_compose() {
+        let unsupported_flags = [
+            (args.push, "--push"),
+            (args.output.is_some(), "--output"),
+            (!args.cache_to.is_empty(), "--cache-to"),
+            (args.platform.is_some(), "--platform"),
+        ];
+
+        for (flag_active, flag_name) in unsupported_flags {
+            if flag_active {
+                let error = result::BuildError::with_description(
+                    format!(
+                        "Cannot use {} with Docker Compose configurations",
+                        flag_name
+                    ),
+                    "Docker Compose does not support this flag during build",
+                );
+                if matches!(args.output_format, OutputFormat::Json) {
+                    println!("{}", serde_json::to_string(&error)?);
+                } else {
+                    eprintln!("Error: {}", error.message);
+                    if let Some(desc) = &error.description {
+                        eprintln!("{}", desc);
+                    }
+                }
+                return Err(anyhow!(
+                    "{} is not supported with Docker Compose configurations",
+                    flag_name
+                ));
+            }
+        }
+    }
 
     // Validate host requirements if specified in configuration
     if let Some(host_requirements) = &config.host_requirements {
@@ -469,8 +693,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     let config_hash = calculate_config_hash(&build_config, workspace_folder)?;
     debug!("Configuration hash: {}", config_hash);
 
-    // Check cache if not forced
-    if !args.force {
+    // Check cache if not forced (skip cache if pushing or exporting)
+    if !args.force && !args.push && args.output.is_none() {
         if let Some(cached_result) = check_build_cache(&config_hash, workspace_folder).await? {
             info!("Using cached build result");
             output_result(
@@ -478,6 +702,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
                 &args.output_format,
                 &args.redaction_config,
                 &args.secret_registry,
+                false,
+                None,
             )?;
             return Ok(());
         }
@@ -494,7 +720,21 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
         dockerfile: Some(build_config.dockerfile.clone()),
     })?;
 
-    let result = execute_docker_build(&build_config, &args, &config_hash, workspace_folder).await;
+    // Dispatch to appropriate build function based on configuration type
+    let result = if config.uses_compose() {
+        execute_compose_build(&config, &args, workspace_folder, &labels, &config_hash).await
+    } else if config.image.is_some() {
+        execute_image_reference_build(&config, &args, workspace_folder, &labels).await
+    } else {
+        execute_docker_build(
+            &build_config,
+            &args,
+            &config_hash,
+            workspace_folder,
+            &labels,
+        )
+        .await
+    };
     let build_duration = build_start_time.elapsed();
 
     // Emit build end event
@@ -546,6 +786,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
         &args.output_format,
         &args.redaction_config,
         &args.secret_registry,
+        args.push,
+        args.output.as_deref(),
     )?;
 
     // Output final summary in debug mode
@@ -568,12 +810,20 @@ fn extract_build_config(
 ) -> Result<BuildConfig> {
     // Check if this is a compose-based configuration
     if config.uses_compose() {
-        return Err(
+        // For compose mode, we use the service name as a placeholder
+        // Actual compose build will be handled by execute_compose_build
+        let service = config.service.as_ref().ok_or_else(|| {
             DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                message: "Docker Compose configurations cannot be built directly. Use 'docker compose build' to build individual services.".to_string(),
+                message: "Docker Compose configuration must specify a service".to_string(),
             })
-            .into(),
-        );
+        })?;
+
+        return Ok(BuildConfig {
+            dockerfile: format!("compose-service-{}", service),
+            context: ".".to_string(),
+            target: None,
+            options: HashMap::new(),
+        });
     }
     // Check if we have a dockerfile specified
     if let Some(dockerfile) = &config.dockerfile {
@@ -632,15 +882,15 @@ fn extract_build_config(
         }
 
         Ok(build_config)
-    } else if config.image.is_some() {
-        // If we have an image but no dockerfile, we can't build
-        Err(
-            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                message: "Cannot build with 'image' configuration. Use 'dockerFile' for builds."
-                    .to_string(),
-            })
-            .into(),
-        )
+    } else if let Some(image) = &config.image {
+        // For image-reference mode, create a build config that will generate a Dockerfile
+        // Actual image-reference build will be handled by execute_image_reference_build
+        Ok(BuildConfig {
+            dockerfile: format!("image-reference-{}", image.replace([':', '/'], "-")),
+            context: ".".to_string(),
+            target: None,
+            options: HashMap::new(),
+        })
     } else {
         // No dockerfile or image specified
         Err(
@@ -970,13 +1220,150 @@ fn should_use_buildkit(buildkit_option: Option<&BuildKitOption>) -> bool {
     }
 }
 
+/// Execute Compose build
+#[instrument(skip(config, args, workspace_folder, labels))]
+async fn execute_compose_build(
+    config: &DevContainerConfig,
+    args: &BuildArgs,
+    workspace_folder: &Path,
+    labels: &[(String, String)],
+    config_hash: &str,
+) -> Result<BuildResult> {
+    use deacon_core::compose::ComposeManager;
+    use std::time::Instant;
+
+    let service = config
+        .service
+        .as_ref()
+        .ok_or_else(|| anyhow!("Docker Compose configuration must specify a service"))?;
+
+    info!("Building Docker Compose service: {}", service);
+
+    let build_start = Instant::now();
+
+    // Create compose project
+    let compose_manager = ComposeManager::new();
+    let project = compose_manager.create_project(config, workspace_folder)?;
+
+    // Validate service exists
+    if !compose_manager.validate_service_exists(&project, service)? {
+        return Err(anyhow!(
+            "Service '{}' not found in Docker Compose configuration",
+            service
+        ));
+    }
+
+    // Build the service
+    let _build_output = compose_manager.build_service(&project, service)?;
+
+    let build_duration = build_start.elapsed().as_secs_f64();
+
+    info!("Docker Compose service built successfully: {}", service);
+
+    // Generate image names - compose services typically use project-service naming
+    let mut image_names = args.image_names.clone();
+    if image_names.is_empty() {
+        // Use default naming: project_service
+        image_names.push(format!("{}-{}", project.name, service));
+    }
+
+    // Create metadata with labels
+    let mut metadata = HashMap::new();
+    for (key, value) in labels {
+        metadata.insert(key.clone(), value.clone());
+    }
+
+    Ok(BuildResult {
+        image_id: format!("{}-{}", project.name, service),
+        tags: image_names,
+        build_duration,
+        metadata,
+        config_hash: config_hash.to_string(),
+    })
+}
+
+/// Execute image-reference build by creating a Dockerfile from the base image
+#[instrument(skip(config, args, workspace_folder, labels))]
+async fn execute_image_reference_build(
+    config: &DevContainerConfig,
+    args: &BuildArgs,
+    workspace_folder: &Path,
+    labels: &[(String, String)],
+) -> Result<BuildResult> {
+    let image = config
+        .image
+        .as_ref()
+        .ok_or_else(|| anyhow!("Image reference configuration must specify an image"))?;
+
+    info!("Building from image reference: {}", image);
+
+    // Create a temporary Dockerfile that extends the base image
+    let temp_dir = workspace_folder.join(".deacon-temp-build");
+    std::fs::create_dir_all(&temp_dir)?;
+
+    // Build Dockerfile content with base image
+    let mut dockerfile_content = format!("FROM {}\n\n", image);
+
+    // Add labels
+    if !labels.is_empty() {
+        dockerfile_content.push_str("# User-specified labels\n");
+        for (key, value) in labels {
+            // Escape quotes in label values
+            let escaped_value = value.replace('"', "\\\"");
+            dockerfile_content.push_str(&format!("LABEL \"{}\"=\"{}\"\n", key, escaped_value));
+        }
+        dockerfile_content.push('\n');
+    }
+
+    // Add devcontainer metadata label
+    // Serialize basic configuration metadata
+    let metadata = serde_json::json!({
+        "name": config.name.as_ref().unwrap_or(&"devcontainer".to_string()),
+        "image": image,
+    });
+    let metadata_str = serde_json::to_string(&metadata)?;
+    let escaped_metadata = metadata_str.replace('"', "\\\"");
+    dockerfile_content.push_str(&format!(
+        "LABEL \"devcontainer.metadata\"=\"{}\"\n",
+        escaped_metadata
+    ));
+
+    // TODO: Apply features if specified in config
+    // This would require feature resolution and installation script generation
+    // For now, image-reference builds with features are a future enhancement
+
+    let dockerfile_path = temp_dir.join("Dockerfile");
+    std::fs::write(&dockerfile_path, dockerfile_content)?;
+
+    // Create a BuildConfig for this temporary Dockerfile
+    let build_config = BuildConfig {
+        dockerfile: "Dockerfile".to_string(),
+        context: temp_dir.to_string_lossy().to_string(),
+        target: None,
+        options: HashMap::new(),
+    };
+
+    // Generate config hash for this image reference build
+    let config_hash = format!("image-ref-{}", image.replace([':', '/'], "-"));
+
+    // Execute the docker build
+    let result =
+        execute_docker_build(&build_config, args, &config_hash, workspace_folder, labels).await;
+
+    // Clean up temporary directory
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    result
+}
+
 /// Execute Docker build
-#[instrument(skip(build_config, args, workspace_folder))]
+#[instrument(skip(build_config, args, workspace_folder, labels))]
 async fn execute_docker_build(
     build_config: &BuildConfig,
     args: &BuildArgs,
     config_hash: &str,
     workspace_folder: &Path,
+    labels: &[(String, String)],
 ) -> Result<BuildResult> {
     {
         use deacon_core::docker::{CliDocker, Docker};
@@ -1184,13 +1571,48 @@ async fn execute_docker_build(
         build_args.push("-t".to_string());
         build_args.push(tag.clone());
 
+        // Add user-specified image names as additional tags
+        for image_name in &args.image_names {
+            build_args.push("-t".to_string());
+            build_args.push(image_name.clone());
+        }
+
         // Add label with config hash
         let label = format!("org.deacon.configHash={}", config_hash);
         build_args.push("--label".to_string());
         build_args.push(label);
 
-        // Add quiet flag to reduce output noise
-        build_args.push("-q".to_string());
+        // Add devcontainer metadata label (simplified for T011)
+        // This stores basic config info in the image for downstream tooling
+        let metadata_json = serde_json::json!({
+            "configHash": config_hash,
+        });
+        let metadata_str = serde_json::to_string(&metadata_json)
+            .map_err(|e| anyhow!("Failed to serialize metadata: {}", e))?;
+        build_args.push("--label".to_string());
+        build_args.push(format!("devcontainer.metadata={}", metadata_str));
+
+        // Add user-specified labels
+        for (key, value) in labels {
+            build_args.push("--label".to_string());
+            build_args.push(format!("{}={}", key, value));
+        }
+
+        // Add --push flag if requested
+        if args.push {
+            build_args.push("--push".to_string());
+        }
+
+        // Add --output flag if requested
+        if let Some(output) = &args.output {
+            build_args.push("--output".to_string());
+            build_args.push(output.clone());
+        }
+
+        // Add quiet flag to reduce output noise (only if not pushing/exporting)
+        if !args.push && args.output.is_none() {
+            build_args.push("-q".to_string());
+        }
 
         // Finally add build context (must be last)
         build_args.push(
@@ -1217,14 +1639,33 @@ async fn execute_docker_build(
             return Err(DockerError::CLIError(format!("Docker build failed: {}", stderr)).into());
         }
 
-        let image_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // When using --push or --output, we may not get an image ID on stdout
+        let image_id = if args.push || args.output.is_some() {
+            // For push/export, the image may not be available locally
+            // Use the first user-specified tag or the deterministic tag as a reference
+            if !args.image_names.is_empty() {
+                args.image_names[0].clone()
+            } else {
+                tag.clone()
+            }
+        } else {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
 
-        // Extract image metadata
-        let metadata = extract_image_metadata(&image_id).await?;
+        // Extract image metadata (skip if pushing or exporting as image may not be local)
+        let metadata = if args.push || args.output.is_some() {
+            HashMap::new()
+        } else {
+            extract_image_metadata(&image_id).await?
+        };
+
+        // Collect all tags: deterministic tag plus user-specified tags
+        let mut all_tags = vec![tag];
+        all_tags.extend(args.image_names.clone());
 
         let result = BuildResult {
             image_id,
-            tags: vec![tag],
+            tags: all_tags,
             build_duration: 0.0, // Will be set by caller
             metadata,
             config_hash: config_hash.to_string(),
@@ -1269,6 +1710,8 @@ fn output_result(
     format: &OutputFormat,
     redaction_config: &deacon_core::redaction::RedactionConfig,
     registry: &deacon_core::redaction::SecretRegistry,
+    pushed: bool,
+    export_path: Option<&str>,
 ) -> Result<()> {
     use deacon_core::redaction::RedactingWriter;
     use std::io::Write;
@@ -1278,7 +1721,26 @@ fn output_result(
 
     match format {
         OutputFormat::Json => {
-            let json = serde_json::to_string_pretty(result).map_err(|e| {
+            // Build spec-compliant JSON output
+            let mut success_result = if result.tags.len() == 1 {
+                result::BuildSuccess::new_single(result.tags[0].clone())
+            } else if result.tags.is_empty() {
+                result::BuildSuccess::default()
+            } else {
+                result::BuildSuccess::new_multiple(result.tags.clone())
+            };
+
+            // Add push status if --push was used
+            if pushed {
+                success_result = success_result.with_pushed(true);
+            }
+
+            // Add export path if --output was used
+            if let Some(path) = export_path {
+                success_result = success_result.with_export_path(path.to_string());
+            }
+
+            let json = serde_json::to_string_pretty(&success_result).map_err(|e| {
                 DeaconError::Internal(deacon_core::errors::InternalError::Generic {
                     message: format!("Failed to serialize result to JSON: {}", e),
                 })
@@ -1287,10 +1749,20 @@ fn output_result(
         }
         OutputFormat::Text => {
             writer.write_line("Build completed successfully!")?;
-            writer.write_line(&format!("Image ID: {}", result.image_id))?;
+            if !result.image_id.is_empty() {
+                writer.write_line(&format!("Image ID: {}", result.image_id))?;
+            }
             writer.write_line(&format!("Tags: {}", result.tags.join(", ")))?;
             writer.write_line(&format!("Build duration: {:.2}s", result.build_duration))?;
             writer.write_line(&format!("Config hash: {}", result.config_hash))?;
+
+            if pushed {
+                writer.write_line("Image pushed to registry successfully")?;
+            }
+
+            if let Some(path) = export_path {
+                writer.write_line(&format!("Image exported to: {}", path))?;
+            }
 
             if !result.metadata.is_empty() {
                 writer.write_line("Labels:")?;
@@ -1586,6 +2058,10 @@ mod tests {
             docker_path: "docker".to_string(),
             terminal_columns: None,
             terminal_rows: None,
+            image_names: Vec::new(),
+            label: Vec::new(),
+            push: false,
+            output: None,
         };
 
         // Verify args are structured correctly
@@ -1631,6 +2107,10 @@ mod tests {
             docker_path: "docker".to_string(),
             terminal_columns: None,
             terminal_rows: None,
+            image_names: Vec::new(),
+            label: Vec::new(),
+            push: false,
+            output: None,
         };
 
         // Verify advanced args are structured correctly
@@ -1724,7 +2204,14 @@ mod tests {
 
         // Test that calling output_result doesn't panic and applies redaction
         // Note: In a real test we'd capture stdout, but for now we just ensure it compiles and runs
-        let result_call = output_result(&result, &OutputFormat::Text, &config, &registry);
+        let result_call = output_result(
+            &result,
+            &OutputFormat::Text,
+            &config,
+            &registry,
+            false,
+            None,
+        );
         assert!(result_call.is_ok(), "Output should not fail");
     }
 

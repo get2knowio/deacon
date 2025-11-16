@@ -560,9 +560,80 @@ pub struct BuildResult {
 
 ---
 
-## 13. Version History
+## 13. Implementation Parity Targets (2025-11-15)
+
+### Phase 1: Tagged Build Deliverable (MVP - Priority P1)
+**Target:** Enable `deacon build` to apply requested tags, devcontainer metadata, and user labels while emitting spec-compliant success payloads.
+
+**Key Deliverables:**
+- ✅ Repeatable `--image-name` flag for custom tagging
+- ✅ Repeatable `--label` flag for user-specified metadata labels
+- ✅ Devcontainer metadata label injection (JSON-serialized config, features, customizations)
+- ✅ Spec-compliant JSON output: `{ "outcome": "success", "imageName": [...] }`
+- ✅ Multi-tag support with deterministic fallback tag
+- ✅ CLI parsing and validation for new flags
+
+**Validation:**
+- Run `deacon build` with multiple `--image-name` and `--label` inputs
+- Verify tags exist locally via `docker images`
+- Verify metadata label contains merged configuration
+- Verify stdout returns spec-compliant success payload
+
+### Phase 2: Registry and Artifact Distribution (Priority P2)
+**Target:** Support pushing images to registries or exporting archives with explicit BuildKit gating and structured error handling.
+
+**Key Deliverables:**
+- ✅ `--push` flag for registry push (BuildKit-only)
+- ✅ `--output` flag for custom export specs (BuildKit-only)
+- ✅ Mutual exclusivity validation (`--push` and `--output` cannot be combined)
+- ✅ BuildKit requirement checks with fail-fast errors
+- ✅ Success payload includes `pushed` and `exportPath` fields
+- ✅ Contract-compliant error messages for validation failures
+
+**Validation:**
+- Execute builds with `--push` on BuildKit-enabled hosts
+- Execute builds with `--output` for archive exports
+- Confirm gating errors when BuildKit unavailable
+- Verify artifacts are published/exported as expected
+
+### Phase 3: Multi-source Configuration Coverage (Priority P3)
+**Target:** Enable builds for Compose and image-reference configurations with parity validation and feature application.
+
+**Key Deliverables:**
+- ✅ Compose service targeting (build only the configured service)
+- ✅ Image-reference mode (extend base image with features)
+- ✅ Compose override generation for features/labels
+- ✅ Unsupported flag preflight validation for Compose mode
+- ✅ Feature application and tagging across all modes
+- ✅ Supporting fixtures for Compose and image-reference tests
+
+**Validation:**
+- Build Compose workspace targeting configured service
+- Build image-reference workspace with features applied
+- Ensure features, labels, and tagging match Dockerfile mode
+- Verify unsupported flags are rejected in Compose mode
+
+### Cross-Cutting Concerns
+- ✅ BuildKit capability detection helpers (`crates/core/src/build/buildkit.rs`)
+- ✅ Shared label and image-tag validation helpers (`crates/core/src/docker.rs`)
+- ✅ Feature metadata serialization (`crates/core/src/build/metadata.rs`)
+- ✅ Domain models: `BuildRequest`, `ImageArtifact`, `FeatureManifest`, `ValidationEvent`
+- ✅ Result structs: `BuildSuccess`, `BuildError` aligned with contracts
+
+### Testing Strategy
+- Integration tests for CLI flag parsing and validation
+- JSON output purity checks for spec-compliant payloads
+- BuildKit gating and mutual exclusivity error coverage
+- Compose service targeting and image-reference build acceptance
+- Push/export workflow validation with contract compliance
+- Regression coverage for BuildKit-only feature contexts
+
+---
+
+## 14. Version History
 
 | Date | Version | Author | Changes |
 |------|---------|--------|---------|
 | 2025-10-13 | 1.0 | AI Analysis | Initial gap analysis |
+| 2025-11-15 | 1.1 | Implementation | Added parity targets for build subcommand closure (Phases 1-3) |
 
