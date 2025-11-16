@@ -143,7 +143,16 @@ export async function runWithProgress(cmd, args = [], { logger = m => console.lo
   }
 }
 
-export async function runWorkflow({ branch, phases, tasksPath, verbose = false, logger = m => console.log(m) }) {
+export async function runWorkflow({
+  branch,
+  phases,
+  tasksPath,
+  buildModel = 'github-copilot/claude-sonnet-4.5',
+  reviewModel = 'github-copilot/claude-sonnet-4.5',
+  fixModel = 'github-copilot/claude-sonnet-4.5',
+  verbose = false,
+  logger = m => console.log(m)
+}) {
 
   if (verbose) logger('Starting workflow with git checkout...')
   // this is pure “business logic”
@@ -163,7 +172,7 @@ export async function runWorkflow({ branch, phases, tasksPath, verbose = false, 
     const phaseArgs = [
       'run',
       '--model',
-      'github-copilot/claude-sonnet-4.5',
+      buildModel,
       '--command',
       'speckit.implement',
       prompt
@@ -191,6 +200,10 @@ export async function runWorkflow({ branch, phases, tasksPath, verbose = false, 
   const coderabbitPath = path.join(outDir, 'coderabbit.md')
   const reviewPath = path.join(outDir, 'review.md')
 
+  // Sleep before review phase
+  if (verbose) logger(`Waiting ${PHASE_SLEEP_SECONDS}s before review phase...`)
+  await new Promise(resolve => setTimeout(resolve, PHASE_SLEEP_SECONDS * 1000))
+
   // Step 1: Run CodeRabbit review and write to coderabbit.md
   if (!(await fileExists(coderabbitPath))) {
     if (verbose) logger('Running CodeRabbit review (prompt-only) → coderabbit.md')
@@ -200,6 +213,10 @@ export async function runWorkflow({ branch, phases, tasksPath, verbose = false, 
   } else {
     if (verbose) logger('coderabbit.md exists; skipping CodeRabbit review')
   }
+
+  // Sleep before standalone review
+  if (verbose) logger(`Waiting ${PHASE_SLEEP_SECONDS}s before standalone review...`)
+  await new Promise(resolve => setTimeout(resolve, PHASE_SLEEP_SECONDS * 1000))
 
   // Step 2: Run an Opencode prompt to perform an independent code review → review.md
   if (!(await fileExists(reviewPath))) {
@@ -214,7 +231,7 @@ export async function runWorkflow({ branch, phases, tasksPath, verbose = false, 
     const opencodeArgs = [
       'run',
       '--model',
-      'github-copilot/claude-sonnet-4.5',
+      reviewModel,
       reviewPrompt
     ]
     if (verbose) logger(`CMD: opencode ${opencodeArgs.map(a => a.includes(' ') ? '"'+a+'"' : a).join(' ')} (cwd=${projectRoot})`)
@@ -223,6 +240,10 @@ export async function runWorkflow({ branch, phases, tasksPath, verbose = false, 
   } else {
     if (verbose) logger('review.md exists; skipping Opencode review')
   }
+
+  // Sleep before fix phase
+  if (verbose) logger(`Waiting ${PHASE_SLEEP_SECONDS}s before fix phase...`)
+  await new Promise(resolve => setTimeout(resolve, PHASE_SLEEP_SECONDS * 1000))
 
   // Step 3: Run an Opencode prompt to address issues from coderabbit.md and review.md
   if (verbose) logger('Running Opencode to address issues from coderabbit.md and review.md')
@@ -235,7 +256,7 @@ export async function runWorkflow({ branch, phases, tasksPath, verbose = false, 
   const fixArgs = [
     'run',
     '--model',
-    'github-copilot/claude-sonnet-4.5',
+    fixModel,
     fixPrompt
   ]
   if (verbose) logger(`CMD: opencode ${fixArgs.map(a => a.includes(' ') ? '"'+a+'"' : a).join(' ')} (cwd=${projectRoot})`)
