@@ -1475,7 +1475,9 @@ async fn execute_docker_build(
                 parsed_secrets.push(secret);
             }
 
-            // Read secret values and register them for redaction
+            // Read all secret values first (before creating any temp files)
+            // This allows early returns on errors without leaving temp files behind
+            let mut secret_values = Vec::new();
             for secret in &parsed_secrets {
                 let value = secret
                     .read_value()
@@ -1492,13 +1494,18 @@ async fn execute_docker_build(
                     args.secret_registry.add_secret(&value);
                 }
 
+                secret_values.push(value);
+            }
+
+            // Now create temp files and build args (after all validation succeeds)
+            for (secret, value) in parsed_secrets.iter().zip(secret_values.iter()) {
                 // For env and stdin sources, we need to write to a temp file
                 let temp_file = match &secret.source {
                     BuildSecretSource::File(_) => None,
                     BuildSecretSource::Env(_) | BuildSecretSource::Stdin => {
                         let temp_file = tempfile::NamedTempFile::new()
                             .context("Failed to create temporary file for build secret")?;
-                        std::fs::write(temp_file.path(), &value).with_context(|| {
+                        std::fs::write(temp_file.path(), value).with_context(|| {
                             format!(
                                 "Failed to write build secret '{}' to temporary file",
                                 secret.id
