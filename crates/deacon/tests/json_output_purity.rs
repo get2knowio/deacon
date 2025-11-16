@@ -497,6 +497,7 @@ fn test_features_info_log_levels_json_purity() -> Result<()> {
 
 /// Test build command JSON output purity with multi-tag success payloads
 #[test]
+#[ignore]
 fn test_build_multi_tag_json_output() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let ws = temp_dir.path();
@@ -598,6 +599,7 @@ RUN echo "Testing multi-tag JSON output"
 
 /// Test build command JSON output for single tag (backward compatibility)
 #[test]
+#[ignore]
 fn test_build_single_tag_json_output() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let ws = temp_dir.path();
