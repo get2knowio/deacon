@@ -453,6 +453,119 @@ impl ComposeManager {
         Ok(())
     }
 
+    /// Build a specific service in a Docker Compose project.
+    ///
+    /// This method executes `docker compose build <service>` to build the specified
+    /// service defined in the project's compose configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `project` - The compose project containing the service
+    /// * `service` - Name of the service to build
+    ///
+    /// # Returns
+    ///
+    /// Returns the command output on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The docker compose command fails to execute
+    /// - The service does not exist in the project
+    /// - The build process fails
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use deacon_core::compose::{ComposeManager, ComposeProject};
+    /// # fn example() -> anyhow::Result<()> {
+    /// let manager = ComposeManager::new()?;
+    /// let project = ComposeProject {
+    ///     name: "my-project".to_string(),
+    ///     file: "docker-compose.yml".to_string(),
+    ///     working_directory: "/path/to/project".into(),
+    /// };
+    ///
+    /// let output = manager.build_service(&project, "web")?;
+    /// println!("Build output: {}", output);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip(self))]
+    pub fn build_service(&self, project: &ComposeProject, service: &str) -> Result<String> {
+        let command = self.get_command(project);
+
+        debug!(
+            "Building compose project {} service {}",
+            project.name, service
+        );
+
+        let output = command.execute(&["build", service])?;
+
+        debug!(
+            "Compose project {} service {} built successfully",
+            project.name, service
+        );
+        Ok(output)
+    }
+
+    /// Validate that a service exists in a Docker Compose project configuration.
+    ///
+    /// This method queries the compose configuration to determine if a service
+    /// with the given name is defined in the project.
+    ///
+    /// # Arguments
+    ///
+    /// * `project` - The compose project to check
+    /// * `service` - Name of the service to validate
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(true)` if the service exists, `Ok(false)` if it doesn't.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the docker compose command fails to execute.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use deacon_core::compose::{ComposeManager, ComposeProject};
+    /// # fn example() -> anyhow::Result<()> {
+    /// let manager = ComposeManager::new()?;
+    /// let project = ComposeProject {
+    ///     name: "my-project".to_string(),
+    ///     file: "docker-compose.yml".to_string(),
+    ///     working_directory: "/path/to/project".into(),
+    /// };
+    ///
+    /// if manager.validate_service_exists(&project, "web")? {
+    ///     println!("Service 'web' exists in the project");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip(self))]
+    pub fn validate_service_exists(&self, project: &ComposeProject, service: &str) -> Result<bool> {
+        let command = self.get_command(project);
+
+        // Use docker compose config --services to list all available services
+        let output = command.execute(&["config", "--services"])?;
+
+        let services: Vec<String> = output
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        debug!(
+            "Found services in compose project {}: {:?}",
+            project.name, services
+        );
+
+        Ok(services.contains(&service.to_string()))
+    }
+
     /// Get primary service container ID
     #[instrument(skip(self))]
     pub fn get_primary_container_id(&self, project: &ComposeProject) -> Result<Option<String>> {

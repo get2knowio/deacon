@@ -1,0 +1,6 @@
+{
+  "name": "unwritable-output",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {},
+  "remoteUser": "root"
+}

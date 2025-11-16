@@ -1,0 +1,6 @@
+{
+  "name": "dockerfile-with-features",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": { "./features/hello": {} },
+  "remoteUser": "root"
+}

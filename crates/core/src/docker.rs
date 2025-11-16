@@ -12,6 +12,223 @@ use std::path::Path;
 use std::process::Command;
 use tracing::{debug, instrument, warn};
 
+/// Validates a Docker label name according to Docker label naming rules.
+///
+/// Docker label names must:
+/// - Start and end with alphanumeric characters
+/// - Contain only lowercase alphanumerics, dots, and hyphens
+/// - Not contain consecutive dots or hyphens
+///
+/// # Arguments
+/// * `label_name` - The label name to validate
+///
+/// # Returns
+/// * `Ok(())` if valid
+/// * `Err(DockerError)` with validation failure details
+pub fn validate_label_name(label_name: &str) -> Result<()> {
+    if label_name.is_empty() {
+        return Err(DockerError::CLIError("Label name cannot be empty".to_string()).into());
+    }
+
+    // Check for valid starting/ending characters
+    let first_char = label_name.chars().next().unwrap();
+    let last_char = label_name.chars().last().unwrap();
+
+    if !first_char.is_ascii_alphanumeric() {
+        return Err(DockerError::CLIError(format!(
+            "Label name '{}' must start with an alphanumeric character",
+            label_name
+        ))
+        .into());
+    }
+
+    if !last_char.is_ascii_alphanumeric() {
+        return Err(DockerError::CLIError(format!(
+            "Label name '{}' must end with an alphanumeric character",
+            label_name
+        ))
+        .into());
+    }
+
+    // Check for valid characters (lowercase alphanumerics, dots, hyphens)
+    for ch in label_name.chars() {
+        if !ch.is_ascii_alphanumeric() && ch != '.' && ch != '-' && ch != '/' {
+            return Err(DockerError::CLIError(format!(
+                "Label name '{}' contains invalid character '{}'. Only lowercase alphanumerics, dots, hyphens, and slashes are allowed",
+                label_name, ch
+            ))
+            .into());
+        }
+    }
+
+    // Check for consecutive dots or hyphens
+    if label_name.contains("..") || label_name.contains("--") {
+        return Err(DockerError::CLIError(format!(
+            "Label name '{}' contains consecutive dots or hyphens",
+            label_name
+        ))
+        .into());
+    }
+
+    Ok(())
+}
+
+/// Validates a Docker image tag according to Docker tag naming rules.
+///
+/// Docker image tags/names follow the format: `[registry/][namespace/]name[:tag][@digest]`
+/// - Registry and namespace are optional
+/// - Name is required and must be lowercase alphanumerics, dots, hyphens, underscores
+/// - Tag is optional, defaults to 'latest'
+/// - Digest is optional
+///
+/// # Arguments
+/// * `image_tag` - The image tag to validate
+///
+/// # Returns
+/// * `Ok(())` if valid
+/// * `Err(DockerError)` with validation failure details
+pub fn validate_image_tag(image_tag: &str) -> Result<()> {
+    if image_tag.is_empty() {
+        return Err(DockerError::CLIError("Image tag cannot be empty".to_string()).into());
+    }
+
+    // Split by '@' to separate digest if present
+    let (name_part, digest_part) = if let Some(pos) = image_tag.rfind('@') {
+        (&image_tag[..pos], Some(&image_tag[pos + 1..]))
+    } else {
+        (image_tag, None)
+    };
+
+    // Validate digest if present
+    if let Some(digest) = digest_part {
+        if !digest.starts_with("sha256:") && !digest.starts_with("sha512:") {
+            return Err(DockerError::CLIError(format!(
+                "Image digest '{}' must start with 'sha256:' or 'sha512:'",
+                digest
+            ))
+            .into());
+        }
+    }
+
+    // Split by ':' to separate tag
+    let (name_section, tag) = if let Some(pos) = name_part.rfind(':') {
+        // Check if ':' is part of a port number (registry:port/name case)
+        let before_colon = &name_part[..pos];
+        let after_colon = &name_part[pos + 1..];
+
+        // If there's a '/' after the colon, this is a registry:port/name pattern
+        if after_colon.contains('/') {
+            (name_part, None)
+        } else {
+            (before_colon, Some(after_colon))
+        }
+    } else {
+        (name_part, None)
+    };
+
+    // Validate tag if present
+    if let Some(tag_str) = tag {
+        if tag_str.is_empty() {
+            return Err(
+                DockerError::CLIError("Image tag after ':' cannot be empty".to_string()).into(),
+            );
+        }
+
+        // Tags can contain alphanumerics, dots, hyphens, underscores
+        // Max length is 128 characters
+        if tag_str.len() > 128 {
+            return Err(DockerError::CLIError(format!(
+                "Image tag '{}' exceeds maximum length of 128 characters",
+                tag_str
+            ))
+            .into());
+        }
+
+        for ch in tag_str.chars() {
+            if !ch.is_ascii_alphanumeric() && ch != '.' && ch != '-' && ch != '_' {
+                return Err(DockerError::CLIError(format!(
+                    "Image tag '{}' contains invalid character '{}'. Only alphanumerics, dots, hyphens, and underscores are allowed",
+                    tag_str, ch
+                ))
+                .into());
+            }
+        }
+
+        // Tag cannot start with '.' or '-'
+        let first_char = tag_str.chars().next().unwrap();
+        if first_char == '.' || first_char == '-' {
+            return Err(DockerError::CLIError(format!(
+                "Image tag '{}' cannot start with '.' or '-'",
+                tag_str
+            ))
+            .into());
+        }
+    }
+
+    // Validate name section (registry/namespace/name)
+    if name_section.is_empty() {
+        return Err(DockerError::CLIError("Image name cannot be empty".to_string()).into());
+    }
+
+    // Split by '/' to get registry/namespace/name components
+    let parts: Vec<&str> = name_section.split('/').collect();
+
+    // Validate each component
+    for (idx, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            return Err(DockerError::CLIError(format!(
+                "Image reference '{}' contains empty component",
+                image_tag
+            ))
+            .into());
+        }
+
+        // First component might be a registry (contains '.' or ':')
+        if idx == 0 && (part.contains('.') || part.contains(':')) {
+            // This is a registry, validate as hostname:port
+            continue;
+        }
+
+        // For repository name components, validate characters
+        for ch in part.chars() {
+            if !ch.is_ascii_lowercase()
+                && !ch.is_ascii_digit()
+                && ch != '.'
+                && ch != '-'
+                && ch != '_'
+            {
+                return Err(DockerError::CLIError(format!(
+                    "Image name component '{}' contains invalid character '{}'. Only lowercase alphanumerics, dots, hyphens, and underscores are allowed",
+                    part, ch
+                ))
+                .into());
+            }
+        }
+
+        // Component cannot start or end with separator characters
+        let first_char = part.chars().next().unwrap();
+        let last_char = part.chars().last().unwrap();
+
+        if first_char == '.' || first_char == '-' || first_char == '_' {
+            return Err(DockerError::CLIError(format!(
+                "Image name component '{}' cannot start with '.', '-', or '_'",
+                part
+            ))
+            .into());
+        }
+
+        if last_char == '.' || last_char == '-' || last_char == '_' {
+            return Err(DockerError::CLIError(format!(
+                "Image name component '{}' cannot end with '.', '-', or '_'",
+                part
+            ))
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
 /// Container information returned by Docker operations
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

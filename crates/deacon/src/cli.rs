@@ -223,6 +223,33 @@ pub enum Commands {
         /// Environment file(s) to pass to docker compose (can be repeated)
         #[arg(long)]
         env_file: Vec<PathBuf>,
+        /// Image name(s) to apply as tags (can be repeated)
+        #[arg(long = "image-name")]
+        image_names: Vec<String>,
+        /// Metadata label to apply to the image in key=value format (can be repeated)
+        #[arg(long)]
+        label: Vec<String>,
+        /// Push image to registry after build (requires BuildKit)
+        #[arg(long)]
+        push: bool,
+        /// Export image to file or directory (BuildKit format: type=...,dest=...)
+        #[arg(long)]
+        output: Option<String>,
+        /// Skip feature auto-mapping (hidden testing flag)
+        #[arg(long, hide = true)]
+        skip_feature_auto_mapping: bool,
+        /// Do not persist customizations from features into image metadata
+        #[arg(long, hide = true)]
+        skip_persisting_customizations_from_features: bool,
+        /// Write feature lockfile (experimental)
+        #[arg(long, hide = true)]
+        experimental_lockfile: bool,
+        /// Fail if lockfile changes would occur (experimental)
+        #[arg(long, hide = true)]
+        experimental_frozen_lockfile: bool,
+        /// Omit Dockerfile syntax directive workaround
+        #[arg(long, hide = true)]
+        omit_syntax_directive: bool,
     },
 
     /// Execute command in running container
@@ -902,6 +929,15 @@ impl Cli {
                 feature_install_order,
                 ignore_host_requirements,
                 env_file,
+                image_names,
+                label,
+                push,
+                output,
+                skip_feature_auto_mapping,
+                skip_persisting_customizations_from_features,
+                experimental_lockfile,
+                experimental_frozen_lockfile,
+                omit_syntax_directive,
             }) => {
                 use crate::commands::build::{execute_build, BuildArgs};
 
@@ -932,6 +968,15 @@ impl Cli {
                     docker_path: self.docker_path.clone(),
                     terminal_columns: self.terminal_columns,
                     terminal_rows: self.terminal_rows,
+                    image_names,
+                    label,
+                    push,
+                    output,
+                    skip_feature_auto_mapping,
+                    skip_persisting_customizations_from_features,
+                    experimental_lockfile,
+                    experimental_frozen_lockfile,
+                    omit_syntax_directive,
                 };
 
                 execute_build(args).await?;

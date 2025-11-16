@@ -32,14 +32,14 @@
     - `--log-format <text|json>` (default `text`)
   - Build behavior:
     - `--no-cache` (boolean): Build without cache.
-    - `--image-name <name[:tag]>` (repeatable): Final image name(s)/tags to apply. Default derived if omitted.
+    - `--image-name <name[:tag]>` (repeatable): Final image name(s)/tags to apply. Default derived if omitted. **[IMPLEMENTED]**
     - `--cache-from <ref>` (repeatable): Additional cache sources (BuildKit only; ignored if `--no-cache`).
     - `--cache-to <spec>`: Buildx cache export destination (BuildKit only; not supported with Compose).
     - `--buildkit <auto|never>` (default `auto`): Build with BuildKit/buildx or legacy build.
     - `--platform <os/arch[/variant]>`: Target platforms (BuildKit only; not supported with Compose).
-    - `--push` (boolean): Push built image to registry (BuildKit only; not supported with Compose).
-    - `--output <spec>`: Override build output (e.g., `type=oci,dest=out.tar`) (BuildKit only; mutually exclusive with `--push`).
-    - `--label <name=value>` (repeatable): Add image metadata labels to builds.
+    - `--push` (boolean): Push built image to registry (BuildKit only; not supported with Compose). **[IMPLEMENTED]**
+    - `--output <spec>`: Override build output (e.g., `type=oci,dest=out.tar`) (BuildKit only; mutually exclusive with `--push`). **[IMPLEMENTED]**
+    - `--label <name=value>` (repeatable): Add image metadata labels to builds. **[IMPLEMENTED]**
   - Features and metadata:
     - `--additional-features <json>`: JSON object per `features` schema to merge with config.
     - `--skip-feature-auto-mapping` (boolean, hidden): Testing toggle; bypasses auto feature mapping.
@@ -63,6 +63,19 @@
   - When `--output` present with `--push`: error “--push true cannot be used with --output.”
   - In Compose mode, usage of `--platform`/`--push`/`--output`/`--cache-to`: error “... not supported.”
 
+
+### Implementation Status
+
+The following validation rules and flags have been fully implemented in the Rust CLI:
+
+- **Multi-tag support**: `--image-name` can be specified multiple times; all tags are applied to the built image and returned in the success payload as an array.
+- **Custom labels**: `--label` can be specified multiple times; labels are injected into the image along with devcontainer metadata.
+- **Push to registry**: `--push` triggers BuildKit push mode; requires BuildKit availability.
+- **Export artifacts**: `--output` enables BuildKit output customization (e.g., OCI archive export); mutually exclusive with `--push`.
+- **BuildKit gating**: BuildKit-only flags (`--push`, `--output`, `--platform`, `--cache-to`) fail fast with clear error messages when BuildKit is unavailable.
+- **Compose mode restrictions**: Compose configurations reject unsupported flags (`--platform`, `--push`, `--output`, `--cache-to`) with validation errors.
+- **Success payload schema**: JSON output matches the contract: `{ "outcome": "success", "imageName": string | string[], "pushed"?: boolean, "exportPath"?: string }`.
+- **Error payload schema**: JSON errors follow the contract: `{ "outcome": "error", "message": string, "description"?: string }`.
 ## 3. Input Processing Pipeline
 
 ```pseudocode
@@ -299,8 +312,13 @@ END FUNCTION
 ## 10. Output Specifications
 - Standard Output (stdout):
   - JSON Mode (default):
-    - Success: `{ "outcome": "success", "imageName": string | string[] }`
+    - Success: `{ "outcome": "success", "imageName": string | string[], "pushed"?: boolean, "exportPath"?: string }`
+      - `imageName`: Single tag (string) or array of tags when multiple `--image-name` flags provided
+      - `pushed`: Optional boolean; `true` when `--push` was used and succeeded
+      - `exportPath`: Optional string; path to exported artifact when `--output` was used
     - Error: `{ "outcome": "error", "message": string, "description"?: string }`
+      - `message`: Short error message (e.g., "BuildKit is required for this operation")
+      - `description`: Optional detailed context for debugging
   - Text Mode: Not used for primary result; logs go to stderr.
 - Standard Error (stderr):
   - Logs at chosen level; build progress streamed (pty vs non-pty).

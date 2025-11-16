@@ -1,0 +1,6 @@
+{
+  "name": "image-reference-with-features",
+  "image": "alpine:3.19",
+  "features": { "./features/hello": {} },
+  "remoteUser": "root"
+}
