@@ -693,6 +693,20 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     let config_hash = calculate_config_hash(&build_config, workspace_folder)?;
     debug!("Configuration hash: {}", config_hash);
 
+    // Fail fast if features are specified (not yet supported)
+    // This check applies to all build modes (Dockerfile, image-reference, compose)
+    if !config.features.is_null()
+        && config
+            .features
+            .as_object()
+            .map_or(false, |obj| !obj.is_empty())
+    {
+        return Err(anyhow!(
+            "Feature installation during build is not yet implemented. \
+             Remove features from devcontainer.json or use 'deacon up' which will apply features after build."
+        ));
+    }
+
     // Check cache if not forced (skip cache if pushing or exporting)
     if !args.force && !args.push && args.output.is_none() {
         if let Some(cached_result) = check_build_cache(&config_hash, workspace_folder).await? {
