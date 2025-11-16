@@ -17,11 +17,11 @@ Notes
 
 Purpose: Ensure minimal scaffolding and flags to support story work.
 
-- [ ] T001 [P] Add `--remote-env` as visible alias to `exec --env` in `crates/deacon/src/cli.rs` (accept empty values)
-- [ ] T002 [P] Add `--default-user-env-probe` option to `Exec` in `crates/deacon/src/cli.rs` (enum: none|loginInteractiveShell|interactiveShell|loginShell)
-- [ ] T003 [P] Thread global `--log-format` into `ExecArgs` (add `force_tty_if_json: bool`) in `crates/deacon/src/cli.rs` and `crates/deacon/src/commands/exec.rs`
-- [ ] T033 [P] Set default for `--default-user-env-probe` to `loginInteractiveShell` and document in help (in `crates/deacon/src/cli.rs`)
-- [ ] T039 [P] Thread Docker tooling path flags through exec: `--docker-path`, `--docker-compose-path`, `--container-data-folder`, `--container-system-data-folder`
+- [X] T001 [P] Add `--remote-env` as visible alias to `exec --env` in `crates/deacon/src/cli.rs` (accept empty values)
+- [X] T002 [P] Add `--default-user-env-probe` option to `Exec` in `crates/deacon/src/cli.rs` (enum: none|loginInteractiveShell|interactiveShell|loginShell)
+- [X] T003 [P] Thread global `--log-format` into `ExecArgs` (add `force_tty_if_json: bool`) in `crates/deacon/src/cli.rs` and `crates/deacon/src/commands/exec.rs`
+- [X] T033 [P] Set default for `--default-user-env-probe` to `loginInteractiveShell` and document in help (in `crates/deacon/src/cli.rs`)
+- [X] T039 [P] Thread Docker tooling path flags through exec: `--docker-path`, `--docker-compose-path`, `--container-data-folder`, `--container-system-data-folder`
 
 ---
 
@@ -29,12 +29,12 @@ Purpose: Ensure minimal scaffolding and flags to support story work.
 
 Purpose: Core utilities used by multiple stories; complete before story work.
 
-- [ ] T004 [P] Expose `ContainerProbeMode` mapping function in `crates/core/src/container_env_probe.rs` (map CLI string → enum)
-- [ ] T005 [P] Add helper to build effective remote env: `build_effective_env(probed, config_remoteEnv, cli_kv)` in `crates/core/src/container_env_probe.rs`
-- [ ] T006 Wire `exec` to accept effective env map via `ExecConfig.env` instead of raw `args.env` in `crates/deacon/src/commands/exec.rs`
-- [ ] T007 Ensure consistent container selection helpers are reused (by id/labels/workspace) from `deacon_core::container` in `crates/deacon/src/commands/exec.rs`
-- [ ] T034 [P] Unit tests for `ContainerProbeMode` mapper including default behavior and invalid inputs in `crates/core/src/container_env_probe.rs`
-- [ ] T037 [P] Add `resolve_effective_config(...)` in `crates/core/` to merge devcontainer config with image labels and apply variable substitution (with unit tests)
+- [X] T004 [P] Expose `ContainerProbeMode` mapping function in `crates/core/src/container_env_probe.rs` (map CLI string → enum)
+- [X] T005 [P] Add helper to build effective remote env: `build_effective_env(probed, config_remoteEnv, cli_kv)` in `crates/core/src/container_env_probe.rs`
+- [X] T006 Wire `exec` to accept effective env map via `ExecConfig.env` instead of raw `args.env` in `crates/deacon/src/commands/exec.rs`
+- [X] T007 Ensure consistent container selection helpers are reused (by id/labels/workspace) from `deacon_core::container` in `crates/deacon/src/commands/exec.rs`
+- [X] T034 [P] Unit tests for `ContainerProbeMode` mapper including default behavior and invalid inputs in `crates/core/src/container_env_probe.rs`
+- [X] T037 [P] Add `resolve_effective_config(...)` in `crates/core/` to merge devcontainer config with image labels and apply variable substitution (with unit tests)
 
 Checkpoint: Foundation ready — user stories can proceed in parallel.
 
@@ -47,17 +47,17 @@ Goal: Target the correct container using precedence `--container-id` > `--id-lab
 Independent Test: Execute via each selection method in isolation and verify stdout/exit code.
 
 Tests (add first)
-- [ ] T008 [P] [US1] Integration: direct ID selection in `crates/deacon/tests/integration_exec_selection.rs`
-- [ ] T009 [P] [US1] Integration: label selection (`--id-label name=value`) in `crates/deacon/tests/integration_exec_selection.rs`
-- [ ] T010 [P] [US1] Integration: workspace discovery selection in `crates/deacon/tests/integration_exec_selection.rs`
-- [ ] T036 [P] [US1] Negative: missing devcontainer config for `--workspace-folder` yields exact error text with absolute path
+- [X] T008 [P] [US1] Integration: direct ID selection in `crates/deacon/tests/integration_exec_selection.rs`
+- [X] T009 [P] [US1] Integration: label selection (`--id-label name=value`) in `crates/deacon/tests/integration_exec_selection.rs`
+- [X] T010 [P] [US1] Integration: workspace discovery selection in `crates/deacon/tests/integration_exec_selection.rs`
+- [X] T036 [P] [US1] Negative: missing devcontainer config for `--workspace-folder` yields exact error text with absolute path
 
 Implementation
-- [ ] T011 [US1] Enforce missing selection error when none of `--container-id|--id-label|--workspace-folder` set (exact text per spec) in `crates/deacon/src/commands/exec.rs`
-- [ ] T012 [US1] Apply explicit precedence when multiple selectors provided in `crates/deacon/src/commands/exec.rs`
-- [ ] T013 [US1] Validate `--id-label` format `name=value` with clear error text in `crates/deacon/src/commands/exec.rs`
-- [ ] T014 [US1] Default working dir: `determine_container_working_dir()` for workspace-based; `/` for id/label in `crates/deacon/src/commands/exec.rs`
-- [ ] T035 [US1] Implement exact discovery error message: `Dev container config (<path>) not found.` (path must be absolute)
+- [X] T011 [US1] Enforce missing selection error when none of `--container-id|--id-label|--workspace-folder` set (exact text per spec) in `crates/deacon/src/commands/exec.rs`
+- [X] T012 [US1] Apply explicit precedence when multiple selectors provided in `crates/deacon/src/commands/exec.rs`
+- [X] T013 [US1] Validate `--id-label` format `name=value` with clear error text in `crates/deacon/src/commands/exec.rs`
+- [X] T014 [US1] Default working dir: `determine_container_working_dir()` for workspace-based; `/` for id/label in `crates/deacon/src/commands/exec.rs`
+- [X] T035 [US1] Implement exact discovery error message: `Dev container config (<path>) not found.` (path must be absolute)
 
 Checkpoint: US1 independently runnable and verifiable per quickstart.
 
