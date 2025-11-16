@@ -1180,15 +1180,16 @@ fn create_build_inputs(result: &BuildResult, _workspace_folder: &Path) -> Result
 /// Check if a Docker image is available locally
 async fn is_image_available(image_id: &str) -> Result<bool> {
     // Use docker inspect to check if image exists
-    let output = std::process::Command::new("docker")
+    let output = tokio::process::Command::new("docker")
         .args(["inspect", "--type=image", image_id])
-        .output();
+        .output()
+        .await;
 
     match output {
         Ok(output) => Ok(output.status.success()),
-        Err(_) => {
+        Err(e) => {
             // If docker command fails, assume image is not available
-            debug!("Failed to check image availability for {}", image_id);
+            debug!("Failed to check image availability for {}: {}", image_id, e);
             Ok(false)
         }
     }
