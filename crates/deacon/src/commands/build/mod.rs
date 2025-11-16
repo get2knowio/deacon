@@ -58,6 +58,21 @@ pub struct BuildArgs {
     pub push: bool,
     /// Export image to file or directory
     pub output: Option<String>,
+    /// Skip feature auto-mapping (hidden testing flag)
+    #[allow(dead_code)] // Reserved for future feature implementation
+    pub skip_feature_auto_mapping: bool,
+    /// Do not persist customizations from features into image metadata
+    #[allow(dead_code)] // Reserved for future feature implementation
+    pub skip_persisting_customizations_from_features: bool,
+    /// Write feature lockfile (experimental)
+    #[allow(dead_code)] // Reserved for future feature implementation
+    pub experimental_lockfile: bool,
+    /// Fail if lockfile changes would occur (experimental)
+    #[allow(dead_code)] // Reserved for future feature implementation
+    pub experimental_frozen_lockfile: bool,
+    /// Omit Dockerfile syntax directive workaround
+    #[allow(dead_code)] // Reserved for future feature implementation
+    pub omit_syntax_directive: bool,
 }
 
 impl Default for BuildArgs {
@@ -93,6 +108,11 @@ impl Default for BuildArgs {
             label: Vec::new(),
             push: false,
             output: None,
+            skip_feature_auto_mapping: false,
+            skip_persisting_customizations_from_features: false,
+            experimental_lockfile: false,
+            experimental_frozen_lockfile: false,
+            omit_syntax_directive: false,
         }
     }
 }
@@ -2058,36 +2078,18 @@ mod tests {
     #[test]
     fn test_build_args_assembly() {
         let args = BuildArgs {
-            no_cache: true,
-            platform: Some("linux/amd64".to_string()),
-            build_arg: vec!["ENV=dev".to_string(), "VERSION=1.0".to_string()],
-            force: false,
-            output_format: OutputFormat::Text,
-            cache_from: Vec::new(),
-            cache_to: Vec::new(),
-            buildkit: None,
-            secret: Vec::new(),
-            build_secret: Vec::new(),
-            ssh: Vec::new(),
-            scan_image: false,
-            fail_on_scan: false,
-            workspace_folder: None,
-            config_path: None,
-            additional_features: None,
-            prefer_cli_features: false,
-            feature_install_order: None,
-            ignore_host_requirements: false,
-            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            redaction_config: deacon_core::redaction::RedactionConfig::default(),
-            secret_registry: deacon_core::redaction::SecretRegistry::new(),
-            env_file: Vec::new(),
-            docker_path: "docker".to_string(),
-            terminal_columns: None,
-            terminal_rows: None,
-            image_names: Vec::new(),
-            label: Vec::new(),
-            push: false,
-            output: None,
+            cache_from: vec![
+                "registry://example.com/cache".to_string(),
+                "type=local,src=/tmp/cache".to_string(),
+            ],
+            cache_to: vec!["registry://example.com/cache:latest".to_string()],
+            buildkit: Some(BuildKitOption::Auto),
+            secret: vec![
+                "id=mypassword,src=./password.txt".to_string(),
+                "id=mytoken".to_string(),
+            ],
+            ssh: vec!["default".to_string(), "mykey=/path/to/key".to_string()],
+            ..Default::default()
         };
 
         // Verify args are structured correctly
@@ -2101,11 +2103,6 @@ mod tests {
     #[test]
     fn test_advanced_build_args_assembly() {
         let args = BuildArgs {
-            no_cache: false,
-            platform: None,
-            build_arg: Vec::new(),
-            force: false,
-            output_format: OutputFormat::Text,
             cache_from: vec![
                 "registry://example.com/cache".to_string(),
                 "type=local,src=/tmp/cache".to_string(),
@@ -2114,29 +2111,11 @@ mod tests {
             buildkit: Some(BuildKitOption::Auto),
             secret: vec![
                 "id=mypassword,src=./password.txt".to_string(),
-                "id=mytoken".to_string(),
+                "id=mykey,env=SSH_KEY".to_string(),
             ],
-            build_secret: Vec::new(),
-            ssh: vec!["default".to_string(), "mykey=/path/to/key".to_string()],
-            scan_image: false,
-            fail_on_scan: false,
-            workspace_folder: None,
-            config_path: None,
-            additional_features: None,
-            prefer_cli_features: false,
-            feature_install_order: None,
-            ignore_host_requirements: false,
-            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            redaction_config: deacon_core::redaction::RedactionConfig::default(),
-            secret_registry: deacon_core::redaction::SecretRegistry::new(),
-            env_file: Vec::new(),
-            docker_path: "docker".to_string(),
-            terminal_columns: None,
-            terminal_rows: None,
-            image_names: Vec::new(),
-            label: Vec::new(),
-            push: false,
-            output: None,
+            build_secret: vec!["id=mysecret,src=./secret.txt".to_string()],
+            ssh: vec!["default".to_string()],
+            ..Default::default()
         };
 
         // Verify advanced args are structured correctly

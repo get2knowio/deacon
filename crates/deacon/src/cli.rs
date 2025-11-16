@@ -235,6 +235,21 @@ pub enum Commands {
         /// Export image to file or directory (BuildKit format: type=...,dest=...)
         #[arg(long)]
         output: Option<String>,
+        /// Skip feature auto-mapping (hidden testing flag)
+        #[arg(long, hide = true)]
+        skip_feature_auto_mapping: bool,
+        /// Do not persist customizations from features into image metadata
+        #[arg(long, hide = true)]
+        skip_persisting_customizations_from_features: bool,
+        /// Write feature lockfile (experimental)
+        #[arg(long, hide = true)]
+        experimental_lockfile: bool,
+        /// Fail if lockfile changes would occur (experimental)
+        #[arg(long, hide = true)]
+        experimental_frozen_lockfile: bool,
+        /// Omit Dockerfile syntax directive workaround
+        #[arg(long, hide = true)]
+        omit_syntax_directive: bool,
     },
 
     /// Execute command in running container
@@ -918,6 +933,11 @@ impl Cli {
                 label,
                 push,
                 output,
+                skip_feature_auto_mapping,
+                skip_persisting_customizations_from_features,
+                experimental_lockfile,
+                experimental_frozen_lockfile,
+                omit_syntax_directive,
             }) => {
                 use crate::commands::build::{execute_build, BuildArgs};
 
@@ -952,6 +972,11 @@ impl Cli {
                     label,
                     push,
                     output,
+                    skip_feature_auto_mapping,
+                    skip_persisting_customizations_from_features,
+                    experimental_lockfile,
+                    experimental_frozen_lockfile,
+                    omit_syntax_directive,
                 };
 
                 execute_build(args).await?;
