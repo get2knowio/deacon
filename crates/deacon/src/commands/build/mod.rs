@@ -640,7 +640,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
         && config
             .features
             .as_object()
-            .map_or(false, |obj| !obj.is_empty())
+            .is_some_and(|obj| !obj.is_empty())
     {
         return Err(anyhow!(
             "Feature installation during build is not yet implemented. \
@@ -955,8 +955,8 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
         build_affecting_files.sort();
         for (path, size, mtime) in build_affecting_files {
             hasher.update(path.as_bytes());
-            hasher.update(&size.to_le_bytes());
-            hasher.update(&mtime.to_le_bytes());
+            hasher.update(size.to_le_bytes());
+            hasher.update(mtime.to_le_bytes());
         }
     }
 
