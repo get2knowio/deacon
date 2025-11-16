@@ -385,6 +385,39 @@ pub struct ContextFile {
     pub mtime: u64,
 }
 
+/// Helper function to validate BuildKit availability with consistent error handling
+fn validate_buildkit_requirement(
+    output_format: &OutputFormat,
+    feature_name: &str,
+    flag_name: &str,
+) -> Result<()> {
+    match deacon_core::build::buildkit::is_buildkit_available() {
+        Ok(true) => {
+            // BuildKit available, proceed
+            Ok(())
+        }
+        Ok(false) => {
+            let error = result::BuildError::with_description(
+                format!("BuildKit is required for {}", flag_name),
+                format!("Enable BuildKit or remove {} flag", flag_name),
+            );
+            if matches!(output_format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string(&error)?);
+            } else {
+                eprintln!("Error: {}", error.message());
+                if let Some(desc) = error.description() {
+                    eprintln!("{}", desc);
+                }
+            }
+            Err(anyhow!("BuildKit is required for {}", feature_name))
+        }
+        Err(e) => {
+            // Failed to detect BuildKit
+            Err(anyhow!("Failed to detect BuildKit: {}", e))
+        }
+    }
+}
+
 /// Execute the build command.
 ///
 /// Loads the DevContainer configuration (from the provided path or by discovery),
@@ -473,134 +506,22 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     // Validate BuildKit requirements for --push
     if args.push {
-        if let Err(e) = deacon_core::build::buildkit::is_buildkit_available() {
-            let error = result::BuildError::with_description(
-                "BuildKit is required for --push",
-                "Enable BuildKit or remove --push flag",
-            );
-            if matches!(args.output_format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string(&error)?);
-            } else {
-                eprintln!("Error: {}", error.message());
-                if let Some(desc) = error.description() {
-                    eprintln!("{}", desc);
-                }
-            }
-            return Err(anyhow!("BuildKit check failed: {}", e));
-        } else if !deacon_core::build::buildkit::is_buildkit_available()? {
-            let error = result::BuildError::with_description(
-                "BuildKit is required for --push",
-                "Enable BuildKit or remove --push flag",
-            );
-            if matches!(args.output_format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string(&error)?);
-            } else {
-                eprintln!("Error: {}", error.message());
-                if let Some(desc) = error.description() {
-                    eprintln!("{}", desc);
-                }
-            }
-            return Err(anyhow!("BuildKit is required for --push"));
-        }
+        validate_buildkit_requirement(&args.output_format, "push", "--push")?;
     }
 
     // Validate BuildKit requirements for --output
     if args.output.is_some() {
-        if let Err(e) = deacon_core::build::buildkit::is_buildkit_available() {
-            let error = result::BuildError::with_description(
-                "BuildKit is required for --output",
-                "Enable BuildKit or remove --output flag",
-            );
-            if matches!(args.output_format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string(&error)?);
-            } else {
-                eprintln!("Error: {}", error.message());
-                if let Some(desc) = error.description() {
-                    eprintln!("{}", desc);
-                }
-            }
-            return Err(anyhow!("BuildKit check failed: {}", e));
-        } else if !deacon_core::build::buildkit::is_buildkit_available()? {
-            let error = result::BuildError::with_description(
-                "BuildKit is required for --output",
-                "Enable BuildKit or remove --output flag",
-            );
-            if matches!(args.output_format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string(&error)?);
-            } else {
-                eprintln!("Error: {}", error.message());
-                if let Some(desc) = error.description() {
-                    eprintln!("{}", desc);
-                }
-            }
-            return Err(anyhow!("BuildKit is required for --output"));
-        }
+        validate_buildkit_requirement(&args.output_format, "output", "--output")?;
     }
 
     // Validate BuildKit requirements for --platform
     if args.platform.is_some() {
-        if let Err(e) = deacon_core::build::buildkit::is_buildkit_available() {
-            let error = result::BuildError::with_description(
-                "BuildKit is required for --platform",
-                "Enable BuildKit or remove --platform flag",
-            );
-            if matches!(args.output_format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string(&error)?);
-            } else {
-                eprintln!("Error: {}", error.message());
-                if let Some(desc) = error.description() {
-                    eprintln!("{}", desc);
-                }
-            }
-            return Err(anyhow!("BuildKit check failed: {}", e));
-        } else if !deacon_core::build::buildkit::is_buildkit_available()? {
-            let error = result::BuildError::with_description(
-                "BuildKit is required for --platform",
-                "Enable BuildKit or remove --platform flag",
-            );
-            if matches!(args.output_format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string(&error)?);
-            } else {
-                eprintln!("Error: {}", error.message());
-                if let Some(desc) = error.description() {
-                    eprintln!("{}", desc);
-                }
-            }
-            return Err(anyhow!("BuildKit is required for --platform"));
-        }
+        validate_buildkit_requirement(&args.output_format, "platform", "--platform")?;
     }
 
     // Validate BuildKit requirements for --cache-to
     if !args.cache_to.is_empty() {
-        if let Err(e) = deacon_core::build::buildkit::is_buildkit_available() {
-            let error = result::BuildError::with_description(
-                "BuildKit is required for --cache-to",
-                "Enable BuildKit or remove --cache-to flag",
-            );
-            if matches!(args.output_format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string(&error)?);
-            } else {
-                eprintln!("Error: {}", error.message());
-                if let Some(desc) = error.description() {
-                    eprintln!("{}", desc);
-                }
-            }
-            return Err(anyhow!("BuildKit check failed: {}", e));
-        } else if !deacon_core::build::buildkit::is_buildkit_available()? {
-            let error = result::BuildError::with_description(
-                "BuildKit is required for --cache-to",
-                "Enable BuildKit or remove --cache-to flag",
-            );
-            if matches!(args.output_format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string(&error)?);
-            } else {
-                eprintln!("Error: {}", error.message());
-                if let Some(desc) = error.description() {
-                    eprintln!("{}", desc);
-                }
-            }
-            return Err(anyhow!("BuildKit is required for --cache-to"));
-        }
+        validate_buildkit_requirement(&args.output_format, "cache-to", "--cache-to")?;
     }
 
     // Load configuration
