@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { Listr } from 'listr2'
 import meow from 'meow'
-import { parsePhases, runWorkflow } from './workflow-core.mjs'
+import { parsePhases } from './tasks/markdown.mjs'
+import { runDefaultWorkflow } from './workflows/speckit.mjs'
 import { fileURLToPath } from 'url'
 import path from 'path'
-import { existsSync } from 'fs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -56,7 +56,7 @@ async function main() {
       task: (ctx, task) => {
         const verbose = cli.flags.verbose
         const verboseLogger = m => { if (verbose) { task.output = m } }
-        return runWorkflow({
+        return runDefaultWorkflow({
           branch,
           phases: ctx.phases,
           tasksPath: resolvedTasksPath,
