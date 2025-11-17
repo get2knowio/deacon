@@ -429,6 +429,32 @@ pub enum Commands {
         #[arg(long)]
         bundle: Option<PathBuf>,
     },
+
+    /// Report outdated features (current | wanted | latest)
+    ///
+    /// Examples:
+    ///   deacon outdated --workspace-folder .
+    ///       # Human-readable table (default)
+    ///   deacon outdated --output json
+    ///       # Machine-readable JSON written to stdout (logs to stderr)
+    ///   deacon outdated --output json --fail-on-outdated
+    ///       # Exit with code 2 when any feature is outdated (CI gating)
+    ///
+    /// Output contracts: by default a text table is written to stdout; when
+    /// `--output json` is specified a compact JSON map is written to stdout and
+    /// all logs/diagnostic messages are sent to stderr. This ensures deterministic
+    /// machine-readable behavior for CI and tooling.
+    Outdated {
+        /// Workspace folder to inspect (default: current directory)
+        #[arg(long, value_name = "PATH")]
+        workspace_folder: Option<PathBuf>,
+        /// Output format (text or json)
+        #[arg(long, value_enum, default_value = "text")]
+        output: OutputFormat,
+        /// Fail CI with exit code 2 when any outdated feature is detected
+        #[arg(long)]
+        fail_on_outdated: bool,
+    },
 }
 
 /// Feature management subcommands
