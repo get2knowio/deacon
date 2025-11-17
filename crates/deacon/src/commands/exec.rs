@@ -539,6 +539,9 @@ where
 
         // Load config.remote_env when we have workspace-based config; prefer resolved config
         let mut config_remote_env: Option<HashMap<String, Option<String>>> = None;
+        // Track effective user: CLI --user overrides any config remoteUser; if absent, fall back to config
+        let mut effective_user: Option<String> = args.user.clone();
+
         if args.container_id.is_none() && args.id_label.is_empty() {
             let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
@@ -584,6 +587,11 @@ where
                 }
             };
 
+            // If CLI didn't specify a user, prefer the resolved config remote user
+            if effective_user.is_none() {
+                effective_user = resolved.remote_user.clone();
+            }
+
             config_remote_env = Some(resolved.remote_env.clone());
         }
 
@@ -594,7 +602,7 @@ where
         // Always attach stdin (interactive) so piped/stdin data flows into the container,
         // independent of TTY allocation. TTY only controls pseudo‑terminal behavior.
         let exec_config = ExecConfig {
-            user: args.user.clone(),
+            user: effective_user.clone(),
             working_dir: Some(working_dir.clone()),
             env: effective_env,
             tty: should_use_tty,

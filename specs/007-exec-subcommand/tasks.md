@@ -70,15 +70,15 @@ Goal: Compute environment using probe → config remoteEnv → CLI `--remote-env
 Independent Test: Verify PATH reflects shell init; CLI variables present and override config values; empty values preserved.
 
 Tests (add first)
-- [ ] T015 [P] [US2] Unit: merge precedence table tests in `crates/core/src/container_env_probe.rs` (CLI wins over config; config over probe)
-- [ ] T016 [P] [US2] Integration: `--remote-env FOO=bar` and `FOO=` empty value in `crates/deacon/tests/integration_exec_env.rs`
+- [X] T015 [P] [US2] Unit: merge precedence table tests in `crates/core/src/container_env_probe.rs` (CLI wins over config; config over probe)
+- [X] T016 [P] [US2] Integration: `--remote-env FOO=bar` and `FOO=` empty value in `crates/deacon/tests/integration_exec_env.rs`
 
 Implementation
-- [ ] T017 [US2] Map `--default-user-env-probe` to `ContainerProbeMode` in `crates/deacon/src/commands/exec.rs`
-- [ ] T018 [US2] Probe container env using `ContainerEnvironmentProber::probe_container_environment` in `crates/deacon/src/commands/exec.rs`
-- [ ] T019 [US2] Load config `remoteEnv` and merge with probed + CLI via `build_effective_env` in `crates/deacon/src/commands/exec.rs`
-- [ ] T020 [US2] Inject merged env into `ExecConfig.env` (preserve empty values) in `crates/deacon/src/commands/exec.rs`
-- [ ] T038 [US2] Use `resolve_effective_config(...)` for env/user inputs; ensure CLI `--remote-env` overrides config
+- [X] T017 [US2] Map `--default-user-env-probe` to `ContainerProbeMode` in `crates/deacon/src/commands/exec.rs`
+- [X] T018 [US2] Probe container env using `ContainerEnvironmentProber::probe_container_environment` in `crates/deacon/src/commands/exec.rs`
+- [X] T019 [US2] Load config `remoteEnv` and merge with probed + CLI via `build_effective_env` in `crates/deacon/src/commands/exec.rs`
+- [X] T020 [US2] Inject merged env into `ExecConfig.env` (preserve empty values) in `crates/deacon/src/commands/exec.rs`
+- [X] T038 [US2] Use `resolve_effective_config(...)` for env/user inputs; ensure CLI `--remote-env` overrides config
 
 Checkpoint: US2 independently verifiable via `env` inside container.
 
@@ -92,7 +92,7 @@ Independent Test: `tty` reports presence in PTY mode; size flags reflected where
 
 Tests (add first)
 - [X] T021 [P] [US3] Unit: PTY decision logic (TTY detected or force when JSON) in `crates/deacon/src/commands/exec.rs` tests
-- [ ] T022 [P] [US3] Integration: non-TTY run preserves exit and streams in `crates/deacon/tests/integration_exec_pty.rs`
+- [X] T022 [P] [US3] Integration: non-TTY run preserves exit and streams in `crates/deacon/tests/integration_exec_pty.rs`
 
 Implementation
 - [X] T023 [US3] Force PTY when `force_tty_if_json` true; otherwise require stdin/stdout TTY and not `--no-tty` in `crates/deacon/src/commands/exec.rs`
@@ -109,16 +109,16 @@ Goal: Deterministic error messages and exit code mapping (propagate code; signal
 Independent Test: Invalid flags, missing selection, and simulated signal termination yield specified messages/codes.
 
 Tests (add first)
-- [ ] T025 [P] [US4] Unit: exact error text assertions for invalid `--id-label`/missing selection in `crates/deacon/src/commands/exec.rs` tests
-- [ ] T026 [P] [US4] Integration: exit code propagation including a signal-based termination case in `crates/deacon/tests/integration_exec_exit.rs`
-- [ ] T042 [P] [US4] Integration: JSON log mode preserves stdout/stderr contract (stdout reserved, logs to stderr)
+- [X] T025 [P] [US4] Unit: exact error text assertions for invalid `--id-label`/missing selection in `crates/deacon/src/commands/exec.rs` tests
+- [X] T026 [P] [US4] Integration: exit code propagation including a signal-based termination case in `crates/deacon/tests/integration_exec_exit.rs`
+- [X] T042 [P] [US4] Integration: JSON log mode preserves stdout/stderr contract (stdout reserved, logs to stderr)
 
 Implementation
-- [ ] T027 [US4] Normalize and surface exact error strings per spec in `crates/deacon/src/commands/exec.rs`
-- [ ] T028 [US4] Ensure exit code from Docker is returned verbatim; retain 128+signal behavior in `crates/deacon/src/commands/exec.rs`
-- [ ] T041 [US4] Ensure global `--log-level` is honored and does not alter stdout/stderr contract for `exec`
-- [ ] T043 [US4] Implement precedence: CLI `--user` overrides config `remoteUser` for execution
-- [ ] T044 [US4] Add integration test asserting `--user` precedence (e.g., `whoami` inside container)
+- [X] T027 [US4] Normalize and surface exact error strings per spec in `crates/deacon/src/commands/exec.rs`
+- [X] T028 [US4] Ensure exit code from Docker is returned verbatim; retain 128+signal behavior in `crates/deacon/src/commands/exec.rs`
+- [X] T041 [US4] Ensure global `--log-level` is honored and does not alter stdout/stderr contract for `exec`
+- [X] T043 [US4] Implement precedence: CLI `--user` overrides config `remoteUser` for execution
+- [X] T044 [US4] Add integration test asserting `--user` precedence (e.g., `whoami` inside container)
 
 Checkpoint: US4 independently verifiable via negative scenarios.
 
@@ -176,7 +176,9 @@ Incremental Delivery
 ## Report Summary
 
 - Total tasks: 32
-- Tasks per story: US1: 7 (T008–T014), US2: 6 (T015–T020), US3: 4 (T021–T024), US4: 4 (T025–T028)
+- Tasks per story: US1: 7 (T008–T014), US2: 6 (T015–T020), US3: 4 (T021–T024), US4: 9 (T025–T044)
+
+Note: Phase 6 (US4) tasks have been completed and checked off.
 - Parallel opportunities: Tests in each story; some foundational tasks marked [P]
 - Independent test criteria:
   - US1: Selection by ID/label/workspace; correct stdout/exit code
