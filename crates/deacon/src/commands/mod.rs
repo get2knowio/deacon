@@ -12,3 +12,4 @@ pub mod read_configuration;
 pub mod run_user_commands;
 pub mod templates;
 pub mod up;
+pub mod outdated;
