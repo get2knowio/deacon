@@ -1272,6 +1272,42 @@ impl Cli {
                     execute_down(args).await
                 }
             }
+            Some(Commands::Outdated {
+                workspace_folder,
+                output,
+                fail_on_outdated,
+            }) => {
+                use crate::commands::outdated::{run as run_outdated, OutdatedArgs};
+
+                // Determine workspace folder precedence: explicit flag -> global flag -> current_dir
+                let wf = if let Some(wf) = workspace_folder {
+                    wf
+                } else if let Some(global_wf) = self.workspace_folder.clone() {
+                    global_wf
+                } else {
+                    std::env::current_dir()?
+                };
+
+                let args = OutdatedArgs {
+                    workspace_folder: wf.to_string_lossy().to_string(),
+                    output: output.clone(),
+                    fail_on_outdated,
+                };
+
+                match run_outdated(args).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        // Propagate dedicated outdated-failure for main.rs to map to exit code 2
+                        if e.downcast_ref::<crate::commands::outdated::OutdatedExitCode>()
+                            .is_some()
+                        {
+                            return Err(e);
+                        }
+                        Err(e)
+                    }
+                }
+            }
+
             Some(Commands::Doctor { json, bundle }) => {
                 // Create a DoctorContext for doctor command
                 let context = deacon_core::doctor::DoctorContext {
