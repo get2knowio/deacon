@@ -1,0 +1,12 @@
+{
+  "name": "Exec Remote Env Example",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "remoteUser": "vscode",
+  "remoteEnv": {
+    "APP_MODE": "development",
+    "API_URL": "http://localhost:3000",
+    "LOG_LEVEL": "info",
+    "CONFIG_SOURCE": "devcontainer.json"
+  },
+  "workspaceFolder": "/workspace"
+}

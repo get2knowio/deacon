@@ -1,0 +1,9 @@
+{
+  "name": "Exec Container ID Example",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "remoteUser": "vscode",
+  "remoteEnv": {
+    "CONTAINER_ENV_VAR": "set-by-config"
+  },
+  "workspaceFolder": "/workspace"
+}
