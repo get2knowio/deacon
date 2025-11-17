@@ -1,0 +1,6 @@
+{
+  "name": "Exec Non-Interactive Example",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspace"
+}

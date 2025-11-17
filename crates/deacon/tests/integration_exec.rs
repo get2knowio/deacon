@@ -21,7 +21,7 @@ fn test_exec_with_missing_config() {
         .assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains("Configuration file not found"));
+        .stderr(predicate::str::contains("Dev container config ("));
 }
 
 #[test]

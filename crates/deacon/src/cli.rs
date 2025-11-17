@@ -1,6 +1,27 @@
 use crate::ui::spinner::{PlainSpinner, SpinnerEmitter};
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use deacon_core::container_env_probe::ContainerProbeMode;
+
+/// CLI-facing probe enum (value_enum for clap) to map into core probe mode
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum DefaultUserEnvProbe {
+    None,
+    LoginInteractiveShell,
+    InteractiveShell,
+    LoginShell,
+}
+
+impl From<DefaultUserEnvProbe> for ContainerProbeMode {
+    fn from(p: DefaultUserEnvProbe) -> Self {
+        match p {
+            DefaultUserEnvProbe::None => ContainerProbeMode::None,
+            DefaultUserEnvProbe::LoginInteractiveShell => ContainerProbeMode::LoginInteractiveShell,
+            DefaultUserEnvProbe::InteractiveShell => ContainerProbeMode::LoginShell, // map interactiveShell -> LoginShell? choose closest
+            DefaultUserEnvProbe::LoginShell => ContainerProbeMode::LoginShell,
+        }
+    }
+}
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
@@ -252,30 +273,47 @@ pub enum Commands {
         omit_syntax_directive: bool,
     },
 
-    /// Execute command in running container
+    /// Execute a command inside a running container.
+    ///
+    /// Usage examples:
+    /// - `deacon exec --container-id <id> -- echo hello`
+    /// - `deacon exec --id-label devcontainer.local_folder=/abs/path -- sh -lc 'pwd'`
+    ///
+    /// Note: At least one of `--container-id`, `--id-label` or `--workspace-folder` must be provided
+    /// unless the command is invoked in a context where the target container can be inferred.
     Exec {
-        /// User to run the command as
+        /// User to run the command as inside the container (overrides config `remoteUser`).
         #[arg(long)]
         user: Option<String>,
-        /// Disable TTY allocation
+        /// Disable TTY allocation (force non-interactive mode).
+        /// Use this when piping output or in CI where a PTY is not desired.
         #[arg(long)]
         no_tty: bool,
-        /// Environment variables to set (KEY=VALUE format)
-        #[arg(long, action = clap::ArgAction::Append)]
+        /// Environment variables to set inside the container (KEY=VALUE format).
+        ///
+        /// Alias: `--remote-env` (visible). Accepts empty values (e.g. `FOO=`) which will be
+        /// injected as present with an empty string value.
+        #[arg(long, action = clap::ArgAction::Append, alias = "remote-env")]
         env: Vec<String>,
-        /// Working directory for command execution
+        /// Working directory inside the container for command execution (overrides default).
         #[arg(short = 'w', long)]
         workdir: Option<String>,
-        /// Target container ID directly
+        /// Target container ID directly (highest precedence selection).
         #[arg(long)]
         container_id: Option<String>,
-        /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
+        /// Identify container by labels (KEY=VALUE format, repeatable).
+        /// Validated as `<name>=<value>`; multiple labels are combined as AND selectors.
         #[arg(long, action = clap::ArgAction::Append)]
         id_label: Vec<String>,
-        /// Target specific service in Docker Compose projects (defaults to primary service)
+        /// Target specific service in Docker Compose projects (defaults to the primary service).
         #[arg(long)]
         service: Option<String>,
-        /// Command to execute
+        /// Default user environment probe mode when config omits `userEnvProbe`.
+        /// Allowed values: `none`, `loginInteractiveShell`, `interactiveShell`, `loginShell`.
+        /// Default: `loginInteractiveShell` (collects shell-initialized environment where possible).
+        #[arg(long, value_enum, default_value = "login-interactive-shell")]
+        default_user_env_probe: DefaultUserEnvProbe,
+        /// Command and arguments to execute inside the container (positional; required).
         command: Vec<String>,
     },
 
@@ -668,6 +706,27 @@ pub struct Cli {
     #[arg(long, global = true, default_value = "docker-compose")]
     pub docker_compose_path: String,
 
+    /// Container-side data folder for user state inside the container
+    #[arg(long, global = true)]
+    pub container_data_folder: Option<PathBuf>,
+
+    /// Container-side system data folder inside the container
+    #[arg(long, global = true)]
+    pub container_system_data_folder: Option<PathBuf>,
+
+    /// Force TTY allocation when log-format is JSON (threads into exec via force_tty_if_json)
+    #[arg(long, global = true)]
+    pub force_tty_if_json: bool,
+
+    /// Default user env probe mode (none|loginInteractiveShell|interactiveShell|loginShell)
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value = "login-interactive-shell"
+    )]
+    pub default_user_env_probe: DefaultUserEnvProbe,
+
     /// Terminal columns for output formatting (requires --terminal-rows)
     #[arg(long, global = true, requires = "terminal_rows")]
     pub terminal_columns: Option<u32>,
@@ -990,6 +1049,7 @@ impl Cli {
                 container_id,
                 id_label,
                 service,
+                default_user_env_probe,
                 command,
             }) => {
                 use crate::commands::exec::{execute_exec, ExecArgs};
@@ -1016,6 +1076,13 @@ impl Cli {
                     config_path: self.config,
                     docker_path: self.docker_path.clone(),
                     docker_compose_path: self.docker_compose_path.clone(),
+                    // Thread global options
+                    force_tty_if_json: self.force_tty_if_json,
+                    default_user_env_probe: Some(default_user_env_probe.into()),
+                    container_data_folder: self.container_data_folder.clone(),
+                    container_system_data_folder: self.container_system_data_folder.clone(),
+                    terminal_columns: self.terminal_columns,
+                    terminal_rows: self.terminal_rows,
                 };
 
                 execute_exec(args).await

@@ -37,11 +37,26 @@
   - Logging and terminal:
     - `--log-level {info|debug|trace}` Optional, default `info`.
     - `--log-format {text|json}` Optional, default `text`.
-    - `--terminal-columns <N>` Optional. Requires `--terminal-rows`.
-    - `--terminal-rows <N>` Optional. Requires `--terminal-columns`.
-  - Hidden/testing:
-    - `--skip-feature-auto-mapping` Optional hidden boolean. Parity/testing only.
-- Flag Taxonomy:
+   - `--terminal-columns <N>` Optional. Requires `--terminal-rows`.
+   - `--terminal-rows <N>` Optional. Requires `--terminal-columns`.
+   - Hidden/testing:
+   - `--skip-feature-auto-mapping` Optional hidden boolean. Parity/testing only.
+
+## PTY Sizing Limits
+
+When a PTY is allocated, the CLI applies terminal sizing using the following mechanism:
+- **Primary mechanism**: The CLI calls the Docker API/container runtime resize endpoint to set rows and columns.
+- **Fallback mechanism**: Additionally, `COLUMNS` and `LINES` environment variables are injected into the exec process as a best-effort fallback.
+- **Important**: We do NOT run `stty` inside the container to set terminal size.
+
+**Platform and runtime limitations**:
+- Some containers or shells may ignore the initial size until a resize event occurs from a controlling PTY.
+- Some container runtimes may not fully support the resize API.
+- The `--terminal-columns` and `--terminal-rows` flags provide best-effort hints but may be ignored by the runtime or the container process.
+- For precise sizing requirements, use interactive shells that properly handle TTY resize events.
+
+ - Flag Taxonomy:
+
   - Required: Positional `<cmd>` is required. At least one of `--container-id`, `--id-label`, or `--workspace-folder` must be provided.
   - Optional: All other flags.
   - Mutually exclusive groups: None. Paired requirement: `--terminal-columns` implies `--terminal-rows` and vice versa.

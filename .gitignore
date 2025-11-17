@@ -42,3 +42,4 @@ artifacts/nextest/full-timing.json
 /crates/deacon/.deacon
 /artifacts/nextest
 /.deacon
+artifacts/nextest/full-timing.json

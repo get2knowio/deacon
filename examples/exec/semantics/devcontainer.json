@@ -1,5 +1,0 @@
-{
-  "name": "Exec Semantics Example",
-  "image": "alpine:3.19",
-  "workspaceFolder": "/wsp"
-}

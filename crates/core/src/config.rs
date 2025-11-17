@@ -1226,6 +1226,71 @@ impl ConfigMerger {
         result
     }
 
+    /// Resolve an effective configuration by merging image labels and applying variable substitution.
+    ///
+    /// Behavior:
+    /// - Image labels with the prefix `deacon.remoteEnv.` will be considered as remoteEnv entries
+    ///   and applied with precedence over config.remote_env (label wins).
+    /// - Variable substitution is applied to string fields using `VariableSubstitution` with a
+    ///   `SubstitutionContext` constructed from `workspace`.
+    ///
+    /// Returns:
+    /// - A tuple containing the resolved configuration and a substitution report.
+    pub fn resolve_effective_config(
+        config: &DevContainerConfig,
+        image_labels: Option<&HashMap<String, String>>,
+        workspace: &std::path::Path,
+    ) -> Result<(DevContainerConfig, crate::variable::SubstitutionReport)> {
+        // Start with a clone of the base config
+        let mut resolved = config.clone();
+
+        // Merge image labels into remote_env if they use the special prefix
+        if let Some(labels) = image_labels {
+            let mut merged_remote = resolved.remote_env.clone();
+            for (k, v) in labels {
+                if let Some(stripped) = k.strip_prefix("deacon.remoteEnv.") {
+                    // Treat as remoteEnv entry - label value always wins
+                    merged_remote.insert(stripped.to_string(), Some(v.clone()));
+                }
+            }
+            resolved.remote_env = merged_remote;
+        }
+
+        // Apply variable substitution to a selection of string fields
+        let context = SubstitutionContext::new(workspace)?;
+        let mut report = SubstitutionReport::new();
+
+        // Substitute workspace_folder if present
+        if let Some(ref wf) = resolved.workspace_folder {
+            let s = VariableSubstitution::substitute_string(wf, &context, &mut report);
+            resolved.workspace_folder = Some(s);
+        }
+
+        // Substitute workspace_mount if present
+        if let Some(ref wm) = resolved.workspace_mount {
+            let s = VariableSubstitution::substitute_string(wm, &context, &mut report);
+            resolved.workspace_mount = Some(s);
+        }
+
+        // Substitute remote_env values
+        let mut substituted_remote: HashMap<String, Option<String>> = HashMap::new();
+        for (k, v_opt) in &resolved.remote_env {
+            match v_opt {
+                Some(v) => {
+                    let sub = VariableSubstitution::substitute_string(v, &context, &mut report);
+                    substituted_remote.insert(k.clone(), Some(sub));
+                }
+                None => {
+                    // Preserve explicit None (means empty string at runtime)
+                    substituted_remote.insert(k.clone(), None);
+                }
+            }
+        }
+        resolved.remote_env = substituted_remote;
+
+        Ok((resolved, report))
+    }
+
     /// Merge port attributes maps with overlay taking precedence
     fn merge_port_attributes_maps(
         base: &HashMap<String, PortAttributes>,

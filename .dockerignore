@@ -55,3 +55,11 @@ docs/.doctrees/
 
 # CI/CD
 .github/workflows/*.log
+
+# Project artifacts
+artifacts/
+.deacon
+
+# Dockerfiles and env
+Dockerfile*
+.env*

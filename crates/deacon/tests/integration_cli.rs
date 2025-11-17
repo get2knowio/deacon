@@ -86,7 +86,8 @@ fn test_subcommand_not_implemented() {
         .failure()
         .code(1)
         // Now properly checks for configuration file first before attempting container operations
-        .stderr(predicate::str::contains("Configuration file not found"));
+        .stderr(predicate::str::contains("Dev container config"))
+        .stderr(predicate::str::contains("not found"));
 }
 
 #[test]

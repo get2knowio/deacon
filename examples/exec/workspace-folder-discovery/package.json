@@ -1,0 +1,11 @@
+{
+  "name": "exec-workspace-example",
+  "version": "1.0.0",
+  "description": "Example demonstrating workspace folder discovery for exec",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "author": "",
+  "license": "MIT"
+}
