@@ -5,9 +5,10 @@
 use anyhow::Result;
 use atty::Stream;
 use deacon_core::config::ConfigLoader;
+use deacon_core::errors::{ConfigError, DeaconError};
 use deacon_core::lockfile as core_lockfile;
 use deacon_core::outdated as core_outdated;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
@@ -24,6 +25,10 @@ pub struct OutdatedArgs {
     /// Path to the workspace folder containing the dev container configuration.
     /// If empty, the current working directory will be used.
     pub workspace_folder: String,
+    /// Explicit path to configuration file (overrides auto-discovery).
+    pub config: Option<PathBuf>,
+    /// Override configuration file path (highest precedence).
+    pub override_config: Option<PathBuf>,
     /// Output format for the results (text or JSON).
     pub output: OutputFormat,
     /// If true, the command will exit with code 2 when outdated features are detected.
@@ -72,6 +77,8 @@ impl std::error::Error for OutdatedExitCode {}
 /// # async fn example() -> anyhow::Result<()> {
 /// let args = OutdatedArgs {
 ///     workspace_folder: ".".to_string(),
+///     config: None,
+///     override_config: None,
 ///     output: OutputFormat::Text,
 ///     fail_on_outdated: false,
 /// };
@@ -98,21 +105,11 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
             })?
     };
 
-    // Discover configuration
-    let config_location = match ConfigLoader::discover_config(&workspace_folder) {
-        Ok(loc) => loc,
-        Err(e) => {
-            // If config not found, surface a clear error message (T044)
-            warn!(error = ?e, "Configuration not found for workspace");
-            anyhow::bail!(
-                "Configuration file not found in workspace: {}",
-                workspace_folder.display()
-            );
-        }
-    };
+    // Resolve configuration path with precedence: override_config > config > auto-discovery
+    let config_location = resolve_config_path(&workspace_folder, &args)?;
 
     // Load configuration
-    let config = ConfigLoader::load_from_path(config_location.path())?;
+    let config = load_config(&config_location)?;
 
     // Extract features map preserving declaration order
     let features_map_opt = config.features.as_object();
@@ -350,4 +347,61 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Resolves the configuration path using explicit flags or auto-discovery.
+///
+/// Precedence order (per spec §2, §4):
+/// 1. `--override-config` (highest precedence)
+/// 2. `--config` (explicit path)
+/// 3. Auto-discovery in workspace folder
+fn resolve_config_path(
+    workspace_folder: &Path,
+    args: &OutdatedArgs,
+) -> Result<deacon_core::config::ConfigLocation> {
+    // Highest precedence: --override-config
+    if let Some(override_path) = &args.override_config {
+        debug!("Using override config path: {}", override_path.display());
+        return Ok(deacon_core::config::ConfigLocation::new(
+            override_path.clone(),
+        ));
+    }
+
+    // Second precedence: --config
+    if let Some(config_path) = &args.config {
+        debug!("Using explicit config path: {}", config_path.display());
+        return Ok(deacon_core::config::ConfigLocation::new(
+            config_path.clone(),
+        ));
+    }
+
+    // Fallback: auto-discovery
+    debug!(
+        "Auto-discovering config in workspace: {}",
+        workspace_folder.display()
+    );
+    match ConfigLoader::discover_config(workspace_folder) {
+        Ok(loc) => Ok(loc),
+        Err(e) => {
+            warn!(error = ?e, "Configuration not found for workspace");
+            anyhow::bail!("Dev container config (...) not found.")
+        }
+    }
+}
+
+/// Loads the configuration file from the resolved location.
+///
+/// Returns appropriate error messages per spec §2, §9.
+fn load_config(
+    config_location: &deacon_core::config::ConfigLocation,
+) -> Result<deacon_core::config::DevContainerConfig> {
+    match ConfigLoader::load_from_path(config_location.path()) {
+        Ok(cfg) => Ok(cfg),
+        Err(e) => match e {
+            DeaconError::Config(ConfigError::NotFound { path }) => {
+                anyhow::bail!("Dev container config ({}) not found.", path)
+            }
+            _ => Err(e.into()),
+        },
+    }
 }

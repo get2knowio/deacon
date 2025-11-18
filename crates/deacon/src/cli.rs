@@ -1290,22 +1290,13 @@ impl Cli {
 
                 let args = OutdatedArgs {
                     workspace_folder: wf.to_string_lossy().to_string(),
+                    config: self.config.clone(),
+                    override_config: self.override_config.clone(),
                     output: output.clone(),
                     fail_on_outdated,
                 };
 
-                match run_outdated(args).await {
-                    Ok(()) => Ok(()),
-                    Err(e) => {
-                        // Propagate dedicated outdated-failure for main.rs to map to exit code 2
-                        if e.downcast_ref::<crate::commands::outdated::OutdatedExitCode>()
-                            .is_some()
-                        {
-                            return Err(e);
-                        }
-                        Err(e)
-                    }
-                }
+                run_outdated(args).await
             }
 
             Some(Commands::Doctor { json, bundle }) => {
