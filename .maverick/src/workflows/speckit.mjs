@@ -1,11 +1,14 @@
 // workflows/default.mjs
 import path from 'path'
+import { execa } from 'execa'
 import { parsePhases, fileExists } from '../tasks/markdown.mjs'
 import { executeStep, run } from '../steps/core.mjs'
+import { makeOpencodeStep } from '../steps/opencode.mjs'
 import {
   opencodeImplementPhase,
-  coderabbitReview,
-  opencodeReview,
+  codexReview,
+  codexCoderabbitReview,
+  codexOrganizeFixes,
   opencodeFix,
 } from '../steps/speckit.mjs'
 
@@ -33,18 +36,18 @@ function buildPhaseSteps({ phasesToRun, projectRoot, buildModel, verbose, logger
 }
 
 /**
- * Build review steps (CodeRabbit and Opencode review).
+ * Build review steps (4-step codex-based review process).
  */
-function buildReviewSteps({ projectRoot, outDir, reviewModel, coderabbitPath, reviewPath }) {
+function buildReviewSteps({ projectRoot }) {
   return [
-    coderabbitReview({
+    codexReview({
       cwd: projectRoot,
-      captureTo: coderabbitPath,
     }),
-    opencodeReview({
+    codexCoderabbitReview({
       cwd: projectRoot,
-      captureTo: reviewPath,
-      model: reviewModel,
+    }),
+    codexOrganizeFixes({
+      cwd: projectRoot,
     }),
   ]
 }
@@ -72,72 +75,85 @@ export async function runDefaultWorkflow({
   fixModel = 'github-copilot/claude-sonnet-4.5',
   verbose = false,
   logger = m => console.log(m),
-  maxIterations = 3
+  maxRetriesPerPhase = 3
 }) {
 
   // Determine output directory and project root early (needed for cwd in phase commands)
   const outDir = tasksPath ? path.dirname(tasksPath) : process.cwd()
   const projectRoot = path.resolve(outDir, '..', '..')
-  const coderabbitPath = path.join(outDir, 'coderabbit.md')
-  const reviewPath = path.join(outDir, 'review.md')
 
   if (verbose) logger('Starting workflow with git checkout...')
   await run('git', ['checkout', '-B', branch])
 
-  // Outer loop: iterate until all tasks complete or max iterations reached
-  let iteration = 0
+  // Parse initial phases
   let phases = initialPhases
 
-  while (iteration < maxIterations) {
-    iteration += 1
-    
-    // Re-parse tasks.md on subsequent iterations to check for updates
-    if (iteration > 1) {
-      if (verbose) logger(`Re-parsing tasks.md for iteration ${iteration}...`)
-      phases = await parsePhases(tasksPath, process.cwd())
-    }
+  // Process each phase sequentially
+  for (let phaseIndex = 0; phaseIndex < phases.length; phaseIndex++) {
+    let retryCount = 0
+    let phaseComplete = false
 
-    const phasesToRun = (phases || []).filter(p => (p.outstandingTasks ?? 0) > 0)
-    const skippedCount = (phases?.length || 0) - phasesToRun.length
-    
-    if (phasesToRun.length === 0) {
-      if (verbose) logger(`All tasks completed! Exiting after ${iteration} iteration(s).`)
-      break
-    }
+    while (!phaseComplete && retryCount < maxRetriesPerPhase) {
+      retryCount += 1
 
-    if (verbose) logger(`[Iteration ${iteration}/${maxIterations}] Running workflow on branch ${branch} for ${phasesToRun.length} phase(s) with outstanding tasks (of ${phases.length} total, ${skippedCount} skipped)`)
+      // Re-parse tasks.md to get current status
+      const currentPhases = await parsePhases(tasksPath, process.cwd())
+      const currentPhase = currentPhases[phaseIndex]
 
-    // Build and execute phase steps
-    const phaseSteps = buildPhaseSteps({ phasesToRun, projectRoot, buildModel, verbose, logger })
-    
-    for (const step of phaseSteps) {
-      await executeStep(step, { logger, verbose })
-      
-      // Sleep after each phase
-      if (verbose) logger(`Waiting ${PHASE_SLEEP_SECONDS}s before next step...`)
-      await new Promise(resolve => setTimeout(resolve, PHASE_SLEEP_SECONDS * 1000))
-    }
-
-    // Check if we should continue to next iteration
-    if (iteration < maxIterations) {
-      const shouldContinue = (await parsePhases(tasksPath, process.cwd())).some(p => (p.outstandingTasks ?? 0) > 0)
-      if (!shouldContinue) {
-        if (verbose) logger(`All tasks completed! Exiting after ${iteration} iteration(s).`)
+      if (!currentPhase || (currentPhase.outstandingTasks ?? 0) === 0) {
+        if (verbose) logger(`Phase ${currentPhase?.identifier || phaseIndex + 1} completed!`)
+        phaseComplete = true
         break
+      }
+
+      const attemptLabel = retryCount > 1 ? ` (attempt ${retryCount}/${maxRetriesPerPhase})` : ''
+      const counts = `(${currentPhase.outstandingTasks}/${currentPhase.totalTasks} outstanding)`
+      if (verbose) logger(`Running phase ${currentPhase.identifier}${attemptLabel} ${counts}: ${currentPhase.title}`)
+
+      // Build and execute phase step
+      const phaseStep = opencodeImplementPhase(currentPhase.identifier, {
+        cwd: projectRoot,
+        model: buildModel,
+        outstandingTasks: currentPhase.outstandingTasks,
+        totalTasks: currentPhase.totalTasks,
+        phaseTitle: currentPhase.title,
+      })
+
+      await executeStep(phaseStep, { logger, verbose })
+
+      // Commit the work for this phase attempt
+      try {
+        if (verbose) logger(`Committing work for phase ${currentPhase.identifier}...`)
+        await run('git', ['add', '-A'])
+        const commitMsg = `Phase ${currentPhase.identifier}: ${currentPhase.title}${attemptLabel}`
+        await run('git', ['commit', '-m', commitMsg, '--allow-empty'])
+        if (verbose) logger(`Committed: ${commitMsg}`)
+      } catch (error) {
+        if (verbose) logger(`Git commit failed (may be nothing to commit): ${error.message}`)
+      }
+
+      // Sleep before checking status or retrying
+      if (verbose) logger(`Waiting ${PHASE_SLEEP_SECONDS}s before continuing...`)
+      await new Promise(resolve => setTimeout(resolve, PHASE_SLEEP_SECONDS * 1000))
+
+      // Re-check if phase is now complete
+      const updatedPhases = await parsePhases(tasksPath, process.cwd())
+      const updatedPhase = updatedPhases[phaseIndex]
+      
+      if (!updatedPhase || (updatedPhase.outstandingTasks ?? 0) === 0) {
+        if (verbose) logger(`Phase ${currentPhase.identifier} completed after ${retryCount} attempt(s)!`)
+        phaseComplete = true
+      } else if (retryCount >= maxRetriesPerPhase) {
+        if (verbose) logger(`Phase ${currentPhase.identifier} reached max retries (${maxRetriesPerPhase}). Moving to next phase.`)
+        phaseComplete = true
       }
     }
   }
 
-  // Build and execute review steps (skip if files already exist)
-  const reviewSteps = buildReviewSteps({ projectRoot, outDir, reviewModel, coderabbitPath, reviewPath })
+  // Build and execute review steps (3 codex steps)
+  const reviewSteps = buildReviewSteps({ projectRoot })
   
   for (const step of reviewSteps) {
-    // Check if output file exists (skip if it does)
-    if (step.captureTo && await fileExists(step.captureTo)) {
-      if (verbose) logger(`${step.captureTo} exists; skipping ${step.id}`)
-      continue
-    }
-    
     await executeStep(step, { logger, verbose })
     
     // Sleep after each review step
@@ -145,7 +161,95 @@ export async function runDefaultWorkflow({
     await new Promise(resolve => setTimeout(resolve, PHASE_SLEEP_SECONDS * 1000))
   }
 
+  // Commit the organized fixes.md
+  try {
+    if (verbose) logger('Committing organized fixes.md...')
+    await run('git', ['add', '-A'])
+    await run('git', ['commit', '-m', 'Review: organized fixes.md with parallelization markers', '--allow-empty'])
+    if (verbose) logger('Committed organized fixes.md')
+  } catch (error) {
+    if (verbose) logger(`Git commit failed (may be nothing to commit): ${error.message}`)
+  }
+
+  // Update constitution based on findings
+  const constitutionStep = makeOpencodeStep(
+    'opencode-update-constitution',
+    'Evaluate the issues found in fixes.md and suggest updates to our constitution and AGENTS.md to prevent these from happening again.',
+    {
+      model: fixModel,
+      command: 'speckit.constitution',
+      cwd: projectRoot,
+      label: 'opencode-update-constitution',
+    }
+  )
+  await executeStep(constitutionStep, { logger, verbose })
+
+  // Commit constitution updates
+  try {
+    if (verbose) logger('Committing constitution updates...')
+    await run('git', ['add', '-A'])
+    await run('git', ['commit', '-m', 'Review: updated constitution and AGENTS.md based on findings', '--allow-empty'])
+    if (verbose) logger('Committed constitution updates')
+  } catch (error) {
+    if (verbose) logger(`Git commit failed (may be nothing to commit): ${error.message}`)
+  }
+
   // Build and execute fix step
   const fixStep = buildFixStep({ projectRoot, fixModel })
   await executeStep(fixStep, { logger, verbose })
+
+  // Commit the implemented fixes
+  try {
+    if (verbose) logger('Committing implemented fixes...')
+    await run('git', ['add', '-A'])
+    await run('git', ['commit', '-m', 'Review: implemented fixes from fixes.md', '--allow-empty'])
+    if (verbose) logger('Committed implemented fixes')
+  } catch (error) {
+    if (verbose) logger(`Git commit failed (may be nothing to commit): ${error.message}`)
+  }
+
+  // Run test suite and fix any failures
+  try {
+    if (verbose) logger('Running test suite...')
+    await run('make', ['test-nextest'], { cwd: projectRoot, timeout: 0 })
+    if (verbose) logger('Tests passed!')
+  } catch (error) {
+    if (verbose) logger('Tests failed, capturing output and invoking opencode to fix...')
+    
+    // Capture the test output
+    const testResult = await execa('make', ['test-nextest'], { 
+      cwd: projectRoot, 
+      reject: false,
+      encoding: 'utf8',
+      timeout: 0
+    })
+    const testOutput = `${testResult.stdout}\n${testResult.stderr}`.trim()
+    
+    // Create fix step with test output in prompt
+    const testFixStep = makeOpencodeStep(
+      'opencode-fix-tests',
+      `The test suite failed with the following output:\n\n${testOutput}\n\nFix all failing tests and ensure "make test-nextest" passes.`,
+      {
+        model: fixModel,
+        cwd: projectRoot,
+        label: 'opencode-fix-tests',
+      }
+    )
+    await executeStep(testFixStep, { logger, verbose })
+    
+    // Commit the test fixes
+    try {
+      if (verbose) logger('Committing test fixes...')
+      await run('git', ['add', '-A'])
+      await run('git', ['commit', '-m', 'Tests: fixed test failures', '--allow-empty'])
+      if (verbose) logger('Committed test fixes')
+    } catch (error) {
+      if (verbose) logger(`Git commit failed (may be nothing to commit): ${error.message}`)
+    }
+    
+    // Verify tests pass after fixes
+    if (verbose) logger('Re-running tests to verify fixes...')
+    await run('make', ['test-nextest'], { cwd: projectRoot, timeout: 0 })
+    if (verbose) logger('Tests now pass!')
+  }
 }
