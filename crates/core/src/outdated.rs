@@ -44,9 +44,25 @@ pub struct OutdatedResult {
 
 /// Compute a canonical feature id with no version information.
 ///
-/// Examples:
-/// - `ghcr.io/devcontainers/features/node:1.2.3` -> `ghcr.io/devcontainers/features/node`
-/// - `ghcr.io/devcontainers/features/node@sha256:abcd...` -> `ghcr.io/devcontainers/features/node`
+/// Strips version tags (`:version`) and digest references (`@sha256:...`) from feature references.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::outdated::canonical_feature_id;
+///
+/// // Tag reference
+/// let ref_with_tag = "ghcr.io/devcontainers/features/node:1.2.3";
+/// assert_eq!(canonical_feature_id(ref_with_tag), "ghcr.io/devcontainers/features/node");
+///
+/// // Digest reference
+/// let ref_with_digest = "ghcr.io/devcontainers/features/node@sha256:abcd1234";
+/// assert_eq!(canonical_feature_id(ref_with_digest), "ghcr.io/devcontainers/features/node");
+///
+/// // No version
+/// let ref_no_version = "ghcr.io/devcontainers/features/node";
+/// assert_eq!(canonical_feature_id(ref_no_version), "ghcr.io/devcontainers/features/node");
+/// ```
 pub fn canonical_feature_id(reference: &str) -> String {
     // If contains '@', split there first
     if let Some(idx) = reference.find('@') {
@@ -71,10 +87,31 @@ pub fn canonical_feature_id(reference: &str) -> String {
 
 /// Compute the "wanted" version for a declared feature reference.
 ///
-/// Heuristics:
-/// - If the declared reference contains a tag (e.g., `:1.2.3`), return that tag without `v` prefix
-/// - If the declared reference contains a digest (`@sha256:...`), return `None` (can't infer wanted)
-/// - Otherwise return `None`
+/// Extracts version information from tag-based references. Leading `v` prefixes are stripped
+/// for normalization (e.g., `v1.2.3` becomes `1.2.3`).
+///
+/// # Returns
+///
+/// - `Some(version)` if a tag is present (e.g., `:1.2.3`)
+/// - `None` if digest-based (`@sha256:...`) or no version specified
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::outdated::compute_wanted_version;
+///
+/// // Tag with version
+/// assert_eq!(compute_wanted_version("ghcr.io/devcontainers/features/node:18"), Some("18".to_string()));
+///
+/// // Tag with v prefix
+/// assert_eq!(compute_wanted_version("ghcr.io/devcontainers/features/node:v1.2.3"), Some("1.2.3".to_string()));
+///
+/// // Digest reference
+/// assert_eq!(compute_wanted_version("ghcr.io/devcontainers/features/node@sha256:abcd"), None);
+///
+/// // No version
+/// assert_eq!(compute_wanted_version("ghcr.io/devcontainers/features/node"), None);
+/// ```
 pub fn compute_wanted_version(reference: &str) -> Option<String> {
     if reference.contains('@') {
         // Digest-based reference: wanted cannot be derived without registry metadata
@@ -99,6 +136,17 @@ pub fn compute_wanted_version(reference: &str) -> Option<String> {
 }
 
 /// Return the major portion of a version string, if parseable as semver.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::outdated::wanted_major;
+///
+/// assert_eq!(wanted_major(&Some("1.2.3".to_string())), Some("1".to_string()));
+/// assert_eq!(wanted_major(&Some("2.0.0".to_string())), Some("2".to_string()));
+/// assert_eq!(wanted_major(&None), None);
+/// assert_eq!(wanted_major(&Some("invalid".to_string())), None);
+/// ```
 pub fn wanted_major(version: &Option<String>) -> Option<String> {
     version
         .as_ref()
@@ -107,9 +155,39 @@ pub fn wanted_major(version: &Option<String>) -> Option<String> {
 
 /// Derive the "current" version for a declared feature given an optional lockfile.
 ///
-/// Logic:
-/// - If lockfile contains an entry for the canonical id, return its `version` field
-/// - Otherwise, fall back to `compute_wanted_version(reference)`
+/// Determines the currently installed version by checking the lockfile first,
+/// then falling back to the wanted version from the configuration.
+///
+/// # Logic
+///
+/// 1. If lockfile contains an entry for the canonical feature ID, return its `version` field
+/// 2. Otherwise, fall back to `compute_wanted_version(reference)`
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::outdated::derive_current_version;
+/// use deacon_core::lockfile::{Lockfile, LockfileFeature};
+/// use std::collections::HashMap;
+///
+/// // Without lockfile, falls back to wanted version
+/// let reference = "ghcr.io/devcontainers/features/node:18";
+/// assert_eq!(derive_current_version(reference, None), Some("18".to_string()));
+///
+/// // With lockfile entry
+/// let mut features = HashMap::new();
+/// features.insert(
+///     "ghcr.io/devcontainers/features/node".to_string(),
+///     LockfileFeature {
+///         version: "16.0.0".to_string(),
+///         resolved: "ghcr.io/devcontainers/features/node@sha256:abc".to_string(),
+///         integrity: "sha256:abc".to_string(),
+///         depends_on: None,
+///     }
+/// );
+/// let lockfile = Lockfile { features };
+/// assert_eq!(derive_current_version(reference, Some(&lockfile)), Some("16.0.0".to_string()));
+/// ```
 pub fn derive_current_version(
     reference: &str,
     lockfile_opt: Option<&lockfile::Lockfile>,
@@ -185,7 +263,17 @@ pub async fn fetch_latest_stable_version(reference: &str) -> Option<String> {
     semver_tags.into_iter().next()
 }
 
-/// Return the major portion of the latest stable version string
+/// Return the major portion of the latest stable version string.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::outdated::latest_major;
+///
+/// assert_eq!(latest_major(&Some("3.11.2".to_string())), Some("3".to_string()));
+/// assert_eq!(latest_major(&Some("20.0.1".to_string())), Some("20".to_string()));
+/// assert_eq!(latest_major(&None), None);
+/// ```
 pub fn latest_major(version: &Option<String>) -> Option<String> {
     version
         .as_ref()
@@ -195,7 +283,11 @@ pub fn latest_major(version: &Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
+    // T037: Unit tests for core helpers
+
+    // canonical_feature_id tests
     #[test]
     fn test_canonical_feature_id_tag() {
         let input = "ghcr.io/devcontainers/features/node:1.2.3";
@@ -215,14 +307,204 @@ mod tests {
     }
 
     #[test]
+    fn test_canonical_feature_id_no_version() {
+        let input = "ghcr.io/devcontainers/features/node";
+        assert_eq!(canonical_feature_id(input), input);
+    }
+
+    #[test]
+    fn test_canonical_feature_id_with_port() {
+        // Registry with port should not be confused with tag separator
+        let input = "localhost:5000/myfeature/test:1.0.0";
+        assert_eq!(canonical_feature_id(input), "localhost:5000/myfeature/test");
+    }
+
+    #[test]
+    fn test_canonical_feature_id_nested_namespace() {
+        let input = "ghcr.io/org/team/project/feature:v2.1.0";
+        assert_eq!(
+            canonical_feature_id(input),
+            "ghcr.io/org/team/project/feature"
+        );
+    }
+
+    // compute_wanted_version tests
+    #[test]
     fn test_compute_wanted_version_tag() {
         let input = "ghcr.io/devcontainers/features/node:18";
         assert_eq!(compute_wanted_version(input).unwrap(), "18");
     }
 
     #[test]
+    fn test_compute_wanted_version_tag_with_v_prefix() {
+        let input = "ghcr.io/devcontainers/features/node:v1.2.3";
+        assert_eq!(compute_wanted_version(input).unwrap(), "1.2.3");
+    }
+
+    #[test]
     fn test_compute_wanted_version_digest() {
         let input = "ghcr.io/devcontainers/features/node@sha256:abcdef";
         assert!(compute_wanted_version(input).is_none());
+    }
+
+    #[test]
+    fn test_compute_wanted_version_no_version() {
+        let input = "ghcr.io/devcontainers/features/node";
+        assert!(compute_wanted_version(input).is_none());
+    }
+
+    #[test]
+    fn test_compute_wanted_version_semver() {
+        let input = "ghcr.io/devcontainers/features/python:3.11.2";
+        assert_eq!(compute_wanted_version(input).unwrap(), "3.11.2");
+    }
+
+    // wanted_major tests
+    #[test]
+    fn test_wanted_major_valid() {
+        assert_eq!(
+            wanted_major(&Some("1.2.3".to_string())),
+            Some("1".to_string())
+        );
+        assert_eq!(
+            wanted_major(&Some("18.0.0".to_string())),
+            Some("18".to_string())
+        );
+    }
+
+    #[test]
+    fn test_wanted_major_none() {
+        assert_eq!(wanted_major(&None), None);
+    }
+
+    #[test]
+    fn test_wanted_major_invalid() {
+        assert_eq!(wanted_major(&Some("invalid".to_string())), None);
+        assert_eq!(wanted_major(&Some("".to_string())), None);
+    }
+
+    // latest_major tests
+    #[test]
+    fn test_latest_major_valid() {
+        assert_eq!(
+            latest_major(&Some("20.1.0".to_string())),
+            Some("20".to_string())
+        );
+        assert_eq!(
+            latest_major(&Some("3.11.5".to_string())),
+            Some("3".to_string())
+        );
+    }
+
+    #[test]
+    fn test_latest_major_none() {
+        assert_eq!(latest_major(&None), None);
+    }
+
+    #[test]
+    fn test_latest_major_invalid() {
+        assert_eq!(latest_major(&Some("not-semver".to_string())), None);
+    }
+
+    // derive_current_version tests
+    #[test]
+    fn test_derive_current_version_no_lockfile() {
+        let reference = "ghcr.io/devcontainers/features/node:18";
+        assert_eq!(
+            derive_current_version(reference, None),
+            Some("18".to_string())
+        );
+    }
+
+    #[test]
+    fn test_derive_current_version_with_lockfile_entry() {
+        let reference = "ghcr.io/devcontainers/features/node:20";
+        let mut features = HashMap::new();
+        features.insert(
+            "ghcr.io/devcontainers/features/node".to_string(),
+            lockfile::LockfileFeature {
+                version: "18.5.0".to_string(),
+                resolved: "ghcr.io/devcontainers/features/node@sha256:abc123".to_string(),
+                integrity: "sha256:abc123".to_string(),
+                depends_on: None,
+            },
+        );
+        let lockfile = lockfile::Lockfile { features };
+
+        // Should return lockfile version, not wanted version
+        assert_eq!(
+            derive_current_version(reference, Some(&lockfile)),
+            Some("18.5.0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_derive_current_version_lockfile_no_match() {
+        let reference = "ghcr.io/devcontainers/features/python:3.11";
+        let mut features = HashMap::new();
+        features.insert(
+            "ghcr.io/devcontainers/features/node".to_string(),
+            lockfile::LockfileFeature {
+                version: "18.0.0".to_string(),
+                resolved: "ghcr.io/devcontainers/features/node@sha256:def456".to_string(),
+                integrity: "sha256:def456".to_string(),
+                depends_on: None,
+            },
+        );
+        let lockfile = lockfile::Lockfile { features };
+
+        // No match in lockfile, should fall back to wanted
+        assert_eq!(
+            derive_current_version(reference, Some(&lockfile)),
+            Some("3.11".to_string())
+        );
+    }
+
+    #[test]
+    fn test_derive_current_version_digest_no_lockfile() {
+        let reference = "ghcr.io/devcontainers/features/node@sha256:abcdef";
+        // Digest with no lockfile should return None (can't derive version)
+        assert_eq!(derive_current_version(reference, None), None);
+    }
+
+    // FeatureVersionInfo serialization tests
+    #[test]
+    fn test_feature_version_info_serialization() {
+        let info = FeatureVersionInfo {
+            id: "ghcr.io/devcontainers/features/node".to_string(),
+            current: Some("18.0.0".to_string()),
+            wanted: Some("18".to_string()),
+            latest: Some("20.1.0".to_string()),
+            wanted_major: Some("18".to_string()),
+            latest_major: Some("20".to_string()),
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: FeatureVersionInfo = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.id, info.id);
+        assert_eq!(deserialized.current, info.current);
+        assert_eq!(deserialized.wanted, info.wanted);
+        assert_eq!(deserialized.latest, info.latest);
+    }
+
+    #[test]
+    fn test_feature_version_info_with_nulls() {
+        let info = FeatureVersionInfo {
+            id: "ghcr.io/devcontainers/features/node".to_string(),
+            current: None,
+            wanted: None,
+            latest: None,
+            wanted_major: None,
+            latest_major: None,
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: FeatureVersionInfo = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.id, info.id);
+        assert_eq!(deserialized.current, None);
+        assert_eq!(deserialized.wanted, None);
+        assert_eq!(deserialized.latest, None);
     }
 }

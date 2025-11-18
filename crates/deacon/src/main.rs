@@ -10,10 +10,16 @@ async fn main() -> Result<()> {
     // Parse CLI arguments
     let parsed = cli::Cli::parse();
 
-    // Dispatch to CLI handler and handle NotImplemented errors
+    // Dispatch to CLI handler and handle special exit codes
     match parsed.dispatch().await {
         Ok(()) => Ok(()),
         Err(err) => {
+            // Check for OutdatedExitCode (exit code 2 for --fail-on-outdated)
+            if let Some(outdated_exit) = err.downcast_ref::<commands::outdated::OutdatedExitCode>()
+            {
+                std::process::exit(outdated_exit.0);
+            }
+
             // Check if this is a NotImplemented error for special handling
             if let Some(deacon_error) = err.downcast_ref::<deacon_core::errors::DeaconError>() {
                 if matches!(

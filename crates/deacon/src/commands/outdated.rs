@@ -327,7 +327,7 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
             }
 
             if any_outdated {
-                return Err(Box::new(OutdatedExitCode(2)).into());
+                std::process::exit(2);
             }
         }
 
@@ -336,7 +336,7 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
 
     // Render text table to stdout (T014) - logs use tracing (stderr)
     println!("Feature | Current | Wanted | Latest");
-    for f in results {
+    for f in &results {
         println!(
             "{} | {} | {} | {}",
             f.id,
@@ -344,6 +344,30 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
             f.wanted.as_deref().unwrap_or("-"),
             f.latest.as_deref().unwrap_or("-")
         );
+    }
+
+    // Check for outdated features if fail_on_outdated is set
+    if args.fail_on_outdated {
+        use deacon_core::semver_utils::compare_versions;
+        let mut any_outdated = false;
+        for f in &results {
+            if let (Some(current), Some(wanted)) = (f.current.as_ref(), f.wanted.as_ref()) {
+                if compare_versions(current, wanted) == std::cmp::Ordering::Less {
+                    any_outdated = true;
+                    break;
+                }
+            }
+            if let (Some(wanted), Some(latest)) = (f.wanted.as_ref(), f.latest.as_ref()) {
+                if compare_versions(wanted, latest) == std::cmp::Ordering::Less {
+                    any_outdated = true;
+                    break;
+                }
+            }
+        }
+
+        if any_outdated {
+            std::process::exit(2);
+        }
     }
 
     Ok(())
