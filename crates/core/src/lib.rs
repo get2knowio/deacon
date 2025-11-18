@@ -30,6 +30,9 @@ pub mod logging;
 pub mod mount;
 pub mod observability;
 pub mod oci;
+/// Feature version tracking and outdated detection.
+/// Provides functionality for checking feature versions against registries.
+pub mod outdated;
 pub mod platform;
 pub mod plugins;
 pub mod ports;
