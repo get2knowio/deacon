@@ -20,3 +20,10 @@
 - Safety: no `unsafe` code; review new deps carefully.
 - Copilot rules: follow `.github/copilot-instructions.md` (run build/test/fmt/clippy after every change).
 - Use Fast Loop by default during spec-phase; run `make test`/`make release-check` periodically and before PRs.
+
+## Active Technologies
+- Rust stable (2021 edition) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio (as already in repo) (001-up-gap-spec)
+- N/A (CLI orchestrator; uses filesystem for configs/cache) (001-up-gap-spec)
+
+## Recent Changes
+- 001-up-gap-spec: Added Rust stable (2021 edition) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio (as already in repo)
