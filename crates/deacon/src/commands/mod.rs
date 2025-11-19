@@ -15,4 +15,4 @@ pub mod templates;
 pub mod up;
 
 // Re-export up command types for stdout JSON contract
-pub use up::{UpError, UpResult, UpSuccess};
+pub use up::UpResult;

@@ -41,16 +41,16 @@
 
 ### Tests for User Story 1
 
-- [ ] T005 [P] [US1] Add unit tests for flag parsing/validation and JSON output serialization in `crates/deacon/src/cli.rs` and `crates/deacon/tests/up_validation.rs`
-- [ ] T006 [P] [US1] Add integration tests for invalid mount/remote-env and success JSON emission in `crates/deacon/tests/up_json_output.rs`
-- [ ] T027 [P] [US1] Add unit/integration tests for config filename validation, disallowed feature error, and image metadata merge in `crates/deacon/tests/up_config_resolution.rs`
+- [X] T005 [P] [US1] Add unit tests for flag parsing/validation and JSON output serialization in `crates/deacon/src/cli.rs` and `crates/deacon/tests/up_validation.rs`
+- [X] T006 [P] [US1] Add integration tests for invalid mount/remote-env and success JSON emission in `crates/deacon/tests/up_json_output.rs`
+- [X] T027 [P] [US1] Add unit/integration tests for config filename validation, disallowed feature error, and image metadata merge in `crates/deacon/tests/up_config_resolution.rs`
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Implement missing CLI flags and help text (workspace/id-label, runtime behavior, mounts/env/cache/buildkit, metadata omission, output shaping, data folders, docker/compose paths) in `crates/deacon/src/cli.rs`
-- [ ] T008 [US1] Enforce validation and normalization rules (workspace/id-label/override-config requirements, mount/remote-env regex, terminal dims pairing, expect-existing fast-fail) in `crates/deacon/src/commands/up.rs`
+- [X] T007 [US1] Implement missing CLI flags and help text (workspace/id-label, runtime behavior, mounts/env/cache/buildkit, metadata omission, output shaping, data folders, docker/compose paths) in `crates/deacon/src/cli.rs`
+- [X] T008 [US1] Enforce validation and normalization rules (workspace/id-label/override-config requirements, mount/remote-env regex, terminal dims pairing, expect-existing fast-fail) in `crates/deacon/src/commands/up.rs`
 - [ ] T009 [US1] Wire normalized options into provision/runtime structures including runtime path overrides and build/cache options in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`
-- [ ] T010 [US1] Implement stdout JSON success/error contract with include-configuration/mergedConfiguration flags and stderr-only logging in `crates/deacon/src/commands/up.rs`
+- [x] T010 [US1] Implement stdout JSON success/error contract with include-configuration/mergedConfiguration flags and stderr-only logging in `crates/deacon/src/commands/up.rs`
 - [ ] T011 [US1] Standardize error mapping/messages and exit codes for validation failures in `crates/deacon/src/commands/up.rs`
 - [ ] T028 [US1] Enforce devcontainer filename validation and override-only discovery rules in `crates/deacon/src/commands/read_configuration.rs`
 - [ ] T029 [US1] Implement id-label discovery, disallowed feature error, and image metadata merge into resolved configuration in `crates/deacon/src/commands/up.rs`

@@ -28,24 +28,24 @@ use tracing::{debug, info, instrument, warn};
 pub struct UpSuccess {
     /// Always "success" for successful outcomes
     pub outcome: String,
-    
+
     /// ID of the created or reused container
     pub container_id: String,
-    
+
     /// Compose project name (only present for compose-based configurations)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compose_project_name: Option<String>,
-    
+
     /// Remote user inside the container
     pub remote_user: String,
-    
+
     /// Remote workspace folder path inside the container
     pub remote_workspace_folder: String,
-    
+
     /// Configuration object (only when includeConfiguration flag is set)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub configuration: Option<serde_json::Value>,
-    
+
     /// Merged configuration object (only when includeMergedConfiguration flag is set)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub merged_configuration: Option<serde_json::Value>,
@@ -61,25 +61,25 @@ pub struct UpSuccess {
 pub struct UpError {
     /// Always "error" for error outcomes
     pub outcome: String,
-    
+
     /// Short error message
     pub message: String,
-    
+
     /// Detailed error description
     pub description: String,
-    
+
     /// Container ID (if container was created before error)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container_id: Option<String>,
-    
+
     /// Disallowed feature ID (if error was due to disallowed feature)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disallowed_feature_id: Option<String>,
-    
+
     /// Whether the container was stopped during error handling
     #[serde(skip_serializing_if = "Option::is_none")]
     pub did_stop_container: Option<bool>,
-    
+
     /// Optional URL for more information
     #[serde(skip_serializing_if = "Option::is_none")]
     pub learn_more_url: Option<String>,
@@ -136,6 +136,7 @@ impl UpResult {
     }
 
     /// Add configuration to a success result
+    #[allow(dead_code)] // TODO: Will be used when includeConfiguration flag is wired
     pub fn with_configuration(mut self, configuration: serde_json::Value) -> Self {
         if let UpResult::Success(ref mut success) = self {
             success.configuration = Some(configuration);
@@ -144,6 +145,7 @@ impl UpResult {
     }
 
     /// Add merged configuration to a success result
+    #[allow(dead_code)] // TODO: Will be used when includeMergedConfiguration flag is wired
     pub fn with_merged_configuration(mut self, merged_configuration: serde_json::Value) -> Self {
         if let UpResult::Success(ref mut success) = self {
             success.merged_configuration = Some(merged_configuration);
@@ -152,6 +154,7 @@ impl UpResult {
     }
 
     /// Add container ID to an error result
+    #[allow(dead_code)] // TODO: Will be used in T011 for error scenarios
     pub fn with_container_id(mut self, container_id: String) -> Self {
         match self {
             UpResult::Success(_) => self,
@@ -163,6 +166,7 @@ impl UpResult {
     }
 
     /// Add disallowed feature ID to an error result
+    #[allow(dead_code)] // TODO: Will be used in T029 for disallowed features
     pub fn with_disallowed_feature_id(mut self, feature_id: String) -> Self {
         if let UpResult::Error(ref mut error) = self {
             error.disallowed_feature_id = Some(feature_id);
@@ -171,6 +175,7 @@ impl UpResult {
     }
 
     /// Mark that container was stopped during error handling
+    #[allow(dead_code)] // TODO: Will be used in T011 for error scenarios
     pub fn with_did_stop_container(mut self, stopped: bool) -> Self {
         if let UpResult::Error(ref mut error) = self {
             error.did_stop_container = Some(stopped);
@@ -179,6 +184,7 @@ impl UpResult {
     }
 
     /// Add learn more URL to an error result
+    #[allow(dead_code)] // TODO: Will be used in T011 for error scenarios
     pub fn with_learn_more_url(mut self, url: String) -> Self {
         if let UpResult::Error(ref mut error) = self {
             error.learn_more_url = Some(url);
@@ -190,10 +196,11 @@ impl UpResult {
     ///
     /// Per contract: stdout receives exactly one JSON document, stderr receives logs.
     /// Returns 0 for success, 1 for error.
+    #[allow(dead_code)] // TODO: Alternative to inline JSON emission in cli.rs
     pub fn emit(&self) -> Result<i32> {
         let json = serde_json::to_string_pretty(self)?;
         println!("{}", json);
-        
+
         match self {
             UpResult::Success(_) => Ok(0),
             UpResult::Error(_) => Ok(1),
@@ -201,14 +208,25 @@ impl UpResult {
     }
 
     /// Check if this is a success result
+    #[allow(dead_code)] // TODO: Helper method for future use
     pub fn is_success(&self) -> bool {
         matches!(self, UpResult::Success(_))
     }
 
     /// Check if this is an error result
+    #[allow(dead_code)] // TODO: Helper method for future use
     pub fn is_error(&self) -> bool {
         matches!(self, UpResult::Error(_))
     }
+}
+
+/// Internal structure to pass container information from execute_up_with_runtime
+#[derive(Debug, Clone)]
+pub struct UpContainerInfo {
+    pub container_id: String,
+    pub remote_user: String,
+    pub remote_workspace_folder: String,
+    pub compose_project_name: Option<String>,
 }
 
 /// Parsed and normalized mount specification.
@@ -237,12 +255,12 @@ impl NormalizedMount {
     /// Returns error if format is invalid or required fields are missing.
     pub fn parse(mount_str: &str) -> Result<Self> {
         use regex::Regex;
-        
+
         // Mount regex pattern from contract
         let mount_regex = Regex::new(
-            r"^type=(bind|volume),source=([^,]+),target=([^,]+)(?:,external=(true|false))?$"
+            r"^type=(bind|volume),source=([^,]+),target=([^,]+)(?:,external=(true|false))?$",
         )?;
-        
+
         let captures = mount_regex.captures(mount_str).ok_or_else(|| {
             DeaconError::Config(deacon_core::errors::ConfigError::Validation {
                 message: format!(
@@ -251,17 +269,17 @@ impl NormalizedMount {
                 ),
             })
         })?;
-        
+
         let mount_type = match &captures[1] {
             "bind" => MountType::Bind,
             "volume" => MountType::Volume,
             _ => unreachable!("Regex should only match bind or volume"),
         };
-        
+
         let source = captures[2].to_string();
         let target = captures[3].to_string();
-        let external = captures.get(4).map_or(false, |m| m.as_str() == "true");
-        
+        let external = captures.get(4).is_some_and(|m| m.as_str() == "true");
+
         Ok(Self {
             mount_type,
             source,
@@ -288,17 +306,19 @@ impl NormalizedRemoteEnv {
     /// Returns error if format is invalid (missing =).
     pub fn parse(env_str: &str) -> Result<Self> {
         let parts: Vec<&str> = env_str.splitn(2, '=').collect();
-        
+
         if parts.len() != 2 {
-            return Err(DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                message: format!(
-                    "Invalid remote-env format: '{}'. Expected: NAME=value",
-                    env_str
-                ),
-            })
-            .into());
+            return Err(
+                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                    message: format!(
+                        "Invalid remote-env format: '{}'. Expected: NAME=value",
+                        env_str
+                    ),
+                })
+                .into(),
+            );
         }
-        
+
         Ok(Self {
             name: parts[0].to_string(),
             value: parts[1].to_string(),
@@ -346,13 +366,14 @@ impl TerminalDimensions {
 /// ensuring all validation rules from the contract are enforced before
 /// any runtime operations begin (fail-fast principle).
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // TODO: Will be fully wired in T009
 pub struct NormalizedUpInput {
     // Identity and discovery
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub override_config_path: Option<PathBuf>,
     pub id_labels: Vec<(String, String)>,
-    
+
     // Runtime behavior
     pub remove_existing_container: bool,
     pub expect_existing_container: bool,
@@ -360,47 +381,47 @@ pub struct NormalizedUpInput {
     pub skip_post_attach: bool,
     pub skip_non_blocking_commands: bool,
     pub prebuild: bool,
-    
+
     // Mounts and environment
     pub mounts: Vec<NormalizedMount>,
     pub remote_env: Vec<NormalizedRemoteEnv>,
     pub mount_workspace_git_root: bool,
-    
+
     // Terminal settings
     pub terminal_dimensions: Option<TerminalDimensions>,
-    
+
     // Build and cache options
     pub build_no_cache: bool,
     pub cache_from: Vec<String>,
     pub cache_to: Option<String>,
     pub buildkit_mode: BuildkitMode,
-    
+
     // Features and dotfiles
     pub additional_features: Option<String>,
     pub skip_feature_auto_mapping: bool,
     pub dotfiles_repository: Option<String>,
     pub dotfiles_install_command: Option<String>,
     pub dotfiles_target_path: Option<String>,
-    
+
     // Secrets
     pub secrets_files: Vec<PathBuf>,
-    
+
     // Output control
     pub include_configuration: bool,
     pub include_merged_configuration: bool,
     pub omit_config_remote_env_from_metadata: bool,
     pub omit_syntax_directive: bool,
-    
+
     // Data folders
     pub container_data_folder: Option<PathBuf>,
     pub container_system_data_folder: Option<PathBuf>,
     pub user_data_folder: Option<PathBuf>,
     pub container_session_data_folder: Option<PathBuf>,
-    
+
     // Runtime paths
     pub docker_path: String,
     pub docker_compose_path: String,
-    
+
     // Internal flags
     pub ports_events: bool,
     pub shutdown: bool,
@@ -410,7 +431,7 @@ pub struct NormalizedUpInput {
     pub feature_install_order: Option<String>,
     pub ignore_host_requirements: bool,
     pub env_file: Vec<PathBuf>,
-    
+
     // Runtime and observability
     pub runtime: Option<deacon_core::runtime::RuntimeKind>,
     pub redaction_config: deacon_core::redaction::RedactionConfig,
@@ -433,27 +454,29 @@ impl NormalizedUpInput {
     /// - workspace_folder OR id_label required
     /// - workspace_folder OR override_config required
     /// - expect_existing_container requires existing container (checked at runtime)
+    #[allow(dead_code)] // TODO: Will be used in T011 for advanced validation
     pub fn validate(&self) -> Result<()> {
         // Require workspace_folder or id_label
         if self.workspace_folder.is_none() && self.id_labels.is_empty() {
-            return Err(DeaconError::Config(
-                deacon_core::errors::ConfigError::Validation {
+            return Err(
+                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
                     message: "Either workspace_folder or id_label must be specified".to_string(),
-                },
-            )
-            .into());
+                })
+                .into(),
+            );
         }
-        
+
         // Require workspace_folder or override_config
         if self.workspace_folder.is_none() && self.override_config_path.is_none() {
-            return Err(DeaconError::Config(
-                deacon_core::errors::ConfigError::Validation {
-                    message: "Either workspace_folder or override_config must be specified".to_string(),
-                },
-            )
-            .into());
+            return Err(
+                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                    message: "Either workspace_folder or override_config must be specified"
+                        .to_string(),
+                })
+                .into(),
+            );
         }
-        
+
         Ok(())
     }
 }
@@ -461,61 +484,140 @@ impl NormalizedUpInput {
 /// Up command arguments
 #[derive(Debug, Clone)]
 pub struct UpArgs {
+    // Container identity and discovery
+    pub id_label: Vec<String>,
+
+    // Runtime behavior
     pub remove_existing_container: bool,
+    pub expect_existing_container: bool,
+    pub prebuild: bool,
     pub skip_post_create: bool,
-    #[allow(dead_code)] // TODO: Connect to container lifecycle execution
+    pub skip_post_attach: bool,
     pub skip_non_blocking_commands: bool,
-    pub ports_events: bool,
-    pub shutdown: bool,
-    pub forward_ports: Vec<String>,
-    pub container_name: Option<String>,
-    pub workspace_folder: Option<PathBuf>,
-    pub config_path: Option<PathBuf>,
+
+    // Mounts and environment
+    pub mount: Vec<String>,
+    pub remote_env: Vec<String>,
+    pub mount_workspace_git_root: bool,
+    #[allow(dead_code)] // TODO: Will be wired in T009
+    pub workspace_mount_consistency: Option<String>,
+
+    // Build and cache options
+    pub build_no_cache: bool,
+    pub cache_from: Vec<String>,
+    pub cache_to: Option<String>,
+    pub buildkit: Option<crate::cli::BuildKitOption>,
+
+    // Features and dotfiles
     pub additional_features: Option<String>,
     pub prefer_cli_features: bool,
     pub feature_install_order: Option<String>,
+    pub skip_feature_auto_mapping: bool,
+    pub dotfiles_repository: Option<String>,
+    pub dotfiles_install_command: Option<String>,
+    pub dotfiles_target_path: Option<String>,
+
+    // Metadata and output control
+    pub omit_config_remote_env_from_metadata: bool,
+    pub omit_syntax_directive: bool,
+    pub include_configuration: bool,
+    pub include_merged_configuration: bool,
+
+    // GPU and advanced options
+    #[allow(dead_code)] // TODO: Will be wired in T009
+    pub gpu_availability: Option<String>,
+    #[allow(dead_code)] // TODO: Will be wired in T009
+    pub update_remote_user_uid_default: Option<String>,
+
+    // Port handling
+    pub ports_events: bool,
+    pub forward_ports: Vec<String>,
+
+    // Lifecycle
+    pub shutdown: bool,
+    pub container_name: Option<String>,
+
+    // Paths and config
+    pub workspace_folder: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
+    pub override_config_path: Option<PathBuf>,
+    pub secrets_files: Vec<PathBuf>,
+    pub container_data_folder: Option<PathBuf>,
+    pub container_system_data_folder: Option<PathBuf>,
+
+    // Host requirements
     pub ignore_host_requirements: bool,
+
+    // Compose
+    pub env_file: Vec<PathBuf>,
+
+    // Runtime paths
+    pub docker_path: String,
+    pub docker_compose_path: String,
+
+    // Terminal
+    pub terminal_columns: Option<u32>,
+    pub terminal_rows: Option<u32>,
+
+    // Runtime and observability
     pub progress_tracker:
         std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
     pub runtime: Option<deacon_core::runtime::RuntimeKind>,
     pub redaction_config: deacon_core::redaction::RedactionConfig,
     pub secret_registry: deacon_core::redaction::SecretRegistry,
-    pub env_file: Vec<PathBuf>,
-    #[allow(dead_code)] // Future: Will be used for custom docker executable path
-    pub docker_path: String,
-    #[allow(dead_code)] // Future: Will be used for standalone docker-compose binary (legacy)
-    pub docker_compose_path: String,
-    #[allow(dead_code)] // Future: Will be used for terminal output formatting
-    pub terminal_columns: Option<u32>,
-    #[allow(dead_code)] // Future: Will be used for terminal output formatting
-    pub terminal_rows: Option<u32>,
 }
 
 impl Default for UpArgs {
     fn default() -> Self {
         Self {
+            id_label: Vec::new(),
             remove_existing_container: false,
+            expect_existing_container: false,
+            prebuild: false,
             skip_post_create: false,
+            skip_post_attach: false,
             skip_non_blocking_commands: false,
-            ports_events: false,
-            shutdown: false,
-            forward_ports: Vec::new(),
-            container_name: None,
-            workspace_folder: None,
-            config_path: None,
+            mount: Vec::new(),
+            remote_env: Vec::new(),
+            mount_workspace_git_root: true,
+            workspace_mount_consistency: None,
+            build_no_cache: false,
+            cache_from: Vec::new(),
+            cache_to: None,
+            buildkit: None,
             additional_features: None,
             prefer_cli_features: false,
             feature_install_order: None,
+            skip_feature_auto_mapping: false,
+            dotfiles_repository: None,
+            dotfiles_install_command: None,
+            dotfiles_target_path: None,
+            omit_config_remote_env_from_metadata: false,
+            omit_syntax_directive: false,
+            include_configuration: false,
+            include_merged_configuration: false,
+            gpu_availability: None,
+            update_remote_user_uid_default: None,
+            ports_events: false,
+            forward_ports: Vec::new(),
+            shutdown: false,
+            container_name: None,
+            workspace_folder: None,
+            config_path: None,
+            override_config_path: None,
+            secrets_files: Vec::new(),
+            container_data_folder: None,
+            container_system_data_folder: None,
             ignore_host_requirements: false,
-            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            runtime: None,
-            redaction_config: deacon_core::redaction::RedactionConfig::default(),
-            secret_registry: deacon_core::redaction::global_registry().clone(),
             env_file: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             terminal_columns: None,
             terminal_rows: None,
+            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            runtime: None,
+            redaction_config: deacon_core::redaction::RedactionConfig::default(),
+            secret_registry: deacon_core::redaction::global_registry().clone(),
         }
     }
 }
@@ -550,9 +652,13 @@ impl Default for UpArgs {
 /// });
 /// ```
 #[instrument(skip(args))]
-pub async fn execute_up(args: UpArgs) -> Result<()> {
+pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
     debug!("Starting up command execution");
     debug!("Up args: {:?}", args);
+
+    // Step 1: Validate and normalize inputs (fail-fast before any runtime operations)
+    let _normalized = normalize_and_validate_args(&args)?;
+    debug!("Args validated and normalized successfully");
 
     // Create runtime based on args
     let runtime_kind = RuntimeFactory::detect_runtime(args.runtime);
@@ -562,9 +668,144 @@ pub async fn execute_up(args: UpArgs) -> Result<()> {
     execute_up_with_runtime(args, runtime).await
 }
 
+/// Normalize and validate up command arguments before any runtime operations.
+///
+/// Enforces contract validation rules from specs/001-up-gap-spec/contracts/up.md:
+/// - workspace_folder OR id_label required
+/// - workspace_folder OR override_config required  
+/// - mount format validation
+/// - remote_env format validation
+/// - terminal dimensions pairing
+/// - expect_existing_container constraints
+fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpInput> {
+    // Validate workspace_folder OR id_label requirement
+    if args.workspace_folder.is_none() && args.id_label.is_empty() {
+        return Err(
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: "Either --workspace-folder or --id-label must be specified".to_string(),
+            })
+            .into(),
+        );
+    }
+
+    // Validate workspace_folder OR override_config requirement
+    if args.workspace_folder.is_none() && args.override_config_path.is_none() {
+        return Err(
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: "Either --workspace-folder or --override-config must be specified"
+                    .to_string(),
+            })
+            .into(),
+        );
+    }
+
+    // Parse and validate mount specifications
+    let mut mounts = Vec::new();
+    for mount_str in &args.mount {
+        match NormalizedMount::parse(mount_str) {
+            Ok(mount) => mounts.push(mount),
+            Err(e) => {
+                return Err(e);
+            }
+        }
+    }
+
+    // Parse and validate remote environment variables
+    let mut remote_env = Vec::new();
+    for env_str in &args.remote_env {
+        match NormalizedRemoteEnv::parse(env_str) {
+            Ok(env) => remote_env.push(env),
+            Err(e) => {
+                return Err(e);
+            }
+        }
+    }
+
+    // Parse and validate id labels
+    let mut id_labels = Vec::new();
+    for label_str in &args.id_label {
+        let parts: Vec<&str> = label_str.splitn(2, '=').collect();
+        if parts.len() != 2 {
+            return Err(
+                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                    message: format!(
+                        "Invalid id-label format: '{}'. Expected: name=value",
+                        label_str
+                    ),
+                })
+                .into(),
+            );
+        }
+        id_labels.push((parts[0].to_string(), parts[1].to_string()));
+    }
+
+    // Validate terminal dimensions pairing
+    let terminal_dimensions = TerminalDimensions::new(args.terminal_columns, args.terminal_rows)?;
+
+    // Map BuildKitOption to BuildkitMode
+    let buildkit_mode = match args.buildkit {
+        Some(crate::cli::BuildKitOption::Auto) => BuildkitMode::Auto,
+        Some(crate::cli::BuildKitOption::Never) => BuildkitMode::Never,
+        None => BuildkitMode::Auto, // Default to auto
+    };
+
+    // Create normalized input
+    Ok(NormalizedUpInput {
+        workspace_folder: args.workspace_folder.clone(),
+        config_path: args.config_path.clone(),
+        override_config_path: args.override_config_path.clone(),
+        id_labels,
+        remove_existing_container: args.remove_existing_container,
+        expect_existing_container: args.expect_existing_container,
+        skip_post_create: args.skip_post_create,
+        skip_post_attach: args.skip_post_attach,
+        skip_non_blocking_commands: args.skip_non_blocking_commands,
+        prebuild: args.prebuild,
+        mounts,
+        remote_env,
+        mount_workspace_git_root: args.mount_workspace_git_root,
+        terminal_dimensions,
+        build_no_cache: args.build_no_cache,
+        cache_from: args.cache_from.clone(),
+        cache_to: args.cache_to.clone(),
+        buildkit_mode,
+        additional_features: args.additional_features.clone(),
+        skip_feature_auto_mapping: args.skip_feature_auto_mapping,
+        dotfiles_repository: args.dotfiles_repository.clone(),
+        dotfiles_install_command: args.dotfiles_install_command.clone(),
+        dotfiles_target_path: args.dotfiles_target_path.clone(),
+        secrets_files: args.secrets_files.clone(),
+        include_configuration: args.include_configuration,
+        include_merged_configuration: args.include_merged_configuration,
+        omit_config_remote_env_from_metadata: args.omit_config_remote_env_from_metadata,
+        omit_syntax_directive: args.omit_syntax_directive,
+        container_data_folder: args.container_data_folder.clone(),
+        container_system_data_folder: args.container_system_data_folder.clone(),
+        user_data_folder: None,              // TODO: Add to UpArgs if needed
+        container_session_data_folder: None, // TODO: Add to UpArgs if needed
+        docker_path: args.docker_path.clone(),
+        docker_compose_path: args.docker_compose_path.clone(),
+        ports_events: args.ports_events,
+        shutdown: args.shutdown,
+        forward_ports: args.forward_ports.clone(),
+        container_name: args.container_name.clone(),
+        prefer_cli_features: args.prefer_cli_features,
+        feature_install_order: args.feature_install_order.clone(),
+        ignore_host_requirements: args.ignore_host_requirements,
+        env_file: args.env_file.clone(),
+        runtime: args.runtime,
+        redaction_config: args.redaction_config.clone(),
+        secret_registry: args.secret_registry.clone(),
+        progress_tracker: args.progress_tracker.clone(),
+    })
+}
+
 /// Execute up command with a specific runtime implementation
 #[instrument(skip(args, runtime))]
-async fn execute_up_with_runtime(args: UpArgs, runtime: ContainerRuntimeImpl) -> Result<()> {
+async fn execute_up_with_runtime(
+    args: UpArgs,
+    runtime: ContainerRuntimeImpl,
+) -> Result<UpContainerInfo> {
     debug!("Starting up command execution");
     debug!("Up args: {:?}", args);
 
@@ -652,7 +893,7 @@ async fn execute_up_with_runtime(args: UpArgs, runtime: ContainerRuntimeImpl) ->
     let mut state_manager = StateManager::new()?;
 
     // Check if this is a compose-based configuration
-    if config.uses_compose() {
+    let container_info = if config.uses_compose() {
         execute_compose_up(
             &config,
             workspace_folder,
@@ -660,7 +901,7 @@ async fn execute_up_with_runtime(args: UpArgs, runtime: ContainerRuntimeImpl) ->
             &mut state_manager,
             &workspace_hash,
         )
-        .await?;
+        .await?
     } else {
         execute_container_up(
             &config,
@@ -670,8 +911,8 @@ async fn execute_up_with_runtime(args: UpArgs, runtime: ContainerRuntimeImpl) ->
             &workspace_hash,
             &runtime,
         )
-        .await?;
-    }
+        .await?
+    };
 
     // Output final metrics summary in debug mode
     if let Ok(tracker_guard) = args.progress_tracker.lock() {
@@ -682,7 +923,7 @@ async fn execute_up_with_runtime(args: UpArgs, runtime: ContainerRuntimeImpl) ->
         }
     }
 
-    Ok(())
+    Ok(container_info)
 }
 
 /// Execute up for Docker Compose configurations
@@ -693,7 +934,7 @@ async fn execute_compose_up(
     args: &UpArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
-) -> Result<()> {
+) -> Result<UpContainerInfo> {
     debug!("Starting Docker Compose project");
 
     let compose_manager = ComposeManager::with_docker_path(args.docker_path.clone());
@@ -710,10 +951,33 @@ async fn execute_compose_up(
             Ok(true) => {
                 debug!("Compose project {} is already running", project.name);
                 // Get the primary container ID for potential exec operations
-                if let Ok(Some(container_id)) = compose_manager.get_primary_container_id(&project) {
-                    debug!("Primary service container ID: {}", container_id);
-                }
-                return Ok(());
+                let container_id = compose_manager
+                    .get_primary_container_id(&project)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Failed to get primary container ID for running compose project"
+                        )
+                    })?;
+                debug!("Primary service container ID: {}", container_id);
+
+                // Return container info for already-running project
+                let remote_user = config
+                    .remote_user
+                    .clone()
+                    .or_else(|| config.container_user.clone())
+                    .unwrap_or_else(|| "root".to_string());
+
+                let remote_workspace_folder = config
+                    .workspace_folder
+                    .clone()
+                    .unwrap_or_else(|| "/workspaces".to_string());
+
+                return Ok(UpContainerInfo {
+                    container_id,
+                    remote_user,
+                    remote_workspace_folder,
+                    compose_project_name: Some(project.name.clone()),
+                });
             }
             Ok(false) => {
                 // Not running, continue
@@ -793,7 +1057,30 @@ async fn execute_compose_up(
         .await?;
     }
 
-    Ok(())
+    // Collect container information for JSON output
+    let container_id = compose_manager
+        .get_primary_container_id(&project)?
+        .ok_or_else(|| {
+            anyhow::anyhow!("Failed to get primary container ID after starting compose project")
+        })?;
+
+    let remote_user = config
+        .remote_user
+        .clone()
+        .or_else(|| config.container_user.clone())
+        .unwrap_or_else(|| "root".to_string());
+
+    let remote_workspace_folder = config
+        .workspace_folder
+        .clone()
+        .unwrap_or_else(|| "/workspaces".to_string());
+
+    Ok(UpContainerInfo {
+        container_id,
+        remote_user,
+        remote_workspace_folder,
+        compose_project_name: Some(project.name.clone()),
+    })
 }
 
 /// Start and manage a single traditional development container for the given workspace.
@@ -829,7 +1116,7 @@ async fn execute_container_up(
     state_manager: &mut StateManager,
     workspace_hash: &str,
     runtime: &ContainerRuntimeImpl,
-) -> Result<()> {
+) -> Result<UpContainerInfo> {
     debug!("Starting traditional development container");
 
     // Merge CLI forward_ports into config
@@ -1004,7 +1291,25 @@ async fn execute_container_up(
     }
 
     info!("Traditional container up completed successfully");
-    Ok(())
+
+    // Collect container information for JSON output
+    let remote_user = config
+        .remote_user
+        .clone()
+        .or_else(|| config.container_user.clone())
+        .unwrap_or_else(|| "root".to_string());
+
+    let remote_workspace_folder = config
+        .workspace_folder
+        .clone()
+        .unwrap_or_else(|| "/workspaces".to_string());
+
+    Ok(UpContainerInfo {
+        container_id: container_result.container_id.clone(),
+        remote_user,
+        remote_workspace_folder,
+        compose_project_name: None,
+    })
 }
 
 /// Execute post-create lifecycle for compose projects
@@ -1571,27 +1876,8 @@ mod tests {
     fn test_up_args_creation() {
         let args = UpArgs {
             remove_existing_container: true,
-            skip_post_create: false,
-            skip_non_blocking_commands: false,
-            ports_events: false,
-            shutdown: false,
-            forward_ports: Vec::new(),
-            container_name: None,
             workspace_folder: Some(PathBuf::from("/test")),
-            config_path: None,
-            additional_features: None,
-            prefer_cli_features: false,
-            feature_install_order: None,
-            ignore_host_requirements: false,
-            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            runtime: None,
-            redaction_config: deacon_core::redaction::RedactionConfig::default(),
-            secret_registry: deacon_core::redaction::global_registry().clone(),
-            env_file: Vec::new(),
-            docker_path: "docker".to_string(),
-            docker_compose_path: "docker-compose".to_string(),
-            terminal_columns: None,
-            terminal_rows: None,
+            ..Default::default()
         };
 
         assert!(args.remove_existing_container);
@@ -1633,22 +1919,8 @@ mod tests {
             ports_events: true,
             shutdown: true,
             forward_ports: vec!["8080".to_string(), "3000:3000".to_string()],
-            container_name: None,
             workspace_folder: Some(PathBuf::from("/test")),
-            config_path: None,
-            additional_features: None,
-            prefer_cli_features: false,
-            feature_install_order: None,
-            ignore_host_requirements: false,
-            progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            runtime: None,
-            redaction_config: deacon_core::redaction::RedactionConfig::default(),
-            secret_registry: deacon_core::redaction::global_registry().clone(),
-            env_file: Vec::new(),
-            docker_path: "docker".to_string(),
-            docker_compose_path: "docker-compose".to_string(),
-            terminal_columns: None,
-            terminal_rows: None,
+            ..Default::default()
         };
 
         assert!(args.remove_existing_container);
@@ -1746,8 +2018,8 @@ mod tests {
 
     #[test]
     fn test_normalized_mount_parse_bind() {
-        let mount = NormalizedMount::parse("type=bind,source=/host/path,target=/container/path")
-            .unwrap();
+        let mount =
+            NormalizedMount::parse("type=bind,source=/host/path,target=/container/path").unwrap();
         assert!(matches!(mount.mount_type, MountType::Bind));
         assert_eq!(mount.source, "/host/path");
         assert_eq!(mount.target, "/container/path");
@@ -1756,8 +2028,9 @@ mod tests {
 
     #[test]
     fn test_normalized_mount_parse_volume_with_external() {
-        let mount = NormalizedMount::parse("type=volume,source=myvolume,target=/data,external=true")
-            .unwrap();
+        let mount =
+            NormalizedMount::parse("type=volume,source=myvolume,target=/data,external=true")
+                .unwrap();
         assert!(matches!(mount.mount_type, MountType::Volume));
         assert_eq!(mount.source, "myvolume");
         assert_eq!(mount.target, "/data");
@@ -1768,10 +2041,10 @@ mod tests {
     fn test_normalized_mount_parse_invalid_format() {
         // Missing target
         assert!(NormalizedMount::parse("type=bind,source=/tmp").is_err());
-        
+
         // Invalid type
         assert!(NormalizedMount::parse("type=invalid,source=/tmp,target=/data").is_err());
-        
+
         // Missing source
         assert!(NormalizedMount::parse("type=bind,target=/data").is_err());
     }
@@ -1781,7 +2054,7 @@ mod tests {
         let env = NormalizedRemoteEnv::parse("FOO=bar").unwrap();
         assert_eq!(env.name, "FOO");
         assert_eq!(env.value, "bar");
-        
+
         // Test with equals in value
         let env = NormalizedRemoteEnv::parse("DATABASE_URL=postgres://user:pass@host/db").unwrap();
         assert_eq!(env.name, "DATABASE_URL");
@@ -1792,7 +2065,7 @@ mod tests {
     fn test_normalized_remote_env_parse_invalid() {
         // Missing equals sign
         assert!(NormalizedRemoteEnv::parse("INVALID").is_err());
-        
+
         // Empty value is ok (equals present)
         let env = NormalizedRemoteEnv::parse("EMPTY=").unwrap();
         assert_eq!(env.name, "EMPTY");
