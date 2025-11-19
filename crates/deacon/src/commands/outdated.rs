@@ -155,9 +155,16 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
     // Prepare results vector
     let mut results: Vec<core_outdated::FeatureVersionInfo> = Vec::new();
 
-    // Collect declared refs preserving declaration order
+    // Collect declared refs preserving declaration order, filtering out non-OCI refs
+    // Per spec §9 and §14: Invalid/legacy feature identifiers (local paths, unknown schemes)
+    // are skipped, not errors. Outdated focuses on versionable OCI identifiers.
     let mut declared_refs: Vec<String> = Vec::new();
     for (feature_key, _feature_value) in features_map.iter() {
+        // Skip non-OCI feature refs (local paths, direct URLs, etc.)
+        if !core_outdated::is_oci_feature_ref(feature_key) {
+            debug!(feature = %feature_key, "Skipping non-OCI feature reference");
+            continue;
+        }
         declared_refs.push(feature_key.clone());
     }
 
@@ -267,8 +274,8 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
     // If JSON output requested, serialize to stdout and return appropriate exit code
     if matches!(args.output, OutputFormat::Json) {
         // Build a serializable version as a map keyed by canonical id
+        // Use serde_json::Map to preserve declaration order (requires preserve_order feature)
         use serde::Serialize;
-        use std::collections::BTreeMap;
 
         #[derive(Serialize)]
         struct JsonFeatureFields {
@@ -283,21 +290,21 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
 
         #[derive(Serialize)]
         struct JsonResultMap {
-            features: BTreeMap<String, JsonFeatureFields>,
+            features: serde_json::Map<String, serde_json::Value>,
         }
 
-        let mut map: BTreeMap<String, JsonFeatureFields> = BTreeMap::new();
+        let mut map = serde_json::Map::new();
         for f in &results {
-            map.insert(
-                f.id.clone(),
-                JsonFeatureFields {
-                    current: f.current.clone(),
-                    wanted: f.wanted.clone(),
-                    wanted_major: f.wanted_major.clone(),
-                    latest: f.latest.clone(),
-                    latest_major: f.latest_major.clone(),
-                },
-            );
+            let fields = JsonFeatureFields {
+                current: f.current.clone(),
+                wanted: f.wanted.clone(),
+                wanted_major: f.wanted_major.clone(),
+                latest: f.latest.clone(),
+                latest_major: f.latest_major.clone(),
+            };
+            // Convert to Value to insert into Map
+            let value = serde_json::to_value(fields)?;
+            map.insert(f.id.clone(), value);
         }
         let jr = JsonResultMap { features: map };
 
@@ -311,7 +318,7 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
         if args.fail_on_outdated {
             use deacon_core::semver_utils::compare_versions;
             let mut any_outdated = false;
-            for f in jr.features.values() {
+            for f in &results {
                 if let (Some(current), Some(wanted)) = (f.current.as_ref(), f.wanted.as_ref()) {
                     if compare_versions(current, wanted) == std::cmp::Ordering::Less {
                         any_outdated = true;
@@ -415,11 +422,14 @@ fn resolve_config_path(
 
 /// Loads the configuration file from the resolved location.
 ///
+/// Per spec §4 (lines 60-86), this must resolve the complete extends chain
+/// and apply variable substitution to obtain the effective configuration.
+///
 /// Returns appropriate error messages per spec §2, §9.
 fn load_config(
     config_location: &deacon_core::config::ConfigLocation,
 ) -> Result<deacon_core::config::DevContainerConfig> {
-    match ConfigLoader::load_from_path(config_location.path()) {
+    match ConfigLoader::load_with_extends(config_location.path()) {
         Ok(cfg) => Ok(cfg),
         Err(e) => match e {
             DeaconError::Config(ConfigError::NotFound { path }) => {

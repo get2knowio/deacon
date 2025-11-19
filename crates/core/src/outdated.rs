@@ -42,6 +42,71 @@ pub struct OutdatedResult {
     pub features: Vec<FeatureVersionInfo>,
 }
 
+/// Check if a feature reference is a valid OCI registry reference.
+///
+/// Returns `true` for OCI registry references (e.g., `ghcr.io/owner/feature:tag`),
+/// `false` for local paths (e.g., `./local-feature`), direct URLs (e.g., `https://...`),
+/// or other non-OCI identifiers.
+///
+/// Per spec §9 and §14, only OCI-based identifiers can be enumerated for versions.
+/// Local paths, direct tarballs, and legacy identifiers are not versionable and should
+/// be filtered out.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::outdated::is_oci_feature_ref;
+///
+/// // Valid OCI references
+/// assert!(is_oci_feature_ref("ghcr.io/devcontainers/features/node:1.2.3"));
+/// assert!(is_oci_feature_ref("ghcr.io/devcontainers/features/node"));
+/// assert!(is_oci_feature_ref("registry.io/ns/feature@sha256:abcd"));
+/// assert!(is_oci_feature_ref("devcontainers/features/node")); // implicit registry
+///
+/// // Invalid non-OCI references (should be skipped)
+/// assert!(!is_oci_feature_ref("./local-feature"));
+/// assert!(!is_oci_feature_ref("../relative/path"));
+/// assert!(!is_oci_feature_ref("/absolute/path"));
+/// assert!(!is_oci_feature_ref("https://example.com/feature.tgz"));
+/// assert!(!is_oci_feature_ref("http://example.com/feature.tgz"));
+/// assert!(!is_oci_feature_ref("file:///path/to/feature"));
+/// ```
+pub fn is_oci_feature_ref(reference: &str) -> bool {
+    // Filter out local file paths
+    if reference.starts_with("./") || reference.starts_with("../") || reference.starts_with('/') {
+        return false;
+    }
+
+    // Filter out direct HTTP(S) URLs
+    if reference.starts_with("http://") || reference.starts_with("https://") {
+        return false;
+    }
+
+    // Filter out file:// URLs
+    if reference.starts_with("file://") {
+        return false;
+    }
+
+    // Must contain at least one '/' to be a valid OCI ref (namespace/name at minimum)
+    // This filters out bare names like "myfeature" which are legacy forms
+    // Note: Actually, per the registry_parser.rs, bare names are allowed and default
+    // to ghcr.io/devcontainers/myfeature, so we should allow them
+    // The key discriminator is really the scheme-based checks above
+
+    // Additional check: if it looks like a Windows path (e.g., C:\path), skip it
+    #[cfg(target_os = "windows")]
+    {
+        if reference.len() >= 3
+            && reference.chars().nth(1) == Some(':')
+            && reference.chars().nth(2) == Some('\\')
+        {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Compute a canonical feature id with no version information.
 ///
 /// Strips version tags (`:version`) and digest references (`@sha256:...`) from feature references.
@@ -286,6 +351,56 @@ mod tests {
     use std::collections::HashMap;
 
     // T037: Unit tests for core helpers
+
+    // is_oci_feature_ref tests
+    #[test]
+    fn test_is_oci_feature_ref_valid_full() {
+        assert!(is_oci_feature_ref(
+            "ghcr.io/devcontainers/features/node:1.2.3"
+        ));
+        assert!(is_oci_feature_ref("ghcr.io/devcontainers/features/node"));
+        assert!(is_oci_feature_ref("registry.io/ns/feature@sha256:abcd"));
+    }
+
+    #[test]
+    fn test_is_oci_feature_ref_valid_implicit_registry() {
+        assert!(is_oci_feature_ref("devcontainers/features/node"));
+        assert!(is_oci_feature_ref("myorg/myfeature:1.0.0"));
+    }
+
+    #[test]
+    fn test_is_oci_feature_ref_invalid_local_paths() {
+        // Relative paths
+        assert!(!is_oci_feature_ref("./local-feature"));
+        assert!(!is_oci_feature_ref("../relative/path"));
+        assert!(!is_oci_feature_ref("./feature-a"));
+
+        // Absolute paths
+        assert!(!is_oci_feature_ref("/absolute/path"));
+        assert!(!is_oci_feature_ref("/usr/local/feature"));
+    }
+
+    #[test]
+    fn test_is_oci_feature_ref_invalid_http_urls() {
+        assert!(!is_oci_feature_ref("https://example.com/feature.tgz"));
+        assert!(!is_oci_feature_ref("http://example.com/feature.tar.gz"));
+        assert!(!is_oci_feature_ref(
+            "https://github.com/user/repo/releases/download/v1.0.0/feature.tgz"
+        ));
+    }
+
+    #[test]
+    fn test_is_oci_feature_ref_invalid_file_urls() {
+        assert!(!is_oci_feature_ref("file:///path/to/feature"));
+        assert!(!is_oci_feature_ref("file://./local/feature"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_is_oci_feature_ref_invalid_windows_paths() {
+        assert!(!is_oci_feature_ref("C:\\path\\to\\feature"));
+        assert!(!is_oci_feature_ref("D:\\features\\myfeature"));
+    }
 
     // canonical_feature_id tests
     #[test]

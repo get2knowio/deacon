@@ -12,7 +12,8 @@ use assert_cmd::Command;
 #[ignore]
 fn test_up_invalid_mount_format_fails_validation() {
     // Test invalid mount format: missing target
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = Command::cargo_bin("deacon")
+        .expect("failed to find deacon binary for tests - ensure 'cargo build' has been run");
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg("/tmp/test-workspace")
@@ -29,7 +30,8 @@ fn test_up_invalid_mount_format_fails_validation() {
 #[ignore]
 fn test_up_invalid_remote_env_format_fails_validation() {
     // Test invalid remote-env format: missing equals sign
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = Command::cargo_bin("deacon")
+        .expect("failed to find deacon binary for tests - ensure 'cargo build' has been run");
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg("/tmp/test-workspace")
@@ -41,7 +43,8 @@ fn test_up_invalid_remote_env_format_fails_validation() {
 
 #[test]
 fn test_up_terminal_columns_without_rows_fails() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = Command::cargo_bin("deacon")
+        .expect("failed to find deacon binary for tests - ensure 'cargo build' has been run");
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg("/tmp/test-workspace")
@@ -54,7 +57,8 @@ fn test_up_terminal_columns_without_rows_fails() {
 
 #[test]
 fn test_up_terminal_rows_without_columns_fails() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = Command::cargo_bin("deacon")
+        .expect("failed to find deacon binary for tests - ensure 'cargo build' has been run");
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg("/tmp/test-workspace")
@@ -69,7 +73,8 @@ fn test_up_terminal_rows_without_columns_fails() {
 fn test_up_terminal_dimensions_both_specified_ok() {
     // This test just verifies that providing both dimensions doesn't cause parsing errors
     // (the actual up operation will fail due to missing config, but that's expected)
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = Command::cargo_bin("deacon")
+        .expect("failed to find deacon binary for tests - ensure 'cargo build' has been run");
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg("/tmp/nonexistent-workspace")
@@ -85,7 +90,8 @@ fn test_up_terminal_dimensions_both_specified_ok() {
 #[test]
 fn test_up_missing_workspace_and_id_label_fails() {
     // Contract requires workspace_folder OR id_label
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = Command::cargo_bin("deacon")
+        .expect("failed to find deacon binary for tests - ensure 'cargo build' has been run");
     cmd.arg("up");
 
     cmd.assert().failure();

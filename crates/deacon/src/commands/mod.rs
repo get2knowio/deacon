@@ -14,5 +14,5 @@ pub mod run_user_commands;
 pub mod templates;
 pub mod up;
 
-// Re-export up command types for stdout JSON contract
+/// Re-export the UpResult type to preserve the stdout JSON contract for the up command.
 pub use up::UpResult;

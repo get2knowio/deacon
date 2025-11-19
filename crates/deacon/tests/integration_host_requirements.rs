@@ -128,6 +128,7 @@ async fn test_host_requirements_ignored_with_flag() {
         skip_post_create: true,
         skip_non_blocking_commands: true,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
+        ignore_host_requirements: true,
         ..Default::default()
     };
 

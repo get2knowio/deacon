@@ -1,4 +1,4 @@
-version: '3.8'
+version: '3.9'
 
 services:
   app:
@@ -12,7 +12,7 @@ services:
       - dev
 
   db:
-    image: alpine:latest
+    image: alpine:3.18
     command: sleep infinity
     environment:
       - DB_NAME=testdb
