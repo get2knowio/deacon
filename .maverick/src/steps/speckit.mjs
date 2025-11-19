@@ -3,6 +3,7 @@
 // These build on generic step types to encapsulate complete workflow patterns
 import { makeOpencodeStep } from './opencode.mjs'
 import { makeCoderabbitStep } from './coderabbit.mjs'
+import { makeCodexStep } from './codex.mjs'
 
 /**
  * Create an opencode step that implements tasks for a specific phase.
@@ -47,68 +48,96 @@ export function opencodeImplementPhase(phaseIdentifier, opts = {}) {
 }
 
 /**
- * Create a coderabbit review step that generates a prompt-only review.
- * Captures output to the specified file.
+ * Create a codex step that performs a senior-level code review.
+ * Generates findings and adds them to fixes.md as a task list.
  * 
  * @param {object} opts - Options
  * @param {string} opts.cwd - Working directory
- * @param {string} opts.captureTo - File path to capture review output
  * @returns {object} Step descriptor
  */
-export function coderabbitReview(opts = {}) {
-  const { cwd, captureTo } = opts
-
-  return makeCoderabbitStep(
-    'coderabbit-review',
-    ['review', '--prompt-only'],
-    {
-      cwd,
-      captureTo,
-      label: 'coderabbit-review',
-    }
-  )
-}
-
-/**
- * Create an opencode step that performs an independent senior-level code review.
- * Captures output to the specified file.
- * 
- * @param {object} opts - Options
- * @param {string} opts.cwd - Working directory
- * @param {string} opts.captureTo - File path to capture review output
- * @param {string} opts.model - Model to use (default: github-copilot/claude-sonnet-4.5)
- * @returns {object} Step descriptor
- */
-export function opencodeReview(opts = {}) {
-  const {
-    cwd,
-    captureTo,
-    model = 'github-copilot/claude-sonnet-4.5',
-  } = opts
+export function codexReview(opts = {}) {
+  const { cwd } = opts
 
   const prompt = [
     'Perform a standalone, senior-level code review of this repository, measuring both quality and completeness.',
     'Use spec.md, plan.md, and tasks.md in the current speckit spec directory as guidance.',
     'Provide actionable findings with severity, rationale, and concrete fixes.',
     'Include file paths and line ranges when possible. Do not make changes.',
-    'Output only the review content in the format of prompts that an AI agent can act on (no extra chatter).'
+    'Format your findings as a series of prompts and add them as a task list to "fixes.md" in the current speckit directory.'
   ].join(' ')
 
-  return makeOpencodeStep(
-    'opencode-review',
+  return makeCodexStep(
+    'codex-review',
     prompt,
     {
-      model,
+      model: 'gpt-5.1-codex',
       cwd,
-      captureTo,
-      label: 'opencode-review',
+      dangerouslyBypassApprovalsAndSandbox: true,
+      label: 'codex-review',
     }
   )
 }
 
 /**
- * Create an opencode step that addresses issues from review feedback.
- * Reads coderabbit.md and review.md to find issues, then implements fixes.
+ * Create a codex step that runs coderabbit review and adds results to fixes.md.
+ * 
+ * @param {object} opts - Options
+ * @param {string} opts.cwd - Working directory
+ * @returns {object} Step descriptor
+ */
+export function codexCoderabbitReview(opts = {}) {
+  const { cwd } = opts
+
+  const prompt = [
+    'Execute "coderabbit review --prompt-only" and format those prompt results',
+    'as additional task items in "fixes.md" in the current spec directory.'
+  ].join(' ')
+
+  return makeCodexStep(
+    'codex-coderabbit-review',
+    prompt,
+    {
+      model: 'gpt-5.1-codex-mini',
+      cwd,
+      dangerouslyBypassApprovalsAndSandbox: true,
+      label: 'codex-coderabbit-review',
+    }
+  )
+}
+
+/**
+ * Create a codex step that organizes and parallelizes tasks in fixes.md.
+ * 
+ * @param {object} opts - Options
+ * @param {string} opts.cwd - Working directory
+ * @returns {object} Step descriptor
+ */
+export function codexOrganizeFixes(opts = {}) {
+  const { cwd } = opts
+
+  const prompt = [
+    'Read fixes.md in the current spec directory and organize the tasks into a proper linear sequence',
+    'while optimizing opportunities for parallelization.',
+    'Then, for adjacent tasks which can be addressed in parallel, prefix the prompt with a [P]',
+    'so that a later process will know which work can be parallelized.',
+    'Update fixes.md with this re-ordering and parallelization indicator.'
+  ].join(' ')
+
+  return makeCodexStep(
+    'codex-organize-fixes',
+    prompt,
+    {
+      model: 'gpt-5.1-codex-mini',
+      cwd,
+      dangerouslyBypassApprovalsAndSandbox: true,
+      label: 'codex-organize-fixes',
+    }
+  )
+}
+
+/**
+ * Create an opencode step that addresses fixes from fixes.md.
+ * Reads fixes.md and executes each task serially, with parallel execution for [P] tasks.
  * 
  * @param {object} opts - Options
  * @param {string} opts.cwd - Working directory
@@ -122,10 +151,9 @@ export function opencodeFix(opts = {}) {
   } = opts
 
   const prompt = [
-    'Read coderabbit.md and review.md (in the current speckit spec directory).',
-    'Address all issues raised by implementing code changes where appropriate.',
-    'Do not remove important validations, tests, or safety checks.',
-    'Prefer small, incremental commits; keep style consistent; no unrelated refactors.'
+    'Read fixes.md in the current spec directory and serially invoke each open task as a prompt in a subagent.',
+    'Adjacent tasks that are denoted with a [P] can be addressed in parallel, each in their own subagent.',
+    'Update fixes.md to mark completed tasks to track your progress.'
   ].join(' ')
 
   return makeOpencodeStep(
