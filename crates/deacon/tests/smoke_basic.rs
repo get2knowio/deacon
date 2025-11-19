@@ -187,6 +187,8 @@ fn smoke_up_then_exec_traditional() {
     let mut up = Command::cargo_bin("deacon").unwrap();
     let up_assert = up
         .current_dir(tmp.path())
+        .arg("--workspace-folder")
+        .arg(tmp.path())
         .arg("up")
         .arg("--remove-existing-container")
         .arg("--skip-post-create")
@@ -296,7 +298,12 @@ services:
 
     // Test up command
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    let assert = cmd.current_dir(&temp_dir).arg("up").assert();
+    let assert = cmd
+        .current_dir(&temp_dir)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .arg("up")
+        .assert();
 
     let output = assert.get_output();
     assert!(
@@ -336,6 +343,8 @@ fn test_exec_environment_and_working_directory() {
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let up_out = up_cmd
         .current_dir(&temp_dir)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("up")
         .assert()
         .get_output()
@@ -565,6 +574,8 @@ fn test_up_exec_happy_path() {
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     up_cmd
         .current_dir(&temp_dir)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("up")
         .arg("--remove-existing-container")
         .assert()

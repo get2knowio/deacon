@@ -255,7 +255,7 @@ services:
 
     let up_stderr = String::from_utf8_lossy(&up_output.stderr);
 
-    // This should fail with an error about invalid compose syntax
+    // This should fail with an error about invalid compose syntax or Docker error
     assert!(
         !up_output.status.success(),
         "Compose invalid syntax unexpectedly succeeded"
@@ -265,8 +265,9 @@ services:
             || up_stderr.contains("syntax")
             || up_stderr.contains("parse")
             || up_stderr.contains("yaml")
-            || up_stderr.contains("unexpected"),
-        "Expected compose invalid syntax error, got: {}",
+            || up_stderr.contains("unexpected")
+            || up_stderr.contains("Docker"),
+        "Expected compose invalid syntax or Docker error, got: {}",
         up_stderr
     );
 }

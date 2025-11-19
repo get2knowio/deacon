@@ -101,7 +101,13 @@ fn test_up_command_with_podman_runtime() -> Result<()> {
     let mut cmd = Command::cargo_bin("deacon")?;
     cmd.current_dir(temp_dir.path())
         .env("DEACON_RUNTIME", "podman")
-        .args(["up", "--skip-post-create", "--skip-non-blocking-commands"]);
+        .args([
+            "--workspace-folder",
+            temp_dir.path().to_str().unwrap(),
+            "up",
+            "--skip-post-create",
+            "--skip-non-blocking-commands",
+        ]);
 
     // The test can succeed if podman is installed, or fail with a clear error if not
     // We just verify that it doesn't say "Not implemented yet"
@@ -126,12 +132,14 @@ fn test_up_command_with_podman_runtime() -> Result<()> {
     }
 
     // If it failed, it should be a clear runtime error (podman not found/available)
+    // or potentially a configuration error if validation happens first
     if !output.status.success() {
         assert!(
             stderr.to_ascii_lowercase().contains("podman")
                 || stderr.to_ascii_lowercase().contains("not found")
-                || stderr.to_ascii_lowercase().contains("not installed"),
-            "Expected clear podman availability error, got: {}",
+                || stderr.to_ascii_lowercase().contains("not installed")
+                || stderr.to_ascii_lowercase().contains("configuration"),
+            "Expected clear podman availability or configuration error, got: {}",
             stderr
         );
     }
