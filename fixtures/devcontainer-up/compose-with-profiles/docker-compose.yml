@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   app:
-    image: mcr.microsoft.com/devcontainers/base:ubuntu
+    image: ubuntu:22.04
     volumes:
       - ../..:/workspace:cached
     command: sleep infinity
@@ -12,8 +12,9 @@ services:
       - dev
 
   db:
-    image: postgres:15
+    image: alpine:latest
+    command: sleep infinity
     environment:
-      - POSTGRES_PASSWORD=test
+      - DB_NAME=testdb
     profiles:
       - dev

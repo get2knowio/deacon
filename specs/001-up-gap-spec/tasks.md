@@ -108,10 +108,10 @@
 
 **Purpose**: Repository-wide consistency, docs, and final validation.
 
-- [ ] T024 [P] Update examples and docs to reflect new up flags/output in `examples/` and `docs/subcommand-specs/up/`
-- [ ] T025 Run quickstart scenarios and adjust fixtures as needed in `fixtures/devcontainer-up/`
-- [ ] T026 [P] Final fmt/clippy/test full gate and document results in `specs/001-up-gap-spec/quickstart.md`
-- [ ] T031 [P] Measure representative `deacon up` runs (<3 minutes target) and record results in `specs/001-up-gap-spec/quickstart.md`
+- [X] T024 [P] Update examples and docs to reflect new up flags/output in `examples/` and `docs/subcommand-specs/up/`
+- [X] T025 Run quickstart scenarios and adjust fixtures as needed in `fixtures/devcontainer-up/`
+- [X] T026 [P] Final fmt/clippy/test full gate and document results in `specs/001-up-gap-spec/quickstart.md`
+- [X] T031 [P] Measure representative `deacon up` runs (<3 minutes target) and record results in `specs/001-up-gap-spec/quickstart.md`
 
 ---
 

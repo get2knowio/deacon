@@ -13,7 +13,6 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::json;
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Test that expect-existing fails fast when container with id-labels not found
@@ -253,9 +252,15 @@ fn test_multiple_secrets_files_merge_and_redaction() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     // All secret values from both files should be redacted
-    assert!(!stderr.contains("secret123"), "DB_PASSWORD should be redacted");
+    assert!(
+        !stderr.contains("secret123"),
+        "DB_PASSWORD should be redacted"
+    );
     assert!(!stderr.contains("token456"), "API_TOKEN should be redacted");
-    assert!(!stderr.contains("key789"), "ENCRYPTION_KEY should be redacted");
+    assert!(
+        !stderr.contains("key789"),
+        "ENCRYPTION_KEY should be redacted"
+    );
 }
 
 /// Test that redaction works in JSON output (should never contain secret values)
@@ -296,8 +301,8 @@ fn test_secrets_never_in_json_output() {
 
     // JSON output should still be valid
     if output.status.success() {
-        let json: serde_json::Value = serde_json::from_str(&stdout)
-            .expect("stdout should contain valid JSON");
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).expect("stdout should contain valid JSON");
         assert_eq!(json["outcome"], "success");
     }
 }
@@ -329,9 +334,7 @@ fn test_expect_existing_with_remove_existing_conflict() {
         .arg("--remove-existing-container");
 
     // Should fail validation (these flags are mutually exclusive)
-    cmd.assert()
-        .failure()
-        .code(1);
+    cmd.assert().failure().code(1);
 }
 
 /// Test that id-label discovery works when expect-existing is used

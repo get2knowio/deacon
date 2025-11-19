@@ -10,7 +10,6 @@
 //! Task: T018 [P] [US3]
 
 use assert_cmd::Command;
-use predicates::prelude::*;
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
@@ -190,7 +189,10 @@ fn test_compose_mount_conversion_with_fixture() {
 
     // Only run if fixture exists
     if !fixture_path.exists() {
-        println!("Skipping fixture test - fixture not found at {:?}", fixture_path);
+        println!(
+            "Skipping fixture test - fixture not found at {:?}",
+            fixture_path
+        );
         return;
     }
 

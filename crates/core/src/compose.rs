@@ -367,7 +367,7 @@ impl ComposeManager {
             run_services: config.run_services.clone(),
             env_files: Vec::new(),
             additional_mounts: Vec::new(), // Will be populated from CLI --mount flags
-            profiles: Vec::new(),           // Will be populated from service profiles
+            profiles: Vec::new(),          // Will be populated from service profiles
         })
     }
 
@@ -509,6 +509,8 @@ impl ComposeManager {
     ///     service: "web".to_string(),
     ///     run_services: Vec::new(),
     ///     env_files: Vec::new(),
+    ///     additional_mounts: Vec::new(),
+    ///     profiles: Vec::new(),
     /// };
     ///
     /// let output = manager.build_service(&project, "web")?;
@@ -566,6 +568,8 @@ impl ComposeManager {
     ///     service: "web".to_string(),
     ///     run_services: Vec::new(),
     ///     env_files: Vec::new(),
+    ///     additional_mounts: Vec::new(),
+    ///     profiles: Vec::new(),
     /// };
     ///
     /// if manager.validate_service_exists(&project, "web")? {
@@ -715,10 +719,7 @@ fn derive_project_name(base_path: &Path) -> String {
     // Task T020: Check for .env file and extract COMPOSE_PROJECT_NAME
     let env_file_path = base_path.join(".env");
     if let Some(project_name) = parse_env_file_for_project_name(&env_file_path) {
-        debug!(
-            "Using project name from .env file: {}",
-            project_name
-        );
+        debug!("Using project name from .env file: {}", project_name);
         return project_name;
     }
 

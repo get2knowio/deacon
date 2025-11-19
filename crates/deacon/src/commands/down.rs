@@ -342,7 +342,7 @@ async fn execute_compose_down(
         run_services: vec![], // We don't track run_services in state currently
         env_files: Vec::new(),
         additional_mounts: Vec::new(), // Not needed for down operation
-        profiles: Vec::new(),           // Not needed for down operation
+        profiles: Vec::new(),          // Not needed for down operation
     };
 
     // Check if project is still running
