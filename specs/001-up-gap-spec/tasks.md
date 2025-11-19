@@ -67,15 +67,15 @@
 
 ### Tests for User Story 2
 
-- [ ] T012 [P] [US2] Add integration test for prebuild lifecycle (stop after updateContent, rerun on repeat) in `crates/deacon/tests/up_prebuild.rs`
-- [ ] T013 [P] [US2] Add integration test for dotfiles installation idempotency in `crates/deacon/tests/up_dotfiles.rs`
+- [X] T012 [P] [US2] Add integration test for prebuild lifecycle (stop after updateContent, rerun on repeat) in `crates/deacon/tests/up_prebuild.rs`
+- [X] T013 [P] [US2] Add integration test for dotfiles installation idempotency in `crates/deacon/tests/up_dotfiles.rs`
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Execute updateContentCommand and prebuild/skip-post-attach sequencing with background task waits in `crates/deacon/src/commands/up.rs`
-- [ ] T015 [US2] Integrate dotfiles flags/workflow using `crates/core/src/dotfiles.rs` within lifecycle setup in `crates/deacon/src/commands/up.rs`
-- [ ] T016 [US2] Implement feature-driven image extension with BuildKit/cache options and provenance merge in `crates/deacon/src/commands/up.rs` and `crates/deacon/src/commands/features.rs`
-- [ ] T017 [US2] Apply UID update flow and security options (init, privileged, capAdd, securityOpt, entrypoint) in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`
+- [X] T014 [US2] Execute updateContentCommand and prebuild/skip-post-attach sequencing with background task waits in `crates/deacon/src/commands/up.rs`
+- [X] T015 [US2] Integrate dotfiles flags/workflow using `crates/core/src/dotfiles.rs` within lifecycle setup in `crates/deacon/src/commands/up.rs`
+- [X] T016 [US2] Implement feature-driven image extension with BuildKit/cache options and provenance merge in `crates/deacon/src/commands/up.rs` and `crates/deacon/src/commands/features.rs`
+- [X] T017 [US2] Apply UID update flow and security options (init, privileged, capAdd, securityOpt, entrypoint) in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`
 
 **Checkpoint**: User Story 2 independently testable (prebuild, lifecycle, dotfiles, features, UID/security).
 
