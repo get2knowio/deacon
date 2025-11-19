@@ -572,6 +572,36 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
     }
 }
 
+/// Validate devcontainer configuration filename.
+///
+/// Per spec FR-004 and docs/subcommand-specs/up/SPEC.md §4:
+/// "IF configFile specified AND file name not devcontainer.json/.devcontainer.json:
+///     ERROR 'Filename must be devcontainer.json or .devcontainer.json'"
+///
+/// Note: We also accept .jsonc extensions (JSON with Comments) as they are widely
+/// used in the devcontainer ecosystem and supported by our JSON5 parser.
+///
+/// This validation applies to both --config and --override-config paths.
+fn validate_config_filename(config_path: &Path, flag_name: &str) -> Result<()> {
+    if let Some(filename) = config_path.file_name().and_then(|n| n.to_str()) {
+        let valid_names = [
+            "devcontainer.json",
+            ".devcontainer.json",
+            "devcontainer.jsonc",
+            ".devcontainer.jsonc",
+        ];
+
+        if !valid_names.contains(&filename) {
+            anyhow::bail!(
+                "Invalid {} filename: '{}'. Filename must be one of: devcontainer.json, .devcontainer.json, devcontainer.jsonc, or .devcontainer.jsonc.",
+                flag_name,
+                filename
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Execute the read-configuration command
 #[instrument(skip(args))]
 pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<()> {
@@ -587,6 +617,15 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         args.override_config_path,
         args.secrets_files.len()
     );
+
+    // Validate devcontainer configuration filenames per FR-004
+    // Must be devcontainer.json or .devcontainer.json
+    if let Some(config_path) = args.config_path.as_ref() {
+        validate_config_filename(config_path, "--config")?;
+    }
+    if let Some(override_path) = args.override_config_path.as_ref() {
+        validate_config_filename(override_path, "--override-config")?;
+    }
 
     // Selector validation per spec (§2, §9):
     // At least one of --container-id, --id-label, or --workspace-folder is required.
@@ -1070,7 +1109,10 @@ mod tests {
     async fn test_read_configuration_with_override() {
         let temp_dir = TempDir::new().unwrap();
         let base_config_path = temp_dir.path().join("devcontainer.json");
-        let override_config_path = temp_dir.path().join("override.json");
+        // Per FR-004: override config must also be named devcontainer.json or .devcontainer.json
+        let override_dir = temp_dir.path().join("override");
+        fs::create_dir(&override_dir).unwrap();
+        let override_config_path = override_dir.join("devcontainer.json");
 
         let base_config_content = r#"{
             "name": "base-container",
@@ -2300,5 +2342,140 @@ API_KEY=another-secret
 
         assert!(args.user_data_folder.is_some());
         assert_eq!(args.user_data_folder.unwrap(), data_folder);
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_invalid_config_filename() {
+        // Test that invalid config filenames are rejected per FR-004
+        let temp_dir = TempDir::new().unwrap();
+        let invalid_config_path = temp_dir.path().join("my-config.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&invalid_config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(invalid_config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Invalid --config filename")
+                && err_msg.contains("my-config.json")
+                && err_msg.contains("devcontainer.json"),
+            "Expected error message about invalid filename, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_invalid_override_filename() {
+        // Test that invalid override-config filenames are rejected per FR-004
+        let temp_dir = TempDir::new().unwrap();
+        let base_config_path = temp_dir.path().join("devcontainer.json");
+        let invalid_override_path = temp_dir.path().join("override.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&base_config_path, config_content).unwrap();
+        fs::write(&invalid_override_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(base_config_path),
+            override_config_path: Some(invalid_override_path),
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Invalid --override-config filename")
+                && err_msg.contains("override.json")
+                && err_msg.contains("devcontainer.json"),
+            "Expected error message about invalid override filename, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_read_configuration_valid_hidden_config_filename() {
+        // Test that .devcontainer.json is accepted as a valid filename
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join(".devcontainer.json");
+
+        let config_content = r#"{
+            "name": "test-container",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+        }"#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_merged_configuration: false,
+            include_features_configuration: false,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
+            workspace_folder: Some(temp_dir.path().to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        let result = execute_read_configuration(args).await;
+        assert!(
+            result.is_ok(),
+            "Expected success with .devcontainer.json filename"
+        );
     }
 }

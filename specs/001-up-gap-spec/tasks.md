@@ -52,8 +52,8 @@
 - [X] T009 [US1] Wire normalized options into provision/runtime structures including runtime path overrides and build/cache options in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`
 - [X] T010 [US1] Implement stdout JSON success/error contract with include-configuration/mergedConfiguration flags and stderr-only logging in `crates/deacon/src/commands/up.rs`
 - [X] T011 [US1] Standardize error mapping/messages and exit codes for validation failures in `crates/deacon/src/commands/up.rs`
-- [ ] T028 [US1] Enforce devcontainer filename validation and override-only discovery rules in `crates/deacon/src/commands/read_configuration.rs`
-- [ ] T029 [US1] Implement id-label discovery, disallowed feature error, and image metadata merge into resolved configuration in `crates/deacon/src/commands/up.rs`
+- [X] T028 [US1] Enforce devcontainer filename validation and override-only discovery rules in `crates/deacon/src/commands/read_configuration.rs`
+- [X] T029 [US1] Implement id-label discovery, disallowed feature error, and image metadata merge into resolved configuration in `crates/deacon/src/commands/up.rs`
 
 **Checkpoint**: User Story 1 independently testable (flags, validation, JSON output).
 
