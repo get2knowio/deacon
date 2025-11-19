@@ -470,6 +470,7 @@ dependencies = [
  "futures",
  "indicatif",
  "predicates",
+ "regex",
  "serde",
  "serde_json",
  "serial_test",

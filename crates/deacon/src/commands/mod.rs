@@ -13,3 +13,6 @@ pub mod read_configuration;
 pub mod run_user_commands;
 pub mod templates;
 pub mod up;
+
+// Re-export up command types for stdout JSON contract
+pub use up::{UpError, UpResult, UpSuccess};

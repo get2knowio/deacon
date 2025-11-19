@@ -13,9 +13,450 @@ use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::ports::PortForwardingManager;
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
 use deacon_core::state::{ComposeState, ContainerState, StateManager};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
+
+/// Success response for the up command, emitted as JSON to stdout.
+///
+/// Per the `deacon up` contract (specs/001-up-gap-spec/contracts/up.md),
+/// exactly one JSON document MUST be written to stdout on success with exit code 0.
+/// All logs go to stderr.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpSuccess {
+    /// Always "success" for successful outcomes
+    pub outcome: String,
+    
+    /// ID of the created or reused container
+    pub container_id: String,
+    
+    /// Compose project name (only present for compose-based configurations)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compose_project_name: Option<String>,
+    
+    /// Remote user inside the container
+    pub remote_user: String,
+    
+    /// Remote workspace folder path inside the container
+    pub remote_workspace_folder: String,
+    
+    /// Configuration object (only when includeConfiguration flag is set)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<serde_json::Value>,
+    
+    /// Merged configuration object (only when includeMergedConfiguration flag is set)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merged_configuration: Option<serde_json::Value>,
+}
+
+/// Error response for the up command, emitted as JSON to stdout.
+///
+/// Per the `deacon up` contract (specs/001-up-gap-spec/contracts/up.md),
+/// exactly one JSON document MUST be written to stdout on error with exit code 1.
+/// All logs go to stderr. Secrets must be redacted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpError {
+    /// Always "error" for error outcomes
+    pub outcome: String,
+    
+    /// Short error message
+    pub message: String,
+    
+    /// Detailed error description
+    pub description: String,
+    
+    /// Container ID (if container was created before error)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_id: Option<String>,
+    
+    /// Disallowed feature ID (if error was due to disallowed feature)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disallowed_feature_id: Option<String>,
+    
+    /// Whether the container was stopped during error handling
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub did_stop_container: Option<bool>,
+    
+    /// Optional URL for more information
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub learn_more_url: Option<String>,
+}
+
+/// Union type for up command results to enforce stdout JSON contract.
+///
+/// The contract requires exactly one JSON document on stdout (success or error).
+/// This type provides builder methods and serialization helpers to emit the correct format.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum UpResult {
+    Success(UpSuccess),
+    Error(UpError),
+}
+
+impl UpResult {
+    /// Create a success result
+    pub fn success(
+        container_id: String,
+        remote_user: String,
+        remote_workspace_folder: String,
+    ) -> Self {
+        UpResult::Success(UpSuccess {
+            outcome: "success".to_string(),
+            container_id,
+            compose_project_name: None,
+            remote_user,
+            remote_workspace_folder,
+            configuration: None,
+            merged_configuration: None,
+        })
+    }
+
+    /// Create an error result
+    pub fn error(message: String, description: String) -> Self {
+        UpResult::Error(UpError {
+            outcome: "error".to_string(),
+            message,
+            description,
+            container_id: None,
+            disallowed_feature_id: None,
+            did_stop_container: None,
+            learn_more_url: None,
+        })
+    }
+
+    /// Add compose project name to a success result
+    pub fn with_compose_project_name(mut self, project_name: String) -> Self {
+        if let UpResult::Success(ref mut success) = self {
+            success.compose_project_name = Some(project_name);
+        }
+        self
+    }
+
+    /// Add configuration to a success result
+    pub fn with_configuration(mut self, configuration: serde_json::Value) -> Self {
+        if let UpResult::Success(ref mut success) = self {
+            success.configuration = Some(configuration);
+        }
+        self
+    }
+
+    /// Add merged configuration to a success result
+    pub fn with_merged_configuration(mut self, merged_configuration: serde_json::Value) -> Self {
+        if let UpResult::Success(ref mut success) = self {
+            success.merged_configuration = Some(merged_configuration);
+        }
+        self
+    }
+
+    /// Add container ID to an error result
+    pub fn with_container_id(mut self, container_id: String) -> Self {
+        match self {
+            UpResult::Success(_) => self,
+            UpResult::Error(ref mut error) => {
+                error.container_id = Some(container_id);
+                self
+            }
+        }
+    }
+
+    /// Add disallowed feature ID to an error result
+    pub fn with_disallowed_feature_id(mut self, feature_id: String) -> Self {
+        if let UpResult::Error(ref mut error) = self {
+            error.disallowed_feature_id = Some(feature_id);
+        }
+        self
+    }
+
+    /// Mark that container was stopped during error handling
+    pub fn with_did_stop_container(mut self, stopped: bool) -> Self {
+        if let UpResult::Error(ref mut error) = self {
+            error.did_stop_container = Some(stopped);
+        }
+        self
+    }
+
+    /// Add learn more URL to an error result
+    pub fn with_learn_more_url(mut self, url: String) -> Self {
+        if let UpResult::Error(ref mut error) = self {
+            error.learn_more_url = Some(url);
+        }
+        self
+    }
+
+    /// Emit this result as JSON to stdout and return appropriate exit code.
+    ///
+    /// Per contract: stdout receives exactly one JSON document, stderr receives logs.
+    /// Returns 0 for success, 1 for error.
+    pub fn emit(&self) -> Result<i32> {
+        let json = serde_json::to_string_pretty(self)?;
+        println!("{}", json);
+        
+        match self {
+            UpResult::Success(_) => Ok(0),
+            UpResult::Error(_) => Ok(1),
+        }
+    }
+
+    /// Check if this is a success result
+    pub fn is_success(&self) -> bool {
+        matches!(self, UpResult::Success(_))
+    }
+
+    /// Check if this is an error result
+    pub fn is_error(&self) -> bool {
+        matches!(self, UpResult::Error(_))
+    }
+}
+
+/// Parsed and normalized mount specification.
+///
+/// Validates and stores mount entries in normalized form after parsing CLI input.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NormalizedMount {
+    pub mount_type: MountType,
+    pub source: String,
+    pub target: String,
+    pub external: bool,
+}
+
+/// Mount type for validated mounts
+#[derive(Debug, Clone, PartialEq)]
+pub enum MountType {
+    Bind,
+    Volume,
+}
+
+impl NormalizedMount {
+    /// Parse and validate a mount string from CLI.
+    ///
+    /// Expected format: `type=(bind|volume),source=<path>,target=<path>[,external=(true|false)]`
+    ///
+    /// Returns error if format is invalid or required fields are missing.
+    pub fn parse(mount_str: &str) -> Result<Self> {
+        use regex::Regex;
+        
+        // Mount regex pattern from contract
+        let mount_regex = Regex::new(
+            r"^type=(bind|volume),source=([^,]+),target=([^,]+)(?:,external=(true|false))?$"
+        )?;
+        
+        let captures = mount_regex.captures(mount_str).ok_or_else(|| {
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: format!(
+                    "Invalid mount format: '{}'. Expected: type=(bind|volume),source=<path>,target=<path>[,external=(true|false)]",
+                    mount_str
+                ),
+            })
+        })?;
+        
+        let mount_type = match &captures[1] {
+            "bind" => MountType::Bind,
+            "volume" => MountType::Volume,
+            _ => unreachable!("Regex should only match bind or volume"),
+        };
+        
+        let source = captures[2].to_string();
+        let target = captures[3].to_string();
+        let external = captures.get(4).map_or(false, |m| m.as_str() == "true");
+        
+        Ok(Self {
+            mount_type,
+            source,
+            target,
+            external,
+        })
+    }
+}
+
+/// Parsed and normalized remote environment variable.
+///
+/// Validates env var entries from CLI input.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NormalizedRemoteEnv {
+    pub name: String,
+    pub value: String,
+}
+
+impl NormalizedRemoteEnv {
+    /// Parse and validate a remote env string from CLI.
+    ///
+    /// Expected format: `NAME=value`
+    ///
+    /// Returns error if format is invalid (missing =).
+    pub fn parse(env_str: &str) -> Result<Self> {
+        let parts: Vec<&str> = env_str.splitn(2, '=').collect();
+        
+        if parts.len() != 2 {
+            return Err(DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: format!(
+                    "Invalid remote-env format: '{}'. Expected: NAME=value",
+                    env_str
+                ),
+            })
+            .into());
+        }
+        
+        Ok(Self {
+            name: parts[0].to_string(),
+            value: parts[1].to_string(),
+        })
+    }
+}
+
+/// Terminal dimensions for output formatting.
+///
+/// Both columns and rows must be specified together.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TerminalDimensions {
+    pub columns: u32,
+    pub rows: u32,
+}
+
+impl TerminalDimensions {
+    /// Create terminal dimensions, ensuring both are specified.
+    pub fn new(columns: Option<u32>, rows: Option<u32>) -> Result<Option<Self>> {
+        match (columns, rows) {
+            (Some(cols), Some(rows)) => Ok(Some(Self {
+                columns: cols,
+                rows,
+            })),
+            (None, None) => Ok(None),
+            (Some(_), None) => Err(DeaconError::Config(
+                deacon_core::errors::ConfigError::Validation {
+                    message: "terminalColumns requires terminalRows to be specified".to_string(),
+                },
+            )
+            .into()),
+            (None, Some(_)) => Err(DeaconError::Config(
+                deacon_core::errors::ConfigError::Validation {
+                    message: "terminalRows requires terminalColumns to be specified".to_string(),
+                },
+            )
+            .into()),
+        }
+    }
+}
+
+/// Parsed and validated input arguments for up command.
+///
+/// This struct contains normalized and validated versions of CLI inputs,
+/// ensuring all validation rules from the contract are enforced before
+/// any runtime operations begin (fail-fast principle).
+#[derive(Debug, Clone)]
+pub struct NormalizedUpInput {
+    // Identity and discovery
+    pub workspace_folder: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
+    pub override_config_path: Option<PathBuf>,
+    pub id_labels: Vec<(String, String)>,
+    
+    // Runtime behavior
+    pub remove_existing_container: bool,
+    pub expect_existing_container: bool,
+    pub skip_post_create: bool,
+    pub skip_post_attach: bool,
+    pub skip_non_blocking_commands: bool,
+    pub prebuild: bool,
+    
+    // Mounts and environment
+    pub mounts: Vec<NormalizedMount>,
+    pub remote_env: Vec<NormalizedRemoteEnv>,
+    pub mount_workspace_git_root: bool,
+    
+    // Terminal settings
+    pub terminal_dimensions: Option<TerminalDimensions>,
+    
+    // Build and cache options
+    pub build_no_cache: bool,
+    pub cache_from: Vec<String>,
+    pub cache_to: Option<String>,
+    pub buildkit_mode: BuildkitMode,
+    
+    // Features and dotfiles
+    pub additional_features: Option<String>,
+    pub skip_feature_auto_mapping: bool,
+    pub dotfiles_repository: Option<String>,
+    pub dotfiles_install_command: Option<String>,
+    pub dotfiles_target_path: Option<String>,
+    
+    // Secrets
+    pub secrets_files: Vec<PathBuf>,
+    
+    // Output control
+    pub include_configuration: bool,
+    pub include_merged_configuration: bool,
+    pub omit_config_remote_env_from_metadata: bool,
+    pub omit_syntax_directive: bool,
+    
+    // Data folders
+    pub container_data_folder: Option<PathBuf>,
+    pub container_system_data_folder: Option<PathBuf>,
+    pub user_data_folder: Option<PathBuf>,
+    pub container_session_data_folder: Option<PathBuf>,
+    
+    // Runtime paths
+    pub docker_path: String,
+    pub docker_compose_path: String,
+    
+    // Internal flags
+    pub ports_events: bool,
+    pub shutdown: bool,
+    pub forward_ports: Vec<String>,
+    pub container_name: Option<String>,
+    pub prefer_cli_features: bool,
+    pub feature_install_order: Option<String>,
+    pub ignore_host_requirements: bool,
+    pub env_file: Vec<PathBuf>,
+    
+    // Runtime and observability
+    pub runtime: Option<deacon_core::runtime::RuntimeKind>,
+    pub redaction_config: deacon_core::redaction::RedactionConfig,
+    pub secret_registry: deacon_core::redaction::SecretRegistry,
+    pub progress_tracker:
+        std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
+}
+
+/// BuildKit mode for image builds
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildkitMode {
+    Auto,
+    Never,
+}
+
+impl NormalizedUpInput {
+    /// Validate contract requirements before any runtime operations.
+    ///
+    /// Enforces:
+    /// - workspace_folder OR id_label required
+    /// - workspace_folder OR override_config required
+    /// - expect_existing_container requires existing container (checked at runtime)
+    pub fn validate(&self) -> Result<()> {
+        // Require workspace_folder or id_label
+        if self.workspace_folder.is_none() && self.id_labels.is_empty() {
+            return Err(DeaconError::Config(
+                deacon_core::errors::ConfigError::Validation {
+                    message: "Either workspace_folder or id_label must be specified".to_string(),
+                },
+            )
+            .into());
+        }
+        
+        // Require workspace_folder or override_config
+        if self.workspace_folder.is_none() && self.override_config_path.is_none() {
+            return Err(DeaconError::Config(
+                deacon_core::errors::ConfigError::Validation {
+                    message: "Either workspace_folder or override_config must be specified".to_string(),
+                },
+            )
+            .into());
+        }
+        
+        Ok(())
+    }
+}
 
 /// Up command arguments
 #[derive(Debug, Clone)]
@@ -1301,5 +1742,87 @@ mod tests {
 
         // Test invalid port mapping
         assert!(PortSpec::parse("8080:invalid").is_err());
+    }
+
+    #[test]
+    fn test_normalized_mount_parse_bind() {
+        let mount = NormalizedMount::parse("type=bind,source=/host/path,target=/container/path")
+            .unwrap();
+        assert!(matches!(mount.mount_type, MountType::Bind));
+        assert_eq!(mount.source, "/host/path");
+        assert_eq!(mount.target, "/container/path");
+        assert!(!mount.external);
+    }
+
+    #[test]
+    fn test_normalized_mount_parse_volume_with_external() {
+        let mount = NormalizedMount::parse("type=volume,source=myvolume,target=/data,external=true")
+            .unwrap();
+        assert!(matches!(mount.mount_type, MountType::Volume));
+        assert_eq!(mount.source, "myvolume");
+        assert_eq!(mount.target, "/data");
+        assert!(mount.external);
+    }
+
+    #[test]
+    fn test_normalized_mount_parse_invalid_format() {
+        // Missing target
+        assert!(NormalizedMount::parse("type=bind,source=/tmp").is_err());
+        
+        // Invalid type
+        assert!(NormalizedMount::parse("type=invalid,source=/tmp,target=/data").is_err());
+        
+        // Missing source
+        assert!(NormalizedMount::parse("type=bind,target=/data").is_err());
+    }
+
+    #[test]
+    fn test_normalized_remote_env_parse_valid() {
+        let env = NormalizedRemoteEnv::parse("FOO=bar").unwrap();
+        assert_eq!(env.name, "FOO");
+        assert_eq!(env.value, "bar");
+        
+        // Test with equals in value
+        let env = NormalizedRemoteEnv::parse("DATABASE_URL=postgres://user:pass@host/db").unwrap();
+        assert_eq!(env.name, "DATABASE_URL");
+        assert_eq!(env.value, "postgres://user:pass@host/db");
+    }
+
+    #[test]
+    fn test_normalized_remote_env_parse_invalid() {
+        // Missing equals sign
+        assert!(NormalizedRemoteEnv::parse("INVALID").is_err());
+        
+        // Empty value is ok (equals present)
+        let env = NormalizedRemoteEnv::parse("EMPTY=").unwrap();
+        assert_eq!(env.name, "EMPTY");
+        assert_eq!(env.value, "");
+    }
+
+    #[test]
+    fn test_terminal_dimensions_both_specified() {
+        let dims = TerminalDimensions::new(Some(80), Some(24)).unwrap();
+        assert!(dims.is_some());
+        let dims = dims.unwrap();
+        assert_eq!(dims.columns, 80);
+        assert_eq!(dims.rows, 24);
+    }
+
+    #[test]
+    fn test_terminal_dimensions_neither_specified() {
+        let dims = TerminalDimensions::new(None, None).unwrap();
+        assert!(dims.is_none());
+    }
+
+    #[test]
+    fn test_terminal_dimensions_only_columns_specified() {
+        let result = TerminalDimensions::new(Some(80), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_terminal_dimensions_only_rows_specified() {
+        let result = TerminalDimensions::new(None, Some(24));
+        assert!(result.is_err());
     }
 }

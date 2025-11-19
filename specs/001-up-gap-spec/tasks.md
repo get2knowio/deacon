@@ -26,8 +26,8 @@
 
 **Purpose**: Core scaffolding that all user stories rely on.
 
-- [ ] T003 Define UpResult success/error structs and serializer helpers in `crates/deacon/src/commands/up.rs` and `crates/deacon/src/commands/mod.rs`
-- [ ] T004 Add parsed input/normalization struct skeleton and shared validation utilities in `crates/deacon/src/commands/up.rs` (mount/remote-env regex, terminal dims pairing)
+- [X] T003 Define UpResult success/error structs and serializer helpers in `crates/deacon/src/commands/up.rs` and `crates/deacon/src/commands/mod.rs`
+- [X] T004 Add parsed input/normalization struct skeleton and shared validation utilities in `crates/deacon/src/commands/up.rs` (mount/remote-env regex, terminal dims pairing)
 
 **Checkpoint**: Foundation ready - user story implementation can now begin.
 
