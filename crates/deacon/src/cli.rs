@@ -827,6 +827,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub container_system_data_folder: Option<PathBuf>,
 
+    /// Host-side user data folder for persistent user state
+    #[arg(long, global = true)]
+    pub user_data_folder: Option<PathBuf>,
+
+    /// Container-side session data folder for temporary session state
+    #[arg(long, global = true)]
+    pub container_session_data_folder: Option<PathBuf>,
+
     /// Force TTY allocation when log-format is JSON (threads into exec via force_tty_if_json)
     #[arg(long, global = true)]
     pub force_tty_if_json: bool,
@@ -937,8 +945,6 @@ impl Cli {
     /// // Runtime::new().unwrap().block_on(cli.dispatch()).unwrap();
     /// ```
     pub async fn dispatch(self) -> Result<()> {
-        use deacon_core::errors::{ConfigError, DeaconError};
-
         // Validate CLI arguments
         self.validate()?;
 
@@ -1112,6 +1118,8 @@ impl Cli {
                     docker_compose_path: self.docker_compose_path.clone(),
                     container_data_folder: self.container_data_folder.clone(),
                     container_system_data_folder: self.container_system_data_folder.clone(),
+                    user_data_folder: self.user_data_folder.clone(),
+                    container_session_data_folder: self.container_session_data_folder.clone(),
                     terminal_columns: self.terminal_columns,
                     terminal_rows: self.terminal_rows,
                 };
@@ -1140,24 +1148,19 @@ impl Cli {
                         Ok(())
                     }
                     Err(e) => {
-                        // Build error result
-                        let message =
-                            if let Some(DeaconError::Config(ConfigError::NotFound { .. })) =
-                                e.downcast_ref::<DeaconError>()
-                            {
-                                "No devcontainer.json found in workspace".to_string()
-                            } else {
-                                format!("{}", e)
-                            };
-
-                        let result = crate::commands::UpResult::error(
-                            message.clone(),
-                            format!("{:?}", e), // Full error chain in description
-                        );
+                        // Map error to standardized JSON result
+                        let result = crate::commands::UpResult::from_error(e);
 
                         // Emit JSON to stdout
                         let json = serde_json::to_string_pretty(&result)?;
                         println!("{}", json);
+
+                        // Extract message for exit error
+                        let message = if let crate::commands::UpResult::Error(ref err) = result {
+                            err.message.clone()
+                        } else {
+                            "Unknown error".to_string()
+                        };
 
                         // Return error to trigger exit code 1
                         Err(anyhow::anyhow!(message))

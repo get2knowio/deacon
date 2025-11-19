@@ -218,6 +218,91 @@ impl UpResult {
     pub fn is_error(&self) -> bool {
         matches!(self, UpResult::Error(_))
     }
+
+    /// Map an anyhow::Error to a standardized user-facing error message.
+    ///
+    /// This provides consistent, actionable error messages following the contract
+    /// in specs/001-up-gap-spec/contracts/up.md and the fail-fast validation strategy
+    /// from research.md.
+    ///
+    /// Error categories:
+    /// - Config errors (NotFound, Validation, Parsing): User-facing messages for invalid inputs
+    /// - Docker/Runtime errors: Clear messages about container/image issues
+    /// - Feature errors: Disallowed features or feature resolution failures
+    /// - Network/Authentication: Connection and auth issues
+    /// - Generic errors: Fallback with debug info
+    pub fn from_error(error: anyhow::Error) -> Self {
+        use deacon_core::errors::{ConfigError, DeaconError, DockerError};
+
+        // Try to downcast to DeaconError for specific handling
+        if let Some(deacon_error) = error.downcast_ref::<DeaconError>() {
+            match deacon_error {
+                DeaconError::Config(config_error) => match config_error {
+                    ConfigError::NotFound { path } => UpResult::error(
+                        "No devcontainer.json found in workspace".to_string(),
+                        format!("Configuration file not found: {}", path),
+                    ),
+                    ConfigError::Validation { message } => UpResult::error(
+                        "Invalid configuration or arguments".to_string(),
+                        message.clone(),
+                    ),
+                    ConfigError::Parsing { message } => UpResult::error(
+                        "Failed to parse configuration file".to_string(),
+                        message.clone(),
+                    ),
+                    ConfigError::ExtendsCycle { chain } => UpResult::error(
+                        "Configuration extends cycle detected".to_string(),
+                        format!("Cycle in extends chain: {}", chain),
+                    ),
+                    ConfigError::NotImplemented { feature } => UpResult::error(
+                        "Feature not implemented".to_string(),
+                        format!("Feature '{}' is not yet implemented", feature),
+                    ),
+                    ConfigError::Io(io_err) => UpResult::error(
+                        "Failed to read configuration file".to_string(),
+                        format!("{}", io_err),
+                    ),
+                },
+                DeaconError::Docker(docker_error) => match docker_error {
+                    DockerError::NotInstalled => UpResult::error(
+                        "Docker is not installed or not accessible".to_string(),
+                        "Please ensure Docker is installed and running".to_string(),
+                    ),
+                    DockerError::CLIError(msg) => {
+                        UpResult::error("Docker CLI operation failed".to_string(), msg.clone())
+                    }
+                    DockerError::ContainerNotFound { id } => UpResult::error(
+                        "Container not found".to_string(),
+                        format!("Container with ID '{}' was not found", id),
+                    ),
+                    DockerError::ExecFailed { code } => UpResult::error(
+                        "Container command failed".to_string(),
+                        format!("Command exited with code {}", code),
+                    ),
+                    DockerError::TTYFailed { reason } => {
+                        UpResult::error("TTY allocation failed".to_string(), reason.clone())
+                    }
+                },
+                DeaconError::Network { message } => {
+                    UpResult::error("Network error".to_string(), message.clone())
+                }
+                DeaconError::Authentication { message } => {
+                    UpResult::error("Authentication failed".to_string(), message.clone())
+                }
+                _ => {
+                    // Other DeaconError variants - use generic formatting
+                    let message = format!("{}", deacon_error);
+                    let description = format!("{:?}", deacon_error);
+                    UpResult::error(message, description)
+                }
+            }
+        } else {
+            // Generic error fallback
+            let message = format!("{:#}", error);
+            let description = format!("{:?}", error);
+            UpResult::error(message, description)
+        }
+    }
 }
 
 /// Internal structure to pass container information from execute_up_with_runtime
@@ -544,6 +629,8 @@ pub struct UpArgs {
     pub secrets_files: Vec<PathBuf>,
     pub container_data_folder: Option<PathBuf>,
     pub container_system_data_folder: Option<PathBuf>,
+    pub user_data_folder: Option<PathBuf>,
+    pub container_session_data_folder: Option<PathBuf>,
 
     // Host requirements
     pub ignore_host_requirements: bool,
@@ -608,6 +695,8 @@ impl Default for UpArgs {
             secrets_files: Vec::new(),
             container_data_folder: None,
             container_system_data_folder: None,
+            user_data_folder: None,
+            container_session_data_folder: None,
             ignore_host_requirements: false,
             env_file: Vec::new(),
             docker_path: "docker".to_string(),
@@ -781,8 +870,8 @@ fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpInput> {
         omit_syntax_directive: args.omit_syntax_directive,
         container_data_folder: args.container_data_folder.clone(),
         container_system_data_folder: args.container_system_data_folder.clone(),
-        user_data_folder: None,              // TODO: Add to UpArgs if needed
-        container_session_data_folder: None, // TODO: Add to UpArgs if needed
+        user_data_folder: args.user_data_folder.clone(),
+        container_session_data_folder: args.container_session_data_folder.clone(),
         docker_path: args.docker_path.clone(),
         docker_compose_path: args.docker_compose_path.clone(),
         ports_events: args.ports_events,
@@ -1908,6 +1997,82 @@ mod tests {
         let json_value = serde_json::Value::Number(serde_json::Number::from(42));
         let result = commands_from_json_value(&json_value);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_mapping_config_not_found() {
+        use deacon_core::errors::{ConfigError, DeaconError};
+
+        let error = DeaconError::Config(ConfigError::NotFound {
+            path: "/workspace/devcontainer.json".to_string(),
+        });
+        let result = UpResult::from_error(error.into());
+
+        assert!(result.is_error());
+        if let UpResult::Error(err) = result {
+            assert_eq!(err.outcome, "error");
+            assert_eq!(err.message, "No devcontainer.json found in workspace");
+            assert!(err.description.contains("/workspace/devcontainer.json"));
+        } else {
+            panic!("Expected Error variant");
+        }
+    }
+
+    #[test]
+    fn test_error_mapping_validation_error() {
+        use deacon_core::errors::{ConfigError, DeaconError};
+
+        let error = DeaconError::Config(ConfigError::Validation {
+            message: "Invalid mount format: missing target".to_string(),
+        });
+        let result = UpResult::from_error(error.into());
+
+        assert!(result.is_error());
+        if let UpResult::Error(err) = result {
+            assert_eq!(err.outcome, "error");
+            assert_eq!(err.message, "Invalid configuration or arguments");
+            assert_eq!(err.description, "Invalid mount format: missing target");
+        } else {
+            panic!("Expected Error variant");
+        }
+    }
+
+    #[test]
+    fn test_error_mapping_docker_error() {
+        use deacon_core::errors::{DeaconError, DockerError};
+
+        let error = DeaconError::Docker(DockerError::ContainerNotFound {
+            id: "abc123".to_string(),
+        });
+        let result = UpResult::from_error(error.into());
+
+        assert!(result.is_error());
+        if let UpResult::Error(err) = result {
+            assert_eq!(err.outcome, "error");
+            assert_eq!(err.message, "Container not found");
+            assert!(err.description.contains("abc123"));
+        } else {
+            panic!("Expected Error variant");
+        }
+    }
+
+    #[test]
+    fn test_error_mapping_network_error() {
+        use deacon_core::errors::DeaconError;
+
+        let error = DeaconError::Network {
+            message: "Connection timeout".to_string(),
+        };
+        let result = UpResult::from_error(error.into());
+
+        assert!(result.is_error());
+        if let UpResult::Error(err) = result {
+            assert_eq!(err.outcome, "error");
+            assert_eq!(err.message, "Network error");
+            assert_eq!(err.description, "Connection timeout");
+        } else {
+            panic!("Expected Error variant");
+        }
     }
 
     #[test]
