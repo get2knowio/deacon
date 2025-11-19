@@ -1,0 +1,11 @@
+{
+  "name": "Single Container Test",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspace",
+  "remoteEnv": {
+    "TEST_ENV": "single-container"
+  },
+  "postCreateCommand": "echo 'Post-create command executed'",
+  "updateContentCommand": "echo 'Update content command executed'"
+}

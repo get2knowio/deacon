@@ -1,0 +1,19 @@
+{
+  "name": "Feature and Dotfiles Test",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "username": "vscode"
+    }
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint"]
+    }
+  },
+  "updateContentCommand": "echo 'Update content with features'",
+  "postCreateCommand": "echo 'Post-create after features'"
+}

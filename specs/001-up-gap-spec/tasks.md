@@ -17,8 +17,8 @@
 
 **Purpose**: Prepare shared fixtures and guardrails for up parity work.
 
-- [ ] T001 Create shared up parity fixtures directory and placeholders in `fixtures/devcontainer-up/` (single-container devcontainer.json, compose with profiles/.env, feature+dotfiles fixture)
-- [ ] T002 Add quick references to fast-loop commands in `specs/001-up-gap-spec/quickstart.md` (ensure commands reflect current repo scripts)
+- [X] T001 Create shared up parity fixtures directory and placeholders in `fixtures/devcontainer-up/` (single-container devcontainer.json, compose with profiles/.env, feature+dotfiles fixture)
+- [X] T002 Add quick references to fast-loop commands in `specs/001-up-gap-spec/quickstart.md` (ensure commands reflect current repo scripts)
 
 ---
 

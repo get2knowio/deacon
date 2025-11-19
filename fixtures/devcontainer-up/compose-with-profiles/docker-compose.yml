@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/base:ubuntu
+    volumes:
+      - ../..:/workspace:cached
+    command: sleep infinity
+    environment:
+      - TEST_ENV=compose-app
+    profiles:
+      - dev
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_PASSWORD=test
+    profiles:
+      - dev
