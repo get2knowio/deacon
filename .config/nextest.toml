@@ -30,6 +30,18 @@ retries = 0
 slow-timeout = "60s"
 status-level = "pass"
 
+# Grant specific slow tests 5 minutes instead of the default 60s
+[[profile.default.overrides]]
+filter = 'test(integration_build_large_context) | test(integration_up_complex_service)'
+timeout = "5m"  # Hard limit before killing
+slow-timeout = "2m" # Warning threshold
+
+# Grant all smoke tests more time
+[[profile.default.overrides]]
+filter = 'test(smoke_)'
+test-group = 'smoke'
+timeout = "10m"
+
 # Override settings for specific test categories
 # Test functions starting with smoke_
 [[profile.default.overrides]]
@@ -70,12 +82,24 @@ test-group = 'fs-heavy'
 filter = 'test(integration_oci) | test(integration_fake_registry)'
 threads-required = 1
 
-# Fast feedback loop profile: Skip slow smoke/parity tests
+# Fast feedback loop profile: Skip slow smoke/parity tests and serial docker tests
 [profile.dev-fast]
 retries = 0
 slow-timeout = "30s"
-# Exclude smoke and parity tests from this profile
-default-filter = 'not (test(smoke_) | test(parity_))'
+# Exclude smoke, parity, and serial docker tests from this profile
+default-filter = 'not (test(smoke_) | test(parity_) | test(integration_build) | test(integration_up) | test(integration_lifecycle))'
+
+# Profile for pure unit tests (runs in milliseconds)
+[profile.unit]
+retries = 0
+# Only run library tests, binaries, and examples. Exclude 'test' (integration tests in tests/ folder)
+default-filter = 'kind(lib) | kind(bin) | kind(example)'
+
+# Profile for Docker integration tests only
+[profile.docker]
+retries = 0
+# Run only the docker groups
+default-filter = 'test(integration_build) | test(integration_up) | test(integration_lifecycle)'
 
 # Conservative concurrency for remaining tests
 [[profile.dev-fast.overrides]]

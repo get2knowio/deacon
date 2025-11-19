@@ -1281,11 +1281,34 @@ async fn execute_compose_up(
     }
 
     // Collect container information for JSON output
-    let container_id = compose_manager
-        .get_primary_container_id(&project)?
-        .ok_or_else(|| {
-            anyhow::anyhow!("Failed to get primary container ID after starting compose project")
-        })?;
+    // Retry getting container ID with exponential backoff to handle race conditions
+    let container_id = {
+        use std::time::Duration;
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 10;
+        const INITIAL_DELAY_MS: u64 = 100;
+
+        loop {
+            match compose_manager.get_primary_container_id(&project)? {
+                Some(id) => break id,
+                None if attempts < MAX_ATTEMPTS => {
+                    attempts += 1;
+                    let delay = Duration::from_millis(INITIAL_DELAY_MS * 2u64.pow(attempts - 1));
+                    debug!(
+                        "Waiting for container to be ready, attempt {}/{}, waiting {:?}",
+                        attempts, MAX_ATTEMPTS, delay
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "Failed to get primary container ID after starting compose project (tried {} times)",
+                        MAX_ATTEMPTS
+                    ));
+                }
+            }
+        }
+    };
 
     let remote_user = config
         .remote_user

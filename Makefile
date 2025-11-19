@@ -46,7 +46,7 @@ help: ## Show this help
 	@grep -E '^(test|test-fast|test-non-smoke|test-smoke|test-parity|test-parity-all|parity):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
 	@echo "Testing (Parallel with cargo-nextest):"
-	@grep -E '^(test-nextest-fast|test-nextest|test-nextest-ci|test-nextest-bg|test-nextest-audit):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@grep -E '^(test-nextest-fast|test-nextest-unit|test-nextest-docker|test-nextest|test-nextest-ci|test-nextest-bg|test-nextest-audit):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
 	@echo "Code Quality:"
 	@grep -E '^(dev-fast|fmt|clippy|coverage):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
@@ -82,7 +82,7 @@ dev-fast: ## Fast local loop: fmt-check + clippy + fast tests (skip slow integra
 	cargo clippy --all-targets -- -D warnings; \
 	$(MAKE) test-fast
 
-test-nextest-fast: install-nextest ## Run fast parallel tests with cargo-nextest (excludes smoke/parity)
+test-nextest-fast: install-nextest ## Run fast parallel tests with cargo-nextest (excludes smoke/parity/docker)
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \
 	mkdir -p artifacts/nextest; \
@@ -103,6 +103,12 @@ test-nextest-fast: install-nextest ## Run fast parallel tests with cargo-nextest
 		echo "✗ Tests failed after $${duration}s. Timing data: artifacts/nextest/dev-fast-timing.json"; \
 		exit $$exit_code; \
 	fi
+
+test-nextest-unit: install-nextest ## Run only unit tests with nextest (super fast)
+	cargo nextest run --profile unit
+
+test-nextest-docker: install-nextest ## Run only docker integration tests
+	cargo nextest run --profile docker
 
 test-nextest: install-nextest ## Run full test suite with cargo-nextest (VERBOSE=1 for regular output)
 	@set -euo pipefail; \

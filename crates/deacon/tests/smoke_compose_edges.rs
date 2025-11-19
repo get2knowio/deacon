@@ -40,6 +40,7 @@ fn test_compose_path_detection_without_docker() {
             volumes:
                 - .:/workspace
             network_mode: bridge
+            command: sleep infinity
         db:
             image: postgres:13
             environment:
@@ -111,6 +112,7 @@ fn test_compose_subfolder_config() {
             volumes:
                 - .:/workspace
             network_mode: bridge
+            command: sleep infinity
     "#;
 
     fs::write(subdir.join("docker-compose.yml"), compose_config).unwrap();
@@ -287,6 +289,7 @@ fn test_compose_multiple_files() {
             image: alpine:3.19
             working_dir: /workspace
             network_mode: bridge
+            command: sleep infinity
     "#;
 
     fs::write(
