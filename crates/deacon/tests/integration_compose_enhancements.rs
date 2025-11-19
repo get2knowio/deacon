@@ -105,6 +105,8 @@ fn test_compose_project_all_services_inclusion() {
             "worker".to_string(),
         ],
         env_files: Vec::new(),
+        additional_mounts: Vec::new(),
+        profiles: Vec::new(),
     };
 
     let all_services = project.get_all_services();
@@ -211,6 +213,8 @@ fn test_compose_get_all_container_ids() {
         service: "app".to_string(),
         run_services: vec!["db".to_string(), "redis".to_string()],
         env_files: Vec::new(),
+        additional_mounts: Vec::new(),
+        profiles: Vec::new(),
     };
 
     let compose_manager = ComposeManager::new();
@@ -260,6 +264,8 @@ fn test_compose_service_targeting() {
         service: "web".to_string(),
         run_services: vec!["db".to_string(), "cache".to_string()],
         env_files: Vec::new(),
+        additional_mounts: Vec::new(),
+        profiles: Vec::new(),
     };
 
     // Verify all services are accessible

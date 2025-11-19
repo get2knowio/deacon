@@ -89,16 +89,16 @@
 
 ### Tests for User Story 3
 
-- [ ] T018 [P] [US3] Add integration test for compose mount conversion and profile selection (including .env project name) in `crates/deacon/tests/up_compose_profiles.rs`
-- [ ] T019 [P] [US3] Add integration test for expect-existing/id-label fast-fail and remote-env/secrets redaction in `crates/deacon/tests/up_reconnect.rs`
+- [X] T018 [P] [US3] Add integration test for compose mount conversion and profile selection (including .env project name) in `crates/deacon/tests/up_compose_profiles.rs`
+- [X] T019 [P] [US3] Add integration test for expect-existing/id-label fast-fail and remote-env/secrets redaction in `crates/deacon/tests/up_reconnect.rs`
 
 ### Implementation for User Story 3
 
-- [ ] T020 [US3] Convert additional mounts to compose volumes and propagate profiles/project name from .env in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`
-- [ ] T021 [US3] Merge remote-env flags and secrets-file contents with redaction for runtime/lifecycle env in `crates/deacon/src/commands/up.rs` and `crates/core/src/secrets.rs`
-- [ ] T022 [US3] Support docker/compose path overrides, data folder options, and buildx cache/platform hooks for compose flows in `crates/deacon/src/commands/up.rs`
-- [ ] T023 [US3] Ensure expect-existing/remove-existing logic for compose/id-label flows errors before create/build, with standardized JSON error output in `crates/deacon/src/commands/up.rs`
-- [ ] T030 [US3] Implement user-data/container-session folder usage and probe caching hooks in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`; validate via compose fixtures
+- [X] T020 [US3] Convert additional mounts to compose volumes and propagate profiles/project name from .env in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`
+- [X] T021 [US3] Merge remote-env flags and secrets-file contents with redaction for runtime/lifecycle env in `crates/deacon/src/commands/up.rs` and `crates/core/src/secrets.rs`
+- [X] T022 [US3] Support docker/compose path overrides, data folder options, and buildx cache/platform hooks for compose flows in `crates/deacon/src/commands/up.rs`
+- [X] T023 [US3] Ensure expect-existing/remove-existing logic for compose/id-label flows errors before create/build, with standardized JSON error output in `crates/deacon/src/commands/up.rs`
+- [X] T030 [US3] Implement user-data/container-session folder usage and probe caching hooks in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`; validate via compose fixtures
 
 **Checkpoint**: User Story 3 independently testable (compose parity, reconnection, secrets/redaction).
 
