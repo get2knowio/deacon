@@ -20,8 +20,8 @@ fn test_cli_with_override_config_and_secrets() {
     }"#;
     fs::write(&base_config, base_content).unwrap();
 
-    // Create override config
-    let override_config = temp_dir.path().join("override.json");
+    // Create override config (must use valid devcontainer filename)
+    let override_config = temp_dir.path().join(".devcontainer.json");
     let override_content = r#"{
         "name": "override-container",
         "containerEnv": {

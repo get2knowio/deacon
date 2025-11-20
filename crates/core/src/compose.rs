@@ -26,6 +26,25 @@ pub struct ComposeProject {
     pub run_services: Vec<String>,
     /// Environment files to pass to docker compose
     pub env_files: Vec<PathBuf>,
+    /// Additional mounts to apply to the primary service (Task T020)
+    /// These are converted from CLI --mount flags for compose workflows
+    pub additional_mounts: Vec<ComposeMount>,
+    /// Profiles to activate for this project (Task T020)
+    /// Automatically derived from runServices profiles
+    pub profiles: Vec<String>,
+}
+
+/// Mount specification for Docker Compose volumes (Task T020)
+#[derive(Debug, Clone)]
+pub struct ComposeMount {
+    /// Mount type (bind or volume)
+    pub mount_type: String,
+    /// Source path or volume name
+    pub source: String,
+    /// Target path in container
+    pub target: String,
+    /// Whether the volume is external (for named volumes)
+    pub external: bool,
 }
 
 /// Docker Compose service information
@@ -347,6 +366,8 @@ impl ComposeManager {
             service: service.clone(),
             run_services: config.run_services.clone(),
             env_files: Vec::new(),
+            additional_mounts: Vec::new(), // Will be populated from CLI --mount flags
+            profiles: Vec::new(),          // Will be populated from service profiles
         })
     }
 
@@ -488,6 +509,8 @@ impl ComposeManager {
     ///     service: "web".to_string(),
     ///     run_services: Vec::new(),
     ///     env_files: Vec::new(),
+    ///     additional_mounts: Vec::new(),
+    ///     profiles: Vec::new(),
     /// };
     ///
     /// let output = manager.build_service(&project, "web")?;
@@ -545,6 +568,8 @@ impl ComposeManager {
     ///     service: "web".to_string(),
     ///     run_services: Vec::new(),
     ///     env_files: Vec::new(),
+    ///     additional_mounts: Vec::new(),
+    ///     profiles: Vec::new(),
     /// };
     ///
     /// if manager.validate_service_exists(&project, "web")? {
@@ -641,7 +666,63 @@ impl ComposeProject {
     }
 }
 
+/// Parse .env file and extract COMPOSE_PROJECT_NAME if present.
+///
+/// Reads a .env file line by line, looking for COMPOSE_PROJECT_NAME=value.
+/// Returns the value if found, otherwise None.
+///
+/// Per Task T020: Support .env project name propagation for compose workflows.
+fn parse_env_file_for_project_name(env_file_path: &Path) -> Option<String> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    if !env_file_path.exists() {
+        return None;
+    }
+
+    let file = File::open(env_file_path).ok()?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = line.ok()?;
+        let line = line.trim();
+
+        // Skip comments and empty lines
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        // Look for COMPOSE_PROJECT_NAME=value
+        if let Some(value) = line.strip_prefix("COMPOSE_PROJECT_NAME=") {
+            let value = value.trim();
+            // Remove quotes if present
+            let value = value
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .unwrap_or(value);
+            let value = value
+                .strip_prefix('\'')
+                .and_then(|v| v.strip_suffix('\''))
+                .unwrap_or(value);
+
+            if !value.is_empty() {
+                debug!("Found COMPOSE_PROJECT_NAME in .env: {}", value);
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 fn derive_project_name(base_path: &Path) -> String {
+    // Task T020: Check for .env file and extract COMPOSE_PROJECT_NAME
+    let env_file_path = base_path.join(".env");
+    if let Some(project_name) = parse_env_file_for_project_name(&env_file_path) {
+        debug!("Using project name from .env file: {}", project_name);
+        return project_name;
+    }
+
     // Docker Compose project name rules:
     // - must start with a lowercase letter or number
     // - may contain only lowercase alphanumeric characters, hyphens, and underscores
@@ -764,6 +845,8 @@ mod tests {
             service: "app".to_string(),
             run_services: vec!["db".to_string(), "redis".to_string()],
             env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
         };
 
         let services = project.get_all_services();
@@ -835,6 +918,8 @@ mod tests {
                 "queue".to_string(),
             ],
             env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
         };
 
         let all_services = project.get_all_services();
@@ -855,6 +940,8 @@ mod tests {
             service: "app".to_string(),
             run_services: vec![],
             env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
         };
 
         let all_services = project.get_all_services();

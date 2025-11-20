@@ -100,7 +100,7 @@ fn test_outdated_json_empty_features() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn test_outdated_json_preserves_declaration_order() -> Result<(), Box<dyn Error>> {
-    // Test that JSON output preserves declaration order via BTreeMap
+    // Test that JSON output preserves declaration order (not alphabetical)
     let td = tempdir()?;
     let devcontainer_dir = td.path().join(".devcontainer");
     fs::create_dir_all(&devcontainer_dir)?;
@@ -136,11 +136,12 @@ fn test_outdated_json_preserves_declaration_order() -> Result<(), Box<dyn Error>
     let features = parsed["features"].as_object().unwrap();
     assert_eq!(features.len(), 3);
 
-    // BTreeMap orders keys alphabetically, so we expect aaa, mmm, zzz
+    // Verify declaration order is preserved (zzz, aaa, mmm), not alphabetical (aaa, mmm, zzz)
     let keys: Vec<&String> = features.keys().collect();
-    assert!(keys.contains(&&"ghcr.io/devcontainers/features/aaa".to_string()));
-    assert!(keys.contains(&&"ghcr.io/devcontainers/features/mmm".to_string()));
-    assert!(keys.contains(&&"ghcr.io/devcontainers/features/zzz".to_string()));
+    assert_eq!(keys.len(), 3);
+    assert_eq!(keys[0], "ghcr.io/devcontainers/features/zzz");
+    assert_eq!(keys[1], "ghcr.io/devcontainers/features/aaa");
+    assert_eq!(keys[2], "ghcr.io/devcontainers/features/mmm");
 
     Ok(())
 }

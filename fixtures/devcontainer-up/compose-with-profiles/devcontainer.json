@@ -1,0 +1,9 @@
+{
+  "name": "Compose with Profiles Test",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "root",
+  "runServices": ["app", "db"],
+  "shutdownAction": "stopCompose"
+}

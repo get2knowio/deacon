@@ -59,6 +59,9 @@ make test-nextest
 # CI-aligned conservative profile
 make test-nextest-ci
 
+# Long-running tests (heavy integration/build tests)
+make test-nextest-long-running
+
 # Audit test group assignments
 make test-nextest-audit
 ```
@@ -194,6 +197,26 @@ filter = 'test(parity_)'
 threads-required = 1
 ```
 
+### 7. `long-running`
+
+**Characteristics:**
+- End-to-end or heavy-build integration tests that can run for several minutes
+- Examples: building a large context, complex up sequences, long vulnerability scans
+
+**Concurrency:** `max-threads = 1` (serial execution by default; you can increase if safe)
+
+**When to use:**
+- Test runs longer than typical integration suites and impacts iteration time
+- Not suitable for `dev-fast` workflows; run in `long-running` profile instead
+
+**Selectors in `.config/nextest.toml`:**
+```toml
+[[profile.default.overrides]]
+filter = 'test(integration_build) | test(integration_up) | test(integration_progress) | test(integration_vulnerability_scan)'
+test-group = 'long-running'
+slow-timeout = { period = "30m", terminate-after = 1 }
+```
+
 ## Execution Profiles
 
 The project defines three nextest profiles in `.config/nextest.toml`:
@@ -254,6 +277,23 @@ cargo nextest run --profile ci --final-status-reporter json
 ```
 
 **Timing artifacts:** `artifacts/nextest/ci-timing.json`
+
+### `long-running` (Heavy integration & build tests)
+
+Purpose: Run long-running integration tests that are intentionally excluded from the `dev-fast` profile to keep local iteration fast.
+
+Characteristics:
+- Tests typically run for multiple minutes (up to 30m+) and may exercise large Docker builds or complex integration flows
+- Execute as a separate step in CI or locally when validating end-to-end scenarios
+
+Usage:
+```bash
+make test-nextest-long-running
+# or
+cargo nextest run --profile long-running
+```
+
+Timing artifacts: `artifacts/nextest/long-running-timing.json`
 
 ## Classification Workflow
 

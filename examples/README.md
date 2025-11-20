@@ -83,6 +83,89 @@ cd examples/configuration/basic
 deacon config validate . --json
 ```
 
+### Up Command Examples
+
+Start a basic development container:
+```sh
+cd examples/container-lifecycle/basic
+deacon up --workspace-folder . --include-configuration | jq '.containerId'
+```
+
+Start with prebuild mode (CI/CD workflows):
+```sh
+cd examples/container-lifecycle/basic
+deacon up --workspace-folder . --prebuild --include-configuration
+# Outputs JSON with container ready for caching
+```
+
+Start with dotfiles installation:
+```sh
+cd examples/container-lifecycle/advanced
+deacon up --workspace-folder . \
+  --dotfiles-repository https://github.com/user/dotfiles \
+  --dotfiles-install-command "./install.sh"
+```
+
+Start with additional mounts and remote environment:
+```sh
+cd examples/container-lifecycle/basic
+deacon up --workspace-folder . \
+  --mount "type=bind,source=/tmp/cache,target=/cache" \
+  --remote-env "NODE_ENV=development" \
+  --remote-env "DEBUG=true"
+```
+
+Start with secrets file:
+```sh
+cd examples/container-lifecycle/advanced
+echo "API_KEY=secret123" > /tmp/secrets.env
+deacon up --workspace-folder . --secrets-file /tmp/secrets.env
+# Secrets are redacted from logs automatically
+```
+
+Start with BuildKit cache:
+```sh
+cd examples/container-lifecycle/basic
+deacon up --workspace-folder . \
+  --buildkit auto \
+  --cache-from type=registry,ref=myrepo/cache \
+  --cache-to type=registry,ref=myrepo/cache
+```
+
+Start with ID labels for reconnection:
+```sh
+cd examples/container-lifecycle/basic
+deacon up --workspace-folder . \
+  --id-label project=myapp \
+  --id-label environment=dev
+# Later reconnect with same labels
+deacon up --id-label project=myapp --id-label environment=dev --expect-existing-container
+```
+
+Start with skip flags for faster iteration:
+```sh
+cd examples/container-lifecycle/basic
+deacon up --workspace-folder . --skip-post-create --skip-post-attach
+# Skips lifecycle hooks for faster startup
+```
+
+Start with included merged configuration:
+```sh
+cd examples/container-lifecycle/basic
+deacon up --workspace-folder . \
+  --include-configuration \
+  --include-merged-configuration | jq '.mergedConfiguration'
+```
+
+Start with custom Docker paths and data folders:
+```sh
+cd examples/container-lifecycle/basic
+deacon up --workspace-folder . \
+  --docker-path /usr/local/bin/docker \
+  --container-data-folder /workspace/.devcontainer \
+  --user-data-folder ~/.local/share/deacon
+```
+
 Start a container with custom name:
 ```sh
 cd examples/cli/custom-container-name
@@ -188,10 +271,14 @@ deacon doctor --workspace-folder .
 deacon doctor --workspace-folder . --json | jq '.disk_space'
 ```
 
-Test container lifecycle commands:
+Test container lifecycle commands (with full up execution):
 ```sh
 cd examples/container-lifecycle/basic
+# First, inspect the configuration
 deacon read-configuration --config devcontainer.json | jq '.onCreateCommand, .postCreateCommand, .postStartCommand, .postAttachCommand'
+
+# Then execute with up command to see lifecycle in action
+deacon up --workspace-folder . --include-configuration
 ```
 
 Explore lifecycle execution order:
@@ -364,7 +451,7 @@ Specific build capability example directories (under `examples/build/`):
 - `unwritable-output/` – Failing fast on unwritable `--output` destination
 
 
-Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/subcommand-specs/*/SPEC.md` Lifecycle Execution Workflow.
+Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/subcommand-specs/*/SPEC.md` Lifecycle Execution Workflow. The `up` command now has full parity with the specification including: JSON output contract, all CLI flags (workspace/config/lifecycle/mount/env/cache/buildkit/dotfiles/security), validation rules, updateContentCommand execution, prebuild mode, ID labels, secrets handling with redaction, image metadata merging, feature-driven builds, compose parity (mount conversion, profiles, remote-env), UID/security options, and data folder management. See `docs/subcommand-specs/up/GAP.md` for complete implementation status (~95% specification compliance).
 
 Doctor examples demonstrate environment diagnostics including host requirements validation (CPU, memory, storage) and real disk space checking using platform-specific APIs as specified in `docs/subcommand-specs/*/SPEC.md` Host Requirements section.
 

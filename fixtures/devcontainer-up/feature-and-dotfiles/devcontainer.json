@@ -1,0 +1,11 @@
+{
+  "name": "Feature and Dotfiles Test",
+  "image": "ubuntu:22.04",
+  "remoteUser": "root",
+  "workspaceFolder": "/workspace",
+  "remoteEnv": {
+    "FIXTURE_TYPE": "feature-and-dotfiles"
+  },
+  "updateContentCommand": "apt-get update && apt-get install -y git && echo 'Update content command'",
+  "postCreateCommand": "echo 'Post-create command'"
+}

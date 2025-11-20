@@ -23,6 +23,7 @@ indicatif = "0.17"
 atty = "0.2"
 console = "0.15"
 futures = "0.3"
+regex = "1.10"
 
 [lints]
 workspace = true
@@ -31,6 +32,5 @@ workspace = true
 assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3.12"
-serial_test = "3"
 zip = "2.4"
 serde_json = { version = "1.0", features = ["preserve_order"] }

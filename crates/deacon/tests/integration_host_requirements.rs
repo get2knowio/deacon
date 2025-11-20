@@ -41,28 +41,10 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
         .expect("Failed to create devcontainer.json");
 
     let args = UpArgs {
-        remove_existing_container: false,
         skip_post_create: true,
         skip_non_blocking_commands: true,
-        ports_events: false,
-        shutdown: false,
-        forward_ports: Vec::new(),
-        container_name: None,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
-        config_path: None,
-        additional_features: None,
-        prefer_cli_features: false,
-        feature_install_order: None,
-        ignore_host_requirements: false,
-        progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        runtime: None,
-        redaction_config: deacon_core::redaction::RedactionConfig::default(),
-        secret_registry: deacon_core::redaction::global_registry().clone(),
-        env_file: Vec::new(),
-        docker_path: "docker".to_string(),
-        docker_compose_path: "docker-compose".to_string(),
-        terminal_columns: None,
-        terminal_rows: None,
+        ..Default::default()
     };
 
     // This should not fail due to host requirements
@@ -101,28 +83,10 @@ async fn test_host_requirements_validation_fails_with_unrealistic_requirements()
         .expect("Failed to create devcontainer.json");
 
     let args = UpArgs {
-        remove_existing_container: false,
         skip_post_create: true,
         skip_non_blocking_commands: true,
-        ports_events: false,
-        shutdown: false,
-        forward_ports: Vec::new(),
-        container_name: None,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
-        config_path: None,
-        additional_features: None,
-        prefer_cli_features: false,
-        feature_install_order: None,
-        ignore_host_requirements: false,
-        progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        runtime: None,
-        redaction_config: deacon_core::redaction::RedactionConfig::default(),
-        secret_registry: deacon_core::redaction::global_registry().clone(),
-        env_file: Vec::new(),
-        docker_path: "docker".to_string(),
-        docker_compose_path: "docker-compose".to_string(),
-        terminal_columns: None,
-        terminal_rows: None,
+        ..Default::default()
     };
 
     let result = execute_up(args).await;
@@ -161,28 +125,11 @@ async fn test_host_requirements_ignored_with_flag() {
         .expect("Failed to create devcontainer.json");
 
     let args = UpArgs {
-        remove_existing_container: false,
         skip_post_create: true,
         skip_non_blocking_commands: true,
-        ports_events: false,
-        shutdown: false,
-        forward_ports: Vec::new(),
-        container_name: None,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
-        config_path: None,
-        additional_features: None,
-        prefer_cli_features: false,
-        feature_install_order: None,
-        ignore_host_requirements: true, // This should make it not fail
-        progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        runtime: None,
-        redaction_config: deacon_core::redaction::RedactionConfig::default(),
-        secret_registry: deacon_core::redaction::global_registry().clone(),
-        env_file: Vec::new(),
-        docker_path: "docker".to_string(),
-        docker_compose_path: "docker-compose".to_string(),
-        terminal_columns: None,
-        terminal_rows: None,
+        ignore_host_requirements: true,
+        ..Default::default()
     };
 
     let result = execute_up(args).await;

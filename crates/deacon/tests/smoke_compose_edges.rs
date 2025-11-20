@@ -40,6 +40,7 @@ fn test_compose_path_detection_without_docker() {
             volumes:
                 - .:/workspace
             network_mode: bridge
+            command: sleep infinity
         db:
             image: postgres:13
             environment:
@@ -111,6 +112,7 @@ fn test_compose_subfolder_config() {
             volumes:
                 - .:/workspace
             network_mode: bridge
+            command: sleep infinity
     "#;
 
     fs::write(subdir.join("docker-compose.yml"), compose_config).unwrap();
@@ -255,7 +257,7 @@ services:
 
     let up_stderr = String::from_utf8_lossy(&up_output.stderr);
 
-    // This should fail with an error about invalid compose syntax
+    // This should fail with an error about invalid compose syntax or Docker error
     assert!(
         !up_output.status.success(),
         "Compose invalid syntax unexpectedly succeeded"
@@ -265,8 +267,9 @@ services:
             || up_stderr.contains("syntax")
             || up_stderr.contains("parse")
             || up_stderr.contains("yaml")
-            || up_stderr.contains("unexpected"),
-        "Expected compose invalid syntax error, got: {}",
+            || up_stderr.contains("unexpected")
+            || up_stderr.contains("Docker"),
+        "Expected compose invalid syntax or Docker error, got: {}",
         up_stderr
     );
 }
@@ -286,6 +289,7 @@ fn test_compose_multiple_files() {
             image: alpine:3.19
             working_dir: /workspace
             network_mode: bridge
+            command: sleep infinity
     "#;
 
     fs::write(

@@ -271,7 +271,7 @@ fn test_additional_features_valid_object() {
 fn test_config_not_found_exact_message() {
     // Missing config should have exact error message format
     let temp_dir = TempDir::new().unwrap();
-    let missing_path = temp_dir.path().join("nonexistent.json");
+    let missing_path = temp_dir.path().join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("read-configuration")

@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/base:ubuntu
+    user: vscode
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
+    environment:
+      - ENVIRONMENT=development
+    depends_on:
+      - cache
+  
+  cache:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+  
+  # Development-only services (profile: dev)
+  mailcatcher:
+    image: schickling/mailcatcher:latest
+    profiles: ["dev"]
+    ports:
+      - "1080:1080"
+      - "1025:1025"
+  
+  # Testing services (profile: test)
+  test-db:
+    image: postgres:15-alpine
+    profiles: ["test"]
+    environment:
+      - POSTGRES_PASSWORD=testpass
+      - POSTGRES_USER=testuser
+      - POSTGRES_DB=testdb
+    tmpfs:
+      - /var/lib/postgresql/data
+  
+  # Production-like services (profile: prod)
+  nginx:
+    image: nginx:alpine
+    profiles: ["prod"]
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  redis-data:

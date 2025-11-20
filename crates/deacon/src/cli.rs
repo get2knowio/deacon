@@ -149,28 +149,60 @@ pub struct CliContext {
 pub enum Commands {
     /// Create and run development container
     Up {
+        // Container identity and discovery
+        /// Container ID label(s) for identification (format: name=value, can be repeated)
+        #[arg(long, action = clap::ArgAction::Append)]
+        id_label: Vec<String>,
+
+        // Runtime behavior
         /// Remove existing container(s) first
         #[arg(long)]
         remove_existing_container: bool,
+        /// Expect existing container (fail if not found)
+        #[arg(long)]
+        expect_existing_container: bool,
+        /// Stop after updateContentCommand (prebuild mode)
+        #[arg(long)]
+        prebuild: bool,
         /// Skip postCreate lifecycle phase
         #[arg(long)]
         skip_post_create: bool,
+        /// Skip postAttach lifecycle phase
+        #[arg(long)]
+        skip_post_attach: bool,
         /// Skip non-blocking commands (postStart & postAttach phases)
         #[arg(long)]
         skip_non_blocking_commands: bool,
-        /// Emit machine-readable port events to stdout with PORT_EVENT prefix
+
+        // Mounts and environment
+        /// Additional mount (format: type=bind|volume,source=<path>,target=<path>[,external=true|false], can be repeated)
         #[arg(long)]
-        ports_events: bool,
-        /// Automatically shut down when process exits
+        mount: Vec<String>,
+        /// Remote environment variable (format: NAME=value, can be repeated)
         #[arg(long)]
-        shutdown: bool,
-        /// Forward port(s) from container to host (can be repeated)
-        /// Format: PORT or HOST_PORT:CONTAINER_PORT
-        #[arg(long = "forward-port")]
-        forward_ports: Vec<String>,
-        /// Custom container name (overrides generated name)
+        remote_env: Vec<String>,
+        /// Mount workspace git root instead of workspace folder
+        #[arg(long, default_value_t = true)]
+        mount_workspace_git_root: bool,
+        /// Workspace mount consistency (consistent, cached, delegated)
         #[arg(long)]
-        container_name: Option<String>,
+        workspace_mount_consistency: Option<String>,
+
+        // Build and cache options
+        /// Build without using cache
+        #[arg(long)]
+        build_no_cache: bool,
+        /// External cache source (can be repeated, e.g. type=registry,ref=<image>)
+        #[arg(long)]
+        cache_from: Vec<String>,
+        /// External cache destination (e.g. type=registry,ref=<image>)
+        #[arg(long)]
+        cache_to: Option<String>,
+        /// BuildKit usage control (auto respects DOCKER_BUILDKIT, never disables)
+        #[arg(long, value_enum)]
+        buildkit: Option<BuildKitOption>,
+
+        // Features and dotfiles
         /// Additional features to install (JSON map of id -> value/options)
         #[arg(long)]
         additional_features: Option<String>,
@@ -180,9 +212,64 @@ pub enum Commands {
         /// Override feature installation order (comma-separated list of IDs)
         #[arg(long)]
         feature_install_order: Option<String>,
+        /// Skip feature auto-mapping (hidden testing flag)
+        #[arg(long, hide = true)]
+        skip_feature_auto_mapping: bool,
+        /// Dotfiles repository URL
+        #[arg(long)]
+        dotfiles_repository: Option<String>,
+        /// Dotfiles installation command
+        #[arg(long)]
+        dotfiles_install_command: Option<String>,
+        /// Dotfiles target path inside container
+        #[arg(long)]
+        dotfiles_target_path: Option<String>,
+
+        // Metadata and output control
+        /// Omit config remoteEnv from image metadata
+        #[arg(long)]
+        omit_config_remote_env_from_metadata: bool,
+        /// Omit Dockerfile syntax directive workaround
+        #[arg(long)]
+        omit_syntax_directive: bool,
+        /// Include configuration in JSON output
+        #[arg(long)]
+        include_configuration: bool,
+        /// Include merged configuration in JSON output
+        #[arg(long)]
+        include_merged_configuration: bool,
+
+        // GPU and advanced options
+        /// GPU availability (all, detect, none)
+        #[arg(long)]
+        gpu_availability: Option<String>,
+        /// Update remote user UID default behavior (never, on, off)
+        #[arg(long)]
+        update_remote_user_uid_default: Option<String>,
+
+        // Port handling
+        /// Emit machine-readable port events to stdout with PORT_EVENT prefix
+        #[arg(long)]
+        ports_events: bool,
+        /// Forward port(s) from container to host (can be repeated)
+        /// Format: PORT or HOST_PORT:CONTAINER_PORT
+        #[arg(long = "forward-port")]
+        forward_ports: Vec<String>,
+
+        // Lifecycle
+        /// Automatically shut down when process exits
+        #[arg(long)]
+        shutdown: bool,
+        /// Custom container name (overrides generated name)
+        #[arg(long)]
+        container_name: Option<String>,
+
+        // Host requirements
         /// Ignore host requirements validation (log warnings instead of failing)
         #[arg(long)]
         ignore_host_requirements: bool,
+
+        // Compose
         /// Environment file(s) to pass to docker compose (can be repeated)
         #[arg(long)]
         env_file: Vec<PathBuf>,
@@ -740,6 +827,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub container_system_data_folder: Option<PathBuf>,
 
+    /// Host-side user data folder for persistent user state
+    #[arg(long, global = true)]
+    pub user_data_folder: Option<PathBuf>,
+
+    /// Container-side session data folder for temporary session state
+    #[arg(long, global = true)]
+    pub container_session_data_folder: Option<PathBuf>,
+
     /// Force TTY allocation when log-format is JSON (threads into exec via force_tty_if_json)
     #[arg(long, global = true)]
     pub force_tty_if_json: bool,
@@ -850,8 +945,6 @@ impl Cli {
     /// // Runtime::new().unwrap().block_on(cli.dispatch()).unwrap();
     /// ```
     pub async fn dispatch(self) -> Result<()> {
-        use deacon_core::errors::{ConfigError, DeaconError};
-
         // Validate CLI arguments
         self.validate()?;
 
@@ -941,31 +1034,76 @@ impl Cli {
 
         match self.command {
             Some(Commands::Up {
+                id_label,
                 remove_existing_container,
+                expect_existing_container,
+                prebuild,
                 skip_post_create,
+                skip_post_attach,
                 skip_non_blocking_commands,
-                ports_events,
-                shutdown,
-                forward_ports,
-                container_name,
+                mount,
+                remote_env,
+                mount_workspace_git_root,
+                workspace_mount_consistency,
+                build_no_cache,
+                cache_from,
+                cache_to,
+                buildkit,
                 additional_features,
                 prefer_cli_features,
                 feature_install_order,
+                skip_feature_auto_mapping,
+                dotfiles_repository,
+                dotfiles_install_command,
+                dotfiles_target_path,
+                omit_config_remote_env_from_metadata,
+                omit_syntax_directive,
+                include_configuration,
+                include_merged_configuration,
+                gpu_availability,
+                update_remote_user_uid_default,
+                ports_events,
+                forward_ports,
+                shutdown,
+                container_name,
                 ignore_host_requirements,
                 env_file,
             }) => {
                 use crate::commands::up::{execute_up, UpArgs};
 
                 let args = UpArgs {
+                    id_label,
                     remove_existing_container,
+                    expect_existing_container,
+                    prebuild,
                     skip_post_create,
+                    skip_post_attach,
                     skip_non_blocking_commands,
+                    mount,
+                    remote_env,
+                    mount_workspace_git_root,
+                    workspace_mount_consistency,
+                    build_no_cache,
+                    cache_from,
+                    cache_to,
+                    buildkit,
+                    skip_feature_auto_mapping,
+                    dotfiles_repository,
+                    dotfiles_install_command,
+                    dotfiles_target_path,
+                    omit_config_remote_env_from_metadata,
+                    omit_syntax_directive,
+                    include_configuration,
+                    include_merged_configuration,
+                    gpu_availability,
+                    update_remote_user_uid_default,
                     ports_events,
                     shutdown,
                     forward_ports,
                     container_name,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    override_config_path: self.override_config,
                     additional_features,
                     prefer_cli_features,
                     feature_install_order,
@@ -974,24 +1112,65 @@ impl Cli {
                     runtime: self.runtime.map(|r| r.into()),
                     redaction_config: redaction_config.clone(),
                     secret_registry: secret_registry.clone(),
+                    secrets_files: self.secrets_file.clone(),
                     env_file,
                     docker_path: self.docker_path.clone(),
                     docker_compose_path: self.docker_compose_path.clone(),
+                    container_data_folder: self.container_data_folder.clone(),
+                    container_system_data_folder: self.container_system_data_folder.clone(),
+                    user_data_folder: self.user_data_folder.clone(),
+                    container_session_data_folder: self.container_session_data_folder.clone(),
                     terminal_columns: self.terminal_columns,
                     terminal_rows: self.terminal_rows,
                 };
 
+                // Execute up and emit JSON output per contract (specs/001-up-gap-spec/contracts/up.md)
                 match execute_up(args).await {
-                    Ok(()) => Ok(()),
-                    Err(e) => {
-                        if let Some(DeaconError::Config(ConfigError::NotFound { .. })) =
-                            e.downcast_ref::<DeaconError>()
-                        {
-                            // Match legacy CLI message expected by tests
-                            Err(anyhow::anyhow!("No devcontainer.json found in workspace"))
-                        } else {
-                            Err(e)
+                    Ok(container_info) => {
+                        // Build success result
+                        let mut result = crate::commands::UpResult::success(
+                            container_info.container_id,
+                            container_info.remote_user,
+                            container_info.remote_workspace_folder,
+                        );
+
+                        // Add compose project name if present
+                        if let Some(project_name) = container_info.compose_project_name {
+                            result = result.with_compose_project_name(project_name);
                         }
+
+                        // Add configuration if requested
+                        if let Some(config) = container_info.configuration {
+                            result = result.with_configuration(config);
+                        }
+
+                        // Add merged configuration if requested
+                        if let Some(merged_config) = container_info.merged_configuration {
+                            result = result.with_merged_configuration(merged_config);
+                        }
+
+                        // Emit JSON to stdout
+                        let json = serde_json::to_string_pretty(&result)?;
+                        println!("{}", json);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        // Map error to standardized JSON result
+                        let result = crate::commands::UpResult::from_error(e);
+
+                        // Emit JSON to stdout
+                        let json = serde_json::to_string_pretty(&result)?;
+                        println!("{}", json);
+
+                        // Extract message for exit error
+                        let message = if let crate::commands::UpResult::Error(ref err) = result {
+                            err.message.clone()
+                        } else {
+                            "Unknown error".to_string()
+                        };
+
+                        // Return error to trigger exit code 1
+                        Err(anyhow::anyhow!(message))
                     }
                 }
             }

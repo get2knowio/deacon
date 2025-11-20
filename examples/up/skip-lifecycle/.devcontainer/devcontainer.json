@@ -1,0 +1,11 @@
+{
+	"name": "Skip Lifecycle Example",
+	"image": "ubuntu:22.04",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"onCreateCommand": "echo 'onCreate executed' && apt-get update",
+	"updateContentCommand": "echo 'updateContent executed' && date > /tmp/update.txt",
+	"postCreateCommand": "echo 'postCreate executed' && mkdir -p /workspace/setup",
+	"postStartCommand": "echo 'postStart executed' >> /tmp/start.log",
+	"postAttachCommand": "echo 'postAttach executed' && echo 'Welcome!'"
+}

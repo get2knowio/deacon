@@ -126,8 +126,30 @@ jobs:
         fi
         echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-    - name: Run smoke test suite via Makefile
-      run: make test-smoke
+    - name: Run smoke test suite via Makefile (nextest)
+      run: make test-nextest-smoke
+
+    - name: Upload timing artifacts (smoke)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: nextest-smoke-timing-ubuntu
+        path: artifacts/nextest/smoke-timing.json
+        if-no-files-found: warn
+
+    - name: Generate smoke timing summary
+      if: always()
+      run: |
+        if [[ -f artifacts/nextest/smoke-timing.json ]]; then
+          echo "## Nextest Smoke Timing Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          smoke_duration=$(jq -r '.duration_seconds // 0' artifacts/nextest/smoke-timing.json)
+          smoke_timestamp=$(jq -r '.timestamp_utc // "N/A"' artifacts/nextest/smoke-timing.json)
+          echo "- **Profile**: ci-smoke" >> $GITHUB_STEP_SUMMARY
+          echo "- **Duration**: ${smoke_duration}s" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: ${smoke_timestamp}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
 
   nextest-ci:
     name: Nextest CI (ubuntu)
@@ -216,6 +238,85 @@ jobs:
           fi
         fi
 
+      long-running:
+        name: Long-running integration tests (nextest) (ubuntu)
+        needs: lint
+        runs-on: ubuntu-latest
+        timeout-minutes: 90
+        env:
+          # Enable network tests for integration tests that require OCI registry access
+          DEACON_NETWORK_TESTS: "1"
+        steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
+
+        - name: Install Rust toolchain
+          uses: dtolnay/rust-toolchain@stable
+
+        - name: Cache cargo registry and target
+          uses: actions/cache@v4
+          with:
+            path: |
+              ~/.cargo/registry
+              ~/.cargo/git
+              target
+            key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}-long
+            restore-keys: |
+              ${{ runner.os }}-cargo-nextest-
+              ${{ runner.os }}-cargo-
+
+        - name: Install cargo-nextest
+          uses: taiki-e/install-action@v2
+          with:
+            tool: cargo-nextest
+
+        - name: Ensure Docker is running
+          run: |
+            sudo service docker start
+            docker info
+
+        - name: Acquire GHCR bearer token (read-only)
+          run: |
+            set -euo pipefail
+            echo "Requesting multi-scope GHCR token..."
+            TOKEN_URL="https://ghcr.io/token?service=ghcr.io\
+            &scope=repository:devcontainers/features/node:pull\
+            &scope=repository:devcontainers/features/common-utils:pull\
+            &scope=repository:devcontainers/features/docker-in-docker:pull\
+            &scope=repository:devcontainers/features/python:pull\
+            &scope=repository:devcontainers/features/git:pull"
+            TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+            if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
+              echo "Failed to acquire GHCR token" >&2
+              exit 1
+            fi
+            echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+        - name: Run nextest long-running profile via Makefile
+          run: make test-nextest-long-running
+
+        - name: Upload timing artifacts (long-running)
+          if: always()
+          uses: actions/upload-artifact@v4
+          with:
+            name: nextest-long-running-timing-ubuntu
+            path: artifacts/nextest/long-running-timing.json
+            if-no-files-found: warn
+
+        - name: Generate long-running timing summary
+          if: always()
+          run: |
+            if [[ -f artifacts/nextest/long-running-timing.json ]]; then
+              echo "## Nextest Long-running Timing Results" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              lr_duration=$(jq -r '.duration_seconds // 0' artifacts/nextest/long-running-timing.json)
+              lr_timestamp=$(jq -r '.timestamp_utc // "N/A"' artifacts/nextest/long-running-timing.json)
+              echo "- **Profile**: long-running" >> $GITHUB_STEP_SUMMARY
+              echo "- **Duration**: ${lr_duration}s" >> $GITHUB_STEP_SUMMARY
+              echo "- **Timestamp**: ${lr_timestamp}" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+
   test-podman:
     name: Podman runtime tests (ubuntu)
     needs: lint
@@ -259,20 +360,15 @@ jobs:
     - name: Build with Podman support
       run: cargo build --verbose
 
-    - name: Run runtime selection tests with Podman
+    - name: Run runtime selection tests with Podman (via Makefile)
       env:
         DEACON_RUNTIME: podman
       run: |
-        echo "Running integration tests with Podman runtime..."
-        cargo test --verbose --test integration_runtime_selection -- --test-threads=1
+        echo "Running integration tests with Podman runtime (via Makefile)..."
+        make test-podman
 
-    - name: Run basic Podman smoke test
-      env:
-        DEACON_RUNTIME: podman
-      run: |
-        echo "Testing basic Podman functionality..."
-        # This will fail gracefully if Podman isn't fully working
-        cargo run -- --runtime podman --help || echo "Help command succeeded"
+    - name: Podman smoke check (already part of `make test-podman`)
+      run: echo "Basic Podman smoke check done as part of make test-podman"
 
   coverage:
     name: Coverage (ubuntu)

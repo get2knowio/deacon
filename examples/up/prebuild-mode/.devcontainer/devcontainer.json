@@ -1,0 +1,21 @@
+{
+	"name": "Prebuild Mode Example",
+	"image": "ubuntu:22.04",
+	"features": {
+		"ghcr.io/devcontainers/features/common-utils:2": {
+			"installZsh": true,
+			"username": "vscode"
+		},
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "20"
+		}
+	},
+	"remoteUser": "vscode",
+	"workspaceFolder": "/workspace",
+	
+	"onCreateCommand": "echo 'Installing base dependencies...' && apt-get update && apt-get install -y build-essential",
+	"updateContentCommand": "echo 'Updating content at:' && date && npm cache clean --force 2>/dev/null || true",
+	"postCreateCommand": "echo 'Setting up project...' && mkdir -p /workspace/node_modules",
+	"postStartCommand": "echo 'Container started!' && node --version",
+	"postAttachCommand": "echo 'Attached to container!'"
+}

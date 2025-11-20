@@ -1,0 +1,20 @@
+version: '3.9'
+
+services:
+  app:
+    image: ubuntu:22.04
+    volumes:
+      - ../..:/workspace:cached
+    command: sleep infinity
+    environment:
+      - TEST_ENV=compose-app
+    profiles:
+      - dev
+
+  db:
+    image: alpine:3.18
+    command: sleep infinity
+    environment:
+      - DB_NAME=testdb
+    profiles:
+      - dev

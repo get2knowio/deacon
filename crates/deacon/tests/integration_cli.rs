@@ -62,7 +62,9 @@ fn test_read_configuration_invalid_id_label_format() {
 #[test]
 fn test_subcommand_not_implemented() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.arg("up")
+    cmd.arg("--workspace-folder")
+        .arg("/tmp/nonexistent")
+        .arg("up")
         .assert()
         .failure()
         .code(1)
@@ -129,6 +131,8 @@ fn test_debug_logging_with_subcommand() {
     cmd.env("RUST_LOG", "debug")
         .arg("--log-level")
         .arg("debug")
+        .arg("--workspace-folder")
+        .arg("/tmp/nonexistent")
         .arg("up")
         .assert()
         .failure()

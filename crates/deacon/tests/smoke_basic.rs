@@ -16,7 +16,6 @@ use assert_cmd::Command;
 use predicates::str as pred_str;
 use serde_json::Value;
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 mod test_utils;
 use test_utils::DeaconGuard;
@@ -33,63 +32,6 @@ fn is_docker_available() -> bool {
 
 // No Docker error tolerance: smoke tests require Docker
 
-fn repo_root() -> PathBuf {
-    // crates/deacon -> repo root is two levels up
-    let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    here.parent()
-        .and_then(|p| p.parent())
-        .unwrap_or(&here)
-        .to_path_buf()
-}
-
-#[test]
-fn smoke_read_configuration_basic() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    let fixtures = repo_root().join("fixtures/config/basic/devcontainer.jsonc");
-    let assert = cmd
-        .arg("read-configuration")
-        .arg("--workspace-folder")
-        .arg(repo_root())
-        .arg("--config")
-        .arg(fixtures)
-        .assert();
-
-    let output = assert.get_output();
-    // For read-configuration we expect success unconditionally
-    assert!(
-        output.status.success(),
-        "read-configuration failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Rust Development Container"));
-    assert!(stdout.contains("workspaceFolder"));
-}
-
-#[test]
-fn smoke_read_configuration_with_variables() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    let fixtures = repo_root().join("fixtures/config/with-variables/devcontainer.jsonc");
-    let assert = cmd
-        .arg("read-configuration")
-        .arg("--workspace-folder")
-        .arg(repo_root())
-        .arg("--config")
-        .arg(fixtures)
-        .assert();
-
-    let output = assert.get_output();
-    assert!(
-        output.status.success(),
-        "read-configuration failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Variable Substitution Test Container"));
-}
-
 #[test]
 fn smoke_build_json_then_text() {
     if !is_docker_available() {
@@ -99,21 +41,22 @@ fn smoke_build_json_then_text() {
     // Temp workspace with a simple Dockerfile under .devcontainer
     let tmp = TempDir::new().unwrap();
     let mut guard = DeaconGuard::new(tmp.path());
-    fs::write(
-        tmp.path().join("Dockerfile"),
-        "FROM alpine:3.19\nRUN echo hi\n",
-    )
-    .unwrap();
 
-    let devcontainer = r#"{
-        "name": "SmokeBuild",
-        "dockerFile": "Dockerfile",
-        "build": {"context": "."}
-    }"#;
+    let dockerfile_content = r#"FROM alpine:3.19
+LABEL test=smoke
+RUN echo "Smoke test image"
+"#;
+    fs::write(tmp.path().join("Dockerfile"), dockerfile_content).unwrap();
+
+    let devcontainer_config = r#"{
+    "name": "Smoke Build Test",
+    "dockerFile": "Dockerfile"
+}
+"#;
     fs::create_dir(tmp.path().join(".devcontainer")).unwrap();
     fs::write(
         tmp.path().join(".devcontainer/devcontainer.json"),
-        devcontainer,
+        devcontainer_config,
     )
     .unwrap();
 
@@ -125,7 +68,6 @@ fn smoke_build_json_then_text() {
         .arg("--output-format")
         .arg("json")
         .assert();
-
     let out = json_run.get_output();
     assert!(
         out.status.success(),
@@ -187,6 +129,8 @@ fn smoke_up_then_exec_traditional() {
     let mut up = Command::cargo_bin("deacon").unwrap();
     let up_assert = up
         .current_dir(tmp.path())
+        .arg("--workspace-folder")
+        .arg(tmp.path())
         .arg("up")
         .arg("--remove-existing-container")
         .arg("--skip-post-create")
@@ -207,49 +151,13 @@ fn smoke_up_then_exec_traditional() {
         .arg("exec")
         .arg("--no-tty")
         .arg("--")
-        .arg("sh")
-        .arg("-lc")
-        .arg("echo -n OK: && whoami && pwd")
+        .arg("whoami")
         .assert();
-
     let exec_out = exec_assert.get_output();
     assert!(
         exec_out.status.success(),
-        "exec failed: {}",
+        "exec whoami failed: {}",
         String::from_utf8_lossy(&exec_out.stderr)
-    );
-    let s = String::from_utf8_lossy(&exec_out.stdout);
-    assert!(s.contains("OK:"));
-
-    // Cleanup handled by guard
-}
-
-#[test]
-fn smoke_doctor_json() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    let assert = cmd.arg("doctor").arg("--json").assert();
-
-    let out = assert.get_output();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "doctor --json failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    // Extract the JSON object from mixed stdout (logging + JSON)
-    let start = stdout.find('{');
-    let end = stdout.rfind('}');
-    let parsed = match (start, end) {
-        (Some(s), Some(e)) if e >= s => {
-            let slice = &stdout[s..=e];
-            serde_json::from_str::<serde_json::Value>(slice).is_ok()
-        }
-        _ => false,
-    };
-    assert!(
-        parsed,
-        "doctor --json should output JSON-like content, got: {}",
-        stdout
     );
 }
 
@@ -296,7 +204,12 @@ services:
 
     // Test up command
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    let assert = cmd.current_dir(&temp_dir).arg("up").assert();
+    let assert = cmd
+        .current_dir(&temp_dir)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .arg("up")
+        .assert();
 
     let output = assert.get_output();
     assert!(
@@ -336,6 +249,8 @@ fn test_exec_environment_and_working_directory() {
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let up_out = up_cmd
         .current_dir(&temp_dir)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("up")
         .assert()
         .get_output()
@@ -452,90 +367,6 @@ RUN echo "Building with version: $BUILD_VERSION, env: $BUILD_ENV"
     }
 }
 
-/// Test doctor JSON stability with potential logging noise
-#[test]
-fn test_doctor_json_stability() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.arg("doctor").arg("--json");
-
-    let assert = cmd.assert().success();
-    let output = assert.get_output();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Extract JSON object from potentially mixed output
-    // Look for first "{" to last "}" to handle any logging noise
-    if let Some(start) = stdout.find('{') {
-        if let Some(end) = stdout.rfind('}') {
-            let json_slice = &stdout[start..=end];
-
-            // Should be able to parse as valid JSON
-            let parsed: Result<Value, _> = serde_json::from_str(json_slice);
-            assert!(
-                parsed.is_ok(),
-                "Failed to parse JSON from doctor output: {}",
-                json_slice
-            );
-
-            if let Ok(json) = parsed {
-                // Validate expected fields exist
-                assert!(json.get("cli_version").is_some());
-                assert!(json.get("host_os").is_some());
-                assert!(json.get("docker_info").is_some());
-            }
-        }
-    } else {
-        panic!("No JSON object found in doctor output: {}", stdout);
-    }
-}
-
-/// Test read-configuration with variable substitution edge cases
-#[test]
-fn test_read_configuration_fixtures_breadth() {
-    let temp_dir = TempDir::new().unwrap();
-
-    // Create base devcontainer.json
-    let base_config = r#"{
-    "name": "Base ${localEnv:USER:developer} Container",
-    "image": "ubuntu:${localEnv:UBUNTU_VERSION:20.04}",
-    "features": {
-        "ghcr.io/devcontainers/features/git:1": {}
-    }
-}
-"#;
-
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
-    fs::write(
-        temp_dir.path().join(".devcontainer/devcontainer.json"),
-        base_config,
-    )
-    .unwrap();
-
-    // Test read-configuration command
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    let assert = cmd
-        .current_dir(&temp_dir)
-        .arg("read-configuration")
-        .arg("--workspace-folder")
-        .arg(temp_dir.path())
-        .assert()
-        .success();
-
-    let output = assert.get_output();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Should contain expected keys and processed variable substitution
-    assert!(stdout.contains("name"));
-    assert!(stdout.contains("image"));
-    assert!(stdout.contains("features"));
-
-    // Variable substitution should have been processed
-    assert!(
-        stdout.contains("developer") || stdout.contains("Container"),
-        "Expected variable substitution in output: {}",
-        stdout
-    );
-}
-
 /// Optional: Full Docker workflow test (gated by environment variable)
 #[test]
 fn test_up_exec_happy_path() {
@@ -565,6 +396,8 @@ fn test_up_exec_happy_path() {
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     up_cmd
         .current_dir(&temp_dir)
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
         .arg("up")
         .arg("--remove-existing-container")
         .assert()

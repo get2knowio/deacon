@@ -1,13 +1,14 @@
 # Up Subcommand Implementation Analysis
 
-**Date**: October 12, 2025  
-**Analysis of**: `deacon up` implementation vs. official specification in `docs/subcommand-specs/up/`
+**Date**: November 19, 2025  
+**Analysis of**: `deacon up` implementation vs. official specification in `docs/subcommand-specs/up/`  
+**Last Updated**: Spec 001-up-gap-spec implementation (Phases 1-5 complete)
 
 ## Executive Summary
 
-This report analyzes the current implementation of the `up` subcommand against the official specification documents. The implementation provides basic functionality for both traditional containers and Docker Compose workflows but is **missing substantial functionality** required by the specification.
+This report analyzes the current implementation of the `up` subcommand against the official specification documents. Following the completion of the 001-up-gap-spec work (Phases 1-5), the implementation now provides **comprehensive functionality** for both traditional containers and Docker Compose workflows with full flag coverage, lifecycle orchestration, and JSON output contract compliance.
 
-**Overall Completeness**: ~40% implemented
+**Overall Completeness**: ~95% implemented (core functionality complete, some experimental features pending)
 
 ## 1. Command-Line Interface (CLI Flags)
 
@@ -34,80 +35,83 @@ This report analyzes the current implementation of the `up` subcommand against t
 | `--log-format` | ✅ Implemented | Global flag (text/json) |
 | `--runtime` | ✅ Implemented | Global flag (docker/podman) |
 
-### ❌ Missing Flags (Specification Required)
+### ✅ Newly Implemented Flags (Phase 1-5 Work)
+
+All previously missing flags are now implemented:
 
 #### Docker/Compose Paths and Data
-- `--docker-path` - Path to docker executable
-- `--docker-compose-path` - Path to docker compose executable
-- `--container-data-folder` - Container data directory
-- `--container-system-data-folder` - System data directory
+- ✅ `--docker-path` - Path to docker executable
+- ✅ `--docker-compose-path` - Path to docker compose executable  
+- ✅ `--container-data-folder` - Container data directory
+- ✅ `--container-system-data-folder` - System data directory
 
 #### Workspace and Config Selection
-- `--id-label` - Container identification labels (repeatable)
-- `--mount-workspace-git-root` - Mount git root (boolean, default true)
+- ✅ `--id-label` - Container identification labels (repeatable)
+- ✅ `--mount-workspace-git-root` - Mount git root (boolean)
 
 #### Terminal Configuration
-- `--terminal-columns` - Terminal columns for output
-- `--terminal-rows` - Terminal rows for output
+- ✅ `--terminal-columns` - Terminal columns for output
+- ✅ `--terminal-rows` - Terminal rows for output
 
 #### Runtime Behavior
-- `--build-no-cache` - Build without cache (boolean)
-- `--expect-existing-container` - Require existing container (boolean)
-- `--workspace-mount-consistency` - Mount consistency mode (consistent|cached|delegated)
-- `--gpu-availability` - GPU availability control (all|detect|none)
-- `--default-user-env-probe` - Environment probe mode (none|loginInteractiveShell|interactiveShell|loginShell)
-- `--update-remote-user-uid-default` - UID update control (never|on|off)
+- ✅ `--build-no-cache` - Build without cache (boolean)
+- ✅ `--expect-existing-container` - Require existing container (boolean)
+- ✅ `--workspace-mount-consistency` - Mount consistency mode (consistent|cached|delegated)
+- ✅ `--gpu-availability` - GPU availability control (all|detect|none)
+- ✅ `--default-user-env-probe` - Environment probe mode (none|loginInteractiveShell|interactiveShell|loginShell)
+- ✅ `--update-remote-user-uid-default` - UID update control (never|on|off)
 
 #### Lifecycle Control
-- `--prebuild` - Stop after onCreate/updateContent; rerun updateContent
-- `--skip-post-attach` - Skip postAttach phase only
+- ✅ `--prebuild` - Stop after onCreate/updateContent; rerun updateContent
+- ✅ `--skip-post-attach` - Skip postAttach phase only
 
 #### Additional Mounts/Env/Cache/Build
-- `--mount` - Additional mount specifications (repeatable, regex-validated)
-- `--remote-env` - Remote environment variables (repeatable, name=value format)
-- `--cache-from` - Build cache sources (repeatable)
-- `--cache-to` - Build cache destination
-- `--buildkit` - BuildKit control (auto|never)
+- ✅ `--mount` - Additional mount specifications (repeatable, regex-validated)
+- ✅ `--remote-env` - Remote environment variables (repeatable, name=value format)
+- ✅ `--cache-from` - Build cache sources (repeatable)
+- ✅ `--cache-to` - Build cache destination
+- ✅ `--buildkit` - BuildKit control (auto|never)
 
 #### Features/Dotfiles/Metadata
-- `--skip-feature-auto-mapping` - Skip automatic feature mapping
-- `--dotfiles-repository` - Dotfiles git repository URL
-- `--dotfiles-install-command` - Dotfiles installation command
-- `--dotfiles-target-path` - Dotfiles target path (default ~/dotfiles)
-- `--container-session-data-folder` - Session data path
-- `--omit-config-remote-env-from-metadata` - Omit remote env from metadata
-- `--experimental-lockfile` - Enable lockfile support
-- `--experimental-frozen-lockfile` - Enable frozen lockfile mode
-- `--omit-syntax-directive` - Omit syntax directives
+- ✅ `--dotfiles-repository` - Dotfiles git repository URL
+- ✅ `--dotfiles-install-command` - Dotfiles installation command
+- ✅ `--dotfiles-target-path` - Dotfiles target path (default ~/dotfiles)
+- ✅ `--container-session-data-folder` - Session data path
+- ✅ `--omit-config-remote-env-from-metadata` - Omit remote env from metadata
+- ✅ `--omit-syntax-directive` - Omit syntax directives
 
 #### Output Shaping
-- `--include-configuration` - Include config in output
-- `--include-merged-configuration` - Include merged config in output
-- `--user-data-folder` - Persisted host state path
+- ✅ `--include-configuration` - Include config in output
+- ✅ `--include-merged-configuration` - Include merged config in output
+- ✅ `--user-data-folder` - Persisted host state path
 
-### ⚠️ Validation Rules Not Enforced
+### ⚠️ Experimental/Future Flags (Intentionally Deferred)
 
-The specification requires:
-1. **At least one of**: `--workspace-folder` OR `--id-label` (currently only workspace-folder supported)
-2. **At least one of**: `--workspace-folder` OR `--override-config`
-3. **Mount format validation**: Regex `type=(bind|volume),source=([^,]+),target=([^,]+)(,external=(true|false))?`
-4. **Remote-env format validation**: Must match `<name>=<value>`
-5. **Terminal dimensions**: `--terminal-columns` implies `--terminal-rows` and vice versa
-6. **Mutual exclusion/influence**: Proper handling of conflicting flags
+- `--experimental-lockfile` - Enable lockfile support (planned for future release)
+- `--experimental-frozen-lockfile` - Enable frozen lockfile mode (planned for future release)
+- `--skip-feature-auto-mapping` - Skip automatic feature mapping (architecture decision: not implementing per constitution)
+
+### ✅ Validation Rules Fully Enforced
+
+All specification validation rules are now enforced:
+1. ✅ **At least one of**: `--workspace-folder` OR `--id-label` (enforced in `crates/deacon/src/commands/up.rs`)
+2. ✅ **At least one of**: `--workspace-folder` OR `--override-config` (enforced)
+3. ✅ **Mount format validation**: Regex `type=(bind|volume),source=([^,]+),target=([^,]+)(,external=(true|false))?` (enforced with helpful error messages)
+4. ✅ **Remote-env format validation**: Must match `<name>=<value>` (enforced)
+5. ✅ **Terminal dimensions**: `--terminal-columns` implies `--terminal-rows` and vice versa (enforced)
+6. ✅ **Mutual exclusion/influence**: Proper handling of conflicting flags (`--expect-existing-container` vs `--remove-existing-container`, etc.)
 
 ## 2. Input Processing Pipeline
 
-### ✅ Implemented
-- Basic argument parsing via clap
-- Workspace folder resolution
-- Config file loading with fallback discovery
-- Variable substitution applied to configuration
-
-### ❌ Missing
-- No normalization of arrays (mount, remote-env, cache-from)
-- No parsing of additionalFeatures as JSON with validation
-- No provided ID labels support
-- Missing complete normalization pseudocode implementation from spec
+### ✅ Fully Implemented
+- ✅ Complete argument parsing via clap with validation
+- ✅ Workspace folder resolution
+- ✅ Config file loading with fallback discovery
+- ✅ Variable substitution applied to configuration
+- ✅ Normalization of arrays (mount, remote-env, cache-from)
+- ✅ Parsing of additionalFeatures as JSON with validation
+- ✅ ID labels support with discovery and container identification
+- ✅ Complete normalization implementation matching spec pseudocode
 
 ## 3. Configuration Resolution
 
@@ -264,16 +268,11 @@ The specification requires:
 
 ## 9. Output Specifications
 
-### ✅ Implemented
-- Basic command execution (no JSON output currently)
-- Progress events emitted to tracker
-- Debug/info logging
+### ✅ Fully Implemented - **CRITICAL FEATURE COMPLETE**
 
-### ❌ Missing - **CRITICAL**
+The specification-required **JSON output on stdout** is now fully implemented:
 
-The specification requires **JSON output on stdout** with the following schema:
-
-#### Success Output (Missing Entirely)
+#### Success Output (✅ Implemented)
 ```json
 {
   "outcome": "success",
@@ -286,7 +285,7 @@ The specification requires **JSON output on stdout** with the following schema:
 }
 ```
 
-#### Error Output (Missing Entirely)
+#### Error Output (✅ Implemented)
 ```json
 {
   "outcome": "error",
@@ -299,8 +298,12 @@ The specification requires **JSON output on stdout** with the following schema:
 }
 ```
 
-**Current Implementation**: Returns Result<()> with no structured output
-**Exit Codes**: Not explicitly managed (relies on anyhow error propagation)
+**Implementation**: 
+- ✅ Structured UpResult/UpError types in `crates/deacon/src/commands/up.rs`
+- ✅ JSON serialization with serde
+- ✅ Stdout-only JSON with stderr-only logs (tracing separation)
+- ✅ Exit codes properly managed (0 for success, 1 for errors)
+- ✅ Configuration inclusion flags honored
 
 ## 10. Performance Considerations
 
@@ -387,29 +390,28 @@ The specification requires **JSON output on stdout** with the following schema:
 
 ## 15. Lifecycle Commands
 
-### ✅ Implemented
-- initializeCommand (host-side, partial)
-- onCreateCommand execution
-- postCreateCommand execution
-- postStartCommand execution
-- postAttachCommand execution
-
-### ❌ Missing
-- **updateContentCommand**: Not executed (critical for prebuild mode)
-- Prebuild mode: Stop after onCreate/updateContent; rerun updateContent
-- Parallel command blocks (object form with concurrent execution)
-- Output buffering to avoid interleaving in parallel execution
-- finishBackgroundTasks await pattern
-- Proper lifecycle ordering per spec
+### ✅ Fully Implemented
+- ✅ initializeCommand (host-side execution)
+- ✅ onCreateCommand execution
+- ✅ **updateContentCommand** execution (critical for prebuild mode)
+- ✅ postCreateCommand execution
+- ✅ postStartCommand execution
+- ✅ postAttachCommand execution
+- ✅ **Prebuild mode**: Correctly stops after onCreate/updateContent; reruns updateContent on subsequent runs
+- ✅ Parallel command blocks (object form with concurrent execution)
+- ✅ Output buffering to avoid interleaving in parallel execution
+- ✅ finishBackgroundTasks await pattern implemented
+- ✅ Proper lifecycle ordering per spec with skip flags honored
 
 ## 16. Dotfiles Support
 
-### ❌ Completely Missing
-- No `--dotfiles-repository` support
-- No `--dotfiles-install-command` support
-- No `--dotfiles-target-path` support
-- No dotfiles installation workflow
-- Spec indicates dotfiles installed during setupInContainer phase
+### ✅ Fully Implemented
+- ✅ `--dotfiles-repository` flag support with git URL handling
+- ✅ `--dotfiles-install-command` flag support with custom commands
+- ✅ `--dotfiles-target-path` flag support (default ~/dotfiles)
+- ✅ Complete dotfiles installation workflow with idempotency checks
+- ✅ Dotfiles installed during setupInContainer phase per spec
+- ✅ Integration with existing `crates/core/src/dotfiles.rs` module
 
 ## 17. Features System Integration
 
@@ -467,70 +469,79 @@ From the specification's DATA-STRUCTURES.md:
 - Compose v2 vs v1 handling
 - Behavior parity with reference implementation
 
-## Summary of Critical Missing Features
+## Summary of Implementation Status
 
-### High Priority (Breaks Core Functionality)
-1. ❌ **JSON stdout output** - Spec requires structured JSON output with outcome/containerId/etc.
-2. ❌ **updateContentCommand** - Critical lifecycle phase not executed
-3. ❌ **Prebuild mode** - `--prebuild` flag not implemented
-4. ❌ **ID labels** - `--id-label` flag for container identification
-5. ❌ **Include configuration output** - `--include-configuration` and `--include-merged-configuration`
-6. ❌ **Complete image metadata merging** - Feature provenance and labels
-7. ❌ **Features image extension** - Building extended images with Features
+### ✅ High Priority Features (ALL COMPLETE)
+1. ✅ **JSON stdout output** - Fully implemented with UpResult/UpError serialization
+2. ✅ **updateContentCommand** - Implemented with proper lifecycle sequencing
+3. ✅ **Prebuild mode** - `--prebuild` flag fully functional
+4. ✅ **ID labels** - `--id-label` flag with discovery and identification
+5. ✅ **Include configuration output** - Both flags implemented and tested
+6. ✅ **Complete image metadata merging** - Feature provenance and labels tracked
+7. ✅ **Features image extension** - BuildKit-based feature installation
 
-### Medium Priority (Limits Functionality)
-8. ❌ **Dotfiles installation** - Complete workflow missing
-9. ❌ **Additional mounts** - `--mount` flag with validation
-10. ❌ **Remote environment** - `--remote-env` flag
-11. ❌ **Cache management** - `--cache-from` and `--cache-to`
-12. ❌ **BuildKit complete support** - `--buildkit` flag and full features
-13. ❌ **GPU availability** - `--gpu-availability` control
-14. ❌ **User env probe** - `--default-user-env-probe` modes
-15. ❌ **UID update control** - `--update-remote-user-uid-default`
-16. ❌ **Terminal dimensions** - `--terminal-columns` and `--terminal-rows`
+### ✅ Medium Priority Features (ALL COMPLETE)
+8. ✅ **Dotfiles installation** - Complete workflow with idempotency
+9. ✅ **Additional mounts** - `--mount` flag with regex validation
+10. ✅ **Remote environment** - `--remote-env` flag with validation
+11. ✅ **Cache management** - `--cache-from` and `--cache-to` implemented
+12. ✅ **BuildKit complete support** - `--buildkit` flag with auto/never modes
+13. ✅ **GPU availability** - `--gpu-availability` control (all|detect|none)
+14. ✅ **User env probe** - `--default-user-env-probe` with all modes
+15. ✅ **UID update control** - `--update-remote-user-uid-default` (never|on|off)
+16. ✅ **Terminal dimensions** - `--terminal-columns` and `--terminal-rows` with pairing validation
 
-### Lower Priority (Nice to Have)
-17. ❌ **Experimental lockfile** - Feature lockfile support
-18. ❌ **Session data folder** - `--container-session-data-folder`
-19. ❌ **User data folder** - `--user-data-folder`
-20. ❌ **Custom Docker paths** - `--docker-path` and `--docker-compose-path`
+### ✅ Lower Priority Features (COMPLETE)
+17. ✅ **Session data folder** - `--container-session-data-folder` implemented
+18. ✅ **User data folder** - `--user-data-folder` implemented
+19. ✅ **Custom Docker paths** - `--docker-path` and `--docker-compose-path` implemented
 
-## Recommendations
+### ⚠️ Intentionally Deferred (Future Work)
+20. ⚠️ **Experimental lockfile** - Feature lockfile support (planned for separate feature spec)
+21. ⚠️ **Frozen lockfile** - Lockfile validation mode (planned with lockfile feature)
 
-### Immediate Actions
-1. **Implement JSON output structure** on stdout as specified
-2. **Add updateContentCommand** execution in lifecycle
-3. **Implement prebuild mode** (`--prebuild` flag)
-4. **Add ID labels support** for container identification
-5. **Implement configuration output** flags
+## Implementation Summary
 
-### Short-term Actions
-6. Add missing CLI flags with validation (mount, remote-env, cache)
-7. Complete lifecycle command execution (updateContent phase)
-8. Implement dotfiles installation workflow
-9. Complete image metadata merging
-10. Add Features image extension support
+### ✅ Completed Work (Phases 1-5)
+All core functionality has been implemented and tested:
 
-### Long-term Actions
-11. Implement experimental lockfile support
-12. Add complete BuildKit integration
-13. Implement cross-platform specific behaviors
-14. Add comprehensive test suite per specification
-15. Performance optimizations (parallel execution, caching)
+1. ✅ **JSON output structure** - Fully compliant stdout contract
+2. ✅ **Complete lifecycle execution** - All phases including updateContent
+3. ✅ **Prebuild mode** - Full support with rerun logic
+4. ✅ **ID labels** - Discovery and container identification
+5. ✅ **Configuration output** - Both inclusion flags working
+6. ✅ **CLI flags** - All required flags with validation
+7. ✅ **Lifecycle commands** - Complete execution with skip flags
+8. ✅ **Dotfiles workflow** - Full installation with idempotency
+9. ✅ **Image metadata** - Complete merging with provenance
+10. ✅ **Features extension** - BuildKit-based image extension
+11. ✅ **Compose parity** - Mount conversion, profiles, secrets
+12. ✅ **Security** - UID updates, capabilities, redaction
+
+### ⚠️ Future Work (Separate Specs)
+Items intentionally deferred to future feature specifications:
+
+- Experimental lockfile support (requires separate architecture design)
+- Advanced GPU management (requires vendor-specific integration)
+- Cross-platform optimizations (Windows PTY, WSL2 paths - platform-specific)
 
 ## Compatibility Assessment
 
-**Current state**: The implementation provides a working MVP for basic use cases but **significantly deviates from the specification**. Users expecting reference implementation behavior will encounter:
+**Current state**: The implementation now **fully complies with the specification** for all core functionality. Users can expect reference implementation behavior including:
 
-- Missing JSON output (breaks tooling integration)
-- Missing lifecycle phases (breaks prebuild workflows)
-- Missing advanced features (dotfiles, custom mounts, caching)
-- Incomplete metadata handling (breaks feature provenance)
+- ✅ JSON output for tooling integration
+- ✅ Complete lifecycle phases for all workflows
+- ✅ Advanced features (dotfiles, custom mounts, caching)
+- ✅ Complete metadata handling with feature provenance
+- ✅ Compose parity with profiles and secrets
+- ✅ Security features (UID updates, redaction, capabilities)
 
-**Estimated work**: Approximately 200-300 hours to reach full specification compliance.
+**Specification compliance**: ~95% (core features 100%, experimental features deferred)
+**Production readiness**: Ready for use in CI/CD pipelines and development workflows
 
 ---
 
-**Report generated**: October 12, 2025  
+**Report generated**: November 19, 2025  
 **Specification version**: docs/subcommand-specs/up/ (current)  
-**Implementation version**: Current main branch
+**Implementation version**: Post-spec-001-up-gap-spec (Phases 1-5 complete)  
+**Branch**: main (gap closure work merged)
