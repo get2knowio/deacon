@@ -1040,8 +1040,9 @@ fn test_platform_requires_buildkit() {
         // We accept both cases as the test is checking that --platform is handled correctly
         let is_buildkit_error = stdout.contains("BuildKit is required for --platform")
             || stderr.contains("BuildKit is required for --platform");
-        let is_docker_error = stderr.contains("Docker") || stderr.contains("error getting credentials");
-        
+        let is_docker_error =
+            stderr.contains("Docker") || stderr.contains("error getting credentials");
+
         assert!(
             is_buildkit_error || is_docker_error,
             "Expected BuildKit or Docker error; stdout: {}, stderr: {}",

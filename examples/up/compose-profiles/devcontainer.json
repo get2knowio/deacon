@@ -1,0 +1,7 @@
+{
+	"name": "Compose with Profiles",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"remoteUser": "vscode"
+}

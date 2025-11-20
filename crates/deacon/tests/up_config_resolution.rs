@@ -29,7 +29,6 @@ fn test_override_config_can_have_custom_name() {
 // Disallowed feature tests
 
 #[test]
-#[ignore] // TODO: Enable once disallowed features list is implemented (T029)
 fn test_disallowed_feature_causes_error_before_build() {
     // Contract: If a feature is in the disallowed list, error before any build/runtime ops
     // Expected error JSON: { "outcome": "error", "disallowedFeatureId": "feature-id", ... }
@@ -49,7 +48,6 @@ fn test_disallowed_feature_causes_error_before_build() {
 // Image metadata merge tests
 
 #[test]
-#[ignore] // TODO: Enable once image metadata merge is implemented (T029)
 fn test_image_metadata_merges_into_configuration() {
     // When includeConfiguration or includeMergedConfiguration is set,
     // the returned config should include metadata from the base image
@@ -64,7 +62,6 @@ fn test_image_metadata_merges_into_configuration() {
 }
 
 #[test]
-#[ignore] // TODO: Enable once config resolution is fully implemented
 fn test_id_label_discovery_without_workspace() {
     // Contract: Can use --id-label to find container without --workspace-folder
     // This is for reconnection scenarios

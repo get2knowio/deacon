@@ -1932,7 +1932,6 @@ async fn execute_scan_command(command: &str, args: &BuildArgs) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::collections::HashMap;
 
     #[test]
@@ -2075,7 +2074,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_buildkit_detection() {
         // Test BuildKit Auto mode with DOCKER_BUILDKIT=1
         std::env::set_var("DOCKER_BUILDKIT", "1");

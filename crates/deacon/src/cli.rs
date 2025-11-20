@@ -1139,8 +1139,15 @@ impl Cli {
                             result = result.with_compose_project_name(project_name);
                         }
 
-                        // TODO: Add configuration and merged_configuration if flags are set
-                        // This requires passing the config through container_info
+                        // Add configuration if requested
+                        if let Some(config) = container_info.configuration {
+                            result = result.with_configuration(config);
+                        }
+
+                        // Add merged configuration if requested
+                        if let Some(merged_config) = container_info.merged_configuration {
+                            result = result.with_merged_configuration(merged_config);
+                        }
 
                         // Emit JSON to stdout
                         let json = serde_json::to_string_pretty(&result)?;

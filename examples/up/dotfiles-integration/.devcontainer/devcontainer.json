@@ -1,0 +1,15 @@
+{
+	"name": "Dotfiles Integration Example",
+	"image": "ubuntu:22.04",
+	"remoteUser": "vscode",
+	"workspaceFolder": "/workspace",
+	
+	"features": {
+		"ghcr.io/devcontainers/features/common-utils:2": {
+			"username": "vscode",
+			"userUid": 1000
+		}
+	},
+	
+	"postCreateCommand": "echo 'Container setup complete. Dotfiles should be installed.'"
+}

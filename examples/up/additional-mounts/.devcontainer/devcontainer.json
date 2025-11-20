@@ -1,0 +1,11 @@
+{
+	"name": "Additional Mounts Example",
+	"image": "ubuntu:22.04",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"mounts": [
+		"source=${localWorkspaceFolder}/config,target=/etc/myapp,type=bind",
+		"source=myapp-cache,target=/var/cache/myapp,type=volume"
+	],
+	"postCreateCommand": "ls -la /etc/myapp && df -h /var/cache/myapp"
+}

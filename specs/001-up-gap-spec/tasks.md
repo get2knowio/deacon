@@ -75,7 +75,7 @@
 - [X] T014 [US2] Execute updateContentCommand and prebuild/skip-post-attach sequencing with background task waits in `crates/deacon/src/commands/up.rs`
 - [X] T015 [US2] Integrate dotfiles flags/workflow using `crates/core/src/dotfiles.rs` within lifecycle setup in `crates/deacon/src/commands/up.rs`
 - [X] T016 [US2] Implement feature-driven image extension with BuildKit/cache options and provenance merge in `crates/deacon/src/commands/up.rs` and `crates/deacon/src/commands/features.rs`
-- [X] T017 [US2] Apply UID update flow and security options (init, privileged, capAdd, securityOpt, entrypoint) in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`
+- [X] T017 [US2] Apply UID update flow and security options (privileged, capAdd, securityOpt) in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`
 
 **Checkpoint**: User Story 2 independently testable (prebuild, lifecycle, dotfiles, features, UID/security).
 
@@ -94,11 +94,11 @@
 
 ### Implementation for User Story 3
 
-- [X] T020 [US3] Convert additional mounts to compose volumes and propagate profiles/project name from .env in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`
-- [X] T021 [US3] Merge remote-env flags and secrets-file contents with redaction for runtime/lifecycle env in `crates/deacon/src/commands/up.rs` and `crates/core/src/secrets.rs`
+- [ ] T020 [US3] Convert additional mounts to compose volumes and propagate profiles/project name from .env in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs` (TODO: All 7 tests in up_compose_profiles.rs disabled)
+- [ ] T021 [US3] Merge remote-env flags and secrets-file contents with redaction for runtime/lifecycle env in `crates/deacon/src/commands/up.rs` and `crates/core/src/secrets.rs` (TODO: Secrets file loading and redaction not implemented, tests disabled)
 - [X] T022 [US3] Support docker/compose path overrides, data folder options, and buildx cache/platform hooks for compose flows in `crates/deacon/src/commands/up.rs`
-- [X] T023 [US3] Ensure expect-existing/remove-existing logic for compose/id-label flows errors before create/build, with standardized JSON error output in `crates/deacon/src/commands/up.rs`
-- [X] T030 [US3] Implement user-data/container-session folder usage and probe caching hooks in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`; validate via compose fixtures
+- [ ] T023 [US3] Ensure expect-existing/remove-existing logic for compose/id-label flows errors before create/build, with standardized JSON error output in `crates/deacon/src/commands/up.rs` (TODO: Fast-fail logic not implemented, tests disabled)
+- [ ] T030 [US3] Implement user-data/container-session folder usage and probe caching hooks in `crates/deacon/src/commands/up.rs` and `crates/core/src/container.rs`; validate via compose fixtures (TODO: No clear implementation found, needs verification)
 
 **Checkpoint**: User Story 3 independently testable (compose parity, reconnection, secrets/redaction).
 

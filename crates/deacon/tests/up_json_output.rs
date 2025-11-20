@@ -7,9 +7,7 @@
 
 use assert_cmd::Command;
 
-// TODO: Enable these tests once --mount and --remote-env flags are implemented (T007)
 #[test]
-#[ignore]
 fn test_up_invalid_mount_format_fails_validation() {
     // Test invalid mount format: missing target
     let mut cmd = Command::cargo_bin("deacon")
@@ -25,9 +23,7 @@ fn test_up_invalid_mount_format_fails_validation() {
     // Stderr should contain the error (not testing exact message here, just that it fails fast)
 }
 
-// TODO: Enable this test once --remote-env flag is implemented (T007)
 #[test]
-#[ignore]
 fn test_up_invalid_remote_env_format_fails_validation() {
     // Test invalid remote-env format: missing equals sign
     let mut cmd = Command::cargo_bin("deacon")

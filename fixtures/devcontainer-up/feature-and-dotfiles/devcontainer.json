@@ -6,6 +6,6 @@
   "remoteEnv": {
     "FIXTURE_TYPE": "feature-and-dotfiles"
   },
-  "updateContentCommand": "echo 'Update content command'",
+  "updateContentCommand": "apt-get update && apt-get install -y git && echo 'Update content command'",
   "postCreateCommand": "echo 'Post-create command'"
 }
