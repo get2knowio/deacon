@@ -16,7 +16,8 @@ use crate::commands::features_publish_output::{
     PublishCollectionResult, PublishFeatureResult, PublishOutput, PublishSummary,
 };
 use anyhow::{Context, Result};
-use deacon_core::config::{ConfigLoader, DevContainerConfig};
+// DeaconError is used in multiple functions throughout this module
+#[allow(unused_imports)]
 use deacon_core::errors::{DeaconError, FeatureError};
 use deacon_core::features::{
     canonicalize_feature_id, parse_feature_metadata, FeatureDependencyResolver, FeatureMergeConfig,
@@ -755,10 +756,10 @@ pub fn create_feature_tgz(src: &Path, dest: &Path) -> Result<String> {
 #[derive(Debug, Clone)]
 pub struct FeaturesArgs {
     pub command: FeatureCommands,
-    #[allow(dead_code)] // Reserved for future use
     pub workspace_folder: Option<PathBuf>,
-    #[allow(dead_code)] // Reserved for future use
     pub config_path: Option<PathBuf>,
+    pub override_config_path: Option<PathBuf>,
+    pub secrets_files: Vec<PathBuf>,
 }
 
 /// Result of a features command execution
@@ -933,12 +934,32 @@ async fn execute_features_plan(
     additional_features: Option<&str>,
     args: &FeaturesArgs,
 ) -> Result<()> {
-    // Determine workspace folder - default to current directory if not provided
-    let workspace_folder = args
-        .workspace_folder
-        .as_ref()
-        .unwrap_or(&std::env::current_dir()?)
-        .clone();
+    use crate::commands::shared::config_loader::{load_config, ConfigLoadArgs};
+    use deacon_core::config::DevContainerConfig;
+    use deacon_core::errors::{ConfigError, DeaconError};
+
+    // Load configuration with shared resolution (workspace/config/override/secrets)
+    // For features plan, allow missing config if additional features are provided
+    let config_load_result = load_config(ConfigLoadArgs {
+        workspace_folder: args.workspace_folder.as_deref(),
+        config_path: args.config_path.as_deref(),
+        override_config_path: args.override_config_path.as_deref(),
+        secrets_files: &args.secrets_files,
+    });
+
+    let (workspace_folder, mut config) = match config_load_result {
+        Ok(result) => (result.workspace_folder, result.config),
+        Err(DeaconError::Config(ConfigError::NotFound { .. })) => {
+            // If config not found, use default config (empty features)
+            // This allows features plan to work with only --additional-features
+            let workspace_folder = args
+                .workspace_folder
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            (workspace_folder, DevContainerConfig::default())
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     // Start standardized span for feature planning
     let timed_span = TimedSpan::new(feature_plan_span(&workspace_folder));
@@ -947,18 +968,6 @@ async fn execute_features_plan(
         let _guard = timed_span.span().enter();
 
         debug!("Generating feature installation plan");
-
-        // Load devcontainer configuration (explicit path > discovery > default)
-        let mut config = if let Some(config_path) = args.config_path.as_deref() {
-            ConfigLoader::load_from_path(config_path)?
-        } else {
-            let config_location = ConfigLoader::discover_config(&workspace_folder)?;
-            if config_location.exists() {
-                ConfigLoader::load_from_path(config_location.path())?
-            } else {
-                DevContainerConfig::default()
-            }
-        };
 
         // Parse and merge additional features if provided
         if let Some(additional_features_str) = additional_features {
@@ -2942,6 +2951,8 @@ mod unit_features_package {
             },
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path.clone()),
+            override_config_path: None,
+            secrets_files: Vec::new(),
         };
 
         let result = execute_features_plan(true, None, &args).await;
@@ -2960,6 +2971,8 @@ mod unit_features_package {
             },
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path.clone()),
+            override_config_path: None,
+            secrets_files: Vec::new(),
         };
 
         let result2 = execute_features_plan(true, None, &args2).await;
@@ -2982,6 +2995,8 @@ mod unit_features_package {
             },
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path.clone()),
+            override_config_path: None,
+            secrets_files: Vec::new(),
         };
 
         let result3 = execute_features_plan(true, None, &args3).await;
@@ -3001,6 +3016,8 @@ mod unit_features_package {
             },
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: None,
+            override_config_path: None,
+            secrets_files: Vec::new(),
         };
 
         let result = execute_features_plan(true, Some(r#"{"./local-feature": true}"#), &args).await;
@@ -3032,6 +3049,8 @@ mod unit_features_package {
             },
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path.clone()),
+            override_config_path: None,
+            secrets_files: Vec::new(),
         };
 
         let result = execute_features_plan(true, None, &args).await;

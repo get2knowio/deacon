@@ -1375,6 +1375,8 @@ impl Cli {
                     command,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    override_config_path: self.override_config,
+                    secrets_files: self.secrets_file.clone(),
                 };
 
                 execute_features(args).await
