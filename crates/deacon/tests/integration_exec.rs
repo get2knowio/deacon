@@ -96,7 +96,7 @@ fn test_exec_invalid_env_format() {
         .failure()
         .code(1)
         .stderr(predicate::str::contains(
-            "Invalid environment variable format",
+            "Invalid remote-env format: 'INVALID_FORMAT'. Expected: NAME=value",
         ));
 }
 

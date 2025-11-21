@@ -816,6 +816,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             args.container_id.clone(),
             args.id_label.clone(),
             args.workspace_folder.clone(),
+            args.override_config_path.clone(),
         )?;
         selector.validate()?;
 

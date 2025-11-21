@@ -643,6 +643,7 @@ async fn execute_script_in_container(
         interactive: false,
         detach: false,
         silent: false,
+        terminal_size: None,
     };
 
     let exec_result = docker

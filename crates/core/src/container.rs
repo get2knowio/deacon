@@ -504,6 +504,7 @@ mod tests {
             None,
             vec!["app=web".to_string(), "env=prod".to_string()],
             None,
+            None,
         )
         .unwrap();
         assert_eq!(selector.id_labels.len(), 2);
@@ -519,8 +520,21 @@ mod tests {
 
     #[test]
     fn test_selector_new_with_invalid_labels() {
-        let result = ContainerSelector::new(None, vec!["invalid".to_string()], None);
+        let result = ContainerSelector::new(None, vec!["invalid".to_string()], None, None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_selector_uses_override_path_parent_when_workspace_missing() {
+        let override_path =
+            std::path::PathBuf::from("/workspace/.devcontainer/custom-override.json");
+
+        let selector = ContainerSelector::new(None, vec![], None, Some(override_path)).unwrap();
+
+        assert_eq!(
+            selector.workspace_folder,
+            Some(std::path::PathBuf::from("/workspace/.devcontainer"))
+        );
     }
 
     #[test]
@@ -617,6 +631,7 @@ mod tests {
 ///     Some("abc123".to_string()),
 ///     vec![],
 ///     None,
+///     None,
 /// ).unwrap();
 /// assert!(selector.validate().is_ok());
 ///
@@ -625,8 +640,18 @@ mod tests {
 ///     None,
 ///     vec!["app=myapp".to_string(), "env=prod".to_string()],
 ///     None,
+///     None,
 /// ).unwrap();
 /// assert!(selector.validate().is_ok());
+///
+/// // Create selector from override config path when workspace isn't provided
+/// let selector = ContainerSelector::new(
+///     None,
+///     vec!["app=myapp".to_string()],
+///     None,
+///     Some(PathBuf::from("/workspace/.devcontainer/override.json")),
+/// ).unwrap();
+/// assert!(selector.workspace_folder.is_some());
 /// ```
 #[derive(Debug, Clone)]
 pub struct ContainerSelector {
@@ -649,7 +674,8 @@ impl ContainerSelector {
     ///
     /// * `container_id` - Optional direct container ID
     /// * `id_label_strings` - Label strings in "key=value" format
-    /// * `workspace_folder` - Optional workspace folder path
+    /// * `workspace_folder` - Optional workspace folder path (or derived from override config)
+    /// * `override_config_path` - Optional override config path used to infer workspace when none is provided
     ///
     /// # Errors
     ///
@@ -664,14 +690,21 @@ impl ContainerSelector {
     ///     Some("abc123".to_string()),
     ///     vec!["app=web".to_string()],
     ///     None,
+    ///     None,
     /// ).unwrap();
     /// ```
     pub fn new(
         container_id: Option<String>,
         id_label_strings: Vec<String>,
         workspace_folder: Option<std::path::PathBuf>,
+        override_config_path: Option<std::path::PathBuf>,
     ) -> anyhow::Result<Self> {
         let id_labels = Self::parse_labels(&id_label_strings)?;
+        let workspace_folder = match (workspace_folder, override_config_path) {
+            (Some(folder), _) => Some(folder),
+            (None, Some(override_path)) => override_path.parent().map(|p| p.to_path_buf()),
+            (None, None) => None,
+        };
         Ok(Self {
             container_id,
             id_labels,
@@ -694,11 +727,12 @@ impl ContainerSelector {
     /// use deacon_core::container::ContainerSelector;
     ///
     /// // Valid: has container_id
-    /// let selector = ContainerSelector::new(Some("abc123".to_string()), vec![], None).unwrap();
+    /// let selector =
+    ///     ContainerSelector::new(Some("abc123".to_string()), vec![], None, None).unwrap();
     /// assert!(selector.validate().is_ok());
     ///
     /// // Invalid: no selectors
-    /// let selector = ContainerSelector::new(None, vec![], None).unwrap();
+    /// let selector = ContainerSelector::new(None, vec![], None, None).unwrap();
     /// assert!(selector.validate().is_err());
     /// ```
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -951,6 +985,7 @@ where
 /// let selector = ContainerSelector::new(
 ///     Some("abc123".to_string()),
 ///     vec![],
+///     None,
 ///     None,
 /// )?;
 /// selector.validate()?;

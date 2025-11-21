@@ -3,13 +3,13 @@
 //! This module provides execution of lifecycle commands in an existing container
 //! without going through the full `up` workflow.
 
+use crate::commands::shared::{load_config, ConfigLoadArgs, ConfigLoadResult};
 use anyhow::Result;
-use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
     execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
     ContainerLifecycleConfig,
 };
-use deacon_core::secrets::SecretsCollection;
 use deacon_core::variable::SubstitutionContext;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -49,46 +49,17 @@ pub struct RunUserCommandsArgs {
 pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> {
     info!("Starting run-user-commands execution");
 
-    // Resolve workspace folder
-    let workspace_folder = if let Some(ref folder) = args.workspace_folder {
-        folder.clone()
-    } else {
-        std::env::current_dir()?
-    };
-
-    // Load configuration with override and secrets support
-    let (config, _substitution_report) = if let Some(ref config_path) = args.config_path {
-        // Load secrets if provided
-        let secrets = if !args.secrets_files.is_empty() {
-            Some(SecretsCollection::load_from_files(&args.secrets_files)?)
-        } else {
-            None
-        };
-
-        ConfigLoader::load_with_overrides_and_substitution(
-            config_path,
-            args.override_config_path.as_deref(),
-            secrets.as_ref(),
-            &workspace_folder,
-        )?
-    } else {
-        // Discover configuration
-        let config_location = ConfigLoader::discover_config(&workspace_folder)?;
-
-        // Load secrets if provided
-        let secrets = if !args.secrets_files.is_empty() {
-            Some(SecretsCollection::load_from_files(&args.secrets_files)?)
-        } else {
-            None
-        };
-
-        ConfigLoader::load_with_overrides_and_substitution(
-            config_location.path(),
-            args.override_config_path.as_deref(),
-            secrets.as_ref(),
-            &workspace_folder,
-        )?
-    };
+    // Load configuration with override and secrets support via shared helper
+    let ConfigLoadResult {
+        config,
+        workspace_folder,
+        ..
+    } = load_config(ConfigLoadArgs {
+        workspace_folder: args.workspace_folder.as_deref(),
+        config_path: args.config_path.as_deref(),
+        override_config_path: args.override_config_path.as_deref(),
+        secrets_files: &args.secrets_files,
+    })?;
 
     debug!("Loaded configuration with overrides and secrets support");
 
@@ -96,10 +67,11 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
         let docker_client = deacon_core::docker::CliDocker::new();
         match resolve_target_container(
             &docker_client,
-            &workspace_folder,
+            workspace_folder.as_path(),
             &config,
             None,
             &args.docker_path,
+            &[],
         )
         .await
         {
@@ -116,7 +88,7 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
     info!("Found target container: {}", container_id);
 
     // Execute lifecycle commands
-    execute_lifecycle_commands(&container_id, &config, &workspace_folder, &args).await?;
+    execute_lifecycle_commands(&container_id, &config, workspace_folder.as_path(), &args).await?;
 
     info!("Run-user-commands execution completed successfully");
     Ok(())

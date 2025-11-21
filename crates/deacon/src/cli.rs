@@ -1,3 +1,4 @@
+use crate::commands::shared::TerminalDimensions;
 use crate::ui::spinner::{PlainSpinner, SpinnerEmitter};
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -173,6 +174,11 @@ pub enum Commands {
         /// Skip non-blocking commands (postStart & postAttach phases)
         #[arg(long)]
         skip_non_blocking_commands: bool,
+        /// Default user environment probe mode when config omits userEnvProbe.
+        /// Allowed values: `none`, `loginInteractiveShell`, `interactiveShell`, `loginShell`.
+        /// Default: `loginInteractiveShell`.
+        #[arg(long, value_enum, default_value = "login-interactive-shell")]
+        default_user_env_probe: DefaultUserEnvProbe,
 
         // Mounts and environment
         /// Additional mount (format: type=bind|volume,source=<path>,target=<path>[,external=true|false], can be repeated)
@@ -395,6 +401,9 @@ pub enum Commands {
         /// Target specific service in Docker Compose projects (defaults to the primary service).
         #[arg(long)]
         service: Option<String>,
+        /// Environment file(s) to pass to docker compose (can be repeated).
+        #[arg(long)]
+        env_file: Vec<PathBuf>,
         /// Default user environment probe mode when config omits `userEnvProbe`.
         /// Allowed values: `none`, `loginInteractiveShell`, `interactiveShell`, `loginShell`.
         /// Default: `loginInteractiveShell` (collects shell-initialized environment where possible).
@@ -862,6 +871,10 @@ pub struct Cli {
 }
 
 impl Cli {
+    fn normalized_terminal_dimensions(&self) -> Result<Option<TerminalDimensions>> {
+        TerminalDimensions::new(self.terminal_columns, self.terminal_rows)
+    }
+
     /// Validate CLI arguments after parsing
     ///
     /// Performs additional validation beyond what clap provides automatically.
@@ -878,14 +891,9 @@ impl Cli {
     /// let cli = deacon::cli::Cli::parse_from(&["deacon"]);
     /// assert!(cli.validate().is_ok());
     /// ```
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn validate(&self) -> Result<()> {
-        // Clap's `requires` attribute already ensures both terminal dimensions are provided together
-        // Here we add additional validation for positive values
-        if let (Some(cols), Some(rows)) = (self.terminal_columns, self.terminal_rows) {
-            if cols == 0 || rows == 0 {
-                anyhow::bail!("Terminal dimensions must be positive integers");
-            }
-        }
+        self.normalized_terminal_dimensions()?;
         Ok(())
     }
 
@@ -945,8 +953,8 @@ impl Cli {
     /// // Runtime::new().unwrap().block_on(cli.dispatch()).unwrap();
     /// ```
     pub async fn dispatch(self) -> Result<()> {
-        // Validate CLI arguments
-        self.validate()?;
+        // Normalize terminal dimensions once for downstream consumers
+        let terminal_dimensions = self.normalized_terminal_dimensions()?;
 
         // Initialize logging based on global options
         let log_format = match self.log_format {
@@ -1041,6 +1049,7 @@ impl Cli {
                 skip_post_create,
                 skip_post_attach,
                 skip_non_blocking_commands,
+                default_user_env_probe,
                 mount,
                 remote_env,
                 mount_workspace_git_root,
@@ -1079,6 +1088,7 @@ impl Cli {
                     skip_post_create,
                     skip_post_attach,
                     skip_non_blocking_commands,
+                    default_user_env_probe: default_user_env_probe.into(),
                     mount,
                     remote_env,
                     mount_workspace_git_root,
@@ -1120,8 +1130,7 @@ impl Cli {
                     container_system_data_folder: self.container_system_data_folder.clone(),
                     user_data_folder: self.user_data_folder.clone(),
                     container_session_data_folder: self.container_session_data_folder.clone(),
-                    terminal_columns: self.terminal_columns,
-                    terminal_rows: self.terminal_rows,
+                    terminal_dimensions,
                 };
 
                 // Execute up and emit JSON output per contract (specs/001-up-gap-spec/contracts/up.md)
@@ -1254,6 +1263,7 @@ impl Cli {
                 container_id,
                 id_label,
                 service,
+                env_file,
                 default_user_env_probe,
                 command,
             }) => {
@@ -1276,9 +1286,12 @@ impl Cli {
                     container_id,
                     id_label,
                     service,
+                    env_file,
                     command,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    override_config_path: self.override_config,
+                    secrets_files: self.secrets_file.clone(),
                     docker_path: self.docker_path.clone(),
                     docker_compose_path: self.docker_compose_path.clone(),
                     // Thread global options
@@ -1286,8 +1299,7 @@ impl Cli {
                     default_user_env_probe: Some(default_user_env_probe.into()),
                     container_data_folder: self.container_data_folder.clone(),
                     container_system_data_folder: self.container_system_data_folder.clone(),
-                    terminal_columns: self.terminal_columns,
-                    terminal_rows: self.terminal_rows,
+                    terminal_dimensions,
                 };
 
                 execute_exec(args).await

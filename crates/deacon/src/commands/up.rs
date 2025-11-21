@@ -3,10 +3,14 @@
 //! Implements the `deacon up` subcommand for starting development containers.
 //! Supports both traditional container workflows and Docker Compose workflows.
 
+use crate::commands::shared::{
+    load_config, resolve_env_and_user, ConfigLoadArgs, ConfigLoadResult, TerminalDimensions,
+};
 use anyhow::Result;
 use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject};
-use deacon_core::config::{ConfigLoader, DevContainerConfig};
-use deacon_core::container::ContainerIdentity;
+use deacon_core::config::DevContainerConfig;
+use deacon_core::container::{ContainerIdentity, ContainerSelector};
+use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::{Docker, DockerLifecycle, ExecConfig};
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
@@ -14,9 +18,12 @@ use deacon_core::ports::PortForwardingManager;
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
 use deacon_core::state::{ComposeState, ContainerState, StateManager};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
+
+pub use crate::commands::shared::NormalizedRemoteEnv;
 
 /// Success response for the up command, emitted as JSON to stdout.
 ///
@@ -374,77 +381,6 @@ impl NormalizedMount {
     }
 }
 
-/// Parsed and normalized remote environment variable.
-///
-/// Validates env var entries from CLI input.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NormalizedRemoteEnv {
-    pub name: String,
-    pub value: String,
-}
-
-impl NormalizedRemoteEnv {
-    /// Parse and validate a remote env string from CLI.
-    ///
-    /// Expected format: `NAME=value`
-    ///
-    /// Returns error if format is invalid (missing =).
-    pub fn parse(env_str: &str) -> Result<Self> {
-        let parts: Vec<&str> = env_str.splitn(2, '=').collect();
-
-        if parts.len() != 2 {
-            return Err(
-                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                    message: format!(
-                        "Invalid remote-env format: '{}'. Expected: NAME=value",
-                        env_str
-                    ),
-                })
-                .into(),
-            );
-        }
-
-        Ok(Self {
-            name: parts[0].to_string(),
-            value: parts[1].to_string(),
-        })
-    }
-}
-
-/// Terminal dimensions for output formatting.
-///
-/// Both columns and rows must be specified together.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TerminalDimensions {
-    pub columns: u32,
-    pub rows: u32,
-}
-
-impl TerminalDimensions {
-    /// Create terminal dimensions, ensuring both are specified.
-    pub fn new(columns: Option<u32>, rows: Option<u32>) -> Result<Option<Self>> {
-        match (columns, rows) {
-            (Some(cols), Some(rows)) => Ok(Some(Self {
-                columns: cols,
-                rows,
-            })),
-            (None, None) => Ok(None),
-            (Some(_), None) => Err(DeaconError::Config(
-                deacon_core::errors::ConfigError::Validation {
-                    message: "terminalColumns requires terminalRows to be specified".to_string(),
-                },
-            )
-            .into()),
-            (None, Some(_)) => Err(DeaconError::Config(
-                deacon_core::errors::ConfigError::Validation {
-                    message: "terminalRows requires terminalColumns to be specified".to_string(),
-                },
-            )
-            .into()),
-        }
-    }
-}
-
 /// Parsed and validated input arguments for up command.
 ///
 /// This struct contains normalized and validated versions of CLI inputs,
@@ -466,6 +402,7 @@ pub struct NormalizedUpInput {
     pub skip_post_attach: bool,
     pub skip_non_blocking_commands: bool,
     pub prebuild: bool,
+    pub default_user_env_probe: ContainerProbeMode,
 
     // Mounts and environment
     pub mounts: Vec<NormalizedMount>,
@@ -532,6 +469,14 @@ pub enum BuildkitMode {
     Never,
 }
 
+fn parse_remote_env_vars(envs: &[String]) -> Result<Vec<NormalizedRemoteEnv>> {
+    let mut remote_env = Vec::new();
+    for env_str in envs {
+        remote_env.push(NormalizedRemoteEnv::parse(env_str)?);
+    }
+    Ok(remote_env)
+}
+
 impl NormalizedUpInput {
     /// Validate contract requirements before any runtime operations.
     ///
@@ -579,6 +524,7 @@ pub struct UpArgs {
     pub skip_post_create: bool,
     pub skip_post_attach: bool,
     pub skip_non_blocking_commands: bool,
+    pub default_user_env_probe: ContainerProbeMode,
 
     // Mounts and environment
     pub mount: Vec<String>,
@@ -643,8 +589,7 @@ pub struct UpArgs {
     pub docker_compose_path: String,
 
     // Terminal
-    pub terminal_columns: Option<u32>,
-    pub terminal_rows: Option<u32>,
+    pub terminal_dimensions: Option<TerminalDimensions>,
 
     // Runtime and observability
     pub progress_tracker:
@@ -664,6 +609,7 @@ impl Default for UpArgs {
             skip_post_create: false,
             skip_post_attach: false,
             skip_non_blocking_commands: false,
+            default_user_env_probe: ContainerProbeMode::LoginInteractiveShell,
             mount: Vec::new(),
             remote_env: Vec::new(),
             mount_workspace_git_root: true,
@@ -701,8 +647,7 @@ impl Default for UpArgs {
             env_file: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
-            terminal_columns: None,
-            terminal_rows: None,
+            terminal_dimensions: None,
             progress_tracker: std::sync::Arc::new(std::sync::Mutex::new(None)),
             runtime: None,
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
@@ -767,25 +712,33 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
 /// - terminal dimensions pairing
 /// - expect_existing_container constraints
 fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpInput> {
-    // Determine effective workspace folder: explicitly provided value or current directory
-    let effective_workspace_folder = args
+    // Parse selection inputs through ContainerSelector to keep validation and error messages shared
+    let selector_workspace = args
         .workspace_folder
         .as_ref()
         .cloned()
         .or_else(|| std::env::current_dir().ok());
 
-    // Validate workspace_folder OR id_label requirement (current_dir counts as workspace)
-    if effective_workspace_folder.is_none() && args.id_label.is_empty() {
-        return Err(
-            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                message: "Either --workspace-folder or --id-label must be specified".to_string(),
-            })
-            .into(),
-        );
-    }
+    let selector = ContainerSelector::new(
+        None,
+        args.id_label.clone(),
+        selector_workspace,
+        args.override_config_path.clone(),
+    )
+    .map_err(|err| {
+        DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+            message: err.to_string(),
+        })
+    })?;
 
-    // Validate workspace_folder OR override_config requirement (current_dir counts as workspace)
-    if effective_workspace_folder.is_none() && args.override_config_path.is_none() {
+    selector.validate().map_err(|err| {
+        DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+            message: err.to_string(),
+        })
+    })?;
+
+    // Validate workspace_folder OR override_config requirement (counts selector-derived workspace)
+    if selector.workspace_folder.is_none() && args.override_config_path.is_none() {
         return Err(
             DeaconError::Config(deacon_core::errors::ConfigError::Validation {
                 message: "Either --workspace-folder or --override-config must be specified"
@@ -807,40 +760,13 @@ fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpInput> {
     }
 
     // Parse and validate remote environment variables
-    let mut remote_env = Vec::new();
-    for env_str in &args.remote_env {
-        match NormalizedRemoteEnv::parse(env_str) {
-            Ok(env) => remote_env.push(env),
-            Err(e) => {
-                return Err(e);
-            }
-        }
-    }
-
-    // Parse and validate id labels
-    let mut id_labels = Vec::new();
-    for label_str in &args.id_label {
-        let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-        if parts.len() != 2 {
-            return Err(
-                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                    message: format!(
-                        "Invalid id-label format: '{}'. Expected: name=value",
-                        label_str
-                    ),
-                })
-                .into(),
-            );
-        }
-        id_labels.push((parts[0].to_string(), parts[1].to_string()));
-    }
+    let remote_env = parse_remote_env_vars(&args.remote_env)?;
 
     // Note: Additional id-label discovery from config happens at execution time
     // when we have loaded the configuration. See discover_id_labels_from_config()
     // in execute_up_with_runtime() for the full discovery logic.
 
-    // Validate terminal dimensions pairing
-    let terminal_dimensions = TerminalDimensions::new(args.terminal_columns, args.terminal_rows)?;
+    let terminal_dimensions = args.terminal_dimensions;
 
     // Map BuildKitOption to BuildkitMode
     let buildkit_mode = match args.buildkit {
@@ -851,16 +777,17 @@ fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpInput> {
 
     // Create normalized input
     Ok(NormalizedUpInput {
-        workspace_folder: args.workspace_folder.clone(),
+        workspace_folder: selector.workspace_folder.clone(),
         config_path: args.config_path.clone(),
         override_config_path: args.override_config_path.clone(),
-        id_labels,
+        id_labels: selector.id_labels.clone(),
         remove_existing_container: args.remove_existing_container,
         expect_existing_container: args.expect_existing_container,
         skip_post_create: args.skip_post_create,
         skip_post_attach: args.skip_post_attach,
         skip_non_blocking_commands: args.skip_non_blocking_commands,
         prebuild: args.prebuild,
+        default_user_env_probe: args.default_user_env_probe,
         mounts,
         remote_env,
         mount_workspace_git_root: args.mount_workspace_git_root,
@@ -1065,23 +992,17 @@ async fn execute_up_with_runtime(
     debug!("Starting up command execution");
     debug!("Up args: {:?}", args);
 
-    // Load configuration
-    let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
-
-    let mut config = if let Some(config_path) = args.config_path.as_ref() {
-        ConfigLoader::load_from_path(config_path)?
-    } else {
-        let config_location = ConfigLoader::discover_config(workspace_folder)?;
-        if !config_location.exists() {
-            return Err(
-                DeaconError::Config(deacon_core::errors::ConfigError::NotFound {
-                    path: config_location.path().to_string_lossy().to_string(),
-                })
-                .into(),
-            );
-        }
-        ConfigLoader::load_from_path(config_location.path())?
-    };
+    // Load configuration with shared resolution (workspace/config/override/secrets)
+    let ConfigLoadResult {
+        mut config,
+        workspace_folder,
+        ..
+    } = load_config(ConfigLoadArgs {
+        workspace_folder: args.workspace_folder.as_deref(),
+        config_path: args.config_path.as_deref(),
+        override_config_path: args.override_config_path.as_deref(),
+        secrets_files: &args.secrets_files,
+    })?;
 
     debug!("Loaded configuration: {:?}", config.name);
 
@@ -1090,20 +1011,26 @@ async fn execute_up_with_runtime(
     debug!("Validated features - no disallowed features found");
 
     // T029: Merge image metadata into configuration
-    config = merge_image_metadata_into_config(config, workspace_folder).await?;
+    config = merge_image_metadata_into_config(config, workspace_folder.as_path()).await?;
     debug!("Merged image metadata into configuration");
 
-    // T029: Discover id-labels from configuration if not provided via CLI
-    // First, parse the id_label strings from args
-    let mut parsed_labels = Vec::new();
-    for label_str in &args.id_label {
-        let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-        if parts.len() == 2 {
-            parsed_labels.push((parts[0].to_string(), parts[1].to_string()));
-        }
+    // Apply CLI remote env overrides on top of config (used for container creation and lifecycle)
+    let mut cli_remote_env = HashMap::new();
+    for env in parse_remote_env_vars(&args.remote_env)? {
+        cli_remote_env.insert(env.name.clone(), env.value.clone());
+        config
+            .remote_env
+            .insert(env.name.clone(), Some(env.value.clone()));
     }
+
+    // T029: Discover id-labels from configuration if not provided via CLI
+    let parsed_labels = ContainerSelector::parse_labels(&args.id_label).map_err(|err| {
+        DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+            message: err.to_string(),
+        })
+    })?;
     let discovered_labels =
-        discover_id_labels_from_config(&parsed_labels, workspace_folder, &config);
+        discover_id_labels_from_config(&parsed_labels, workspace_folder.as_path(), &config);
     debug!("Discovered id-labels: {:?}", discovered_labels);
 
     // Validate host requirements if specified in configuration
@@ -1113,7 +1040,7 @@ async fn execute_up_with_runtime(
 
         match evaluator.validate_requirements(
             host_requirements,
-            Some(workspace_folder),
+            Some(workspace_folder.as_path()),
             args.ignore_host_requirements,
         ) {
             Ok(evaluation) => {
@@ -1157,13 +1084,13 @@ async fn execute_up_with_runtime(
     // Apply variable substitution prior to runtime operations (workspaceMount, mounts, runArgs, env, lifecycle)
     {
         use deacon_core::variable::SubstitutionContext;
-        let substitution_context = SubstitutionContext::new(workspace_folder)?;
+        let substitution_context = SubstitutionContext::new(workspace_folder.as_path())?;
         let (substituted, _report) = config.apply_variable_substitution(&substitution_context);
         config = substituted;
     }
 
     // Create container identity for state tracking
-    let identity = ContainerIdentity::new(workspace_folder, &config);
+    let identity = ContainerIdentity::new(workspace_folder.as_path(), &config);
     let workspace_hash = identity.workspace_hash.clone();
 
     // Initialize state manager
@@ -1173,7 +1100,7 @@ async fn execute_up_with_runtime(
     let container_info = if config.uses_compose() {
         execute_compose_up(
             &config,
-            workspace_folder,
+            workspace_folder.as_path(),
             &args,
             &mut state_manager,
             &workspace_hash,
@@ -1182,10 +1109,11 @@ async fn execute_up_with_runtime(
     } else {
         execute_container_up(
             &config,
-            workspace_folder,
+            workspace_folder.as_path(),
             &args,
             &mut state_manager,
             &workspace_hash,
+            &cli_remote_env,
             &runtime,
         )
         .await?
@@ -1438,7 +1366,18 @@ async fn execute_compose_up(
 /// // Setup `config`, `workspace_folder`, `args`, and `state_manager` according to your test harness.
 /// // Then call the async function from a Tokio runtime:
 /// // tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// //     execute_container_up(&config, &workspace_folder, &args, &mut state_manager, &workspace_hash).await.unwrap();
+/// //     let cli_remote_env = std::collections::HashMap::new();
+/// //     execute_container_up(
+/// //         &config,
+/// //         &workspace_folder,
+/// //         &args,
+/// //         &mut state_manager,
+/// //         &workspace_hash,
+/// //         &cli_remote_env,
+/// //         &runtime,
+/// //     )
+/// //     .await
+/// //     .unwrap();
 /// // });
 /// ```
 #[instrument(skip_all)]
@@ -1448,6 +1387,7 @@ async fn execute_container_up(
     args: &UpArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
+    cli_remote_env: &HashMap<String, String>,
     runtime: &ContainerRuntimeImpl,
 ) -> Result<UpContainerInfo> {
     debug!("Starting traditional development container");
@@ -1642,12 +1582,29 @@ async fn execute_container_up(
         apply_user_mapping(&container_result.container_id, &config, workspace_folder).await?;
     }
 
+    let config_user = config
+        .remote_user
+        .clone()
+        .or_else(|| config.container_user.clone());
+    let env_user_resolution = resolve_env_and_user(
+        runtime,
+        &container_result.container_id,
+        None,
+        config_user.clone(),
+        args.default_user_env_probe,
+        Some(&config.remote_env),
+        cli_remote_env,
+    )
+    .await;
+
     // Execute lifecycle commands if not skipped
     execute_lifecycle_commands(
         &container_result.container_id,
         &config,
         workspace_folder,
         args,
+        env_user_resolution.effective_env.clone(),
+        env_user_resolution.effective_user.clone(),
     )
     .await?;
 
@@ -1678,10 +1635,15 @@ async fn execute_container_up(
     info!("Traditional container up completed successfully");
 
     // Collect container information for JSON output
-    let remote_user = config
-        .remote_user
+    let remote_user = env_user_resolution
+        .effective_user
         .clone()
-        .or_else(|| config.container_user.clone())
+        .or_else(|| {
+            config
+                .remote_user
+                .clone()
+                .or_else(|| config.container_user.clone())
+        })
         .unwrap_or_else(|| "root".to_string());
 
     let remote_workspace_folder = config
@@ -1755,6 +1717,7 @@ async fn execute_compose_post_create(
                         interactive: false,
                         detach: false,
                         silent: false,
+                        terminal_size: None,
                     },
                 )
                 .await;
@@ -2036,6 +1999,8 @@ async fn execute_lifecycle_commands(
     config: &DevContainerConfig,
     workspace_folder: &Path,
     args: &UpArgs,
+    effective_env: HashMap<String, String>,
+    effective_user: Option<String>,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
         execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
@@ -2062,17 +2027,14 @@ async fn execute_lifecycle_commands(
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {
         container_id: container_id.to_string(),
-        user: config
-            .remote_user
-            .clone()
-            .or_else(|| config.container_user.clone()),
+        user: effective_user,
         container_workspace_folder,
-        container_env: config.container_env.clone(),
+        container_env: effective_env,
         skip_post_create: args.skip_post_create,
         skip_non_blocking_commands: args.skip_non_blocking_commands,
         non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout
         use_login_shell: true, // Default: use login shell for lifecycle commands
-        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::LoginShell,
+        user_env_probe: ContainerProbeMode::None,
     };
 
     // Build lifecycle commands from configuration
@@ -2249,6 +2211,7 @@ async fn execute_dotfiles_installation(
         interactive: false,
         detach: false,
         silent: false,
+        terminal_size: None,
     };
 
     // T015: Step 0 - Check if dotfiles directory already exists (idempotency)
@@ -2825,29 +2788,24 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_dimensions_both_specified() {
-        let dims = TerminalDimensions::new(Some(80), Some(24)).unwrap();
-        assert!(dims.is_some());
-        let dims = dims.unwrap();
-        assert_eq!(dims.columns, 80);
-        assert_eq!(dims.rows, 24);
-    }
+    fn test_invalid_id_label_uses_shared_selector_message() {
+        let args = UpArgs {
+            id_label: vec!["foo".to_string()],
+            workspace_folder: Some(PathBuf::from("/tmp/workspace")),
+            ..Default::default()
+        };
 
-    #[test]
-    fn test_terminal_dimensions_neither_specified() {
-        let dims = TerminalDimensions::new(None, None).unwrap();
-        assert!(dims.is_none());
-    }
+        let err = normalize_and_validate_args(&args).unwrap_err();
+        let result = UpResult::from_error(err);
 
-    #[test]
-    fn test_terminal_dimensions_only_columns_specified() {
-        let result = TerminalDimensions::new(Some(80), None);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_terminal_dimensions_only_rows_specified() {
-        let result = TerminalDimensions::new(None, Some(24));
-        assert!(result.is_err());
+        if let UpResult::Error(err_payload) = result {
+            assert_eq!(
+                err_payload.description,
+                "Unmatched argument format: id-label must match <name>=<value>."
+            );
+            assert_eq!(err_payload.message, "Invalid configuration or arguments");
+        } else {
+            panic!("Expected error result for invalid id-label input");
+        }
     }
 }

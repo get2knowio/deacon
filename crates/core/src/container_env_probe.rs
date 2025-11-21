@@ -335,6 +335,7 @@ impl ContainerEnvironmentProber {
             interactive: false,
             detach: false,
             silent: true, // Suppress output for shell detection probes
+            terminal_size: None,
         };
 
         // Use exit code to determine if shell exists (0 = exists, non-zero = doesn't exist)
@@ -400,6 +401,7 @@ impl ContainerEnvironmentProber {
             interactive: false,
             detach: false,
             silent: true, // Suppress output for environment probes
+            terminal_size: None,
         };
 
         let result = docker

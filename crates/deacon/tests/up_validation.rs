@@ -7,7 +7,8 @@
 //! - remote_env format validation
 //! - terminal dimensions pairing
 
-use deacon::commands::up::{NormalizedMount, NormalizedRemoteEnv, TerminalDimensions, UpResult};
+use deacon::commands::shared::TerminalDimensions;
+use deacon::commands::up::{NormalizedMount, NormalizedRemoteEnv, UpResult};
 
 #[test]
 fn test_normalized_mount_validation_bind_basic() {

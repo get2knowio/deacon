@@ -400,6 +400,105 @@ pub struct ExecConfig {
     pub detach: bool,
     /// Whether to suppress stdout/stderr (for internal probe commands)
     pub silent: bool,
+    /// Optional terminal size hint when allocating a PTY
+    pub terminal_size: Option<TerminalSize>,
+}
+
+/// Terminal sizing hint for PTY execs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalSize {
+    pub columns: u16,
+    pub rows: u16,
+}
+
+impl TerminalSize {
+    pub fn new(columns: u32, rows: u32) -> Self {
+        Self {
+            columns: columns.min(u16::MAX as u32) as u16,
+            rows: rows.min(u16::MAX as u32) as u16,
+        }
+    }
+}
+
+#[cfg(unix)]
+struct TerminalResizeGuard {
+    previous_modes: Option<String>,
+}
+
+#[cfg(unix)]
+impl TerminalResizeGuard {
+    fn apply(size: TerminalSize) -> Option<Self> {
+        let previous_modes = Self::capture_state().ok()?;
+        if let Err(err) = Self::apply_size(size) {
+            debug!("Failed to apply terminal size override: {}", err);
+            return None;
+        }
+
+        Some(Self {
+            previous_modes: Some(previous_modes),
+        })
+    }
+
+    fn capture_state() -> std::io::Result<String> {
+        let output = Command::new("stty")
+            .args(["-F", "/dev/tty", "-g"])
+            .output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(std::io::Error::other(format!(
+                "stty -g failed: {}",
+                stderr.trim()
+            )));
+        }
+        let modes = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(modes)
+    }
+
+    fn apply_size(size: TerminalSize) -> std::io::Result<()> {
+        let rows = size.rows.to_string();
+        let cols = size.columns.to_string();
+        let status = Command::new("stty")
+            .args([
+                "-F",
+                "/dev/tty",
+                "rows",
+                rows.as_str(),
+                "columns",
+                cols.as_str(),
+            ])
+            .status()?;
+        if !status.success() {
+            let code = status.code().unwrap_or(-1);
+            return Err(std::io::Error::other(format!(
+                "stty rows/columns failed with status {}",
+                code
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for TerminalResizeGuard {
+    fn drop(&mut self) {
+        if let Some(modes) = self.previous_modes.take() {
+            match Command::new("stty")
+                .args(["-F", "/dev/tty", modes.as_str()])
+                .status()
+            {
+                Ok(status) if status.success() => {}
+                Ok(status) => {
+                    debug!(
+                        "Failed to restore terminal size: status {}",
+                        status.code().unwrap_or(-1)
+                    );
+                }
+                Err(err) => {
+                    debug!("Failed to restore terminal size: {}", err);
+                }
+            }
+        }
+    }
 }
 
 /// Result of executing a command in a container
@@ -1227,6 +1326,13 @@ impl Docker for CliRuntime {
 
             let mut command = std::process::Command::new(&runtime_path);
             command.args(&args);
+
+            #[cfg(unix)]
+            let _terminal_resize_guard = if config.tty {
+                config.terminal_size.and_then(TerminalResizeGuard::apply)
+            } else {
+                None
+            };
 
             // Handle stdio based on silent mode:
             // - silent=true: Capture output for return value (used by probes)
@@ -2613,6 +2719,7 @@ mod tests {
             interactive: true,
             detach: false,
             silent: false,
+            terminal_size: None,
         };
 
         let result = mock_docker
@@ -2664,6 +2771,7 @@ mod tests {
             interactive: false,
             detach: false,
             silent: false,
+            terminal_size: None,
         };
 
         let start_time = Instant::now();

@@ -37,14 +37,16 @@ async fn integration_exec_non_tty_preserves_streams_and_tty_flag() {
         command: vec!["sh".to_string(), "-c".to_string(), "echo hello".to_string()],
         workspace_folder: None,
         config_path: None,
+        override_config_path: None,
+        secrets_files: Vec::new(),
         docker_path: "docker".to_string(),
         docker_compose_path: "docker-compose".to_string(),
+        env_file: Vec::new(),
         force_tty_if_json: false,
         default_user_env_probe: Some(deacon_core::container_env_probe::ContainerProbeMode::None),
         container_data_folder: None,
         container_system_data_folder: None,
-        terminal_columns: None,
-        terminal_rows: None,
+        terminal_dimensions: None,
     };
 
     // Execute - should complete and be recorded by the mock

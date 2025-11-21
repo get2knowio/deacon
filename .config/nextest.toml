@@ -18,6 +18,8 @@ docker-shared = { max-threads = 4 }
 # FS-heavy: Tests performing significant filesystem operations
 # Limited concurrency to avoid I/O contention
 fs-heavy = { max-threads = 4 }
+# Host-only environment probe tests: lightweight host shell probing
+env-probe = { max-threads = 8 }
 # Long-running tests: heavy end-to-end or build-with-large-context tests
 long-running = { max-threads = 1 }
 
@@ -65,6 +67,14 @@ filter = 'binary(=parity_read_configuration)'
 test-group = 'parity-cli'
 
 [[profile.default.overrides]]
+filter = 'binary(=parity_remote_env_flags)'
+test-group = 'parity-cli'
+
+[[profile.default.overrides]]
+filter = 'binary(#integration_env_probe_*)'
+test-group = 'env-probe'
+
+[[profile.default.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
 test-group = 'long-running'
 slow-timeout = { period = "30m", terminate-after = 1 }
@@ -86,7 +96,7 @@ slow-timeout = "5m"
 [profile.dev-fast]
 retries = 0
 slow-timeout = "30s"
-default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress))'
+default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*))'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(#smoke_*)'
@@ -107,6 +117,14 @@ test-group = 'parity'
 [[profile.dev-fast.overrides]]
 filter = 'binary(=parity_read_configuration)'
 test-group = 'parity-cli'
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(=parity_remote_env_flags)'
+test-group = 'parity-cli'
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(#integration_env_probe_*)'
+test-group = 'env-probe'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
@@ -156,6 +174,14 @@ filter = 'binary(=parity_read_configuration)'
 test-group = 'parity-cli'
 
 [[profile.full.overrides]]
+filter = 'binary(=parity_remote_env_flags)'
+test-group = 'parity-cli'
+
+[[profile.full.overrides]]
+filter = 'binary(#integration_env_probe_*)'
+test-group = 'env-probe'
+
+[[profile.full.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(#integration_compose_*) | binary(=integration_vulnerability_scan) | binary(=integration_progress) | binary(=up_dotfiles)'
 test-group = 'docker-exclusive'
 
@@ -195,6 +221,14 @@ test-group = 'parity'
 [[profile.ci.overrides]]
 filter = 'binary(=parity_read_configuration)'
 test-group = 'parity-cli'
+
+[[profile.ci.overrides]]
+filter = 'binary(=parity_remote_env_flags)'
+test-group = 'parity-cli'
+
+[[profile.ci.overrides]]
+filter = 'binary(#integration_env_probe_*)'
+test-group = 'env-probe'
 
 # Very conservative Docker concurrency for CI
 [[profile.ci.overrides]]

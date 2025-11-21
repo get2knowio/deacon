@@ -1,23 +1,17 @@
 <!--
 Sync Impact Report
-- Version change: 1.5.0 → 1.6.0
+- Version change: 1.7.0 → 1.7.1
 - Modified principles:
-  - II. Keep the Build Green → Updated testing commands to use `make test-nextest-*` targets exclusively
-  - VI. Testing Completeness → Added nextest configuration requirements and parallelization guidance
-- Added sections:
-  - Nextest Configuration Requirements (under Testing Completeness)
-  - Test Parallelization Strategy (under Testing Completeness)
+  - VII. Subcommand Consistency & Shared Abstractions → clarified governance without citing specific task files
+- Added sections: None
 - Removed sections: None
 - Templates requiring updates/alignment:
-  - ✅ .specify/templates/plan-template.md (no changes needed - testing strategy is implementation detail)
-  - ✅ .specify/templates/spec-template.md (no changes needed - specs are tool-agnostic)
-  - ✅ .specify/templates/tasks-template.md (verification needed if testing workflow referenced)
-- Follow-up TODOs: Verify AGENTS.md updated consistently
-- Rationale: Standardized on nextest for all test execution to maximize parallelization and reduce
-  iteration time. Added explicit requirement that all new integration tests must be configured in
-  nextest.toml with appropriate test groups for optimal resource utilization. This is a MINOR version
-  bump because it adds materially expanded guidance on testing workflow without removing existing
-  principles.
+  - ✅ .specify/templates/plan-template.md (no changes needed)
+  - ✅ .specify/templates/spec-template.md (no changes needed)
+  - ✅ .specify/templates/tasks-template.md (no changes needed)
+- Follow-up TODOs: None
+- Rationale: Keep the new shared-helper mandate while avoiding hard references to ephemeral task lists. This is a
+  PATCH version bump (textual clarification, no new governance scope).
 -->
 
 # deacon Constitution
@@ -168,6 +162,28 @@ configuring them for maximum safe parallelism. When multiple tests share the sam
 
 Goal: Maximize test throughput while maintaining determinism and avoiding flaky tests.
 
+### VII. Subcommand Consistency & Shared Abstractions
+All CLI subcommands (existing and new) MUST share canonical helpers for any behavior that appears in
+multiple commands. Terminal sizing, configuration/override/secrets resolution, container targeting,
+remote environment merging, compose option wiring, and environment probing/user selection MUST NOT be
+hand‑implemented per subcommand—these flows belong in shared modules consumed everywhere.
+
+**Shared Helper Requirements**:
+- Maintain a living backlog of cross-subcommand alignment tasks (terminal dimensions helper, config loader,
+  container selector integration, remote env parsing, compose env-file threading, env probe reconciliation).
+  The backlog is binding; resolve items before extending `up`, `exec`, or introducing a new subcommand in
+  the same area.
+- When overlapping functionality exists (e.g., `--id-label`, `--terminal-columns/rows`, config overrides,
+  `--remote-env`, compose env files, env probe defaults), teams MUST either reuse the shared helper or
+  justify in writing why divergence is unavoidable. Implementing bespoke parsing or behavior is a
+  constitution violation.
+- New subcommands or CLI flags MUST evaluate whether they hook into existing helpers. If a helper is
+  missing, add it once, record the debt in the backlog, and reuse it everywhere before shipping.
+
+**Drift Remediation**: When inconsistencies are discovered, record them in the shared backlog immediately
+and remediate before unrelated feature work. Reordering or deleting backlog items requires the same
+approval rigor as modifying this constitution.
+
 ## Additional Constraints & Security
 
 - Do not execute arbitrary shell from unvalidated input; surface destructive operations (e.g., container removal,
@@ -175,6 +191,9 @@ Goal: Maximize test throughput while maintaining determinism and avoiding flaky 
 - Avoid leaking secrets in logs; maintain a redaction layer (if disabled explicitly, warn users).
 - Tests MUST be deterministic and hermetic (no network); gate true integration behind CI‑only markers when needed.
 - Prefer minimal, pinned dependencies; justify additions and keep the dependency set lean.
+- Maintain an authoritative cross-subcommand alignment log. When implementing CLI work that overlaps
+  existing functionality, consult and update that log so engineering tasks track the shared-helper
+  obligations codified in Principle VII.
 
 ## Development Workflow & Quality Gates
 
@@ -237,4 +256,4 @@ This checklist prevents spec drift and reduces rework. Document deviations with 
 - Compliance Review: All PRs MUST include a quick constitution compliance check (in PR body or checklist). Reviewers
   SHALL block merges on violations of Principles I–VI or on missing updates to tests/examples.
 
-**Version**: 1.6.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-20
+**Version**: 1.7.1 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-20

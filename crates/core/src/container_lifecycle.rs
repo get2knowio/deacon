@@ -632,6 +632,7 @@ where
             interactive: false,
             detach: false,
             silent: false,
+            terminal_size: None,
         };
 
         // Detect shell and create appropriate command args

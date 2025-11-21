@@ -1,4 +1,5 @@
 use deacon::commands::exec::{execute_exec_with_docker, ExecArgs};
+use deacon::commands::shared::TerminalDimensions;
 use deacon_core::docker::mock::{MockContainer, MockDocker};
 
 use std::collections::HashMap;
@@ -36,14 +37,16 @@ async fn integration_exec_applies_merged_env() {
         command: vec!["echo".to_string(), "hello".to_string()],
         workspace_folder: None,
         config_path: None,
+        override_config_path: None,
+        secrets_files: Vec::new(),
         docker_path: "docker".to_string(),
         docker_compose_path: "docker-compose".to_string(),
+        env_file: Vec::new(),
         force_tty_if_json: false,
         default_user_env_probe: Some(deacon_core::container_env_probe::ContainerProbeMode::None),
         container_data_folder: None,
         container_system_data_folder: None,
-        terminal_columns: None,
-        terminal_rows: None,
+        terminal_dimensions: None,
     };
 
     // Execute
@@ -97,14 +100,16 @@ async fn integration_exec_preserves_empty_cli_env_values() {
         command: vec!["echo".to_string(), "hello".to_string()],
         workspace_folder: None,
         config_path: None,
+        override_config_path: None,
+        secrets_files: Vec::new(),
         docker_path: "docker".to_string(),
         docker_compose_path: "docker-compose".to_string(),
+        env_file: Vec::new(),
         force_tty_if_json: false,
         default_user_env_probe: Some(deacon_core::container_env_probe::ContainerProbeMode::None),
         container_data_folder: None,
         container_system_data_folder: None,
-        terminal_columns: None,
-        terminal_rows: None,
+        terminal_dimensions: None,
     };
 
     let res1 = execute_exec_with_docker(args_non_empty, &mock).await;
@@ -130,14 +135,16 @@ async fn integration_exec_preserves_empty_cli_env_values() {
         command: vec!["echo".to_string(), "hello".to_string()],
         workspace_folder: None,
         config_path: None,
+        override_config_path: None,
+        secrets_files: Vec::new(),
         docker_path: "docker".to_string(),
         docker_compose_path: "docker-compose".to_string(),
+        env_file: Vec::new(),
         force_tty_if_json: false,
         default_user_env_probe: Some(deacon_core::container_env_probe::ContainerProbeMode::None),
         container_data_folder: None,
         container_system_data_folder: None,
-        terminal_columns: None,
-        terminal_rows: None,
+        terminal_dimensions: None,
     };
 
     let res2 = execute_exec_with_docker(args_empty, &mock).await;
@@ -150,4 +157,69 @@ async fn integration_exec_preserves_empty_cli_env_values() {
     // Empty value should be preserved (present with empty string)
     assert!(recorded_env2.contains_key("FOO"));
     assert_eq!(recorded_env2.get("FOO").map(String::as_str), Some(""));
+}
+
+#[tokio::test]
+async fn integration_exec_sets_terminal_size_for_stty() {
+    let mock = MockDocker::new();
+    let container = MockContainer::new(
+        "terminal-size-1".to_string(),
+        "terminal-size-1".to_string(),
+        "myimage:latest".to_string(),
+    );
+    mock.add_container(container);
+
+    let args = ExecArgs {
+        user: None,
+        no_tty: false,
+        env: vec![],
+        workdir: Some("/".to_string()),
+        container_id: Some("terminal-size-1".to_string()),
+        id_label: vec![],
+        service: None,
+        command: vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "stty size".to_string(),
+        ],
+        workspace_folder: None,
+        config_path: None,
+        override_config_path: None,
+        secrets_files: Vec::new(),
+        docker_path: "docker".to_string(),
+        docker_compose_path: "docker-compose".to_string(),
+        env_file: Vec::new(),
+        force_tty_if_json: true, // Force PTY to exercise terminal hints
+        default_user_env_probe: Some(deacon_core::container_env_probe::ContainerProbeMode::None),
+        container_data_folder: None,
+        container_system_data_folder: None,
+        terminal_dimensions: Some(TerminalDimensions {
+            columns: 132,
+            rows: 40,
+        }),
+    };
+
+    let res = execute_exec_with_docker(args, &mock).await;
+    assert!(res.is_ok());
+
+    let history = mock.get_exec_history();
+    assert_eq!(history.len(), 1);
+    let call = &history[0];
+    assert_eq!(
+        call.command,
+        vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "stty size".to_string()
+        ]
+    );
+    assert!(call.config.tty, "terminal hint requires PTY");
+    assert_eq!(
+        call.config
+            .terminal_size
+            .map(|size| (size.columns, size.rows)),
+        Some((132, 40))
+    );
+    assert_eq!(call.config.env.get("COLUMNS"), Some(&"132".to_string()));
+    assert_eq!(call.config.env.get("LINES"), Some(&"40".to_string()));
 }
