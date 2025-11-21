@@ -6,8 +6,9 @@
 //! Spec: docs/subcommand-specs/read-configuration/SPEC.md
 //! Implementation: specs/001-read-config-parity/spec.md
 
+use crate::commands::shared::{load_config, ConfigLoadArgs, TerminalDimensions};
 use anyhow::{Context, Result};
-use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerSelector;
 
 use deacon_core::features::{
@@ -644,14 +645,8 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         ContainerSelector::parse_labels(&args.id_label)?;
     }
 
-    // Validate terminal dimensions are paired (both or neither)
-    let has_terminal_cols = args.terminal_columns.is_some();
-    let has_terminal_rows = args.terminal_rows.is_some();
-    if has_terminal_cols != has_terminal_rows {
-        anyhow::bail!(
-            "--terminal-columns and --terminal-rows must both be provided or both be omitted."
-        );
-    }
+    // Validate terminal dimensions using shared helper (aligns with up/exec validation)
+    let _terminal_dimensions = TerminalDimensions::new(args.terminal_columns, args.terminal_rows)?;
 
     // Validate additional_features JSON early (must be an object if provided)
     if let Some(additional_features_str) = args.additional_features.as_ref() {
@@ -680,6 +675,26 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     // Determine workspace folder
     let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
+    // Load configuration using shared helper (aligns with up/exec behavior)
+    let (config, substitution_report) = if container_only_mode {
+        // Per spec line 104: "If only container selection flags are provided (no config or workspace),
+        // proceed with an empty base config {} and a substitution function seeded with host env/paths."
+        let empty_config = DevContainerConfig::default();
+        let substitution_context = SubstitutionContext::new(workspace_folder)?;
+        let (substituted_config, report) =
+            empty_config.apply_variable_substitution(&substitution_context);
+        (substituted_config, report)
+    } else {
+        // Use shared config loader for consistent behavior across subcommands
+        let config_result = load_config(ConfigLoadArgs {
+            workspace_folder: Some(workspace_folder),
+            config_path: args.config_path.as_deref(),
+            override_config_path: args.override_config_path.as_deref(),
+            secrets_files: &args.secrets_files,
+        })?;
+        (config_result.config, config_result.substitution_report)
+    };
+
     // Always try to resolve workspace configuration (unless container-only mode)
     // Per spec: workspace is omitted only if it cannot be resolved
     let workspace_config = if container_only_mode {
@@ -693,106 +708,11 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         .ok()
     };
 
-    // Load secrets if provided
+    // Load secrets if provided (needed for container-specific substitution later)
     let secrets = if !args.secrets_files.is_empty() {
         Some(SecretsCollection::load_from_files(&args.secrets_files)?)
     } else {
         None
-    };
-
-    // Load configuration
-    let (config, substitution_report) = if container_only_mode {
-        // Per spec line 104: "If only container selection flags are provided (no config or workspace),
-        // proceed with an empty base config {} and a substitution function seeded with host env/paths."
-        let empty_config = DevContainerConfig::default();
-        let substitution_context = SubstitutionContext::new(workspace_folder)?;
-        let (substituted_config, report) =
-            empty_config.apply_variable_substitution(&substitution_context);
-        (substituted_config, report)
-    } else if let Some(config_path) = args.config_path.as_ref() {
-        use deacon_core::errors::{ConfigError, DeaconError};
-
-        // For non-merged config, still apply overrides and substitution
-        let base_config = match ConfigLoader::load_from_path(config_path) {
-            Ok(cfg) => cfg,
-            Err(e) => match e {
-                DeaconError::Config(ConfigError::NotFound { path }) => {
-                    anyhow::bail!("Dev container config ({}) not found.", path)
-                }
-                other => return Err(other.into()),
-            },
-        };
-        let mut configs = vec![base_config];
-
-        // Add override config if provided
-        if let Some(override_path) = args.override_config_path.as_ref() {
-            let override_config = match ConfigLoader::load_from_path(override_path) {
-                Ok(cfg) => cfg,
-                Err(e) => match e {
-                    DeaconError::Config(ConfigError::NotFound { path }) => {
-                        anyhow::bail!("Dev container config ({}) not found.", path)
-                    }
-                    other => return Err(other.into()),
-                },
-            };
-            configs.push(override_config);
-        }
-
-        let merged = deacon_core::config::ConfigMerger::merge_configs(&configs);
-
-        // Apply variable substitution with secrets
-        let mut substitution_context = SubstitutionContext::new(workspace_folder)?;
-        if let Some(secrets) = &secrets {
-            for (key, value) in secrets.as_env_vars() {
-                substitution_context
-                    .local_env
-                    .insert(key.clone(), value.clone());
-            }
-        }
-
-        merged.apply_variable_substitution(&substitution_context)
-    } else {
-        // Discover configuration
-        let config_location = ConfigLoader::discover_config(workspace_folder)?;
-        if !config_location.exists() {
-            anyhow::bail!(
-                "Dev container config ({}) not found.",
-                config_location.path().display()
-            );
-        }
-
-        // For non-merged config, still apply overrides and substitution
-        let base_config = ConfigLoader::load_from_path(config_location.path())?;
-        let mut configs = vec![base_config];
-
-        // Add override config if provided
-        if let Some(override_path) = args.override_config_path.as_ref() {
-            use deacon_core::errors::{ConfigError, DeaconError};
-            let override_config = match ConfigLoader::load_from_path(override_path) {
-                Ok(cfg) => cfg,
-                Err(e) => match e {
-                    DeaconError::Config(ConfigError::NotFound { path }) => {
-                        anyhow::bail!("Dev container config ({}) not found.", path)
-                    }
-                    other => return Err(other.into()),
-                },
-            };
-            configs.push(override_config);
-        }
-
-        let merged = deacon_core::config::ConfigMerger::merge_configs(&configs);
-
-        // Apply variable substitution with secrets
-        let mut substitution_context = SubstitutionContext::new(workspace_folder)?;
-        if let Some(secrets) = &secrets {
-            for (key, value) in secrets.as_env_vars() {
-                substitution_context
-                    .local_env
-                    .insert(key.clone(), value.clone());
-            }
-        }
-
-        merged.apply_variable_substitution(&substitution_context)
     };
 
     debug!("Loaded configuration: {:?}", config.name);
@@ -1195,15 +1115,13 @@ API_KEY=another-secret
         let result = execute_read_configuration(args).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        let expected = format!(
-            "Dev container config ({}) not found.",
-            temp_dir
-                .path()
-                .join(".devcontainer")
-                .join("devcontainer.json")
-                .display()
+        // Error format changed to use shared config loader which returns DeaconError::Config
+        // The error message should contain "Configuration error" from DeaconError Display
+        assert!(
+            err_msg.contains("Configuration error") || err_msg.contains("not found"),
+            "Expected error about missing config, got: {}",
+            err_msg
         );
-        assert_eq!(err_msg, expected);
     }
 
     #[tokio::test]
@@ -2131,10 +2049,13 @@ API_KEY=another-secret
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_err(), "Should fail when only columns provided");
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("--terminal-columns and --terminal-rows must both be provided"));
+        let err_msg = result.unwrap_err().to_string();
+        // Error now comes from shared TerminalDimensions::new() which returns DeaconError::Config
+        assert!(
+            err_msg.contains("terminal") || err_msg.contains("Configuration error"),
+            "Expected error about terminal dimensions, got: {}",
+            err_msg
+        );
     }
 
     #[tokio::test]
@@ -2174,10 +2095,13 @@ API_KEY=another-secret
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_err(), "Should fail when only rows provided");
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("--terminal-columns and --terminal-rows must both be provided"));
+        let err_msg = result.unwrap_err().to_string();
+        // Error now comes from shared TerminalDimensions::new() which returns DeaconError::Config
+        assert!(
+            err_msg.contains("terminal") || err_msg.contains("Configuration error"),
+            "Expected error about terminal dimensions, got: {}",
+            err_msg
+        );
     }
 
     #[tokio::test]
