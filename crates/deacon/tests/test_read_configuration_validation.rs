@@ -283,10 +283,8 @@ fn test_config_not_found_exact_message() {
     let path_str = missing_path.display().to_string();
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains(format!(
-            "Dev container config ({}) not found.",
-            path_str
-        )));
+        .stderr(predicate::str::contains("Configuration file not found:"))
+        .stderr(predicate::str::contains(path_str));
 }
 
 #[test]

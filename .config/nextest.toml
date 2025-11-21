@@ -11,31 +11,34 @@ nextest-version = "0.9.111"
 # These tests create/destroy containers and must not run concurrently
 docker-exclusive = { max-threads = 1 }
 
+# Docker-slow-shared: Heavy Docker tests that can overlap once isolation is fixed
+docker-slow-shared = { max-threads = 2 }
+
 # Docker-shared: Tests that interact with Docker but can share daemon access
-# Limited concurrency to avoid overwhelming Docker daemon
-docker-shared = { max-threads = 4 }
+# Increased concurrency for short-lived CLI-level Docker cases
+docker-shared = { max-threads = 8 }
 
 # FS-heavy: Tests performing significant filesystem operations
 # Limited concurrency to avoid I/O contention
 fs-heavy = { max-threads = 4 }
 # Host-only environment probe tests: lightweight host shell probing
-env-probe = { max-threads = 8 }
+env-probe = { max-threads = 12 }
 # Long-running tests: heavy end-to-end or build-with-large-context tests
-long-running = { max-threads = 1 }
+long-running = { max-threads = 2 }
 
-# Smoke tests: High-level integration tests verifying core workflows
-# Run serially to ensure clean state between tests
-smoke = { max-threads = 1 }
+# Smoke tests: split lightweight vs heavy daemon cases for higher parallelism
+smoke-lite = { max-threads = 4 }
+smoke-heavy = { max-threads = 2 }
 
 # CLI-only smoke tests: safe to run in parallel with light throttling
-smoke-cli = { max-threads = 4 }
+smoke-cli = { max-threads = 8 }
 
 # Parity tests: Tests comparing behavior with upstream devcontainers CLI
-# Run serially due to Docker dependencies and external process spawning
-parity = { max-threads = 1 }
+# Mildly throttled to allow overlap while avoiding daemon contention
+parity = { max-threads = 2 }
 
 # CLI-only parity tests
-parity-cli = { max-threads = 4 }
+parity-cli = { max-threads = 8 }
 
 # Default profile: Balanced parallelization for local development
 [profile.default]
@@ -44,8 +47,13 @@ slow-timeout = "60s"
 status-level = "pass"
 
 [[profile.default.overrides]]
-filter = 'binary(#smoke_*)'
-test-group = 'smoke'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+test-group = 'smoke-heavy'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+test-group = 'smoke-lite'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.default.overrides]]
@@ -76,7 +84,7 @@ test-group = 'env-probe'
 
 [[profile.default.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
-test-group = 'long-running'
+test-group = 'docker-slow-shared'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.default.overrides]]
@@ -92,15 +100,23 @@ filter = 'binary(=integration_config) | binary(=integration_layered_merge) | bin
 test-group = 'fs-heavy'
 slow-timeout = "5m"
 
+[[profile.default.overrides]]
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+priority = 100
+
 # Fast feedback loop profile: skip smoke/parity suites and throttled Docker tests
 [profile.dev-fast]
 retries = 0
 slow-timeout = "30s"
-default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*))'
+default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/))'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(#smoke_*)'
-test-group = 'smoke'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+test-group = 'smoke-heavy'
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+test-group = 'smoke-lite'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_cli)'
@@ -128,7 +144,7 @@ test-group = 'env-probe'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
-test-group = 'long-running'
+test-group = 'docker-slow-shared'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=test_features_cli)'
@@ -141,6 +157,10 @@ test-group = 'docker-shared'
 [[profile.dev-fast.overrides]]
 filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates)'
 test-group = 'fs-heavy'
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+priority = 100
 
 # Full profile: Run all tests with appropriate grouping
 [profile.full]
@@ -156,10 +176,21 @@ slow-timeout = { period = "30m", terminate-after = 1 }
 status-level = "pass"
 default-filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_vulnerability_scan)'
 
+[[profile.long-running.overrides]]
+filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_vulnerability_scan)'
+test-group = 'docker-slow-shared'
+slow-timeout = { period = "30m", terminate-after = 1 }
+
 # Apply all default overrides
 [[profile.full.overrides]]
-filter = 'binary(#smoke_*)'
-test-group = 'smoke'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+test-group = 'smoke-heavy'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.full.overrides]]
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+test-group = 'smoke-lite'
+slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.full.overrides]]
 filter = 'binary(=smoke_cli)'
@@ -184,6 +215,7 @@ test-group = 'env-probe'
 [[profile.full.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(#integration_compose_*) | binary(=integration_vulnerability_scan) | binary(=integration_progress) | binary(=up_dotfiles)'
 test-group = 'docker-exclusive'
+slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.full.overrides]]
 filter = 'binary(=test_features_cli) & test(test_features_test_)'
@@ -196,6 +228,10 @@ test-group = 'docker-shared'
 [[profile.full.overrides]]
 filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates)'
 test-group = 'fs-heavy'
+
+[[profile.full.overrides]]
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+priority = 100
 
 # CI profile: Conservative settings for deterministic CI execution
 [profile.ci]
@@ -205,10 +241,14 @@ status-level = "all"
 fail-fast = false
 global-timeout = "1h"
 
-# Enforce serial execution for smoke and parity tests
+# Throttle smoke and parity tests while allowing more overlap
 [[profile.ci.overrides]]
-filter = 'binary(#smoke_*)'
-test-group = 'smoke'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+test-group = 'smoke-heavy'
+
+[[profile.ci.overrides]]
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+test-group = 'smoke-lite'
 
 [[profile.ci.overrides]]
 filter = 'binary(=smoke_cli)'
@@ -230,10 +270,10 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'env-probe'
 
-# Very conservative Docker concurrency for CI
 [[profile.ci.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(#integration_compose_*) | binary(=integration_vulnerability_scan) | binary(=integration_progress) | binary(=up_dotfiles)'
 test-group = 'docker-exclusive'
+slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.ci.overrides]]
 filter = 'binary(=test_features_cli) & test(test_features_test_)'
@@ -248,3 +288,7 @@ threads-required = 1
 filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates)'
 test-group = 'fs-heavy'
 threads-required = 1
+
+[[profile.ci.overrides]]
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+priority = 100

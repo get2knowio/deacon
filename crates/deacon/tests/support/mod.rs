@@ -65,13 +65,30 @@ pub fn extract_json_from_output(output: &str) -> Result<serde_json::Value, serde
 
 /// Generate a unique, docker-safe resource name with a prefix.
 ///
-/// Combines the prefix with the current process ID and a monotonic timestamp
-/// to reduce the chance of collisions when tests run in parallel.
+/// Incorporates nextest slot info when available so parallel runs don’t
+/// collide across test processes, then adds PID + timestamp as a final tie-breaker.
 pub fn unique_name(prefix: &str) -> String {
     let pid = std::process::id();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("{}-{}-{}", prefix, pid, nanos)
+
+    let slot = std::env::var("NEXTEST_GLOBAL_SLOT").ok();
+    let group = std::env::var("NEXTEST_TEST_GROUP").ok();
+    let mut suffix = String::new();
+    if let Some(slot) = slot {
+        suffix.push_str("-slot");
+        suffix.push_str(&slot);
+    }
+    if let Some(group) = group {
+        let sanitized: String = group
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        suffix.push_str("-group-");
+        suffix.push_str(&sanitized);
+    }
+
+    format!("{}{}-{}-{}", prefix, suffix, pid, nanos)
 }
