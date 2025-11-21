@@ -708,7 +708,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         .ok()
     };
 
-    // Load secrets if provided (needed for container-specific substitution later)
+    // Load secrets separately from config loading for container-specific substitution
+    // Note: While load_config() handles secrets for initial config substitution,
+    // we need the SecretsCollection again later for container-aware substitutions
+    // (lines 839-843 and 890-896) which apply additional variables like ${containerEnv:*}
     let secrets = if !args.secrets_files.is_empty() {
         Some(SecretsCollection::load_from_files(&args.secrets_files)?)
     } else {
