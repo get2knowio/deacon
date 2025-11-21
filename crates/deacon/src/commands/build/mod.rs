@@ -6,8 +6,9 @@
 pub mod result;
 
 use crate::cli::{BuildKitOption, OutputFormat};
+use crate::commands::shared::{load_config, ConfigLoadArgs, TerminalDimensions};
 use anyhow::{anyhow, Context, Result};
-use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,8 @@ pub struct BuildArgs {
     pub fail_on_scan: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
+    pub override_config_path: Option<PathBuf>,
+    pub secrets_files: Vec<PathBuf>,
     pub additional_features: Option<String>,
     pub prefer_cli_features: bool,
     pub feature_install_order: Option<String>,
@@ -46,10 +49,9 @@ pub struct BuildArgs {
     pub env_file: Vec<PathBuf>,
     #[allow(dead_code)] // Future: Will be used for custom docker executable path
     pub docker_path: String,
+    /// Optional terminal dimension hint for output formatting
     #[allow(dead_code)] // Future: Will be used for terminal output formatting
-    pub terminal_columns: Option<u32>,
-    #[allow(dead_code)] // Future: Will be used for terminal output formatting
-    pub terminal_rows: Option<u32>,
+    pub terminal_dimensions: Option<TerminalDimensions>,
     /// Image names to apply as tags
     pub image_names: Vec<String>,
     /// Metadata labels to apply in key=value format
@@ -93,6 +95,8 @@ impl Default for BuildArgs {
             fail_on_scan: false,
             workspace_folder: None,
             config_path: None,
+            override_config_path: None,
+            secrets_files: Vec::new(),
             additional_features: None,
             prefer_cli_features: false,
             feature_install_order: None,
@@ -102,8 +106,7 @@ impl Default for BuildArgs {
             secret_registry: deacon_core::redaction::SecretRegistry::new(),
             env_file: Vec::new(),
             docker_path: "docker".to_string(),
-            terminal_columns: None,
-            terminal_rows: None,
+            terminal_dimensions: None,
             image_names: Vec::new(),
             label: Vec::new(),
             push: false,
@@ -524,23 +527,16 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
         validate_buildkit_requirement(&args.output_format, "cache-to", "--cache-to")?;
     }
 
-    // Load configuration
-    let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
+    // Load configuration using shared helper for consistency with up/exec
+    let load_result = load_config(ConfigLoadArgs {
+        workspace_folder: args.workspace_folder.as_deref(),
+        config_path: args.config_path.as_deref(),
+        override_config_path: args.override_config_path.as_deref(),
+        secrets_files: &args.secrets_files,
+    })?;
 
-    let mut config = if let Some(config_path) = args.config_path.as_ref() {
-        ConfigLoader::load_from_path(config_path)?
-    } else {
-        let config_location = ConfigLoader::discover_config(workspace_folder)?;
-        if !config_location.exists() {
-            return Err(
-                DeaconError::Config(deacon_core::errors::ConfigError::NotFound {
-                    path: config_location.path().to_string_lossy().to_string(),
-                })
-                .into(),
-            );
-        }
-        ConfigLoader::load_from_path(config_location.path())?
-    };
+    let mut config = load_result.config;
+    let workspace_folder = load_result.workspace_folder;
 
     debug!("Loaded configuration: {:?}", config.name);
 
@@ -585,7 +581,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
         match evaluator.validate_requirements(
             host_requirements,
-            Some(workspace_folder),
+            Some(&workspace_folder),
             args.ignore_host_requirements,
         ) {
             Ok(evaluation) => {
@@ -627,11 +623,11 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     }
 
     // Extract build configuration
-    let build_config = extract_build_config(&config, workspace_folder)?;
+    let build_config = extract_build_config(&config, &workspace_folder)?;
     debug!("Build config: {:?}", build_config);
 
     // Calculate configuration hash for caching
-    let config_hash = calculate_config_hash(&build_config, workspace_folder)?;
+    let config_hash = calculate_config_hash(&build_config, &workspace_folder)?;
     debug!("Configuration hash: {}", config_hash);
 
     // Fail fast if features are specified (not yet supported)
@@ -650,7 +646,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     // Check cache if not forced (skip cache if pushing or exporting)
     if !args.force && !args.push && args.output.is_none() {
-        if let Some(cached_result) = check_build_cache(&config_hash, workspace_folder).await? {
+        if let Some(cached_result) = check_build_cache(&config_hash, &workspace_folder).await? {
             info!("Using cached build result");
             output_result(
                 &cached_result,
@@ -677,15 +673,15 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     // Dispatch to appropriate build function based on configuration type
     let result = if config.uses_compose() {
-        execute_compose_build(&config, &args, workspace_folder, &labels, &config_hash).await
+        execute_compose_build(&config, &args, &workspace_folder, &labels, &config_hash).await
     } else if config.image.is_some() {
-        execute_image_reference_build(&config, &args, workspace_folder, &labels).await
+        execute_image_reference_build(&config, &args, &workspace_folder, &labels).await
     } else {
         execute_docker_build(
             &build_config,
             &args,
             &config_hash,
-            workspace_folder,
+            &workspace_folder,
             &labels,
         )
         .await
@@ -722,7 +718,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     };
 
     // Cache the result
-    cache_build_result(&final_result, workspace_folder).await?;
+    cache_build_result(&final_result, &workspace_folder).await?;
 
     // Execute vulnerability scan if requested
     if args.scan_image {
