@@ -6,7 +6,14 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
+
+/// Helper function to create a minimal Dockerfile for testing
+fn create_minimal_dockerfile(dir: &Path, base_image: &str) {
+    let dockerfile_content = format!("FROM {}\n", base_image);
+    fs::write(dir.join("Dockerfile"), dockerfile_content).unwrap();
+}
 
 /// Test that build command respects --override-config flag
 #[test]
@@ -29,8 +36,9 @@ fn build_uses_override_config() {
     )
     .unwrap();
 
-    // Create minimal Dockerfile
-    fs::write(temp.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+    // Create minimal Dockerfile matching base config
+    // (The override config will be used instead, demonstrating config override behavior)
+    create_minimal_dockerfile(temp.path(), "alpine:3.19");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.current_dir(temp.path())
@@ -63,7 +71,7 @@ fn build_uses_secrets_file() {
     fs::write(&secrets_path, r#"{"MY_SECRET": "test-value"}"#).unwrap();
 
     // Create minimal Dockerfile
-    fs::write(temp.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+    create_minimal_dockerfile(temp.path(), "alpine:3.19");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.current_dir(temp.path())
@@ -86,7 +94,7 @@ fn build_validates_terminal_dimensions_together() {
     fs::write(&config_path, r#"{"image": "alpine:3.19"}"#).unwrap();
 
     // Create minimal Dockerfile
-    fs::write(temp.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+    create_minimal_dockerfile(temp.path(), "alpine:3.19");
 
     // Test: providing only columns should fail (CLI enforces via requires)
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -95,9 +103,9 @@ fn build_validates_terminal_dimensions_together() {
         .arg("80")
         .arg("build");
 
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("required arguments were not provided"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "required arguments were not provided",
+    ));
 
     // Test: providing only rows should fail (CLI enforces via requires)
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -106,9 +114,9 @@ fn build_validates_terminal_dimensions_together() {
         .arg("24")
         .arg("build");
 
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("required arguments were not provided"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "required arguments were not provided",
+    ));
 
     // Test: providing both should succeed (validation passes)
     let mut cmd = Command::cargo_bin("deacon").unwrap();
