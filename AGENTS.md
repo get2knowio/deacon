@@ -24,6 +24,7 @@
 - Commits/PRs: Conventional Commits; keep build green locally after every change.
 - Safety: no `unsafe` code; review new deps carefully. Migrate deprecated deps promptly (e.g., `atty` → `is-terminal`).
 - Shared helpers: whenever multiple subcommands expose the same flag or behavior (terminal sizing, config/override/secrets resolution, container targeting, remote env merging, compose env-file wiring, env probing, etc.), reuse the canonical helper. If no helper exists, create one and record the debt in the shared alignment log before extending individual subcommands.
+- Examples: every `examples/` directory MUST include an `exec.sh` that runs **all** README-documented paths in one non-interactive pass, echoes scenario banners, and cleans up containers/images/volumes it creates. Keep README and `exec.sh` in lockstep; update the subcommand-level aggregator scripts (e.g., `examples/up/exec.sh`) whenever examples are added/changed.
 - Copilot rules: follow `.github/copilot-instructions.md` (run build/test/fmt/clippy after every change).
 - Use `make test-nextest-fast` by default during spec-phase; run `make test-nextest` before PRs.
 

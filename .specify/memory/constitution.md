@@ -1,17 +1,15 @@
 <!--
 Sync Impact Report
-- Version change: 1.7.0 → 1.7.1
+- Version change: 1.7.1 → 1.8.0
 - Modified principles:
-  - VII. Subcommand Consistency & Shared Abstractions → clarified governance without citing specific task files
-- Added sections: None
+  - Added VIII. Executable & Self-Verifying Examples (new governance for README-aligned exec scripts)
+- Added sections: Principle VIII (examples execution/cleanup requirements)
 - Removed sections: None
 - Templates requiring updates/alignment:
   - ✅ .specify/templates/plan-template.md (no changes needed)
   - ✅ .specify/templates/spec-template.md (no changes needed)
   - ✅ .specify/templates/tasks-template.md (no changes needed)
 - Follow-up TODOs: None
-- Rationale: Keep the new shared-helper mandate while avoiding hard references to ephemeral task lists. This is a
-  PATCH version bump (textual clarification, no new governance scope).
 -->
 
 # deacon Constitution
@@ -184,6 +182,22 @@ hand‑implemented per subcommand—these flows belong in shared modules consume
 and remediate before unrelated feature work. Reordering or deleting backlog items requires the same
 approval rigor as modifying this constitution.
 
+### VIII. Executable & Self‑Verifying Examples
+Examples are executable contracts, not documentation suggestions. Every example directory under `examples/`
+MUST contain an `exec.sh` that:
+- Executes every README-documented path in a single run (no hidden env toggles), with clear echo banners per
+  scenario and inline comments mapping to README sections.
+- Cleans up all resources it creates (containers, images, volumes, temp files) after each scenario so reruns
+  start clean and CI remains deterministic.
+- Avoids interactive prompts; pins images/refs; uses non-networked fixtures unless the README explicitly
+  documents required connectivity.
+- Stays in lockstep with the README; any README change requires the corresponding `exec.sh` change and vice
+  versa.
+
+Subcommand-level aggregators (e.g., `examples/up/exec.sh`) MUST invoke each child example script serially with
+scenario logging and must fail fast when any child fails. Adding a new example requires updating both the README
+table and the aggregator to include the new `exec.sh`.
+
 ## Additional Constraints & Security
 
 - Do not execute arbitrary shell from unvalidated input; surface destructive operations (e.g., container removal,
@@ -194,6 +208,9 @@ approval rigor as modifying this constitution.
 - Maintain an authoritative cross-subcommand alignment log. When implementing CLI work that overlaps
   existing functionality, consult and update that log so engineering tasks track the shared-helper
   obligations codified in Principle VII.
+- Examples under `examples/` and fixtures under `fixtures/` are living documentation; keep READMEs, `exec.sh`
+  scripts, and aggregator scripts in sync with user-facing flags, schemas, and outputs. Each `exec.sh` must
+  leave the workspace clean after completion.
 
 ## Development Workflow & Quality Gates
 
@@ -254,6 +271,6 @@ This checklist prevents spec drift and reduces rework. Document deviations with 
   - MINOR: new principles/sections or materially expanded guidance
   - PATCH: clarifications, wording, typo fixes, non‑semantic refinements
 - Compliance Review: All PRs MUST include a quick constitution compliance check (in PR body or checklist). Reviewers
-  SHALL block merges on violations of Principles I–VI or on missing updates to tests/examples.
+  SHALL block merges on violations of Principles I–VIII or on missing updates to tests/examples.
 
-**Version**: 1.7.1 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-20
+**Version**: 1.8.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-22
