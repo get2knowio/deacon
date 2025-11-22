@@ -11,6 +11,7 @@ pub mod container;
 pub mod container_env_probe;
 pub mod container_lifecycle;
 pub mod docker;
+pub mod dockerfile_generator;
 pub mod doctor;
 pub mod dotfiles;
 pub mod entrypoint;

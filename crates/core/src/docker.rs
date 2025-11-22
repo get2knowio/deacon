@@ -1821,6 +1821,74 @@ impl CliRuntime {
         .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
         .map_err(Into::into)
     }
+
+    /// Build an image using docker buildx (BuildKit)
+    ///
+    /// This method builds a Docker image using BuildKit, which is required for
+    /// mounting build contexts and proper layer caching.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - Build arguments to pass to `docker buildx build`
+    ///
+    /// # Returns
+    ///
+    /// Returns the image ID on success
+    #[instrument(skip(self))]
+    pub async fn build_image(&self, args: &[String]) -> Result<String> {
+        debug!("Building image with BuildKit: {:?}", args);
+
+        let runtime_path = self.runtime_path.clone();
+        let args = args.to_vec();
+
+        tokio::task::spawn_blocking(move || -> std::result::Result<String, DockerError> {
+            let output = Command::new(&runtime_path)
+                .args(&args)
+                .output()
+                .map_err(|e| DockerError::CLIError(format!("Failed to build image: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(DockerError::CLIError(format!(
+                    "Image build failed: {}",
+                    stderr
+                )));
+            }
+
+            // Parse the image ID from the output
+            // BuildKit outputs "writing image sha256:<image_id>" in the logs
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let combined = format!("{}\n{}", stdout, stderr);
+
+            // Look for the image ID in the output
+            for line in combined.lines() {
+                if line.contains("writing image sha256:") {
+                    if let Some(sha_start) = line.find("sha256:") {
+                        let image_id = &line[sha_start + 7..];
+                        // Extract just the ID (up to next space or end of line)
+                        let image_id = image_id
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or(image_id)
+                            .to_string();
+                        debug!("Built image ID: {}", image_id);
+                        return Ok(image_id);
+                    }
+                }
+            }
+
+            // If we can't find the image ID in the output, return an error
+            // The image was likely built but we couldn't parse its ID from the output
+            debug!("Could not parse image ID from build output");
+            Err(DockerError::CLIError(
+                "Could not determine image ID from build output. Image may have been built successfully.".to_string(),
+            ))
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        .map_err(Into::into)
+    }
 }
 
 pub mod mock {
