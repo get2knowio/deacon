@@ -2230,7 +2230,7 @@ async fn build_image_with_features(
     std::fs::create_dir_all(&features_dir)?;
 
     // Copy features to the BuildKit context directory
-    for (_level_idx, level) in installation_plan.levels.iter().enumerate() {
+    for level in installation_plan.levels.iter() {
         for feature_id in level {
             let feature = installation_plan.get_feature(feature_id).ok_or_else(|| {
                 DeaconError::Runtime(format!("Feature {} not found in plan", feature_id))
