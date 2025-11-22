@@ -74,11 +74,11 @@ impl DockerfileGenerator {
             dockerfile.push_str(&format!("# Level {}: Installing features\n", level_idx));
 
             for feature_id in level {
-                let feature = plan
-                    .get_feature(feature_id)
-                    .ok_or_else(|| FeatureError::NotFound {
-                        path: format!("Feature {} in installation plan", feature_id),
-                    })?;
+                let feature =
+                    plan.get_feature(feature_id)
+                        .ok_or_else(|| FeatureError::NotFound {
+                            path: format!("Feature {} in installation plan", feature_id),
+                        })?;
 
                 dockerfile.push_str(&self.generate_feature_install_command(feature, level_idx)?);
             }
@@ -294,7 +294,8 @@ mod tests {
         let dockerfile = generator.generate(&plan).unwrap();
 
         assert!(dockerfile.contains("ARG _DEV_CONTAINERS_BASE_IMAGE=ubuntu:22.04"));
-        assert!(dockerfile.contains("FROM ${_DEV_CONTAINERS_BASE_IMAGE} AS dev_containers_target_stage"));
+        assert!(dockerfile
+            .contains("FROM ${_DEV_CONTAINERS_BASE_IMAGE} AS dev_containers_target_stage"));
         assert!(dockerfile.contains("RUN mkdir -p /tmp/dev-container-features"));
         assert!(dockerfile.contains("RUN --mount=type=bind"));
         assert!(dockerfile.contains("VERSION=\"20\""));
@@ -310,10 +311,8 @@ mod tests {
         };
 
         let generator = DockerfileGenerator::new(config);
-        let args = generator.generate_build_args(
-            Path::new("/tmp/Dockerfile.extended"),
-            "test:latest",
-        );
+        let args =
+            generator.generate_build_args(Path::new("/tmp/Dockerfile.extended"), "test:latest");
 
         assert!(args.contains(&"buildx".to_string()));
         assert!(args.contains(&"build".to_string()));

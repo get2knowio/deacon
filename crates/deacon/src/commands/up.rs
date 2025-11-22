@@ -1119,10 +1119,7 @@ fn extract_build_config_from_devcontainer(
 
 /// Build Docker image from build configuration
 #[instrument(skip(build_config))]
-async fn build_image_from_config(
-    build_config: &BuildConfig,
-    no_cache: bool,
-) -> Result<String> {
+async fn build_image_from_config(build_config: &BuildConfig, no_cache: bool) -> Result<String> {
     debug!(
         "Building image from Dockerfile: {}",
         build_config.dockerfile
@@ -1130,7 +1127,8 @@ async fn build_image_from_config(
 
     // Resolve context path relative to the directory containing devcontainer.json
     // This handles ".." and other relative paths correctly
-    let context_path = build_config.context_folder
+    let context_path = build_config
+        .context_folder
         .join(&build_config.context)
         .canonicalize()
         .context("Failed to resolve build context path")?;
@@ -1309,8 +1307,7 @@ async fn execute_up_with_runtime(
         {
             info!("Building image from Dockerfile configuration");
             let built_image_id =
-                build_image_from_config(&build_config, args.build_no_cache)
-                    .await?;
+                build_image_from_config(&build_config, args.build_no_cache).await?;
 
             // Update config to use the built image
             config.image = Some(built_image_id.clone());
@@ -1690,24 +1687,10 @@ async fn execute_container_up(
 
     let container_start_time = std::time::Instant::now();
 
-    // T016: Feature-driven image extension with BuildKit/cache options
-    // Features have already been merged into config.features via FeatureMerger (see lines 1088-1107)
-    //
-    // Per specs/001-up-gap-spec/ User Story 2:
-    // - Features should extend the base image using BuildKit before container creation
-    // - Cache options (--cache-from, --cache-to) should be passed to build process
-    // - Feature metadata should be merged into final configuration
-    //
-    // The infrastructure for feature installation exists in deacon_core::feature_installer.
-    // Full implementation would involve:
-    // 1. Create FeatureInstaller with docker client and BuildKit/cache options
-    // 2. Call install_features() to build an extended image
-    // 3. Update config.image to point to the feature-extended image
-    // 4. Pass the extended image to docker.up()
-    //
-    // Current implementation: Features are merged into config, providing correct metadata.
-    // The DockerLifecycle::up() method will handle features during container creation.
-    // This approach integrates with the existing container.rs feature installation flow.
+    // T016: Feature-driven image extension with BuildKit
+    // Features should extend the base image using BuildKit before container creation.
+    // This implementation builds features into the image during the docker build phase,
+    // following the DevContainer specification and reference CLI implementation.
 
     if !config
         .features
@@ -1715,15 +1698,21 @@ async fn execute_container_up(
         .map(|o| o.is_empty())
         .unwrap_or(true)
     {
-        debug!("Features detected in configuration - will be applied during container creation");
+        info!("Installing features during image build phase");
         if let Some(features_obj) = config.features.as_object() {
             debug!("Feature count: {}", features_obj.len());
             for (feature_id, _) in features_obj {
                 debug!("  - Feature: {}", feature_id);
             }
         }
-        // Note: Actual feature installation is delegated to DockerLifecycle::up()
-        // which handles feature application via the container runtime
+
+        // Build extended image with features
+        let extended_image =
+            build_image_with_features(&config, &identity, workspace_folder).await?;
+
+        // Update config to use the extended image
+        config.image = Some(extended_image);
+        info!("Features installed successfully, using extended image");
     }
 
     // Create container using DockerLifecycle trait
@@ -2100,6 +2089,246 @@ async fn execute_initialize_command(
         result.phases.len()
     );
 
+    Ok(())
+}
+
+/// Build an extended Docker image with features installed using BuildKit
+///
+/// This function:
+/// 1. Parses and resolves feature dependencies from the configuration
+/// 2. Downloads features from OCI registries
+/// 3. Generates a Dockerfile with BuildKit mount syntax for features
+/// 4. Builds the extended image using docker buildx build
+/// 5. Returns the tag of the newly built image
+#[instrument(skip(config, identity))]
+async fn build_image_with_features(
+    config: &DevContainerConfig,
+    identity: &ContainerIdentity,
+    workspace_folder: &Path,
+) -> Result<String> {
+    use deacon_core::dockerfile_generator::{DockerfileConfig, DockerfileGenerator};
+    use deacon_core::features::{FeatureDependencyResolver, OptionValue, ResolvedFeature};
+    use deacon_core::oci::{default_fetcher, DownloadedFeature, FeatureRef};
+    use deacon_core::registry_parser::parse_registry_reference;
+    use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory, RuntimeKind};
+    use std::collections::HashMap;
+    use std::io::Write;
+
+    info!("Building extended image with features");
+
+    // Get base image
+    let base_image = config
+        .image
+        .as_ref()
+        .ok_or_else(|| DeaconError::Runtime("No base image specified".to_string()))?;
+
+    // Parse features from config
+    let features_obj = config
+        .features
+        .as_object()
+        .ok_or_else(|| DeaconError::Runtime("Features must be an object".to_string()))?;
+
+    if features_obj.is_empty() {
+        return Ok(base_image.clone());
+    }
+
+    // Create feature fetcher
+    let fetcher = default_fetcher()?;
+
+    // Parse and fetch features
+    let mut feature_refs = Vec::new();
+    let mut feature_options_map: HashMap<String, HashMap<String, OptionValue>> = HashMap::new();
+
+    for (feature_id, feature_options) in features_obj.iter() {
+        // Parse feature reference
+        let (registry_url, namespace, name, tag) =
+            parse_registry_reference(feature_id).map_err(|e| {
+                DeaconError::Runtime(format!("Invalid feature ID '{}': {}", feature_id, e))
+            })?;
+
+        let feature_ref = FeatureRef::new(registry_url, namespace, name, tag);
+
+        // Parse options
+        let options = if let Some(opts_obj) = feature_options.as_object() {
+            opts_obj
+                .iter()
+                .filter_map(|(k, v)| {
+                    let opt_val = match v {
+                        serde_json::Value::Bool(b) => Some(OptionValue::Boolean(*b)),
+                        serde_json::Value::String(s) => Some(OptionValue::String(s.clone())),
+                        serde_json::Value::Number(n) => Some(OptionValue::Number(n.clone())),
+                        serde_json::Value::Array(a) => Some(OptionValue::Array(a.clone())),
+                        serde_json::Value::Object(o) => Some(OptionValue::Object(o.clone())),
+                        serde_json::Value::Null => Some(OptionValue::Null),
+                    };
+                    opt_val.map(|v| (k.clone(), v))
+                })
+                .collect()
+        } else {
+            HashMap::new()
+        };
+
+        feature_options_map.insert(feature_ref.reference(), options);
+        feature_refs.push(feature_ref);
+    }
+
+    // Download features
+    debug!("Downloading {} features", feature_refs.len());
+    let mut downloaded_features: HashMap<String, DownloadedFeature> = HashMap::new();
+    for feature_ref in &feature_refs {
+        let downloaded = fetcher.fetch_feature(feature_ref).await?;
+        downloaded_features.insert(downloaded.metadata.id.clone(), downloaded);
+    }
+
+    // Create resolved features
+    let mut resolved_features = Vec::new();
+    for feature_ref in &feature_refs {
+        let reference = feature_ref.reference();
+        let downloaded = downloaded_features
+            .values()
+            .find(|df| {
+                // Match by ID or by checking if the feature name matches
+                df.metadata.id == reference
+                    || reference.contains(&df.metadata.id)
+                    || df.metadata.id.contains(&feature_ref.name)
+            })
+            .ok_or_else(|| {
+                DeaconError::Runtime(format!("Downloaded feature not found for {}", reference))
+            })?;
+
+        let options = feature_options_map
+            .get(&reference)
+            .cloned()
+            .unwrap_or_default();
+
+        resolved_features.push(ResolvedFeature {
+            id: downloaded.metadata.id.clone(),
+            source: reference.clone(),
+            options,
+            metadata: downloaded.metadata.clone(),
+        });
+    }
+
+    // Resolve dependencies
+    let override_order = config.override_feature_install_order.clone();
+    let resolver = FeatureDependencyResolver::new(override_order);
+    let installation_plan = resolver.resolve(&resolved_features)?;
+
+    debug!(
+        "Resolved {} features into {} levels",
+        installation_plan.len(),
+        installation_plan.levels.len()
+    );
+
+    // Create temporary directory for features and Dockerfile
+    let temp_dir =
+        std::env::temp_dir().join(format!("deacon-features-{}", identity.workspace_hash));
+    std::fs::create_dir_all(&temp_dir)?;
+
+    // Create features directory structure for BuildKit context
+    let features_dir = temp_dir.join("features");
+    std::fs::create_dir_all(&features_dir)?;
+
+    // Copy features to the BuildKit context directory
+    for (_level_idx, level) in installation_plan.levels.iter().enumerate() {
+        for feature_id in level {
+            let feature = installation_plan.get_feature(feature_id).ok_or_else(|| {
+                DeaconError::Runtime(format!("Feature {} not found in plan", feature_id))
+            })?;
+
+            // Find the downloaded feature directory
+            let downloaded = downloaded_features
+                .values()
+                .find(|df| df.metadata.id == feature.id)
+                .ok_or_else(|| {
+                    DeaconError::Runtime(format!("Downloaded feature {} not found", feature.id))
+                })?;
+
+            // Sanitize feature ID for directory name
+            let sanitized_id = feature
+                .id
+                .chars()
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>();
+
+            // Copy feature directory to BuildKit context
+            let feature_dest = features_dir.join(&sanitized_id);
+            copy_dir_all(&downloaded.path, &feature_dest)?;
+        }
+    }
+
+    // Generate Dockerfile
+    let dockerfile_config = DockerfileConfig {
+        base_image: base_image.clone(),
+        target_stage: "dev_containers_target_stage".to_string(),
+        features_source_dir: features_dir.display().to_string(),
+    };
+
+    let generator = DockerfileGenerator::new(dockerfile_config.clone());
+    let dockerfile_content = generator.generate(&installation_plan)?;
+
+    // Write Dockerfile
+    let dockerfile_path = temp_dir.join("Dockerfile.extended");
+    let mut dockerfile_file = std::fs::File::create(&dockerfile_path)?;
+    dockerfile_file.write_all(dockerfile_content.as_bytes())?;
+
+    debug!("Generated Dockerfile at {}", dockerfile_path.display());
+
+    // Generate image tag
+    let extended_image_tag = format!("deacon-devcontainer-features:{}", identity.workspace_hash);
+
+    // Check BuildKit availability
+    use deacon_core::build::buildkit::is_buildkit_available;
+    if !is_buildkit_available()? {
+        return Err(DeaconError::Runtime(
+            "BuildKit is required for feature installation. Please enable BuildKit.".to_string(),
+        )
+        .into());
+    }
+
+    // Build image with BuildKit
+    let build_args = generator.generate_build_args(&dockerfile_path, &extended_image_tag);
+
+    // Execute build
+    let docker = RuntimeFactory::create_runtime(RuntimeKind::Docker)?;
+    debug!("Building image with args: {:?}", build_args);
+
+    // Get the inner Docker runtime to call build_image on CliDocker
+    if let ContainerRuntimeImpl::Docker(_docker_runtime) = docker {
+        // Access the inner CliDocker to call build_image
+        use deacon_core::docker::CliDocker;
+        let cli_docker = CliDocker::new();
+        let _image_id = cli_docker.build_image(&build_args).await?;
+    } else {
+        return Err(DeaconError::Runtime(
+            "Docker runtime required for feature installation".to_string(),
+        )
+        .into());
+    }
+
+    info!("Successfully built extended image: {}", extended_image_tag);
+
+    Ok(extended_image_tag)
+}
+
+/// Recursively copy a directory
+fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
+    std::fs::create_dir_all(&dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        }
+    }
     Ok(())
 }
 
