@@ -69,6 +69,9 @@ pub trait ContainerOps {
 
     /// Get container image ID
     async fn get_container_image(&self, container_id: &str) -> Result<String>;
+
+    /// Commit a container to create a new image
+    async fn commit_container(&self, container_id: &str, image_tag: &str) -> Result<()>;
 }
 
 impl ContainerIdentity {

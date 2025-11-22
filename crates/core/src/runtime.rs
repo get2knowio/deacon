@@ -104,6 +104,14 @@ impl ContainerRuntimeImpl {
             Self::Podman(_) => "podman",
         }
     }
+
+    /// Get the underlying CliDocker/CliRuntime instance for feature installation
+    pub fn cli_docker(&self) -> crate::docker::CliDocker {
+        match self {
+            Self::Docker(runtime) => runtime.docker.clone(),
+            Self::Podman(runtime) => runtime.runtime.clone(),
+        }
+    }
 }
 
 #[allow(async_fn_in_trait)]
@@ -196,6 +204,13 @@ impl ContainerOps for ContainerRuntimeImpl {
         match self {
             Self::Docker(runtime) => runtime.get_container_image(container_id).await,
             Self::Podman(runtime) => runtime.get_container_image(container_id).await,
+        }
+    }
+
+    async fn commit_container(&self, container_id: &str, image_tag: &str) -> Result<()> {
+        match self {
+            Self::Docker(runtime) => runtime.commit_container(container_id, image_tag).await,
+            Self::Podman(runtime) => runtime.commit_container(container_id, image_tag).await,
         }
     }
 }
@@ -308,6 +323,10 @@ impl ContainerOps for DockerRuntime {
     async fn get_container_image(&self, container_id: &str) -> Result<String> {
         self.docker.get_container_image(container_id).await
     }
+
+    async fn commit_container(&self, container_id: &str, image_tag: &str) -> Result<()> {
+        self.docker.commit_container(container_id, image_tag).await
+    }
 }
 
 #[allow(async_fn_in_trait)]
@@ -414,6 +433,10 @@ impl ContainerOps for PodmanRuntime {
 
     async fn get_container_image(&self, container_id: &str) -> Result<String> {
         self.runtime.get_container_image(container_id).await
+    }
+
+    async fn commit_container(&self, container_id: &str, image_tag: &str) -> Result<()> {
+        self.runtime.commit_container(container_id, image_tag).await
     }
 }
 

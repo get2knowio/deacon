@@ -1699,6 +1699,35 @@ impl ContainerOps for CliRuntime {
         .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
         .map_err(Into::into)
     }
+
+    #[instrument(skip(self))]
+    async fn commit_container(&self, container_id: &str, image_tag: &str) -> Result<()> {
+        debug!("Committing container {} to image {}", container_id, image_tag);
+
+        let runtime_path = self.runtime_path.clone();
+        let container_id = container_id.to_string();
+        let image_tag = image_tag.to_string();
+
+        tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
+            let output = Command::new(&runtime_path)
+                .args(["commit", &container_id, &image_tag])
+                .output()
+                .map_err(|e| DockerError::CLIError(format!("Failed to commit container: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(DockerError::CLIError(format!(
+                    "Commit command failed: {}",
+                    stderr
+                )));
+            }
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        .map_err(Into::into)
+    }
 }
 
 impl DockerLifecycle for CliRuntime {
@@ -2335,6 +2364,30 @@ pub mod mock {
             }
 
             debug!("MockDocker container not found for image query");
+            Err(DockerError::CLIError(format!("Container {} not found", container_id)).into())
+        }
+
+        #[instrument(skip(self))]
+        async fn commit_container(&self, container_id: &str, image_tag: &str) -> Result<()> {
+            debug!(
+                "MockDocker commit_container called for ID: {} with tag: {}",
+                container_id, image_tag
+            );
+
+            let config = self.config.lock().unwrap();
+            if config.daemon_unavailable {
+                return Err(DockerError::NotInstalled.into());
+            }
+
+            let containers = self.containers.lock().unwrap();
+            for container in containers.iter() {
+                if container.id == container_id {
+                    debug!("MockDocker committed container to image: {}", image_tag);
+                    return Ok(());
+                }
+            }
+
+            debug!("MockDocker container not found for commit");
             Err(DockerError::CLIError(format!("Container {} not found", container_id)).into())
         }
     }
