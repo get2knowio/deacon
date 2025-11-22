@@ -2106,11 +2106,11 @@ async fn build_image_with_features(
     identity: &ContainerIdentity,
     workspace_folder: &Path,
 ) -> Result<String> {
+    use deacon_core::docker::CliDocker;
     use deacon_core::dockerfile_generator::{DockerfileConfig, DockerfileGenerator};
     use deacon_core::features::{FeatureDependencyResolver, OptionValue, ResolvedFeature};
     use deacon_core::oci::{default_fetcher, DownloadedFeature, FeatureRef};
     use deacon_core::registry_parser::parse_registry_reference;
-    use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory, RuntimeKind};
     use std::collections::HashMap;
     use std::io::Write;
 
@@ -2295,22 +2295,10 @@ async fn build_image_with_features(
     // Build image with BuildKit
     let build_args = generator.generate_build_args(&dockerfile_path, &extended_image_tag);
 
-    // Execute build
-    let docker = RuntimeFactory::create_runtime(RuntimeKind::Docker)?;
+    // Execute build using CliDocker
+    let cli_docker = CliDocker::new();
     debug!("Building image with args: {:?}", build_args);
-
-    // Get the inner Docker runtime to call build_image on CliDocker
-    if let ContainerRuntimeImpl::Docker(_docker_runtime) = docker {
-        // Access the inner CliDocker to call build_image
-        use deacon_core::docker::CliDocker;
-        let cli_docker = CliDocker::new();
-        let _image_id = cli_docker.build_image(&build_args).await?;
-    } else {
-        return Err(DeaconError::Runtime(
-            "Docker runtime required for feature installation".to_string(),
-        )
-        .into());
-    }
+    let _image_id = cli_docker.build_image(&build_args).await?;
 
     info!("Successfully built extended image: {}", extended_image_tag);
 

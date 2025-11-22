@@ -10,6 +10,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::{debug, instrument};
 
+/// Build context name for feature content source
+/// This name is used in both the Dockerfile generation and build arguments
+const FEATURE_CONTENT_SOURCE: &str = "dev_containers_feature_content_source";
+
 /// Configuration for Dockerfile generation
 #[derive(Debug, Clone)]
 pub struct DockerfileConfig {
@@ -103,8 +107,8 @@ impl DockerfileGenerator {
 
         // Start RUN command with BuildKit mount
         command.push_str(&format!(
-            "RUN --mount=type=bind,from=dev_containers_feature_content_source,source={},target={} \\\n",
-            feature_dir_name, mount_target
+            "RUN --mount=type=bind,from={},source={},target={} \\\n",
+            FEATURE_CONTENT_SOURCE, feature_dir_name, mount_target
         ));
 
         // Add environment variables for feature options
@@ -177,8 +181,8 @@ impl DockerfileGenerator {
             "--load".to_string(),
             "--build-context".to_string(),
             format!(
-                "dev_containers_feature_content_source={}",
-                self.config.features_source_dir
+                "{}={}",
+                FEATURE_CONTENT_SOURCE, self.config.features_source_dir
             ),
             "--build-arg".to_string(),
             format!("_DEV_CONTAINERS_BASE_IMAGE={}", self.config.base_image),

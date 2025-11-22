@@ -1849,11 +1849,11 @@ impl CliRuntime {
                 }
             }
 
-            // If we can't find the image ID in the output, try to get it from the tag
-            // by inspecting the image that was just built
-            debug!("Could not parse image ID from build output, attempting to inspect built image");
+            // If we can't find the image ID in the output, return an error
+            // The image was likely built but we couldn't parse its ID from the output
+            debug!("Could not parse image ID from build output");
             Err(DockerError::CLIError(
-                "Could not determine image ID from build output".to_string(),
+                "Could not determine image ID from build output. Image may have been built successfully.".to_string(),
             ))
         })
         .await
