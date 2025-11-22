@@ -6,13 +6,13 @@
 use crate::commands::shared::{
     load_config, resolve_env_and_user, ConfigLoadArgs, ConfigLoadResult, TerminalDimensions,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::{ContainerIdentity, ContainerSelector};
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::{Docker, DockerLifecycle, ExecConfig};
-use deacon_core::errors::DeaconError;
+use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::ports::PortForwardingManager;
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
@@ -983,6 +983,219 @@ async fn merge_image_metadata_into_config(
     Ok(config)
 }
 
+/// Build configuration extracted from DevContainerConfig
+#[derive(Debug, Clone)]
+struct BuildConfig {
+    dockerfile: String,
+    context: String,
+    context_folder: PathBuf,
+    target: Option<String>,
+    options: HashMap<String, String>,
+}
+
+/// Extract build configuration from DevContainerConfig.build object
+fn extract_build_config_from_devcontainer(
+    config: &DevContainerConfig,
+    workspace_folder: &Path,
+) -> Result<Option<BuildConfig>> {
+    // If image is specified, no build needed
+    if config.image.is_some() {
+        return Ok(None);
+    }
+
+    // Determine config folder (where devcontainer.json is located)
+    // Typically .devcontainer/ or workspace root
+    let config_folder = workspace_folder.join(".devcontainer");
+    let config_folder = if config_folder.exists() {
+        config_folder
+    } else {
+        workspace_folder.to_path_buf()
+    };
+
+    // Check for build object with dockerfile field
+    let build_value = match &config.build {
+        Some(v) => v,
+        None => {
+            // Check for top-level dockerFile field
+            if let Some(dockerfile) = &config.dockerfile {
+                let dockerfile_path = config_folder.join(dockerfile);
+                if !dockerfile_path.exists() {
+                    return Err(
+                        DeaconError::Config(deacon_core::errors::ConfigError::NotFound {
+                            path: dockerfile_path.to_string_lossy().to_string(),
+                        })
+                        .into(),
+                    );
+                }
+
+                return Ok(Some(BuildConfig {
+                    dockerfile: dockerfile.clone(),
+                    context: ".".to_string(),
+                    context_folder: config_folder.clone(),
+                    target: None,
+                    options: HashMap::new(),
+                }));
+            }
+            return Ok(None);
+        }
+    };
+
+    let build_obj = build_value.as_object().ok_or_else(|| {
+        DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+            message: "build field must be an object".to_string(),
+        })
+    })?;
+
+    // Extract dockerfile from build object
+    let dockerfile = build_obj
+        .get("dockerfile")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: "build.dockerfile is required when using build object".to_string(),
+            })
+        })?;
+
+    // Verify dockerfile exists - it's resolved relative to the config folder (where devcontainer.json is)
+    // The context is used at build time as the Docker build context, but the Dockerfile path
+    // itself is relative to the devcontainer.json location
+    let dockerfile_path = config_folder.join(dockerfile);
+    if !dockerfile_path.exists() {
+        return Err(
+            DeaconError::Config(deacon_core::errors::ConfigError::NotFound {
+                path: dockerfile_path.to_string_lossy().to_string(),
+            })
+            .into(),
+        );
+    }
+
+    let mut build_config = BuildConfig {
+        dockerfile: dockerfile_path
+            .to_str()
+            .ok_or_else(|| {
+                DeaconError::Docker(DockerError::CLIError("Invalid dockerfile path".to_string()))
+            })?
+            .to_string(),
+        context: ".".to_string(),
+        context_folder: config_folder.clone(),
+        target: None,
+        options: HashMap::new(),
+    };
+
+    // Extract context
+    if let Some(context) = build_obj.get("context").and_then(|v| v.as_str()) {
+        build_config.context = context.to_string();
+    }
+
+    // Extract target
+    if let Some(target) = build_obj.get("target").and_then(|v| v.as_str()) {
+        build_config.target = Some(target.to_string());
+    }
+
+    // Extract build options/args
+    if let Some(options) = build_obj.get("options").and_then(|v| v.as_object()) {
+        for (key, value) in options {
+            let val_str = value
+                .as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| value.to_string());
+            build_config.options.insert(key.clone(), val_str);
+        }
+    }
+
+    // Extract build args (upstream-compatible: build.args)
+    if let Some(args_obj) = build_obj.get("args").and_then(|v| v.as_object()) {
+        for (key, value) in args_obj {
+            let val_str = value
+                .as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| value.to_string());
+            build_config.options.insert(key.clone(), val_str);
+        }
+    }
+
+    Ok(Some(build_config))
+}
+
+/// Build Docker image from build configuration
+#[instrument(skip(build_config))]
+async fn build_image_from_config(
+    build_config: &BuildConfig,
+    no_cache: bool,
+) -> Result<String> {
+    debug!(
+        "Building image from Dockerfile: {}",
+        build_config.dockerfile
+    );
+
+    // Resolve context path relative to the directory containing devcontainer.json
+    // This handles ".." and other relative paths correctly
+    let context_path = build_config.context_folder
+        .join(&build_config.context)
+        .canonicalize()
+        .context("Failed to resolve build context path")?;
+
+    // Prepare docker build arguments
+    let mut build_args = vec!["build".to_string()];
+
+    // Add dockerfile (already a full path from extract_build_config_from_devcontainer)
+    build_args.push("-f".to_string());
+    build_args.push(build_config.dockerfile.clone());
+
+    // Add no-cache flag
+    if no_cache {
+        build_args.push("--no-cache".to_string());
+    }
+
+    // Add target
+    if let Some(target) = &build_config.target {
+        build_args.push("--target".to_string());
+        build_args.push(target.clone());
+    }
+
+    // Add build args from config
+    for (key, value) in &build_config.options {
+        build_args.push("--build-arg".to_string());
+        build_args.push(format!("{}={}", key, value));
+    }
+
+    // Add quiet flag to reduce output noise and get just the image ID
+    build_args.push("-q".to_string());
+
+    // Finally add build context (must be last)
+    build_args.push(
+        context_path
+            .to_str()
+            .ok_or_else(|| {
+                DeaconError::Docker(DockerError::CLIError("Invalid context path".to_string()))
+            })?
+            .to_string(),
+    );
+
+    debug!("Docker build command: docker {}", build_args.join(" "));
+
+    // Execute docker build
+    let output = tokio::process::Command::new("docker")
+        .args(&build_args)
+        .output()
+        .await
+        .context("Failed to execute docker build")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DeaconError::Docker(DockerError::CLIError(format!(
+            "Docker build failed: {}",
+            stderr
+        )))
+        .into());
+    }
+
+    let image_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    debug!("Built image with ID: {}", image_id);
+
+    Ok(image_id)
+}
+
 /// Execute up command with a specific runtime implementation
 #[instrument(skip(args, runtime))]
 async fn execute_up_with_runtime(
@@ -1087,6 +1300,22 @@ async fn execute_up_with_runtime(
         let substitution_context = SubstitutionContext::new(workspace_folder.as_path())?;
         let (substituted, _report) = config.apply_variable_substitution(&substitution_context);
         config = substituted;
+    }
+
+    // Build image from Dockerfile if needed (when no image specified but build object present)
+    if config.image.is_none() && !config.uses_compose() {
+        if let Some(build_config) =
+            extract_build_config_from_devcontainer(&config, &workspace_folder)?
+        {
+            info!("Building image from Dockerfile configuration");
+            let built_image_id =
+                build_image_from_config(&build_config, args.build_no_cache)
+                    .await?;
+
+            // Update config to use the built image
+            config.image = Some(built_image_id.clone());
+            info!("Successfully built image: {}", built_image_id);
+        }
     }
 
     // Create container identity for state tracking

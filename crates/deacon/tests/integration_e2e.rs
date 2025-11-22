@@ -660,7 +660,9 @@ fn test_e2e_error_handling() {
         "--workspace-folder",
         harness.workspace_path.to_str().unwrap(),
     ]);
-    result.assert_failure().assert_stderr_contains("Configuration file not found");
+    result
+        .assert_failure()
+        .assert_stderr_contains("Configuration file not found");
 
     // Test 2: Invalid JSON
     let invalid_config = r#"{ "name": "invalid" missing comma }"#;
