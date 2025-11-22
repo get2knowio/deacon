@@ -518,6 +518,20 @@ impl FeatureInstaller {
         env.insert("PROVIDED_OPTIONS".to_string(), options_json);
         env.insert("DEACON".to_string(), "1".to_string());
 
+        // Expose feature options as uppercase environment variables for install script
+        // This is per the DevContainer spec - options are converted to UPPERCASE env vars
+        for (key, value) in &feature.options {
+            let env_key = key.to_uppercase();
+            let env_value = match value {
+                crate::features::OptionValue::String(s) => s.clone(),
+                crate::features::OptionValue::Number(n) => n.to_string(),
+                crate::features::OptionValue::Boolean(b) => b.to_string(),
+                crate::features::OptionValue::Null => "".to_string(),
+                _ => serde_json::to_string(value).unwrap_or_default(),
+            };
+            env.insert(env_key, env_value);
+        }
+
         // Set FEATURE_PATH for compatibility
         env.insert(
             "FEATURE_PATH".to_string(),

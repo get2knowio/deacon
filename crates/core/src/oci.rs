@@ -406,6 +406,74 @@ impl ReqwestClient {
         Self::with_timeout(None)
     }
 
+    /// Parse WWW-Authenticate header and exchange for token
+    ///
+    /// Implements OCI Distribution Spec token authentication for anonymous access.
+    /// Parses the Bearer challenge from WWW-Authenticate header and exchanges for a token.
+    async fn exchange_token(
+        &self,
+        www_authenticate: &str,
+    ) -> std::result::Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        // Parse Bearer challenge: Bearer realm="...",service="...",scope="..."
+        let mut realm = None;
+        let mut service = None;
+        let mut scope = None;
+
+        // Simple parser for Bearer challenge parameters
+        if let Some(bearer_params) = www_authenticate.strip_prefix("Bearer ") {
+            for param in bearer_params.split(',') {
+                let param = param.trim();
+                if let Some((key, value)) = param.split_once('=') {
+                    let value = value.trim_matches('"');
+                    match key {
+                        "realm" => realm = Some(value.to_string()),
+                        "service" => service = Some(value.to_string()),
+                        "scope" => scope = Some(value.to_string()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        let realm = realm.ok_or("Missing realm in WWW-Authenticate header")?;
+
+        // Build token URL
+        let mut token_url = realm;
+        let mut params = Vec::new();
+        if let Some(service) = service {
+            params.push(format!("service={}", service));
+        }
+        if let Some(scope) = scope {
+            params.push(format!("scope={}", scope));
+        }
+        if !params.is_empty() {
+            token_url.push('?');
+            token_url.push_str(&params.join("&"));
+        }
+
+        debug!("Exchanging for anonymous token at: {}", token_url);
+
+        // Make token request (anonymous - no credentials)
+        let response = self.client.get(&token_url).send().await?;
+
+        if !response.status().is_success() {
+            return Err(format!("Token exchange failed with status: {}", response.status()).into());
+        }
+
+        let token_response: serde_json::Value = response.json().await?;
+
+        // Extract token from response
+        let token = token_response
+            .get("token")
+            .or_else(|| token_response.get("access_token"))
+            .and_then(|t| t.as_str())
+            .ok_or("Token not found in response")?
+            .to_string();
+
+        debug!("Successfully obtained anonymous access token");
+        Ok(token)
+    }
+
     /// Create a new ReqwestClient with custom timeout configuration
     ///
     /// # Arguments
@@ -624,8 +692,8 @@ impl HttpClient for ReqwestClient {
         }
 
         let mut request = self.client.get(url);
-        for (key, value) in headers {
-            request = request.header(&key, &value);
+        for (key, value) in &headers {
+            request = request.header(key, value);
         }
 
         let response = request.send().await.map_err(|e| {
@@ -644,8 +712,36 @@ impl HttpClient for ReqwestClient {
             }
         })?;
 
-        // Handle 401 authentication errors
+        // Handle 401 authentication errors with token exchange
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            // Try to get WWW-Authenticate header for token exchange
+            if let Some(www_auth) = response.headers().get("www-authenticate") {
+                if let Ok(www_auth_str) = www_auth.to_str() {
+                    if www_auth_str.starts_with("Bearer ") {
+                        debug!("Got 401 with Bearer challenge, attempting token exchange");
+
+                        // Attempt token exchange for anonymous access
+                        if let Ok(token) = self.exchange_token(www_auth_str).await {
+                            // Retry request with the obtained token
+                            let mut retry_headers = headers.clone();
+                            retry_headers
+                                .insert("Authorization".to_string(), format!("Bearer {}", token));
+
+                            let mut retry_request = self.client.get(url);
+                            for (key, value) in retry_headers {
+                                retry_request = retry_request.header(&key, &value);
+                            }
+
+                            let retry_response = retry_request.send().await?;
+
+                            if retry_response.status().is_success() {
+                                return Ok(retry_response.bytes().await?);
+                            }
+                        }
+                    }
+                }
+            }
+
             return Err(format!("Authentication failed for URL: {}", url).into());
         }
 
@@ -670,8 +766,8 @@ impl HttpClient for ReqwestClient {
         }
 
         let mut request = self.client.get(url);
-        for (key, value) in headers {
-            request = request.header(&key, &value);
+        for (key, value) in &headers {
+            request = request.header(key, value);
         }
 
         let response = request.send().await.map_err(|e| {
@@ -690,6 +786,53 @@ impl HttpClient for ReqwestClient {
             }
         })?;
 
+        // Handle 401 authentication errors with token exchange
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            // Try to get WWW-Authenticate header for token exchange
+            if let Some(www_auth) = response.headers().get("www-authenticate") {
+                if let Ok(www_auth_str) = www_auth.to_str() {
+                    if www_auth_str.starts_with("Bearer ") {
+                        debug!("Got 401 with Bearer challenge, attempting token exchange");
+
+                        // Attempt token exchange for anonymous access
+                        if let Ok(token) = self.exchange_token(www_auth_str).await {
+                            // Retry request with the obtained token
+                            let mut retry_headers = headers.clone();
+                            retry_headers
+                                .insert("Authorization".to_string(), format!("Bearer {}", token));
+
+                            let mut retry_request = self.client.get(url);
+                            for (key, value) in &retry_headers {
+                                retry_request = retry_request.header(key, value);
+                            }
+
+                            let retry_response = retry_request.send().await?;
+                            let status = retry_response.status().as_u16();
+
+                            // Extract headers from retry response
+                            let mut response_headers = HashMap::new();
+                            for (key, value) in retry_response.headers() {
+                                if let Ok(value_str) = value.to_str() {
+                                    response_headers.insert(key.to_string(), value_str.to_string());
+                                }
+                            }
+
+                            if retry_response.status().is_success() {
+                                let bytes = retry_response.bytes().await?;
+                                return Ok(HttpResponse {
+                                    status,
+                                    headers: response_headers,
+                                    body: bytes,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            return Err(format!("Authentication failed for URL: {}", url).into());
+        }
+
         let status = response.status().as_u16();
 
         // Extract headers
@@ -698,11 +841,6 @@ impl HttpClient for ReqwestClient {
             if let Ok(value_str) = value.to_str() {
                 response_headers.insert(key.to_string(), value_str.to_string());
             }
-        }
-
-        // Handle 401 authentication errors
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(format!("Authentication failed for URL: {}", url).into());
         }
 
         // Handle other HTTP errors
