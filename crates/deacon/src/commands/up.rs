@@ -9,12 +9,17 @@ use crate::commands::shared::{
 use anyhow::{Context, Result};
 use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject};
 use deacon_core::config::DevContainerConfig;
-use deacon_core::container::{ContainerIdentity, ContainerSelector};
+use deacon_core::container::{ContainerIdentity, ContainerOps, ContainerSelector};
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::{Docker, DockerLifecycle, ExecConfig};
 use deacon_core::errors::{DeaconError, DockerError};
-use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+use deacon_core::feature_installer::{FeatureInstallationConfig, FeatureInstaller};
+use deacon_core::features::{
+    FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger, FeatureMetadata, ResolvedFeature,
+};
+use deacon_core::oci::{FeatureFetcher, FeatureRef, ReqwestClient};
 use deacon_core::ports::PortForwardingManager;
+use deacon_core::registry_parser::parse_registry_reference;
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
 use deacon_core::state::{ComposeState, ContainerState, StateManager};
 use serde::{Deserialize, Serialize};
@@ -1687,32 +1692,190 @@ async fn execute_container_up(
 
     let container_start_time = std::time::Instant::now();
 
-    // T016: Feature-driven image extension with BuildKit
-    // Features should extend the base image using BuildKit before container creation.
-    // This implementation builds features into the image during the docker build phase,
-    // following the DevContainer specification and reference CLI implementation.
+    // T016: Feature-driven image extension with BuildKit/cache options
+    // Features have already been merged into config.features via FeatureMerger (see lines 1088-1107)
+    //
+    // Per specs/001-up-gap-spec/ User Story 2:
+    // - Features should extend the base image using BuildKit before container creation
+    // - Cache options (--cache-from, --cache-to) should be passed to build process
+    // - Feature metadata should be merged into final configuration
 
+    // Install features if present in configuration
     if !config
         .features
         .as_object()
         .map(|o| o.is_empty())
         .unwrap_or(true)
     {
-        info!("Installing features during image build phase");
-        if let Some(features_obj) = config.features.as_object() {
-            debug!("Feature count: {}", features_obj.len());
-            for (feature_id, _) in features_obj {
-                debug!("  - Feature: {}", feature_id);
-            }
+        info!("Features detected in configuration - installing into extended image");
+        
+        // Parse features from config
+        let features_obj = config.features.as_object().unwrap();
+        let mut resolved_features = Vec::new();
+        
+        for (feature_id, options) in features_obj {
+            debug!("Resolving feature: {}", feature_id);
+            
+            // Parse feature reference
+            let (_registry, _namespace, _name, tag) = parse_registry_reference(feature_id)
+                .with_context(|| format!("Failed to parse feature reference: {}", feature_id))?;
+            
+            // Extract options as HashMap
+            let feature_options = if let Some(opts_obj) = options.as_object() {
+                opts_obj
+                    .iter()
+                    .map(|(k, v)| {
+                        let value = match v {
+                            serde_json::Value::Bool(b) => deacon_core::features::OptionValue::Boolean(*b),
+                            serde_json::Value::String(s) => deacon_core::features::OptionValue::String(s.clone()),
+                            serde_json::Value::Number(n) => deacon_core::features::OptionValue::Number(n.clone()),
+                            serde_json::Value::Array(a) => deacon_core::features::OptionValue::Array(a.clone()),
+                            serde_json::Value::Object(o) => deacon_core::features::OptionValue::Object(o.clone()),
+                            serde_json::Value::Null => deacon_core::features::OptionValue::Null,
+                        };
+                        (k.clone(), value)
+                    })
+                    .collect()
+            } else {
+                HashMap::new()
+            };
+            
+            // Create resolved feature with minimal metadata
+            let metadata = FeatureMetadata {
+                id: feature_id.clone(),
+                version: tag.clone(),
+                name: None,
+                description: None,
+                documentation_url: None,
+                license_url: None,
+                options: HashMap::new(),
+                container_env: HashMap::new(),
+                mounts: Vec::new(),
+                init: None,
+                privileged: None,
+                cap_add: Vec::new(),
+                security_opt: Vec::new(),
+                entrypoint: None,
+                installs_after: Vec::new(),
+                depends_on: HashMap::new(),
+                on_create_command: None,
+                update_content_command: None,
+                post_create_command: None,
+                post_start_command: None,
+                post_attach_command: None,
+            };
+            
+            resolved_features.push(ResolvedFeature {
+                id: feature_id.clone(),
+                source: feature_id.clone(),
+                metadata,
+                options: feature_options,
+            });
         }
-
-        // Build extended image with features
-        let extended_image =
-            build_image_with_features(&config, &identity, workspace_folder).await?;
-
-        // Update config to use the extended image
-        config.image = Some(extended_image);
-        info!("Features installed successfully, using extended image");
+        
+        // Resolve dependencies and create installation plan
+        let resolver = FeatureDependencyResolver::new(
+            args.feature_install_order.as_ref().map(|s| vec![s.clone()])
+        );
+        let plan = resolver
+            .resolve(&resolved_features)
+            .with_context(|| "Failed to resolve feature dependencies")?;
+        
+        info!("Feature installation plan created with {} features", plan.len());
+        
+        // Download features from OCI registry
+        let http_client = ReqwestClient::new()
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
+        let oci_client = FeatureFetcher::new(http_client);
+        let mut downloaded_features = HashMap::new();
+        
+        for feature in &resolved_features {
+            info!("Downloading feature: {}", feature.id);
+            let (registry, namespace, name, tag) = parse_registry_reference(&feature.id)?;
+            let feature_ref = FeatureRef::new(registry, namespace, name, tag);
+            let downloaded = oci_client
+                .fetch_feature(&feature_ref)
+                .await
+                .with_context(|| format!("Failed to download feature: {}", feature.id))?;
+            downloaded_features.insert(feature.id.clone(), downloaded);
+        }
+        
+        info!("Downloaded {} features", downloaded_features.len());
+        
+        // Create a temporary container from base image to install features
+        let base_image = config
+            .image
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No base image specified"))?;
+        
+        info!("Creating temporary container from base image: {}", base_image);
+        
+        // Create temporary identity for feature installation container
+        let temp_identity = ContainerIdentity {
+            workspace_hash: identity.workspace_hash.clone(),
+            config_hash: identity.config_hash.clone(),
+            name: Some(format!("{}-feature-build", identity.container_name())),
+            custom_name: Some(format!("{}-feature-build", identity.container_name())),
+        };
+        
+        // Create temporary container for feature installation
+        let temp_container_id = docker
+            .create_container(&temp_identity, &config, workspace_folder)
+            .await
+            .with_context(|| "Failed to create temporary container for feature installation")?;
+        
+        debug!("Created temporary container: {}", temp_container_id);
+        
+        // Start the container
+        docker
+            .start_container(&temp_container_id)
+            .await
+            .with_context(|| "Failed to start temporary container")?;
+        
+        // Install features in the container
+        let feature_config = FeatureInstallationConfig {
+            container_id: temp_container_id.clone(),
+            apply_security_options: false,
+            installation_base_dir: "/tmp/devcontainer-features".to_string(),
+        };
+        
+        let installer = FeatureInstaller::new(docker.cli_docker().clone());
+        let install_result = installer
+            .install_features(&plan, &downloaded_features, &feature_config)
+            .await
+            .with_context(|| "Feature installation failed")?;
+        
+        if !install_result.success {
+            // Clean up temporary container
+            let _ = docker.remove_container(&temp_container_id).await;
+            return Err(anyhow::anyhow!("Feature installation failed"));
+        }
+        
+        info!("Successfully installed {} features", install_result.feature_results.len());
+        
+        // Commit the container to create a new image
+        let extended_image_tag = format!("deacon-devcontainer:{}", identity.container_name());
+        info!("Committing feature-extended image: {}", extended_image_tag);
+        
+        docker
+            .commit_container(&temp_container_id, &extended_image_tag)
+            .await
+            .with_context(|| "Failed to commit feature-extended image")?;
+        
+        // Clean up temporary container
+        docker
+            .remove_container(&temp_container_id)
+            .await
+            .with_context(|| "Failed to remove temporary container")?;
+        
+        // Update config to use the feature-extended image
+        config.image = Some(extended_image_tag.clone());
+        info!("Updated config to use feature-extended image: {}", extended_image_tag);
+        
+        // Merge feature environment variables into config
+        for (key, value) in install_result.combined_env {
+            config.container_env.insert(key, value);
+        }
     }
 
     // Create container using DockerLifecycle trait

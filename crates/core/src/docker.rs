@@ -1702,10 +1702,7 @@ impl ContainerOps for CliRuntime {
 
     #[instrument(skip(self))]
     async fn commit_container(&self, container_id: &str, image_tag: &str) -> Result<()> {
-        debug!(
-            "Committing container {} to image {}",
-            container_id, image_tag
-        );
+        debug!("Committing container {} to image {}", container_id, image_tag);
 
         let runtime_path = self.runtime_path.clone();
         let container_id = container_id.to_string();
