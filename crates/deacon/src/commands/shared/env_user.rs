@@ -23,6 +23,7 @@ pub async fn resolve_env_and_user<D: Docker>(
     probe_mode: ContainerProbeMode,
     config_remote_env: Option<&HashMap<String, Option<String>>>,
     cli_env: &HashMap<String, String>,
+    cache_folder: Option<&std::path::Path>,
 ) -> EnvUserResolution {
     let effective_user = cli_user.or(config_remote_user);
 
@@ -35,6 +36,7 @@ pub async fn resolve_env_and_user<D: Docker>(
                 container_id,
                 probe_mode,
                 effective_user.as_deref(),
+                cache_folder,
             )
             .await
         {

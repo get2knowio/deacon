@@ -121,6 +121,7 @@ impl ContainerEnvironmentProber {
         container_id: &str,
         mode: ContainerProbeMode,
         user: Option<&str>,
+        cache_folder: Option<&std::path::Path>,
     ) -> Result<ContainerProbeResult>
     where
         D: Docker,
@@ -143,6 +144,25 @@ impl ContainerEnvironmentProber {
             });
         }
 
+        // Attempt to load cached probe result if available
+        if let Some(folder) = cache_folder {
+            let cache_key = format!("{}_{}", container_id, user.unwrap_or("root"));
+            let cache_path = folder.join(format!("env_probe_{}.json", cache_key));
+            if cache_path.exists() {
+                if let Ok(contents) = std::fs::read_to_string(&cache_path) {
+                    if let Ok(env_vars) = serde_json::from_str::<HashMap<String, String>>(&contents)
+                    {
+                        debug!("Loaded cached env probe from {}", cache_path.display());
+                        return Ok(ContainerProbeResult {
+                            env_vars: env_vars.clone(),
+                            shell_used: "cache".to_string(),
+                            var_count: env_vars.len(),
+                        });
+                    }
+                }
+            }
+        }
+
         // Detect shell in container
         let shell = self
             .detect_container_shell(docker, container_id, user)
@@ -162,6 +182,16 @@ impl ContainerEnvironmentProber {
             "Container environment probe completed: shell={}, mode={:?}, variables_captured={}",
             shell, mode, var_count
         );
+
+        // Persist cache if requested
+        if let Some(folder) = cache_folder {
+            let _ = std::fs::create_dir_all(folder);
+            let cache_key = format!("{}_{}", container_id, user.unwrap_or("root"));
+            let cache_path = folder.join(format!("env_probe_{}.json", cache_key));
+            if let Ok(contents) = serde_json::to_string(&env_vars) {
+                let _ = std::fs::write(&cache_path, contents);
+            }
+        }
 
         Ok(ContainerProbeResult {
             env_vars,

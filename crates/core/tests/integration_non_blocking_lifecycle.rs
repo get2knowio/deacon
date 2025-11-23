@@ -39,6 +39,7 @@ async fn test_non_blocking_phases_are_deferred() {
         non_blocking_timeout: Duration::from_secs(30),
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     // Create lifecycle commands with all phases
@@ -133,6 +134,7 @@ async fn test_skip_non_blocking_commands_behavior() {
         non_blocking_timeout: Duration::from_secs(30),
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     // Create lifecycle commands with all phases
@@ -202,6 +204,7 @@ async fn test_non_blocking_phases_sync_execution() {
         non_blocking_timeout: Duration::from_secs(30),
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     // Create lifecycle commands with all phases
@@ -321,6 +324,7 @@ async fn test_non_blocking_phase_command_failures_are_handled() {
         non_blocking_timeout: Duration::from_secs(30),
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     // Create lifecycle commands with all phases
@@ -427,6 +431,7 @@ async fn test_non_blocking_phase_timeout_handling() {
         non_blocking_timeout: Duration::from_millis(100), // Very short timeout
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     // Create lifecycle commands
@@ -499,6 +504,7 @@ async fn test_non_blocking_phases_with_progress_streaming() {
         non_blocking_timeout: Duration::from_secs(30),
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     // Create lifecycle commands with non-blocking phases

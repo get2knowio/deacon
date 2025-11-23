@@ -7,6 +7,7 @@ use crate::config::DevContainerConfig;
 use crate::errors::{ConfigError, DockerError, Result};
 use crate::security::SecurityOptions;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, instrument, warn};
@@ -32,6 +33,8 @@ pub struct ComposeProject {
     /// Profiles to activate for this project (Task T020)
     /// Automatically derived from runServices profiles
     pub profiles: Vec<String>,
+    /// Additional environment variables to inject into primary service
+    pub additional_env: HashMap<String, String>,
 }
 
 /// Mount specification for Docker Compose volumes (Task T020)
@@ -368,6 +371,7 @@ impl ComposeManager {
             env_files: Vec::new(),
             additional_mounts: Vec::new(), // Will be populated from CLI --mount flags
             profiles: Vec::new(),          // Will be populated from service profiles
+            additional_env: std::collections::HashMap::new(),
         })
     }
 
@@ -847,6 +851,7 @@ mod tests {
             env_files: Vec::new(),
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
+            additional_env: HashMap::new(),
         };
 
         let services = project.get_all_services();
@@ -920,6 +925,7 @@ mod tests {
             env_files: Vec::new(),
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
+            additional_env: HashMap::new(),
         };
 
         let all_services = project.get_all_services();
@@ -942,6 +948,7 @@ mod tests {
             env_files: Vec::new(),
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
+            additional_env: HashMap::new(),
         };
 
         let all_services = project.get_all_services();

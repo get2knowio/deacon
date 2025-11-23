@@ -132,6 +132,7 @@ async fn execute_lifecycle_commands(
         non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout
         use_login_shell: true, // Default: use login shell for lifecycle commands
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::LoginShell,
+        cache_folder: args.container_data_folder.clone(),
     };
 
     // Build lifecycle commands from configuration

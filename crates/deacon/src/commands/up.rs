@@ -22,7 +22,56 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::{env, fs};
 use tracing::{debug, info, instrument, warn};
+
+fn build_merged_configuration(
+    config: &DevContainerConfig,
+    config_path: &Path,
+) -> Result<serde_json::Value> {
+    use deacon_core::config::merge::LayeredConfigMerger;
+    let merged = LayeredConfigMerger::merge_with_provenance(&[(config.clone(), config_path)], true);
+    Ok(serde_json::to_value(merged)?)
+}
+
+/// Create a temporary Docker Compose override file to inject mounts and environment variables.
+///
+/// Applies only to the primary service; uses simple string volume syntax and environment map.
+fn create_compose_override(project: &ComposeProject) -> Result<Option<PathBuf>> {
+    if project.additional_mounts.is_empty() && project.additional_env.is_empty() {
+        return Ok(None);
+    }
+
+    let mut yaml = String::from("services:\n");
+    yaml.push_str(&format!("  {}:\n", project.service));
+
+    if !project.additional_env.is_empty() {
+        yaml.push_str("    environment:\n");
+        for (key, value) in &project.additional_env {
+            let escaped = value.replace('"', "\\\"");
+            yaml.push_str(&format!("      {}: \"{}\"\n", key, escaped));
+        }
+    }
+
+    if !project.additional_mounts.is_empty() {
+        yaml.push_str("    volumes:\n");
+        for mount in &project.additional_mounts {
+            let mut mount_str = format!("{}:{}", mount.source, mount.target);
+            if mount.external {
+                mount_str.push_str(":ro");
+            }
+            yaml.push_str(&format!("      - {}\n", mount_str));
+        }
+    }
+
+    let override_path = env::temp_dir().join(format!(
+        "deacon-compose-override-{}-{}.yml",
+        project.name,
+        std::process::id()
+    ));
+    fs::write(&override_path, yaml)?;
+    Ok(Some(override_path))
+}
 
 pub use crate::commands::shared::NormalizedRemoteEnv;
 
@@ -425,6 +474,7 @@ pub struct NormalizedUpInput {
     pub skip_non_blocking_commands: bool,
     pub prebuild: bool,
     pub default_user_env_probe: ContainerProbeMode,
+    pub cache_folder: Option<PathBuf>,
 
     // Mounts and environment
     pub mounts: Vec<NormalizedMount>,
@@ -619,6 +669,8 @@ pub struct UpArgs {
     pub runtime: Option<deacon_core::runtime::RuntimeKind>,
     pub redaction_config: deacon_core::redaction::RedactionConfig,
     pub secret_registry: deacon_core::redaction::SecretRegistry,
+    pub force_tty_if_json: bool,
+    pub cache_folder: Option<PathBuf>,
 }
 
 impl Default for UpArgs {
@@ -674,6 +726,7 @@ impl Default for UpArgs {
             runtime: None,
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::global_registry().clone(),
+            force_tty_if_json: false,
         }
     }
 }
@@ -711,6 +764,17 @@ impl Default for UpArgs {
 pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
     debug!("Starting up command execution");
     debug!("Up args: {:?}", args);
+
+    // Normalize workspace folder for git-root mounting when requested
+    let mut args = args;
+    if let Some(ws) = args.workspace_folder.clone() {
+        let resolved = if args.mount_workspace_git_root {
+            deacon_core::workspace::resolve_workspace_root(&ws)?
+        } else {
+            ws.canonicalize().unwrap_or(ws)
+        };
+        args.workspace_folder = Some(resolved);
+    }
 
     // Step 1: Validate and normalize inputs (fail-fast before any runtime operations)
     let _normalized = normalize_and_validate_args(&args)?;
@@ -842,6 +906,7 @@ fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpInput> {
         redaction_config: args.redaction_config.clone(),
         secret_registry: args.secret_registry.clone(),
         progress_tracker: args.progress_tracker.clone(),
+        cache_folder: args.container_data_folder.clone(),
     })
 }
 
@@ -1225,6 +1290,7 @@ async fn execute_up_with_runtime(
     let ConfigLoadResult {
         mut config,
         workspace_folder,
+        config_path,
         ..
     } = load_config(ConfigLoadArgs {
         workspace_folder: args.workspace_folder.as_deref(),
@@ -1249,6 +1315,14 @@ async fn execute_up_with_runtime(
             }
         }
         config.mounts = mounts;
+    }
+
+    // GPU availability hint threading
+    if config.run_args.is_empty() && args.gpu_availability.as_deref() == Some("all") {
+        // Minimal handling: add --gpus all to runArgs if not present
+        config
+            .run_args
+            .extend(["--gpus".to_string(), "all".to_string()]);
     }
 
     // T029: Merge image metadata into configuration
@@ -1297,6 +1371,39 @@ async fn execute_up_with_runtime(
         }
     }
 
+    // Apply data folders to config metadata
+    if let Some(ref container_data) = args.container_data_folder {
+        config
+            .container_env
+            .entry("DEACON_CONTAINER_DATA_FOLDER".to_string())
+            .or_insert(container_data.display().to_string());
+    }
+    if let Some(ref container_system_data) = args.container_system_data_folder {
+        config
+            .container_env
+            .entry("DEACON_CONTAINER_SYSTEM_DATA_FOLDER".to_string())
+            .or_insert(container_system_data.display().to_string());
+    }
+    if let Some(ref user_data) = args.user_data_folder {
+        config
+            .remote_env
+            .entry("DEACON_USER_DATA_FOLDER".to_string())
+            .or_insert(Some(user_data.display().to_string()));
+    }
+    if let Some(ref session_data) = args.container_session_data_folder {
+        config
+            .container_env
+            .entry("DEACON_CONTAINER_SESSION_DATA_FOLDER".to_string())
+            .or_insert(session_data.display().to_string());
+    }
+
+    if args.force_tty_if_json {
+        config
+            .container_env
+            .entry("DEACON_FORCE_TTY_IF_JSON".to_string())
+            .or_insert_with(|| "true".to_string());
+    }
+
     // T029: Discover id-labels from configuration if not provided via CLI
     let parsed_labels = ContainerSelector::parse_labels(&args.id_label).map_err(|err| {
         DeaconError::Config(deacon_core::errors::ConfigError::Validation {
@@ -1306,6 +1413,11 @@ async fn execute_up_with_runtime(
     let discovered_labels =
         discover_id_labels_from_config(&parsed_labels, workspace_folder.as_path(), &config);
     debug!("Discovered id-labels: {:?}", discovered_labels);
+
+    let cache_folder = args
+        .container_data_folder
+        .clone()
+        .or(args.user_data_folder.clone());
 
     // Validate host requirements if specified in configuration
     if let Some(host_requirements) = &config.host_requirements {
@@ -1393,6 +1505,12 @@ async fn execute_up_with_runtime(
             &args,
             &mut state_manager,
             &workspace_hash,
+            &config
+                .remote_env
+                .iter()
+                .filter_map(|(k, v)| v.clone().map(|val| (k.clone(), val)))
+                .collect(),
+            config_path.as_path(),
         )
         .await?
     } else {
@@ -1404,6 +1522,7 @@ async fn execute_up_with_runtime(
             &workspace_hash,
             &cli_remote_env,
             &runtime,
+            config_path.as_path(),
         )
         .await?
     };
@@ -1429,6 +1548,8 @@ async fn execute_compose_up(
     args: &UpArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
+    effective_env: &HashMap<String, String>,
+    config_path: &Path,
 ) -> Result<UpContainerInfo> {
     debug!("Starting Docker Compose project");
 
@@ -1437,6 +1558,35 @@ async fn execute_compose_up(
 
     // Add env files from CLI args
     project.env_files = args.env_file.clone();
+
+    // Apply CLI mounts to compose project
+    if !args.mount.is_empty() {
+        let mut additional_mounts = Vec::new();
+        for mount_str in &args.mount {
+            if let Ok(mount) = NormalizedMount::parse(mount_str) {
+                additional_mounts.push(deacon_core::compose::ComposeMount {
+                    mount_type: match mount.mount_type {
+                        MountType::Bind => "bind".to_string(),
+                        MountType::Volume => "volume".to_string(),
+                    },
+                    source: mount.source.clone(),
+                    target: mount.target.clone(),
+                    external: mount.external,
+                });
+            }
+        }
+        project.additional_mounts = additional_mounts;
+    }
+
+    // Apply remote env to compose services
+    if !effective_env.is_empty() {
+        project.additional_env = effective_env.clone();
+    }
+
+    // Generate a temporary compose override to inject mounts/env for the primary service
+    if let Some(override_file) = create_compose_override(&project)? {
+        project.compose_files.push(override_file);
+    }
 
     debug!("Created compose project: {:?}", project.name);
 
@@ -1631,7 +1781,7 @@ async fn execute_compose_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
-        Some(serde_json::to_value(&config)?)
+        Some(build_merged_configuration(config, config_path)?)
     } else {
         None
     };
@@ -1683,6 +1833,7 @@ async fn execute_compose_up(
 /// // });
 /// ```
 #[instrument(skip_all)]
+#[allow(clippy::too_many_arguments)]
 async fn execute_container_up(
     config: &DevContainerConfig,
     workspace_folder: &Path,
@@ -1691,11 +1842,36 @@ async fn execute_container_up(
     workspace_hash: &str,
     cli_remote_env: &HashMap<String, String>,
     runtime: &ContainerRuntimeImpl,
+    config_path: &Path,
 ) -> Result<UpContainerInfo> {
     debug!("Starting traditional development container");
 
     // Merge CLI forward_ports into config
     let mut config = config.clone();
+
+    // Apply workspace mount consistency when using default workspace mount
+    if config.workspace_mount.is_none() {
+        let target_path = config.workspace_folder.clone().unwrap_or_else(|| {
+            format!(
+                "/workspaces/{}",
+                workspace_folder
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("workspace")
+            )
+        });
+        let source_path = workspace_folder
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_folder.to_path_buf())
+            .display()
+            .to_string();
+        if let Some(ref consistency) = args.workspace_mount_consistency {
+            config.workspace_mount = Some(format!(
+                "type=bind,source={},target={},consistency={}",
+                source_path, target_path, consistency
+            ));
+        }
+    }
     if !args.forward_ports.is_empty() {
         use deacon_core::config::PortSpec;
         debug!(
@@ -1904,6 +2080,7 @@ async fn execute_container_up(
         args.default_user_env_probe,
         Some(&config.remote_env),
         cli_remote_env,
+        cache_folder.as_deref(),
     )
     .await;
 
@@ -1969,7 +2146,7 @@ async fn execute_container_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
-        Some(serde_json::to_value(&config)?)
+        Some(build_merged_configuration(&config, config_path)?)
     } else {
         None
     };

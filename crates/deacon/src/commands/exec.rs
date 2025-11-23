@@ -559,6 +559,7 @@ where
             probe_mode,
             config_remote_env.as_ref(),
             &env_map,
+            args.container_data_folder.as_deref(),
         )
         .await;
 

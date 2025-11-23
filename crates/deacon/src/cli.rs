@@ -1131,6 +1131,7 @@ impl Cli {
                     user_data_folder: self.user_data_folder.clone(),
                     container_session_data_folder: self.container_session_data_folder.clone(),
                     terminal_dimensions,
+                    force_tty_if_json: self.force_tty_if_json,
                 };
 
                 // Execute up and emit JSON output per contract (specs/001-up-gap-spec/contracts/up.md)

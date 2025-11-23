@@ -35,6 +35,8 @@ pub struct ContainerLifecycleConfig {
     pub use_login_shell: bool,
     /// User environment probe mode for lifecycle commands
     pub user_env_probe: crate::container_env_probe::ContainerProbeMode,
+    /// Optional cache folder for env probe results
+    pub cache_folder: Option<std::path::PathBuf>,
 }
 
 /// Execute lifecycle commands in a container with full variable substitution
@@ -184,6 +186,7 @@ where
                     &config.container_id,
                     config.user_env_probe,
                     config.user.as_deref(),
+                    config.cache_folder.as_deref(),
                 )
                 .await
             {
@@ -1099,6 +1102,7 @@ mod tests {
             non_blocking_timeout: Duration::from_secs(300), // 5 minutes default
             use_login_shell: true,
             user_env_probe: crate::container_env_probe::ContainerProbeMode::LoginShell,
+            cache_folder: None,
         };
 
         assert_eq!(config.container_id, "test-container");
@@ -1219,6 +1223,7 @@ mod tests {
                 non_blocking_timeout: Duration::from_secs(30),
                 use_login_shell: false, // Use plain sh for tests
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
+                cache_folder: None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
@@ -1275,6 +1280,7 @@ mod tests {
                 non_blocking_timeout: Duration::from_secs(30),
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
+                cache_folder: None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
@@ -1345,6 +1351,7 @@ mod tests {
                 non_blocking_timeout: Duration::from_millis(100), // Very short timeout
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
+                cache_folder: None,
             },
             context: substitution_context,
             timeout: Duration::from_millis(100), // Very short timeout
@@ -1402,6 +1409,7 @@ mod tests {
                 non_blocking_timeout: Duration::from_secs(30),
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
+                cache_folder: None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),

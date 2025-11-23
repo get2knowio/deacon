@@ -35,6 +35,7 @@ async fn test_container_lifecycle_with_variable_substitution() {
         non_blocking_timeout: Duration::from_secs(300),
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     // Define lifecycle commands with variable substitution
@@ -102,6 +103,7 @@ async fn test_container_lifecycle_with_skip_flags() {
         non_blocking_timeout: Duration::from_secs(300),
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     let commands = ContainerLifecycleCommands::new()
@@ -148,6 +150,7 @@ fn test_container_lifecycle_config_validation() {
         non_blocking_timeout: Duration::from_secs(300),
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     assert_eq!(config.container_id, "test-container");
@@ -203,6 +206,7 @@ async fn test_all_lifecycle_phases_ordering() {
         non_blocking_timeout: Duration::from_secs(300),
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     // Define all 6 lifecycle phases
