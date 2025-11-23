@@ -9,14 +9,15 @@
 			"userUid": 1000,
 			"userGid": 1000
 		},
-		"ghcr.io/devcontainers/features/git:1": {
-			"version": "latest"
-		},
 		"ghcr.io/devcontainers/features/node:1": {
 			"version": "20"
 		}
 	},
 	"remoteUser": "vscode",
+	"command": [
+		"sleep",
+		"infinity"
+	],
 	"workspaceFolder": "/workspace",
-	"postCreateCommand": "node --version && git --version && zsh --version"
+	"postCreateCommand": "node --version && zsh --version"
 }

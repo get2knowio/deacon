@@ -107,7 +107,7 @@ impl DockerfileGenerator {
 
         // Start RUN command with BuildKit mount
         command.push_str(&format!(
-            "RUN --mount=type=bind,from={},source={},target={} \\\n",
+            "RUN --mount=type=bind,from={},source={},target={},rw \\\n",
             FEATURE_CONTENT_SOURCE, feature_dir_name, mount_target
         ));
 

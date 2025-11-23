@@ -436,7 +436,7 @@ impl ReqwestClient {
         }
 
         let realm = realm.ok_or("Missing realm in WWW-Authenticate header")?;
-        
+
         // Build token URL
         let mut token_url = realm;
         let mut params = Vec::new();
@@ -455,13 +455,13 @@ impl ReqwestClient {
 
         // Make token request (anonymous - no credentials)
         let response = self.client.get(&token_url).send().await?;
-        
+
         if !response.status().is_success() {
             return Err(format!("Token exchange failed with status: {}", response.status()).into());
         }
 
         let token_response: serde_json::Value = response.json().await?;
-        
+
         // Extract token from response
         let token = token_response
             .get("token")
@@ -719,20 +719,21 @@ impl HttpClient for ReqwestClient {
                 if let Ok(www_auth_str) = www_auth.to_str() {
                     if www_auth_str.starts_with("Bearer ") {
                         debug!("Got 401 with Bearer challenge, attempting token exchange");
-                        
+
                         // Attempt token exchange for anonymous access
                         if let Ok(token) = self.exchange_token(www_auth_str).await {
                             // Retry request with the obtained token
                             let mut retry_headers = headers.clone();
-                            retry_headers.insert("Authorization".to_string(), format!("Bearer {}", token));
-                            
+                            retry_headers
+                                .insert("Authorization".to_string(), format!("Bearer {}", token));
+
                             let mut retry_request = self.client.get(url);
                             for (key, value) in retry_headers {
                                 retry_request = retry_request.header(&key, &value);
                             }
-                            
+
                             let retry_response = retry_request.send().await?;
-                            
+
                             if retry_response.status().is_success() {
                                 return Ok(retry_response.bytes().await?);
                             }
@@ -740,7 +741,7 @@ impl HttpClient for ReqwestClient {
                     }
                 }
             }
-            
+
             return Err(format!("Authentication failed for URL: {}", url).into());
         }
 
@@ -792,21 +793,22 @@ impl HttpClient for ReqwestClient {
                 if let Ok(www_auth_str) = www_auth.to_str() {
                     if www_auth_str.starts_with("Bearer ") {
                         debug!("Got 401 with Bearer challenge, attempting token exchange");
-                        
+
                         // Attempt token exchange for anonymous access
                         if let Ok(token) = self.exchange_token(www_auth_str).await {
                             // Retry request with the obtained token
                             let mut retry_headers = headers.clone();
-                            retry_headers.insert("Authorization".to_string(), format!("Bearer {}", token));
-                            
+                            retry_headers
+                                .insert("Authorization".to_string(), format!("Bearer {}", token));
+
                             let mut retry_request = self.client.get(url);
                             for (key, value) in &retry_headers {
                                 retry_request = retry_request.header(key, value);
                             }
-                            
+
                             let retry_response = retry_request.send().await?;
                             let status = retry_response.status().as_u16();
-                            
+
                             // Extract headers from retry response
                             let mut response_headers = HashMap::new();
                             for (key, value) in retry_response.headers() {
@@ -814,7 +816,7 @@ impl HttpClient for ReqwestClient {
                                     response_headers.insert(key.to_string(), value_str.to_string());
                                 }
                             }
-                            
+
                             if retry_response.status().is_success() {
                                 let bytes = retry_response.bytes().await?;
                                 return Ok(HttpResponse {
@@ -827,7 +829,7 @@ impl HttpClient for ReqwestClient {
                     }
                 }
             }
-            
+
             return Err(format!("Authentication failed for URL: {}", url).into());
         }
 

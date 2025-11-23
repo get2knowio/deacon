@@ -49,6 +49,14 @@ pub fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
     };
 
     let mut config_path = if let Some(path) = args.config_path {
+        // Validate filename per spec: must be devcontainer.json or .devcontainer.json
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+            if file_name != "devcontainer.json" && file_name != ".devcontainer.json" {
+                return Err(DeaconError::Config(ConfigError::Validation {
+                    message: "Filename must be devcontainer.json or .devcontainer.json".to_string(),
+                }));
+            }
+        }
         path.to_path_buf()
     } else {
         ConfigLoader::discover_config(&workspace_folder)?

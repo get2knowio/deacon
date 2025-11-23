@@ -6,30 +6,49 @@ DEACON_BIN="${DEACON_BIN:-deacon}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 # README mapping:
-# - "Basic Up with Features"       -> default run
-# - "With Additional Features"     -> set ADDITIONAL_FEATURES_JSON
-# - "Skip Feature Auto-Mapping"    -> SKIP_FEATURE_AUTO_MAPPING=true
+# - "Basic Up with Features" -> default run
 run() {
 	echo "+ $*" >&2
 	"$@"
 }
 
 extract_container_id() {
-	printf '%s' "$1" | "$PYTHON_BIN" - <<'PY'
+	local json_out=""
+	if command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+		json_out="$(printf '%s' "$1" | "$PYTHON_BIN" - <<'PY'
 import json, sys
-data = json.load(sys.stdin)
-print(data.get("containerId", ""))
+lines = [ln.strip() for ln in sys.stdin.read().splitlines() if ln.strip()]
+if lines:
+    try:
+        data = json.loads(lines[-1])
+        cid = data.get("containerId", "")
+        if cid:
+            print(cid)
+            sys.exit(0)
+    except json.JSONDecodeError:
+        pass
+sys.exit(0)
 PY
+)" || json_out=""
+		if [ -n "$json_out" ]; then
+			printf '%s' "$json_out"
+			return 0
+		fi
+	fi
+
+	local fallback=""
+	fallback="$(docker ps -aq --filter "label=devcontainer.local_folder=$SCRIPT_DIR" --latest 2>/dev/null || true)"
+	printf '%s' "$fallback" | head -n1
 }
 
 cd "$SCRIPT_DIR"
 
 echo "== Basic Up with Features ==" >&2
-out_basic="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container "$@")"
+out_basic="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container --skip-post-create "$@")"
 basic_container="$(extract_container_id "$out_basic")"
 
 echo "== With Additional Features ==" >&2
-out_additional="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
+out_additional="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container --skip-post-create \
 	--additional-features '{
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {
 			"version": "latest"
@@ -39,7 +58,7 @@ out_additional="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove
 additional_container="$(extract_container_id "$out_additional")"
 
 echo "== Skip Feature Auto-Mapping ==" >&2
-out_skip_map="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
+out_skip_map="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container --skip-post-create \
 	--skip-feature-auto-mapping \
 	"$@")"
 skip_map_container="$(extract_container_id "$out_skip_map")"
@@ -50,11 +69,3 @@ for cid in "$basic_container" "$additional_container" "$skip_map_container"; do
 		docker rm -f "$cid" >/dev/null 2>&1 || true
 	fi
 done
-if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-	if command -v python >/dev/null 2>&1; then
-		PYTHON_BIN="python"
-	else
-		echo "python3 (or python) is required to parse JSON output" >&2
-		exit 1
-	fi
-fi

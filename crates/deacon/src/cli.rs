@@ -18,7 +18,7 @@ impl From<DefaultUserEnvProbe> for ContainerProbeMode {
         match p {
             DefaultUserEnvProbe::None => ContainerProbeMode::None,
             DefaultUserEnvProbe::LoginInteractiveShell => ContainerProbeMode::LoginInteractiveShell,
-            DefaultUserEnvProbe::InteractiveShell => ContainerProbeMode::LoginShell, // map interactiveShell -> LoginShell? choose closest
+            DefaultUserEnvProbe::InteractiveShell => ContainerProbeMode::LoginShell,
             DefaultUserEnvProbe::LoginShell => ContainerProbeMode::LoginShell,
         }
     }

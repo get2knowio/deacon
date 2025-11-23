@@ -9,7 +9,6 @@ This example demonstrates using Dev Container Features to extend a base image wi
 - **Base Image**: Ubuntu 22.04
 - **Features**:
   - `common-utils`: Installs Zsh, Oh My Zsh, and creates a non-root user
-  - `git`: Installs the latest version of Git
   - `node`: Installs Node.js version 20
 - **Remote User**: Uses `vscode` user created by the `common-utils` feature
 - **Workspace**: Mounted at `/workspace`
@@ -26,7 +25,7 @@ The `up` command will:
 1. Pull the Ubuntu 22.04 base image
 2. Apply the Features (extends the image with a new layer)
 3. Create a container with the configured user and workspace
-4. Run the `postCreateCommand` to verify installations
+4. Run the `postCreateCommand` to verify installations (unless you pass `--skip-post-create` like `./exec.sh` does for speed)
 5. Return container details
 
 ### With Additional Features
@@ -69,9 +68,6 @@ Verify the features are installed:
 # Check Node.js
 docker exec <container-id> node --version
 
-# Check Git
-docker exec <container-id> git --version
-
 # Check Zsh
 docker exec <container-id> zsh --version
 
@@ -85,10 +81,6 @@ docker exec <container-id> whoami  # Should output: vscode
 - Creates a non-root user with specified UID/GID
 - Installs Zsh and Oh My Zsh for an enhanced shell experience
 - Sets up common development utilities
-
-### git Feature
-- Installs Git from official sources
-- Configures Git with sensible defaults
 
 ### node Feature
 - Installs Node.js and npm

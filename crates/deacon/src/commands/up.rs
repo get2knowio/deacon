@@ -9,18 +9,14 @@ use crate::commands::shared::{
 use anyhow::{Context, Result};
 use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject};
 use deacon_core::config::DevContainerConfig;
-use deacon_core::container::{ContainerIdentity, ContainerOps, ContainerSelector};
+use deacon_core::container::{ContainerIdentity, ContainerSelector};
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::{Docker, DockerLifecycle, ExecConfig};
 use deacon_core::errors::{DeaconError, DockerError};
-use deacon_core::feature_installer::{FeatureInstallationConfig, FeatureInstaller};
-use deacon_core::features::{
-    FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger, FeatureMetadata, ResolvedFeature,
-};
-use deacon_core::oci::{FeatureFetcher, FeatureRef, ReqwestClient};
+use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::ports::PortForwardingManager;
-use deacon_core::registry_parser::parse_registry_reference;
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
+use deacon_core::secrets::SecretsCollection;
 use deacon_core::state::{ComposeState, ContainerState, StateManager};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -384,6 +380,27 @@ impl NormalizedMount {
             external,
         })
     }
+
+    /// Convert back to the devcontainer mount string format.
+    pub fn to_spec_string(&self) -> String {
+        let mut parts = vec![
+            format!(
+                "type={}",
+                match self.mount_type {
+                    MountType::Bind => "bind",
+                    MountType::Volume => "volume",
+                }
+            ),
+            format!("source={}", self.source),
+            format!("target={}", self.target),
+        ];
+
+        if self.external {
+            parts.push("external=true".to_string());
+        }
+
+        parts.join(",")
+    }
 }
 
 /// Parsed and validated input arguments for up command.
@@ -718,11 +735,7 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
 /// - expect_existing_container constraints
 fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpInput> {
     // Parse selection inputs through ContainerSelector to keep validation and error messages shared
-    let selector_workspace = args
-        .workspace_folder
-        .as_ref()
-        .cloned()
-        .or_else(|| std::env::current_dir().ok());
+    let selector_workspace = args.workspace_folder.as_ref().cloned();
 
     let selector = ContainerSelector::new(
         None,
@@ -1226,6 +1239,18 @@ async fn execute_up_with_runtime(
     check_for_disallowed_features(&config.features)?;
     debug!("Validated features - no disallowed features found");
 
+    // Apply CLI mounts to configuration mounts so runtime receives them
+    if !args.mount.is_empty() {
+        let mut mounts = config.mounts.clone();
+        for mount_str in &args.mount {
+            // Already validated earlier; parse again to normalize and re-emit
+            if let Ok(mount) = NormalizedMount::parse(mount_str) {
+                mounts.push(serde_json::Value::String(mount.to_spec_string()));
+            }
+        }
+        config.mounts = mounts;
+    }
+
     // T029: Merge image metadata into configuration
     config = merge_image_metadata_into_config(config, workspace_folder.as_path()).await?;
     debug!("Merged image metadata into configuration");
@@ -1237,6 +1262,39 @@ async fn execute_up_with_runtime(
         config
             .remote_env
             .insert(env.name.clone(), Some(env.value.clone()));
+    }
+
+    // Secrets files populate remote env for lifecycle and are redacted downstream.
+    let secrets_collection = if !args.secrets_files.is_empty() {
+        Some(SecretsCollection::load_from_files(&args.secrets_files)?)
+    } else {
+        None
+    };
+    if let Some(secrets) = &secrets_collection {
+        for (key, value) in secrets.as_env_vars() {
+            cli_remote_env
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
+            config
+                .remote_env
+                .entry(key.clone())
+                .or_insert_with(|| Some(value.clone()));
+        }
+    }
+
+    // Apply updateRemoteUserUID default when not specified in config
+    if config.update_remote_user_uid.is_none() {
+        if let Some(mode) = &args.update_remote_user_uid_default {
+            let normalized = mode.to_ascii_lowercase();
+            let value = match normalized.as_str() {
+                "on" => Some(true),
+                "off" | "never" => Some(false),
+                _ => None,
+            };
+            if let Some(v) = value {
+                config.update_remote_user_uid = Some(v);
+            }
+        }
     }
 
     // T029: Discover id-labels from configuration if not provided via CLI
@@ -1381,6 +1439,20 @@ async fn execute_compose_up(
     project.env_files = args.env_file.clone();
 
     debug!("Created compose project: {:?}", project.name);
+
+    // If we expect an existing project, fail fast when it's not running.
+    if args.expect_existing_container {
+        match compose_manager.is_project_running(&project) {
+            Ok(true) => { /* ok */ }
+            Ok(false) => {
+                return Err(DeaconError::Docker(DockerError::ContainerNotFound {
+                    id: project.name.clone(),
+                })
+                .into());
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
 
     // Check if project is already running
     if !args.remove_existing_container {
@@ -1558,7 +1630,6 @@ async fn execute_compose_up(
         None
     };
 
-    // TODO: Merged configuration would require feature metadata and overrides
     let merged_configuration = if args.include_merged_configuration {
         Some(serde_json::to_value(&config)?)
     } else {
@@ -1701,181 +1772,29 @@ async fn execute_container_up(
     // - Feature metadata should be merged into final configuration
 
     // Install features if present in configuration
-    if !config
+    if config
         .features
         .as_object()
-        .map(|o| o.is_empty())
-        .unwrap_or(true)
+        .map(|o| !o.is_empty())
+        .unwrap_or(false)
     {
-        info!("Features detected in configuration - installing into extended image");
-        
-        // Parse features from config
-        let features_obj = config.features.as_object().unwrap();
-        let mut resolved_features = Vec::new();
-        
-        for (feature_id, options) in features_obj {
-            debug!("Resolving feature: {}", feature_id);
-            
-            // Parse feature reference
-            let (_registry, _namespace, _name, tag) = parse_registry_reference(feature_id)
-                .with_context(|| format!("Failed to parse feature reference: {}", feature_id))?;
-            
-            // Extract options as HashMap
-            let feature_options = if let Some(opts_obj) = options.as_object() {
-                opts_obj
-                    .iter()
-                    .map(|(k, v)| {
-                        let value = match v {
-                            serde_json::Value::Bool(b) => deacon_core::features::OptionValue::Boolean(*b),
-                            serde_json::Value::String(s) => deacon_core::features::OptionValue::String(s.clone()),
-                            serde_json::Value::Number(n) => deacon_core::features::OptionValue::Number(n.clone()),
-                            serde_json::Value::Array(a) => deacon_core::features::OptionValue::Array(a.clone()),
-                            serde_json::Value::Object(o) => deacon_core::features::OptionValue::Object(o.clone()),
-                            serde_json::Value::Null => deacon_core::features::OptionValue::Null,
-                        };
-                        (k.clone(), value)
-                    })
-                    .collect()
-            } else {
-                HashMap::new()
-            };
-            
-            // Create resolved feature with minimal metadata
-            let metadata = FeatureMetadata {
-                id: feature_id.clone(),
-                version: tag.clone(),
-                name: None,
-                description: None,
-                documentation_url: None,
-                license_url: None,
-                options: HashMap::new(),
-                container_env: HashMap::new(),
-                mounts: Vec::new(),
-                init: None,
-                privileged: None,
-                cap_add: Vec::new(),
-                security_opt: Vec::new(),
-                entrypoint: None,
-                installs_after: Vec::new(),
-                depends_on: HashMap::new(),
-                on_create_command: None,
-                update_content_command: None,
-                post_create_command: None,
-                post_start_command: None,
-                post_attach_command: None,
-            };
-            
-            resolved_features.push(ResolvedFeature {
-                id: feature_id.clone(),
-                source: feature_id.clone(),
-                metadata,
-                options: feature_options,
-            });
+        info!("Features detected in configuration - building feature-extended image with BuildKit");
+
+        let feature_build = build_image_with_features(&config, &identity, workspace_folder)
+            .await
+            .with_context(|| "Failed to build feature-extended image")?;
+
+        if !feature_build.combined_env.is_empty() {
+            config
+                .container_env
+                .extend(feature_build.combined_env.into_iter());
         }
-        
-        // Resolve dependencies and create installation plan
-        let resolver = FeatureDependencyResolver::new(
-            args.feature_install_order.as_ref().map(|s| vec![s.clone()])
+
+        config.image = Some(feature_build.image_tag.clone());
+        info!(
+            "Updated config to use feature-extended image: {}",
+            feature_build.image_tag
         );
-        let plan = resolver
-            .resolve(&resolved_features)
-            .with_context(|| "Failed to resolve feature dependencies")?;
-        
-        info!("Feature installation plan created with {} features", plan.len());
-        
-        // Download features from OCI registry
-        let http_client = ReqwestClient::new()
-            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
-        let oci_client = FeatureFetcher::new(http_client);
-        let mut downloaded_features = HashMap::new();
-        
-        for feature in &resolved_features {
-            info!("Downloading feature: {}", feature.id);
-            let (registry, namespace, name, tag) = parse_registry_reference(&feature.id)?;
-            let feature_ref = FeatureRef::new(registry, namespace, name, tag);
-            let downloaded = oci_client
-                .fetch_feature(&feature_ref)
-                .await
-                .with_context(|| format!("Failed to download feature: {}", feature.id))?;
-            downloaded_features.insert(feature.id.clone(), downloaded);
-        }
-        
-        info!("Downloaded {} features", downloaded_features.len());
-        
-        // Create a temporary container from base image to install features
-        let base_image = config
-            .image
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No base image specified"))?;
-        
-        info!("Creating temporary container from base image: {}", base_image);
-        
-        // Create temporary identity for feature installation container
-        let temp_identity = ContainerIdentity {
-            workspace_hash: identity.workspace_hash.clone(),
-            config_hash: identity.config_hash.clone(),
-            name: Some(format!("{}-feature-build", identity.container_name())),
-            custom_name: Some(format!("{}-feature-build", identity.container_name())),
-        };
-        
-        // Create temporary container for feature installation
-        let temp_container_id = docker
-            .create_container(&temp_identity, &config, workspace_folder)
-            .await
-            .with_context(|| "Failed to create temporary container for feature installation")?;
-        
-        debug!("Created temporary container: {}", temp_container_id);
-        
-        // Start the container
-        docker
-            .start_container(&temp_container_id)
-            .await
-            .with_context(|| "Failed to start temporary container")?;
-        
-        // Install features in the container
-        let feature_config = FeatureInstallationConfig {
-            container_id: temp_container_id.clone(),
-            apply_security_options: false,
-            installation_base_dir: "/tmp/devcontainer-features".to_string(),
-        };
-        
-        let installer = FeatureInstaller::new(docker.cli_docker().clone());
-        let install_result = installer
-            .install_features(&plan, &downloaded_features, &feature_config)
-            .await
-            .with_context(|| "Feature installation failed")?;
-        
-        if !install_result.success {
-            // Clean up temporary container
-            let _ = docker.remove_container(&temp_container_id).await;
-            return Err(anyhow::anyhow!("Feature installation failed"));
-        }
-        
-        info!("Successfully installed {} features", install_result.feature_results.len());
-        
-        // Commit the container to create a new image
-        let extended_image_tag = format!("deacon-devcontainer:{}", identity.container_name());
-        info!("Committing feature-extended image: {}", extended_image_tag);
-        
-        docker
-            .commit_container(&temp_container_id, &extended_image_tag)
-            .await
-            .with_context(|| "Failed to commit feature-extended image")?;
-        
-        // Clean up temporary container
-        docker
-            .remove_container(&temp_container_id)
-            .await
-            .with_context(|| "Failed to remove temporary container")?;
-        
-        // Update config to use the feature-extended image
-        config.image = Some(extended_image_tag.clone());
-        info!("Updated config to use feature-extended image: {}", extended_image_tag);
-        
-        // Merge feature environment variables into config
-        for (key, value) in install_result.combined_env {
-            config.container_env.insert(key, value);
-        }
     }
 
     // Create container using DockerLifecycle trait
@@ -1916,6 +1835,16 @@ async fn execute_container_up(
     }
 
     let container_result = container_result?;
+
+    if args.expect_existing_container && !container_result.reused {
+        return Err(DeaconError::Docker(DockerError::ContainerNotFound {
+            id: identity
+                .name
+                .clone()
+                .unwrap_or_else(|| container_result.container_id.clone()),
+        })
+        .into());
+    }
 
     debug!(
         "Container {} {} (image: {})",
@@ -2039,7 +1968,6 @@ async fn execute_container_up(
         None
     };
 
-    // TODO: Merged configuration would require feature metadata and overrides
     let merged_configuration = if args.include_merged_configuration {
         Some(serde_json::to_value(&config)?)
     } else {
@@ -2255,6 +2183,12 @@ async fn execute_initialize_command(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct FeatureBuildOutput {
+    image_tag: String,
+    combined_env: HashMap<String, String>,
+}
+
 /// Build an extended Docker image with features installed using BuildKit
 ///
 /// This function:
@@ -2262,13 +2196,13 @@ async fn execute_initialize_command(
 /// 2. Downloads features from OCI registries
 /// 3. Generates a Dockerfile with BuildKit mount syntax for features
 /// 4. Builds the extended image using docker buildx build
-/// 5. Returns the tag of the newly built image
+/// 5. Returns the tag of the newly built image and combined env from feature metadata
 #[instrument(skip(config, identity))]
 async fn build_image_with_features(
     config: &DevContainerConfig,
     identity: &ContainerIdentity,
-    workspace_folder: &Path,
-) -> Result<String> {
+    _workspace_folder: &Path,
+) -> Result<FeatureBuildOutput> {
     use deacon_core::docker::CliDocker;
     use deacon_core::dockerfile_generator::{DockerfileConfig, DockerfileGenerator};
     use deacon_core::features::{FeatureDependencyResolver, OptionValue, ResolvedFeature};
@@ -2292,14 +2226,17 @@ async fn build_image_with_features(
         .ok_or_else(|| DeaconError::Runtime("Features must be an object".to_string()))?;
 
     if features_obj.is_empty() {
-        return Ok(base_image.clone());
+        return Ok(FeatureBuildOutput {
+            image_tag: base_image.clone(),
+            combined_env: HashMap::new(),
+        });
     }
 
     // Create feature fetcher
     let fetcher = default_fetcher()?;
 
     // Parse and fetch features
-    let mut feature_refs = Vec::new();
+    let mut feature_refs: Vec<(String, FeatureRef)> = Vec::new();
     let mut feature_options_map: HashMap<String, HashMap<String, OptionValue>> = HashMap::new();
 
     for (feature_id, feature_options) in features_obj.iter() {
@@ -2310,6 +2247,11 @@ async fn build_image_with_features(
             })?;
 
         let feature_ref = FeatureRef::new(registry_url, namespace, name, tag);
+        // Canonical ID (no version) so dependency matching aligns with installsAfter/dependsOn entries
+        let canonical_id = format!(
+            "{}/{}/{}",
+            feature_ref.registry, feature_ref.namespace, feature_ref.name
+        );
 
         // Parse options
         let options = if let Some(opts_obj) = feature_options.as_object() {
@@ -2331,41 +2273,45 @@ async fn build_image_with_features(
             HashMap::new()
         };
 
-        feature_options_map.insert(feature_ref.reference(), options);
-        feature_refs.push(feature_ref);
+        feature_options_map.insert(canonical_id.clone(), options);
+        feature_refs.push((canonical_id, feature_ref));
     }
 
     // Download features
     debug!("Downloading {} features", feature_refs.len());
     let mut downloaded_features: HashMap<String, DownloadedFeature> = HashMap::new();
-    for feature_ref in &feature_refs {
+    for (canonical_id, feature_ref) in &feature_refs {
         let downloaded = fetcher.fetch_feature(feature_ref).await?;
-        downloaded_features.insert(downloaded.metadata.id.clone(), downloaded);
+        downloaded_features.insert(canonical_id.clone(), downloaded);
     }
 
     // Create resolved features
     let mut resolved_features = Vec::new();
-    for feature_ref in &feature_refs {
+    for (canonical_id, feature_ref) in &feature_refs {
         let reference = feature_ref.reference();
-        let downloaded = downloaded_features
-            .values()
-            .find(|df| {
-                // Match by ID or by checking if the feature name matches
-                df.metadata.id == reference
-                    || reference.contains(&df.metadata.id)
-                    || df.metadata.id.contains(&feature_ref.name)
-            })
-            .ok_or_else(|| {
-                DeaconError::Runtime(format!("Downloaded feature not found for {}", reference))
-            })?;
+        let downloaded = downloaded_features.get(canonical_id).ok_or_else(|| {
+            DeaconError::Runtime(format!("Downloaded feature not found for {}", reference))
+        })?;
 
-        let options = feature_options_map
-            .get(&reference)
+        // Start with user-provided options
+        let mut options = feature_options_map
+            .get(canonical_id)
             .cloned()
             .unwrap_or_default();
 
+        // Fill in defaults from metadata when the user did not supply a value
+        for (opt_name, opt_def) in &downloaded.metadata.options {
+            if options.contains_key(opt_name) {
+                continue;
+            }
+
+            if let Some(default_val) = opt_def.default_value() {
+                options.insert(opt_name.clone(), default_val);
+            }
+        }
+
         resolved_features.push(ResolvedFeature {
-            id: downloaded.metadata.id.clone(),
+            id: canonical_id.clone(),
             source: reference.clone(),
             options,
             metadata: downloaded.metadata.clone(),
@@ -2383,6 +2329,16 @@ async fn build_image_with_features(
         installation_plan.levels.len()
     );
 
+    // Collect combined env from feature metadata in plan order so later features win
+    let mut combined_env = HashMap::new();
+    for level in &installation_plan.levels {
+        for feature_id in level {
+            if let Some(feature) = installation_plan.get_feature(feature_id) {
+                combined_env.extend(feature.metadata.container_env.clone());
+            }
+        }
+    }
+
     // Create temporary directory for features and Dockerfile
     let temp_dir =
         std::env::temp_dir().join(format!("deacon-features-{}", identity.workspace_hash));
@@ -2393,19 +2349,16 @@ async fn build_image_with_features(
     std::fs::create_dir_all(&features_dir)?;
 
     // Copy features to the BuildKit context directory
-    for level in installation_plan.levels.iter() {
+    for (level_idx, level) in installation_plan.levels.iter().enumerate() {
         for feature_id in level {
             let feature = installation_plan.get_feature(feature_id).ok_or_else(|| {
                 DeaconError::Runtime(format!("Feature {} not found in plan", feature_id))
             })?;
 
             // Find the downloaded feature directory
-            let downloaded = downloaded_features
-                .values()
-                .find(|df| df.metadata.id == feature.id)
-                .ok_or_else(|| {
-                    DeaconError::Runtime(format!("Downloaded feature {} not found", feature.id))
-                })?;
+            let downloaded = downloaded_features.get(feature_id).ok_or_else(|| {
+                DeaconError::Runtime(format!("Downloaded feature {} not found", feature_id))
+            })?;
 
             // Sanitize feature ID for directory name
             let sanitized_id = feature
@@ -2421,7 +2374,8 @@ async fn build_image_with_features(
                 .collect::<String>();
 
             // Copy feature directory to BuildKit context
-            let feature_dest = features_dir.join(&sanitized_id);
+            let feature_dir_name = format!("{}_{}", sanitized_id, level_idx);
+            let feature_dest = features_dir.join(&feature_dir_name);
             copy_dir_all(&downloaded.path, &feature_dest)?;
         }
     }
@@ -2465,7 +2419,10 @@ async fn build_image_with_features(
 
     info!("Successfully built extended image: {}", extended_image_tag);
 
-    Ok(extended_image_tag)
+    Ok(FeatureBuildOutput {
+        image_tag: extended_image_tag,
+        combined_env,
+    })
 }
 
 /// Recursively copy a directory
@@ -2619,6 +2576,12 @@ async fn execute_lifecycle_commands(
 
     debug!("Executing lifecycle commands in container");
 
+    // Skip all lifecycle work when --skip-post-create is set (per reference behavior: skip onCreate/updateContent/post* and dotfiles).
+    if args.skip_post_create {
+        debug!("Skipping lifecycle execution due to --skip-post-create");
+        return Ok(());
+    }
+
     // Create substitution context
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
 
@@ -2650,18 +2613,18 @@ async fn execute_lifecycle_commands(
     let mut commands = ContainerLifecycleCommands::new();
     let mut phases_to_execute = Vec::new();
 
-    // T014: Add updateContentCommand support
-    // updateContent runs after features are installed and before postCreate
-    if let Some(ref update_content) = config.update_content_command {
-        let phase_commands = commands_from_json_value(update_content)?;
-        commands = commands.with_update_content(phase_commands.clone());
-        phases_to_execute.push(("updateContent".to_string(), phase_commands));
-    }
-
     if let Some(ref on_create) = config.on_create_command {
         let phase_commands = commands_from_json_value(on_create)?;
         commands = commands.with_on_create(phase_commands.clone());
         phases_to_execute.push(("onCreate".to_string(), phase_commands));
+    }
+
+    // T014: Add updateContentCommand support
+    // updateContent runs after onCreate and before postCreate
+    if let Some(ref update_content) = config.update_content_command {
+        let phase_commands = commands_from_json_value(update_content)?;
+        commands = commands.with_update_content(phase_commands.clone());
+        phases_to_execute.push(("updateContent".to_string(), phase_commands));
     }
 
     // T014: Prebuild mode stops after updateContent; skip postCreate/postStart/postAttach
