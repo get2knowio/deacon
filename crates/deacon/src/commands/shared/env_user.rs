@@ -15,6 +15,7 @@ pub struct EnvUserResolution {
 ///
 /// Merge order matches the exec specification and is shared with the up lifecycle path:
 /// probed shell environment → config `remoteEnv` → CLI `--remote-env` entries.
+#[allow(clippy::too_many_arguments)]
 pub async fn resolve_env_and_user<D: Docker>(
     docker_client: &D,
     container_id: &str,

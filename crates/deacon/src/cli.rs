@@ -1420,6 +1420,7 @@ impl Cli {
                     secrets_files: self.secrets_file,
                     progress_tracker: progress_tracker.clone(),
                     docker_path: self.docker_path.clone(),
+                    container_data_folder: self.container_data_folder.clone(),
                 };
 
                 execute_run_user_commands(args).await
