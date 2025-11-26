@@ -31,9 +31,9 @@ A task MUST NOT be marked `[X]` unless ALL of these are true:
 
 **Purpose**: Confirm scope and existing surfaces before wiring GPU modes.
 
-- [ ] T001 Review GPU mode spec/plan/research to confirm scope and acceptance (specs/001-gpu-modes/spec.md, specs/001-gpu-modes/plan.md, specs/001-gpu-modes/research.md).
-- [ ] T002 Inspect existing CLI argument surfaces for GPU placeholders and value enums (crates/deacon/src/cli.rs).
-- [ ] T003 Map runtime and compose invocation points for GPU flag injection in up flow (crates/deacon/src/commands/up.rs, crates/core/src/docker.rs, crates/core/src/compose.rs).
+- [X] T001 Review GPU mode spec/plan/research to confirm scope and acceptance (specs/001-gpu-modes/spec.md, specs/001-gpu-modes/plan.md, specs/001-gpu-modes/research.md).
+- [X] T002 Inspect existing CLI argument surfaces for GPU placeholders and value enums (crates/deacon/src/cli.rs).
+- [X] T003 Map runtime and compose invocation points for GPU flag injection in up flow (crates/deacon/src/commands/up.rs, crates/core/src/docker.rs, crates/core/src/compose.rs).
 
 ---
 
@@ -41,10 +41,10 @@ A task MUST NOT be marked `[X]` unless ALL of these are true:
 
 **Purpose**: Core structures and plumbing required by all user stories.
 
-- [ ] T004 Add GPUMode enum and HostGpuCapability structs per data-model (crates/core/src/gpu.rs).
-- [ ] T005 Wire GPU mode CLI parsing with default=none into Up args and normalization (crates/deacon/src/cli.rs, crates/deacon/src/commands/up.rs).
-- [ ] T006 Implement GPU detection helper using Docker runtime introspection with warning context plumbing (crates/core/src/docker.rs).
-- [ ] T007 Thread GPU mode through runtime/compose helper interfaces to enable downstream application (crates/core/src/runtime.rs, crates/core/src/compose.rs).
+- [X] T004 Add GPUMode enum and HostGpuCapability structs per data-model (crates/core/src/gpu.rs).
+- [X] T005 Wire GPU mode CLI parsing with default=none into Up args and normalization (crates/deacon/src/cli.rs, crates/deacon/src/commands/up.rs).
+- [X] T006 Implement GPU detection helper using Docker runtime introspection with warning context plumbing (crates/core/src/docker.rs).
+- [X] T007 Thread GPU mode through runtime/compose helper interfaces to enable downstream application (crates/core/src/runtime.rs, crates/core/src/compose.rs).
 
 **Checkpoint**: Foundation ready - user story implementation can now begin.
 
@@ -58,9 +58,9 @@ A task MUST NOT be marked `[X]` unless ALL of these are true:
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Apply GPU mode `all` to docker run/build/compose invocations via shared helpers (crates/core/src/docker.rs, crates/core/src/compose.rs).
-- [ ] T009 [US1] Map CLI mode `all` through up flow and emit confirmation in user-facing output/logs (crates/deacon/src/commands/up.rs).
-- [ ] T010 [P] [US1] Add coverage asserting `--gpus all` propagation for run/build and compose paths when mode=`all` (crates/deacon/tests/up_gpu_all.rs).
+- [X] T008 [US1] Apply GPU mode `all` to docker run/build/compose invocations via shared helpers (crates/core/src/docker.rs, crates/core/src/compose.rs).
+- [X] T009 [US1] Map CLI mode `all` through up flow and emit confirmation in user-facing output/logs (crates/deacon/src/commands/up.rs).
+- [X] T010 [P] [US1] Add coverage asserting `--gpus all` propagation for run/build and compose paths when mode=`all` (crates/deacon/tests/up_gpu_all.rs).
 
 **Checkpoint**: User Story 1 fully functional and testable independently.
 
@@ -74,9 +74,9 @@ A task MUST NOT be marked `[X]` unless ALL of these are true:
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Integrate detect-mode probe results into up flow; request GPUs when available and issue a single warning when absent (crates/deacon/src/commands/up.rs).
-- [ ] T012 [P] [US2] Add tests for detect mode covering GPU-present (flags added) and GPU-absent (warning, no flags) cases (crates/deacon/tests/up_gpu_detect.rs).
-- [ ] T013 [US2] Ensure build and compose flows reuse detection results without duplicate probes or log spam (crates/core/src/docker.rs, crates/core/src/compose.rs).
+- [X] T011 [US2] Integrate detect-mode probe results into up flow; request GPUs when available and issue a single warning when absent (crates/deacon/src/commands/up.rs).
+- [X] T012 [P] [US2] Add tests for detect mode covering GPU-present (flags added) and GPU-absent (warning, no flags) cases (crates/deacon/tests/up_gpu_detect.rs).
+- [X] T013 [US2] Ensure build and compose flows reuse detection results without duplicate probes or log spam (crates/core/src/docker.rs, crates/core/src/compose.rs).
 
 **Checkpoint**: User Story 2 functional with warning behavior validated.
 
@@ -90,8 +90,8 @@ A task MUST NOT be marked `[X]` unless ALL of these are true:
 
 ### Implementation for User Story 3
 
-- [ ] T014 [US3] Enforce GPU mode `none` to bypass GPU flag emission and suppress GPU warnings across run/build/compose (crates/deacon/src/commands/up.rs).
-- [ ] T015 [P] [US3] Add regression test verifying no GPU flags or warnings when mode=`none` (crates/deacon/tests/up_gpu_none.rs).
+- [X] T014 [US3] Enforce GPU mode `none` to bypass GPU flag emission and suppress GPU warnings across run/build/compose (crates/deacon/src/commands/up.rs).
+- [X] T015 [P] [US3] Add regression test verifying no GPU flags or warnings when mode=`none` (crates/deacon/tests/up_gpu_none.rs).
 
 **Checkpoint**: User Story 3 functional and testable independently.
 
@@ -101,13 +101,13 @@ A task MUST NOT be marked `[X]` unless ALL of these are true:
 
 **Purpose**: Cross-story documentation, examples, and quality gates.
 
-- [ ] T016 [P] Update CLI help/quickstart/docs to reflect GPU modes, defaults, and warning behaviors (crates/deacon/src/cli.rs, specs/001-gpu-modes/quickstart.md).
-- [ ] T017 [P] Create/update examples in examples/up/ to demonstrate GPU modes and keep README/exec.sh in sync (examples/up/).
-- [ ] T018 Run formatting, clippy, and targeted nextest suite for GPU mode changes (cargo fmt, cargo clippy, make test-nextest-fast; add docker/compose-focused nextest suite if runtime/compose wiring changed).
-- [ ] T019 [P] Validate warning wording/channel and output contracts for all/detect/none (stderr for warnings; stdout JSON intact) (crates/deacon/tests/up_gpu_output.rs).
-- [ ] T020 [P] Test edge cases: missing GPU drivers/permissions, runtime failure surfaces, mixed service GPU needs, explicit mode override per invocation (crates/deacon/tests/up_gpu_edge_cases.rs).
-- [ ] T021 [P] Validate consistency across run/build/compose over repeated runs for selected mode (crates/deacon/tests/up_gpu_consistency.rs).
-- [ ] T022 [P] Compare GPU mode behavior against docs/repomix-output-devcontainers-cli.xml reference expectations and align flags/warnings (docs/repomix-output-devcontainers-cli.xml).
+- [X] T016 [P] Update CLI help/quickstart/docs to reflect GPU modes, defaults, and warning behaviors (crates/deacon/src/cli.rs, specs/001-gpu-modes/quickstart.md).
+- [X] T017 [P] Create/update examples in examples/up/ to demonstrate GPU modes and keep README/exec.sh in sync (examples/up/).
+- [X] T018 Run formatting, clippy, and targeted nextest suite for GPU mode changes (cargo fmt, cargo clippy, make test-nextest-fast; add docker/compose-focused nextest suite if runtime/compose wiring changed).
+- [X] T019 [P] Validate warning wording/channel and output contracts for all/detect/none (stderr for warnings; stdout JSON intact) (crates/deacon/tests/up_gpu_output.rs).
+- [X] T020 [P] Test edge cases: missing GPU drivers/permissions, runtime failure surfaces, mixed service GPU needs, explicit mode override per invocation (crates/deacon/tests/up_gpu_edge_cases.rs).
+- [X] T021 [P] Validate consistency across run/build/compose over repeated runs for selected mode (crates/deacon/tests/up_gpu_consistency.rs).
+- [X] T022 [P] Compare GPU mode behavior against docs/repomix-output-devcontainers-cli.xml reference expectations and align flags/warnings (docs/repomix-output-devcontainers-cli.xml).
 
 ---
 

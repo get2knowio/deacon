@@ -19,6 +19,7 @@ DEFAULT_EXAMPLES=(
 	"configuration-output"
 	"id-labels-reconnect"
 	"remove-existing"
+	"gpu-modes"
 )
 
 if [ -n "${EXAMPLES_OVERRIDE:-}" ]; then

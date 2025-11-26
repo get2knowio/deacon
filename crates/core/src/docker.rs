@@ -549,6 +549,7 @@ pub trait DockerLifecycle: Docker + ContainerOps {
         config: &DevContainerConfig,
         workspace_path: &Path,
         remove_existing: bool,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<ContainerResult>;
 }
 
@@ -733,6 +734,14 @@ impl CliRuntime {
     /// Alias for backward compatibility - check if docker is installed
     pub fn check_docker_installed(&self) -> Result<()> {
         self.check_runtime_installed()
+    }
+
+    /// Detect GPU capability on this container runtime.
+    ///
+    /// This is a convenience wrapper around `crate::gpu::detect_gpu_capability`.
+    /// See that function for detailed documentation.
+    pub async fn detect_gpu_capability(&self) -> crate::gpu::HostGpuCapability {
+        crate::gpu::detect_gpu_capability(&self.runtime_path).await
     }
 
     /// Execute container runtime command and return stdout
@@ -1445,8 +1454,12 @@ impl ContainerOps for CliRuntime {
         identity: &ContainerIdentity,
         config: &DevContainerConfig,
         workspace_path: &Path,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<String> {
-        debug!("Creating container with identity: {:?}", identity);
+        debug!(
+            "Creating container with identity: {:?}, gpu_mode: {:?}",
+            identity, gpu_mode
+        );
 
         let container_name = identity.container_name();
         let labels = identity.labels();
@@ -1557,6 +1570,23 @@ impl ContainerOps for CliRuntime {
             };
             args.push("-p".to_string());
             args.push(port_arg);
+        }
+
+        // Add GPU flags based on GPU mode
+        // Note: GpuMode::Detect is resolved to All or None by the caller (e.g., in up.rs)
+        match gpu_mode {
+            crate::gpu::GpuMode::All => {
+                args.push("--gpus".to_string());
+                args.push("all".to_string());
+                debug!("Added --gpus all flag for GpuMode::All");
+            }
+            crate::gpu::GpuMode::None => {
+                // Silent no-op per FR-006: no GPU requests, no GPU-related logs
+            }
+            crate::gpu::GpuMode::Detect => {
+                // This should never happen - Detect mode should be resolved upstream
+                warn!("GpuMode::Detect passed to docker.rs - this indicates a bug. Skipping GPU flags.");
+            }
         }
 
         // Add runArgs if present
@@ -1741,8 +1771,12 @@ impl DockerLifecycle for CliRuntime {
         config: &DevContainerConfig,
         workspace_path: &Path,
         remove_existing: bool,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<ContainerResult> {
-        debug!("Starting up container workflow");
+        debug!(
+            "Starting up container workflow with gpu_mode: {:?}",
+            gpu_mode
+        );
 
         // Find existing containers
         let existing_containers = self.find_matching_containers(identity).await?;
@@ -1775,7 +1809,7 @@ impl DockerLifecycle for CliRuntime {
 
         // Create new container
         let container_id = self
-            .create_container(identity, config, workspace_path)
+            .create_container(identity, config, workspace_path, gpu_mode)
             .await?;
         self.start_container(&container_id).await?;
 
@@ -2333,8 +2367,12 @@ pub mod mock {
             identity: &ContainerIdentity,
             config: &DevContainerConfig,
             workspace_path: &Path,
+            gpu_mode: crate::gpu::GpuMode,
         ) -> Result<String> {
-            debug!("MockDocker create_container called");
+            debug!(
+                "MockDocker create_container called with gpu_mode: {:?}",
+                gpu_mode
+            );
 
             let mock_config = self.config.lock().unwrap();
             if mock_config.daemon_unavailable {
@@ -2472,8 +2510,9 @@ pub mod mock {
             config: &DevContainerConfig,
             workspace_path: &Path,
             remove_existing: bool,
+            gpu_mode: crate::gpu::GpuMode,
         ) -> Result<ContainerResult> {
-            debug!("MockDocker up called");
+            debug!("MockDocker up called with gpu_mode: {:?}", gpu_mode);
 
             // Find existing containers
             let existing_containers = self.find_matching_containers(identity).await?;
@@ -2506,7 +2545,7 @@ pub mod mock {
 
             // Create new container
             let container_id = self
-                .create_container(identity, config, workspace_path)
+                .create_container(identity, config, workspace_path, gpu_mode)
                 .await?;
             self.start_container(&container_id).await?;
 
@@ -2932,7 +2971,12 @@ mod tests {
         };
 
         let container_id = mock_docker
-            .create_container(&identity, &config, Path::new("/workspace"))
+            .create_container(
+                &identity,
+                &config,
+                Path::new("/workspace"),
+                crate::gpu::GpuMode::None,
+            )
             .await
             .unwrap();
         assert!(container_id.starts_with("mock-container-"));

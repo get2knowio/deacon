@@ -23,6 +23,7 @@ pub mod features_info;
 /// Feature testing infrastructure for dev container features.
 /// Provides functionality for discovering and executing tests for dev container features.
 pub mod features_test;
+pub mod gpu;
 pub mod host_requirements;
 pub mod io;
 pub mod lifecycle;

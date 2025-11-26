@@ -96,6 +96,10 @@ filter = 'binary(=integration_features_test_json) | binary(=integration_features
 test-group = 'docker-shared'
 
 [[profile.default.overrides]]
+filter = 'binary(=integration_gpu_detection) | binary(=up_gpu_all) | binary(=up_gpu_detect) | binary(=up_gpu_none) | binary(=up_gpu_edge_cases) | binary(=up_gpu_consistency) | binary(=up_gpu_output)'
+test-group = 'docker-shared'
+
+[[profile.default.overrides]]
 filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates)'
 test-group = 'fs-heavy'
 slow-timeout = "5m"
@@ -152,6 +156,10 @@ test-group = 'docker-exclusive'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding)'
+test-group = 'docker-shared'
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(=integration_gpu_detection) | binary(=up_gpu_all) | binary(=up_gpu_detect) | binary(=up_gpu_none) | binary(=up_gpu_edge_cases) | binary(=up_gpu_consistency) | binary(=up_gpu_output)'
 test-group = 'docker-shared'
 
 [[profile.dev-fast.overrides]]
@@ -237,6 +245,10 @@ filter = 'binary(=integration_features_test_json) | binary(=integration_features
 test-group = 'docker-shared'
 
 [[profile.docker.overrides]]
+filter = 'binary(=integration_gpu_detection) | binary(=up_gpu_all) | binary(=up_gpu_detect) | binary(=up_gpu_none) | binary(=up_gpu_edge_cases) | binary(=up_gpu_output) | binary(=up_gpu_consistency)'
+test-group = 'docker-shared'
+
+[[profile.docker.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
@@ -282,6 +294,10 @@ test-group = 'docker-exclusive'
 
 [[profile.full.overrides]]
 filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding)'
+test-group = 'docker-shared'
+
+[[profile.full.overrides]]
+filter = 'binary(=integration_gpu_detection) | binary(=up_gpu_all) | binary(=up_gpu_detect) | binary(=up_gpu_none) | binary(=up_gpu_edge_cases) | binary(=up_gpu_consistency) | binary(=up_gpu_output)'
 test-group = 'docker-shared'
 
 [[profile.full.overrides]]
@@ -342,6 +358,10 @@ test-group = 'docker-exclusive'
 filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding)'
 test-group = 'docker-shared'
 threads-required = 1
+
+[[profile.ci.overrides]]
+filter = 'binary(=integration_gpu_detection) | binary(=up_gpu_all) | binary(=up_gpu_detect) | binary(=up_gpu_none) | binary(=up_gpu_edge_cases) | binary(=up_gpu_consistency) | binary(=up_gpu_output)'
+test-group = 'docker-shared'
 
 [[profile.ci.overrides]]
 filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates)'
