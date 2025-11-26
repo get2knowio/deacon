@@ -30,7 +30,17 @@
       "Bash(cargo clippy:*)",
       "Bash(cargo build:*)",
       "Bash(cargo test:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(cargo run:*)",
+      "Bash(test:*)",
+      "Bash(cargo nextest show-config:*)",
+      "Bash(/workspaces/deacon/target/debug/deacon down:*)",
+      "Bash(make test-nextest-fast:*)",
+      "Bash(chmod:*)",
+      "Bash(bash:*)",
+      "Bash(tree:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr edit:*)"
     ],
     "deny": [],
     "ask": []
