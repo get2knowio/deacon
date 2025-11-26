@@ -49,7 +49,8 @@
       "Bash(timeout 120 coderabbit review:*)",
       "Bash(coderabbit --version:*)",
       "SlashCommand(/speckit.constitution)",
-      "Bash(.claude/scripts/run-validation.sh)"
+      "Bash(.claude/scripts/run-validation.sh)",
+      "Bash(.claude/scripts/manage-pr.sh:*)"
     ],
     "deny": [],
     "ask": []
