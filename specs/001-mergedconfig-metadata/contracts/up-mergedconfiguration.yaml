@@ -1,0 +1,143 @@
+openapi: 3.0.0
+info:
+  title: Up mergedConfiguration output
+  version: 0.1.0
+  description: JSON contract for `up` success output when includeMergedConfig is requested.
+paths:
+  /up:
+    post:
+      summary: Placeholder to document CLI JSON output shape
+      responses:
+        "200":
+          description: Up success result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpSuccess"
+components:
+  schemas:
+    UpSuccess:
+      type: object
+      required:
+        - outcome
+        - containerId
+        - remoteUser
+        - remoteWorkspaceFolder
+      properties:
+        outcome:
+          type: string
+          enum: [success]
+        containerId:
+          type: string
+        composeProjectName:
+          type: string
+          nullable: true
+        remoteUser:
+          type: string
+        remoteWorkspaceFolder:
+          type: string
+        configuration:
+          type: object
+          nullable: true
+          description: Base configuration when includeConfig is requested.
+        mergedConfiguration:
+          $ref: "#/components/schemas/MergedConfiguration"
+          description: Enriched configuration when includeMergedConfig is requested.
+    MergedConfiguration:
+      type: object
+      description: Resolved configuration including feature metadata and label metadata with provenance, ordering, and null semantics preserved.
+      properties:
+        features:
+          type: object
+          nullable: true
+          description: Resolved features section from base config.
+        featureMetadata:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeatureMetadataEntry"
+          nullable: true
+          description: Ordered entries matching feature resolution order.
+        imageMetadata:
+          oneOf:
+            - $ref: "#/components/schemas/LabelSet"
+            - type: array
+              items:
+                $ref: "#/components/schemas/LabelSet"
+          nullable: true
+          description: Labels derived from images; keep field present even when null/empty.
+        containerMetadata:
+          oneOf:
+            - $ref: "#/components/schemas/LabelSet"
+            - type: array
+              items:
+                $ref: "#/components/schemas/LabelSet"
+          nullable: true
+          description: Labels derived from containers/compose services; keep field present even when null/empty.
+      additionalProperties: true
+    FeatureMetadataEntry:
+      type: object
+      description: Feature metadata captured during resolution.
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        documentationURL:
+          type: string
+          nullable: true
+        options:
+          type: object
+          additionalProperties: true
+          nullable: true
+        installsAfter:
+          type: array
+          items:
+            type: string
+          nullable: true
+        dependsOn:
+          type: array
+          items:
+            type: string
+          nullable: true
+        mounts:
+          type: array
+          items:
+            type: object
+          nullable: true
+        containerEnv:
+          type: object
+          additionalProperties: true
+          nullable: true
+        customizations:
+          type: object
+          additionalProperties: true
+          nullable: true
+        provenance:
+          type: object
+          description: Source reference (registry/local), compose service (if any), and resolution order index.
+          nullable: true
+      additionalProperties: true
+    LabelSet:
+      type: object
+      description: Labels plus provenance for a scope (image or container/service).
+      properties:
+        source:
+          type: string
+          description: Scope such as image or container; may include service name.
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          nullable: true
+        provenance:
+          type: object
+          description: Collection source details (image ref, container id, service name).
+          nullable: true
+      additionalProperties: true
