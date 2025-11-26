@@ -36,6 +36,7 @@ async fn test_container_lifecycle_with_variable_substitution() {
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        force_pty: false,
     };
 
     // Define lifecycle commands with variable substitution
@@ -104,6 +105,7 @@ async fn test_container_lifecycle_with_skip_flags() {
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        force_pty: false,
     };
 
     let commands = ContainerLifecycleCommands::new()
@@ -151,6 +153,7 @@ fn test_container_lifecycle_config_validation() {
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        force_pty: false,
     };
 
     assert_eq!(config.container_id, "test-container");
@@ -207,6 +210,7 @@ async fn test_all_lifecycle_phases_ordering() {
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        force_pty: false,
     };
 
     // Define all 6 lifecycle phases

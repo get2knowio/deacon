@@ -13,6 +13,7 @@
   - `--progress {auto|json|none}`
   - `--progress-file <PATH>`
   - `--plugin <NAME>` (cfg feature)
+  - `--force-tty-if-json` (forces PTY allocation for lifecycle exec when JSON logging is active; env: `DEACON_FORCE_TTY_IF_JSON`)
 
 - Subcommands
   - `up`

@@ -99,7 +99,9 @@ fn map_config_error(err: DeaconError) -> anyhow::Error {
 /// Build an `ExecConfig` value from higher level inputs. This helper exists to
 /// make the PTY decision logic and produced config testable without executing
 /// the command (which would call `std::process::exit`).
-pub(crate) fn build_exec_config(
+///
+/// This function is public to support integration testing of PTY allocation logic.
+pub fn build_exec_config(
     args: &ExecArgs,
     working_dir: String,
     mut effective_env: HashMap<String, String>,

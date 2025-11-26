@@ -1,14 +1,16 @@
 <!--
 Sync Impact Report
-- Version change: 1.7.1 → 1.8.0
+- Version change: 1.9.0 → 1.9.1
 - Modified principles:
-  - Added VIII. Executable & Self-Verifying Examples (new governance for README-aligned exec scripts)
-- Added sections: Principle VIII (examples execution/cleanup requirements)
+  - IV. Idiomatic, Safe Rust: Added guidance on environment variable constants
+  - VI. Testing Completeness: Added guidance on ignored tests requiring tracking
+- Added sections: None
 - Removed sections: None
 - Templates requiring updates/alignment:
   - ✅ .specify/templates/plan-template.md (no changes needed)
   - ✅ .specify/templates/spec-template.md (no changes needed)
   - ✅ .specify/templates/tasks-template.md (no changes needed)
+  - ✅ CLAUDE.md (no changes needed - existing guidance covers these patterns)
 - Follow-up TODOs: None
 -->
 
@@ -101,6 +103,11 @@ values when operations can fail. Provide error context with `anyhow::Context` or
 superseded (e.g., `atty` → `is-terminal`), migrate promptly. Prefer minimal, stable dependencies with active
 maintenance.
 
+**Environment Variable Constants**: Environment variable names used in multiple places MUST be defined as constants
+(e.g., `const ENV_FORCE_TTY_IF_JSON: &str = "DEACON_FORCE_TTY_IF_JSON";`) rather than repeated string literals.
+This prevents typos, ensures consistency, and makes the codebase easier to search and refactor. Document the
+constant with its purpose and valid values.
+
 ### V. Observability and Output Contracts
 Stdout/stderr separation is a contract:
 - JSON modes (`--json`, `--output json`): stdout contains only the single JSON document; all logs go to stderr.
@@ -132,6 +139,11 @@ section or lists required test scenarios, treat them as acceptance criteria:
 Tests MUST be deterministic and hermetic (no network); use fixtures and mocked registries. When an integration test
 passes but codifies incorrect behavior (e.g., testing for alphabetical order when spec requires declaration order),
 it is a bug—fix the implementation and update the test to assert correct behavior.
+
+**Ignored Tests Require Tracking**: When a test is marked `#[ignore]` because it requires specific environment setup
+(e.g., PTY allocation failure simulation) or cannot be reliably automated, it MUST include a tracking issue number
+or detailed manual testing procedure in the test comment. Ignored tests without documentation or a tracking plan
+are constitution violations—either implement the test properly, document why it cannot be automated, or remove it.
 
 **Nextest Configuration Requirements**: ALL new integration tests MUST be configured in `.config/nextest.toml` with
 appropriate test groups for resource isolation and parallelization. When adding a new test binary or test suite:
@@ -221,9 +233,46 @@ table and the aggregator to include the new `exec.sh`.
 - Doctests MUST compile and run; add missing trait imports, `Default` impls, or public visibility as needed.
 - Examples under `examples/` and fixtures under `fixtures/` are living documentation; update them when user‑facing
   flags, schemas, or outputs change; keep `examples/README.md` curated and aligned with spec terminology.
-- Use ast-grep tool (command 'sg') for searching or rewriting code instead of find or grep.
 - Use context7 MCP server for retrieving up-to-date documentation for libraries and packages.
 - Use github MCP server for interacting with GitHub repositories, managing issues, pull requests, and code searches.
+
+### Code Search & Refactoring with ast-grep
+
+Use ast-grep (command: `sg`) for searching and rewriting code instead of `find`, `grep`, or regex-based tools.
+ast-grep operates on Abstract Syntax Trees (AST), enabling precise pattern matching that respects language syntax.
+
+**When to use ast-grep**:
+- Searching for specific code patterns (function calls, struct definitions, trait implementations)
+- Refactoring code at scale (renaming, restructuring, migrating APIs)
+- Finding usages that regex would miss or over-match (e.g., distinguishing method calls from field access)
+- Enforcing code conventions or detecting anti-patterns
+
+**Basic usage**:
+```bash
+# Search for a pattern in Rust files
+sg --pattern 'unwrap()' --lang rust
+
+# Search for function definitions
+sg --pattern 'fn $NAME($$$ARGS) -> $RET { $$$BODY }' --lang rust
+
+# Rewrite code (dry-run by default)
+sg --pattern 'println!($$$ARGS)' --rewrite 'tracing::info!($$$ARGS)' --lang rust
+
+# Apply rewrites
+sg --pattern 'old_fn($ARG)' --rewrite 'new_fn($ARG)' --lang rust --update-all
+```
+
+**Pattern syntax**:
+- `$NAME` - Single metavariable (matches one AST node)
+- `$$$ARGS` - Variadic metavariable (matches zero or more nodes)
+- Patterns match AST structure, not text—whitespace and formatting are irrelevant
+
+**Best practices**:
+- Always specify `--lang rust` for Rust codebases
+- Test patterns with search before applying rewrites
+- Use `--interactive` for selective rewrites
+- Prefer ast-grep over regex for any structural code transformation
+- For complex refactors, write YAML rules in `sgconfig.yml`
 - Observability: prefer structured fields over string concatenation; ensure spans cover multi‑step workflows.
 
 ### Pre-Implementation Validation Checklist
@@ -273,4 +322,4 @@ This checklist prevents spec drift and reduces rework. Document deviations with 
 - Compliance Review: All PRs MUST include a quick constitution compliance check (in PR body or checklist). Reviewers
   SHALL block merges on violations of Principles I–VIII or on missing updates to tests/examples.
 
-**Version**: 1.8.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-22
+**Version**: 1.9.1 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-26

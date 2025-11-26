@@ -188,6 +188,41 @@ Color and accessibility:
 - Help/usage output uses automatic color when writing to a terminal. Spinner/status messages also use subtle colors (yellow for in‑progress, green for success, red for failures).
 - Respecting your environment, color is disabled when not writing to a TTY and when `NO_COLOR` is set (see https://no-color.org/). To force-disable colors, export `NO_COLOR=1`.
 
+### PTY Allocation for JSON Log Mode
+
+When using JSON logging format (`--log-format json`), lifecycle commands (onCreate, postCreate, etc.) run without PTY (pseudo-terminal) allocation by default. This is ideal for non-interactive scripts and automated environments.
+
+However, if your lifecycle commands need interactive terminal behavior while maintaining structured JSON logs, you can force PTY allocation:
+
+**Via CLI Flag:**
+```bash
+deacon up --log-format json --force-tty-if-json
+```
+
+**Via Environment Variable:**
+```bash
+# Enable PTY allocation
+export DEACON_FORCE_TTY_IF_JSON=true
+deacon up --log-format json
+
+# Disable PTY allocation (default)
+export DEACON_FORCE_TTY_IF_JSON=false
+deacon up --log-format json
+```
+
+**Truthy values** (case-insensitive): `true`, `1`, `yes`
+**Falsey values**: `false`, `0`, `no`, or unset
+
+**Precedence:**
+1. CLI flag (`--force-tty-if-json`)
+2. Environment variable (`DEACON_FORCE_TTY_IF_JSON`)
+3. Default (no PTY allocation)
+
+**Important Notes:**
+- This setting only applies when `--log-format json` is active
+- With PTY allocation enabled, interactive commands work correctly while JSON logs remain structured on stderr and machine-readable output stays on stdout
+- Without PTY allocation (default), lifecycle commands run in non-interactive mode
+
 ## Output Streams
 
 Deacon follows a strict stdout/stderr separation contract to ensure reliable machine-readable output:

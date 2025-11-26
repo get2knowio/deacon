@@ -37,6 +37,11 @@ pub struct ContainerLifecycleConfig {
     pub user_env_probe: crate::container_env_probe::ContainerProbeMode,
     /// Optional cache folder for env probe results
     pub cache_folder: Option<std::path::PathBuf>,
+    /// Whether to force PTY allocation for lifecycle exec commands.
+    /// When true, allocates a PTY even in non-interactive environments.
+    /// Primarily used with JSON log mode to support interactive lifecycle commands.
+    /// Controlled by CLI flag `--force-tty-if-json` or env var `DEACON_FORCE_TTY_IF_JSON`.
+    pub force_pty: bool,
 }
 
 /// Execute lifecycle commands in a container with full variable substitution
@@ -631,7 +636,7 @@ where
             user: config.user.clone(),
             working_dir: Some(config.container_workspace_folder.clone()),
             env: config.container_env.clone(),
-            tty: false,
+            tty: config.force_pty,
             interactive: false,
             detach: false,
             silent: false,
@@ -1103,6 +1108,7 @@ mod tests {
             use_login_shell: true,
             user_env_probe: crate::container_env_probe::ContainerProbeMode::LoginShell,
             cache_folder: None,
+            force_pty: false,
         };
 
         assert_eq!(config.container_id, "test-container");
@@ -1224,6 +1230,7 @@ mod tests {
                 use_login_shell: false, // Use plain sh for tests
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                force_pty: false,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
@@ -1281,6 +1288,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                force_pty: false,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
@@ -1352,6 +1360,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                force_pty: false,
             },
             context: substitution_context,
             timeout: Duration::from_millis(100), // Very short timeout
@@ -1410,6 +1419,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                force_pty: false,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),

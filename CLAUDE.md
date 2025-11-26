@@ -143,6 +143,44 @@ cargo test test_name -- --test-threads=1
 - Pin images to specific versions (e.g., `alpine:3.18` not `latest`)
 - Keep README and `exec.sh` in lockstep
 
+## Code Search & Refactoring with ast-grep
+
+Use ast-grep (command: `sg`) for searching and rewriting code instead of `find`, `grep`, or regex-based tools.
+ast-grep operates on Abstract Syntax Trees (AST), enabling precise pattern matching that respects language syntax.
+
+**When to use ast-grep:**
+- Searching for specific code patterns (function calls, struct definitions, trait implementations)
+- Refactoring code at scale (renaming, restructuring, migrating APIs)
+- Finding usages that regex would miss or over-match
+- Enforcing code conventions or detecting anti-patterns
+
+**Basic usage:**
+```bash
+# Search for a pattern in Rust files
+sg --pattern 'unwrap()' --lang rust
+
+# Search for function definitions
+sg --pattern 'fn $NAME($$$ARGS) -> $RET { $$$BODY }' --lang rust
+
+# Rewrite code (dry-run by default)
+sg --pattern 'println!($$$ARGS)' --rewrite 'tracing::info!($$$ARGS)' --lang rust
+
+# Apply rewrites
+sg --pattern 'old_fn($ARG)' --rewrite 'new_fn($ARG)' --lang rust --update-all
+```
+
+**Pattern syntax:**
+- `$NAME` - Single metavariable (matches one AST node)
+- `$$$ARGS` - Variadic metavariable (matches zero or more nodes)
+- Patterns match AST structure, not text—whitespace and formatting are irrelevant
+
+**Best practices:**
+- Always specify `--lang rust` for Rust codebases
+- Test patterns with search before applying rewrites
+- Use `--interactive` for selective rewrites
+- Prefer ast-grep over regex for any structural code transformation
+- For complex refactors, write YAML rules in `sgconfig.yml`
+
 ## OCI Registry Implementation
 
 **HTTP Client Trait Pattern:**

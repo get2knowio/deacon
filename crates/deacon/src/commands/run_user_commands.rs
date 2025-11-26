@@ -134,6 +134,9 @@ async fn execute_lifecycle_commands(
         use_login_shell: true, // Default: use login shell for lifecycle commands
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::LoginShell,
         cache_folder: args.container_data_folder.clone(),
+        // Per FR-006: force_pty toggle only applies to 'up' workflow lifecycle exec,
+        // not to run-user-commands which is a separate entry point
+        force_pty: false,
     };
 
     // Build lifecycle commands from configuration

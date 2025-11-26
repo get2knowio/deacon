@@ -339,6 +339,7 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        force_pty: false,
     };
 
     // Create lifecycle commands
@@ -433,6 +434,7 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        force_pty: false,
     };
 
     // Create lifecycle commands
@@ -500,6 +502,7 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        force_pty: false,
     };
 
     // Create lifecycle commands with a failing command
@@ -593,6 +596,7 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
         use_login_shell: false,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        force_pty: false,
     };
 
     // Create lifecycle commands
