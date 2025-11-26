@@ -171,16 +171,17 @@ impl ContainerOps for ContainerRuntimeImpl {
         identity: &ContainerIdentity,
         config: &DevContainerConfig,
         workspace_path: &Path,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<String> {
         match self {
             Self::Docker(runtime) => {
                 runtime
-                    .create_container(identity, config, workspace_path)
+                    .create_container(identity, config, workspace_path, gpu_mode)
                     .await
             }
             Self::Podman(runtime) => {
                 runtime
-                    .create_container(identity, config, workspace_path)
+                    .create_container(identity, config, workspace_path, gpu_mode)
                     .await
             }
         }
@@ -223,16 +224,17 @@ impl DockerLifecycle for ContainerRuntimeImpl {
         config: &DevContainerConfig,
         workspace_path: &Path,
         remove_existing: bool,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<ContainerResult> {
         match self {
             Self::Docker(runtime) => {
                 runtime
-                    .up(identity, config, workspace_path, remove_existing)
+                    .up(identity, config, workspace_path, remove_existing, gpu_mode)
                     .await
             }
             Self::Podman(runtime) => {
                 runtime
-                    .up(identity, config, workspace_path, remove_existing)
+                    .up(identity, config, workspace_path, remove_existing, gpu_mode)
                     .await
             }
         }
@@ -306,9 +308,10 @@ impl ContainerOps for DockerRuntime {
         identity: &ContainerIdentity,
         config: &DevContainerConfig,
         workspace_path: &Path,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<String> {
         self.docker
-            .create_container(identity, config, workspace_path)
+            .create_container(identity, config, workspace_path, gpu_mode)
             .await
     }
 
@@ -337,9 +340,10 @@ impl DockerLifecycle for DockerRuntime {
         config: &DevContainerConfig,
         workspace_path: &Path,
         remove_existing: bool,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<ContainerResult> {
         self.docker
-            .up(identity, config, workspace_path, remove_existing)
+            .up(identity, config, workspace_path, remove_existing, gpu_mode)
             .await
     }
 }
@@ -417,9 +421,10 @@ impl ContainerOps for PodmanRuntime {
         identity: &ContainerIdentity,
         config: &DevContainerConfig,
         workspace_path: &Path,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<String> {
         self.runtime
-            .create_container(identity, config, workspace_path)
+            .create_container(identity, config, workspace_path, gpu_mode)
             .await
     }
 
@@ -448,9 +453,10 @@ impl DockerLifecycle for PodmanRuntime {
         config: &DevContainerConfig,
         workspace_path: &Path,
         remove_existing: bool,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<ContainerResult> {
         self.runtime
-            .up(identity, config, workspace_path, remove_existing)
+            .up(identity, config, workspace_path, remove_existing, gpu_mode)
             .await
     }
 }

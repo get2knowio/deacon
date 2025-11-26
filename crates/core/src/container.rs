@@ -59,6 +59,7 @@ pub trait ContainerOps {
         identity: &ContainerIdentity,
         config: &DevContainerConfig,
         workspace_path: &Path,
+        gpu_mode: crate::gpu::GpuMode,
     ) -> Result<String>;
 
     /// Start a container by ID
