@@ -1744,7 +1744,7 @@ async fn execute_compose_up(
     // Execute post-create lifecycle if not skipped
     if !args.skip_post_create {
         // Resolve PTY preference for compose post-create (same logic as lifecycle commands)
-        let json_mode = std::env::var("DEACON_LOG_FORMAT")
+        let json_mode = std::env::var(ENV_LOG_FORMAT)
             .map(|v| v == "json")
             .unwrap_or(false);
         let force_pty = resolve_force_pty(args.force_tty_if_json, json_mode);
