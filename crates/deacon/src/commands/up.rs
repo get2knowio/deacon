@@ -627,8 +627,7 @@ pub struct UpArgs {
     pub include_merged_configuration: bool,
 
     // GPU and advanced options
-    #[allow(dead_code)] // TODO: Will be wired in T009
-    pub gpu_availability: Option<String>,
+    pub gpu_mode: deacon_core::gpu::GpuMode,
     #[allow(dead_code)] // TODO: Will be wired in T009
     pub update_remote_user_uid_default: Option<String>,
 
@@ -702,7 +701,7 @@ impl Default for UpArgs {
             omit_syntax_directive: false,
             include_configuration: false,
             include_merged_configuration: false,
-            gpu_availability: None,
+            gpu_mode: deacon_core::gpu::GpuMode::None,
             update_remote_user_uid_default: None,
             ports_events: false,
             forward_ports: Vec::new(),
@@ -783,6 +782,38 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
     let runtime_kind = RuntimeFactory::detect_runtime(args.runtime);
     let runtime = RuntimeFactory::create_runtime(runtime_kind)?;
     debug!("Using container runtime: {}", runtime.runtime_name());
+
+    // Step 2: Resolve effective GPU mode if detect mode is requested
+    let effective_gpu_mode = if args.gpu_mode == deacon_core::gpu::GpuMode::Detect {
+        debug!("GPU mode is 'detect', probing for GPU capability");
+        let gpu_capability = deacon_core::gpu::detect_gpu_capability(runtime.runtime_name()).await;
+
+        if gpu_capability.available {
+            info!(
+                "GPU runtime '{}' detected, proceeding with GPU acceleration",
+                gpu_capability.runtime_name.as_deref().unwrap_or("unknown")
+            );
+            deacon_core::gpu::GpuMode::All
+        } else {
+            // Emit warning once per invocation
+            if let Some(error) = gpu_capability.probe_error {
+                warn!(
+                    "GPU detection failed: {}. Proceeding without GPU acceleration.",
+                    error
+                );
+            } else {
+                warn!("GPU mode 'detect' specified but no GPU runtime found. Proceeding without GPU acceleration.");
+            }
+            deacon_core::gpu::GpuMode::None
+        }
+    } else {
+        // Use the mode as-is for 'all' or 'none'
+        args.gpu_mode
+    };
+
+    // Replace the gpu_mode in args with the effective mode
+    let mut args = args;
+    args.gpu_mode = effective_gpu_mode;
 
     execute_up_with_runtime(args, runtime).await
 }
@@ -1316,14 +1347,6 @@ async fn execute_up_with_runtime(
         config.mounts = mounts;
     }
 
-    // GPU availability hint threading
-    if config.run_args.is_empty() && args.gpu_availability.as_deref() == Some("all") {
-        // Minimal handling: add --gpus all to runArgs if not present
-        config
-            .run_args
-            .extend(["--gpus".to_string(), "all".to_string()]);
-    }
-
     // T029: Merge image metadata into configuration
     config = merge_image_metadata_into_config(config, workspace_folder.as_path()).await?;
     debug!("Merged image metadata into configuration");
@@ -1683,7 +1706,14 @@ async fn execute_compose_up(
     // First, warn about security options that cannot be applied dynamically
     ComposeCommand::warn_security_options_for_compose(config);
 
-    compose_manager.start_project(&project)?;
+    // Log GPU mode application for compose
+    if args.gpu_mode == deacon_core::gpu::GpuMode::All {
+        info!("Applying GPU mode: all - requesting GPU access for compose services");
+    } else if args.gpu_mode != deacon_core::gpu::GpuMode::None {
+        debug!("GPU mode for compose: {:?}", args.gpu_mode);
+    }
+
+    compose_manager.start_project(&project, args.gpu_mode)?;
 
     info!("Compose project {} started successfully", project.name);
 
@@ -1974,6 +2004,13 @@ async fn execute_container_up(
         );
     }
 
+    // Log GPU mode application
+    if args.gpu_mode == deacon_core::gpu::GpuMode::All {
+        info!("Applying GPU mode: all - requesting GPU access for container");
+    } else if args.gpu_mode != deacon_core::gpu::GpuMode::None {
+        debug!("GPU mode: {:?}", args.gpu_mode);
+    }
+
     // Create container using DockerLifecycle trait
     let container_result = docker
         .up(
@@ -1981,6 +2018,7 @@ async fn execute_container_up(
             &config,
             workspace_folder,
             args.remove_existing_container,
+            args.gpu_mode,
         )
         .await;
 

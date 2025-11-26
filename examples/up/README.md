@@ -52,6 +52,12 @@ deacon up --workspace-folder .
 | [id-labels-reconnect/](id-labels-reconnect/) | Container reconnection | ID labels, container discovery, `--expect-existing-container` |
 | [remove-existing/](remove-existing/) | Container replacement | `--remove-existing-container`, force recreation |
 
+### GPU & Hardware
+
+| Example | Description | Key Features |
+|---------|-------------|--------------|
+| [gpu-modes/](gpu-modes/) | GPU mode handling | `--gpu-mode` flag, auto-detection, GPU resource requests |
+
 ## Common Usage Patterns
 
 ### 1. First-Time Setup
@@ -107,6 +113,19 @@ deacon up --workspace-folder . --id-label "env=staging"
 deacon up --workspace-folder . --id-label "env=test"
 ```
 
+### 6. GPU-Accelerated Workloads
+
+```bash
+# Guarantee GPU access (requires GPU host)
+deacon up --workspace-folder . --gpu-mode all
+
+# Auto-detect with fallback
+deacon up --workspace-folder . --gpu-mode detect
+
+# Explicit CPU-only (default)
+deacon up --workspace-folder . --gpu-mode none
+```
+
 ## Flag Reference
 
 ### Essential Flags
@@ -134,6 +153,10 @@ deacon up --workspace-folder . --id-label "env=test"
 - `--remove-existing-container`: Remove and recreate container
 - `--expect-existing-container`: Fail if container doesn't exist
 - `--workspace-mount-consistency <consistent|cached|delegated>`: Mount sync behavior
+
+### GPU & Hardware
+
+- `--gpu-mode <all|detect|none>`: GPU resource handling (default: none)
 
 ### Customization
 
@@ -210,6 +233,7 @@ Exit code: 0 for success, 1 for error.
 | Prebuild workflow | prebuild-mode |
 | BuildKit | dockerfile-build |
 | Compose profiles | compose-profiles |
+| GPU modes | gpu-modes |
 
 ## Testing Examples
 

@@ -246,9 +246,19 @@ pub enum Commands {
         include_merged_configuration: bool,
 
         // GPU and advanced options
-        /// GPU availability (all, detect, none)
-        #[arg(long)]
-        gpu_availability: Option<String>,
+        /// GPU handling mode for container operations
+        ///
+        /// Controls how GPU resources are requested when creating containers.
+        ///
+        /// Values:
+        ///   all    - Always request GPU resources (--gpus all)
+        ///   detect - Auto-detect GPU availability; warn once if absent
+        ///   none   - No GPU requests, no GPU-related output (default)
+        ///
+        /// In detect mode, the system will probe for GPU capabilities and emit
+        /// a single warning if no GPU runtime is found, then continue without GPU support.
+        #[arg(long = "gpu-mode", default_value = "none", value_enum)]
+        gpu_mode: deacon_core::gpu::GpuMode,
         /// Update remote user UID default behavior (never, on, off)
         #[arg(long)]
         update_remote_user_uid_default: Option<String>,
@@ -1069,7 +1079,7 @@ impl Cli {
                 omit_syntax_directive,
                 include_configuration,
                 include_merged_configuration,
-                gpu_availability,
+                gpu_mode,
                 update_remote_user_uid_default,
                 ports_events,
                 forward_ports,
@@ -1105,7 +1115,7 @@ impl Cli {
                     omit_syntax_directive,
                     include_configuration,
                     include_merged_configuration,
-                    gpu_availability,
+                    gpu_mode,
                     update_remote_user_uid_default,
                     ports_events,
                     shutdown,

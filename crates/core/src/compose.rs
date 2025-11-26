@@ -177,11 +177,34 @@ impl ComposeCommand {
 
     /// Start services
     #[instrument(skip(self))]
-    pub fn up(&self, services: &[String], detached: bool) -> Result<String> {
+    pub fn up(
+        &self,
+        services: &[String],
+        detached: bool,
+        gpu_mode: crate::gpu::GpuMode,
+    ) -> Result<String> {
         let mut args = vec!["up"];
         if detached {
             args.push("-d");
         }
+
+        // Add GPU flags based on GPU mode
+        // Note: GpuMode::Detect is resolved to All or None by the caller (e.g., in up.rs)
+        match gpu_mode {
+            crate::gpu::GpuMode::All => {
+                args.push("--gpus");
+                args.push("all");
+                debug!("Added --gpus all flag for compose up (GpuMode::All)");
+            }
+            crate::gpu::GpuMode::None => {
+                // Silent no-op per FR-006: no GPU requests, no GPU-related logs
+            }
+            crate::gpu::GpuMode::Detect => {
+                // This should never happen - Detect mode should be resolved upstream
+                warn!("GpuMode::Detect passed to compose.rs - this indicates a bug. Skipping GPU flags.");
+            }
+        }
+
         args.extend(services.iter().map(|s| s.as_str()));
         self.execute(&args)
     }
@@ -413,16 +436,20 @@ impl ComposeManager {
 
     /// Start compose project
     #[instrument(skip(self))]
-    pub fn start_project(&self, project: &ComposeProject) -> Result<()> {
+    pub fn start_project(
+        &self,
+        project: &ComposeProject,
+        gpu_mode: crate::gpu::GpuMode,
+    ) -> Result<()> {
         let command = self.get_command(project);
         let services = project.get_all_services();
 
         debug!(
-            "Starting compose project {} with services: {:?}",
-            project.name, services
+            "Starting compose project {} with services: {:?}, gpu_mode: {:?}",
+            project.name, services, gpu_mode
         );
 
-        command.up(&services, true)?;
+        command.up(&services, true, gpu_mode)?;
 
         debug!("Compose project {} started successfully", project.name);
         Ok(())
