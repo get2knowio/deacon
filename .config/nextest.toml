@@ -80,7 +80,7 @@ test-group = 'parity-cli'
 
 [[profile.default.overrides]]
 filter = 'binary(#integration_env_probe_*)'
-test-group = 'env-probe'
+test-group = 'docker-shared'
 
 [[profile.default.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
@@ -140,7 +140,7 @@ test-group = 'parity-cli'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(#integration_env_probe_*)'
-test-group = 'env-probe'
+test-group = 'docker-shared'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
@@ -181,6 +181,65 @@ filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integ
 test-group = 'docker-slow-shared'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
+# Docker profile: Run all tests that require Docker
+[profile.docker]
+retries = 0
+slow-timeout = { period = "10m", terminate-after = 1 }
+status-level = "pass"
+default-filter = 'binary(#smoke_*) | binary(#parity_*) | binary(#integration_*) | binary(=up_dotfiles)'
+
+[[profile.docker.overrides]]
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+test-group = 'smoke-heavy'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.docker.overrides]]
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+test-group = 'smoke-lite'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.docker.overrides]]
+filter = 'binary(=smoke_cli)'
+test-group = 'smoke-cli'
+
+[[profile.docker.overrides]]
+filter = 'binary(#parity_*)'
+test-group = 'parity'
+
+[[profile.docker.overrides]]
+filter = 'binary(=parity_read_configuration)'
+test-group = 'parity-cli'
+
+[[profile.docker.overrides]]
+filter = 'binary(=parity_remote_env_flags)'
+test-group = 'parity-cli'
+
+[[profile.docker.overrides]]
+filter = 'binary(#integration_env_probe_*)'
+test-group = 'docker-shared'
+
+[[profile.docker.overrides]]
+filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
+test-group = 'docker-slow-shared'
+slow-timeout = { period = "30m", terminate-after = 1 }
+
+[[profile.docker.overrides]]
+filter = 'binary(=up_dotfiles)'
+test-group = 'docker-exclusive'
+slow-timeout = { period = "5m", terminate-after = 1 }
+
+[[profile.docker.overrides]]
+filter = 'binary(=test_features_cli)'
+test-group = 'docker-exclusive'
+
+[[profile.docker.overrides]]
+filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding)'
+test-group = 'docker-shared'
+
+[[profile.docker.overrides]]
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+priority = 100
+
 # Apply all default overrides
 [[profile.full.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
@@ -210,7 +269,7 @@ test-group = 'parity-cli'
 
 [[profile.full.overrides]]
 filter = 'binary(#integration_env_probe_*)'
-test-group = 'env-probe'
+test-group = 'docker-shared'
 
 [[profile.full.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(#integration_compose_*) | binary(=integration_vulnerability_scan) | binary(=integration_progress) | binary(=up_dotfiles)'
@@ -268,7 +327,7 @@ test-group = 'parity-cli'
 
 [[profile.ci.overrides]]
 filter = 'binary(#integration_env_probe_*)'
-test-group = 'env-probe'
+test-group = 'docker-shared'
 
 [[profile.ci.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(#integration_compose_*) | binary(=integration_vulnerability_scan) | binary(=integration_progress) | binary(=up_dotfiles)'
