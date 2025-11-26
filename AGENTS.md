@@ -114,8 +114,8 @@ Document this checklist in your plan.md or PR description to prevent spec drift.
 - Rust stable (2021 edition) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio (as already in repo) (001-up-gap-spec)
 - cargo-nextest for parallel test execution with resource-aware scheduling
 - N/A (CLI orchestrator; uses filesystem for configs/cache) (001-up-gap-spec)
-- Rust 2021 (rust-toolchain pinned) + clap, serde/serde_json, anyhow/thiserror, tracing, Docker CLI/compose integration helpers (001-gpu-modes)
-- N/A (runtime configuration only) (001-gpu-modes)
+- Rust (2021 edition; workspace pinned via rust-toolchain) + clap, serde/serde_json, tracing, anyhow/thiserror, tokio, existing exec/TTY helpers in crates/core and crates/deacon (001-force-pty-up)
+- N/A (CLI runtime only) (001-force-pty-up)
 
 ## Recent Changes
 - 001-up-gap-spec: Added Rust stable (2021 edition) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio (as already in repo)
