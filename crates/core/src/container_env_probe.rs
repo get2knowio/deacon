@@ -28,7 +28,7 @@ use crate::errors::{DeaconError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// Environment probing modes for container
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -149,19 +149,40 @@ impl ContainerEnvironmentProber {
             let cache_key = format!("{}_{}", container_id, user.unwrap_or("root"));
             let cache_path = folder.join(format!("env_probe_{}.json", cache_key));
             if cache_path.exists() {
-                if let Ok(contents) = std::fs::read_to_string(&cache_path) {
-                    if let Ok(env_vars) = serde_json::from_str::<HashMap<String, String>>(&contents)
-                    {
-                        debug!("Loaded cached env probe from {}", cache_path.display());
-                        return Ok(ContainerProbeResult {
-                            env_vars: env_vars.clone(),
-                            shell_used: "cache".to_string(),
-                            var_count: env_vars.len(),
-                        });
+                match std::fs::read_to_string(&cache_path) {
+                    Ok(contents) => {
+                        match serde_json::from_str::<HashMap<String, String>>(&contents) {
+                            Ok(env_vars) => {
+                                let var_count = env_vars.len();
+                                debug!(cache_path = %cache_path.display(), var_count = var_count, "Loaded cached env probe");
+                                return Ok(ContainerProbeResult {
+                                    env_vars,
+                                    shell_used: "cache".to_string(),
+                                    var_count,
+                                });
+                            }
+                            Err(e) => {
+                                warn!(
+                                    cache_path = %cache_path.display(),
+                                    error = %e,
+                                    "Failed to parse cache file, falling back to fresh probe"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            cache_path = %cache_path.display(),
+                            error = %e,
+                            "Failed to read cache file, falling back to fresh probe"
+                        );
                     }
                 }
             }
         }
+
+        // Cache miss - execute fresh probe
+        debug!(container_id = %container_id, user = ?user, "Cache miss: executing fresh probe");
 
         // Detect shell in container
         let shell = self
@@ -185,11 +206,38 @@ impl ContainerEnvironmentProber {
 
         // Persist cache if requested
         if let Some(folder) = cache_folder {
-            let _ = std::fs::create_dir_all(folder);
-            let cache_key = format!("{}_{}", container_id, user.unwrap_or("root"));
-            let cache_path = folder.join(format!("env_probe_{}.json", cache_key));
-            if let Ok(contents) = serde_json::to_string(&env_vars) {
-                let _ = std::fs::write(&cache_path, contents);
+            if let Err(e) = std::fs::create_dir_all(folder) {
+                warn!(
+                    cache_folder = %folder.display(),
+                    error = %e,
+                    "Failed to create cache directory"
+                );
+            } else {
+                let cache_key = format!("{}_{}", container_id, user.unwrap_or("root"));
+                let cache_path = folder.join(format!("env_probe_{}.json", cache_key));
+                match serde_json::to_string(&env_vars) {
+                    Ok(contents) => {
+                        if let Err(e) = std::fs::write(&cache_path, &contents) {
+                            warn!(
+                                cache_path = %cache_path.display(),
+                                error = %e,
+                                "Failed to write cache file"
+                            );
+                        } else {
+                            debug!(
+                                cache_path = %cache_path.display(),
+                                var_count = env_vars.len(),
+                                "Persisted env probe cache"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "Failed to serialize env vars for cache"
+                        );
+                    }
+                }
             }
         }
 

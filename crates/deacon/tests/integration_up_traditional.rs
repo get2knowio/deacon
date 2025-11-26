@@ -114,20 +114,22 @@ fn test_up_traditional_container_with_flags() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
+    // Convert stderr to lowercase for case-insensitive matching
+    let stderr_lower = stderr.to_lowercase();
+
     // Debug: print actual output if assertion fails
-    if !(stderr.contains("traditional")
-        || stderr.contains("Container created")
-        || stderr.contains("Container reused")
-        || stderr.contains("docker")
-        || stderr.contains("Docker")
-        || stderr.contains("ping")
-        || stderr.contains("Lifecycle")
-        || stderr.contains("Not installed")
-        || stderr.contains("No such file or directory")
-        || stderr.contains("Error response from daemon")
-        || stderr.contains("permission denied")
-        || stderr.contains("Failed to spawn")
-        || stderr.contains("command not found")
+    if !(stderr_lower.contains("traditional")
+        || stderr_lower.contains("container created")
+        || stderr_lower.contains("container reused")
+        || stderr_lower.contains("docker")
+        || stderr_lower.contains("ping")
+        || stderr_lower.contains("lifecycle")
+        || stderr_lower.contains("not installed")
+        || stderr_lower.contains("no such file or directory")
+        || stderr_lower.contains("error response from daemon")
+        || stderr_lower.contains("permission denied")
+        || stderr_lower.contains("failed to spawn")
+        || stderr_lower.contains("command not found")
         || stderr.is_empty())
     {
         eprintln!("Test failed - stderr content: {:?}", stderr);
@@ -137,21 +139,19 @@ fn test_up_traditional_container_with_flags() {
 
     // Command will succeed if Docker available, fail at Docker step if not
     assert!(
-        stderr.contains("traditional")
-            || stderr.contains("Container created")
-            || stderr.contains("Container reused")
-            || stderr.contains("docker")
-            || stderr.contains("Docker")
-            || stderr.contains("Error response from daemon")
-            || stderr.contains("is not running")
-            || stderr.contains("ping")
-            || stderr.contains("Lifecycle")
-            || stderr.contains("Not installed")
-            || stderr.contains("No such file or directory")
-            || stderr.contains("Error response from daemon")
-            || stderr.contains("permission denied")
-            || stderr.contains("Failed to spawn")
-            || stderr.contains("command not found")
+        stderr_lower.contains("traditional")
+            || stderr_lower.contains("container created")
+            || stderr_lower.contains("container reused")
+            || stderr_lower.contains("docker")
+            || stderr_lower.contains("error response from daemon")
+            || stderr_lower.contains("is not running")
+            || stderr_lower.contains("ping")
+            || stderr_lower.contains("lifecycle")
+            || stderr_lower.contains("not installed")
+            || stderr_lower.contains("no such file or directory")
+            || stderr_lower.contains("permission denied")
+            || stderr_lower.contains("failed to spawn")
+            || stderr_lower.contains("command not found")
             || stderr.is_empty() // Sometimes successful runs have empty stderr
     );
 }
