@@ -18,26 +18,6 @@ description: "Task list template for feature implementation"
 - **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
 - Include exact file paths in descriptions
 
-## Task Completion Criteria (CRITICAL)
-
-A task MUST NOT be marked `[X]` unless ALL of these are true:
-
-1. ✅ **Implementation Complete**: All code is written and functional (no stubs, no blocking TODOs)
-2. ✅ **Tests Pass**: All related tests pass without `#[ignore]` or skip markers
-3. ✅ **No Blocking TODOs**: No `TODO T###` comments indicating missing functionality in the task scope
-4. ✅ **Verified**: Task has been tested against its acceptance criteria
-
-**Invalid Completion Examples**:
-- ❌ Tests marked `#[ignore] // TODO: Enable when T### is implemented`
-- ❌ Implementation has `// TODO T###: Implement [core functionality]`
-- ❌ Only test skeleton exists, no implementation
-- ❌ Functionality partially works or returns hardcoded stubs
-
-**Valid States**:
-- `[ ]` = Not started or significant work remaining
-- `[X]` = Fully complete per above criteria
-- Use comments for partial progress: `T020 ... (data structures exist, logic pending)`
-
 ## Path Conventions
 
 - **Single project**: `src/`, `tests/` at repository root
