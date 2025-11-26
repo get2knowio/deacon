@@ -153,11 +153,12 @@ impl ContainerEnvironmentProber {
                     Ok(contents) => {
                         match serde_json::from_str::<HashMap<String, String>>(&contents) {
                             Ok(env_vars) => {
-                                debug!(cache_path = %cache_path.display(), var_count = env_vars.len(), "Loaded cached env probe");
+                                let var_count = env_vars.len();
+                                debug!(cache_path = %cache_path.display(), var_count = var_count, "Loaded cached env probe");
                                 return Ok(ContainerProbeResult {
-                                    env_vars: env_vars.clone(),
+                                    env_vars,
                                     shell_used: "cache".to_string(),
-                                    var_count: env_vars.len(),
+                                    var_count,
                                 });
                             }
                             Err(e) => {
@@ -205,16 +206,38 @@ impl ContainerEnvironmentProber {
 
         // Persist cache if requested
         if let Some(folder) = cache_folder {
-            let _ = std::fs::create_dir_all(folder);
-            let cache_key = format!("{}_{}", container_id, user.unwrap_or("root"));
-            let cache_path = folder.join(format!("env_probe_{}.json", cache_key));
-            if let Ok(contents) = serde_json::to_string(&env_vars) {
-                let _ = std::fs::write(&cache_path, contents);
-                debug!(
-                    cache_path = %cache_path.display(),
-                    var_count = env_vars.len(),
-                    "Persisted env probe cache"
+            if let Err(e) = std::fs::create_dir_all(folder) {
+                warn!(
+                    cache_folder = %folder.display(),
+                    error = %e,
+                    "Failed to create cache directory"
                 );
+            } else {
+                let cache_key = format!("{}_{}", container_id, user.unwrap_or("root"));
+                let cache_path = folder.join(format!("env_probe_{}.json", cache_key));
+                match serde_json::to_string(&env_vars) {
+                    Ok(contents) => {
+                        if let Err(e) = std::fs::write(&cache_path, &contents) {
+                            warn!(
+                                cache_path = %cache_path.display(),
+                                error = %e,
+                                "Failed to write cache file"
+                            );
+                        } else {
+                            debug!(
+                                cache_path = %cache_path.display(),
+                                var_count = env_vars.len(),
+                                "Persisted env probe cache"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "Failed to serialize env vars for cache"
+                        );
+                    }
+                }
             }
         }
 
