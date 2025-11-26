@@ -35,11 +35,11 @@ Evaluate the tasks file at `{tasks_file}` (from Part 0). For each uncompleted ta
    - Adjacent tasks marked with **"P"** can be processed in **parallel**
    - Each parallel task gets its own subagent
 
-3. **For each task (or parallel batch), spawn subagent(s):**
+3. **For each task (or parallel batch), spawn subagent(s) that invoke the following slash-command:**
 ```
-Task: Implement [task description]
+/speckit.implement
 
-Execute: /speckit.implement
+Task: {task_content}
 
 Follow the specification in {spec_dir}/ for this task.
 Report back with:
@@ -47,6 +47,8 @@ Report back with:
 - Any issues encountered
 - Any deviations from spec (and why)
 ```
+
+   Where `{task_content}` is the full text of the task from the tasks file.
 
 4. **After each task/batch completes:**
    - Mark task(s) complete in `{tasks_file}`

@@ -854,7 +854,20 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub container_session_data_folder: Option<PathBuf>,
 
-    /// Force TTY allocation when log-format is JSON (threads into exec via force_tty_if_json)
+    /// Force PTY (pseudo-terminal) allocation for lifecycle exec commands when using JSON log format.
+    ///
+    /// This flag only takes effect when --log-format json is active. It allows interactive
+    /// commands in lifecycle hooks (onCreate, postCreate, etc.) to behave correctly while
+    /// maintaining structured JSON logs on stderr and machine-readable output on stdout.
+    ///
+    /// Precedence: CLI flag > DEACON_FORCE_TTY_IF_JSON environment variable > default (no PTY).
+    ///
+    /// Environment variable: DEACON_FORCE_TTY_IF_JSON
+    /// - Truthy values (case-insensitive): true, 1, yes
+    /// - Falsey values or unset: false, 0, no, or absent
+    ///
+    /// When disabled (default), lifecycle commands run without PTY allocation. This is suitable
+    /// for non-interactive scripts and automated environments.
     #[arg(long, global = true)]
     pub force_tty_if_json: bool,
 

@@ -40,7 +40,16 @@
       "Bash(bash:*)",
       "Bash(tree:*)",
       "Bash(gh pr view:*)",
-      "Bash(gh pr edit:*)"
+      "Bash(gh pr edit:*)",
+      "Bash(.claude/scripts/sync-branch.sh:*)",
+      "Bash(python3:*)",
+      "Bash(RUST_BACKTRACE=1 cargo test:*)",
+      "Bash(docker ps:*)",
+      "Bash(.claude/scripts/get-changed-files.sh)",
+      "Bash(timeout 120 coderabbit review:*)",
+      "Bash(coderabbit --version:*)",
+      "SlashCommand(/speckit.constitution)",
+      "Bash(.claude/scripts/run-validation.sh)"
     ],
     "deny": [],
     "ask": []

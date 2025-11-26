@@ -12,6 +12,26 @@ use std::path::Path;
 use std::process::Command;
 use tracing::{debug, instrument, warn};
 
+/// Detects if an error message indicates a PTY allocation failure.
+///
+/// Common PTY-related error patterns from Docker:
+/// - "the input device is not a TTY"
+/// - "cannot enable tty mode"
+/// - "TTY" in error context
+///
+/// # Arguments
+/// * `error_msg` - The error message to check
+///
+/// # Returns
+/// * `true` if the error is PTY-related, `false` otherwise
+fn is_pty_allocation_error(error_msg: &str) -> bool {
+    let lower = error_msg.to_lowercase();
+    lower.contains("the input device is not a tty")
+        || lower.contains("cannot enable tty mode")
+        || lower.contains("tty mode")
+        || (lower.contains("tty") && (lower.contains("not a") || lower.contains("cannot")))
+}
+
 /// Validates a Docker label name according to Docker label naming rules.
 ///
 /// Docker label names must:
@@ -1352,6 +1372,18 @@ impl Docker for CliRuntime {
                 command.stderr(std::process::Stdio::piped());
 
                 let output = command.output().map_err(|e| {
+                    // Detect PTY-specific errors when PTY was requested
+                    if config.tty {
+                        let error_msg = format!("{}", e);
+                        if is_pty_allocation_error(&error_msg) {
+                            return DockerError::TTYFailed {
+                                reason: format!(
+                                    "PTY allocation failed: {}. Ensure your environment supports PTY allocation.",
+                                    error_msg
+                                ),
+                            };
+                        }
+                    }
                     DockerError::CLIError(format!("Failed to execute runtime exec: {}", e))
                 })?;
 
@@ -1360,6 +1392,17 @@ impl Docker for CliRuntime {
 
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                // Check for PTY allocation errors in stderr when PTY was requested
+                if config.tty && !success && is_pty_allocation_error(&stderr) {
+                    return Err(DockerError::TTYFailed {
+                        reason: format!(
+                            "PTY allocation failed: {}. The --force-tty-if-json flag requires PTY support. Either ensure your terminal supports PTY allocation or remove the flag.",
+                            stderr.trim()
+                        ),
+                    }
+                    .into());
+                }
 
                 Ok(ExecResult {
                     exit_code,
@@ -1371,10 +1414,34 @@ impl Docker for CliRuntime {
                 // Inherit stdio for real-time display (user-facing commands)
                 // Output cannot be captured in this mode, but user sees it immediately
                 let mut child = command.spawn().map_err(|e| {
+                    // Detect PTY-specific errors when PTY was requested
+                    if config.tty {
+                        let error_msg = format!("{}", e);
+                        if is_pty_allocation_error(&error_msg) {
+                            return DockerError::TTYFailed {
+                                reason: format!(
+                                    "PTY allocation failed: {}. The --force-tty-if-json flag requires PTY support. Either ensure your terminal supports PTY allocation or remove the flag.",
+                                    error_msg
+                                ),
+                            };
+                        }
+                    }
                     DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e))
                 })?;
 
                 let exit_status = child.wait().map_err(|e| {
+                    // Detect PTY-specific errors when PTY was requested
+                    if config.tty {
+                        let error_msg = format!("{}", e);
+                        if is_pty_allocation_error(&error_msg) {
+                            return DockerError::TTYFailed {
+                                reason: format!(
+                                    "PTY allocation failed: {}. The --force-tty-if-json flag requires PTY support. Either ensure your terminal supports PTY allocation or remove the flag.",
+                                    error_msg
+                                ),
+                            };
+                        }
+                    }
                     DockerError::CLIError(format!("Failed to wait for runtime exec: {}", e))
                 })?;
 
@@ -3309,5 +3376,46 @@ mod tests {
 
         let result = derive_container_workspace_folder(&mounts);
         assert_eq!(result, Some("/workspaces/nested/project".to_string()));
+    }
+
+    #[test]
+    fn test_is_pty_allocation_error_detects_common_patterns() {
+        // Common Docker TTY error messages
+        assert!(is_pty_allocation_error("the input device is not a TTY"));
+        assert!(is_pty_allocation_error(
+            "Error: the input device is not a TTY"
+        ));
+        assert!(is_pty_allocation_error(
+            "cannot enable tty mode on a non-tty input"
+        ));
+        assert!(is_pty_allocation_error("cannot enable tty mode"));
+        assert!(is_pty_allocation_error("TTY mode not available"));
+        assert!(is_pty_allocation_error("tty: not a tty"));
+        assert!(is_pty_allocation_error("cannot allocate TTY"));
+
+        // Case insensitive
+        assert!(is_pty_allocation_error("THE INPUT DEVICE IS NOT A TTY"));
+
+        // Should not match non-TTY errors
+        assert!(!is_pty_allocation_error("Failed to execute command"));
+        assert!(!is_pty_allocation_error("Container not found"));
+        assert!(!is_pty_allocation_error("Permission denied"));
+        assert!(!is_pty_allocation_error("Out of memory"));
+    }
+
+    #[test]
+    fn test_is_pty_allocation_error_edge_cases() {
+        // Empty string
+        assert!(!is_pty_allocation_error(""));
+
+        // Just "tty" without error context
+        assert!(!is_pty_allocation_error("tty"));
+
+        // TTY in different context (should not match)
+        assert!(!is_pty_allocation_error("Starting tty session"));
+
+        // Partial matches that should still detect
+        assert!(is_pty_allocation_error("Docker: not a tty available"));
+        assert!(is_pty_allocation_error("cannot use tty in this mode"));
     }
 }

@@ -17,7 +17,7 @@
 
 **Purpose**: Ensure design alignment before implementation
 
-- [ ] T001 Confirm spec/plan alignment for PTY toggle inputs in specs/001-force-pty-up/spec.md and specs/001-force-pty-up/plan.md
+- [x] T001 Confirm spec/plan alignment for PTY toggle inputs in specs/001-force-pty-up/spec.md and specs/001-force-pty-up/plan.md
 
 ---
 
@@ -25,9 +25,9 @@
 
 **Purpose**: Baseline understanding and hooks before story work
 
-- [ ] T002 Review current lifecycle exec and PTY/log handling in crates/deacon/src/commands/up.rs and crates/deacon/src/commands/exec.rs
-- [ ] T003 [P] Identify JSON log mode detection and stdout/stderr routing hooks in crates/deacon/src/commands/up.rs and crates/deacon/src/runtime_utils.rs
-- [ ] T004 [P] Inspect existing PTY-related integration coverage to align fixtures in crates/deacon/tests/integration_exec_pty.rs and crates/deacon/tests/parity_up_exec.rs
+- [x] T002 Review current lifecycle exec and PTY/log handling in crates/deacon/src/commands/up.rs and crates/deacon/src/commands/exec.rs
+- [x] T003 [P] Identify JSON log mode detection and stdout/stderr routing hooks in crates/deacon/src/commands/up.rs and crates/deacon/src/runtime_utils.rs
+- [x] T004 [P] Inspect existing PTY-related integration coverage to align fixtures in crates/deacon/tests/integration_exec_pty.rs and crates/deacon/tests/parity_up_exec.rs
 
 ---
 
@@ -39,19 +39,19 @@
 
 ### Tests for User Story 1
 
-- [ ] T005 [P] [US1] Add integration for PTY-on with flag/env in crates/deacon/tests/integration_up_force_tty_if_json.rs
-- [ ] T005a [P] [US1] Add integration asserting stdout JSON purity and stderr-only logs under PTY in crates/deacon/tests/integration_up_force_tty_if_json.rs
-- [ ] T005b [P] [US1] Add integration covering PTY allocation failure path (clear error, no silent downgrade) in crates/deacon/tests/integration_up_force_tty_if_json.rs
-- [ ] T005c [P] [US1] Integration verifying flag overrides env (flag on + env false) in crates/deacon/tests/integration_up_force_tty_if_json.rs
-- [ ] T006 [P] [US1] Configure nextest group for new integration binary in .config/nextest.toml (docker-shared unless isolation requires docker-exclusive)
+- [x] T005 [P] [US1] Add integration for PTY-on with flag/env in crates/deacon/tests/integration_up_force_tty_if_json.rs
+- [x] T005a [P] [US1] Add integration asserting stdout JSON purity and stderr-only logs under PTY in crates/deacon/tests/integration_up_force_tty_if_json.rs
+- [x] T005b [P] [US1] Add integration covering PTY allocation failure path (clear error, no silent downgrade) in crates/deacon/tests/integration_up_force_tty_if_json.rs
+- [x] T005c [P] [US1] Integration verifying flag overrides env (flag on + env false) in crates/deacon/tests/integration_up_force_tty_if_json.rs
+- [x] T006 [P] [US1] Configure nextest group for new integration binary in .config/nextest.toml (docker-shared unless isolation requires docker-exclusive)
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Implement PTY preference resolution (flag > env `DEACON_FORCE_TTY_IF_JSON` truthy parsing > default) scoped to JSON log mode in crates/deacon/src/commands/up.rs
-- [ ] T008 [P] [US1] Apply resolved PTY to lifecycle exec invocations while preserving stdout/stderr separation in crates/deacon/src/commands/up.rs
-- [ ] T008a [P] [US1] Ensure PTY execution preserves stdout/stderr separation in crates/deacon/src/commands/up.rs
-- [ ] T008b [US1] Surface explicit error when PTY allocation fails (no silent downgrade) in crates/deacon/src/commands/up.rs
-- [ ] T009 [P] [US1] Document flag/env PTY toggle in crates/deacon/src/cli.rs help text; update docs/CLI-SPEC.md if contract requires user-facing doc change
+- [x] T007 [US1] Implement PTY preference resolution (flag > env `DEACON_FORCE_TTY_IF_JSON` truthy parsing > default) scoped to JSON log mode in crates/deacon/src/commands/up.rs
+- [x] T008 [P] [US1] Apply resolved PTY to lifecycle exec invocations while preserving stdout/stderr separation in crates/deacon/src/commands/up.rs
+- [x] T008a [P] [US1] Ensure PTY execution preserves stdout/stderr separation in crates/deacon/src/commands/up.rs
+- [x] T008b [US1] Surface explicit error when PTY allocation fails (no silent downgrade) in crates/deacon/src/commands/up.rs
+- [x] T009 [P] [US1] Document flag/env PTY toggle in crates/deacon/src/cli.rs help text; update docs/CLI-SPEC.md if contract requires user-facing doc change
 
 **Checkpoint**: User Story 1 independently delivers PTY-on behavior in JSON mode with structured logs intact.
 
@@ -65,12 +65,12 @@
 
 ### Tests for User Story 2
 
-- [ ] T010 [P] [US2] Add integration asserting non-PTY default when flag/env absent or false in crates/deacon/tests/integration_up_force_tty_if_json.rs
-- [ ] T011 [P] [US2] Add integration for non-JSON mode ignoring PTY toggle in crates/deacon/tests/integration_up_force_tty_if_json.rs
+- [x] T010 [P] [US2] Add integration asserting non-PTY default when flag/env absent or false in crates/deacon/tests/integration_up_force_tty_if_json.rs
+- [x] T011 [P] [US2] Add integration for non-JSON mode ignoring PTY toggle in crates/deacon/tests/integration_up_force_tty_if_json.rs
 
 ### Implementation for User Story 2
 
-- [ ] T012 [US2] Guard default non-PTY path (including env falsey/unset) in lifecycle exec resolution in crates/deacon/src/commands/up.rs
+- [x] T012 [US2] Guard default non-PTY path (including env falsey/unset) in lifecycle exec resolution in crates/deacon/src/commands/up.rs
 
 **Checkpoint**: User Story 2 independently proves defaults are unchanged when PTY not requested.
 
@@ -84,11 +84,11 @@
 
 ### Tests for User Story 3
 
-- [ ] T013 [P] [US3] Add regression coverage for exec PTY behavior unaffected by toggle in crates/deacon/tests/integration_exec_pty.rs
+- [x] T013 [P] [US3] Add regression coverage for exec PTY behavior unaffected by toggle in crates/deacon/tests/integration_exec_pty.rs
 
 ### Implementation for User Story 3
 
-- [ ] T014 [US3] Scope PTY toggle logic to up lifecycle only, leaving exec command defaults and exit codes unchanged in crates/deacon/src/commands/exec.rs
+- [x] T014 [US3] Scope PTY toggle logic to up lifecycle only, leaving exec command defaults and exit codes unchanged in crates/deacon/src/commands/exec.rs
 
 **Checkpoint**: User Story 3 independently validates no regressions to exec paths.
 
@@ -96,8 +96,8 @@
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T015 [P] Update quickstart and spec references to reflect final PTY toggle behavior in specs/001-force-pty-up/quickstart.md and note if docs/CLI-SPEC.md change is required or not
-- [ ] T016 Validate formatting/lint/tests per Constitution (cargo fmt --all, cargo fmt --all -- --check, cargo clippy --all-targets -- -D warnings, targeted make test-nextest-* with new nextest group updates) after changes in workspace root
+- [x] T015 [P] Update quickstart and spec references to reflect final PTY toggle behavior in specs/001-force-pty-up/quickstart.md and note if docs/CLI-SPEC.md change is required or not
+- [x] T016 Validate formatting/lint/tests per Constitution (cargo fmt --all, cargo fmt --all -- --check, cargo clippy --all-targets -- -D warnings, targeted make test-nextest-* with new nextest group updates) after changes in workspace root
 
 ---
 

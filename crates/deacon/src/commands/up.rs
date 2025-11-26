@@ -25,6 +25,14 @@ use std::time::Duration;
 use std::{env, fs};
 use tracing::{debug, info, instrument, warn};
 
+/// Environment variable name for controlling PTY allocation in JSON log mode.
+/// When set to truthy values (true/1/yes, case-insensitive), forces PTY allocation
+/// for lifecycle exec commands during `deacon up` when JSON logging is active.
+const ENV_FORCE_TTY_IF_JSON: &str = "DEACON_FORCE_TTY_IF_JSON";
+
+/// Environment variable name for log format detection.
+const ENV_LOG_FORMAT: &str = "DEACON_LOG_FORMAT";
+
 fn build_merged_configuration(
     config: &DevContainerConfig,
     config_path: &Path,
@@ -1422,7 +1430,7 @@ async fn execute_up_with_runtime(
     if args.force_tty_if_json {
         config
             .container_env
-            .entry("DEACON_FORCE_TTY_IF_JSON".to_string())
+            .entry(ENV_FORCE_TTY_IF_JSON.to_string())
             .or_insert_with(|| "true".to_string());
     }
 
@@ -1735,7 +1743,12 @@ async fn execute_compose_up(
 
     // Execute post-create lifecycle if not skipped
     if !args.skip_post_create {
-        execute_compose_post_create(&project, config, &args.docker_path).await?;
+        // Resolve PTY preference for compose post-create (same logic as lifecycle commands)
+        let json_mode = std::env::var("DEACON_LOG_FORMAT")
+            .map(|v| v == "json")
+            .unwrap_or(false);
+        let force_pty = resolve_force_pty(args.force_tty_if_json, json_mode);
+        execute_compose_post_create(&project, config, &args.docker_path, force_pty).await?;
     }
 
     // Handle port forwarding and events
@@ -2207,6 +2220,7 @@ async fn execute_compose_post_create(
     project: &ComposeProject,
     config: &DevContainerConfig,
     docker_path: &str,
+    force_pty: bool,
 ) -> Result<()> {
     debug!("Executing post-create lifecycle for compose project");
 
@@ -2239,7 +2253,7 @@ async fn execute_compose_post_create(
                         user: None,
                         working_dir: None,
                         env: std::collections::HashMap::new(),
-                        tty: false,
+                        tty: force_pty,
                         interactive: false,
                         detach: false,
                         silent: false,
@@ -2371,6 +2385,7 @@ async fn execute_initialize_command(
         use_login_shell: true,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        force_pty: false,
     };
 
     // Create a progress event callback
@@ -2778,6 +2793,29 @@ async fn apply_user_mapping(
 /// // This example shows the expected signature and usage pattern
 /// # Ok(()) }
 /// ```
+/// Resolve PTY preference for lifecycle commands based on flag, environment, and JSON mode
+///
+/// Per FR-002, FR-005: PTY toggle only applies in JSON log mode.
+/// Precedence: CLI flag > env var `DEACON_FORCE_TTY_IF_JSON` > default (false)
+fn resolve_force_pty(flag: bool, json_mode: bool) -> bool {
+    // PTY toggle only applies when in JSON log mode
+    if !json_mode {
+        return false;
+    }
+
+    // CLI flag takes precedence
+    if flag {
+        return true;
+    }
+
+    // Check environment variable (truthy: true/1/yes; falsey: false/0/no or unset)
+    if let Ok(val) = std::env::var(ENV_FORCE_TTY_IF_JSON) {
+        matches!(val.to_lowercase().as_str(), "true" | "1" | "yes")
+    } else {
+        false // default: no PTY
+    }
+}
+
 async fn execute_lifecycle_commands(
     container_id: &str,
     config: &DevContainerConfig,
@@ -2815,6 +2853,23 @@ async fn execute_lifecycle_commands(
         format!("/workspaces/{}", workspace_name)
     };
 
+    // Determine if JSON log mode is active by checking DEACON_LOG_FORMAT env var
+    // Per FR-001, FR-002: PTY toggle only applies in JSON log mode
+    let json_mode = std::env::var(ENV_LOG_FORMAT)
+        .map(|v| v == "json")
+        .unwrap_or(false);
+
+    // Resolve PTY preference based on flag, env, and JSON mode
+    let force_pty = resolve_force_pty(args.force_tty_if_json, json_mode);
+
+    debug!(
+        "PTY preference resolved: force_pty={}, json_mode={}, flag={}, env={}",
+        force_pty,
+        json_mode,
+        args.force_tty_if_json,
+        std::env::var(ENV_FORCE_TTY_IF_JSON).unwrap_or_else(|_| "unset".to_string())
+    );
+
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {
         container_id: container_id.to_string(),
@@ -2827,6 +2882,7 @@ async fn execute_lifecycle_commands(
         use_login_shell: true, // Default: use login shell for lifecycle commands
         user_env_probe: ContainerProbeMode::None,
         cache_folder: cache_folder.clone(),
+        force_pty,
     };
 
     // Build lifecycle commands from configuration
@@ -2922,7 +2978,7 @@ async fn execute_lifecycle_commands(
     // Per specs/001-up-gap-spec/ User Story 2: dotfiles are user-specific customizations
     // Dotfiles should NOT run in prebuild mode (CI images should not include user-specific dotfiles)
     if !is_prebuild_mode {
-        execute_dotfiles_installation(container_id, config, args).await?;
+        execute_dotfiles_installation(container_id, config, args, force_pty).await?;
     } else {
         debug!("Prebuild mode: skipping dotfiles installation");
     }
@@ -2951,6 +3007,7 @@ async fn execute_dotfiles_installation(
     container_id: &str,
     config: &DevContainerConfig,
     args: &UpArgs,
+    force_pty: bool,
 ) -> Result<()> {
     use deacon_core::docker::{CliDocker, Docker, ExecConfig};
     use std::collections::HashMap;
@@ -2999,7 +3056,7 @@ async fn execute_dotfiles_installation(
         user: Some(remote_user.clone()),
         working_dir: None,
         env: HashMap::new(),
-        tty: false,
+        tty: force_pty,
         interactive: false,
         detach: false,
         silent: false,
