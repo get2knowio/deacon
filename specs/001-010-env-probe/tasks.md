@@ -37,9 +37,9 @@ A task MUST NOT be marked `[X]` unless ALL of these are true:
 
 **Purpose**: Verify existing infrastructure is in place (no new setup needed)
 
-- [ ] T001 Verify project builds with `cargo build --quiet` and identify compilation errors
-- [ ] T002 [P] Run `make test-nextest-fast` to baseline current test state
-- [ ] T003 [P] Review existing cache implementation in crates/core/src/container_env_probe.rs (lines 147-194)
+- [X] T001 Verify project builds with `cargo build --quiet` and identify compilation errors
+- [X] T002 [P] Run `make test-nextest-fast` to baseline current test state
+- [X] T003 [P] Review existing cache implementation in crates/core/src/container_env_probe.rs (lines 147-194)
 
 ---
 
