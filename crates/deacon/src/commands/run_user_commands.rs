@@ -42,6 +42,7 @@ pub struct RunUserCommandsArgs {
     pub secrets_files: Vec<std::path::PathBuf>,
     pub progress_tracker: Arc<Mutex<Option<deacon_core::progress::ProgressTracker>>>,
     pub docker_path: String,
+    pub container_data_folder: Option<std::path::PathBuf>,
 }
 
 /// Execute the run-user-commands command
@@ -302,6 +303,7 @@ mod tests {
             secrets_files: vec![],
             progress_tracker,
             docker_path: "docker".to_string(),
+            container_data_folder: None,
         };
 
         assert!(!args.skip_post_create);

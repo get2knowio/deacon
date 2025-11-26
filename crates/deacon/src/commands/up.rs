@@ -670,7 +670,6 @@ pub struct UpArgs {
     pub redaction_config: deacon_core::redaction::RedactionConfig,
     pub secret_registry: deacon_core::redaction::SecretRegistry,
     pub force_tty_if_json: bool,
-    pub cache_folder: Option<PathBuf>,
 }
 
 impl Default for UpArgs {
@@ -1523,6 +1522,7 @@ async fn execute_up_with_runtime(
             &cli_remote_env,
             &runtime,
             config_path.as_path(),
+            &cache_folder,
         )
         .await?
     };
@@ -1843,6 +1843,7 @@ async fn execute_container_up(
     cli_remote_env: &HashMap<String, String>,
     runtime: &ContainerRuntimeImpl,
     config_path: &Path,
+    cache_folder: &Option<PathBuf>,
 ) -> Result<UpContainerInfo> {
     debug!("Starting traditional development container");
 
@@ -2092,6 +2093,7 @@ async fn execute_container_up(
         args,
         env_user_resolution.effective_env.clone(),
         env_user_resolution.effective_user.clone(),
+        cache_folder,
     )
     .await?;
 
@@ -2330,6 +2332,7 @@ async fn execute_initialize_command(
         non_blocking_timeout: Duration::from_secs(300),
         use_login_shell: true,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
     };
 
     // Create a progress event callback
@@ -2744,6 +2747,7 @@ async fn execute_lifecycle_commands(
     args: &UpArgs,
     effective_env: HashMap<String, String>,
     effective_user: Option<String>,
+    cache_folder: &Option<PathBuf>,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
         execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
@@ -2784,6 +2788,7 @@ async fn execute_lifecycle_commands(
         non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout
         use_login_shell: true, // Default: use login shell for lifecycle commands
         user_env_probe: ContainerProbeMode::None,
+        cache_folder: cache_folder.clone(),
     };
 
     // Build lifecycle commands from configuration

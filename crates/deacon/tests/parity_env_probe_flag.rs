@@ -74,6 +74,7 @@ async fn up_shared_probe_helper_uses_login_shell() {
         ContainerProbeMode::LoginShell,
         Some(&config_remote_env),
         &cli_env,
+        None,
     )
     .await;
 

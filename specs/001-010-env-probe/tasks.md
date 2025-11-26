@@ -49,15 +49,15 @@ A task MUST NOT be marked `[X]` unless ALL of these are true:
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Fix missing `cache_folder: None` in UpArgs::default() at crates/deacon/src/commands/up.rs:678
-- [ ] T005 [P] Fix missing `cache_folder: None` in ContainerLifecycleConfig initializer at crates/deacon/src/commands/up.rs:2323
-- [ ] T006 [P] Fix missing `cache_folder: None` in ContainerLifecycleConfig initializer at crates/deacon/src/commands/up.rs:2777
-- [ ] T007 [P] Fix missing `cache_folder` fields in ExecArgs test initializers in crates/deacon/src/commands/exec.rs
-- [ ] T008 [P] Fix unused variable warning for `cache_folder` in crates/deacon/src/commands/run_user_commands.rs:135
-- [ ] T009 Run `cargo fmt --all` to format all fixed code
-- [ ] T010 Run `cargo clippy --all-targets -- -D warnings` to verify zero warnings
-- [ ] T011 Run `cargo build --quiet` to verify compilation succeeds
-- [ ] T012 Run `make test-nextest-fast` to verify no test regressions from fixes
+- [X] T004 Fix missing `cache_folder: None` in UpArgs::default() at crates/deacon/src/commands/up.rs:678
+- [X] T005 [P] Fix missing `cache_folder: None` in ContainerLifecycleConfig initializer at crates/deacon/src/commands/up.rs:2323
+- [X] T006 [P] Fix missing `cache_folder: None` in ContainerLifecycleConfig initializer at crates/deacon/src/commands/up.rs:2777
+- [X] T007 [P] Fix missing `cache_folder` fields in ExecArgs test initializers in crates/deacon/src/commands/exec.rs
+- [X] T008 [P] Fix unused variable warning for `cache_folder` in crates/deacon/src/commands/run_user_commands.rs:135
+- [X] T009 Run `cargo fmt --all` to format all fixed code
+- [X] T010 Run `cargo clippy --all-targets -- -D warnings` to verify zero warnings
+- [X] T011 Run `cargo build --quiet` to verify compilation succeeds
+- [X] T012 Run `make test-nextest-fast` to verify no test regressions from fixes
 
 **Checkpoint**: Build is green - user story implementation can now begin in parallel
 
