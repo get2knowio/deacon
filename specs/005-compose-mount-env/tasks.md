@@ -119,30 +119,35 @@
 ## Deferred Work
 
 - [ ] T022 [Deferral] Wrap ComposeManager blocking calls in spawn_blocking or convert to async
+  - **GitHub Issue**: https://github.com/get2knowio/deacon/issues/420
   - **Issue**: ComposeManager uses std::process::Command (blocking I/O) but is called from async contexts
   - **Rationale**: This is pre-existing tech debt affecting compose.rs broadly, not specific to this feature
   - **Pattern**: See docker.rs which properly uses tokio::task::spawn_blocking for std::process::Command calls
   - **Acceptance**: All ComposeManager methods called from async contexts are wrapped in spawn_blocking
 
 - [ ] T023 [Deferral] Populate external_volumes field from compose config parsing
+  - **GitHub Issue**: https://github.com/get2knowio/deacon/issues/421
   - **Issue**: `external_volumes: Vec<String>` is declared in ComposeProject but never populated
   - **Spec Reference**: data-model.md lines 36-38 (ExternalVolume entity)
   - **Rationale**: Requires compose YAML parsing logic not currently in scope
   - **Acceptance**: Parse top-level `volumes` with `external: true` and populate external_volumes field
 
 - [ ] T024 [Deferral] Propagate mount options (rw/ro, consistency) to generated YAML
+  - **GitHub Issue**: https://github.com/get2knowio/deacon/issues/422
   - **Issue**: Only `external` flag triggers `:ro`; other mount options are not propagated
   - **Spec Reference**: data-model.md line 22 (Mount.options)
   - **Rationale**: Requires extending ComposeMount struct and YAML generation
   - **Acceptance**: CLI mount options like `rw`, `consistency=cached` appear in generated YAML
 
 - [ ] T025 [Deferral] Add response schema fields to UpSuccess for contract compliance
+  - **GitHub Issue**: https://github.com/get2knowio/deacon/issues/423
   - **Issue**: UpSuccess missing effectiveMounts, effectiveEnv, profilesApplied, externalVolumesPreserved
   - **Spec Reference**: contracts/up.yaml lines 74-103
   - **Rationale**: Requires threading injection results back through the response
   - **Acceptance**: UpSuccess includes all fields defined in the contract response schema
 
 - [ ] T026 [Deferral] Replace HashMap with IndexMap for environment variable ordering
+  - **GitHub Issue**: https://github.com/get2knowio/deacon/issues/424
   - **Issue**: HashMap iteration order is non-deterministic; spec requires "ordered map"
   - **Spec Reference**: data-model.md line 12 (ComposeService.environment ordered map)
   - **Rationale**: Currently mitigated by sorting keys before YAML generation, but IndexMap is more correct
