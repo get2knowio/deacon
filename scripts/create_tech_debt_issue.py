@@ -3,22 +3,49 @@
 Create a tech debt GitHub issue from structured input.
 
 Usage:
-    python scripts/create_tech_debt_issue.py --title "Title" --problem "Description" [options]
+    # Quick issue with minimal info
+    python scripts/create_tech_debt_issue.py --title "Title" --problem "Description"
 
-Example:
+    # Issue with detailed body from file
+    python scripts/create_tech_debt_issue.py --title "Title" --body-file issue.md
+
+    # Issue with body from stdin (for Claude to pipe content)
+    echo "Full markdown content..." | python scripts/create_tech_debt_issue.py --title "Title" --body -
+
+Examples:
+    # Minimal issue
     python scripts/create_tech_debt_issue.py \
         --title "Wrap ComposeManager blocking calls in spawn_blocking" \
         --problem "ComposeManager uses std::process::Command but is called from async contexts" \
-        --rationale "Pre-existing tech debt, not specific to this feature" \
-        --pattern "See docker.rs spawn_blocking usage" \
-        --files "crates/core/src/compose.rs" \
-        --spec-ref "CLAUDE.md async safety guidelines" \
-        --labels "compose,architecture"
+        --labels compose architecture
 
-The script will:
-1. Use Claude (via the conversation context) to expand the minimal input into a detailed issue
-2. Create the GitHub issue with appropriate labels
-3. Output the issue URL
+    # Rich issue with full markdown body
+    python scripts/create_tech_debt_issue.py \
+        --title "Wrap ComposeManager blocking calls in spawn_blocking" \
+        --body-file /tmp/issue-body.md \
+        --labels compose architecture
+
+    # Body from heredoc (useful in scripts/Claude)
+    python scripts/create_tech_debt_issue.py --title "Fix blocking I/O" --labels compose --body - << 'EOF'
+    ## Summary
+    ComposeManager uses blocking I/O in async contexts...
+
+    ## Problem
+    The following methods use std::process::Command:
+    - `start_project()` - line 150
+    - `is_project_running()` - line 200
+
+    ## Proposed Solution
+    ```rust
+    tokio::task::spawn_blocking(move || {
+        compose_manager.start_project(&project)
+    }).await?
+    ```
+
+    ## Acceptance Criteria
+    - [ ] All blocking calls wrapped
+    - [ ] Tests pass
+    EOF
 
 For use in maverick.fly workflow during Phase 2.5.
 """
@@ -59,12 +86,26 @@ def ensure_tech_debt_label():
 
 
 def build_issue_body(args) -> str:
-    """Build a structured issue body from the arguments."""
+    """Build issue body from arguments or provided content."""
+
+    # If full body provided via file or stdin, use that
+    if args.body_file:
+        return Path(args.body_file).read_text()
+
+    if args.body:
+        if args.body == '-':
+            # Read from stdin
+            return sys.stdin.read()
+        else:
+            return args.body
+
+    # Otherwise build from structured arguments
     sections = []
 
     # Summary
-    sections.append("## Summary\n")
-    sections.append(f"{args.problem}\n")
+    if args.problem:
+        sections.append("## Summary\n")
+        sections.append(f"{args.problem}\n")
 
     # Problem details
     if args.details:
@@ -174,10 +215,17 @@ Examples:
     # Required
     parser.add_argument('--title', required=True,
                         help='Issue title')
-    parser.add_argument('--problem', required=True,
-                        help='Brief problem description')
 
-    # Optional enrichment
+    # Body options (mutually exclusive approaches)
+    body_group = parser.add_mutually_exclusive_group()
+    body_group.add_argument('--body', metavar='TEXT_OR_DASH',
+                            help='Full markdown body (use "-" to read from stdin)')
+    body_group.add_argument('--body-file', metavar='FILE',
+                            help='Read body from file')
+    parser.add_argument('--problem',
+                        help='Brief problem description (used if no --body/--body-file)')
+
+    # Optional enrichment (used if no --body/--body-file)
     parser.add_argument('--details',
                         help='Detailed problem explanation')
     parser.add_argument('--rationale',
@@ -206,6 +254,10 @@ Examples:
                         help='Output JSON with issue URL')
 
     args = parser.parse_args()
+
+    # Validate: need either body content or at least a problem description
+    if not args.body and not args.body_file and not args.problem:
+        parser.error("Must provide either --body, --body-file, or --problem")
 
     if args.dry_run:
         print("=== Issue Title ===")
