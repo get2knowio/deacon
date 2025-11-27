@@ -38,10 +38,10 @@ The `$ARGUMENTS` variable contains the optional branch name passed to this comma
 
 ## Part 1: Feature Implementation
 
-Use speckit-rust-implementer to invoke `/speckit.implement` with the following prompt:
+Invoke the slash-command `/speckit.implement` along with the following prompt:
 
 ```
-Implement the tasks in {tasks_file}, each in their own subagent, parallelizing where possible.
+Implement the tasks in {tasks_file}, each in their own subagent, parallelizing where possible. Each subagent should run as a speckit-rust-implementer.
 
 Specification directory: {spec_dir}/
 ```

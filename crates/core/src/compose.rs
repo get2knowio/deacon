@@ -838,6 +838,7 @@ impl ComposeProject {
     /// will surface as compose errors (not silently replaced with bind mounts).
     ///
     /// Returns None if no mounts or env need to be injected.
+    #[must_use = "injection override should be passed to compose up"]
     pub fn generate_injection_override(&self) -> Option<String> {
         if self.additional_mounts.is_empty() && self.additional_env.is_empty() {
             return None;
@@ -848,9 +849,13 @@ impl ComposeProject {
 
         if !self.additional_env.is_empty() {
             yaml.push_str("    environment:\n");
-            for (key, value) in &self.additional_env {
-                let escaped = value.replace('"', "\\\"");
-                yaml.push_str(&format!("      {}: \"{}\"\n", key, escaped));
+            // Sort keys for deterministic output (HashMap iteration order is arbitrary)
+            let mut sorted_keys: Vec<_> = self.additional_env.keys().collect();
+            sorted_keys.sort();
+            for key in sorted_keys {
+                let value = &self.additional_env[key];
+                let escaped = escape_yaml_value(value);
+                yaml.push_str(&format!("      {}: {}\n", key, escaped));
             }
         }
 
@@ -937,6 +942,43 @@ impl ComposeProject {
         self.additional_mounts = additional_mounts;
         self.additional_env = cli_env;
         self
+    }
+}
+
+/// Escape a value for YAML output.
+///
+/// YAML requires special handling for values containing:
+/// - Newlines (must be quoted and escaped)
+/// - Colons (especially at start)
+/// - Quotes (must be escaped)
+/// - Leading/trailing whitespace (must be quoted)
+/// - Hash characters (could be interpreted as comments)
+fn escape_yaml_value(value: &str) -> String {
+    // Check if value needs quoting
+    let needs_quoting = value.contains('\n')
+        || value.contains(':')
+        || value.contains('#')
+        || value.contains('"')
+        || value.contains('\'')
+        || value.starts_with(' ')
+        || value.ends_with(' ')
+        || value.starts_with('!')
+        || value.starts_with('&')
+        || value.starts_with('*')
+        || value.is_empty();
+
+    if needs_quoting {
+        // Use double quotes and escape special characters
+        let escaped = value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+        format!("\"{}\"", escaped)
+    } else {
+        // Simple values can be unquoted or double-quoted for consistency
+        format!("\"{}\"", value)
     }
 }
 
@@ -1461,5 +1503,93 @@ mod tests {
         assert!(override_yaml.contains("volumes:"));
         assert!(override_yaml.contains("MY_VAR:"));
         assert!(override_yaml.contains("/src:/dst"));
+    }
+
+    #[test]
+    fn test_generate_injection_override_with_special_chars() {
+        let mut additional_env = HashMap::new();
+        additional_env.insert("MULTILINE".to_string(), "line1\nline2".to_string());
+        additional_env.insert("QUOTED".to_string(), "value with \"quotes\"".to_string());
+        additional_env.insert("COLON".to_string(), "key:value".to_string());
+        additional_env.insert("HASH".to_string(), "before#after".to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env,
+            external_volumes: Vec::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+
+        // Verify proper escaping
+        assert!(override_yaml.contains("MULTILINE: \"line1\\nline2\""));
+        assert!(override_yaml.contains("QUOTED: \"value with \\\"quotes\\\"\""));
+        assert!(override_yaml.contains("COLON: \"key:value\""));
+        assert!(override_yaml.contains("HASH: \"before#after\""));
+    }
+
+    #[test]
+    fn test_generate_injection_override_deterministic_order() {
+        let mut additional_env = HashMap::new();
+        additional_env.insert("ZZZ".to_string(), "last".to_string());
+        additional_env.insert("AAA".to_string(), "first".to_string());
+        additional_env.insert("MMM".to_string(), "middle".to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env,
+            external_volumes: Vec::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+
+        // Keys should be sorted alphabetically
+        let aaa_pos = override_yaml.find("AAA:").unwrap();
+        let mmm_pos = override_yaml.find("MMM:").unwrap();
+        let zzz_pos = override_yaml.find("ZZZ:").unwrap();
+
+        assert!(
+            aaa_pos < mmm_pos && mmm_pos < zzz_pos,
+            "Keys should be sorted: AAA < MMM < ZZZ"
+        );
+    }
+
+    #[test]
+    fn test_escape_yaml_value() {
+        // Simple value
+        assert_eq!(escape_yaml_value("hello"), "\"hello\"");
+
+        // Value with newline
+        assert_eq!(escape_yaml_value("line1\nline2"), "\"line1\\nline2\"");
+
+        // Value with quotes
+        assert_eq!(escape_yaml_value("say \"hi\""), "\"say \\\"hi\\\"\"");
+
+        // Value with colon
+        assert_eq!(escape_yaml_value("key:value"), "\"key:value\"");
+
+        // Value with backslash - backslash doesn't need special escaping in YAML
+        // when double-quoted, unless combined with other special chars
+        assert_eq!(escape_yaml_value(r"path\to\file"), r#""path\to\file""#);
+
+        // Empty value
+        assert_eq!(escape_yaml_value(""), "\"\"");
+
+        // Value with leading space
+        assert_eq!(escape_yaml_value(" leading"), "\" leading\"");
     }
 }

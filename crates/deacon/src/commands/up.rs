@@ -1740,20 +1740,21 @@ async fn execute_compose_up(
     project.env_files = args.env_file.clone();
 
     // Apply CLI mounts to compose project
+    // Per CLAUDE.md: No silent fallbacks - fail fast on invalid mounts
     if !args.mount.is_empty() {
         let mut additional_mounts = Vec::new();
         for mount_str in &args.mount {
-            if let Ok(mount) = NormalizedMount::parse(mount_str) {
-                additional_mounts.push(deacon_core::compose::ComposeMount {
-                    mount_type: match mount.mount_type {
-                        MountType::Bind => "bind".to_string(),
-                        MountType::Volume => "volume".to_string(),
-                    },
-                    source: mount.source.clone(),
-                    target: mount.target.clone(),
-                    external: mount.external,
-                });
-            }
+            let mount = NormalizedMount::parse(mount_str)
+                .with_context(|| format!("Invalid mount specification: {}", mount_str))?;
+            additional_mounts.push(deacon_core::compose::ComposeMount {
+                mount_type: match mount.mount_type {
+                    MountType::Bind => "bind".to_string(),
+                    MountType::Volume => "volume".to_string(),
+                },
+                source: mount.source.clone(),
+                target: mount.target.clone(),
+                external: mount.external,
+            });
         }
         project.additional_mounts = additional_mounts;
     }
