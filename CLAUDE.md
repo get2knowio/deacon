@@ -49,6 +49,15 @@ Development loop options:
 - Filter invalid inputs at ingress per spec (e.g., only OCI refs, only semver tags)
 - Never swallow errors with unwraps or sentinel values - always propagate with `Result` and `.context()`
 
+**4. Panic-Free, Async-Safe Implementations**
+- Runtime code MUST NOT panic on expected failures: replace `unwrap`/unchecked `expect` with fallible paths and
+  contextual errors.
+- Async code MUST avoid blocking calls (`std::process::Command::output`, blocking file IO). Use `tokio` async
+  equivalents with streamed output or offload to bounded blocking tasks.
+- Prefer modular boundaries over monoliths: split large commands/clients into focused modules (e.g., `features`
+  `{plan,package,publish,test}`, `oci` `{auth,client,semver,install}`, `up` `{args,config,compose,runtime}`) and
+  reuse shared helpers.
+
 **4. Subcommand Consistency & Shared Abstractions**
 When multiple subcommands share behavior (terminal sizing, config resolution, container targeting, env probing), use shared helpers:
 - `resolve_env_and_user()` - Container environment probing with cache support
@@ -117,8 +126,8 @@ cargo test test_name -- --test-threads=1
 **Error Handling:**
 - `thiserror` for domain errors in core
 - `anyhow` only at binary boundaries with `.context()` for diagnostics
-- Never use `unwrap()` without `.expect("context")`
-- Propagate with `Result` - no silent failures or sentinel values
+- Never use `unwrap()`/unchecked `expect` in runtime paths; propagate with `Result` and context
+- Avoid blocking calls inside async functions; prefer `tokio` async IO or spawn bounded blocking tasks
 
 **Logging:**
 - Use `tracing` spans for workflows: `config.resolve`, `feature.install`, `lifecycle.run`
@@ -239,6 +248,29 @@ Before implementing any new subcommand or feature:
 
 Document this checklist in plan.md or PR description to prevent spec drift.
 
+## Deferral Tracking
+
+When implementing complex features in phases (MVP-first approach):
+
+1. **Document deferrals in research.md** with numbered decisions explaining rationale
+2. **Add deferred work to tasks.md** under a "## Deferred Work" section:
+   - Reference the research.md decision number
+   - Include specific acceptance criteria
+   - Use `[Deferral]` tag in task description
+3. **A spec is NOT complete** while deferred tasks remain unresolved
+
+Example tasks.md entry:
+```markdown
+## Deferred Work
+
+- [ ] T050 [Deferral] Thread resolved FeatureMetadata through flows per research.md Decision 6
+  - **Decision**: Use from_config_entry() for MVP; from_resolved() when metadata available
+  - **Rationale**: Requires architectural threading beyond MVP scope
+  - **Acceptance**: featureMetadata includes version, name, description from resolved features
+```
+
+When reviewing PRs, verify research.md deferrals have corresponding tasks.md entries.
+
 ## Common Anti-Patterns to Avoid
 
 - **Data Structure Mismatch**: Using `Vec` when spec defines `map<string, T>`
@@ -249,6 +281,7 @@ Document this checklist in plan.md or PR description to prevent spec drift.
 - **Test Gaps**: Implementing features without spec-mandated tests
 - **Missing Nextest Config**: Adding integration tests without configuring test groups
 - **Suboptimal Test Grouping**: Using docker-exclusive when docker-shared would work
+- **Untracked Deferrals**: Documenting deferrals in research.md without corresponding tasks.md entries
 
 ## Output Streams Contract
 

@@ -33,13 +33,189 @@ const ENV_FORCE_TTY_IF_JSON: &str = "DEACON_FORCE_TTY_IF_JSON";
 /// Environment variable name for log format detection.
 const ENV_LOG_FORMAT: &str = "DEACON_LOG_FORMAT";
 
-fn build_merged_configuration(
+/// Options for building enriched merged configuration with label metadata.
+#[derive(Debug, Default)]
+struct MergedConfigurationOptions {
+    /// Labels from the image (devcontainer.metadata label, etc.)
+    image_labels: Option<HashMap<String, String>>,
+    /// Reference to the source image
+    image_ref: Option<String>,
+    /// Labels from the running container
+    container_labels: Option<HashMap<String, String>>,
+    /// ID of the running container
+    container_id: Option<String>,
+    /// Compose service name (for service-aware provenance)
+    service_name: Option<String>,
+    /// Resolved features from installation plan (contains full metadata)
+    resolved_features: Option<Vec<deacon_core::features::ResolvedFeature>>,
+}
+
+/// Build enriched merged configuration with optional label metadata.
+///
+/// Use this variant when image/container labels are available from Docker inspection.
+fn build_merged_configuration_with_options(
     config: &DevContainerConfig,
     config_path: &Path,
+    options: MergedConfigurationOptions,
 ) -> Result<serde_json::Value> {
-    use deacon_core::config::merge::LayeredConfigMerger;
+    use deacon_core::config::merge::{EnrichedMergedConfiguration, LabelSet, LayeredConfigMerger};
+
+    // Get base merged configuration with layer provenance
     let merged = LayeredConfigMerger::merge_with_provenance(&[(config.clone(), config_path)], true);
-    Ok(serde_json::to_value(merged)?)
+
+    // Extract feature metadata entries from config.features
+    // Per spec: preserve order of features as declared in configuration
+    // Prefer resolved features (full metadata) over config extraction (minimal)
+    let feature_metadata = if let Some(ref resolved) = options.resolved_features {
+        extract_feature_metadata_from_resolved(resolved, options.service_name.clone())
+    } else {
+        extract_feature_metadata_from_config(&config.features)
+    };
+
+    // Create enriched configuration with feature metadata
+    let mut enriched =
+        EnrichedMergedConfiguration::from_merged(merged).with_feature_metadata(feature_metadata);
+
+    // Add image metadata if available
+    // Per spec: keep field present with null labels when image was inspected but had no labels
+    if options.image_labels.is_some() || options.image_ref.is_some() {
+        enriched = enriched.with_image_metadata(LabelSet::from_image(
+            options.image_labels,
+            options.image_ref,
+        ));
+    }
+
+    // Add container metadata if available
+    // Per spec: keep field present with null labels when container was inspected but had no labels
+    if options.container_labels.is_some() || options.container_id.is_some() {
+        let label_set = if let Some(service) = &options.service_name {
+            LabelSet::from_service(service, options.container_labels, options.container_id)
+        } else {
+            LabelSet::from_container(options.container_labels, options.container_id)
+        };
+        enriched = enriched.with_container_metadata(label_set);
+    }
+
+    Ok(serde_json::to_value(enriched)?)
+}
+
+/// Inspect container and image to collect labels for merged configuration enrichment.
+///
+/// This async helper consolidates the inspect logic used across multiple enrichment sites
+/// (compose reconnect, fresh compose, single container) to eliminate code duplication
+/// and ensure consistent use of the injected runtime abstraction.
+///
+/// # Arguments
+/// * `docker` - Container runtime implementing the Docker trait
+/// * `container_id` - ID of the running container to inspect
+/// * `image_ref` - Optional image reference to inspect for labels
+/// * `service_name` - Optional compose service name for service-aware provenance
+/// * `resolved_features` - Optional resolved features from installation plan
+async fn inspect_for_merged_configuration(
+    docker: &impl Docker,
+    container_id: &str,
+    image_ref: Option<&str>,
+    service_name: Option<String>,
+    resolved_features: Option<Vec<deacon_core::features::ResolvedFeature>>,
+) -> MergedConfigurationOptions {
+    // Inspect container to get labels
+    let container_labels = if let Ok(Some(info)) = docker.inspect_container(container_id).await {
+        if info.labels.is_empty() {
+            None
+        } else {
+            Some(info.labels)
+        }
+    } else {
+        None
+    };
+
+    // Inspect image to get labels
+    let image_labels = if let Some(img_ref) = image_ref {
+        if let Ok(Some(info)) = docker.inspect_image(img_ref).await {
+            if info.labels.is_empty() {
+                None
+            } else {
+                Some(info.labels)
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    MergedConfigurationOptions {
+        image_labels,
+        image_ref: image_ref.map(String::from),
+        container_labels,
+        container_id: Some(container_id.to_string()),
+        service_name,
+        resolved_features,
+    }
+}
+
+/// Extract feature metadata entries from the config features field.
+///
+/// Features in config are stored as a JSON object mapping feature IDs to options.
+/// This function extracts each feature as a FeatureMetadataEntry with:
+/// - id: The feature identifier (key)
+/// - options: The options value (may be empty object, boolean true, or object with options)
+/// - provenance: Order index based on declaration order
+///
+/// **Note on phased implementation (see research.md Decision 6)**:
+/// This uses `from_config_entry()` which extracts minimal metadata from config.
+/// Full feature metadata (version, name, description, etc.) requires resolved
+/// `FeatureMetadata` which isn't available at this point in the flow. Use
+/// `from_resolved()` when resolved features are threaded through.
+///
+/// Per the spec, we preserve declaration order. Since JSON objects don't guarantee
+/// order, we iterate over the object but this may not be deterministic across
+/// implementations. For truly deterministic ordering, the config would need to be
+/// parsed with order-preserving deserialization.
+fn extract_feature_metadata_from_config(
+    features: &serde_json::Value,
+) -> Vec<deacon_core::config::merge::FeatureMetadataEntry> {
+    use deacon_core::config::merge::FeatureMetadataEntry;
+
+    let Some(features_obj) = features.as_object() else {
+        return vec![];
+    };
+
+    features_obj
+        .iter()
+        .enumerate()
+        .map(|(order, (id, options))| {
+            FeatureMetadataEntry::from_config_entry(id.clone(), options.clone(), order)
+        })
+        .collect()
+}
+
+/// Extract feature metadata entries from resolved features.
+///
+/// This uses the full resolved feature metadata including version, name,
+/// description, etc. from the installation plan.
+fn extract_feature_metadata_from_resolved(
+    features: &[deacon_core::features::ResolvedFeature],
+    service: Option<String>,
+) -> Vec<deacon_core::config::merge::FeatureMetadataEntry> {
+    use deacon_core::config::merge::FeatureMetadataEntry;
+
+    features
+        .iter()
+        .enumerate()
+        .map(|(order, f)| {
+            // Convert options HashMap<String, OptionValue> to serde_json::Value
+            let options = serde_json::to_value(&f.options).ok();
+            FeatureMetadataEntry::from_resolved(
+                f.id.clone(),
+                f.source.clone(),
+                options,
+                &f.metadata,
+                order,
+                service.clone(),
+            )
+        })
+        .collect()
 }
 
 /// Create a temporary Docker Compose override file to inject mounts and environment variables.
@@ -1541,6 +1717,7 @@ async fn execute_up_with_runtime(
                 .filter_map(|(k, v)| v.clone().map(|val| (k.clone(), val)))
                 .collect(),
             config_path.as_path(),
+            &runtime,
         )
         .await?
     } else {
@@ -1572,7 +1749,8 @@ async fn execute_up_with_runtime(
 
 /// Execute up for Docker Compose configurations
 #[allow(clippy::needless_borrows_for_generic_args)] // config borrowed twice for serialization
-#[instrument(skip(config, workspace_folder, args, state_manager))]
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip(config, workspace_folder, args, state_manager, runtime))]
 async fn execute_compose_up(
     config: &DevContainerConfig,
     workspace_folder: &Path,
@@ -1581,6 +1759,7 @@ async fn execute_compose_up(
     workspace_hash: &str,
     effective_env: &HashMap<String, String>,
     config_path: &Path,
+    runtime: &ContainerRuntimeImpl,
 ) -> Result<UpContainerInfo> {
     debug!("Starting Docker Compose project");
 
@@ -1669,9 +1848,22 @@ async fn execute_compose_up(
                     None
                 };
 
-                // TODO: Merged configuration would require feature metadata and overrides
+                // Existing container reconnect - no resolved features available
                 let merged_configuration = if args.include_merged_configuration {
-                    Some(serde_json::to_value(config)?)
+                    // Use shared helper with injected runtime (respects --docker-path)
+                    let options = inspect_for_merged_configuration(
+                        runtime,
+                        &container_id,
+                        config.image.as_deref(),
+                        Some(project.service.clone()),
+                        None, // No resolved features for reconnect
+                    )
+                    .await;
+                    Some(build_merged_configuration_with_options(
+                        config,
+                        config_path,
+                        options,
+                    )?)
                 } else {
                     None
                 };
@@ -1824,7 +2016,20 @@ async fn execute_compose_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
-        Some(build_merged_configuration(config, config_path)?)
+        // Use shared helper with injected runtime (respects --docker-path)
+        let options = inspect_for_merged_configuration(
+            runtime,
+            &container_id,
+            config.image.as_deref(),
+            Some(project.service.clone()),
+            None, // Features not yet supported for compose flow
+        )
+        .await;
+        Some(build_merged_configuration_with_options(
+            config,
+            config_path,
+            options,
+        )?)
     } else {
         None
     };
@@ -1992,7 +2197,7 @@ async fn execute_container_up(
     // - Feature metadata should be merged into final configuration
 
     // Install features if present in configuration
-    if config
+    let resolved_features = if config
         .features
         .as_object()
         .map(|o| !o.is_empty())
@@ -2015,7 +2220,11 @@ async fn execute_container_up(
             "Updated config to use feature-extended image: {}",
             feature_build.image_tag
         );
-    }
+
+        Some(feature_build.resolved_features)
+    } else {
+        None
+    };
 
     // Log GPU mode application
     if args.gpu_mode == deacon_core::gpu::GpuMode::All {
@@ -2199,7 +2408,20 @@ async fn execute_container_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
-        Some(build_merged_configuration(&config, config_path)?)
+        // Use shared helper with injected runtime
+        let options = inspect_for_merged_configuration(
+            docker,
+            &container_result.container_id,
+            config.image.as_deref(),
+            None, // Single container, no service context
+            resolved_features,
+        )
+        .await;
+        Some(build_merged_configuration_with_options(
+            &config,
+            config_path,
+            options,
+        )?)
     } else {
         None
     };
@@ -2420,6 +2642,7 @@ async fn execute_initialize_command(
 struct FeatureBuildOutput {
     image_tag: String,
     combined_env: HashMap<String, String>,
+    resolved_features: Vec<deacon_core::features::ResolvedFeature>,
 }
 
 /// Build an extended Docker image with features installed using BuildKit
@@ -2462,6 +2685,7 @@ async fn build_image_with_features(
         return Ok(FeatureBuildOutput {
             image_tag: base_image.clone(),
             combined_env: HashMap::new(),
+            resolved_features: Vec::new(),
         });
     }
 
@@ -2655,6 +2879,7 @@ async fn build_image_with_features(
     Ok(FeatureBuildOutput {
         image_tag: extended_image_tag,
         combined_env,
+        resolved_features: installation_plan.features.clone(),
     })
 }
 

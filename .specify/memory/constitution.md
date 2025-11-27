@@ -1,16 +1,16 @@
 <!--
 Sync Impact Report
-- Version change: 1.9.0 → 1.9.1
+- Version change: 1.10.0 → 1.11.0
 - Modified principles:
-  - IV. Idiomatic, Safe Rust: Added guidance on environment variable constants
-  - VI. Testing Completeness: Added guidance on ignored tests requiring tracking
+  - I. Spec-Parity as Source of Truth: Added "Deferral Tracking" subsection requiring deferrals to be
+    added to tasks.md under a "Deferred Work" section. Spec not complete until deferrals resolved.
 - Added sections: None
 - Removed sections: None
 - Templates requiring updates/alignment:
-  - ✅ .specify/templates/plan-template.md (no changes needed)
+  - ✅ .specify/templates/plan-template.md (constitution check remains valid)
   - ✅ .specify/templates/spec-template.md (no changes needed)
-  - ✅ .specify/templates/tasks-template.md (no changes needed)
-  - ✅ CLAUDE.md (no changes needed - existing guidance covers these patterns)
+  - ✅ .specify/templates/tasks-template.md (add Deferred Work section example)
+  - ✅ CLAUDE.md (updated with deferral tracking guidance)
 - Follow-up TODOs: None
 -->
 
@@ -34,6 +34,28 @@ alternatives that break spec guarantees.
 **Configuration Resolution**: Commands that operate on devcontainer configuration MUST use the full resolution path
 (includes `extends` chains, overrides, variable substitution) as defined in the spec, not just the top-level file.
 Failing to resolve the complete effective configuration violates contract expectations and produces incomplete results.
+
+**Phased Implementation**: Complex spec features MAY be implemented in phases (MVP-first), provided:
+1. Core data structures and contracts are established in the first phase
+2. Placeholder integration points are explicitly documented (e.g., "Future: docker inspect for labels")
+3. Design decisions explaining phased approach are recorded in `research.md` with clear rationale
+4. Tests verify the implemented portion functions correctly with the available data
+5. Future work to complete full data population is clearly scoped
+
+This pattern is valid when full implementation requires architectural threading (e.g., passing resolved features
+through execution flows) that extends beyond MVP scope. The key is explicit documentation—reviewers should find
+answers to "why isn't X fully populated?" in research.md decisions.
+
+**Deferral Tracking**: When work is deferred per the phased implementation pattern above, deferrals MUST be:
+1. Documented in `research.md` with numbered decisions explaining rationale
+2. Added to `tasks.md` under a dedicated "## Deferred Work" section with:
+   - Task IDs continuing the numbering sequence (e.g., T050, T051)
+   - Clear reference to the research.md decision that created the deferral
+   - Specific acceptance criteria for completing the deferred work
+3. Tracked until completion—a specification is NOT considered complete while deferred tasks remain
+
+The "Deferred Work" section in tasks.md ensures visibility and prevents deferrals from being forgotten. Reviewers
+MUST verify that any research.md deferrals have corresponding tasks.md entries before approving PRs.
 
 ### II. Keep the Build Green (Non‑Negotiable)
 All code changes MUST keep the build green with an explicit cadence for quick vs. full checks:
@@ -95,9 +117,19 @@ implementations. Introduce async only for IO‑bound work. Logging uses `tracing
 aligned to workflows (e.g., `config.resolve`, `feature.install`, `container.create`, `lifecycle.run`). Formatting
 and imports are enforced via rustfmt; imports order: std → external crates → local modules.
 
-**Error Propagation**: Use `Result` types consistently; do not swallow errors with unwraps or by returning sentinel
-values when operations can fail. Provide error context with `anyhow::Context` or equivalent. Avoid direct
-`std::process::exit` calls; implement proper `Termination` or error wrappers so cleanup and testing work correctly.
+**Error Propagation**: Use `Result` types consistently; do not swallow errors with unwraps or unchecked `expect`
+calls or by returning sentinel values when operations can fail. Provide error context with `anyhow::Context` or
+equivalent. Avoid direct `std::process::exit` calls; implement proper `Termination` or error wrappers so cleanup
+and testing work correctly. Runtime code MUST be panic-free for expected failure modes—propagate, don’t crash.
+
+**Async Discipline**: Do not block the async runtime with synchronous IO (e.g., `std::process::Command::output()`,
+`std::fs::read_to_end`) inside async functions. Use async equivalents (`tokio::process::Command` with streaming,
+`tokio::fs`, `tokio::io`). Long-running or CPU-heavy work should be offloaded to blocking tasks with clear bounds.
+
+**Modular Boundaries Over Monoliths**: Large commands and clients MUST be decomposed into focused modules with
+clear APIs (e.g., `plan`, `package`, `publish`, `test` for features; `auth`, `client`, `semver`, `install` for OCI;
+`args`, `config`, `compose`, `runtime` for `up`). Keep public surface area minimal and reuse shared helpers instead
+of duplicating logic in sprawling single files.
 
 **Dependency Hygiene**: Keep dependencies current and avoid deprecated crates. When a dependency is deprecated or
 superseded (e.g., `atty` → `is-terminal`), migrate promptly. Prefer minimal, stable dependencies with active
@@ -193,6 +225,17 @@ hand‑implemented per subcommand—these flows belong in shared modules consume
 **Drift Remediation**: When inconsistencies are discovered, record them in the shared backlog immediately
 and remediate before unrelated feature work. Reordering or deleting backlog items requires the same
 approval rigor as modifying this constitution.
+
+**Builder Pattern for Configuration Objects**: When constructing complex configuration or output objects
+that have optional enrichment (e.g., `EnrichedMergedConfiguration`), use builder-style methods:
+- Base construction: `Type::from_base(base_data)`
+- Optional enrichment: `.with_feature_metadata(...)`, `.with_labels(...)`, etc.
+- This pattern allows callers to add only available data without complex conditional logic
+
+**Design Decision Documentation**: When implementation choices may be questioned by reviewers (e.g., using
+`from_config_entry()` instead of `from_resolved()`, placeholder TODO comments), document the rationale in
+`specs/{feature}/research.md` with numbered decisions. Reference these decisions in code comments to help
+reviewers understand intentional trade-offs versus oversights.
 
 ### VIII. Executable & Self‑Verifying Examples
 Examples are executable contracts, not documentation suggestions. Every example directory under `examples/`
@@ -322,4 +365,4 @@ This checklist prevents spec drift and reduces rework. Document deviations with 
 - Compliance Review: All PRs MUST include a quick constitution compliance check (in PR body or checklist). Reviewers
   SHALL block merges on violations of Principles I–VIII or on missing updates to tests/examples.
 
-**Version**: 1.9.1 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-26
+**Version**: 1.11.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-27

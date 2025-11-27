@@ -2,11 +2,17 @@
 
 Implement features from the task list, perform code review and cleanup, update project conventions, and manage the PR.
 
+**Usage:** `/maverick.fly [branch-name]`
+- If `branch-name` is provided, switch to that branch before starting
+- If not provided, work on the current branch
+
 ---
 
 ## Part 0: Setup and Sync
 
-Run `.claude/scripts/sync-branch.sh` and parse the JSON output.
+Run `.claude/scripts/sync-branch.sh $ARGUMENTS` and parse the JSON output.
+
+The `$ARGUMENTS` variable contains the optional branch name passed to this command. If empty, the script uses the current branch.
 
 **If status is "conflicts":**
 - Report the conflicting files to the user

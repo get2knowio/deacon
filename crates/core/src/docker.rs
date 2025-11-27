@@ -275,6 +275,15 @@ pub struct ContainerInfo {
     pub mounts: Vec<Mount>,
 }
 
+/// Image information returned by Docker operations
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImageInfo {
+    /// Image ID
+    pub id: String,
+    /// Image labels (from Config.Labels)
+    pub labels: HashMap<String, String>,
+}
+
 /// Represents an exposed port from a container
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -547,6 +556,9 @@ pub trait Docker {
     /// Inspect a specific container by ID
     async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>>;
 
+    /// Inspect a specific image by reference and return its info including labels
+    async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>>;
+
     /// Execute a command in a running container
     async fn exec(
         &self,
@@ -586,6 +598,10 @@ impl<T: Docker> Docker for &T {
 
     async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>> {
         (*self).inspect_container(id).await
+    }
+
+    async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        (*self).inspect_image(image_ref).await
     }
 
     async fn exec(
@@ -1283,6 +1299,70 @@ impl Docker for CliRuntime {
             };
 
             Ok(Some(container_info))
+        })
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+    }
+
+    #[instrument(skip(self))]
+    async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        debug!("Inspecting image: {}", image_ref);
+
+        let runtime_path = self.runtime_path.clone();
+        let image_ref = image_ref.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let output = Command::new(&runtime_path)
+                .args(["image", "inspect", "--format", "{{json .}}", &image_ref])
+                .output()
+                .map_err(|e| {
+                    DockerError::CLIError(format!("Failed to run docker image inspect: {}", e))
+                })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if stderr.contains("No such image") {
+                    return Ok(None);
+                }
+                return Err(DockerError::CLIError(format!(
+                    "docker image inspect failed: {}",
+                    stderr
+                ))
+                .into());
+            }
+
+            // Parse JSON output - it's an array with one element
+            let stdout = String::from_utf8(output.stdout).map_err(|e| {
+                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
+            })?;
+
+            let images: Vec<serde_json::Value> = serde_json::from_str(&stdout).map_err(|e| {
+                DockerError::CLIError(format!("Failed to parse image inspect output: {}", e))
+            })?;
+
+            let image = images
+                .into_iter()
+                .next()
+                .ok_or_else(|| DockerError::CLIError("Empty image inspect output".to_string()))?;
+
+            let id = image
+                .get("Id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let labels = image
+                .get("Config")
+                .and_then(|c| c.get("Labels"))
+                .and_then(|l| l.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            Ok(Some(ImageInfo { id, labels }))
         })
         .await
         .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
@@ -2004,7 +2084,9 @@ pub mod mock {
 
     use crate::config::DevContainerConfig;
     use crate::container::{ContainerIdentity, ContainerOps, ContainerResult};
-    use crate::docker::{ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult};
+    use crate::docker::{
+        ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult, ImageInfo,
+    };
     use crate::errors::{DockerError, Result};
     use std::collections::HashMap;
     use std::path::Path;
@@ -2322,6 +2404,15 @@ pub mod mock {
 
             debug!("MockDocker container not found for inspection");
             Ok(None)
+        }
+
+        #[instrument(skip(self))]
+        async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+            debug!("MockDocker inspect_image called for: {}", image_ref);
+            Ok(Some(ImageInfo {
+                id: format!("sha256:mock_{}", image_ref.replace(':', "_")),
+                labels: HashMap::new(),
+            }))
         }
 
         #[instrument(skip(self, config))]
@@ -2928,6 +3019,15 @@ mod tests {
         // Test not found
         let result = mock_docker.inspect_container("nonexistent").await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_inspect_image() {
+        let mock_docker = MockDocker::new();
+        let result = mock_docker.inspect_image("node:18").await.unwrap();
+        assert!(result.is_some());
+        let info = result.unwrap();
+        assert!(info.id.contains("mock_node_18"));
     }
 
     #[tokio::test]
