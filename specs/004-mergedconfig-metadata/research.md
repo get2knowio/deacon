@@ -31,4 +31,21 @@
 - **Decision**: Add/adjust tests that assert mergedConfiguration differs from base when enrichment applies, includes feature metadata keys, carries image/container labels when available, and remains JSON-schema valid for both single and compose paths.
 - **Rationale**: Acceptance hinges on schema correctness, ordering, and null handling; tests must guard against regressions.
 - **Alternatives considered**:
-  - Rely solely on existing read_configuration tests (rejected: up-specific paths and compose handling need direct coverage).***
+  - Rely solely on existing read_configuration tests (rejected: up-specific paths and compose handling need direct coverage).
+
+## Decision 6: Phased feature metadata extraction
+- **Decision**: Use `from_config_entry()` for MVP, extracting feature ID, options, and order from config. Reserve `from_resolved()` for future integration when resolved `FeatureMetadata` is available in the merged configuration build path.
+- **Rationale**: At the point where `build_merged_configuration_with_options` is called, we only have `DevContainerConfig` with `features` as JSON value, not the resolved feature metadata (version, name, description, etc.). Wiring resolved features through the entire up flow requires architectural changes beyond MVP scope.
+- **Implementation**:
+  - `FeatureMetadataEntry::from_config_entry()` - Extracts ID, options, provenance order from config
+  - `FeatureMetadataEntry::from_resolved()` - Full extraction when `FeatureMetadata` is available (future)
+- **Future work**: Thread resolved `FeatureMetadata` through compose/single flows to populate version, name, description, documentationUrl, installsAfter, dependsOn, mounts, containerEnv fields.
+
+## Decision 7: Deferred Docker inspect for labels
+- **Decision**: Define label metadata structures and integration points now; defer actual Docker inspect calls to future iteration.
+- **Rationale**: The data structures (`LabelSet`, `imageMetadata`, `containerMetadata`) and builder pattern are in place. Actual Docker inspection adds runtime complexity and potential failure modes that should be addressed separately with proper error handling and caching.
+- **Implementation**:
+  - `MergedConfigurationOptions` accepts optional `image_labels` and `container_labels`
+  - `LabelSet::from_image()`, `LabelSet::from_container()`, `LabelSet::from_service()` handle construction
+  - TODO comments mark integration points for Docker inspect
+- **Future work**: Add Docker image/container inspect calls in compose and single-container flows; consider caching label results to avoid repeated inspection.

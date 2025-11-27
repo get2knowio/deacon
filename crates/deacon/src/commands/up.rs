@@ -100,6 +100,12 @@ fn build_merged_configuration_with_options(
 /// - options: The options value (may be empty object, boolean true, or object with options)
 /// - provenance: Order index based on declaration order
 ///
+/// **Note on phased implementation (see research.md Decision 6)**:
+/// This uses `from_config_entry()` which extracts minimal metadata from config.
+/// Full feature metadata (version, name, description, etc.) requires resolved
+/// `FeatureMetadata` which isn't available at this point in the flow. Use
+/// `from_resolved()` when resolved features are threaded through.
+///
 /// Per the spec, we preserve declaration order. Since JSON objects don't guarantee
 /// order, we iterate over the object but this may not be deterministic across
 /// implementations. For truly deterministic ordering, the config would need to be
@@ -1906,9 +1912,12 @@ async fn execute_compose_up(
     let merged_configuration = if args.include_merged_configuration {
         // Build enriched merged configuration with compose service context
         let options = MergedConfigurationOptions {
-            image_labels: None, // TODO: Retrieve from docker image inspect
+            // See research.md Decision 7: Label retrieval deferred to future iteration
+            // Future: docker image inspect <image> -> labels
+            image_labels: None,
             image_ref: config.image.clone(),
-            container_labels: None, // TODO: Retrieve from docker container inspect
+            // Future: docker container inspect <id> -> labels
+            container_labels: None,
             container_id: Some(container_id.clone()),
             service_name: Some(project.service.clone()),
         };
@@ -2293,9 +2302,12 @@ async fn execute_container_up(
     let merged_configuration = if args.include_merged_configuration {
         // Build enriched merged configuration with container context
         let options = MergedConfigurationOptions {
-            image_labels: None, // TODO: Retrieve from docker image inspect
+            // See research.md Decision 7: Label retrieval deferred to future iteration
+            // Future: docker image inspect <image> -> labels
+            image_labels: None,
             image_ref: config.image.clone(),
-            container_labels: None, // TODO: Retrieve from docker container inspect
+            // Future: docker container inspect <id> -> labels
+            container_labels: None,
             container_id: Some(container_result.container_id.clone()),
             service_name: None, // Single container, no service context
         };

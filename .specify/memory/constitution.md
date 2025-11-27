@@ -1,16 +1,15 @@
 <!--
 Sync Impact Report
-- Version change: 1.9.0 → 1.9.1
+- Version change: 1.9.2 → 1.10.0
 - Modified principles:
-  - IV. Idiomatic, Safe Rust: Added guidance on environment variable constants
-  - VI. Testing Completeness: Added guidance on ignored tests requiring tracking
+  - IV. Idiomatic, Safe Rust: Explicitly forbid panic-on-error (`unwrap`, unchecked `expect`) in runtime paths, ban blocking sync work inside async contexts, and require modular boundaries to avoid monoliths.
 - Added sections: None
 - Removed sections: None
 - Templates requiring updates/alignment:
-  - ✅ .specify/templates/plan-template.md (no changes needed)
+  - ✅ .specify/templates/plan-template.md (constitution check remains valid)
   - ✅ .specify/templates/spec-template.md (no changes needed)
   - ✅ .specify/templates/tasks-template.md (no changes needed)
-  - ✅ CLAUDE.md (no changes needed - existing guidance covers these patterns)
+  - ✅ CLAUDE.md (updated to reflect new anti-pattern guidance)
 - Follow-up TODOs: None
 -->
 
@@ -34,6 +33,17 @@ alternatives that break spec guarantees.
 **Configuration Resolution**: Commands that operate on devcontainer configuration MUST use the full resolution path
 (includes `extends` chains, overrides, variable substitution) as defined in the spec, not just the top-level file.
 Failing to resolve the complete effective configuration violates contract expectations and produces incomplete results.
+
+**Phased Implementation**: Complex spec features MAY be implemented in phases (MVP-first), provided:
+1. Core data structures and contracts are established in the first phase
+2. Placeholder integration points are explicitly documented (e.g., "Future: docker inspect for labels")
+3. Design decisions explaining phased approach are recorded in `research.md` with clear rationale
+4. Tests verify the implemented portion functions correctly with the available data
+5. Future work to complete full data population is clearly scoped
+
+This pattern is valid when full implementation requires architectural threading (e.g., passing resolved features
+through execution flows) that extends beyond MVP scope. The key is explicit documentation—reviewers should find
+answers to "why isn't X fully populated?" in research.md decisions.
 
 ### II. Keep the Build Green (Non‑Negotiable)
 All code changes MUST keep the build green with an explicit cadence for quick vs. full checks:
@@ -194,6 +204,17 @@ hand‑implemented per subcommand—these flows belong in shared modules consume
 and remediate before unrelated feature work. Reordering or deleting backlog items requires the same
 approval rigor as modifying this constitution.
 
+**Builder Pattern for Configuration Objects**: When constructing complex configuration or output objects
+that have optional enrichment (e.g., `EnrichedMergedConfiguration`), use builder-style methods:
+- Base construction: `Type::from_base(base_data)`
+- Optional enrichment: `.with_feature_metadata(...)`, `.with_labels(...)`, etc.
+- This pattern allows callers to add only available data without complex conditional logic
+
+**Design Decision Documentation**: When implementation choices may be questioned by reviewers (e.g., using
+`from_config_entry()` instead of `from_resolved()`, placeholder TODO comments), document the rationale in
+`specs/{feature}/research.md` with numbered decisions. Reference these decisions in code comments to help
+reviewers understand intentional trade-offs versus oversights.
+
 ### VIII. Executable & Self‑Verifying Examples
 Examples are executable contracts, not documentation suggestions. Every example directory under `examples/`
 MUST contain an `exec.sh` that:
@@ -322,4 +343,4 @@ This checklist prevents spec drift and reduces rework. Document deviations with 
 - Compliance Review: All PRs MUST include a quick constitution compliance check (in PR body or checklist). Reviewers
   SHALL block merges on violations of Principles I–VIII or on missing updates to tests/examples.
 
-**Version**: 1.9.1 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-26
+**Version**: 1.9.2 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-27
