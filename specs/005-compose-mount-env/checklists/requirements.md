@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning  
 **Created**: 2025-11-26  
-**Feature**: specs/001-compose-mount-env/spec.md
+**Feature**: specs/005-compose-mount-env/spec.md
 
 ## Content Quality
 

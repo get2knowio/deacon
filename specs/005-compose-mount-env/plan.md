@@ -1,7 +1,7 @@
 # Implementation Plan: Compose mount & env injection
 
-**Branch**: `001-compose-mount-env` | **Date**: 2025-11-26 | **Spec**: specs/001-compose-mount-env/spec.md
-**Input**: Feature specification from `specs/001-compose-mount-env/spec.md`
+**Branch**: `005-compose-mount-env` | **Date**: 2025-11-26 | **Spec**: specs/005-compose-mount-env/spec.md
+**Input**: Feature specification from `specs/005-compose-mount-env/spec.md`
 
 ## Summary
 
@@ -55,7 +55,7 @@ specs/[###-feature]/
 -->
 
 ```text
-specs/001-compose-mount-env/
+specs/005-compose-mount-env/
 ├── plan.md
 ├── research.md
 ├── data-model.md
@@ -73,7 +73,7 @@ docs/
 .config/nextest.toml # test grouping and overrides
 ```
 
-**Structure Decision**: Use existing multi-crate Rust CLI layout (crates/core + crates/deacon) with spec artifacts under `specs/001-compose-mount-env/`.
+**Structure Decision**: Use existing multi-crate Rust CLI layout (crates/core + crates/deacon) with spec artifacts under `specs/005-compose-mount-env/`.
 
 ## Complexity Tracking
 
@@ -85,7 +85,7 @@ docs/
 
 ## Phase Outputs
 
-- Phase 0 research: specs/001-compose-mount-env/research.md (decisions on injection scope, precedence, external volumes, Git root handling, profiles/env-files/project naming)
-- Phase 1 design: specs/001-compose-mount-env/data-model.md, specs/001-compose-mount-env/contracts/up.yaml, specs/001-compose-mount-env/quickstart.md
+- Phase 0 research: specs/005-compose-mount-env/research.md (decisions on injection scope, precedence, external volumes, Git root handling, profiles/env-files/project naming)
+- Phase 1 design: specs/005-compose-mount-env/data-model.md, specs/005-compose-mount-env/contracts/up.yaml, specs/005-compose-mount-env/quickstart.md
 - Agent context: updated via `.specify/scripts/bash/update-agent-context.sh codex`
 - Post-design constitution check: no violations identified

@@ -344,6 +344,7 @@ async fn execute_compose_down(
         additional_mounts: Vec::new(), // Not needed for down operation
         profiles: Vec::new(),          // Not needed for down operation
         additional_env: std::collections::HashMap::new(),
+        external_volumes: Vec::new(), // Not needed for down operation
     };
 
     // Check if project is still running

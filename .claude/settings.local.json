@@ -50,7 +50,10 @@
       "Bash(fi)",
       "Bash(lsof:*)",
       "Bash(./target/debug/deacon features:*)",
-      "Bash(sg:*)"
+      "Bash(sg:*)",
+      "Bash(if [ -d \"/workspaces/deacon/specs/005-compose-mount-env/checklists\" ])",
+      "Bash(then find \"/workspaces/deacon/specs/005-compose-mount-env/checklists\" -name \"*.md\" -type f)",
+      "Bash(docker compose:*)"
     ],
     "deny": [],
     "ask": []

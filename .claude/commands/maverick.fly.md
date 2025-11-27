@@ -33,6 +33,15 @@ The `$ARGUMENTS` variable contains the optional branch name passed to this comma
 
 Evaluate the tasks file at `{tasks_file}` (from Part 0). For each uncompleted task:
 
+### Critical Rule: ALL Task Work via /speckit.implement
+
+**IMPORTANT:** All task implementation work MUST be done by invoking `/speckit.implement`. Do NOT:
+- Implement tasks directly in the main conversation
+- Use generic exploration agents for task work
+- Write code outside of the `/speckit.implement` context
+
+The `/speckit.implement` command ensures proper spec compliance, consistent implementation patterns, and appropriate context loading.
+
 ### Processing Rules
 
 1. **Read the tasks file** and identify all incomplete tasks (not marked done)
@@ -41,18 +50,26 @@ Evaluate the tasks file at `{tasks_file}` (from Part 0). For each uncompleted ta
    - Adjacent tasks marked with **"P"** can be processed in **parallel**
    - Each parallel task gets its own subagent
 
-3. **For each task (or parallel batch), spawn subagent(s) that invoke the following slash-command:**
-```
-/speckit.implement
+3. **For each task (or parallel batch), spawn subagent(s) using the SlashCommand tool:**
 
-Task: {task_content}
+   ```
+   SlashCommand: /speckit.implement
+   ```
 
-Follow the specification in {spec_dir}/ for this task.
-Report back with:
-- What was implemented
-- Any issues encountered
-- Any deviations from spec (and why)
-```
+   The subagent prompt MUST include:
+   ```
+   Task: {task_content}
+
+   Specification directory: {spec_dir}/
+
+   Instructions:
+   - Read all spec files in {spec_dir}/ before implementing
+   - Follow the specification exactly
+   - Report back with:
+     - What was implemented
+     - Any issues encountered
+     - Any deviations from spec (and why)
+   ```
 
    Where `{task_content}` is the full text of the task from the tasks file.
 
@@ -68,12 +85,23 @@ Report back with:
 If tasks file contains:
 ```
 - [ ] P: Implement user authentication
-- [ ] P: Implement session management  
+- [ ] P: Implement session management
 - [ ] P: Add rate limiting middleware
 - [ ] Integrate auth with existing endpoints
 ```
 
 The first three (marked "P", adjacent) run in parallel, then the fourth runs after they complete.
+
+### What /speckit.implement Does
+
+The `/speckit.implement` command:
+1. Loads the specification context from the spec directory
+2. Understands project conventions from CLAUDE.md and constitution
+3. Implements the task following spec requirements
+4. Validates implementation against acceptance criteria
+5. Reports completion status with details
+
+This ensures consistent, spec-compliant implementations across all tasks.
 
 ---
 

@@ -1,6 +1,6 @@
 # Feature Specification: Compose mount & env injection
 
-**Feature Branch**: `001-compose-mount-env`  
+**Feature Branch**: `005-compose-mount-env`  
 **Created**: 2025-11-26  
 **Status**: Draft  
 **Input**: User description: "In our journey to compliance with docs/repomix-output-devcontainers-cli.xml we need to implement: Spec native compose mount/env injection for up subcommand: apply CLI mounts and remote env to compose services without temp override; align mountWorkspaceGitRoot in compose mounts. Extend ComposeProject/ComposeCommand to inject env/volumes for primary service, handle external volumes, respect profiles/env-files/project naming. Acceptance: mounts/env visible inside service; external volumes honored; git-root applied; profiles/env-files still respected."

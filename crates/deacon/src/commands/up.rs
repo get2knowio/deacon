@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use std::{env, fs};
 use tracing::{debug, info, instrument, warn};
 
 /// Environment variable name for controlling PTY allocation in JSON log mode.
@@ -218,44 +217,10 @@ fn extract_feature_metadata_from_resolved(
         .collect()
 }
 
-/// Create a temporary Docker Compose override file to inject mounts and environment variables.
-///
-/// Applies only to the primary service; uses simple string volume syntax and environment map.
-fn create_compose_override(project: &ComposeProject) -> Result<Option<PathBuf>> {
-    if project.additional_mounts.is_empty() && project.additional_env.is_empty() {
-        return Ok(None);
-    }
-
-    let mut yaml = String::from("services:\n");
-    yaml.push_str(&format!("  {}:\n", project.service));
-
-    if !project.additional_env.is_empty() {
-        yaml.push_str("    environment:\n");
-        for (key, value) in &project.additional_env {
-            let escaped = value.replace('"', "\\\"");
-            yaml.push_str(&format!("      {}: \"{}\"\n", key, escaped));
-        }
-    }
-
-    if !project.additional_mounts.is_empty() {
-        yaml.push_str("    volumes:\n");
-        for mount in &project.additional_mounts {
-            let mut mount_str = format!("{}:{}", mount.source, mount.target);
-            if mount.external {
-                mount_str.push_str(":ro");
-            }
-            yaml.push_str(&format!("      - {}\n", mount_str));
-        }
-    }
-
-    let override_path = env::temp_dir().join(format!(
-        "deacon-compose-override-{}-{}.yml",
-        project.name,
-        std::process::id()
-    ));
-    fs::write(&override_path, yaml)?;
-    Ok(Some(override_path))
-}
+// NOTE: The create_compose_override function has been removed per T006.
+// Mount/env injection is now handled via ComposeProject::generate_injection_override()
+// which pipes YAML to docker compose via stdin using `-f -` (no temp files).
+// See crates/core/src/compose.rs for the implementation.
 
 pub use crate::commands::shared::NormalizedRemoteEnv;
 
@@ -1798,10 +1763,9 @@ async fn execute_compose_up(
         project.additional_env = effective_env.clone();
     }
 
-    // Generate a temporary compose override to inject mounts/env for the primary service
-    if let Some(override_file) = create_compose_override(&project)? {
-        project.compose_files.push(override_file);
-    }
+    // Per T006: Mount/env injection is now handled via ComposeManager::start_project()
+    // which uses ComposeProject::generate_injection_override() to pipe YAML via stdin.
+    // No temporary override files are created.
 
     debug!("Created compose project: {:?}", project.name);
 
