@@ -118,6 +118,8 @@ Document this checklist in your plan.md or PR description to prevent spec drift.
 - N/A (CLI runtime only) (001-force-pty-up)
 - Rust (stable, 2021 edition; rust-toolchain pins stable) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio, compose/exec helpers in crates/core and crates/deacon (001-compose-mount-env)
 - N/A (compose config files and runtime Docker resources) (001-compose-mount-env)
+- Rust (stable, Edition 2021) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio; local crates `core` and `deacon` (006-align-workspace-mounts)
+- N/A (filesystem discovery only) (006-align-workspace-mounts)
 
 ## Recent Changes
 - 001-up-gap-spec: Added Rust stable (2021 edition) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio (as already in repo)
