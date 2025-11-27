@@ -112,6 +112,8 @@ Synthesize all three reviews:
    - Same file or dependencies → must serialize
    - Max 3-4 parallel subagents
 
+5. **Identify deferrals**: For issues that are out of scope or require significant refactoring, note them for Phase 2.5
+
 ### Phase 2.3: Execute Improvements
 
 For each batch of parallelizable issues, spawn subagents:
@@ -134,7 +136,7 @@ After each batch: review changes, resolve conflicts, update TODO, proceed.
 
 Run `.claude/scripts/run-validation.sh` and parse results.
 
-**If `all_passed` is true:** Proceed to Part 3
+**If `all_passed` is true:** Proceed to Phase 2.5
 
 **If any check failed:**
 1. Parse error output from failed checks
@@ -152,6 +154,34 @@ File: [location]
 Investigate whether it's a test bug or implementation bug.
 Fix the actual issue - do NOT weaken assertions.
 ```
+
+### Phase 2.5: Create Tech Debt Issues
+
+For each deferred issue identified during consolidation (Phase 2.2), create a GitHub issue directly:
+
+```bash
+python3 scripts/create_tech_debt_issue.py \
+    --title "Brief descriptive title" \
+    --problem "What's wrong and why it matters" \
+    --rationale "Why this was deferred (pre-existing, out of scope, etc.)" \
+    --pattern "Reference to correct pattern if applicable" \
+    --files path/to/file1.rs path/to/file2.rs \
+    --acceptance "What 'done' looks like" \
+    --labels component1 component2 \
+    --source-branch {branch}
+```
+
+The script:
+- Creates a GitHub issue with `tech-debt` label plus specified component labels
+- Returns the issue URL
+- Supports `--dry-run` to preview and `--json` for structured output
+
+**Collect all created issue URLs** for the PR description in Part 4.
+
+**Deferral criteria** - Only defer when:
+- The issue is pre-existing tech debt unrelated to the feature
+- Fixing requires architectural changes beyond the feature scope
+- The issue is a spec compliance gap that doesn't affect core functionality
 
 ---
 
@@ -227,7 +257,7 @@ Create the report (this becomes the PR description):
 
 ## Improvements Made
 - Critical: X
-- Major: Y  
+- Major: Y
 - Minor: Z
 - Style: W
 
@@ -239,6 +269,10 @@ Create the report (this becomes the PR description):
 - cargo clippy: ✅/❌
 - cargo build: ✅/❌
 - cargo test: ✅/❌ (X passed, Y failed)
+
+## Tech Debt Created
+- [List any tech debt issues created with their GitHub URLs]
+- Or "None"
 
 ## Convention Updates
 - [Summary of changes made via /speckit.constitution, or "None needed"]
@@ -259,7 +293,7 @@ Create the report (this becomes the PR description):
    - `docs(scope):` - Documentation
    - `test(scope):` - Tests
    - `chore(scope):` - Maintenance
-   
+
    Scope = branch name or primary area of change
 
 2. **Save report to temp file:**
@@ -279,8 +313,9 @@ Create the report (this becomes the PR description):
 ## Execution Notes
 
 - Commit after Part 1 (feature implementation)
-- Commit after Part 2 (code review fixes)  
+- Commit after Part 2 (code review fixes)
 - Commit after Part 3 (convention updates) if changes were made
 - Subagent timeout: 5 minutes, then proceed
 - Prefer many small subagents over few large ones
 - When uncertain about parallelization, run sequentially
+- Tech debt goes directly to GitHub issues (not tracked in tasks.md)
