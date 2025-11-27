@@ -113,3 +113,13 @@
 - Deliver MVP by completing User Story 1 (Phase 3) first to ensure mount/env injection works without overrides.
 - Layer User Story 2 to preserve external volumes and align Git root mounts, then User Story 3 to confirm profiles/env-files/project naming remain intact.
 - Keep compose helper changes centralized in `crates/core/src/compose.rs` and orchestrate via `crates/deacon/src/commands/up.rs` to avoid per-story divergence.
+
+---
+
+## Deferred Work
+
+- [ ] T022 [Deferral] Wrap ComposeManager blocking calls in spawn_blocking or convert to async
+  - **Issue**: ComposeManager uses std::process::Command (blocking I/O) but is called from async contexts
+  - **Rationale**: This is pre-existing tech debt affecting compose.rs broadly, not specific to this feature
+  - **Pattern**: See docker.rs which properly uses tokio::task::spawn_blocking for std::process::Command calls
+  - **Acceptance**: All ComposeManager methods called from async contexts are wrapped in spawn_blocking
