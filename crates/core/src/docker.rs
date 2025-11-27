@@ -276,7 +276,7 @@ pub struct ContainerInfo {
 }
 
 /// Image information returned by Docker operations
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImageInfo {
     /// Image ID
     pub id: String,

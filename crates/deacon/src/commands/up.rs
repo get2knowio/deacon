@@ -99,6 +99,61 @@ fn build_merged_configuration_with_options(
     Ok(serde_json::to_value(enriched)?)
 }
 
+/// Inspect container and image to collect labels for merged configuration enrichment.
+///
+/// This async helper consolidates the inspect logic used across multiple enrichment sites
+/// (compose reconnect, fresh compose, single container) to eliminate code duplication
+/// and ensure consistent use of the injected runtime abstraction.
+///
+/// # Arguments
+/// * `docker` - Container runtime implementing the Docker trait
+/// * `container_id` - ID of the running container to inspect
+/// * `image_ref` - Optional image reference to inspect for labels
+/// * `service_name` - Optional compose service name for service-aware provenance
+/// * `resolved_features` - Optional resolved features from installation plan
+async fn inspect_for_merged_configuration(
+    docker: &impl Docker,
+    container_id: &str,
+    image_ref: Option<&str>,
+    service_name: Option<String>,
+    resolved_features: Option<Vec<deacon_core::features::ResolvedFeature>>,
+) -> MergedConfigurationOptions {
+    // Inspect container to get labels
+    let container_labels = if let Ok(Some(info)) = docker.inspect_container(container_id).await {
+        if info.labels.is_empty() {
+            None
+        } else {
+            Some(info.labels)
+        }
+    } else {
+        None
+    };
+
+    // Inspect image to get labels
+    let image_labels = if let Some(img_ref) = image_ref {
+        if let Ok(Some(info)) = docker.inspect_image(img_ref).await {
+            if info.labels.is_empty() {
+                None
+            } else {
+                Some(info.labels)
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    MergedConfigurationOptions {
+        image_labels,
+        image_ref: image_ref.map(String::from),
+        container_labels,
+        container_id: Some(container_id.to_string()),
+        service_name,
+        resolved_features,
+    }
+}
+
 /// Extract feature metadata entries from the config features field.
 ///
 /// Features in config are stored as a JSON object mapping feature IDs to options.
@@ -1662,6 +1717,7 @@ async fn execute_up_with_runtime(
                 .filter_map(|(k, v)| v.clone().map(|val| (k.clone(), val)))
                 .collect(),
             config_path.as_path(),
+            &runtime,
         )
         .await?
     } else {
@@ -1693,7 +1749,8 @@ async fn execute_up_with_runtime(
 
 /// Execute up for Docker Compose configurations
 #[allow(clippy::needless_borrows_for_generic_args)] // config borrowed twice for serialization
-#[instrument(skip(config, workspace_folder, args, state_manager))]
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip(config, workspace_folder, args, state_manager, runtime))]
 async fn execute_compose_up(
     config: &DevContainerConfig,
     workspace_folder: &Path,
@@ -1702,6 +1759,7 @@ async fn execute_compose_up(
     workspace_hash: &str,
     effective_env: &HashMap<String, String>,
     config_path: &Path,
+    runtime: &ContainerRuntimeImpl,
 ) -> Result<UpContainerInfo> {
     debug!("Starting Docker Compose project");
 
@@ -1792,46 +1850,15 @@ async fn execute_compose_up(
 
                 // Existing container reconnect - no resolved features available
                 let merged_configuration = if args.include_merged_configuration {
-                    // For reconnect, we can still inspect the container and image
-                    let docker = deacon_core::docker::CliDocker::new();
-
-                    // Inspect existing container to get labels
-                    let container_labels =
-                        if let Ok(Some(info)) = docker.inspect_container(&container_id).await {
-                            if info.labels.is_empty() {
-                                None
-                            } else {
-                                Some(info.labels)
-                            }
-                        } else {
-                            None
-                        };
-
-                    // Inspect image to get labels
-                    let image_labels = if let Some(ref image_ref) = config.image {
-                        if let Ok(Some(info)) = docker.inspect_image(image_ref).await {
-                            if info.labels.is_empty() {
-                                None
-                            } else {
-                                Some(info.labels)
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    let options = MergedConfigurationOptions {
-                        image_labels,
-                        image_ref: config.image.clone(),
-                        container_labels,
-                        container_id: Some(container_id.clone()),
-                        service_name: Some(project.name.clone()),
-                        // resolved_features is None because we're reconnecting to an existing container
-                        // and don't have access to the installation plan from the original build
-                        resolved_features: None,
-                    };
+                    // Use shared helper with injected runtime (respects --docker-path)
+                    let options = inspect_for_merged_configuration(
+                        runtime,
+                        &container_id,
+                        config.image.as_deref(),
+                        Some(project.service.clone()),
+                        None, // No resolved features for reconnect
+                    )
+                    .await;
                     Some(build_merged_configuration_with_options(
                         config,
                         config_path,
@@ -1989,44 +2016,15 @@ async fn execute_compose_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
-        // Inspect container to get labels
-        let docker = deacon_core::docker::CliDocker::new();
-        let container_labels = if let Ok(Some(info)) = docker.inspect_container(&container_id).await
-        {
-            if info.labels.is_empty() {
-                None
-            } else {
-                Some(info.labels)
-            }
-        } else {
-            None
-        };
-
-        // Inspect image to get labels
-        let image_labels = if let Some(ref image_ref) = config.image {
-            if let Ok(Some(info)) = docker.inspect_image(image_ref).await {
-                if info.labels.is_empty() {
-                    None
-                } else {
-                    Some(info.labels)
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Build enriched merged configuration with compose service context
-        let options = MergedConfigurationOptions {
-            image_labels,
-            image_ref: config.image.clone(),
-            container_labels,
-            container_id: Some(container_id.clone()),
-            service_name: Some(project.service.clone()),
-            // Features not yet supported for compose flow
-            resolved_features: None,
-        };
+        // Use shared helper with injected runtime (respects --docker-path)
+        let options = inspect_for_merged_configuration(
+            runtime,
+            &container_id,
+            config.image.as_deref(),
+            Some(project.service.clone()),
+            None, // Features not yet supported for compose flow
+        )
+        .await;
         Some(build_merged_configuration_with_options(
             config,
             config_path,
@@ -2410,44 +2408,15 @@ async fn execute_container_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
-        // Inspect container to get labels
-        let container_labels = if let Ok(Some(info)) = docker
-            .inspect_container(&container_result.container_id)
-            .await
-        {
-            if info.labels.is_empty() {
-                None
-            } else {
-                Some(info.labels)
-            }
-        } else {
-            None
-        };
-
-        // Inspect image to get labels
-        let image_labels = if let Some(ref image_ref) = config.image {
-            if let Ok(Some(info)) = docker.inspect_image(image_ref).await {
-                if info.labels.is_empty() {
-                    None
-                } else {
-                    Some(info.labels)
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Build enriched merged configuration with container context
-        let options = MergedConfigurationOptions {
-            image_labels,
-            image_ref: config.image.clone(),
-            container_labels,
-            container_id: Some(container_result.container_id.clone()),
-            service_name: None, // Single container, no service context
-            resolved_features,  // Pass resolved features from installation plan
-        };
+        // Use shared helper with injected runtime
+        let options = inspect_for_merged_configuration(
+            docker,
+            &container_result.container_id,
+            config.image.as_deref(),
+            None, // Single container, no service context
+            resolved_features,
+        )
+        .await;
         Some(build_merged_configuration_with_options(
             &config,
             config_path,
