@@ -33,13 +33,93 @@ const ENV_FORCE_TTY_IF_JSON: &str = "DEACON_FORCE_TTY_IF_JSON";
 /// Environment variable name for log format detection.
 const ENV_LOG_FORMAT: &str = "DEACON_LOG_FORMAT";
 
-fn build_merged_configuration(
+/// Options for building enriched merged configuration with label metadata.
+#[derive(Debug, Default)]
+struct MergedConfigurationOptions {
+    /// Labels from the image (devcontainer.metadata label, etc.)
+    image_labels: Option<HashMap<String, String>>,
+    /// Reference to the source image
+    image_ref: Option<String>,
+    /// Labels from the running container
+    container_labels: Option<HashMap<String, String>>,
+    /// ID of the running container
+    container_id: Option<String>,
+    /// Compose service name (for service-aware provenance)
+    service_name: Option<String>,
+}
+
+/// Build enriched merged configuration with optional label metadata.
+///
+/// Use this variant when image/container labels are available from Docker inspection.
+fn build_merged_configuration_with_options(
     config: &DevContainerConfig,
     config_path: &Path,
+    options: MergedConfigurationOptions,
 ) -> Result<serde_json::Value> {
-    use deacon_core::config::merge::LayeredConfigMerger;
+    use deacon_core::config::merge::{EnrichedMergedConfiguration, LabelSet, LayeredConfigMerger};
+
+    // Get base merged configuration with layer provenance
     let merged = LayeredConfigMerger::merge_with_provenance(&[(config.clone(), config_path)], true);
-    Ok(serde_json::to_value(merged)?)
+
+    // Extract feature metadata entries from config.features
+    // Per spec: preserve order of features as declared in configuration
+    let feature_metadata = extract_feature_metadata_from_config(&config.features);
+
+    // Create enriched configuration with feature metadata
+    let mut enriched =
+        EnrichedMergedConfiguration::from_merged(merged).with_feature_metadata(feature_metadata);
+
+    // Add image metadata if available
+    // Per spec: keep field present with null labels when image was inspected but had no labels
+    if options.image_labels.is_some() || options.image_ref.is_some() {
+        enriched = enriched.with_image_metadata(LabelSet::from_image(
+            options.image_labels,
+            options.image_ref,
+        ));
+    }
+
+    // Add container metadata if available
+    // Per spec: keep field present with null labels when container was inspected but had no labels
+    if options.container_labels.is_some() || options.container_id.is_some() {
+        let label_set = if let Some(service) = &options.service_name {
+            LabelSet::from_service(service, options.container_labels, options.container_id)
+        } else {
+            LabelSet::from_container(options.container_labels, options.container_id)
+        };
+        enriched = enriched.with_container_metadata(label_set);
+    }
+
+    Ok(serde_json::to_value(enriched)?)
+}
+
+/// Extract feature metadata entries from the config features field.
+///
+/// Features in config are stored as a JSON object mapping feature IDs to options.
+/// This function extracts each feature as a FeatureMetadataEntry with:
+/// - id: The feature identifier (key)
+/// - options: The options value (may be empty object, boolean true, or object with options)
+/// - provenance: Order index based on declaration order
+///
+/// Per the spec, we preserve declaration order. Since JSON objects don't guarantee
+/// order, we iterate over the object but this may not be deterministic across
+/// implementations. For truly deterministic ordering, the config would need to be
+/// parsed with order-preserving deserialization.
+fn extract_feature_metadata_from_config(
+    features: &serde_json::Value,
+) -> Vec<deacon_core::config::merge::FeatureMetadataEntry> {
+    use deacon_core::config::merge::FeatureMetadataEntry;
+
+    let Some(features_obj) = features.as_object() else {
+        return vec![];
+    };
+
+    features_obj
+        .iter()
+        .enumerate()
+        .map(|(order, (id, options))| {
+            FeatureMetadataEntry::from_config_entry(id.clone(), options.clone(), order)
+        })
+        .collect()
 }
 
 /// Create a temporary Docker Compose override file to inject mounts and environment variables.
@@ -1824,7 +1904,19 @@ async fn execute_compose_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
-        Some(build_merged_configuration(config, config_path)?)
+        // Build enriched merged configuration with compose service context
+        let options = MergedConfigurationOptions {
+            image_labels: None, // TODO: Retrieve from docker image inspect
+            image_ref: config.image.clone(),
+            container_labels: None, // TODO: Retrieve from docker container inspect
+            container_id: Some(container_id.clone()),
+            service_name: Some(project.service.clone()),
+        };
+        Some(build_merged_configuration_with_options(
+            config,
+            config_path,
+            options,
+        )?)
     } else {
         None
     };
@@ -2199,7 +2291,19 @@ async fn execute_container_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
-        Some(build_merged_configuration(&config, config_path)?)
+        // Build enriched merged configuration with container context
+        let options = MergedConfigurationOptions {
+            image_labels: None, // TODO: Retrieve from docker image inspect
+            image_ref: config.image.clone(),
+            container_labels: None, // TODO: Retrieve from docker container inspect
+            container_id: Some(container_result.container_id.clone()),
+            service_name: None, // Single container, no service context
+        };
+        Some(build_merged_configuration_with_options(
+            &config,
+            config_path,
+            options,
+        )?)
     } else {
         None
     };

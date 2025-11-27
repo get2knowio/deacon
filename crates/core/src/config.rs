@@ -2932,6 +2932,270 @@ pub mod merge {
         pub layers: Vec<ConfigLayer>,
     }
 
+    /// Provenance information for tracking source of metadata entries
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Provenance {
+        /// Source reference (e.g., registry URL, local path)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub source: Option<String>,
+        /// Compose service name if applicable
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub service: Option<String>,
+        /// Resolution order index (0-based)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub order: Option<usize>,
+    }
+
+    /// Feature metadata entry for mergedConfiguration output
+    ///
+    /// Represents metadata for a single resolved feature with all spec-required fields.
+    /// Per the contract, optional fields remain present with null/empty values when absent.
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct FeatureMetadataEntry {
+        /// Fully qualified feature identifier
+        #[serde(default)]
+        pub id: String,
+        /// Resolved version string (may be null if absent in source metadata)
+        pub version: Option<String>,
+        /// Feature display name
+        pub name: Option<String>,
+        /// Feature description
+        pub description: Option<String>,
+        /// Documentation URL
+        pub documentation_url: Option<String>,
+        /// Map of resolved options
+        pub options: Option<serde_json::Value>,
+        /// Ordered array of dependency hints (features to install before)
+        pub installs_after: Option<Vec<String>>,
+        /// Hard dependencies
+        pub depends_on: Option<Vec<String>>,
+        /// Mount specifications from feature
+        pub mounts: Option<Vec<serde_json::Value>>,
+        /// Container environment variables from feature
+        pub container_env: Option<std::collections::HashMap<String, String>>,
+        /// Feature customizations
+        pub customizations: Option<serde_json::Value>,
+        /// Source reference and resolution order
+        pub provenance: Option<Provenance>,
+    }
+
+    impl FeatureMetadataEntry {
+        /// Create a FeatureMetadataEntry from resolved feature information
+        ///
+        /// This converts the internal feature resolution data into the spec-compliant
+        /// format for mergedConfiguration output.
+        pub fn from_resolved(
+            id: String,
+            source: String,
+            options: Option<serde_json::Value>,
+            metadata: &crate::features::FeatureMetadata,
+            order: usize,
+            service: Option<String>,
+        ) -> Self {
+            Self {
+                id: id.clone(),
+                version: metadata.version.clone(),
+                name: metadata.name.clone(),
+                description: metadata.description.clone(),
+                documentation_url: metadata.documentation_url.clone(),
+                options,
+                installs_after: if metadata.installs_after.is_empty() {
+                    None
+                } else {
+                    Some(metadata.installs_after.clone())
+                },
+                depends_on: if metadata.depends_on.is_empty() {
+                    None
+                } else {
+                    Some(metadata.depends_on.keys().cloned().collect())
+                },
+                mounts: if metadata.mounts.is_empty() {
+                    None
+                } else {
+                    Some(
+                        metadata
+                            .mounts
+                            .iter()
+                            .map(|m| serde_json::Value::String(m.clone()))
+                            .collect(),
+                    )
+                },
+                container_env: if metadata.container_env.is_empty() {
+                    None
+                } else {
+                    Some(metadata.container_env.clone())
+                },
+                customizations: None, // TODO: Extract customizations from feature metadata if available
+                provenance: Some(Provenance {
+                    source: Some(source),
+                    service,
+                    order: Some(order),
+                }),
+            }
+        }
+
+        /// Create a minimal entry from config features map (when full metadata is unavailable)
+        ///
+        /// This is used when we only have the features configuration but haven't resolved
+        /// the full feature metadata yet.
+        pub fn from_config_entry(id: String, options: serde_json::Value, order: usize) -> Self {
+            Self {
+                id,
+                version: None,
+                name: None,
+                description: None,
+                documentation_url: None,
+                options: if options.is_null() || options.as_object().is_some_and(|m| m.is_empty()) {
+                    None
+                } else {
+                    Some(options)
+                },
+                installs_after: None,
+                depends_on: None,
+                mounts: None,
+                container_env: None,
+                customizations: None,
+                provenance: Some(Provenance {
+                    source: None,
+                    service: None,
+                    order: Some(order),
+                }),
+            }
+        }
+    }
+
+    /// Label set with provenance for image or container labels
+    ///
+    /// Per the contract, labels field remains present even when null/empty
+    /// to satisfy schema expectations.
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct LabelSet {
+        /// Scope of labels (e.g., "image", "container", compose service name)
+        pub source: String,
+        /// Map of label key/value pairs (null/empty when none present)
+        pub labels: Option<std::collections::HashMap<String, String>>,
+        /// Collection source details
+        pub provenance: Option<Provenance>,
+    }
+
+    impl LabelSet {
+        /// Create a new LabelSet for an image
+        pub fn from_image(
+            labels: Option<std::collections::HashMap<String, String>>,
+            image_ref: Option<String>,
+        ) -> Self {
+            Self {
+                source: "image".to_string(),
+                labels,
+                provenance: image_ref.map(|r| Provenance {
+                    source: Some(r),
+                    service: None,
+                    order: None,
+                }),
+            }
+        }
+
+        /// Create a new LabelSet for a container
+        pub fn from_container(
+            labels: Option<std::collections::HashMap<String, String>>,
+            container_id: Option<String>,
+        ) -> Self {
+            Self {
+                source: "container".to_string(),
+                labels,
+                provenance: container_id.map(|id| Provenance {
+                    source: Some(id),
+                    service: None,
+                    order: None,
+                }),
+            }
+        }
+
+        /// Create a new LabelSet for a compose service
+        pub fn from_service(
+            service_name: &str,
+            labels: Option<std::collections::HashMap<String, String>>,
+            container_id: Option<String>,
+        ) -> Self {
+            Self {
+                source: service_name.to_string(),
+                labels,
+                provenance: container_id.map(|id| Provenance {
+                    source: Some(id),
+                    service: Some(service_name.to_string()),
+                    order: None,
+                }),
+            }
+        }
+    }
+
+    /// Enriched merged configuration with feature metadata and label metadata
+    ///
+    /// This struct extends the base merged configuration with additional metadata
+    /// required by the spec: feature metadata entries with provenance and ordering,
+    /// and image/container labels with source annotations.
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct EnrichedMergedConfiguration {
+        /// The base merged configuration (flattened into this object)
+        #[serde(flatten)]
+        pub config: DevContainerConfig,
+
+        /// Metadata about the configuration layers
+        #[serde(rename = "__meta", skip_serializing_if = "Option::is_none")]
+        pub meta: Option<ConfigMeta>,
+
+        /// Ordered list of feature metadata entries (per spec: preserved resolution order)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub feature_metadata: Option<Vec<FeatureMetadataEntry>>,
+
+        /// Labels derived from images (keep field present even when null/empty)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub image_metadata: Option<LabelSet>,
+
+        /// Labels derived from containers/compose services (keep field present even when null/empty)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub container_metadata: Option<LabelSet>,
+    }
+
+    impl EnrichedMergedConfiguration {
+        /// Create from a base merged configuration
+        pub fn from_merged(merged: MergedDevContainerConfig) -> Self {
+            Self {
+                config: merged.config,
+                meta: merged.meta,
+                feature_metadata: None,
+                image_metadata: None,
+                container_metadata: None,
+            }
+        }
+
+        /// Add feature metadata entries
+        pub fn with_feature_metadata(mut self, features: Vec<FeatureMetadataEntry>) -> Self {
+            self.feature_metadata = if features.is_empty() {
+                None
+            } else {
+                Some(features)
+            };
+            self
+        }
+
+        /// Add image metadata (label set)
+        pub fn with_image_metadata(mut self, labels: LabelSet) -> Self {
+            self.image_metadata = Some(labels);
+            self
+        }
+
+        /// Add container metadata (label set)
+        pub fn with_container_metadata(mut self, labels: LabelSet) -> Self {
+            self.container_metadata = Some(labels);
+            self
+        }
+    }
+
     /// Enhanced configuration merger that tracks layer provenance
     pub struct LayeredConfigMerger;
 
