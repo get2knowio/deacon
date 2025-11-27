@@ -16,8 +16,15 @@ The `$ARGUMENTS` variable contains the optional branch name passed to this comma
 
 **If status is "conflicts":**
 - Report the conflicting files to the user
-- Pause and wait for human intervention
-- After conflicts are resolved, user should run `git rebase --continue`
+- Attempt to resolve conflicts automatically:
+  1. For each conflicting file, analyze the conflict markers
+  2. If the conflict is trivial (e.g., both sides made non-overlapping changes), resolve it
+  3. Run `git add <resolved-file>` for each resolved file
+  4. Run `git rebase --continue`
+- If conflicts cannot be auto-resolved:
+  - Abort the rebase with `git rebase --abort`
+  - Try a merge instead: `git merge origin/main`
+  - If merge also has unresolvable conflicts, report to user and pause for human intervention
 
 **If status is "error":**
 - Report the error (missing spec directory or tasks file)
@@ -31,77 +38,24 @@ The `$ARGUMENTS` variable contains the optional branch name passed to this comma
 
 ## Part 1: Feature Implementation
 
-Evaluate the tasks file at `{tasks_file}` (from Part 0). For each uncompleted task:
+Use speckit-rust-implementer to invoke `/speckit.implement` with the following prompt:
 
-### Critical Rule: ALL Task Work via /speckit.implement
-
-**IMPORTANT:** All task implementation work MUST be done by invoking `/speckit.implement`. Do NOT:
-- Implement tasks directly in the main conversation
-- Use generic exploration agents for task work
-- Write code outside of the `/speckit.implement` context
-
-The `/speckit.implement` command ensures proper spec compliance, consistent implementation patterns, and appropriate context loading.
-
-### Processing Rules
-
-1. **Read the tasks file** and identify all incomplete tasks (not marked done)
-
-2. **Process tasks serially by default**, with one exception:
-   - Adjacent tasks marked with **"P"** can be processed in **parallel**
-   - Each parallel task gets its own subagent
-
-3. **For each task (or parallel batch), spawn subagent(s) using the SlashCommand tool:**
-
-   ```
-   SlashCommand: /speckit.implement
-   ```
-
-   The subagent prompt MUST include:
-   ```
-   Task: {task_content}
-
-   Specification directory: {spec_dir}/
-
-   Instructions:
-   - Read all spec files in {spec_dir}/ before implementing
-   - Follow the specification exactly
-   - Report back with:
-     - What was implemented
-     - Any issues encountered
-     - Any deviations from spec (and why)
-   ```
-
-   Where `{task_content}` is the full text of the task from the tasks file.
-
-4. **After each task/batch completes:**
-   - Mark task(s) complete in `{tasks_file}`
-   - Run `cargo check` to verify compilation
-   - Proceed to next task(s)
-
-5. **Continue until all tasks are complete**
-
-### Parallel Example
-
-If tasks file contains:
 ```
-- [ ] P: Implement user authentication
-- [ ] P: Implement session management
-- [ ] P: Add rate limiting middleware
-- [ ] Integrate auth with existing endpoints
+Implement the tasks in {tasks_file}, each in their own subagent, parallelizing where possible.
+
+Specification directory: {spec_dir}/
 ```
 
-The first three (marked "P", adjacent) run in parallel, then the fourth runs after they complete.
+This single command handles:
+- Reading and parsing the tasks file
+- Processing tasks serially by default
+- Parallelizing adjacent tasks marked with "P"
+- Loading spec context for each task
+- Marking tasks complete as they finish
+- Running validation checks
+- Reporting overall completion status
 
-### What /speckit.implement Does
-
-The `/speckit.implement` command:
-1. Loads the specification context from the spec directory
-2. Understands project conventions from CLAUDE.md and constitution
-3. Implements the task following spec requirements
-4. Validates implementation against acceptance criteria
-5. Reports completion status with details
-
-This ensures consistent, spec-compliant implementations across all tasks.
+Wait for `/speckit.implement` to complete before proceeding to Part 2.
 
 ---
 
@@ -109,7 +63,7 @@ This ensures consistent, spec-compliant implementations across all tasks.
 
 ### Phase 2.1: Parallel Reviews
 
-Launch two subagents simultaneously:
+Launch three subagents simultaneously:
 
 **Subagent 1: CodeRabbit Review**
 ```
@@ -117,19 +71,9 @@ Run `coderabbit review --prompt-only` and return the complete output.
 Do not summarize - return everything.
 ```
 
-**Subagent 2: Architecture & Specification Review**
+**Subagent 2: Technical Code Review**
 ```
-Review all changes in this branch against clean code principles, clean architecture, and spec compliance.
-
-First, run `.claude/scripts/get-changed-files.sh` to identify changed files.
-
-Review criteria:
-
-1. **Clean Code**: Single responsibility, DRY, naming, function size, comments, error handling
-
-2. **Clean Architecture**: Dependency direction, layer separation, abstraction boundaries, coupling, testability
-
-3. **Specification Compliance**: Read all files in {spec_dir}/, verify implementation matches requirements
+Use rust-code-reviewer to do a thorough code review of the changes on this branch (both committed and uncommitted).
 
 Return structured report with:
 - File-by-file findings
@@ -137,10 +81,21 @@ Return structured report with:
 - Line numbers where applicable
 - Concrete recommendations
 ```
+**Subagent 3: Spec Compliance Review**
+```
+Use spec-compliance-reviewer to do a thorough spec compliance review of the changes in this branch (both committed and uncommitted).
+
+Return structured report with:
+- File-by-file findings
+- Severity (critical/major/minor/suggestion)
+- Line numbers where applicable
+- Spec references where possible
+- Concrete recommendations
+```
 
 ### Phase 2.2: Consolidate Findings
 
-Synthesize both reviews:
+Synthesize all three reviews:
 
 1. **Deduplicate** overlapping findings
 
