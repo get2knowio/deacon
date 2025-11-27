@@ -7,6 +7,7 @@ pub mod config;
 pub mod down;
 pub mod exec;
 pub mod features;
+pub mod features_monolith;
 pub mod features_publish_output;
 pub mod outdated;
 pub mod read_configuration;

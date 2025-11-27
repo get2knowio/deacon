@@ -1867,18 +1867,24 @@ async fn execute_scan_command(command: &str, args: &BuildArgs) -> Result<i32> {
         .map_err(|e| anyhow::anyhow!("Failed to spawn scan command '{}': {}", program, e))?;
 
     // Read stdout and stderr in parallel
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout from scan command"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("Failed to capture stderr from scan command"))?;
 
     let stdout_task = tokio::spawn(async move {
         use tokio::io::{AsyncBufReadExt, BufReader};
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
         let mut output = Vec::new();
-        while let Some(line) = lines.next_line().await.unwrap_or(None) {
+        while let Ok(Some(line)) = lines.next_line().await {
             output.push(line);
         }
-        output
+        Ok::<Vec<String>, anyhow::Error>(output)
     });
 
     let stderr_task = tokio::spawn(async move {
@@ -1886,10 +1892,10 @@ async fn execute_scan_command(command: &str, args: &BuildArgs) -> Result<i32> {
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
         let mut output = Vec::new();
-        while let Some(line) = lines.next_line().await.unwrap_or(None) {
+        while let Ok(Some(line)) = lines.next_line().await {
             output.push(line);
         }
-        output
+        Ok::<Vec<String>, anyhow::Error>(output)
     });
 
     // Wait for command to complete
@@ -1899,8 +1905,14 @@ async fn execute_scan_command(command: &str, args: &BuildArgs) -> Result<i32> {
         .map_err(|e| anyhow::anyhow!("Failed to wait for scan command: {}", e))?;
 
     // Collect output
-    let stdout_lines = stdout_task.await.unwrap_or_default();
-    let stderr_lines = stderr_task.await.unwrap_or_default();
+    let stdout_lines = stdout_task
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to join stdout task: {}", e))?
+        .context("Failed to read stdout from scan command")?;
+    let stderr_lines = stderr_task
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to join stderr task: {}", e))?
+        .context("Failed to read stderr from scan command")?;
 
     // Write output through redacting writer
     if !stdout_lines.is_empty() {

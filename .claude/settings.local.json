@@ -57,7 +57,9 @@
       "Bash(if [ -d \"/workspaces/deacon/specs/004-mergedconfig-metadata/checklists\" ])",
       "Bash(then find \"/workspaces/deacon/specs/004-mergedconfig-metadata/checklists\" -name \"*.md\" -type f)",
       "Bash(fi)",
-      "Bash(lsof:*)"
+      "Bash(lsof:*)",
+      "Bash(./target/debug/deacon features:*)",
+      "Bash(sg:*)"
     ],
     "deny": [],
     "ask": []

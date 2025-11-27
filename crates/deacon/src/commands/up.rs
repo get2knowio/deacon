@@ -953,7 +953,12 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
         let resolved = if args.mount_workspace_git_root {
             deacon_core::workspace::resolve_workspace_root(&ws)?
         } else {
-            ws.canonicalize().unwrap_or(ws)
+            ws.canonicalize().with_context(|| {
+                format!(
+                    "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
+                    ws.display()
+                )
+            })?
         };
         args.workspace_folder = Some(resolved);
     }
@@ -2111,7 +2116,12 @@ async fn execute_container_up(
         });
         let source_path = workspace_folder
             .canonicalize()
-            .unwrap_or_else(|_| workspace_folder.to_path_buf())
+            .with_context(|| {
+                format!(
+                    "Failed to canonicalize workspace folder '{}' for mounting: path does not exist or cannot be accessed",
+                    workspace_folder.display()
+                )
+            })?
             .display()
             .to_string();
         if let Some(ref consistency) = args.workspace_mount_consistency {
@@ -3881,5 +3891,36 @@ mod tests {
         } else {
             panic!("Expected error result for invalid id-label input");
         }
+    }
+
+    #[tokio::test]
+    async fn test_canonicalization_failure() {
+        // Test that proper errors are returned when workspace path cannot be canonicalized
+        // This tests the canonicalization logic in execute_up function
+        let non_existent_path = PathBuf::from("/nonexistent/path/that/does/not/exist/xyz123");
+        let args = UpArgs {
+            workspace_folder: Some(non_existent_path.clone()),
+            mount_workspace_git_root: false, // This will trigger canonicalize path
+            ..Default::default()
+        };
+
+        // Call execute_up which will attempt canonicalization
+        let result = execute_up(args).await;
+
+        // Verify the error is properly returned
+        assert!(
+            result.is_err(),
+            "Expected canonicalization to fail for non-existent path"
+        );
+
+        let err = result.unwrap_err();
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("Failed to resolve workspace path")
+                || err_str.contains("No such file or directory")
+                || err_str.contains("cannot be accessed"),
+            "Error should mention path resolution failure, got: {}",
+            err_str
+        );
     }
 }

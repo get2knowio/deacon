@@ -929,7 +929,7 @@ fn is_local_path(feature_id: &str) -> bool {
 }
 
 /// Execute features plan command
-async fn execute_features_plan(
+pub async fn execute_features_plan(
     json: bool,
     additional_features: Option<&str>,
     args: &FeaturesArgs,
@@ -952,10 +952,12 @@ async fn execute_features_plan(
         Err(DeaconError::Config(ConfigError::NotFound { .. })) => {
             // If config not found, use default config (empty features)
             // This allows features plan to work with only --additional-features
-            let workspace_folder = args
-                .workspace_folder
-                .clone()
-                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            let workspace_folder = match args.workspace_folder.clone() {
+                Some(folder) => folder,
+                None => std::env::current_dir().context(
+                    "Failed to determine workspace folder: could not get current directory",
+                )?,
+            };
             (workspace_folder, DevContainerConfig::default())
         }
         Err(e) => return Err(e.into()),
@@ -1346,7 +1348,7 @@ fn output_result(result: &FeaturesResult, json: bool) -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn execute_features_test_collection(
+pub async fn execute_features_test_collection(
     project_folder: String,
     selected_features: Vec<String>,
     filter: Option<String>,
@@ -1574,7 +1576,7 @@ async fn execute_features_test_collection(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn execute_features_test(
+pub async fn execute_features_test(
     project_folder: String,
     features: Vec<String>,
     filter: Option<String>,
@@ -1631,7 +1633,7 @@ async fn execute_features_test(
 }
 
 /// Execute features package command
-async fn execute_features_package(
+pub async fn execute_features_package(
     path: &str,
     output_dir: &str,
     force_clean_output_folder: bool,
@@ -1696,7 +1698,10 @@ async fn execute_features_package(
                 options: if metadata.options.is_empty() {
                     None
                 } else {
-                    Some(serde_json::to_value(&metadata.options).unwrap_or(serde_json::Value::Null))
+                    Some(
+                        serde_json::to_value(&metadata.options)
+                            .context("Failed to serialize feature options")?,
+                    )
                 },
                 installs_after: if metadata.installs_after.is_empty() {
                     None
@@ -1783,10 +1788,10 @@ async fn execute_features_package(
                     options: if metadata.options.is_empty() {
                         None
                     } else {
-                        Some(
-                            serde_json::to_value(&metadata.options)
-                                .unwrap_or(serde_json::Value::Null),
-                        )
+                        Some(serde_json::to_value(&metadata.options).context(format!(
+                            "Failed to serialize options for feature '{}'",
+                            metadata.id
+                        ))?)
                     },
                     installs_after: if metadata.installs_after.is_empty() {
                         None
@@ -1855,7 +1860,7 @@ async fn execute_features_package(
 }
 
 /// Execute features pull command (stub - not yet implemented)
-async fn execute_features_pull(_registry_ref: &str, _json: bool) -> Result<()> {
+pub async fn execute_features_pull(_registry_ref: &str, _json: bool) -> Result<()> {
     anyhow::bail!("Failed to pull feature: features pull command is not yet implemented")
 }
 
@@ -2239,7 +2244,7 @@ pub async fn execute_features_publish(
 ///
 /// # Errors
 /// Returns an error if the version is invalid or registry operations fail
-async fn compute_publish_plan(
+pub async fn compute_publish_plan(
     fetcher: &deacon_core::oci::FeatureFetcher<deacon_core::oci::ReqwestClient>,
     feature_ref: &deacon_core::oci::FeatureRef,
     version: &str,
@@ -2274,7 +2279,7 @@ async fn compute_publish_plan(
 }
 
 /// Execute features info command
-async fn execute_features_info(
+pub async fn execute_features_info(
     mode: &str,
     feature: &str,
     output_format: crate::cli::OutputFormat,
@@ -2305,7 +2310,7 @@ async fn execute_features_info(
 }
 
 /// Inner implementation of features info execution
-async fn execute_features_info_inner(
+pub async fn execute_features_info_inner(
     mode: &str,
     feature: &str,
     output_format: crate::cli::OutputFormat,
@@ -2763,7 +2768,7 @@ fn output_verbose_info_aggregated(
 
 /// Run feature test in an ephemeral Alpine container
 #[allow(dead_code)]
-async fn run_feature_test_in_container(
+pub async fn run_feature_test_in_container(
     feature_path: &Path,
     _install_script: &Path,
 ) -> Result<bool> {
@@ -2806,7 +2811,7 @@ async fn run_feature_test_in_container(
 }
 
 /// Create a feature package (gzipped tar archive with OCI manifest stub)
-async fn create_feature_package(
+pub async fn create_feature_package(
     feature_path: &Path,
     output_path: &Path,
     metadata: &FeatureMetadata,
@@ -2864,7 +2869,7 @@ async fn create_feature_package(
 }
 
 /// Output publish result in the specified format
-fn output_publish_result(result: &PublishOutput, json: bool) -> Result<()> {
+pub fn output_publish_result(result: &PublishOutput, json: bool) -> Result<()> {
     if json {
         let json_output = serde_json::to_string_pretty(result)?;
         println!("{}", json_output);

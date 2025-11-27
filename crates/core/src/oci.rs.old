@@ -48,7 +48,6 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tar::Archive;
@@ -2167,6 +2166,9 @@ impl<C: HttpClient> FeatureFetcher<C> {
         script_path: &Path,
         env_vars: &HashMap<String, String>,
     ) -> Result<()> {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        use tokio::process::Command;
+
         debug!("Executing install script: {}", script_path.display());
 
         let mut command = Command::new("bash");
@@ -2178,32 +2180,61 @@ impl<C: HttpClient> FeatureFetcher<C> {
             debug!("Set environment variable: {}={}", key, value);
         }
 
-        // Execute the command
-        let output = command.output().map_err(|e| FeatureError::Installation {
+        // Capture stdout and stderr for streaming
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+
+        // Spawn the child process
+        let mut child = command.spawn().map_err(|e| FeatureError::Installation {
             message: format!("Failed to execute install script: {}", e),
         })?;
 
-        // Log stdout and stderr
-        if !output.stdout.is_empty() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
+        // Get stdout and stderr handles
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| FeatureError::Installation {
+                message: "Failed to capture stdout".to_string(),
+            })?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| FeatureError::Installation {
+                message: "Failed to capture stderr".to_string(),
+            })?;
+
+        // Stream stdout asynchronously
+        let stdout_handle = tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
                 info!("[install] stdout: {}", line);
             }
-        }
+        });
 
-        if !output.stderr.is_empty() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            for line in stderr.lines() {
+        // Stream stderr asynchronously
+        let stderr_handle = tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
                 warn!("[install] stderr: {}", line);
             }
-        }
+        });
+
+        // Wait for the process to complete
+        let status = child.wait().await.map_err(|e| FeatureError::Installation {
+            message: format!("Failed to wait for install script: {}", e),
+        })?;
+
+        // Wait for output streaming tasks to complete
+        let _ = tokio::try_join!(stdout_handle, stderr_handle);
 
         // Check exit status
-        if !output.status.success() {
+        if !status.success() {
             return Err(FeatureError::Installation {
                 message: format!(
                     "Install script failed with exit code: {}",
-                    output.status.code().unwrap_or(-1)
+                    status.code().unwrap_or(-1)
                 ),
             }
             .into());
