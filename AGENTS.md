@@ -116,6 +116,8 @@ Document this checklist in your plan.md or PR description to prevent spec drift.
 - N/A (CLI orchestrator; uses filesystem for configs/cache) (001-up-gap-spec)
 - Rust (2021 edition; workspace pinned via rust-toolchain) + clap, serde/serde_json, tracing, anyhow/thiserror, tokio, existing exec/TTY helpers in crates/core and crates/deacon (001-force-pty-up)
 - N/A (CLI runtime only) (001-force-pty-up)
+- Rust stable (2021 edition per workspace toolchain) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio, cargo-nextest for tests; reuse existing config/feature/build helpers in `crates/core` and CLI wiring in `crates/deacon` (007-up-build-parity)
+- Filesystem-based config/lockfile inputs and merged outputs; no persistent DB (007-up-build-parity)
 
 ## Recent Changes
 - 001-up-gap-spec: Added Rust stable (2021 edition) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio (as already in repo)
