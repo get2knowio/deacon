@@ -5,7 +5,7 @@
 
 use crate::config::DevContainerConfig;
 use crate::container::{ContainerIdentity, ContainerOps, ContainerResult};
-use crate::docker::{ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult};
+use crate::docker::{ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult, ImageInfo};
 use crate::errors::{DeaconError, Result};
 use std::path::Path;
 
@@ -134,6 +134,13 @@ impl Docker for ContainerRuntimeImpl {
         match self {
             Self::Docker(runtime) => runtime.inspect_container(id).await,
             Self::Podman(runtime) => runtime.inspect_container(id).await,
+        }
+    }
+
+    async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        match self {
+            Self::Docker(runtime) => runtime.inspect_image(image_ref).await,
+            Self::Podman(runtime) => runtime.inspect_image(image_ref).await,
         }
     }
 
@@ -283,6 +290,10 @@ impl Docker for DockerRuntime {
         self.docker.inspect_container(id).await
     }
 
+    async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        self.docker.inspect_image(image_ref).await
+    }
+
     async fn exec(
         &self,
         container_id: &str,
@@ -394,6 +405,10 @@ impl Docker for PodmanRuntime {
 
     async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>> {
         self.runtime.inspect_container(id).await
+    }
+
+    async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        self.runtime.inspect_image(image_ref).await
     }
 
     async fn exec(

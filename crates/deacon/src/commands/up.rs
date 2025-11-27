@@ -46,6 +46,8 @@ struct MergedConfigurationOptions {
     container_id: Option<String>,
     /// Compose service name (for service-aware provenance)
     service_name: Option<String>,
+    /// Resolved features from installation plan (contains full metadata)
+    resolved_features: Option<Vec<deacon_core::features::ResolvedFeature>>,
 }
 
 /// Build enriched merged configuration with optional label metadata.
@@ -63,7 +65,12 @@ fn build_merged_configuration_with_options(
 
     // Extract feature metadata entries from config.features
     // Per spec: preserve order of features as declared in configuration
-    let feature_metadata = extract_feature_metadata_from_config(&config.features);
+    // Prefer resolved features (full metadata) over config extraction (minimal)
+    let feature_metadata = if let Some(ref resolved) = options.resolved_features {
+        extract_feature_metadata_from_resolved(resolved, options.service_name.clone())
+    } else {
+        extract_feature_metadata_from_config(&config.features)
+    };
 
     // Create enriched configuration with feature metadata
     let mut enriched =
@@ -124,6 +131,34 @@ fn extract_feature_metadata_from_config(
         .enumerate()
         .map(|(order, (id, options))| {
             FeatureMetadataEntry::from_config_entry(id.clone(), options.clone(), order)
+        })
+        .collect()
+}
+
+/// Extract feature metadata entries from resolved features.
+///
+/// This uses the full resolved feature metadata including version, name,
+/// description, etc. from the installation plan.
+fn extract_feature_metadata_from_resolved(
+    features: &[deacon_core::features::ResolvedFeature],
+    service: Option<String>,
+) -> Vec<deacon_core::config::merge::FeatureMetadataEntry> {
+    use deacon_core::config::merge::FeatureMetadataEntry;
+
+    features
+        .iter()
+        .enumerate()
+        .map(|(order, f)| {
+            // Convert options HashMap<String, OptionValue> to serde_json::Value
+            let options = serde_json::to_value(&f.options).ok();
+            FeatureMetadataEntry::from_resolved(
+                f.id.clone(),
+                f.source.clone(),
+                options,
+                &f.metadata,
+                order,
+                service.clone(),
+            )
         })
         .collect()
 }
@@ -1755,9 +1790,53 @@ async fn execute_compose_up(
                     None
                 };
 
-                // TODO: Merged configuration would require feature metadata and overrides
+                // Existing container reconnect - no resolved features available
                 let merged_configuration = if args.include_merged_configuration {
-                    Some(serde_json::to_value(config)?)
+                    // For reconnect, we can still inspect the container and image
+                    let docker = deacon_core::docker::CliDocker::new();
+
+                    // Inspect existing container to get labels
+                    let container_labels =
+                        if let Ok(Some(info)) = docker.inspect_container(&container_id).await {
+                            if info.labels.is_empty() {
+                                None
+                            } else {
+                                Some(info.labels)
+                            }
+                        } else {
+                            None
+                        };
+
+                    // Inspect image to get labels
+                    let image_labels = if let Some(ref image_ref) = config.image {
+                        if let Ok(Some(info)) = docker.inspect_image(image_ref).await {
+                            if info.labels.is_empty() {
+                                None
+                            } else {
+                                Some(info.labels)
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    let options = MergedConfigurationOptions {
+                        image_labels,
+                        image_ref: config.image.clone(),
+                        container_labels,
+                        container_id: Some(container_id.clone()),
+                        service_name: Some(project.name.clone()),
+                        // resolved_features is None because we're reconnecting to an existing container
+                        // and don't have access to the installation plan from the original build
+                        resolved_features: None,
+                    };
+                    Some(build_merged_configuration_with_options(
+                        config,
+                        config_path,
+                        options,
+                    )?)
                 } else {
                     None
                 };
@@ -1910,16 +1989,43 @@ async fn execute_compose_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
+        // Inspect container to get labels
+        let docker = deacon_core::docker::CliDocker::new();
+        let container_labels = if let Ok(Some(info)) = docker.inspect_container(&container_id).await
+        {
+            if info.labels.is_empty() {
+                None
+            } else {
+                Some(info.labels)
+            }
+        } else {
+            None
+        };
+
+        // Inspect image to get labels
+        let image_labels = if let Some(ref image_ref) = config.image {
+            if let Ok(Some(info)) = docker.inspect_image(image_ref).await {
+                if info.labels.is_empty() {
+                    None
+                } else {
+                    Some(info.labels)
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Build enriched merged configuration with compose service context
         let options = MergedConfigurationOptions {
-            // See research.md Decision 7: Label retrieval deferred to future iteration
-            // Future: docker image inspect <image> -> labels
-            image_labels: None,
+            image_labels,
             image_ref: config.image.clone(),
-            // Future: docker container inspect <id> -> labels
-            container_labels: None,
+            container_labels,
             container_id: Some(container_id.clone()),
             service_name: Some(project.service.clone()),
+            // Features not yet supported for compose flow
+            resolved_features: None,
         };
         Some(build_merged_configuration_with_options(
             config,
@@ -2093,7 +2199,7 @@ async fn execute_container_up(
     // - Feature metadata should be merged into final configuration
 
     // Install features if present in configuration
-    if config
+    let resolved_features = if config
         .features
         .as_object()
         .map(|o| !o.is_empty())
@@ -2116,7 +2222,11 @@ async fn execute_container_up(
             "Updated config to use feature-extended image: {}",
             feature_build.image_tag
         );
-    }
+
+        Some(feature_build.resolved_features)
+    } else {
+        None
+    };
 
     // Log GPU mode application
     if args.gpu_mode == deacon_core::gpu::GpuMode::All {
@@ -2300,16 +2410,43 @@ async fn execute_container_up(
     };
 
     let merged_configuration = if args.include_merged_configuration {
+        // Inspect container to get labels
+        let container_labels = if let Ok(Some(info)) = docker
+            .inspect_container(&container_result.container_id)
+            .await
+        {
+            if info.labels.is_empty() {
+                None
+            } else {
+                Some(info.labels)
+            }
+        } else {
+            None
+        };
+
+        // Inspect image to get labels
+        let image_labels = if let Some(ref image_ref) = config.image {
+            if let Ok(Some(info)) = docker.inspect_image(image_ref).await {
+                if info.labels.is_empty() {
+                    None
+                } else {
+                    Some(info.labels)
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Build enriched merged configuration with container context
         let options = MergedConfigurationOptions {
-            // See research.md Decision 7: Label retrieval deferred to future iteration
-            // Future: docker image inspect <image> -> labels
-            image_labels: None,
+            image_labels,
             image_ref: config.image.clone(),
-            // Future: docker container inspect <id> -> labels
-            container_labels: None,
+            container_labels,
             container_id: Some(container_result.container_id.clone()),
             service_name: None, // Single container, no service context
+            resolved_features,  // Pass resolved features from installation plan
         };
         Some(build_merged_configuration_with_options(
             &config,
@@ -2536,6 +2673,7 @@ async fn execute_initialize_command(
 struct FeatureBuildOutput {
     image_tag: String,
     combined_env: HashMap<String, String>,
+    resolved_features: Vec<deacon_core::features::ResolvedFeature>,
 }
 
 /// Build an extended Docker image with features installed using BuildKit
@@ -2578,6 +2716,7 @@ async fn build_image_with_features(
         return Ok(FeatureBuildOutput {
             image_tag: base_image.clone(),
             combined_env: HashMap::new(),
+            resolved_features: Vec::new(),
         });
     }
 
@@ -2771,6 +2910,7 @@ async fn build_image_with_features(
     Ok(FeatureBuildOutput {
         image_tag: extended_image_tag,
         combined_env,
+        resolved_features: installation_plan.features.clone(),
     })
 }
 

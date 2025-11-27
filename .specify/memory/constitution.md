@@ -1,15 +1,16 @@
 <!--
 Sync Impact Report
-- Version change: 1.9.2 → 1.10.0
+- Version change: 1.10.0 → 1.11.0
 - Modified principles:
-  - IV. Idiomatic, Safe Rust: Explicitly forbid panic-on-error (`unwrap`, unchecked `expect`) in runtime paths, ban blocking sync work inside async contexts, and require modular boundaries to avoid monoliths.
+  - I. Spec-Parity as Source of Truth: Added "Deferral Tracking" subsection requiring deferrals to be
+    added to tasks.md under a "Deferred Work" section. Spec not complete until deferrals resolved.
 - Added sections: None
 - Removed sections: None
 - Templates requiring updates/alignment:
   - ✅ .specify/templates/plan-template.md (constitution check remains valid)
   - ✅ .specify/templates/spec-template.md (no changes needed)
-  - ✅ .specify/templates/tasks-template.md (no changes needed)
-  - ✅ CLAUDE.md (updated to reflect new anti-pattern guidance)
+  - ✅ .specify/templates/tasks-template.md (add Deferred Work section example)
+  - ✅ CLAUDE.md (updated with deferral tracking guidance)
 - Follow-up TODOs: None
 -->
 
@@ -44,6 +45,17 @@ Failing to resolve the complete effective configuration violates contract expect
 This pattern is valid when full implementation requires architectural threading (e.g., passing resolved features
 through execution flows) that extends beyond MVP scope. The key is explicit documentation—reviewers should find
 answers to "why isn't X fully populated?" in research.md decisions.
+
+**Deferral Tracking**: When work is deferred per the phased implementation pattern above, deferrals MUST be:
+1. Documented in `research.md` with numbered decisions explaining rationale
+2. Added to `tasks.md` under a dedicated "## Deferred Work" section with:
+   - Task IDs continuing the numbering sequence (e.g., T050, T051)
+   - Clear reference to the research.md decision that created the deferral
+   - Specific acceptance criteria for completing the deferred work
+3. Tracked until completion—a specification is NOT considered complete while deferred tasks remain
+
+The "Deferred Work" section in tasks.md ensures visibility and prevents deferrals from being forgotten. Reviewers
+MUST verify that any research.md deferrals have corresponding tasks.md entries before approving PRs.
 
 ### II. Keep the Build Green (Non‑Negotiable)
 All code changes MUST keep the build green with an explicit cadence for quick vs. full checks:
@@ -105,9 +117,19 @@ implementations. Introduce async only for IO‑bound work. Logging uses `tracing
 aligned to workflows (e.g., `config.resolve`, `feature.install`, `container.create`, `lifecycle.run`). Formatting
 and imports are enforced via rustfmt; imports order: std → external crates → local modules.
 
-**Error Propagation**: Use `Result` types consistently; do not swallow errors with unwraps or by returning sentinel
-values when operations can fail. Provide error context with `anyhow::Context` or equivalent. Avoid direct
-`std::process::exit` calls; implement proper `Termination` or error wrappers so cleanup and testing work correctly.
+**Error Propagation**: Use `Result` types consistently; do not swallow errors with unwraps or unchecked `expect`
+calls or by returning sentinel values when operations can fail. Provide error context with `anyhow::Context` or
+equivalent. Avoid direct `std::process::exit` calls; implement proper `Termination` or error wrappers so cleanup
+and testing work correctly. Runtime code MUST be panic-free for expected failure modes—propagate, don’t crash.
+
+**Async Discipline**: Do not block the async runtime with synchronous IO (e.g., `std::process::Command::output()`,
+`std::fs::read_to_end`) inside async functions. Use async equivalents (`tokio::process::Command` with streaming,
+`tokio::fs`, `tokio::io`). Long-running or CPU-heavy work should be offloaded to blocking tasks with clear bounds.
+
+**Modular Boundaries Over Monoliths**: Large commands and clients MUST be decomposed into focused modules with
+clear APIs (e.g., `plan`, `package`, `publish`, `test` for features; `auth`, `client`, `semver`, `install` for OCI;
+`args`, `config`, `compose`, `runtime` for `up`). Keep public surface area minimal and reuse shared helpers instead
+of duplicating logic in sprawling single files.
 
 **Dependency Hygiene**: Keep dependencies current and avoid deprecated crates. When a dependency is deprecated or
 superseded (e.g., `atty` → `is-terminal`), migrate promptly. Prefer minimal, stable dependencies with active
@@ -343,4 +365,4 @@ This checklist prevents spec drift and reduces rework. Document deviations with 
 - Compliance Review: All PRs MUST include a quick constitution compliance check (in PR body or checklist). Reviewers
   SHALL block merges on violations of Principles I–VIII or on missing updates to tests/examples.
 
-**Version**: 1.9.2 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-27
+**Version**: 1.11.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-27
