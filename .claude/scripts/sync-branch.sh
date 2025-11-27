@@ -1,9 +1,41 @@
 #!/bin/bash
 # sync-branch.sh
 # Syncs current branch with origin/main and returns structured JSON
+# Usage: sync-branch.sh [branch-name]
+#   If branch-name is provided, switches to that branch first
+#   If not provided, uses the current branch
 # Returns: {"status": "ok"|"conflicts", "branch": "...", "spec_dir": "...", "tasks_file": "...", "conflicts?": "..."}
 
 set -e
+
+# If a branch argument is provided, switch to it first
+if [ -n "$1" ]; then
+    TARGET_BRANCH="$1"
+
+    # Fetch to ensure we have latest refs
+    git fetch origin 2>/dev/null
+
+    # Check if we need to switch branches
+    CURRENT=$(git branch --show-current)
+    if [ "$CURRENT" != "$TARGET_BRANCH" ]; then
+        # Try to switch to the branch
+        if ! git checkout "$TARGET_BRANCH" 2>/dev/null; then
+            # Branch might not exist locally, try to check out from origin
+            if ! git checkout -b "$TARGET_BRANCH" "origin/$TARGET_BRANCH" 2>/dev/null; then
+                cat <<EOF
+{
+  "status": "error",
+  "branch": "$TARGET_BRANCH",
+  "spec_dir": "specs/$TARGET_BRANCH",
+  "tasks_file": "specs/$TARGET_BRANCH/tasks.md",
+  "error": "Could not switch to branch: $TARGET_BRANCH"
+}
+EOF
+                exit 1
+            fi
+        fi
+    fi
+fi
 
 BRANCH_NAME=$(git branch --show-current)
 SPEC_DIR="specs/$BRANCH_NAME"
