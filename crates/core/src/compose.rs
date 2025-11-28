@@ -437,6 +437,94 @@ impl ComposeCommand {
 
         Ok(result)
     }
+
+    /// Extract external volumes from compose configuration.
+    ///
+    /// Uses `docker compose config --format json` to get the merged configuration
+    /// and extracts volume names that are marked as external.
+    ///
+    /// Per the spec (data-model.md): External volumes are those with `external: true`
+    /// or `external: { name: "..." }` in the compose configuration. These must remain
+    /// intact and not be replaced by injection logic.
+    ///
+    /// # Returns
+    ///
+    /// A list of external volume names. Returns an empty list if no volumes are defined
+    /// or if none are marked as external.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the docker compose config command fails to execute or
+    /// produces invalid JSON output.
+    #[instrument(skip(self))]
+    pub fn extract_external_volumes(&self) -> Result<Vec<String>> {
+        let output = self.execute(&["config", "--format", "json"])?;
+        parse_external_volumes_from_config(&output)
+    }
+}
+
+/// Parse external volumes from docker compose config JSON output.
+///
+/// This function extracts volume names that are marked as external from the
+/// compose configuration. It handles both formats:
+/// - `external: true` - Simple boolean form
+/// - `external: { name: "actual-volume-name" }` - Object form with explicit name
+///
+/// # Arguments
+///
+/// * `json_output` - The JSON output from `docker compose config --format json`
+///
+/// # Returns
+///
+/// A list of external volume names. For the object form with `name`, the actual
+/// external volume name is used. For the simple boolean form, the key name from
+/// the volumes section is used.
+fn parse_external_volumes_from_config(json_output: &str) -> Result<Vec<String>> {
+    if json_output.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let config: serde_json::Value = serde_json::from_str(json_output).map_err(|e| {
+        DockerError::CLIError(format!("Failed to parse compose config JSON: {}", e))
+    })?;
+
+    let mut external_volumes = Vec::new();
+
+    if let Some(volumes) = config.get("volumes").and_then(|v| v.as_object()) {
+        for (volume_name, volume_config) in volumes {
+            // Check if the volume is marked as external
+            if let Some(external) = volume_config.get("external") {
+                if external.as_bool() == Some(true) {
+                    // Simple form: external: true
+                    external_volumes.push(volume_name.clone());
+                    debug!("Found external volume (simple form): {}", volume_name);
+                } else if external.is_object() {
+                    // Object form: external: { name: "..." }
+                    // In this case, the external volume name might differ from the key
+                    if let Some(external_name) = external.get("name").and_then(|n| n.as_str()) {
+                        external_volumes.push(external_name.to_string());
+                        debug!(
+                            "Found external volume (object form): {} -> {}",
+                            volume_name, external_name
+                        );
+                    } else {
+                        // external is an object but no name specified, use the key name
+                        external_volumes.push(volume_name.clone());
+                        debug!(
+                            "Found external volume (object form, no name): {}",
+                            volume_name
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    debug!(
+        "Extracted {} external volumes from compose config",
+        external_volumes.len()
+    );
+    Ok(external_volumes)
 }
 
 /// Docker Compose manager
@@ -517,8 +605,54 @@ impl ComposeManager {
             additional_mounts: Vec::new(), // Will be populated from CLI --mount flags
             profiles: Vec::new(),          // Will be populated from service profiles
             additional_env: IndexMap::new(),
-            external_volumes: Vec::new(), // Will be populated from compose config parsing
+            external_volumes: Vec::new(), // Will be populated via populate_external_volumes()
         })
+    }
+
+    /// Populate external volumes for a compose project.
+    ///
+    /// This method uses `docker compose config --format json` to extract external
+    /// volume declarations from the compose configuration files. The extracted
+    /// volume names are stored in the project's `external_volumes` field.
+    ///
+    /// Per the spec (data-model.md): External volumes must remain intact and
+    /// not be replaced or mutated by injection logic. This method enables
+    /// tracking which volumes are external for validation and preservation.
+    ///
+    /// # Arguments
+    ///
+    /// * `project` - The compose project to populate external volumes for
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success. The project's `external_volumes` field
+    /// is modified in-place.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the docker compose config command fails to execute.
+    /// This may happen if:
+    /// - Docker is not available
+    /// - The compose files are invalid
+    /// - Variable substitution fails
+    ///
+    /// # Note
+    ///
+    /// This operation requires Docker to be available and may fail in
+    /// environments without Docker. Callers should handle errors gracefully
+    /// and potentially continue without external volume information if
+    /// Docker is unavailable.
+    #[instrument(skip(self))]
+    pub fn populate_external_volumes(&self, project: &mut ComposeProject) -> Result<()> {
+        let command = self.get_command(project);
+        let external_volumes = command.extract_external_volumes()?;
+        project.external_volumes = external_volumes;
+        debug!(
+            "Populated {} external volumes for project {}",
+            project.external_volumes.len(),
+            project.name
+        );
+        Ok(())
     }
 
     /// Get compose command for a project
@@ -1612,5 +1746,149 @@ mod tests {
 
         // Value with leading space
         assert_eq!(escape_yaml_value(" leading"), "\" leading\"");
+    }
+
+    // Tests for parse_external_volumes_from_config
+
+    #[test]
+    fn test_parse_external_volumes_empty_config() {
+        // Empty JSON
+        let result = parse_external_volumes_from_config("").unwrap();
+        assert!(result.is_empty());
+
+        // JSON with no volumes section
+        let config = r#"{"services": {"app": {"image": "nginx"}}}"#;
+        let result = parse_external_volumes_from_config(config).unwrap();
+        assert!(result.is_empty());
+
+        // JSON with empty volumes section
+        let config = r#"{"volumes": {}}"#;
+        let result = parse_external_volumes_from_config(config).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_external_volumes_simple_form() {
+        // external: true (simple boolean form)
+        let config = r#"{
+            "volumes": {
+                "my_data": {
+                    "external": true
+                }
+            }
+        }"#;
+        let result = parse_external_volumes_from_config(config).unwrap();
+        assert_eq!(result, vec!["my_data"]);
+    }
+
+    #[test]
+    fn test_parse_external_volumes_object_form_with_name() {
+        // external: { name: "actual-name" } (object form with explicit name)
+        let config = r#"{
+            "volumes": {
+                "local_name": {
+                    "external": {
+                        "name": "actual-external-volume"
+                    }
+                }
+            }
+        }"#;
+        let result = parse_external_volumes_from_config(config).unwrap();
+        assert_eq!(result, vec!["actual-external-volume"]);
+    }
+
+    #[test]
+    fn test_parse_external_volumes_object_form_without_name() {
+        // external: {} (object form without name, uses key name)
+        let config = r#"{
+            "volumes": {
+                "my_volume": {
+                    "external": {}
+                }
+            }
+        }"#;
+        let result = parse_external_volumes_from_config(config).unwrap();
+        assert_eq!(result, vec!["my_volume"]);
+    }
+
+    #[test]
+    fn test_parse_external_volumes_multiple_volumes() {
+        // Mix of external and non-external volumes
+        let config = r#"{
+            "volumes": {
+                "external_vol1": {
+                    "external": true
+                },
+                "local_vol": {
+                    "driver": "local"
+                },
+                "external_vol2": {
+                    "external": {
+                        "name": "shared-data"
+                    }
+                },
+                "another_local": {}
+            }
+        }"#;
+        let result = parse_external_volumes_from_config(config).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&"external_vol1".to_string()));
+        assert!(result.contains(&"shared-data".to_string()));
+    }
+
+    #[test]
+    fn test_parse_external_volumes_external_false() {
+        // external: false should not be included
+        let config = r#"{
+            "volumes": {
+                "not_external": {
+                    "external": false
+                }
+            }
+        }"#;
+        let result = parse_external_volumes_from_config(config).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_external_volumes_invalid_json() {
+        // Invalid JSON should return an error
+        let result = parse_external_volumes_from_config("not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_external_volumes_realistic_config() {
+        // A more realistic compose config output
+        let config = r#"{
+            "name": "myproject",
+            "services": {
+                "app": {
+                    "image": "myapp:latest",
+                    "volumes": [
+                        {
+                            "type": "volume",
+                            "source": "app_data",
+                            "target": "/data"
+                        },
+                        {
+                            "type": "volume",
+                            "source": "shared_cache",
+                            "target": "/cache"
+                        }
+                    ]
+                }
+            },
+            "volumes": {
+                "app_data": {
+                    "driver": "local"
+                },
+                "shared_cache": {
+                    "external": true
+                }
+            }
+        }"#;
+        let result = parse_external_volumes_from_config(config).unwrap();
+        assert_eq!(result, vec!["shared_cache"]);
     }
 }
