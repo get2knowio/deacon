@@ -25,6 +25,9 @@ pub struct NormalizedMount {
     /// Whether the mount is read-only (adds `:ro` suffix to the volume)
     /// Parsed from CLI `external=true` for backward compatibility
     pub read_only: bool,
+    /// Mount consistency option (cached, consistent, delegated)
+    /// Only applicable to bind mounts on macOS for performance tuning
+    pub consistency: Option<String>,
 }
 
 /// Mount type for validated mounts
@@ -37,44 +40,141 @@ pub enum MountType {
 impl NormalizedMount {
     /// Parse and validate a mount string from CLI.
     ///
-    /// Expected format: `type=(bind|volume),source=<path>,target=<path>[,external=(true|false)]`
+    /// Expected format: `type=(bind|volume),source=<path>,target=<path>[,external=(true|false)][,consistency=(cached|consistent|delegated)]`
     ///
     /// Note: The `external` option in CLI maps to `read_only` field internally.
     /// This maintains backward compatibility while using clearer naming in code.
+    /// The optional fields (external, consistency) can appear in any order.
     ///
     /// Returns error if format is invalid or required fields are missing.
     pub fn parse(mount_str: &str) -> Result<Self> {
-        use regex::Regex;
+        // Parse key-value pairs from the mount string
+        let mut mount_type_str: Option<&str> = None;
+        let mut source: Option<&str> = None;
+        let mut target: Option<&str> = None;
+        let mut external: Option<&str> = None;
+        let mut consistency: Option<&str> = None;
 
-        // Mount regex pattern from contract
-        let mount_regex = Regex::new(
-            r"^type=(bind|volume),source=([^,]+),target=([^,]+)(?:,external=(true|false))?$",
-        )?;
+        for part in mount_str.split(',') {
+            if let Some((key, value)) = part.split_once('=') {
+                match key {
+                    "type" => mount_type_str = Some(value),
+                    "source" => source = Some(value),
+                    "target" => target = Some(value),
+                    "external" => external = Some(value),
+                    "consistency" => consistency = Some(value),
+                    _ => {
+                        return Err(DeaconError::Config(
+                            deacon_core::errors::ConfigError::Validation {
+                                message: format!(
+                                    "Invalid mount format: '{}'. Unknown option: '{}'",
+                                    mount_str, key
+                                ),
+                            },
+                        )
+                        .into())
+                    }
+                }
+            } else {
+                return Err(
+                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                        message: format!(
+                            "Invalid mount format: '{}'. Expected key=value format",
+                            mount_str
+                        ),
+                    })
+                    .into(),
+                );
+            }
+        }
 
-        let captures = mount_regex.captures(mount_str).ok_or_else(|| {
+        // Validate required fields
+        let mount_type_str = mount_type_str.ok_or_else(|| {
             DeaconError::Config(deacon_core::errors::ConfigError::Validation {
                 message: format!(
-                    "Invalid mount format: '{}'. Expected: type=(bind|volume),source=<path>,target=<path>[,external=(true|false)]",
+                    "Invalid mount format: '{}'. Missing required field: type",
                     mount_str
                 ),
             })
         })?;
 
-        let mount_type = match &captures[1] {
+        let source = source.ok_or_else(|| {
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: format!(
+                    "Invalid mount format: '{}'. Missing required field: source",
+                    mount_str
+                ),
+            })
+        })?;
+
+        let target = target.ok_or_else(|| {
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: format!(
+                    "Invalid mount format: '{}'. Missing required field: target",
+                    mount_str
+                ),
+            })
+        })?;
+
+        // Validate and convert mount type
+        let mount_type = match mount_type_str {
             "bind" => MountType::Bind,
             "volume" => MountType::Volume,
-            _ => unreachable!("Regex should only match bind or volume"),
+            _ => {
+                return Err(
+                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                        message: format!(
+                            "Invalid mount format: '{}'. type must be 'bind' or 'volume'",
+                            mount_str
+                        ),
+                    })
+                    .into(),
+                )
+            }
         };
 
-        let source = captures[2].to_string();
-        let target = captures[3].to_string();
-        let read_only = captures.get(4).is_some_and(|m| m.as_str() == "true");
+        // Validate external value if provided
+        let read_only = match external {
+            Some("true") => true,
+            Some("false") | None => false,
+            Some(val) => {
+                return Err(
+                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                        message: format!(
+                        "Invalid mount format: '{}'. external must be 'true' or 'false', got: '{}'",
+                        mount_str, val
+                    ),
+                    })
+                    .into(),
+                )
+            }
+        };
+
+        // Validate consistency value if provided
+        let consistency = match consistency {
+            Some("cached") => Some("cached".to_string()),
+            Some("consistent") => Some("consistent".to_string()),
+            Some("delegated") => Some("delegated".to_string()),
+            None => None,
+            Some(val) => {
+                return Err(DeaconError::Config(
+                    deacon_core::errors::ConfigError::Validation {
+                        message: format!(
+                            "Invalid mount format: '{}'. consistency must be 'cached', 'consistent', or 'delegated', got: '{}'",
+                            mount_str, val
+                        ),
+                    },
+                )
+                .into())
+            }
+        };
 
         Ok(Self {
             mount_type,
-            source,
-            target,
+            source: source.to_string(),
+            target: target.to_string(),
             read_only,
+            consistency,
         })
     }
 
@@ -94,6 +194,10 @@ impl NormalizedMount {
 
         if self.read_only {
             parts.push("external=true".to_string());
+        }
+
+        if let Some(ref consistency) = self.consistency {
+            parts.push(format!("consistency={}", consistency));
         }
 
         parts.join(",")

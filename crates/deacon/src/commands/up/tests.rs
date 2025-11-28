@@ -246,6 +246,90 @@ fn test_normalized_mount_parse_volume_with_external() {
     assert_eq!(mount.source, "myvolume");
     assert_eq!(mount.target, "/data");
     assert!(mount.read_only);
+    assert!(mount.consistency.is_none());
+}
+
+#[test]
+fn test_normalized_mount_parse_with_consistency_cached() {
+    let mount = NormalizedMount::parse(
+        "type=bind,source=/host/path,target=/container/path,consistency=cached",
+    )
+    .unwrap();
+    assert!(matches!(mount.mount_type, MountType::Bind));
+    assert_eq!(mount.source, "/host/path");
+    assert_eq!(mount.target, "/container/path");
+    assert!(!mount.read_only);
+    assert_eq!(mount.consistency, Some("cached".to_string()));
+}
+
+#[test]
+fn test_normalized_mount_parse_with_consistency_delegated() {
+    let mount = NormalizedMount::parse(
+        "type=bind,source=/host/path,target=/container/path,consistency=delegated",
+    )
+    .unwrap();
+    assert_eq!(mount.consistency, Some("delegated".to_string()));
+}
+
+#[test]
+fn test_normalized_mount_parse_with_consistency_consistent() {
+    let mount = NormalizedMount::parse(
+        "type=bind,source=/host/path,target=/container/path,consistency=consistent",
+    )
+    .unwrap();
+    assert_eq!(mount.consistency, Some("consistent".to_string()));
+}
+
+#[test]
+fn test_normalized_mount_parse_with_external_and_consistency() {
+    let mount = NormalizedMount::parse(
+        "type=bind,source=/host/path,target=/container/path,external=true,consistency=cached",
+    )
+    .unwrap();
+    assert!(mount.read_only);
+    assert_eq!(mount.consistency, Some("cached".to_string()));
+}
+
+#[test]
+fn test_normalized_mount_parse_with_consistency_before_external() {
+    // Test that options can appear in any order
+    let mount = NormalizedMount::parse(
+        "type=bind,source=/host/path,target=/container/path,consistency=cached,external=true",
+    )
+    .unwrap();
+    assert!(mount.read_only);
+    assert_eq!(mount.consistency, Some("cached".to_string()));
+}
+
+#[test]
+fn test_normalized_mount_to_spec_string_with_consistency() {
+    let mount = NormalizedMount {
+        mount_type: MountType::Bind,
+        source: "/host/path".to_string(),
+        target: "/container/path".to_string(),
+        read_only: false,
+        consistency: Some("cached".to_string()),
+    };
+    let spec_string = mount.to_spec_string();
+    assert!(spec_string.contains("consistency=cached"));
+    assert_eq!(
+        spec_string,
+        "type=bind,source=/host/path,target=/container/path,consistency=cached"
+    );
+}
+
+#[test]
+fn test_normalized_mount_to_spec_string_with_external_and_consistency() {
+    let mount = NormalizedMount {
+        mount_type: MountType::Bind,
+        source: "/host/path".to_string(),
+        target: "/container/path".to_string(),
+        read_only: true,
+        consistency: Some("delegated".to_string()),
+    };
+    let spec_string = mount.to_spec_string();
+    assert!(spec_string.contains("external=true"));
+    assert!(spec_string.contains("consistency=delegated"));
 }
 
 #[test]
