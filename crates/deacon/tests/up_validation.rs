@@ -17,7 +17,7 @@ fn test_normalized_mount_validation_bind_basic() {
     let mount = result.unwrap();
     assert_eq!(mount.source, "/host/path");
     assert_eq!(mount.target, "/container/path");
-    assert!(!mount.external);
+    assert!(!mount.read_only);
 }
 
 #[test]
@@ -27,7 +27,7 @@ fn test_normalized_mount_validation_volume_with_external() {
     let mount = result.unwrap();
     assert_eq!(mount.source, "myvolume");
     assert_eq!(mount.target, "/data");
-    assert!(mount.external);
+    assert!(mount.read_only);
 }
 
 #[test]

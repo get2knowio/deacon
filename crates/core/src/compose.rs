@@ -52,8 +52,8 @@ pub struct ComposeMount {
     pub source: String,
     /// Target path in container
     pub target: String,
-    /// Whether the volume is external (read-only, for named volumes)
-    pub external: bool,
+    /// Whether the mount is read-only (adds `:ro` suffix to the volume)
+    pub read_only: bool,
     /// Mount consistency option (cached, consistent, delegated)
     /// Only applicable to bind mounts on macOS for performance tuning
     pub consistency: Option<String>,
@@ -873,7 +873,7 @@ impl ComposeProject {
                 // Docker Compose short-form: source:target:options
                 // Options can be comma-separated: :ro,cached or just :cached
                 let mut options = Vec::new();
-                if mount.external {
+                if mount.read_only {
                     options.push("ro");
                 }
                 if let Some(ref consistency) = mount.consistency {
@@ -1468,14 +1468,14 @@ mod tests {
                     mount_type: "bind".to_string(),
                     source: "/host/path".to_string(),
                     target: "/container/path".to_string(),
-                    external: false,
+                    read_only: false,
                     consistency: None,
                 },
                 ComposeMount {
                     mount_type: "bind".to_string(),
                     source: "/another/host".to_string(),
                     target: "/another/container".to_string(),
-                    external: true, // Read-only
+                    read_only: true,
                     consistency: None,
                 },
             ],
@@ -1508,7 +1508,7 @@ mod tests {
                 mount_type: "bind".to_string(),
                 source: "/src".to_string(),
                 target: "/dst".to_string(),
-                external: false,
+                read_only: false,
                 consistency: None,
             }],
             profiles: Vec::new(),
