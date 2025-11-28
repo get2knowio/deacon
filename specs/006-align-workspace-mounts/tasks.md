@@ -22,8 +22,8 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Confirm workspace state and tooling before feature work
 
-- [ ] T001 Ensure rust toolchain components installed (`rustfmt`, `clippy`) per rust-toolchain.toml
-- [ ] T002 Verify nextest targets runnable (`make test-nextest-fast`) to confirm baseline passes
+- [X] T001 Ensure rust toolchain components installed (`rustfmt`, `clippy`) per rust-toolchain.toml
+- [X] T002 Verify nextest targets runnable (`make test-nextest-fast`) to confirm baseline passes
 
 ---
 
@@ -31,9 +31,9 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Establish shared helpers and test scaffolding used by all stories
 
-- [ ] T003 Map current workspace discovery and mount rendering entry points in `crates/core` and `crates/deacon` (note functions/modules)
-- [ ] T004 [P] Identify existing tests covering workspace mount generation in `crates/deacon/tests` and note gaps for consistency/git-root parity
-- [ ] T005 [P] Prepare fixtures/helpers for mount rendering tests if needed in `crates/deacon/tests/` (no behavior changes yet)
+- [X] T003 Map current workspace discovery and mount rendering entry points in `crates/core` and `crates/deacon` (note functions/modules)
+- [X] T004 [P] Identify existing tests covering workspace mount generation in `crates/deacon/tests` and note gaps for consistency/git-root parity
+- [X] T005 [P] Prepare fixtures/helpers for mount rendering tests if needed in `crates/deacon/tests/` (no behavior changes yet)
 
 **Checkpoint**: Foundation ready—user story implementation can begin
 
@@ -47,16 +47,16 @@ description: "Task list template for feature implementation"
 
 ### Tests for User Story 1
 
-- [ ] T006 [P] [US1] Add/extend unit test for consistency propagation in Docker mount rendering (`crates/deacon/tests/workspace_mounts.rs`)
-- [ ] T007 [P] [US1] Add/extend unit test for consistency propagation in Compose mount rendering (`crates/deacon/tests/workspace_mounts.rs`)
+- [X] T006 [P] [US1] Add/extend unit test for consistency propagation in Docker mount rendering (`crates/deacon/tests/workspace_mounts.rs`)
+- [X] T007 [P] [US1] Add/extend unit test for consistency propagation in Compose mount rendering (`crates/deacon/tests/workspace_mounts.rs`)
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Apply consistency value during workspace mount construction in Docker path (`crates/deacon/src/commands/up.rs`)
-- [ ] T009 [P] [US1] Apply consistency value during workspace mount construction in Compose path (`crates/core/src/compose.rs`)
-- [ ] T010 [US1] Ensure consistency value is visible in rendered mount definitions/output for Docker and Compose (`crates/core/src/docker.rs` and `crates/core/src/compose.rs`)
-- [ ] T011 [P] [US1] Add unit test confirming default workspace discovery unchanged when no consistency override is provided (`crates/deacon/tests/workspace_mounts.rs`)
-- [ ] T012 [US1] Preserve default workspace discovery behavior when consistency flag is absent (`crates/deacon/src/commands/up.rs`)
+- [X] T008 [US1] Apply consistency value during workspace mount construction in Docker path (`crates/deacon/src/commands/up.rs`)
+- [X] T009 [P] [US1] Apply consistency value during workspace mount construction in Compose path (`crates/core/src/compose.rs`)
+- [X] T010 [US1] Ensure consistency value is visible in rendered mount definitions/output for Docker and Compose (`crates/core/src/docker.rs` and `crates/core/src/compose.rs`)
+- [X] T011 [P] [US1] Add unit test confirming default workspace discovery unchanged when no consistency override is provided (`crates/deacon/tests/workspace_mounts.rs`)
+- [X] T012 [US1] Preserve default workspace discovery behavior when consistency flag is absent (`crates/deacon/src/commands/up.rs`)
 
 **Checkpoint**: User Story 1 independently testable (consistency visible across Docker and Compose)
 
@@ -70,13 +70,13 @@ description: "Task list template for feature implementation"
 
 ### Tests for User Story 2
 
-- [ ] T013 [P] [US2] Add unit/integration test for Docker mount host path selection when git-root flag is set (`crates/deacon/tests/workspace_mounts.rs`)
+- [X] T013 [P] [US2] Add unit/integration test for Docker mount host path selection when git-root flag is set (`crates/deacon/tests/workspace_mounts.rs`)
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Align git-root discovery for Docker flow to use repository top-level (if present) in mount construction (`crates/core/src/docker.rs`)
-- [ ] T015 [P] [US2] Preserve consistency value when using git-root host path in Docker mount rendering (`crates/core/src/docker.rs`)
-- [ ] T016 [US2] Add fallback note/logging when git root absent while continuing with workspace root for Docker mounts (`crates/deacon/src/commands/up.rs`)
+- [X] T014 [US2] Align git-root discovery for Docker flow to use repository top-level (if present) in mount construction (`crates/core/src/workspace.rs` - added `find_git_repository_root()` and updated `resolve_workspace_root()`)
+- [X] T015 [P] [US2] Preserve consistency value when using git-root host path in Docker mount rendering (`crates/deacon/tests/workspace_mounts.rs` - verified with `git_root_with_consistency_tests`)
+- [X] T016 [US2] Add fallback note/logging when git root absent while continuing with workspace root for Docker mounts (`crates/deacon/src/commands/up.rs`)
 
 **Checkpoint**: User Story 2 independently testable (Docker git-root mount path correct with consistency)
 
@@ -90,13 +90,13 @@ description: "Task list template for feature implementation"
 
 ### Tests for User Story 3
 
-- [ ] T017 [P] [US3] Add unit/integration test for Compose mount host path selection with git-root flag across services (`crates/deacon/tests/workspace_mounts.rs`)
+- [X] T017 [P] [US3] Add unit/integration test for Compose mount host path selection with git-root flag across services (`crates/deacon/tests/workspace_mounts.rs`)
 
 ### Implementation for User Story 3
 
-- [ ] T018 [US3] Apply git-root host path to all Compose service workspace mounts when flag set (`crates/core/src/compose.rs`)
-- [ ] T019 [P] [US3] Ensure consistency value remains applied in Compose mounts when using git-root host path (`crates/core/src/compose.rs`)
-- [ ] T020 [US3] Surface fallback note/logging for Compose when git root missing while continuing with workspace root (`crates/deacon/src/commands/up.rs`)
+- [X] T018 [US3] Apply git-root host path to all Compose service workspace mounts when flag set (`crates/deacon/src/commands/up.rs` - added default workspace mount injection for Compose with git-root path)
+- [X] T019 [P] [US3] Ensure consistency value remains applied in Compose mounts when using git-root host path (`crates/deacon/src/commands/up.rs` - workspace_mount_consistency applied to injected Compose mount)
+- [X] T020 [US3] Surface fallback note/logging for Compose when git root missing while continuing with workspace root (`crates/deacon/src/commands/up.rs` - shared with T016 at execute_up level)
 
 **Checkpoint**: User Story 3 independently testable (Compose git-root mount path correct with consistency)
 
@@ -106,11 +106,11 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Final alignment, docs, and verification across stories
 
-- [ ] T021 [P] Update quickstart/tests documentation in `specs/006-align-workspace-mounts/quickstart.md` if test commands or coverage changed
-- [ ] T022 [P] Verify `.config/nextest.toml` contains any new integration binaries/groups (docker-shared vs docker-exclusive) if added
-- [ ] T023 Run full validation cadence: `cargo fmt --all && cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `make test-nextest-fast`, `make test-nextest` before PR
-- [ ] T024 [P] Final code/doc cleanup for mount handling (comments/log wording) in touched files
-- [ ] T025 [P] Add lightweight timing check (<200ms) for workspace discovery and mount rendering path (`crates/deacon/tests/workspace_mounts.rs` or micro-benchmark harness)
+- [X] T021 [P] Update quickstart/tests documentation in `specs/006-align-workspace-mounts/quickstart.md` if test commands or coverage changed
+- [X] T022 [P] Verify `.config/nextest.toml` contains any new integration binaries/groups (docker-shared vs docker-exclusive) if added
+- [X] T023 Run full validation cadence: `cargo fmt --all && cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `make test-nextest-fast`, `make test-nextest` before PR
+- [X] T024 [P] Final code/doc cleanup for mount handling (comments/log wording) in touched files
+- [X] T025 [P] Add lightweight timing check (<200ms) for workspace discovery and mount rendering path (`crates/deacon/tests/workspace_mounts.rs` or micro-benchmark harness)
 
 ---
 

@@ -27,10 +27,10 @@ pub struct ComposeProject {
     pub run_services: Vec<String>,
     /// Environment files to pass to docker compose
     pub env_files: Vec<PathBuf>,
-    /// Additional mounts to apply to the primary service (Task T020)
-    /// These are converted from CLI --mount flags for compose workflows
+    /// Additional mounts to apply to the primary service
+    /// Includes workspace mounts (with optional consistency) and CLI --mount flags
     pub additional_mounts: Vec<ComposeMount>,
-    /// Profiles to activate for this project (Task T020)
+    /// Profiles to activate for this project
     /// Automatically derived from runServices profiles
     pub profiles: Vec<String>,
     /// Additional environment variables to inject into primary service
@@ -40,7 +40,10 @@ pub struct ComposeProject {
     pub external_volumes: Vec<String>,
 }
 
-/// Mount specification for Docker Compose volumes (Task T020)
+/// Mount specification for Docker Compose volumes
+///
+/// Used to inject additional volume mounts into Compose services during
+/// container startup. Supports workspace mounts with consistency options.
 #[derive(Debug, Clone)]
 pub struct ComposeMount {
     /// Mount type (bind or volume)
@@ -49,8 +52,11 @@ pub struct ComposeMount {
     pub source: String,
     /// Target path in container
     pub target: String,
-    /// Whether the volume is external (for named volumes)
+    /// Whether the volume is external (read-only, for named volumes)
     pub external: bool,
+    /// Mount consistency option (cached, consistent, delegated)
+    /// Only applicable to bind mounts on macOS for performance tuning
+    pub consistency: Option<String>,
 }
 
 /// Docker Compose service information
@@ -863,8 +869,19 @@ impl ComposeProject {
             yaml.push_str("    volumes:\n");
             for mount in &self.additional_mounts {
                 let mut mount_str = format!("{}:{}", mount.source, mount.target);
+                // Build options suffix: ro and/or consistency
+                // Docker Compose short-form: source:target:options
+                // Options can be comma-separated: :ro,cached or just :cached
+                let mut options = Vec::new();
                 if mount.external {
-                    mount_str.push_str(":ro");
+                    options.push("ro");
+                }
+                if let Some(ref consistency) = mount.consistency {
+                    options.push(consistency);
+                }
+                if !options.is_empty() {
+                    mount_str.push(':');
+                    mount_str.push_str(&options.join(","));
                 }
                 yaml.push_str(&format!("      - {}\n", mount_str));
             }
@@ -1452,12 +1469,14 @@ mod tests {
                     source: "/host/path".to_string(),
                     target: "/container/path".to_string(),
                     external: false,
+                    consistency: None,
                 },
                 ComposeMount {
                     mount_type: "bind".to_string(),
                     source: "/another/host".to_string(),
                     target: "/another/container".to_string(),
                     external: true, // Read-only
+                    consistency: None,
                 },
             ],
             profiles: Vec::new(),
@@ -1490,6 +1509,7 @@ mod tests {
                 source: "/src".to_string(),
                 target: "/dst".to_string(),
                 external: false,
+                consistency: None,
             }],
             profiles: Vec::new(),
             additional_env,
