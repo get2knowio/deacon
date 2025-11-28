@@ -35,6 +35,9 @@ pub struct ComposeProject {
     pub profiles: Vec<String>,
     /// Additional environment variables to inject into primary service
     pub additional_env: HashMap<String, String>,
+    /// External volume names that must remain referenced (not replaced by injection)
+    /// Per spec: these volumes should surface compose errors if missing, not bind fallback
+    pub external_volumes: Vec<String>,
 }
 
 /// Mount specification for Docker Compose volumes (Task T020)
@@ -78,6 +81,8 @@ pub struct ComposeCommand {
     base_path: PathBuf,
     /// Environment files
     env_files: Vec<PathBuf>,
+    /// Profiles to activate
+    profiles: Vec<String>,
 }
 
 impl ComposeCommand {
@@ -89,6 +94,7 @@ impl ComposeCommand {
             project_name: None,
             base_path,
             env_files: Vec::new(),
+            profiles: Vec::new(),
         }
     }
 
@@ -107,6 +113,14 @@ impl ComposeCommand {
     /// Set environment files
     pub fn with_env_files(mut self, env_files: Vec<PathBuf>) -> Self {
         self.env_files = env_files;
+        self
+    }
+
+    /// Set profiles to activate
+    ///
+    /// Per FR-005: The up workflow must respect compose profiles
+    pub fn with_profiles(mut self, profiles: Vec<String>) -> Self {
+        self.profiles = profiles;
         self
     }
 
@@ -130,6 +144,11 @@ impl ComposeCommand {
             command.arg("-p").arg(project_name);
         }
 
+        // Add profiles if specified (per FR-005)
+        for profile in &self.profiles {
+            command.arg("--profile").arg(profile);
+        }
+
         // Add arguments
         command.args(args);
 
@@ -142,21 +161,101 @@ impl ComposeCommand {
     /// Execute compose command and return output
     #[instrument(skip(self))]
     pub fn execute(&self, args: &[&str]) -> Result<String> {
+        self.execute_with_stdin(args, None)
+    }
+
+    /// Execute compose command with optional stdin input (e.g., for inline override YAML)
+    ///
+    /// When `stdin_input` is Some, the command will:
+    /// 1. Add `-f -` to read an additional compose file from stdin
+    /// 2. Pipe the stdin_input content to the command
+    ///
+    /// This allows injecting mounts/env without creating temporary override files.
+    #[instrument(skip(self, stdin_input))]
+    pub fn execute_with_stdin(&self, args: &[&str], stdin_input: Option<&str>) -> Result<String> {
+        use std::io::Write;
+        use std::process::Stdio;
+
         let mut command = self.build_command(args);
 
+        // Add stdin file source if we have input
+        if stdin_input.is_some() {
+            // Insert -f - before the subcommand args to read from stdin
+            // Note: We need to rebuild command to insert at the right position
+            let mut new_command = Command::new(&self.docker_path);
+            new_command.arg("compose");
+
+            // Add compose files
+            for file in &self.compose_files {
+                new_command.arg("-f").arg(file);
+            }
+
+            // Add stdin as additional compose file
+            new_command.arg("-f").arg("-");
+
+            // Add environment files
+            for file in &self.env_files {
+                new_command.arg("--env-file").arg(file);
+            }
+
+            // Add project name if specified
+            if let Some(ref project_name) = self.project_name {
+                new_command.arg("-p").arg(project_name);
+            }
+
+            // Add profiles if specified
+            for profile in &self.profiles {
+                new_command.arg("--profile").arg(profile);
+            }
+
+            // Add arguments
+            new_command.args(args);
+
+            // Set working directory
+            new_command.current_dir(&self.base_path);
+
+            command = new_command;
+        }
+
         debug!(
-            "Executing docker compose command: {} compose {} {}",
+            "Executing docker compose command: {} compose {} {} {}",
             self.docker_path,
             self.compose_files
                 .iter()
                 .map(|f| format!("-f {}", f.display()))
                 .collect::<Vec<_>>()
                 .join(" "),
+            if stdin_input.is_some() {
+                "-f - (stdin)"
+            } else {
+                ""
+            },
             args.join(" ")
         );
 
-        let output = command.output().map_err(|e| {
+        // Set up stdin/stdout/stderr
+        if stdin_input.is_some() {
+            command.stdin(Stdio::piped());
+        }
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+
+        let mut child = command.spawn().map_err(|e| {
             DockerError::CLIError(format!("Failed to execute docker compose command: {}", e))
+        })?;
+
+        // Write stdin input if provided
+        if let Some(input) = stdin_input {
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(input.as_bytes()).map_err(|e| {
+                    DockerError::CLIError(format!("Failed to write stdin to docker compose: {}", e))
+                })?;
+                // Drop stdin to signal EOF
+            }
+        }
+
+        let output = child.wait_with_output().map_err(|e| {
+            DockerError::CLIError(format!("Failed to wait for docker compose command: {}", e))
         })?;
 
         if !output.status.success() {
@@ -183,6 +282,23 @@ impl ComposeCommand {
         detached: bool,
         gpu_mode: crate::gpu::GpuMode,
     ) -> Result<String> {
+        self.up_with_injection(services, detached, gpu_mode, None)
+    }
+
+    /// Start services with optional inline injection override.
+    ///
+    /// Per FR-001/FR-002: This method allows injecting mounts and environment
+    /// variables into the primary service without creating temporary override files.
+    ///
+    /// The injection_override YAML is piped to docker compose via stdin using `-f -`.
+    #[instrument(skip(self, injection_override))]
+    pub fn up_with_injection(
+        &self,
+        services: &[String],
+        detached: bool,
+        gpu_mode: crate::gpu::GpuMode,
+        injection_override: Option<&str>,
+    ) -> Result<String> {
         let mut args = vec!["up"];
         if detached {
             args.push("-d");
@@ -206,7 +322,7 @@ impl ComposeCommand {
         }
 
         args.extend(services.iter().map(|s| s.as_str()));
-        self.execute(&args)
+        self.execute_with_stdin(&args, injection_override)
     }
 
     /// Warn about security options that cannot be applied dynamically in Docker Compose
@@ -395,15 +511,19 @@ impl ComposeManager {
             additional_mounts: Vec::new(), // Will be populated from CLI --mount flags
             profiles: Vec::new(),          // Will be populated from service profiles
             additional_env: std::collections::HashMap::new(),
+            external_volumes: Vec::new(), // Will be populated from compose config parsing
         })
     }
 
     /// Get compose command for a project
+    ///
+    /// Per T005: Threads profiles, env-files, and project naming through all compose invocations
     pub fn get_command(&self, project: &ComposeProject) -> ComposeCommand {
         ComposeCommand::new(project.base_path.clone(), project.compose_files.clone())
             .with_docker_path(self.docker_path.clone())
             .with_project_name(project.name.clone())
             .with_env_files(project.env_files.clone())
+            .with_profiles(project.profiles.clone())
     }
 
     /// Check if project containers are running
@@ -435,6 +555,9 @@ impl ComposeManager {
     }
 
     /// Start compose project
+    ///
+    /// Per FR-001/FR-002: Injects mounts and env into the primary service
+    /// using inline YAML via stdin (no temp files).
     #[instrument(skip(self))]
     pub fn start_project(
         &self,
@@ -449,7 +572,10 @@ impl ComposeManager {
             project.name, services, gpu_mode
         );
 
-        command.up(&services, true, gpu_mode)?;
+        // Generate injection override if we have mounts or env to inject
+        let injection_override = project.generate_injection_override();
+
+        command.up_with_injection(&services, true, gpu_mode, injection_override.as_deref())?;
 
         debug!("Compose project {} started successfully", project.name);
         Ok(())
@@ -542,6 +668,8 @@ impl ComposeManager {
     ///     env_files: Vec::new(),
     ///     additional_mounts: Vec::new(),
     ///     profiles: Vec::new(),
+    ///     additional_env: std::collections::HashMap::new(),
+    ///     external_volumes: Vec::new(),
     /// };
     ///
     /// let output = manager.build_service(&project, "web")?;
@@ -601,6 +729,8 @@ impl ComposeManager {
     ///     env_files: Vec::new(),
     ///     additional_mounts: Vec::new(),
     ///     profiles: Vec::new(),
+    ///     additional_env: std::collections::HashMap::new(),
+    ///     external_volumes: Vec::new(),
     /// };
     ///
     /// if manager.validate_service_exists(&project, "web")? {
@@ -694,6 +824,161 @@ impl ComposeProject {
         let mut services = vec![self.service.clone()];
         services.extend(self.run_services.clone());
         services
+    }
+
+    /// Generate inline compose override YAML for mount/env injection.
+    ///
+    /// Per FR-001/FR-002: Apply CLI mounts and remote env to the primary service
+    /// without creating temporary override files that users need to manage.
+    ///
+    /// **External Volume Preservation (FR-004, T010)**:
+    /// This override only adds volumes to the service definition - it does NOT
+    /// define or modify top-level volume declarations. External volumes declared
+    /// in the original compose files remain intact, and missing external volumes
+    /// will surface as compose errors (not silently replaced with bind mounts).
+    ///
+    /// Returns None if no mounts or env need to be injected.
+    #[must_use = "injection override should be passed to compose up"]
+    pub fn generate_injection_override(&self) -> Option<String> {
+        if self.additional_mounts.is_empty() && self.additional_env.is_empty() {
+            return None;
+        }
+
+        let mut yaml = String::from("services:\n");
+        yaml.push_str(&format!("  {}:\n", self.service));
+
+        if !self.additional_env.is_empty() {
+            yaml.push_str("    environment:\n");
+            // Sort keys for deterministic output (HashMap iteration order is arbitrary)
+            let mut sorted_keys: Vec<_> = self.additional_env.keys().collect();
+            sorted_keys.sort();
+            for key in sorted_keys {
+                let value = &self.additional_env[key];
+                let escaped = escape_yaml_value(value);
+                yaml.push_str(&format!("      {}: {}\n", key, escaped));
+            }
+        }
+
+        if !self.additional_mounts.is_empty() {
+            yaml.push_str("    volumes:\n");
+            for mount in &self.additional_mounts {
+                let mut mount_str = format!("{}:{}", mount.source, mount.target);
+                if mount.external {
+                    mount_str.push_str(":ro");
+                }
+                yaml.push_str(&format!("      - {}\n", mount_str));
+            }
+        }
+
+        debug!(
+            "Generated compose injection override for service '{}': {} env vars, {} mounts",
+            self.service,
+            self.additional_env.len(),
+            self.additional_mounts.len()
+        );
+
+        Some(yaml)
+    }
+
+    /// Merge CLI remote environment with existing environment entries.
+    ///
+    /// Per the spec (FR-002, research.md Decision 3):
+    /// - CLI/remote env entries override duplicate keys from env-files/service defaults
+    /// - Non-conflicting keys remain untouched
+    /// - Returns merged HashMap with CLI values taking precedence
+    ///
+    /// # Arguments
+    /// * `service_env` - Environment variables from compose service definition
+    /// * `env_file_env` - Environment variables from env-files
+    /// * `cli_env` - CLI-provided remote environment entries (highest precedence)
+    ///
+    /// # Returns
+    /// Merged HashMap with CLI precedence: CLI > env-files > service defaults
+    pub fn merge_env_with_cli_precedence(
+        service_env: &HashMap<String, String>,
+        env_file_env: &HashMap<String, String>,
+        cli_env: &HashMap<String, String>,
+    ) -> HashMap<String, String> {
+        let mut merged = HashMap::new();
+
+        // Layer 1: Service defaults (lowest precedence)
+        for (key, value) in service_env {
+            merged.insert(key.clone(), value.clone());
+        }
+
+        // Layer 2: Env-file values (override service defaults)
+        for (key, value) in env_file_env {
+            merged.insert(key.clone(), value.clone());
+        }
+
+        // Layer 3: CLI/remote env (highest precedence)
+        for (key, value) in cli_env {
+            merged.insert(key.clone(), value.clone());
+        }
+
+        debug!(
+            "Merged env: {} service defaults + {} env-file + {} CLI = {} total",
+            service_env.len(),
+            env_file_env.len(),
+            cli_env.len(),
+            merged.len()
+        );
+
+        merged
+    }
+
+    /// Apply additional mounts and environment to this project.
+    ///
+    /// This method prepares the project for compose up by:
+    /// 1. Setting additional mounts for the primary service
+    /// 2. Merging CLI environment with precedence over defaults
+    ///
+    /// Per the spec, injection targets only the primary service.
+    pub fn with_injection(
+        mut self,
+        additional_mounts: Vec<ComposeMount>,
+        cli_env: HashMap<String, String>,
+    ) -> Self {
+        self.additional_mounts = additional_mounts;
+        self.additional_env = cli_env;
+        self
+    }
+}
+
+/// Escape a value for YAML output.
+///
+/// YAML requires special handling for values containing:
+/// - Newlines (must be quoted and escaped)
+/// - Colons (especially at start)
+/// - Quotes (must be escaped)
+/// - Leading/trailing whitespace (must be quoted)
+/// - Hash characters (could be interpreted as comments)
+fn escape_yaml_value(value: &str) -> String {
+    // Check if value needs quoting
+    let needs_quoting = value.contains('\n')
+        || value.contains(':')
+        || value.contains('#')
+        || value.contains('"')
+        || value.contains('\'')
+        || value.starts_with(' ')
+        || value.ends_with(' ')
+        || value.starts_with('!')
+        || value.starts_with('&')
+        || value.starts_with('*')
+        || value.is_empty();
+
+    if needs_quoting {
+        // Use double quotes and escape special characters
+        let escaped = value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+        format!("\"{}\"", escaped)
+    } else {
+        // Simple values can be unquoted or double-quoted for consistency
+        format!("\"{}\"", value)
     }
 }
 
@@ -868,6 +1153,34 @@ mod tests {
     }
 
     #[test]
+    fn test_compose_command_with_profiles() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let compose_files = vec![base_path.join("docker-compose.yml")];
+        let profiles = vec!["dev".to_string(), "debug".to_string()];
+
+        let cmd = ComposeCommand::new(base_path.clone(), compose_files.clone())
+            .with_project_name("test-project".to_string())
+            .with_profiles(profiles);
+
+        let command = cmd.build_command(&["up", "-d"]);
+
+        let args: Vec<String> = command
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
+
+        assert!(args.contains(&"compose".to_string()));
+        assert!(args.contains(&"--profile".to_string()));
+        assert!(args.contains(&"dev".to_string()));
+        assert!(args.contains(&"debug".to_string()));
+
+        // Verify that both profiles are included
+        let profile_count = args.iter().filter(|&arg| arg == "--profile").count();
+        assert_eq!(profile_count, 2, "Should have two --profile flags");
+    }
+
+    #[test]
     fn test_compose_project_get_all_services() {
         let project = ComposeProject {
             name: "test".to_string(),
@@ -879,6 +1192,7 @@ mod tests {
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
             additional_env: HashMap::new(),
+            external_volumes: Vec::new(),
         };
 
         let services = project.get_all_services();
@@ -953,6 +1267,7 @@ mod tests {
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
             additional_env: HashMap::new(),
+            external_volumes: Vec::new(),
         };
 
         let all_services = project.get_all_services();
@@ -976,6 +1291,7 @@ mod tests {
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
             additional_env: HashMap::new(),
+            external_volumes: Vec::new(),
         };
 
         let all_services = project.get_all_services();
@@ -1000,5 +1316,280 @@ mod tests {
     fn test_derive_project_name_fallback_for_all_invalid() {
         let path = Path::new("/tmp/...");
         assert_eq!(derive_project_name(path), "deacon-compose");
+    }
+
+    #[test]
+    fn test_merge_env_with_cli_precedence() {
+        let mut service_env = HashMap::new();
+        service_env.insert("DB_HOST".to_string(), "localhost".to_string());
+        service_env.insert("DB_PORT".to_string(), "5432".to_string());
+        service_env.insert("SERVICE_ONLY".to_string(), "from_service".to_string());
+
+        let mut env_file_env = HashMap::new();
+        env_file_env.insert("DB_HOST".to_string(), "db.example.com".to_string());
+        env_file_env.insert("ENV_FILE_ONLY".to_string(), "from_env_file".to_string());
+
+        let mut cli_env = HashMap::new();
+        cli_env.insert(
+            "DB_HOST".to_string(),
+            "cli-override.example.com".to_string(),
+        );
+        cli_env.insert("CLI_ONLY".to_string(), "from_cli".to_string());
+
+        let merged =
+            ComposeProject::merge_env_with_cli_precedence(&service_env, &env_file_env, &cli_env);
+
+        // CLI takes precedence over both env-file and service defaults
+        assert_eq!(
+            merged.get("DB_HOST"),
+            Some(&"cli-override.example.com".to_string())
+        );
+
+        // Service default preserved when not overridden
+        assert_eq!(merged.get("DB_PORT"), Some(&"5432".to_string()));
+        assert_eq!(
+            merged.get("SERVICE_ONLY"),
+            Some(&"from_service".to_string())
+        );
+
+        // Env-file value preserved when not overridden by CLI
+        assert_eq!(
+            merged.get("ENV_FILE_ONLY"),
+            Some(&"from_env_file".to_string())
+        );
+
+        // CLI-only value present
+        assert_eq!(merged.get("CLI_ONLY"), Some(&"from_cli".to_string()));
+
+        // Total should be 5 unique keys
+        assert_eq!(merged.len(), 5);
+    }
+
+    #[test]
+    fn test_merge_env_empty_inputs() {
+        let service_env = HashMap::new();
+        let env_file_env = HashMap::new();
+        let cli_env = HashMap::new();
+
+        let merged =
+            ComposeProject::merge_env_with_cli_precedence(&service_env, &env_file_env, &cli_env);
+
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn test_merge_env_cli_only() {
+        let service_env = HashMap::new();
+        let env_file_env = HashMap::new();
+        let mut cli_env = HashMap::new();
+        cli_env.insert("MY_VAR".to_string(), "my_value".to_string());
+
+        let merged =
+            ComposeProject::merge_env_with_cli_precedence(&service_env, &env_file_env, &cli_env);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged.get("MY_VAR"), Some(&"my_value".to_string()));
+    }
+
+    #[test]
+    fn test_generate_injection_override_empty() {
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env: HashMap::new(),
+            external_volumes: Vec::new(),
+        };
+
+        // No mounts or env, should return None
+        assert!(project.generate_injection_override().is_none());
+    }
+
+    #[test]
+    fn test_generate_injection_override_with_env() {
+        let mut additional_env = HashMap::new();
+        additional_env.insert("FOO".to_string(), "bar".to_string());
+        additional_env.insert("BAZ".to_string(), "qux".to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "myservice".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env,
+            external_volumes: Vec::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+        assert!(override_yaml.contains("services:"));
+        assert!(override_yaml.contains("myservice:"));
+        assert!(override_yaml.contains("environment:"));
+        assert!(override_yaml.contains("FOO:"));
+        assert!(override_yaml.contains("BAZ:"));
+    }
+
+    #[test]
+    fn test_generate_injection_override_with_mounts() {
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "myservice".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: vec![
+                ComposeMount {
+                    mount_type: "bind".to_string(),
+                    source: "/host/path".to_string(),
+                    target: "/container/path".to_string(),
+                    external: false,
+                },
+                ComposeMount {
+                    mount_type: "bind".to_string(),
+                    source: "/another/host".to_string(),
+                    target: "/another/container".to_string(),
+                    external: true, // Read-only
+                },
+            ],
+            profiles: Vec::new(),
+            additional_env: HashMap::new(),
+            external_volumes: Vec::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+        assert!(override_yaml.contains("services:"));
+        assert!(override_yaml.contains("myservice:"));
+        assert!(override_yaml.contains("volumes:"));
+        assert!(override_yaml.contains("/host/path:/container/path"));
+        assert!(override_yaml.contains("/another/host:/another/container:ro"));
+    }
+
+    #[test]
+    fn test_generate_injection_override_with_both() {
+        let mut additional_env = HashMap::new();
+        additional_env.insert("MY_VAR".to_string(), "my_value".to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: vec![ComposeMount {
+                mount_type: "bind".to_string(),
+                source: "/src".to_string(),
+                target: "/dst".to_string(),
+                external: false,
+            }],
+            profiles: Vec::new(),
+            additional_env,
+            external_volumes: Vec::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+
+        // Should have both environment and volumes sections
+        assert!(override_yaml.contains("environment:"));
+        assert!(override_yaml.contains("volumes:"));
+        assert!(override_yaml.contains("MY_VAR:"));
+        assert!(override_yaml.contains("/src:/dst"));
+    }
+
+    #[test]
+    fn test_generate_injection_override_with_special_chars() {
+        let mut additional_env = HashMap::new();
+        additional_env.insert("MULTILINE".to_string(), "line1\nline2".to_string());
+        additional_env.insert("QUOTED".to_string(), "value with \"quotes\"".to_string());
+        additional_env.insert("COLON".to_string(), "key:value".to_string());
+        additional_env.insert("HASH".to_string(), "before#after".to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env,
+            external_volumes: Vec::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+
+        // Verify proper escaping
+        assert!(override_yaml.contains("MULTILINE: \"line1\\nline2\""));
+        assert!(override_yaml.contains("QUOTED: \"value with \\\"quotes\\\"\""));
+        assert!(override_yaml.contains("COLON: \"key:value\""));
+        assert!(override_yaml.contains("HASH: \"before#after\""));
+    }
+
+    #[test]
+    fn test_generate_injection_override_deterministic_order() {
+        let mut additional_env = HashMap::new();
+        additional_env.insert("ZZZ".to_string(), "last".to_string());
+        additional_env.insert("AAA".to_string(), "first".to_string());
+        additional_env.insert("MMM".to_string(), "middle".to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env,
+            external_volumes: Vec::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+
+        // Keys should be sorted alphabetically
+        let aaa_pos = override_yaml.find("AAA:").unwrap();
+        let mmm_pos = override_yaml.find("MMM:").unwrap();
+        let zzz_pos = override_yaml.find("ZZZ:").unwrap();
+
+        assert!(
+            aaa_pos < mmm_pos && mmm_pos < zzz_pos,
+            "Keys should be sorted: AAA < MMM < ZZZ"
+        );
+    }
+
+    #[test]
+    fn test_escape_yaml_value() {
+        // Simple value
+        assert_eq!(escape_yaml_value("hello"), "\"hello\"");
+
+        // Value with newline
+        assert_eq!(escape_yaml_value("line1\nline2"), "\"line1\\nline2\"");
+
+        // Value with quotes
+        assert_eq!(escape_yaml_value("say \"hi\""), "\"say \\\"hi\\\"\"");
+
+        // Value with colon
+        assert_eq!(escape_yaml_value("key:value"), "\"key:value\"");
+
+        // Value with backslash - backslash doesn't need special escaping in YAML
+        // when double-quoted, unless combined with other special chars
+        assert_eq!(escape_yaml_value(r"path\to\file"), r#""path\to\file""#);
+
+        // Empty value
+        assert_eq!(escape_yaml_value(""), "\"\"");
+
+        // Value with leading space
+        assert_eq!(escape_yaml_value(" leading"), "\" leading\"");
     }
 }
