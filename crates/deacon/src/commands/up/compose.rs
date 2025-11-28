@@ -110,6 +110,18 @@ pub(crate) async fn execute_compose_up(
     // which uses ComposeProject::generate_injection_override() to pipe YAML via stdin.
     // No temporary override files are created.
 
+    // Populate external volumes from compose config.
+    // This enables tracking which volumes are external for validation and preservation.
+    // Per spec: external volumes must not be replaced or mutated by injection.
+    // Note: This operation requires Docker - if unavailable, we continue without
+    // external volume information as this is non-blocking for the core up workflow.
+    if let Err(e) = compose_manager.populate_external_volumes(&mut project) {
+        debug!(
+            "Could not populate external volumes (Docker may be unavailable): {}",
+            e
+        );
+    }
+
     debug!("Created compose project: {:?}", project.name);
 
     // If we expect an existing project, fail fast when it's not running.
