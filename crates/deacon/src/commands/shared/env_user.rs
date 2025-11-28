@@ -51,13 +51,8 @@ pub async fn resolve_env_and_user<D: Docker>(
         }
     }
 
-    // Convert IndexMap to HashMap for build_effective_env (internal API uses HashMap)
-    let cli_env_map: HashMap<String, String> = cli_env
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
     let prober = ContainerEnvironmentProber::new();
-    let effective_env = prober.build_effective_env(&probed_env, config_remote_env, &cli_env_map);
+    let effective_env = prober.build_effective_env(&probed_env, config_remote_env, cli_env);
 
     EnvUserResolution {
         effective_env,
