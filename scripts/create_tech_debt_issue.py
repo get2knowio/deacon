@@ -54,6 +54,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -159,9 +160,12 @@ def create_issue(args) -> str:
     """Create the GitHub issue and return its URL."""
     body = build_issue_body(args)
 
-    # Write body to temp file
-    body_file = Path('/tmp/tech_debt_issue.md')
-    body_file.write_text(body)
+    # Write body to secure temp file
+    with tempfile.NamedTemporaryFile(
+        mode='w', delete=False, suffix='.md'
+    ) as tf:
+        tf.write(body)
+        body_file = Path(tf.name)
 
     try:
         # Build labels list
