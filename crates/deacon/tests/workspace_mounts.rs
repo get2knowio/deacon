@@ -225,7 +225,7 @@ mod compose_consistency_tests {
                 mount_type: "bind".to_string(),
                 source: "/host/workspace".to_string(),
                 target: "/workspaces/project".to_string(),
-                external: false,
+                read_only: false,
                 consistency: Some("cached".to_string()),
             }],
             profiles: Vec::new(),
@@ -266,7 +266,7 @@ mod compose_consistency_tests {
                 mount_type: "bind".to_string(),
                 source: "/host/workspace".to_string(),
                 target: "/workspaces/project".to_string(),
-                external: false,
+                read_only: false,
                 consistency: None,
             }],
             profiles: Vec::new(),
@@ -298,7 +298,7 @@ mod compose_consistency_tests {
                 mount_type: "bind".to_string(),
                 source: "/host/workspace".to_string(),
                 target: "/workspaces/project".to_string(),
-                external: false,
+                read_only: false,
                 consistency: None,
             }],
             profiles: Vec::new(),
@@ -323,9 +323,9 @@ mod compose_consistency_tests {
         );
     }
 
-    /// Test that external mounts get :ro suffix (existing behavior verification)
+    /// Test that read-only mounts get :ro suffix (existing behavior verification)
     #[test]
-    fn test_compose_workspace_mount_external_gets_ro_suffix() {
+    fn test_compose_workspace_mount_read_only_gets_ro_suffix() {
         let project = ComposeProject {
             name: "test-project".to_string(),
             base_path: PathBuf::from("/host/workspace"),
@@ -337,7 +337,7 @@ mod compose_consistency_tests {
                 mount_type: "bind".to_string(),
                 source: "/host/external".to_string(),
                 target: "/external".to_string(),
-                external: true, // This should produce :ro
+                read_only: true, // This should produce :ro
                 consistency: None,
             }],
             profiles: Vec::new(),
@@ -349,7 +349,7 @@ mod compose_consistency_tests {
 
         assert!(
             override_yaml.contains("/host/external:/external:ro"),
-            "External mount should have :ro suffix, got: {}",
+            "Read-only mount should have :ro suffix, got: {}",
             override_yaml
         );
     }
@@ -590,7 +590,7 @@ mod git_root_docker_mount_tests {
             .expect("Should find git repository root");
 
         assert_eq!(
-            git_root_result.git_root.unwrap().canonicalize().unwrap(),
+            git_root_result.git_root.canonicalize().unwrap(),
             temp_dir.path().canonicalize().unwrap(),
             "Should find git repository root from deeply nested subdirectory"
         );
@@ -873,7 +873,7 @@ mod default_workspace_discovery_tests {
                 mount_type: "bind".to_string(),
                 source: "/host/workspace".to_string(),
                 target: "/workspaces/project".to_string(),
-                external: false,
+                read_only: false,
                 consistency: None, // No consistency override
             }],
             profiles: Vec::new(),
@@ -1016,7 +1016,7 @@ mod compose_git_root_tests {
                 mount_type: "bind".to_string(),
                 source: git_root.to_string(),
                 target: target_path.clone(),
-                external: false,
+                read_only: false,
                 consistency: None,
             }],
             profiles: Vec::new(),
@@ -1061,7 +1061,7 @@ mod compose_git_root_tests {
                 mount_type: "bind".to_string(),
                 source: git_root.to_string(),
                 target: target_path.clone(),
-                external: false,
+                read_only: false,
                 consistency: None,
             }],
             profiles: Vec::new(),
@@ -1109,7 +1109,7 @@ mod compose_git_root_tests {
                 mount_type: "bind".to_string(),
                 source: git_root.to_string(),
                 target: target_path.to_string(),
-                external: false,
+                read_only: false,
                 consistency: None,
             }],
             profiles: Vec::new(),
@@ -1160,7 +1160,7 @@ mod compose_git_root_tests {
                 mount_type: "bind".to_string(),
                 source: root_path.to_string(),
                 target: target_path.to_string(),
-                external: false,
+                read_only: false,
                 consistency: Some("cached".to_string()),
             }],
             profiles: Vec::new(),
@@ -1204,7 +1204,7 @@ mod compose_git_root_consistency_tests {
                 mount_type: "bind".to_string(),
                 source: git_root.to_string(),
                 target: target_path.to_string(),
-                external: false,
+                read_only: false,
                 consistency: Some("cached".to_string()),
             }],
             profiles: Vec::new(),
@@ -1239,7 +1239,7 @@ mod compose_git_root_consistency_tests {
                 mount_type: "bind".to_string(),
                 source: git_root.to_string(),
                 target: target_path.to_string(),
-                external: false,
+                read_only: false,
                 consistency: Some("consistent".to_string()),
             }],
             profiles: Vec::new(),
@@ -1274,7 +1274,7 @@ mod compose_git_root_consistency_tests {
                 mount_type: "bind".to_string(),
                 source: git_root.to_string(),
                 target: target_path.to_string(),
-                external: false,
+                read_only: false,
                 consistency: Some("delegated".to_string()),
             }],
             profiles: Vec::new(),
@@ -1310,7 +1310,7 @@ mod compose_git_root_consistency_tests {
                     mount_type: "bind".to_string(),
                     source: git_root.to_string(),
                     target: target_path.to_string(),
-                    external: false,
+                    read_only: false,
                     consistency: Some(consistency.to_string()),
                 }],
                 profiles: Vec::new(),
@@ -1346,7 +1346,7 @@ mod compose_git_root_consistency_tests {
                 mount_type: "bind".to_string(),
                 source: git_root.to_string(),
                 target: target_path.to_string(),
-                external: true, // Read-only
+                read_only: true, // Read-only
                 consistency: Some("cached".to_string()),
             }],
             profiles: Vec::new(),
@@ -1381,7 +1381,7 @@ mod compose_git_root_consistency_tests {
                 mount_type: "bind".to_string(),
                 source: git_root.to_string(),
                 target: target_path.to_string(),
-                external: false,
+                read_only: false,
                 consistency: None,
             }],
             profiles: Vec::new(),
@@ -1529,7 +1529,7 @@ mod performance_tests {
                 mount_type: "bind".to_string(),
                 source: format!("/host/path/{}", i),
                 target: format!("/container/path/{}", i),
-                external: i % 2 == 0,
+                read_only: i % 2 == 0,
                 consistency: if i % 3 == 0 {
                     Some("cached".to_string())
                 } else {
@@ -1621,7 +1621,7 @@ mod performance_tests {
                     mount_type: "bind".to_string(),
                     source: workspace_root.display().to_string(),
                     target: "/workspaces/project".to_string(),
-                    external: false,
+                    read_only: false,
                     consistency: Some("cached".to_string()),
                 }],
                 profiles: Vec::new(),

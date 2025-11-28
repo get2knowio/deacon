@@ -528,7 +528,9 @@ pub struct NormalizedMount {
     pub mount_type: MountType,
     pub source: String,
     pub target: String,
-    pub external: bool,
+    /// Whether the mount is read-only (adds `:ro` suffix to the volume)
+    /// Parsed from CLI `external=true` for backward compatibility
+    pub read_only: bool,
 }
 
 /// Mount type for validated mounts
@@ -542,6 +544,9 @@ impl NormalizedMount {
     /// Parse and validate a mount string from CLI.
     ///
     /// Expected format: `type=(bind|volume),source=<path>,target=<path>[,external=(true|false)]`
+    ///
+    /// Note: The `external` option in CLI maps to `read_only` field internally.
+    /// This maintains backward compatibility while using clearer naming in code.
     ///
     /// Returns error if format is invalid or required fields are missing.
     pub fn parse(mount_str: &str) -> Result<Self> {
@@ -569,13 +574,13 @@ impl NormalizedMount {
 
         let source = captures[2].to_string();
         let target = captures[3].to_string();
-        let external = captures.get(4).is_some_and(|m| m.as_str() == "true");
+        let read_only = captures.get(4).is_some_and(|m| m.as_str() == "true");
 
         Ok(Self {
             mount_type,
             source,
             target,
-            external,
+            read_only,
         })
     }
 
@@ -593,7 +598,7 @@ impl NormalizedMount {
             format!("target={}", self.target),
         ];
 
-        if self.external {
+        if self.read_only {
             parts.push("external=true".to_string());
         }
 
@@ -1780,7 +1785,7 @@ async fn execute_compose_up(
             mount_type: "bind".to_string(),
             source: source_path,
             target: target_path,
-            external: false,
+            read_only: false,
             consistency: args.workspace_mount_consistency.clone(),
         });
         debug!(
@@ -1801,7 +1806,7 @@ async fn execute_compose_up(
             },
             source: mount.source.clone(),
             target: mount.target.clone(),
-            external: mount.external,
+            read_only: mount.read_only,
             // CLI mounts don't currently support per-mount consistency
             // workspace_mount_consistency is applied to the default workspace mount only
             consistency: None,
@@ -3846,7 +3851,7 @@ mod tests {
         assert!(matches!(mount.mount_type, MountType::Bind));
         assert_eq!(mount.source, "/host/path");
         assert_eq!(mount.target, "/container/path");
-        assert!(!mount.external);
+        assert!(!mount.read_only);
     }
 
     #[test]
@@ -3857,7 +3862,7 @@ mod tests {
         assert!(matches!(mount.mount_type, MountType::Volume));
         assert_eq!(mount.source, "myvolume");
         assert_eq!(mount.target, "/data");
-        assert!(mount.external);
+        assert!(mount.read_only);
     }
 
     #[test]
