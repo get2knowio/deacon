@@ -424,6 +424,11 @@ pub(crate) async fn execute_container_up(
         remote_user,
         remote_workspace_folder,
         compose_project_name: None,
+        // Single container flow doesn't use compose profiles or external volumes
+        effective_mounts: None,
+        effective_env: None,
+        profiles_applied: None,
+        external_volumes_preserved: None,
         configuration,
         merged_configuration,
     })

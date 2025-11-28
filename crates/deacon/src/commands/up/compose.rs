@@ -11,7 +11,7 @@ use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
 };
 use super::ports::handle_port_events;
-use super::result::UpContainerInfo;
+use super::result::{EffectiveMount, UpContainerInfo};
 use super::ENV_LOG_FORMAT;
 use anyhow::{Context, Result};
 use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject};
@@ -22,6 +22,7 @@ use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ComposeState, StateManager};
 use deacon_core::IndexMap;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
@@ -197,6 +198,11 @@ pub(crate) async fn execute_compose_up(
                     remote_user,
                     remote_workspace_folder,
                     compose_project_name: Some(project.name.clone()),
+                    // For existing container reconnect, we don't have injection data
+                    effective_mounts: None,
+                    effective_env: None,
+                    profiles_applied: None,
+                    external_volumes_preserved: None,
                     configuration,
                     merged_configuration,
                 });
@@ -357,11 +363,68 @@ pub(crate) async fn execute_compose_up(
         None
     };
 
+    // Capture effective mounts from compose project
+    let effective_mounts = if project.additional_mounts.is_empty() {
+        None
+    } else {
+        Some(
+            project
+                .additional_mounts
+                .iter()
+                .map(|m| {
+                    let mut options = Vec::new();
+                    if m.read_only {
+                        options.push("ro".to_string());
+                    }
+                    if let Some(ref consistency) = m.consistency {
+                        options.push(format!("consistency={}", consistency));
+                    }
+                    EffectiveMount {
+                        source: m.source.clone(),
+                        target: m.target.clone(),
+                        options,
+                    }
+                })
+                .collect(),
+        )
+    };
+
+    // Capture effective env from compose project
+    let effective_env = if project.additional_env.is_empty() {
+        None
+    } else {
+        Some(
+            project
+                .additional_env
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<HashMap<_, _>>(),
+        )
+    };
+
+    // Capture profiles applied
+    let profiles_applied = if project.profiles.is_empty() {
+        None
+    } else {
+        Some(project.profiles.clone())
+    };
+
+    // Capture external volumes preserved
+    let external_volumes_preserved = if project.external_volumes.is_empty() {
+        None
+    } else {
+        Some(project.external_volumes.clone())
+    };
+
     Ok(UpContainerInfo {
         container_id,
         remote_user,
         remote_workspace_folder,
         compose_project_name: Some(project.name.clone()),
+        effective_mounts,
+        effective_env,
+        profiles_applied,
+        external_volumes_preserved,
         configuration,
         merged_configuration,
     })

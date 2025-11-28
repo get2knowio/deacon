@@ -337,3 +337,195 @@ async fn test_canonicalization_failure() {
         err_str
     );
 }
+
+#[test]
+fn test_effective_mount_serialization() {
+    use super::result::EffectiveMount;
+
+    // Test serialization with options
+    let mount = EffectiveMount {
+        source: "/host/path".to_string(),
+        target: "/container/path".to_string(),
+        options: vec!["ro".to_string(), "consistency=cached".to_string()],
+    };
+
+    let json_value = serde_json::to_value(&mount).unwrap();
+    assert_eq!(json_value["source"], "/host/path");
+    assert_eq!(json_value["target"], "/container/path");
+    assert_eq!(json_value["options"], json!(["ro", "consistency=cached"]));
+
+    // Test serialization with empty options (should skip the field)
+    let mount_no_options = EffectiveMount {
+        source: "/host/path".to_string(),
+        target: "/container/path".to_string(),
+        options: vec![],
+    };
+
+    let json_value_no_options = serde_json::to_value(&mount_no_options).unwrap();
+    assert!(json_value_no_options.get("options").is_none());
+}
+
+#[test]
+fn test_up_success_with_new_fields_serialization() {
+    use super::result::{EffectiveMount, UpSuccess};
+    use std::collections::HashMap;
+
+    let mut effective_env = HashMap::new();
+    effective_env.insert("GITHUB_TOKEN".to_string(), "***".to_string());
+    effective_env.insert("NODE_ENV".to_string(), "development".to_string());
+
+    let success = UpSuccess {
+        outcome: "success".to_string(),
+        container_id: "abc123".to_string(),
+        compose_project_name: Some("myproject".to_string()),
+        remote_user: "vscode".to_string(),
+        remote_workspace_folder: "/workspaces/myproject".to_string(),
+        effective_mounts: Some(vec![
+            EffectiveMount {
+                source: "/home/user/code".to_string(),
+                target: "/workspaces/myproject".to_string(),
+                options: vec![],
+            },
+            EffectiveMount {
+                source: "/home/user/.gitconfig".to_string(),
+                target: "/home/vscode/.gitconfig".to_string(),
+                options: vec!["ro".to_string()],
+            },
+        ]),
+        effective_env: Some(effective_env),
+        profiles_applied: Some(vec!["dev".to_string(), "debug".to_string()]),
+        external_volumes_preserved: Some(vec![
+            "postgres_data".to_string(),
+            "redis_data".to_string(),
+        ]),
+        configuration: None,
+        merged_configuration: None,
+    };
+
+    let json_value = serde_json::to_value(&success).unwrap();
+
+    // Verify all fields are correctly serialized
+    assert_eq!(json_value["outcome"], "success");
+    assert_eq!(json_value["containerId"], "abc123");
+    assert_eq!(json_value["composeProjectName"], "myproject");
+    assert_eq!(json_value["remoteUser"], "vscode");
+    assert_eq!(json_value["remoteWorkspaceFolder"], "/workspaces/myproject");
+
+    // Check effective mounts
+    let mounts = json_value["effectiveMounts"].as_array().unwrap();
+    assert_eq!(mounts.len(), 2);
+    assert_eq!(mounts[0]["source"], "/home/user/code");
+    assert_eq!(mounts[0]["target"], "/workspaces/myproject");
+    assert!(mounts[0].get("options").is_none()); // Empty options should be omitted
+    assert_eq!(mounts[1]["source"], "/home/user/.gitconfig");
+    assert_eq!(mounts[1]["options"], json!(["ro"]));
+
+    // Check effective env
+    let env = json_value["effectiveEnv"].as_object().unwrap();
+    assert!(env.contains_key("GITHUB_TOKEN"));
+    assert!(env.contains_key("NODE_ENV"));
+
+    // Check profiles
+    let profiles = json_value["profilesApplied"].as_array().unwrap();
+    assert_eq!(profiles.len(), 2);
+    assert!(profiles.contains(&json!("dev")));
+    assert!(profiles.contains(&json!("debug")));
+
+    // Check external volumes
+    let volumes = json_value["externalVolumesPreserved"].as_array().unwrap();
+    assert_eq!(volumes.len(), 2);
+    assert!(volumes.contains(&json!("postgres_data")));
+    assert!(volumes.contains(&json!("redis_data")));
+}
+
+#[test]
+fn test_up_success_with_none_fields_serialization() {
+    use super::result::UpSuccess;
+
+    // Test that None fields are correctly omitted
+    let success = UpSuccess {
+        outcome: "success".to_string(),
+        container_id: "abc123".to_string(),
+        compose_project_name: None,
+        remote_user: "root".to_string(),
+        remote_workspace_folder: "/workspaces".to_string(),
+        effective_mounts: None,
+        effective_env: None,
+        profiles_applied: None,
+        external_volumes_preserved: None,
+        configuration: None,
+        merged_configuration: None,
+    };
+
+    let json_value = serde_json::to_value(&success).unwrap();
+    let json_obj = json_value.as_object().unwrap();
+
+    // These fields should be present
+    assert!(json_obj.contains_key("outcome"));
+    assert!(json_obj.contains_key("containerId"));
+    assert!(json_obj.contains_key("remoteUser"));
+    assert!(json_obj.contains_key("remoteWorkspaceFolder"));
+
+    // These fields should be omitted when None
+    assert!(!json_obj.contains_key("composeProjectName"));
+    assert!(!json_obj.contains_key("effectiveMounts"));
+    assert!(!json_obj.contains_key("effectiveEnv"));
+    assert!(!json_obj.contains_key("profilesApplied"));
+    assert!(!json_obj.contains_key("externalVolumesPreserved"));
+    assert!(!json_obj.contains_key("configuration"));
+    assert!(!json_obj.contains_key("mergedConfiguration"));
+}
+
+#[test]
+fn test_up_result_builder_methods_for_new_fields() {
+    use super::result::EffectiveMount;
+    use std::collections::HashMap;
+
+    let mut result = UpResult::success(
+        "container123".to_string(),
+        "user".to_string(),
+        "/workspaces".to_string(),
+    );
+
+    // Add effective mounts
+    let mounts = vec![EffectiveMount {
+        source: "/host".to_string(),
+        target: "/container".to_string(),
+        options: vec!["ro".to_string()],
+    }];
+    result = result.with_effective_mounts(mounts);
+
+    // Add effective env
+    let mut env = HashMap::new();
+    env.insert("TEST".to_string(), "value".to_string());
+    result = result.with_effective_env(env);
+
+    // Add profiles
+    result = result.with_profiles_applied(vec!["dev".to_string()]);
+
+    // Add external volumes
+    result = result.with_external_volumes_preserved(vec!["data".to_string()]);
+
+    // Verify the fields are set
+    if let UpResult::Success(success) = &result {
+        assert!(success.effective_mounts.is_some());
+        assert_eq!(success.effective_mounts.as_ref().unwrap().len(), 1);
+
+        assert!(success.effective_env.is_some());
+        assert!(success.effective_env.as_ref().unwrap().contains_key("TEST"));
+
+        assert!(success.profiles_applied.is_some());
+        assert_eq!(
+            success.profiles_applied.as_ref().unwrap(),
+            &vec!["dev".to_string()]
+        );
+
+        assert!(success.external_volumes_preserved.is_some());
+        assert_eq!(
+            success.external_volumes_preserved.as_ref().unwrap(),
+            &vec!["data".to_string()]
+        );
+    } else {
+        panic!("Expected Success variant");
+    }
+}
