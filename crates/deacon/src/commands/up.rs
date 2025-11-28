@@ -751,7 +751,6 @@ pub struct UpArgs {
     pub mount: Vec<String>,
     pub remote_env: Vec<String>,
     pub mount_workspace_git_root: bool,
-    #[allow(dead_code)] // TODO: Will be wired in T009
     pub workspace_mount_consistency: Option<String>,
 
     // Build and cache options
@@ -916,6 +915,15 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
     let mut args = args;
     if let Some(ws) = args.workspace_folder.clone() {
         let resolved = if args.mount_workspace_git_root {
+            // Check if git root exists before resolving
+            let git_root_result = deacon_core::workspace::find_git_repository_root(&ws)?;
+            if git_root_result.is_none() {
+                // T016: Log fallback when git root requested but not found
+                info!(
+                    "Git root requested (--mount-workspace-git-root) but no git repository found at '{}'. Using workspace root instead.",
+                    ws.display()
+                );
+            }
             deacon_core::workspace::resolve_workspace_root(&ws)?
         } else {
             ws.canonicalize().with_context(|| {
@@ -1027,6 +1035,17 @@ fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpInput> {
 
     // Parse and validate remote environment variables
     let remote_env = parse_remote_env_vars(&args.remote_env)?;
+
+    // Validate workspace_mount_consistency values
+    if let Some(ref consistency) = args.workspace_mount_consistency {
+        const VALID_CONSISTENCY: &[&str] = &["cached", "consistent", "delegated"];
+        if !VALID_CONSISTENCY.contains(&consistency.as_str()) {
+            return Err(anyhow::anyhow!(
+                "Invalid workspace mount consistency '{}'. Valid values: cached, consistent, delegated",
+                consistency
+            ));
+        }
+    }
 
     // Note: Additional id-label discovery from config happens at execution time
     // when we have loaded the configuration. See discover_id_labels_from_config()
@@ -1739,23 +1758,56 @@ async fn execute_compose_up(
     // Add env files from CLI args
     project.env_files = args.env_file.clone();
 
+    // Apply default workspace mount for Compose when consistency is provided
+    // Per FR-001: workspace_mount_consistency MUST apply to both Docker and Compose outputs
+    // This mirrors the Docker behavior in execute_docker_up()
+    let mut additional_mounts = Vec::new();
+    if args.workspace_mount_consistency.is_some() {
+        // Compute target path (container path) - same logic as Docker path
+        let target_path = config.workspace_folder.clone().unwrap_or_else(|| {
+            format!(
+                "/workspaces/{}",
+                workspace_folder
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("workspace")
+            )
+        });
+        // Source path is the resolved workspace_folder (already canonicalized in execute_up)
+        let source_path = workspace_folder.display().to_string();
+
+        additional_mounts.push(deacon_core::compose::ComposeMount {
+            mount_type: "bind".to_string(),
+            source: source_path,
+            target: target_path,
+            external: false,
+            consistency: args.workspace_mount_consistency.clone(),
+        });
+        debug!(
+            "Added default workspace mount for Compose with consistency: {:?}",
+            args.workspace_mount_consistency
+        );
+    }
+
     // Apply CLI mounts to compose project
     // Per CLAUDE.md: No silent fallbacks - fail fast on invalid mounts
-    if !args.mount.is_empty() {
-        let mut additional_mounts = Vec::new();
-        for mount_str in &args.mount {
-            let mount = NormalizedMount::parse(mount_str)
-                .with_context(|| format!("Invalid mount specification: {}", mount_str))?;
-            additional_mounts.push(deacon_core::compose::ComposeMount {
-                mount_type: match mount.mount_type {
-                    MountType::Bind => "bind".to_string(),
-                    MountType::Volume => "volume".to_string(),
-                },
-                source: mount.source.clone(),
-                target: mount.target.clone(),
-                external: mount.external,
-            });
-        }
+    for mount_str in &args.mount {
+        let mount = NormalizedMount::parse(mount_str)
+            .with_context(|| format!("Invalid mount specification: {}", mount_str))?;
+        additional_mounts.push(deacon_core::compose::ComposeMount {
+            mount_type: match mount.mount_type {
+                MountType::Bind => "bind".to_string(),
+                MountType::Volume => "volume".to_string(),
+            },
+            source: mount.source.clone(),
+            target: mount.target.clone(),
+            external: mount.external,
+            // CLI mounts don't currently support per-mount consistency
+            // workspace_mount_consistency is applied to the default workspace mount only
+            consistency: None,
+        });
+    }
+    if !additional_mounts.is_empty() {
         project.additional_mounts = additional_mounts;
     }
 
@@ -2067,6 +2119,13 @@ async fn execute_container_up(
 
     // Merge CLI forward_ports into config
     let mut config = config.clone();
+
+    // Warn if workspace_mount_consistency is specified but workspace_mount is already defined
+    if config.workspace_mount.is_some() && args.workspace_mount_consistency.is_some() {
+        tracing::warn!(
+            "workspace_mount_consistency specified but workspace_mount is already defined in config; CLI option will be ignored"
+        );
+    }
 
     // Apply workspace mount consistency when using default workspace mount
     if config.workspace_mount.is_none() {
