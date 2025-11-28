@@ -12,8 +12,8 @@ use tracing::{debug, instrument};
 /// Result of git repository root detection
 #[derive(Debug, Clone, PartialEq)]
 pub struct GitRootResult {
-    /// The detected git repository root, or None if not in a git repository
-    pub git_root: Option<PathBuf>,
+    /// The detected git repository root
+    pub git_root: PathBuf,
     /// Whether this is a git worktree (vs. a regular repository)
     pub is_worktree: bool,
 }
@@ -66,13 +66,9 @@ pub fn resolve_workspace_root(path: &Path) -> Result<PathBuf> {
     }
 
     // Try to find the git repository root (directory containing .git)
-    if let Some(GitRootResult {
-        git_root: Some(root),
-        ..
-    }) = find_git_repository_root(&canonical)?
-    {
-        debug!("Found git repository root: {}", root.display());
-        return Ok(root);
+    if let Some(result) = find_git_repository_root(&canonical)? {
+        debug!("Found git repository root: {}", result.git_root.display());
+        return Ok(result.git_root);
     }
 
     // Return the canonical path as the workspace root
@@ -91,7 +87,7 @@ pub fn resolve_workspace_root(path: &Path) -> Result<PathBuf> {
 ///
 /// # Returns
 ///
-/// Returns `GitRootResult` with `git_root` set to the repository root path if found,
+/// Returns `Some(GitRootResult)` with the repository root path if found,
 /// or `None` if not within a git repository.
 ///
 /// # Example
@@ -101,9 +97,8 @@ pub fn resolve_workspace_root(path: &Path) -> Result<PathBuf> {
 /// use std::path::Path;
 ///
 /// # fn example() -> anyhow::Result<()> {
-/// let result = find_git_repository_root(Path::new("."))?;
-/// if let Some(root) = result.and_then(|r| r.git_root) {
-///     println!("Git root: {}", root.display());
+/// if let Some(result) = find_git_repository_root(Path::new("."))? {
+///     println!("Git root: {}", result.git_root.display());
 /// }
 /// # Ok(())
 /// # }
@@ -150,7 +145,7 @@ pub fn find_git_repository_root(path: &Path) -> Result<Option<GitRootResult>> {
                 is_worktree
             );
             return Ok(Some(GitRootResult {
-                git_root: Some(current.to_path_buf()),
+                git_root: current.to_path_buf(),
                 is_worktree,
             }));
         }
@@ -456,7 +451,7 @@ mod tests {
 
         let git_result = result.unwrap();
         assert_eq!(
-            git_result.git_root.as_ref().unwrap().canonicalize()?,
+            git_result.git_root.canonicalize()?,
             temp_dir.path().canonicalize()?,
             "Git root should be the temp directory"
         );
@@ -489,7 +484,7 @@ mod tests {
 
         let git_result = result.unwrap();
         assert_eq!(
-            git_result.git_root.as_ref().unwrap().canonicalize()?,
+            git_result.git_root.canonicalize()?,
             temp_dir.path().canonicalize()?,
             "Git root should be the repo root, not the subdirectory"
         );
@@ -511,7 +506,7 @@ mod tests {
 
         let git_result = result.unwrap();
         assert_eq!(
-            git_result.git_root.as_ref().unwrap().canonicalize()?,
+            git_result.git_root.canonicalize()?,
             temp_dir.path().canonicalize()?,
             "Git root should be the worktree root"
         );

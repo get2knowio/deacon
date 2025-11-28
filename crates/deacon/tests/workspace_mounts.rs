@@ -590,7 +590,7 @@ mod git_root_docker_mount_tests {
             .expect("Should find git repository root");
 
         assert_eq!(
-            git_root_result.git_root.unwrap().canonicalize().unwrap(),
+            git_root_result.git_root.canonicalize().unwrap(),
             temp_dir.path().canonicalize().unwrap(),
             "Should find git repository root from deeply nested subdirectory"
         );
