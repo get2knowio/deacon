@@ -1702,11 +1702,7 @@ async fn execute_up_with_runtime(
             &args,
             &mut state_manager,
             &workspace_hash,
-            &config
-                .remote_env
-                .iter()
-                .filter_map(|(k, v)| v.clone().map(|val| (k.clone(), val)))
-                .collect(),
+            &cli_remote_env,
             config_path.as_path(),
             &runtime,
         )
