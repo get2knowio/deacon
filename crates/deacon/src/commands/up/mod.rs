@@ -36,7 +36,7 @@ mod tests;
 #[allow(unused_imports)]
 pub use args::{BuildkitMode, MountType, NormalizedMount, NormalizedUpInput, UpArgs};
 #[allow(unused_imports)]
-pub use result::{UpContainerInfo, UpError, UpResult, UpSuccess};
+pub use result::{EffectiveMount, UpContainerInfo, UpError, UpResult, UpSuccess};
 
 // Re-export NormalizedRemoteEnv from shared module
 #[allow(unused_imports)]

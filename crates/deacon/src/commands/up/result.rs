@@ -5,9 +5,28 @@
 //! - `UpError` - Error response structure
 //! - `UpResult` - Union type for up command results
 //! - `UpContainerInfo` - Internal container information structure
+//! - `EffectiveMount` - Mount specification with source/target/options
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// Represents a mount that was injected into the primary service.
+///
+/// Per the contract in `specs/005-compose-mount-env/contracts/up.yaml`,
+/// this structure represents an effective mount with source, target, and options.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct EffectiveMount {
+    /// Host path for the bind mount or volume name
+    pub source: String,
+
+    /// Container path where the mount appears
+    pub target: String,
+
+    /// Mount options (e.g., "ro", "rw", "consistency=cached")
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+}
 
 /// Success response for the up command, emitted as JSON to stdout.
 ///
@@ -32,6 +51,26 @@ pub struct UpSuccess {
 
     /// Remote workspace folder path inside the container
     pub remote_workspace_folder: String,
+
+    /// Mounts that were injected into the primary service
+    /// Per contract: `specs/005-compose-mount-env/contracts/up.yaml` lines 77-89
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_mounts: Option<Vec<EffectiveMount>>,
+
+    /// Environment variables injected into the primary service
+    /// Per contract: `specs/005-compose-mount-env/contracts/up.yaml` lines 90-93
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_env: Option<HashMap<String, String>>,
+
+    /// Profiles that were activated for this compose project
+    /// Per contract: `specs/005-compose-mount-env/contracts/up.yaml` lines 94-97
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profiles_applied: Option<Vec<String>>,
+
+    /// External volumes that were preserved (not created/modified)
+    /// Per contract: `specs/005-compose-mount-env/contracts/up.yaml` lines 100-103
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_volumes_preserved: Option<Vec<String>>,
 
     /// Configuration object (only when includeConfiguration flag is set)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,7 +122,7 @@ pub struct UpError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum UpResult {
-    Success(UpSuccess),
+    Success(Box<UpSuccess>),
     Error(UpError),
 }
 
@@ -94,15 +133,19 @@ impl UpResult {
         remote_user: String,
         remote_workspace_folder: String,
     ) -> Self {
-        UpResult::Success(UpSuccess {
+        UpResult::Success(Box::new(UpSuccess {
             outcome: "success".to_string(),
             container_id,
             compose_project_name: None,
             remote_user,
             remote_workspace_folder,
+            effective_mounts: None,
+            effective_env: None,
+            profiles_applied: None,
+            external_volumes_preserved: None,
             configuration: None,
             merged_configuration: None,
-        })
+        }))
     }
 
     /// Create an error result
@@ -138,6 +181,38 @@ impl UpResult {
     pub fn with_merged_configuration(mut self, merged_configuration: serde_json::Value) -> Self {
         if let UpResult::Success(ref mut success) = self {
             success.merged_configuration = Some(merged_configuration);
+        }
+        self
+    }
+
+    /// Add effective mounts to a success result
+    pub fn with_effective_mounts(mut self, mounts: Vec<EffectiveMount>) -> Self {
+        if let UpResult::Success(ref mut success) = self {
+            success.effective_mounts = Some(mounts);
+        }
+        self
+    }
+
+    /// Add effective environment variables to a success result
+    pub fn with_effective_env(mut self, env: HashMap<String, String>) -> Self {
+        if let UpResult::Success(ref mut success) = self {
+            success.effective_env = Some(env);
+        }
+        self
+    }
+
+    /// Add applied profiles to a success result
+    pub fn with_profiles_applied(mut self, profiles: Vec<String>) -> Self {
+        if let UpResult::Success(ref mut success) = self {
+            success.profiles_applied = Some(profiles);
+        }
+        self
+    }
+
+    /// Add preserved external volumes to a success result
+    pub fn with_external_volumes_preserved(mut self, volumes: Vec<String>) -> Self {
+        if let UpResult::Success(ref mut success) = self {
+            success.external_volumes_preserved = Some(volumes);
         }
         self
     }
@@ -301,6 +376,14 @@ pub struct UpContainerInfo {
     pub remote_user: String,
     pub remote_workspace_folder: String,
     pub compose_project_name: Option<String>,
+    /// Mounts that were injected into the primary service
+    pub effective_mounts: Option<Vec<EffectiveMount>>,
+    /// Environment variables injected into the primary service
+    pub effective_env: Option<HashMap<String, String>>,
+    /// Profiles that were activated for this compose project
+    pub profiles_applied: Option<Vec<String>>,
+    /// External volumes that were preserved
+    pub external_volumes_preserved: Option<Vec<String>>,
     pub configuration: Option<serde_json::Value>,
     pub merged_configuration: Option<serde_json::Value>,
 }

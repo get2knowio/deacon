@@ -1172,6 +1172,26 @@ impl Cli {
                             result = result.with_compose_project_name(project_name);
                         }
 
+                        // Add effective mounts if present
+                        if let Some(mounts) = container_info.effective_mounts {
+                            result = result.with_effective_mounts(mounts);
+                        }
+
+                        // Add effective env if present
+                        if let Some(env) = container_info.effective_env {
+                            result = result.with_effective_env(env);
+                        }
+
+                        // Add profiles applied if present
+                        if let Some(profiles) = container_info.profiles_applied {
+                            result = result.with_profiles_applied(profiles);
+                        }
+
+                        // Add external volumes preserved if present
+                        if let Some(volumes) = container_info.external_volumes_preserved {
+                            result = result.with_external_volumes_preserved(volumes);
+                        }
+
                         // Add configuration if requested
                         if let Some(config) = container_info.configuration {
                             result = result.with_configuration(config);
