@@ -92,9 +92,7 @@ pub(crate) async fn execute_compose_up(
             source: mount.source.clone(),
             target: mount.target.clone(),
             read_only: mount.read_only,
-            // CLI mounts don't currently support per-mount consistency
-            // workspace_mount_consistency is applied to the default workspace mount only
-            consistency: None,
+            consistency: mount.consistency.clone(),
         });
     }
     if !additional_mounts.is_empty() {
