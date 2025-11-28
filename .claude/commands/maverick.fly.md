@@ -1,41 +1,5 @@
 # Development Workflow
 
-Implement features from the task list, perform code review and cleanup, update project conventions, and manage the PR.
-
-**Usage:** `/maverick.fly [branch-name]`
-- If `branch-name` is provided, switch to that branch before starting
-- If not provided, work on the current branch
-
----
-
-## Part 0: Setup and Sync
-
-Run `.claude/scripts/sync-branch.sh $ARGUMENTS` and parse the JSON output.
-
-The `$ARGUMENTS` variable contains the optional branch name passed to this command. If empty, the script uses the current branch.
-
-**If status is "conflicts":**
-- Report the conflicting files to the user
-- Attempt to resolve conflicts automatically:
-  1. For each conflicting file, analyze the conflict markers
-  2. If the conflict is trivial (e.g., both sides made non-overlapping changes), resolve it
-  3. Run `git add <resolved-file>` for each resolved file
-  4. Run `git rebase --continue`
-- If conflicts cannot be auto-resolved:
-  - Abort the rebase with `git rebase --abort`
-  - Try a merge instead: `git merge origin/main`
-  - If merge also has unresolvable conflicts, report to user and pause for human intervention
-
-**If status is "error":**
-- Report the error (missing spec directory or tasks file)
-- Halt execution
-
-**If status is "ok":**
-- Store `branch`, `spec_dir`, and `tasks_file` for use in subsequent steps
-- Proceed to Part 1
-
----
-
 ## Part 1: Feature Implementation
 
 Invoke the slash-command `/speckit.implement` along with the following prompt:
@@ -55,7 +19,7 @@ This single command handles:
 - Running validation checks
 - Reporting overall completion status
 
-Wait for `/speckit.implement` to complete before proceeding to Part 2.
+Wait for `/speckit.implement` to complete before proceeding to Part 2. **Do not work through the task list in any other way except via /speckit.implement**
 
 ---
 
