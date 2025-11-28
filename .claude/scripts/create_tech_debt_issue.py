@@ -86,19 +86,37 @@ def ensure_tech_debt_label():
             pass
 
 
+TECH_DEBT_DIRECTIVES = """
+---
+
+## Implementation Directives
+
+> **⚠️ TECH DEBT RESOLUTION REQUIREMENTS**
+>
+> This is a **tech debt issue** that must be resolved **in its entirety**. The following directives apply:
+>
+> 1. **No Partial Solutions**: Complete all acceptance criteria before closing. Do not close with "good enough" implementations.
+> 2. **No Deferral**: There is no option to defer portions of this work to future issues. If scope expands during implementation, expand this issue rather than spawning follow-ups.
+> 3. **No New Debt**: Do not introduce new technical debt while resolving this issue. If you encounter blocking debt, resolve it as part of this issue.
+> 4. **Full Test Coverage**: All changes must include appropriate tests. Untested code is incomplete code.
+> 5. **Documentation Updates**: Update any affected documentation as part of this issue.
+
+"""
+
+
 def build_issue_body(args) -> str:
     """Build issue body from arguments or provided content."""
 
-    # If full body provided via file or stdin, use that
+    # If full body provided via file or stdin, append directives
     if args.body_file:
-        return Path(args.body_file).read_text()
+        return Path(args.body_file).read_text() + TECH_DEBT_DIRECTIVES
 
     if args.body:
         if args.body == '-':
             # Read from stdin
-            return sys.stdin.read()
+            return sys.stdin.read() + TECH_DEBT_DIRECTIVES
         else:
-            return args.body
+            return args.body + TECH_DEBT_DIRECTIVES
 
     # Otherwise build from structured arguments
     sections = []
@@ -152,6 +170,9 @@ def build_issue_body(args) -> str:
             sections.append(f"- Discovered while working on branch: `{args.source_branch}`\n")
         if args.source_pr:
             sections.append(f"- Related PR: #{args.source_pr}\n")
+
+    # Append standard tech debt directives
+    sections.append(TECH_DEBT_DIRECTIVES)
 
     return ''.join(sections)
 

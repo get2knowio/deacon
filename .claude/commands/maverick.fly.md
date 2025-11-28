@@ -124,7 +124,7 @@ Fix the actual issue - do NOT weaken assertions.
 For each deferred issue identified during consolidation (Phase 2.2), create a GitHub issue directly:
 
 ```bash
-python3 scripts/create_tech_debt_issue.py \
+python3 .claude/scripts/create_tech_debt_issue.py \
     --title "Brief descriptive title" \
     --problem "What's wrong and why it matters" \
     --rationale "Why this was deferred (pre-existing, out of scope, etc.)" \
