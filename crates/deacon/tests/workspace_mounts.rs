@@ -204,7 +204,6 @@ mod docker_consistency_tests {
 /// or the long-form volumes syntax.
 mod compose_consistency_tests {
     use deacon_core::compose::{ComposeMount, ComposeProject};
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     /// Test that Compose mount with consistency generates correct YAML volume syntax
@@ -229,7 +228,7 @@ mod compose_consistency_tests {
                 consistency: Some("cached".to_string()),
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -270,7 +269,7 @@ mod compose_consistency_tests {
                 consistency: None,
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -302,7 +301,7 @@ mod compose_consistency_tests {
                 consistency: None,
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -341,7 +340,7 @@ mod compose_consistency_tests {
                 consistency: None,
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -877,7 +876,7 @@ mod default_workspace_discovery_tests {
                 consistency: None, // No consistency override
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -989,7 +988,6 @@ mod default_workspace_discovery_tests {
 /// - Multi-service compose scenarios use consistent paths
 mod compose_git_root_tests {
     use deacon_core::compose::{ComposeMount, ComposeProject};
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     /// Test that Compose workspace mount uses git-root path when flag is set
@@ -1020,7 +1018,7 @@ mod compose_git_root_tests {
                 consistency: None,
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1065,7 +1063,7 @@ mod compose_git_root_tests {
                 consistency: None,
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1113,7 +1111,7 @@ mod compose_git_root_tests {
                 consistency: None,
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1164,7 +1162,7 @@ mod compose_git_root_tests {
                 consistency: Some("cached".to_string()),
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1184,7 +1182,6 @@ mod compose_git_root_tests {
 /// Verifies that consistency + git-root work together for Compose mounts.
 mod compose_git_root_consistency_tests {
     use deacon_core::compose::{ComposeMount, ComposeProject};
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     /// Test that git-root path with cached consistency produces correct mount
@@ -1208,7 +1205,7 @@ mod compose_git_root_consistency_tests {
                 consistency: Some("cached".to_string()),
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1243,7 +1240,7 @@ mod compose_git_root_consistency_tests {
                 consistency: Some("consistent".to_string()),
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1278,7 +1275,7 @@ mod compose_git_root_consistency_tests {
                 consistency: Some("delegated".to_string()),
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1314,7 +1311,7 @@ mod compose_git_root_consistency_tests {
                     consistency: Some(consistency.to_string()),
                 }],
                 profiles: Vec::new(),
-                additional_env: HashMap::new(),
+                additional_env: deacon_core::IndexMap::new(),
                 external_volumes: Vec::new(),
             };
 
@@ -1350,7 +1347,7 @@ mod compose_git_root_consistency_tests {
                 consistency: Some("cached".to_string()),
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1385,7 +1382,7 @@ mod compose_git_root_consistency_tests {
                 consistency: None,
             }],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1423,7 +1420,6 @@ mod performance_tests {
     use super::*;
     use deacon_core::compose::{ComposeMount, ComposeProject};
     use deacon_core::workspace::resolve_workspace_root;
-    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
     use tempfile::TempDir;
@@ -1519,7 +1515,8 @@ mod performance_tests {
     #[test]
     fn test_compose_override_generation_performance() {
         // Prepare test data with multiple mounts and env vars
-        let mut additional_env = HashMap::new();
+        let mut additional_env: deacon_core::IndexMap<String, String> =
+            deacon_core::IndexMap::new();
         for i in 0..10 {
             additional_env.insert(format!("VAR_{}", i), format!("value_{}", i));
         }
@@ -1625,7 +1622,7 @@ mod performance_tests {
                     consistency: Some("cached".to_string()),
                 }],
                 profiles: Vec::new(),
-                additional_env: HashMap::new(),
+                additional_env: deacon_core::IndexMap::new(),
                 external_volumes: Vec::new(),
             };
 

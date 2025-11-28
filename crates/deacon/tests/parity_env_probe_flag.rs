@@ -2,6 +2,7 @@ use deacon::commands::exec::{execute_exec_with_docker, ExecArgs};
 use deacon::commands::shared::resolve_env_and_user;
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::mock::{MockContainer, MockDocker};
+use deacon_core::IndexMap;
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -63,7 +64,7 @@ async fn up_shared_probe_helper_uses_login_shell() {
         "ubuntu:22.04".to_string(),
     ));
 
-    let cli_env = HashMap::new();
+    let cli_env: IndexMap<String, String> = IndexMap::new();
     let config_remote_env: HashMap<String, Option<String>> = HashMap::new();
 
     let resolution = resolve_env_and_user(

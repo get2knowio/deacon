@@ -6,8 +6,8 @@
 use crate::config::DevContainerConfig;
 use crate::errors::{ConfigError, DockerError, Result};
 use crate::security::SecurityOptions;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, instrument, warn};
@@ -34,7 +34,7 @@ pub struct ComposeProject {
     /// Automatically derived from runServices profiles
     pub profiles: Vec<String>,
     /// Additional environment variables to inject into primary service
-    pub additional_env: HashMap<String, String>,
+    pub additional_env: IndexMap<String, String>,
     /// External volume names that must remain referenced (not replaced by injection)
     /// Per spec: these volumes should surface compose errors if missing, not bind fallback
     pub external_volumes: Vec<String>,
@@ -516,7 +516,7 @@ impl ComposeManager {
             env_files: Vec::new(),
             additional_mounts: Vec::new(), // Will be populated from CLI --mount flags
             profiles: Vec::new(),          // Will be populated from service profiles
-            additional_env: std::collections::HashMap::new(),
+            additional_env: IndexMap::new(),
             external_volumes: Vec::new(), // Will be populated from compose config parsing
         })
     }
@@ -674,7 +674,7 @@ impl ComposeManager {
     ///     env_files: Vec::new(),
     ///     additional_mounts: Vec::new(),
     ///     profiles: Vec::new(),
-    ///     additional_env: std::collections::HashMap::new(),
+    ///     additional_env: IndexMap::new(),
     ///     external_volumes: Vec::new(),
     /// };
     ///
@@ -735,7 +735,7 @@ impl ComposeManager {
     ///     env_files: Vec::new(),
     ///     additional_mounts: Vec::new(),
     ///     profiles: Vec::new(),
-    ///     additional_env: std::collections::HashMap::new(),
+    ///     additional_env: IndexMap::new(),
     ///     external_volumes: Vec::new(),
     /// };
     ///
@@ -855,11 +855,8 @@ impl ComposeProject {
 
         if !self.additional_env.is_empty() {
             yaml.push_str("    environment:\n");
-            // Sort keys for deterministic output (HashMap iteration order is arbitrary)
-            let mut sorted_keys: Vec<_> = self.additional_env.keys().collect();
-            sorted_keys.sort();
-            for key in sorted_keys {
-                let value = &self.additional_env[key];
+            // IndexMap preserves insertion order - no sorting needed
+            for (key, value) in &self.additional_env {
                 let escaped = escape_yaml_value(value);
                 yaml.push_str(&format!("      {}: {}\n", key, escaped));
             }
@@ -902,7 +899,7 @@ impl ComposeProject {
     /// Per the spec (FR-002, research.md Decision 3):
     /// - CLI/remote env entries override duplicate keys from env-files/service defaults
     /// - Non-conflicting keys remain untouched
-    /// - Returns merged HashMap with CLI values taking precedence
+    /// - Returns merged IndexMap with CLI values taking precedence
     ///
     /// # Arguments
     /// * `service_env` - Environment variables from compose service definition
@@ -910,13 +907,13 @@ impl ComposeProject {
     /// * `cli_env` - CLI-provided remote environment entries (highest precedence)
     ///
     /// # Returns
-    /// Merged HashMap with CLI precedence: CLI > env-files > service defaults
+    /// Merged IndexMap with CLI precedence: CLI > env-files > service defaults
     pub fn merge_env_with_cli_precedence(
-        service_env: &HashMap<String, String>,
-        env_file_env: &HashMap<String, String>,
-        cli_env: &HashMap<String, String>,
-    ) -> HashMap<String, String> {
-        let mut merged = HashMap::new();
+        service_env: &IndexMap<String, String>,
+        env_file_env: &IndexMap<String, String>,
+        cli_env: &IndexMap<String, String>,
+    ) -> IndexMap<String, String> {
+        let mut merged = IndexMap::new();
 
         // Layer 1: Service defaults (lowest precedence)
         for (key, value) in service_env {
@@ -954,7 +951,7 @@ impl ComposeProject {
     pub fn with_injection(
         mut self,
         additional_mounts: Vec<ComposeMount>,
-        cli_env: HashMap<String, String>,
+        cli_env: IndexMap<String, String>,
     ) -> Self {
         self.additional_mounts = additional_mounts;
         self.additional_env = cli_env;
@@ -1208,7 +1205,7 @@ mod tests {
             env_files: Vec::new(),
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1283,7 +1280,7 @@ mod tests {
             env_files: Vec::new(),
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1307,7 +1304,7 @@ mod tests {
             env_files: Vec::new(),
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1337,16 +1334,16 @@ mod tests {
 
     #[test]
     fn test_merge_env_with_cli_precedence() {
-        let mut service_env = HashMap::new();
+        let mut service_env: IndexMap<String, String> = IndexMap::new();
         service_env.insert("DB_HOST".to_string(), "localhost".to_string());
         service_env.insert("DB_PORT".to_string(), "5432".to_string());
         service_env.insert("SERVICE_ONLY".to_string(), "from_service".to_string());
 
-        let mut env_file_env = HashMap::new();
+        let mut env_file_env: IndexMap<String, String> = IndexMap::new();
         env_file_env.insert("DB_HOST".to_string(), "db.example.com".to_string());
         env_file_env.insert("ENV_FILE_ONLY".to_string(), "from_env_file".to_string());
 
-        let mut cli_env = HashMap::new();
+        let mut cli_env: IndexMap<String, String> = IndexMap::new();
         cli_env.insert(
             "DB_HOST".to_string(),
             "cli-override.example.com".to_string(),
@@ -1384,9 +1381,9 @@ mod tests {
 
     #[test]
     fn test_merge_env_empty_inputs() {
-        let service_env = HashMap::new();
-        let env_file_env = HashMap::new();
-        let cli_env = HashMap::new();
+        let service_env: IndexMap<String, String> = IndexMap::new();
+        let env_file_env: IndexMap<String, String> = IndexMap::new();
+        let cli_env: IndexMap<String, String> = IndexMap::new();
 
         let merged =
             ComposeProject::merge_env_with_cli_precedence(&service_env, &env_file_env, &cli_env);
@@ -1396,9 +1393,9 @@ mod tests {
 
     #[test]
     fn test_merge_env_cli_only() {
-        let service_env = HashMap::new();
-        let env_file_env = HashMap::new();
-        let mut cli_env = HashMap::new();
+        let service_env: IndexMap<String, String> = IndexMap::new();
+        let env_file_env: IndexMap<String, String> = IndexMap::new();
+        let mut cli_env: IndexMap<String, String> = IndexMap::new();
         cli_env.insert("MY_VAR".to_string(), "my_value".to_string());
 
         let merged =
@@ -1419,7 +1416,7 @@ mod tests {
             env_files: Vec::new(),
             additional_mounts: Vec::new(),
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1429,7 +1426,7 @@ mod tests {
 
     #[test]
     fn test_generate_injection_override_with_env() {
-        let mut additional_env = HashMap::new();
+        let mut additional_env: IndexMap<String, String> = IndexMap::new();
         additional_env.insert("FOO".to_string(), "bar".to_string());
         additional_env.insert("BAZ".to_string(), "qux".to_string());
 
@@ -1480,7 +1477,7 @@ mod tests {
                 },
             ],
             profiles: Vec::new(),
-            additional_env: HashMap::new(),
+            additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
         };
 
@@ -1494,7 +1491,7 @@ mod tests {
 
     #[test]
     fn test_generate_injection_override_with_both() {
-        let mut additional_env = HashMap::new();
+        let mut additional_env: IndexMap<String, String> = IndexMap::new();
         additional_env.insert("MY_VAR".to_string(), "my_value".to_string());
 
         let project = ComposeProject {
@@ -1527,7 +1524,7 @@ mod tests {
 
     #[test]
     fn test_generate_injection_override_with_special_chars() {
-        let mut additional_env = HashMap::new();
+        let mut additional_env: IndexMap<String, String> = IndexMap::new();
         additional_env.insert("MULTILINE".to_string(), "line1\nline2".to_string());
         additional_env.insert("QUOTED".to_string(), "value with \"quotes\"".to_string());
         additional_env.insert("COLON".to_string(), "key:value".to_string());
@@ -1556,8 +1553,9 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_injection_override_deterministic_order() {
-        let mut additional_env = HashMap::new();
+    fn test_generate_injection_override_preserves_insertion_order() {
+        let mut additional_env: IndexMap<String, String> = IndexMap::new();
+        // Insert in this specific order: ZZZ, AAA, MMM
         additional_env.insert("ZZZ".to_string(), "last".to_string());
         additional_env.insert("AAA".to_string(), "first".to_string());
         additional_env.insert("MMM".to_string(), "middle".to_string());
@@ -1577,14 +1575,17 @@ mod tests {
 
         let override_yaml = project.generate_injection_override().unwrap();
 
-        // Keys should be sorted alphabetically
+        // IndexMap preserves insertion order: ZZZ, AAA, MMM (not sorted alphabetically)
+        let zzz_pos = override_yaml.find("ZZZ:").unwrap();
         let aaa_pos = override_yaml.find("AAA:").unwrap();
         let mmm_pos = override_yaml.find("MMM:").unwrap();
-        let zzz_pos = override_yaml.find("ZZZ:").unwrap();
 
         assert!(
-            aaa_pos < mmm_pos && mmm_pos < zzz_pos,
-            "Keys should be sorted: AAA < MMM < ZZZ"
+            zzz_pos < aaa_pos && aaa_pos < mmm_pos,
+            "Keys should be in insertion order: ZZZ < AAA < MMM, but got ZZZ={}, AAA={}, MMM={}",
+            zzz_pos,
+            aaa_pos,
+            mmm_pos
         );
     }
 

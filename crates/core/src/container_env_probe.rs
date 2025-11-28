@@ -25,6 +25,7 @@
 
 use crate::docker::Docker;
 use crate::errors::{DeaconError, Result};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -582,13 +583,13 @@ impl ContainerEnvironmentProber {
     /// Rules:
     /// - Start from `probed_env` (lowest precedence)
     /// - Overlay `config_remote_env` (values are `Option<String>`; `None` means set empty string)
-    /// - Overlay `cli_env` (highest precedence)
+    /// - Overlay `cli_env` (highest precedence, preserves CLI argument order)
     /// - Preserve empty string values explicitly set
     pub fn build_effective_env(
         &self,
         probed_env: &HashMap<String, String>,
         config_remote_env: Option<&HashMap<String, Option<String>>>,
-        cli_env: &HashMap<String, String>,
+        cli_env: &IndexMap<String, String>,
     ) -> HashMap<String, String> {
         let mut result = probed_env.clone();
 
@@ -824,7 +825,7 @@ mod tests {
         // Config sets B to None -> should result in empty string
         config_remote_env.insert("B".to_string(), None);
 
-        let mut cli_env = HashMap::new();
+        let mut cli_env: IndexMap<String, String> = IndexMap::new();
         // CLI sets B to 'from_cli' -> CLI should override config's explicit empty
         cli_env.insert("B".to_string(), "from_cli".to_string());
         // CLI sets C to value -> should be present

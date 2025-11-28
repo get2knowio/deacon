@@ -18,6 +18,7 @@ use deacon_core::ports::PortForwardingManager;
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::state::{ComposeState, ContainerState, StateManager};
+use deacon_core::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -1530,7 +1531,8 @@ async fn execute_up_with_runtime(
     debug!("Merged image metadata into configuration");
 
     // Apply CLI remote env overrides on top of config (used for container creation and lifecycle)
-    let mut cli_remote_env = HashMap::new();
+    // Using IndexMap to preserve CLI argument order per spec
+    let mut cli_remote_env: IndexMap<String, String> = IndexMap::new();
     for env in parse_remote_env_vars(&args.remote_env)? {
         cli_remote_env.insert(env.name.clone(), env.value.clone());
         config
@@ -1705,11 +1707,7 @@ async fn execute_up_with_runtime(
             &args,
             &mut state_manager,
             &workspace_hash,
-            &config
-                .remote_env
-                .iter()
-                .filter_map(|(k, v)| v.clone().map(|val| (k.clone(), val)))
-                .collect(),
+            &cli_remote_env,
             config_path.as_path(),
             &runtime,
         )
@@ -1751,7 +1749,7 @@ async fn execute_compose_up(
     args: &UpArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
-    effective_env: &HashMap<String, String>,
+    effective_env: &IndexMap<String, String>,
     config_path: &Path,
     runtime: &ContainerRuntimeImpl,
 ) -> Result<UpContainerInfo> {
@@ -2115,7 +2113,7 @@ async fn execute_container_up(
     args: &UpArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
-    cli_remote_env: &HashMap<String, String>,
+    cli_remote_env: &IndexMap<String, String>,
     runtime: &ContainerRuntimeImpl,
     config_path: &Path,
     cache_folder: &Option<PathBuf>,
