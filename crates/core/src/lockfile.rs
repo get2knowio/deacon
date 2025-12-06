@@ -569,6 +569,228 @@ fn validate_sha256_digest(digest: &str) -> Result<()> {
     Ok(())
 }
 
+/// Result of validating a lockfile against configuration.
+///
+/// Describes whether the lockfile matches the configuration's declared features,
+/// or details of any mismatch.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LockfileValidationResult {
+    /// Lockfile matches configuration - all declared features are locked
+    /// and no extra features exist in the lockfile.
+    Matched,
+
+    /// Lockfile is missing entirely when validation was requested.
+    Missing {
+        /// Expected lockfile path
+        expected_path: PathBuf,
+    },
+
+    /// Features declared in config but missing from lockfile.
+    MissingFromLockfile {
+        /// Feature IDs that are in config but not in lockfile
+        features: Vec<String>,
+    },
+
+    /// Features in lockfile but not declared in config.
+    ExtraInLockfile {
+        /// Feature IDs that are in lockfile but not in config
+        features: Vec<String>,
+    },
+
+    /// Both missing and extra features found.
+    Mismatch {
+        /// Feature IDs that are in config but not in lockfile
+        missing_from_lockfile: Vec<String>,
+        /// Feature IDs that are in lockfile but not in config
+        extra_in_lockfile: Vec<String>,
+    },
+}
+
+impl LockfileValidationResult {
+    /// Returns true if the validation result indicates a match.
+    pub fn is_matched(&self) -> bool {
+        matches!(self, LockfileValidationResult::Matched)
+    }
+
+    /// Format the validation result as an error message.
+    ///
+    /// Returns a user-friendly error message describing the mismatch,
+    /// including actionable guidance on how to resolve the issue.
+    pub fn format_error(&self) -> String {
+        match self {
+            LockfileValidationResult::Matched => "Lockfile validation passed".to_string(),
+            LockfileValidationResult::Missing { expected_path } => {
+                format!(
+                    "Frozen lockfile mode requires a lockfile, but none found at '{}'.\n\
+                     Run without --experimental-frozen-lockfile to generate a lockfile, \
+                     or create one with `deacon build --experimental-lockfile`.",
+                    expected_path.display()
+                )
+            }
+            LockfileValidationResult::MissingFromLockfile { features } => {
+                format!(
+                    "Frozen lockfile mismatch: features declared in config but missing from lockfile:\n  \
+                     - {}\n\
+                     Update the lockfile or remove --experimental-frozen-lockfile to allow resolution.",
+                    features.join("\n  - ")
+                )
+            }
+            LockfileValidationResult::ExtraInLockfile { features } => {
+                format!(
+                    "Frozen lockfile mismatch: features in lockfile but not declared in config:\n  \
+                     - {}\n\
+                     Update the lockfile to remove stale entries, or add these features to your config.",
+                    features.join("\n  - ")
+                )
+            }
+            LockfileValidationResult::Mismatch {
+                missing_from_lockfile,
+                extra_in_lockfile,
+            } => {
+                format!(
+                    "Frozen lockfile mismatch:\n\
+                     Features declared in config but missing from lockfile:\n  - {}\n\
+                     Features in lockfile but not declared in config:\n  - {}\n\
+                     Update the lockfile or remove --experimental-frozen-lockfile to allow resolution.",
+                    missing_from_lockfile.join("\n  - "),
+                    extra_in_lockfile.join("\n  - ")
+                )
+            }
+        }
+    }
+}
+
+/// Extract feature IDs from a DevContainer config features object.
+///
+/// The features field in DevContainerConfig is a serde_json::Value that
+/// should be an object with feature IDs as keys.
+///
+/// # Arguments
+///
+/// * `features` - The features field from DevContainerConfig
+///
+/// # Returns
+///
+/// A sorted vector of feature ID strings, or an empty vector if features
+/// is not an object or is empty.
+pub fn extract_feature_ids_from_config(features: &serde_json::Value) -> Vec<String> {
+    match features.as_object() {
+        Some(obj) => {
+            let mut ids: Vec<String> = obj.keys().cloned().collect();
+            ids.sort();
+            ids
+        }
+        None => Vec::new(),
+    }
+}
+
+/// Validate a lockfile against the features declared in configuration.
+///
+/// This function compares the features declared in a DevContainer configuration
+/// against the features locked in a lockfile. It is used to implement frozen
+/// lockfile validation where builds should fail if the lockfile doesn't match.
+///
+/// # Arguments
+///
+/// * `lockfile` - The lockfile to validate (can be None if missing)
+/// * `config_features` - The features field from DevContainerConfig
+/// * `lockfile_path` - Path where the lockfile was expected (for error messages)
+///
+/// # Returns
+///
+/// A `LockfileValidationResult` indicating whether the lockfile matches,
+/// or details about the mismatch.
+///
+/// # Examples
+///
+/// ```rust
+/// use deacon_core::lockfile::{Lockfile, LockfileFeature, validate_lockfile_against_config, LockfileValidationResult};
+/// use std::collections::HashMap;
+/// use std::path::Path;
+///
+/// // Create a lockfile with one feature
+/// let mut features = HashMap::new();
+/// features.insert(
+///     "ghcr.io/devcontainers/features/node:1".to_string(),
+///     LockfileFeature {
+///         version: "1.0.0".to_string(),
+///         resolved: "ghcr.io/devcontainers/features/node@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd".to_string(),
+///         integrity: "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd".to_string(),
+///         depends_on: None,
+///     },
+/// );
+/// let lockfile = Lockfile { features };
+///
+/// // Config with matching feature
+/// let config_features = serde_json::json!({
+///     "ghcr.io/devcontainers/features/node:1": {}
+/// });
+///
+/// let result = validate_lockfile_against_config(
+///     Some(&lockfile),
+///     &config_features,
+///     Path::new("devcontainer-lock.json"),
+/// );
+///
+/// assert!(result.is_matched());
+/// ```
+pub fn validate_lockfile_against_config(
+    lockfile: Option<&Lockfile>,
+    config_features: &serde_json::Value,
+    lockfile_path: &Path,
+) -> LockfileValidationResult {
+    // If lockfile is missing, return Missing result
+    let lockfile = match lockfile {
+        Some(lf) => lf,
+        None => {
+            return LockfileValidationResult::Missing {
+                expected_path: lockfile_path.to_path_buf(),
+            };
+        }
+    };
+
+    // Extract feature IDs from config
+    let config_feature_ids = extract_feature_ids_from_config(config_features);
+
+    // Get feature IDs from lockfile
+    let mut lockfile_feature_ids: Vec<String> = lockfile.features.keys().cloned().collect();
+    lockfile_feature_ids.sort();
+
+    // Find features in config but not in lockfile
+    let missing_from_lockfile: Vec<String> = config_feature_ids
+        .iter()
+        .filter(|id| !lockfile.features.contains_key(*id))
+        .cloned()
+        .collect();
+
+    // Find features in lockfile but not in config
+    let config_feature_set: std::collections::HashSet<&String> =
+        config_feature_ids.iter().collect();
+    let extra_in_lockfile: Vec<String> = lockfile_feature_ids
+        .iter()
+        .filter(|id| !config_feature_set.contains(id))
+        .cloned()
+        .collect();
+
+    // Determine result based on findings
+    match (
+        missing_from_lockfile.is_empty(),
+        extra_in_lockfile.is_empty(),
+    ) {
+        (true, true) => LockfileValidationResult::Matched,
+        (false, true) => LockfileValidationResult::MissingFromLockfile {
+            features: missing_from_lockfile,
+        },
+        (true, false) => LockfileValidationResult::ExtraInLockfile {
+            features: extra_in_lockfile,
+        },
+        (false, false) => LockfileValidationResult::Mismatch {
+            missing_from_lockfile,
+            extra_in_lockfile,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1012,5 +1234,262 @@ mod tests {
         // Verify keys are in alphabetical order in the JSON
         assert!(content1.find("a-feature").unwrap() < content1.find("m-feature").unwrap());
         assert!(content1.find("m-feature").unwrap() < content1.find("z-feature").unwrap());
+    }
+
+    // =========================================================================
+    // Lockfile Validation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_validate_lockfile_against_config_matched() {
+        let mut lockfile = Lockfile {
+            features: HashMap::new(),
+        };
+        lockfile.features.insert(
+            "ghcr.io/devcontainers/features/node:1".to_string(),
+            LockfileFeature {
+                version: "1.0.0".to_string(),
+                resolved: "ghcr.io/devcontainers/features/node@sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                integrity: "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                depends_on: None,
+            },
+        );
+
+        let config_features = serde_json::json!({
+            "ghcr.io/devcontainers/features/node:1": {}
+        });
+
+        let result = validate_lockfile_against_config(
+            Some(&lockfile),
+            &config_features,
+            Path::new("devcontainer-lock.json"),
+        );
+
+        assert!(result.is_matched());
+        assert_eq!(result, LockfileValidationResult::Matched);
+    }
+
+    #[test]
+    fn test_validate_lockfile_against_config_missing_lockfile() {
+        let config_features = serde_json::json!({
+            "ghcr.io/devcontainers/features/node:1": {}
+        });
+
+        let result = validate_lockfile_against_config(
+            None,
+            &config_features,
+            Path::new("/path/to/devcontainer-lock.json"),
+        );
+
+        assert!(!result.is_matched());
+        match result {
+            LockfileValidationResult::Missing { expected_path } => {
+                assert_eq!(
+                    expected_path,
+                    PathBuf::from("/path/to/devcontainer-lock.json")
+                );
+            }
+            _ => panic!("Expected Missing result"),
+        }
+    }
+
+    #[test]
+    fn test_validate_lockfile_against_config_missing_from_lockfile() {
+        let lockfile = Lockfile {
+            features: HashMap::new(),
+        };
+
+        let config_features = serde_json::json!({
+            "ghcr.io/devcontainers/features/node:1": {}
+        });
+
+        let result = validate_lockfile_against_config(
+            Some(&lockfile),
+            &config_features,
+            Path::new("devcontainer-lock.json"),
+        );
+
+        assert!(!result.is_matched());
+        match result {
+            LockfileValidationResult::MissingFromLockfile { features } => {
+                assert_eq!(features, vec!["ghcr.io/devcontainers/features/node:1"]);
+            }
+            _ => panic!("Expected MissingFromLockfile result"),
+        }
+    }
+
+    #[test]
+    fn test_validate_lockfile_against_config_extra_in_lockfile() {
+        let mut lockfile = Lockfile {
+            features: HashMap::new(),
+        };
+        lockfile.features.insert(
+            "ghcr.io/devcontainers/features/node:1".to_string(),
+            LockfileFeature {
+                version: "1.0.0".to_string(),
+                resolved: "ghcr.io/devcontainers/features/node@sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                integrity: "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                depends_on: None,
+            },
+        );
+
+        // Empty config features
+        let config_features = serde_json::json!({});
+
+        let result = validate_lockfile_against_config(
+            Some(&lockfile),
+            &config_features,
+            Path::new("devcontainer-lock.json"),
+        );
+
+        assert!(!result.is_matched());
+        match result {
+            LockfileValidationResult::ExtraInLockfile { features } => {
+                assert_eq!(features, vec!["ghcr.io/devcontainers/features/node:1"]);
+            }
+            _ => panic!("Expected ExtraInLockfile result"),
+        }
+    }
+
+    #[test]
+    fn test_validate_lockfile_against_config_mismatch() {
+        let mut lockfile = Lockfile {
+            features: HashMap::new(),
+        };
+        lockfile.features.insert(
+            "ghcr.io/devcontainers/features/go:1".to_string(),
+            LockfileFeature {
+                version: "1.0.0".to_string(),
+                resolved: "ghcr.io/devcontainers/features/go@sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                integrity: "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+                depends_on: None,
+            },
+        );
+
+        let config_features = serde_json::json!({
+            "ghcr.io/devcontainers/features/node:1": {}
+        });
+
+        let result = validate_lockfile_against_config(
+            Some(&lockfile),
+            &config_features,
+            Path::new("devcontainer-lock.json"),
+        );
+
+        assert!(!result.is_matched());
+        match result {
+            LockfileValidationResult::Mismatch {
+                missing_from_lockfile,
+                extra_in_lockfile,
+            } => {
+                assert_eq!(
+                    missing_from_lockfile,
+                    vec!["ghcr.io/devcontainers/features/node:1"]
+                );
+                assert_eq!(
+                    extra_in_lockfile,
+                    vec!["ghcr.io/devcontainers/features/go:1"]
+                );
+            }
+            _ => panic!("Expected Mismatch result"),
+        }
+    }
+
+    #[test]
+    fn test_validate_lockfile_against_config_empty_both() {
+        let lockfile = Lockfile {
+            features: HashMap::new(),
+        };
+        let config_features = serde_json::json!({});
+
+        let result = validate_lockfile_against_config(
+            Some(&lockfile),
+            &config_features,
+            Path::new("devcontainer-lock.json"),
+        );
+
+        assert!(result.is_matched());
+    }
+
+    #[test]
+    fn test_extract_feature_ids_from_config() {
+        let features = serde_json::json!({
+            "ghcr.io/devcontainers/features/node:1": {},
+            "ghcr.io/devcontainers/features/go:1": {"version": "1.20"}
+        });
+
+        let mut ids = extract_feature_ids_from_config(&features);
+        ids.sort();
+
+        assert_eq!(
+            ids,
+            vec![
+                "ghcr.io/devcontainers/features/go:1",
+                "ghcr.io/devcontainers/features/node:1"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_extract_feature_ids_from_config_empty() {
+        let features = serde_json::json!({});
+        let ids = extract_feature_ids_from_config(&features);
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn test_extract_feature_ids_from_config_not_object() {
+        let features = serde_json::json!(["feature1", "feature2"]);
+        let ids = extract_feature_ids_from_config(&features);
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn test_validation_result_format_error_matched() {
+        let result = LockfileValidationResult::Matched;
+        assert_eq!(result.format_error(), "Lockfile validation passed");
+    }
+
+    #[test]
+    fn test_validation_result_format_error_missing() {
+        let result = LockfileValidationResult::Missing {
+            expected_path: PathBuf::from("/path/to/lockfile.json"),
+        };
+        let error = result.format_error();
+        assert!(error.contains("Frozen lockfile mode requires a lockfile"));
+        assert!(error.contains("/path/to/lockfile.json"));
+    }
+
+    #[test]
+    fn test_validation_result_format_error_missing_from_lockfile() {
+        let result = LockfileValidationResult::MissingFromLockfile {
+            features: vec!["feature-a".to_string(), "feature-b".to_string()],
+        };
+        let error = result.format_error();
+        assert!(error.contains("features declared in config but missing from lockfile"));
+        assert!(error.contains("feature-a"));
+        assert!(error.contains("feature-b"));
+    }
+
+    #[test]
+    fn test_validation_result_format_error_extra_in_lockfile() {
+        let result = LockfileValidationResult::ExtraInLockfile {
+            features: vec!["stale-feature".to_string()],
+        };
+        let error = result.format_error();
+        assert!(error.contains("features in lockfile but not declared in config"));
+        assert!(error.contains("stale-feature"));
+    }
+
+    #[test]
+    fn test_validation_result_format_error_mismatch() {
+        let result = LockfileValidationResult::Mismatch {
+            missing_from_lockfile: vec!["new-feature".to_string()],
+            extra_in_lockfile: vec!["old-feature".to_string()],
+        };
+        let error = result.format_error();
+        assert!(error.contains("Frozen lockfile mismatch"));
+        assert!(error.contains("new-feature"));
+        assert!(error.contains("old-feature"));
     }
 }

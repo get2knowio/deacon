@@ -221,6 +221,13 @@ pub enum Commands {
         /// Skip feature auto-mapping (hidden testing flag)
         #[arg(long, hide = true)]
         skip_feature_auto_mapping: bool,
+        /// Path to feature lockfile for validation (experimental, hidden)
+        #[arg(long, hide = true)]
+        experimental_lockfile: Option<PathBuf>,
+        /// Require lockfile to exist and match config features exactly (experimental, hidden)
+        /// Implies --experimental-lockfile if not specified; uses default lockfile location.
+        #[arg(long, hide = true)]
+        experimental_frozen_lockfile: bool,
         /// Dotfiles repository URL
         #[arg(long)]
         dotfiles_repository: Option<String>,
@@ -1085,6 +1092,8 @@ impl Cli {
                 prefer_cli_features,
                 feature_install_order,
                 skip_feature_auto_mapping,
+                experimental_lockfile,
+                experimental_frozen_lockfile,
                 dotfiles_repository,
                 dotfiles_install_command,
                 dotfiles_target_path,
@@ -1121,6 +1130,8 @@ impl Cli {
                     cache_to,
                     buildkit,
                     skip_feature_auto_mapping,
+                    experimental_lockfile,
+                    experimental_frozen_lockfile,
                     dotfiles_repository,
                     dotfiles_install_command,
                     dotfiles_target_path,

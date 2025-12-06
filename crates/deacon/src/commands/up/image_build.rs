@@ -6,11 +6,12 @@
 //! - `build_image_from_config` - Build Docker image from build configuration
 
 use anyhow::{Context, Result};
+use deacon_core::build::BuildOptions;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::{DeaconError, DockerError};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument};
 
 /// Build configuration extracted from DevContainerConfig
 #[derive(Debug, Clone)]
@@ -147,15 +148,39 @@ pub(crate) fn extract_build_config_from_devcontainer(
 }
 
 /// Build Docker image from build configuration
-#[instrument(skip(build_config))]
+///
+/// # Arguments
+///
+/// * `build_config` - Build configuration extracted from devcontainer.json
+/// * `build_options` - Build options containing cache and buildx settings
+///
+/// When `build_options.is_default()` is true, no extra arguments are added,
+/// preserving existing behavior. When cache-from/cache-to/builder options
+/// are set, they are passed to the docker build command via `to_docker_args()`.
+#[instrument(skip(build_config, build_options))]
 pub(crate) async fn build_image_from_config(
     build_config: &BuildConfig,
-    no_cache: bool,
+    build_options: &BuildOptions,
 ) -> Result<String> {
     debug!(
         "Building image from Dockerfile: {}",
         build_config.dockerfile
     );
+
+    // Log cache configuration before build starts (per research.md Decision 2).
+    // Docker/BuildKit handles cache failures gracefully; we inform users of the configuration.
+    if !build_options.cache_from.is_empty() {
+        info!(
+            cache_from = ?build_options.cache_from,
+            "Using cache source(s) for build"
+        );
+    }
+    if let Some(cache_to) = &build_options.cache_to {
+        info!(
+            cache_to = %cache_to,
+            "Exporting build cache to destination"
+        );
+    }
 
     // Resolve context path relative to the directory containing devcontainer.json
     // This handles ".." and other relative paths correctly
@@ -172,9 +197,12 @@ pub(crate) async fn build_image_from_config(
     build_args.push("-f".to_string());
     build_args.push(build_config.dockerfile.clone());
 
-    // Add no-cache flag
-    if no_cache {
-        build_args.push("--no-cache".to_string());
+    // Add build options (no-cache, cache-from, cache-to, builder) if any are set
+    // When is_default() is true, to_docker_args() returns an empty vec, preserving existing behavior
+    let cache_args = build_options.to_docker_args();
+    if !cache_args.is_empty() {
+        debug!("Adding build options: {:?}", cache_args);
+        build_args.extend(cache_args);
     }
 
     // Add target

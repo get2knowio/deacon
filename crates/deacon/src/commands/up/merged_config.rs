@@ -247,3 +247,281 @@ pub(crate) async fn merge_image_metadata_into_config(
 
     Ok(config)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use deacon_core::features::{FeatureMetadata, OptionValue, ResolvedFeature};
+
+    use super::*;
+
+    // ============================================================================
+    // T016: Tests for feature order preservation in metadata extraction
+    // Per data-model.md: "Ordering from the user configuration/lockfile must be
+    // preserved when serializing mergedConfiguration outputs"
+    // ============================================================================
+
+    /// Helper to create a minimal FeatureMetadata with just required fields.
+    fn empty_metadata(id: &str) -> FeatureMetadata {
+        FeatureMetadata {
+            id: id.to_string(),
+            version: None,
+            name: None,
+            description: None,
+            documentation_url: None,
+            license_url: None,
+            options: HashMap::new(),
+            container_env: HashMap::new(),
+            mounts: Vec::new(),
+            init: None,
+            privileged: None,
+            cap_add: Vec::new(),
+            security_opt: Vec::new(),
+            entrypoint: None,
+            installs_after: Vec::new(),
+            depends_on: HashMap::new(),
+            on_create_command: None,
+            update_content_command: None,
+            post_create_command: None,
+            post_start_command: None,
+            post_attach_command: None,
+        }
+    }
+
+    /// Test that extract_feature_metadata_from_config preserves declaration order.
+    ///
+    /// Features declared in non-alphabetical order should retain their original
+    /// position in the resulting metadata array.
+    #[test]
+    fn test_extract_from_config_preserves_declaration_order() {
+        // Create features object with non-alphabetical keys
+        // Using serde_json::json! macro which preserves insertion order with preserve_order feature
+        let features = serde_json::json!({
+            "ghcr.io/devcontainers/features/node:1": {"version": "20"},
+            "ghcr.io/devcontainers/features/go:1": {},
+            "ghcr.io/devcontainers/features/python:1": {"version": "3.11"},
+            "ghcr.io/devcontainers/features/rust:1": true
+        });
+
+        let entries = extract_feature_metadata_from_config(&features);
+
+        // Verify order matches declaration order (not alphabetical)
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0].id, "ghcr.io/devcontainers/features/node:1");
+        assert_eq!(entries[1].id, "ghcr.io/devcontainers/features/go:1");
+        assert_eq!(entries[2].id, "ghcr.io/devcontainers/features/python:1");
+        assert_eq!(entries[3].id, "ghcr.io/devcontainers/features/rust:1");
+
+        // Verify provenance order indexes match array position
+        assert_eq!(entries[0].provenance.as_ref().unwrap().order, Some(0));
+        assert_eq!(entries[1].provenance.as_ref().unwrap().order, Some(1));
+        assert_eq!(entries[2].provenance.as_ref().unwrap().order, Some(2));
+        assert_eq!(entries[3].provenance.as_ref().unwrap().order, Some(3));
+    }
+
+    /// Test that order is preserved even when some features have empty metadata.
+    ///
+    /// Empty options ({}) vs options with values should not affect ordering.
+    #[test]
+    fn test_extract_from_config_preserves_order_with_empty_metadata() {
+        let features = serde_json::json!({
+            "feature-c": {},
+            "feature-a": {"key": "value"},
+            "feature-b": {}
+        });
+
+        let entries = extract_feature_metadata_from_config(&features);
+
+        // Order preserved: c, a, b (not alphabetical: a, b, c)
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].id, "feature-c");
+        assert_eq!(entries[1].id, "feature-a");
+        assert_eq!(entries[2].id, "feature-b");
+
+        // First and third have no options (empty object -> None)
+        assert!(entries[0].options.is_none());
+        assert!(entries[1].options.is_some());
+        assert!(entries[2].options.is_none());
+    }
+
+    /// Test that extract_feature_metadata_from_resolved preserves slice order.
+    ///
+    /// Resolved features are already in declaration order from the resolution pipeline;
+    /// this function must preserve that order.
+    #[test]
+    fn test_extract_from_resolved_preserves_order() {
+        let resolved_features = vec![
+            ResolvedFeature {
+                id: "ghcr.io/devcontainers/features/python:1".to_string(),
+                source: "oci://ghcr.io/devcontainers/features/python:1.2.3".to_string(),
+                options: HashMap::new(),
+                metadata: FeatureMetadata {
+                    name: Some("Python".to_string()),
+                    version: Some("1.2.3".to_string()),
+                    ..empty_metadata("python")
+                },
+            },
+            ResolvedFeature {
+                id: "ghcr.io/devcontainers/features/node:1".to_string(),
+                source: "oci://ghcr.io/devcontainers/features/node:1.0.0".to_string(),
+                options: {
+                    let mut opts = HashMap::new();
+                    opts.insert("version".to_string(), OptionValue::String("20".to_string()));
+                    opts
+                },
+                metadata: FeatureMetadata {
+                    name: Some("Node.js".to_string()),
+                    version: Some("1.0.0".to_string()),
+                    ..empty_metadata("node")
+                },
+            },
+            ResolvedFeature {
+                id: "ghcr.io/devcontainers/features/go:1".to_string(),
+                source: "oci://ghcr.io/devcontainers/features/go:1.0.0".to_string(),
+                options: HashMap::new(),
+                metadata: empty_metadata("go"),
+            },
+        ];
+
+        let entries = extract_feature_metadata_from_resolved(&resolved_features, None);
+
+        // Order preserved: python, node, go (matching input slice order)
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].id, "ghcr.io/devcontainers/features/python:1");
+        assert_eq!(entries[1].id, "ghcr.io/devcontainers/features/node:1");
+        assert_eq!(entries[2].id, "ghcr.io/devcontainers/features/go:1");
+
+        // Verify provenance order indexes
+        assert_eq!(entries[0].provenance.as_ref().unwrap().order, Some(0));
+        assert_eq!(entries[1].provenance.as_ref().unwrap().order, Some(1));
+        assert_eq!(entries[2].provenance.as_ref().unwrap().order, Some(2));
+
+        // Verify full metadata is extracted when available
+        assert_eq!(entries[0].name, Some("Python".to_string()));
+        assert_eq!(entries[0].version, Some("1.2.3".to_string()));
+        assert_eq!(entries[1].name, Some("Node.js".to_string()));
+        // Third has empty metadata
+        assert!(entries[2].name.is_none());
+        assert!(entries[2].version.is_none());
+    }
+
+    /// Test that order is preserved when resolved features have varying metadata completeness.
+    ///
+    /// Some features may have rich metadata while others have minimal/empty metadata;
+    /// the order must be preserved regardless.
+    #[test]
+    fn test_extract_from_resolved_preserves_order_with_varying_metadata() {
+        let resolved_features = vec![
+            // Feature with empty metadata
+            ResolvedFeature {
+                id: "feature-z".to_string(),
+                source: "source-z".to_string(),
+                options: HashMap::new(),
+                metadata: empty_metadata("feature-z"),
+            },
+            // Feature with full metadata
+            ResolvedFeature {
+                id: "feature-a".to_string(),
+                source: "source-a".to_string(),
+                options: HashMap::new(),
+                metadata: FeatureMetadata {
+                    name: Some("Feature A".to_string()),
+                    version: Some("1.0.0".to_string()),
+                    description: Some("A description".to_string()),
+                    documentation_url: Some("https://example.com".to_string()),
+                    container_env: {
+                        let mut env = HashMap::new();
+                        env.insert("KEY".to_string(), "value".to_string());
+                        env
+                    },
+                    ..empty_metadata("feature-a")
+                },
+            },
+            // Feature with partial metadata
+            ResolvedFeature {
+                id: "feature-m".to_string(),
+                source: "source-m".to_string(),
+                options: HashMap::new(),
+                metadata: FeatureMetadata {
+                    name: Some("Feature M".to_string()),
+                    ..empty_metadata("feature-m")
+                },
+            },
+        ];
+
+        let entries = extract_feature_metadata_from_resolved(
+            &resolved_features,
+            Some("service1".to_string()),
+        );
+
+        // Order preserved: z, a, m
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].id, "feature-z");
+        assert_eq!(entries[1].id, "feature-a");
+        assert_eq!(entries[2].id, "feature-m");
+
+        // Service name is propagated to all entries
+        for entry in &entries {
+            assert_eq!(
+                entry.provenance.as_ref().unwrap().service,
+                Some("service1".to_string())
+            );
+        }
+    }
+
+    /// Test that extract_feature_metadata_from_config handles null/non-object gracefully.
+    #[test]
+    fn test_extract_from_config_handles_non_object() {
+        // Null features
+        let null_features = serde_json::Value::Null;
+        assert!(extract_feature_metadata_from_config(&null_features).is_empty());
+
+        // Array features (invalid per spec, but should not panic)
+        let array_features = serde_json::json!(["feature-a", "feature-b"]);
+        assert!(extract_feature_metadata_from_config(&array_features).is_empty());
+
+        // String features (invalid)
+        let string_features = serde_json::json!("feature-a");
+        assert!(extract_feature_metadata_from_config(&string_features).is_empty());
+    }
+
+    /// Test that empty resolved features slice produces empty output.
+    #[test]
+    fn test_extract_from_resolved_handles_empty_slice() {
+        let entries = extract_feature_metadata_from_resolved(&[], None);
+        assert!(entries.is_empty());
+    }
+
+    /// Test JSON serialization roundtrip preserves order of feature metadata.
+    ///
+    /// When metadata entries are serialized to JSON and back, order must be preserved.
+    #[test]
+    fn test_feature_metadata_json_roundtrip_preserves_order() {
+        let features = serde_json::json!({
+            "z-feature": {"opt": "val"},
+            "a-feature": {},
+            "m-feature": true
+        });
+
+        let entries = extract_feature_metadata_from_config(&features);
+
+        // Serialize to JSON
+        let json_str = serde_json::to_string(&entries).unwrap();
+
+        // Deserialize back
+        let deserialized: Vec<deacon_core::config::merge::FeatureMetadataEntry> =
+            serde_json::from_str(&json_str).unwrap();
+
+        // Order preserved through roundtrip
+        assert_eq!(deserialized.len(), 3);
+        assert_eq!(deserialized[0].id, "z-feature");
+        assert_eq!(deserialized[1].id, "a-feature");
+        assert_eq!(deserialized[2].id, "m-feature");
+
+        // Provenance order preserved
+        assert_eq!(deserialized[0].provenance.as_ref().unwrap().order, Some(0));
+        assert_eq!(deserialized[1].provenance.as_ref().unwrap().order, Some(1));
+        assert_eq!(deserialized[2].provenance.as_ref().unwrap().order, Some(2));
+    }
+}

@@ -606,6 +606,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             args.additional_features.clone(),
             args.prefer_cli_features,
             args.feature_install_order.clone(),
+            args.skip_feature_auto_mapping,
         );
 
         // Merge features

@@ -47,6 +47,9 @@ use anyhow::{Context, Result};
 use deacon_core::container::{ContainerIdentity, ContainerSelector};
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+use deacon_core::lockfile::{
+    get_lockfile_path, read_lockfile, validate_lockfile_against_config, LockfileValidationResult,
+};
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::state::StateManager;
@@ -54,7 +57,7 @@ use deacon_core::IndexMap;
 use tracing::{debug, info, instrument, warn};
 
 // Internal imports from submodules
-use args::{normalize_and_validate_args, parse_remote_env_vars};
+use args::{build_options_from_args, normalize_and_validate_args, parse_remote_env_vars};
 use compose::execute_compose_up;
 use container::execute_container_up;
 use helpers::{check_for_disallowed_features, discover_id_labels_from_config};
@@ -200,6 +203,89 @@ pub(crate) async fn execute_up_with_runtime(
     check_for_disallowed_features(&config.features)?;
     debug!("Validated features - no disallowed features found");
 
+    // T012: Enforce lockfile/frozen validation pre-build
+    // T013: User-facing error handling for lockfile/frozen enforcement
+    // If frozen mode is enabled, or lockfile path is explicitly provided, validate before build
+    if args.experimental_frozen_lockfile || args.experimental_lockfile.is_some() {
+        // Determine lockfile path: use explicit path if provided, otherwise derive from config
+        let lockfile_path = args
+            .experimental_lockfile
+            .clone()
+            .unwrap_or_else(|| get_lockfile_path(&config_path));
+
+        // Use info-level log so users can see lockfile validation is active
+        if args.experimental_frozen_lockfile {
+            info!(
+                "Frozen lockfile mode enabled: validating features against '{}'",
+                lockfile_path.display()
+            );
+        } else {
+            debug!(
+                "Lockfile validation enabled: path={}",
+                lockfile_path.display()
+            );
+        }
+
+        // Read the lockfile (may be None if missing)
+        let lockfile = read_lockfile(&lockfile_path).with_context(|| {
+            format!(
+                "Failed to read lockfile at '{}'. \
+                 The file may be corrupted or contain invalid JSON. \
+                 To regenerate, remove the file and run without --experimental-frozen-lockfile.",
+                lockfile_path.display()
+            )
+        })?;
+
+        // Validate lockfile against config features
+        let validation_result =
+            validate_lockfile_against_config(lockfile.as_ref(), &config.features, &lockfile_path);
+
+        match &validation_result {
+            LockfileValidationResult::Matched => {
+                if args.experimental_frozen_lockfile {
+                    info!(
+                        "Lockfile validation passed: all features match '{}'",
+                        lockfile_path.display()
+                    );
+                } else {
+                    debug!("Lockfile validation passed");
+                }
+            }
+            _ => {
+                let error_message = validation_result.format_error();
+
+                if args.experimental_frozen_lockfile {
+                    // Frozen mode: fail immediately on any mismatch (exit code 1)
+                    return Err(DeaconError::Config(
+                        deacon_core::errors::ConfigError::Validation {
+                            message: error_message,
+                        },
+                    )
+                    .into());
+                } else {
+                    // Non-frozen lockfile mode: warn but continue
+                    warn!("{}", error_message);
+                }
+            }
+        }
+    }
+
+    // T006: Prepare build options from CLI args for threading through Dockerfile and feature builds
+    let build_options = build_options_from_args(&args);
+    if build_options.requires_buildkit() {
+        debug!(
+            "Build options require BuildKit: cache_from={:?}, cache_to={:?}, builder={:?}",
+            build_options.cache_from, build_options.cache_to, build_options.builder
+        );
+    } else if !build_options.is_default() {
+        debug!(
+            "Build options set (no BuildKit required): no_cache={}",
+            build_options.no_cache
+        );
+    }
+    // T007: build_options is passed to Dockerfile builds below
+    // T008: build_options is passed to feature builds via execute_container_up
+
     // Apply CLI mounts to configuration mounts so runtime receives them
     if !args.mount.is_empty() {
         let mut mounts = config.mounts.clone();
@@ -335,10 +421,19 @@ pub(crate) async fn execute_up_with_runtime(
 
     // Apply feature merging if CLI features are provided
     if args.additional_features.is_some() || args.feature_install_order.is_some() {
+        // T013: Log info when skip-feature-auto-mapping is enabled so users know CLI features are ignored
+        if args.skip_feature_auto_mapping && args.additional_features.is_some() {
+            info!(
+                "Skip-feature-auto-mapping enabled: CLI-provided features (--additional-features) \
+                 will be ignored. Only features declared in devcontainer.json will be used."
+            );
+        }
+
         let merge_config = FeatureMergeConfig::new(
             args.additional_features.clone(),
             args.prefer_cli_features,
             args.feature_install_order.clone(),
+            args.skip_feature_auto_mapping,
         );
 
         // Merge features
@@ -364,13 +459,13 @@ pub(crate) async fn execute_up_with_runtime(
     }
 
     // Build image from Dockerfile if needed (when no image specified but build object present)
+    // T007: Pass build_options to apply cache-from/cache-to/buildx settings
     if config.image.is_none() && !config.uses_compose() {
         if let Some(build_config) =
             extract_build_config_from_devcontainer(&config, &workspace_folder)?
         {
             info!("Building image from Dockerfile configuration");
-            let built_image_id =
-                build_image_from_config(&build_config, args.build_no_cache).await?;
+            let built_image_id = build_image_from_config(&build_config, &build_options).await?;
 
             // Update config to use the built image
             config.image = Some(built_image_id.clone());
@@ -409,6 +504,7 @@ pub(crate) async fn execute_up_with_runtime(
             &runtime,
             config_path.as_path(),
             &cache_folder,
+            &build_options,
         )
         .await?
     };

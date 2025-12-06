@@ -6,9 +6,11 @@
 //! - `NormalizedMount` - Parsed mount specifications
 //! - `MountType` - Mount type enum
 //! - `BuildkitMode` - BuildKit mode enum
+//! - Helper to construct `BuildOptions` from CLI args
 
 use crate::commands::shared::{NormalizedRemoteEnv, TerminalDimensions};
 use anyhow::Result;
+use deacon_core::build::BuildOptions;
 use deacon_core::container::ContainerSelector;
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::errors::DeaconError;
@@ -363,6 +365,12 @@ pub struct UpArgs {
     pub dotfiles_install_command: Option<String>,
     pub dotfiles_target_path: Option<String>,
 
+    // Lockfile control (experimental)
+    /// Path to feature lockfile for validation (experimental)
+    pub experimental_lockfile: Option<PathBuf>,
+    /// Require lockfile to exist and match config features exactly (experimental)
+    pub experimental_frozen_lockfile: bool,
+
     // Metadata and output control
     pub omit_config_remote_env_from_metadata: bool,
     pub omit_syntax_directive: bool,
@@ -440,6 +448,8 @@ impl Default for UpArgs {
             dotfiles_repository: None,
             dotfiles_install_command: None,
             dotfiles_target_path: None,
+            experimental_lockfile: None,
+            experimental_frozen_lockfile: false,
             omit_config_remote_env_from_metadata: false,
             omit_syntax_directive: false,
             include_configuration: false,
@@ -479,6 +489,27 @@ pub(crate) fn parse_remote_env_vars(envs: &[String]) -> Result<Vec<NormalizedRem
         remote_env.push(NormalizedRemoteEnv::parse(env_str)?);
     }
     Ok(remote_env)
+}
+
+/// Construct `BuildOptions` from up command arguments.
+///
+/// Extracts the build-related options from `UpArgs` and aggregates them into
+/// a `BuildOptions` struct that can be threaded through both Dockerfile and
+/// feature builds.
+///
+/// Per spec (data-model.md):
+/// - `cache_from`: ordered list of cache sources, preserved when invoking BuildKit/buildx
+/// - `cache_to`: optional cache destination
+/// - `builder`: optional buildx builder selection (not yet exposed in up CLI, set to None)
+/// - Scope: applies to entire `up` run for both Dockerfile and feature builds
+pub(crate) fn build_options_from_args(args: &UpArgs) -> BuildOptions {
+    BuildOptions {
+        no_cache: args.build_no_cache,
+        cache_from: args.cache_from.clone(),
+        cache_to: args.cache_to.clone(),
+        // builder is not currently exposed in the up CLI; reserved for future addition
+        builder: None,
+    }
 }
 
 /// Normalize and validate up command arguments before any runtime operations.

@@ -560,3 +560,232 @@ fn test_camel_case_field_naming() {
     assert!(json_str.contains("containerEnv"));
     assert!(!json_str.contains("container_env"));
 }
+
+// ============================================================================
+// T016: Additional order preservation tests for end-to-end validation
+// ============================================================================
+
+/// Test that EnrichedMergedConfiguration preserves feature order when built from config.
+///
+/// Per data-model.md: "Ordering from the user configuration/lockfile must be preserved
+/// when serializing mergedConfiguration outputs"
+#[test]
+fn test_enriched_merged_configuration_preserves_feature_declaration_order() {
+    use deacon_core::config::merge::MergedDevContainerConfig;
+    use deacon_core::config::DevContainerConfig;
+
+    // Create config with features in non-alphabetical order
+    let config = DevContainerConfig {
+        name: Some("order-test".to_string()),
+        image: Some("node:18".to_string()),
+        features: serde_json::json!({
+            "ghcr.io/devcontainers/features/python:1": {"version": "3.11"},
+            "ghcr.io/devcontainers/features/node:1": {"version": "20"},
+            "ghcr.io/devcontainers/features/go:1": {},
+            "ghcr.io/devcontainers/features/rust:1": true
+        }),
+        ..Default::default()
+    };
+
+    let merged = MergedDevContainerConfig { config, meta: None };
+
+    // Build feature metadata in declaration order
+    let features = vec![
+        FeatureMetadataEntry::from_config_entry(
+            "ghcr.io/devcontainers/features/python:1".to_string(),
+            serde_json::json!({"version": "3.11"}),
+            0,
+        ),
+        FeatureMetadataEntry::from_config_entry(
+            "ghcr.io/devcontainers/features/node:1".to_string(),
+            serde_json::json!({"version": "20"}),
+            1,
+        ),
+        FeatureMetadataEntry::from_config_entry(
+            "ghcr.io/devcontainers/features/go:1".to_string(),
+            serde_json::json!({}),
+            2,
+        ),
+        FeatureMetadataEntry::from_config_entry(
+            "ghcr.io/devcontainers/features/rust:1".to_string(),
+            serde_json::json!(true),
+            3,
+        ),
+    ];
+
+    let enriched = EnrichedMergedConfiguration::from_merged(merged).with_feature_metadata(features);
+
+    // Serialize and parse back
+    let json = serde_json::to_value(&enriched).unwrap();
+    let feature_metadata = json["featureMetadata"].as_array().unwrap();
+
+    // Verify declaration order is preserved (not alphabetical: go, node, python, rust)
+    assert_eq!(feature_metadata.len(), 4);
+    assert_eq!(
+        feature_metadata[0]["id"],
+        "ghcr.io/devcontainers/features/python:1"
+    );
+    assert_eq!(
+        feature_metadata[1]["id"],
+        "ghcr.io/devcontainers/features/node:1"
+    );
+    assert_eq!(
+        feature_metadata[2]["id"],
+        "ghcr.io/devcontainers/features/go:1"
+    );
+    assert_eq!(
+        feature_metadata[3]["id"],
+        "ghcr.io/devcontainers/features/rust:1"
+    );
+
+    // Verify provenance order indexes
+    for (i, entry) in feature_metadata.iter().enumerate() {
+        assert_eq!(entry["provenance"]["order"], i as i64);
+    }
+}
+
+/// Test that feature order is preserved when some features have empty metadata.
+///
+/// Empty options should not cause features to be reordered or filtered.
+#[test]
+fn test_feature_order_with_mixed_empty_and_populated_metadata() {
+    use deacon_core::config::merge::MergedDevContainerConfig;
+    use deacon_core::config::DevContainerConfig;
+
+    let config = DevContainerConfig {
+        name: Some("mixed-metadata".to_string()),
+        image: Some("alpine:3.18".to_string()),
+        ..Default::default()
+    };
+
+    let merged = MergedDevContainerConfig { config, meta: None };
+
+    // Features with varying levels of metadata completeness
+    let features = vec![
+        // Full metadata
+        FeatureMetadataEntry {
+            id: "feature-z".to_string(),
+            version: Some("1.0.0".to_string()),
+            name: Some("Feature Z".to_string()),
+            description: Some("The Z feature".to_string()),
+            options: Some(serde_json::json!({"opt": "val"})),
+            ..Default::default()
+        },
+        // Empty metadata
+        FeatureMetadataEntry {
+            id: "feature-a".to_string(),
+            provenance: Some(Provenance {
+                source: None,
+                service: None,
+                order: Some(1),
+            }),
+            ..Default::default()
+        },
+        // Partial metadata
+        FeatureMetadataEntry {
+            id: "feature-m".to_string(),
+            name: Some("Feature M".to_string()),
+            provenance: Some(Provenance {
+                source: None,
+                service: None,
+                order: Some(2),
+            }),
+            ..Default::default()
+        },
+    ];
+
+    let enriched = EnrichedMergedConfiguration::from_merged(merged).with_feature_metadata(features);
+
+    let json = serde_json::to_value(&enriched).unwrap();
+    let feature_metadata = json["featureMetadata"].as_array().unwrap();
+
+    // Order: z, a, m (not alphabetical: a, m, z)
+    assert_eq!(feature_metadata.len(), 3);
+    assert_eq!(feature_metadata[0]["id"], "feature-z");
+    assert_eq!(feature_metadata[1]["id"], "feature-a");
+    assert_eq!(feature_metadata[2]["id"], "feature-m");
+
+    // Verify all features are present even with empty metadata
+    assert!(feature_metadata[0]["version"].is_string());
+    assert!(
+        feature_metadata[1].get("version").is_none() || feature_metadata[1]["version"].is_null()
+    );
+}
+
+/// Test that feature order survives JSON serialization roundtrip in EnrichedMergedConfiguration.
+#[test]
+fn test_enriched_merged_configuration_order_survives_roundtrip() {
+    use deacon_core::config::merge::MergedDevContainerConfig;
+    use deacon_core::config::DevContainerConfig;
+
+    let config = DevContainerConfig {
+        name: Some("roundtrip-test".to_string()),
+        image: Some("node:18".to_string()),
+        ..Default::default()
+    };
+
+    let merged = MergedDevContainerConfig { config, meta: None };
+
+    // Create features in specific order
+    let features = vec![
+        FeatureMetadataEntry::from_config_entry("zz-last".to_string(), serde_json::json!({}), 0),
+        FeatureMetadataEntry::from_config_entry("aa-first".to_string(), serde_json::json!({}), 1),
+        FeatureMetadataEntry::from_config_entry("mm-middle".to_string(), serde_json::json!({}), 2),
+    ];
+
+    let original = EnrichedMergedConfiguration::from_merged(merged).with_feature_metadata(features);
+
+    // Serialize to JSON string
+    let json_str = serde_json::to_string(&original).unwrap();
+
+    // Deserialize back
+    let deserialized: EnrichedMergedConfiguration = serde_json::from_str(&json_str).unwrap();
+
+    // Verify order is preserved
+    let feature_metadata = deserialized.feature_metadata.unwrap();
+    assert_eq!(feature_metadata.len(), 3);
+    assert_eq!(feature_metadata[0].id, "zz-last");
+    assert_eq!(feature_metadata[1].id, "aa-first");
+    assert_eq!(feature_metadata[2].id, "mm-middle");
+
+    // Verify provenance order is preserved
+    assert_eq!(
+        feature_metadata[0].provenance.as_ref().unwrap().order,
+        Some(0)
+    );
+    assert_eq!(
+        feature_metadata[1].provenance.as_ref().unwrap().order,
+        Some(1)
+    );
+    assert_eq!(
+        feature_metadata[2].provenance.as_ref().unwrap().order,
+        Some(2)
+    );
+}
+
+/// Test that feature order is stable across multiple serializations.
+///
+/// Serializing the same configuration multiple times should produce identical output.
+#[test]
+fn test_feature_order_serialization_stability() {
+    let features = vec![
+        FeatureMetadataEntry::from_config_entry("beta".to_string(), serde_json::json!({}), 0),
+        FeatureMetadataEntry::from_config_entry("alpha".to_string(), serde_json::json!({}), 1),
+        FeatureMetadataEntry::from_config_entry("gamma".to_string(), serde_json::json!({}), 2),
+    ];
+
+    // Serialize multiple times
+    let json1 = serde_json::to_string(&features).unwrap();
+    let json2 = serde_json::to_string(&features).unwrap();
+    let json3 = serde_json::to_string(&features).unwrap();
+
+    // All serializations should be identical
+    assert_eq!(json1, json2);
+    assert_eq!(json2, json3);
+
+    // Parse and verify order
+    let parsed: Vec<FeatureMetadataEntry> = serde_json::from_str(&json1).unwrap();
+    assert_eq!(parsed[0].id, "beta");
+    assert_eq!(parsed[1].id, "alpha");
+    assert_eq!(parsed[2].id, "gamma");
+}
