@@ -203,7 +203,7 @@ fn resolve_workspace_configuration(
 async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     config: &deacon_core::config::DevContainerConfig,
     additional_features: Option<&str>,
-    _skip_feature_auto_mapping: bool,
+    skip_feature_auto_mapping: bool,
     fetcher: &deacon_core::oci::FeatureFetcher<C>,
 ) -> Result<FeaturesConfiguration> {
     use anyhow::Context;
@@ -229,8 +229,9 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
 
         let merge_config = FeatureMergeConfig::new(
             Some(additional_features_str.to_string()),
-            true, // CLI features take precedence over config features
-            None, // No install order override in this context
+            true,                      // CLI features take precedence over config features
+            None,                      // No install order override in this context
+            skip_feature_auto_mapping, // Respect CLI flag for auto-mapping behavior
         );
         config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
     }
@@ -280,7 +281,7 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                     (k, option_value)
                 })
                 .collect(),
-            serde_json::Value::String(s) if !_skip_feature_auto_mapping => {
+            serde_json::Value::String(s) if !skip_feature_auto_mapping => {
                 // Auto-map top-level string value to "version" option
                 let mut map = HashMap::new();
                 map.insert("version".to_string(), OptionValue::String(s.clone()));

@@ -306,8 +306,19 @@ clippy: ## Run clippy with warnings as errors
 coverage: ## Generate coverage report
 	cargo llvm-cov --workspace --open
 
-clean: ## Clean build artifacts
+clean: ## Clean build artifacts and Docker resources (for docker-in-docker devcontainer)
 	cargo clean
+	@# Docker cleanup (safe no-ops if docker unavailable)
+	@if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then \
+		echo "Cleaning Docker resources..."; \
+		docker container prune -f 2>/dev/null || true; \
+		docker image prune -af 2>/dev/null || true; \
+		docker volume prune -f 2>/dev/null || true; \
+		docker network prune -f 2>/dev/null || true; \
+		docker builder prune -af 2>/dev/null || true; \
+		docker buildx prune -af 2>/dev/null || true; \
+		echo "Docker cleanup complete."; \
+	fi
 
 release-check: ## Full quality gate
 	cargo fmt --all && cargo fmt --all -- --check && \

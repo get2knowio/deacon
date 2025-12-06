@@ -82,6 +82,13 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
 
+# integration_up_build_options tests are CLI-only (no actual Docker container operations)
+# They test argument parsing and BuildOptions/BuildKitOptions behavior without spawning containers
+[[profile.default.overrides]]
+filter = 'binary(=integration_up_build_options)'
+test-group = 'smoke-cli'
+slow-timeout = "60s"
+
 [[profile.default.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
 test-group = 'docker-slow-shared'
@@ -105,7 +112,7 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates)'
+filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
 test-group = 'fs-heavy'
 slow-timeout = "5m"
 
@@ -151,6 +158,12 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
 
+# integration_up_build_options tests are CLI-only (no actual Docker container operations)
+[[profile.dev-fast.overrides]]
+filter = 'binary(=integration_up_build_options)'
+test-group = 'smoke-cli'
+slow-timeout = "60s"
+
 [[profile.dev-fast.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
 test-group = 'docker-slow-shared'
@@ -173,7 +186,7 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates)'
+filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
 test-group = 'fs-heavy'
 
 [[profile.dev-fast.overrides]]
@@ -193,6 +206,12 @@ retries = 0
 slow-timeout = { period = "30m", terminate-after = 1 }
 status-level = "pass"
 default-filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_vulnerability_scan)'
+
+# integration_up_build_options tests are CLI-only (no actual Docker container operations)
+[[profile.long-running.overrides]]
+filter = 'binary(=integration_up_build_options)'
+test-group = 'smoke-cli'
+slow-timeout = "60s"
 
 [[profile.long-running.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_vulnerability_scan)'
@@ -235,6 +254,12 @@ test-group = 'parity-cli'
 [[profile.docker.overrides]]
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
+
+# integration_up_build_options tests are CLI-only (no actual Docker container operations)
+[[profile.docker.overrides]]
+filter = 'binary(=integration_up_build_options)'
+test-group = 'smoke-cli'
+slow-timeout = "60s"
 
 [[profile.docker.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress)'
@@ -298,6 +323,12 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
 
+# integration_up_build_options tests are CLI-only (no actual Docker container operations)
+[[profile.full.overrides]]
+filter = 'binary(=integration_up_build_options)'
+test-group = 'smoke-cli'
+slow-timeout = "60s"
+
 [[profile.full.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(#integration_compose_*) | binary(=integration_vulnerability_scan) | binary(=integration_progress) | binary(=up_dotfiles)'
 test-group = 'docker-exclusive'
@@ -321,7 +352,7 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.full.overrides]]
-filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates)'
+filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
 test-group = 'fs-heavy'
 
 [[profile.full.overrides]]
@@ -365,6 +396,12 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
 
+# integration_up_build_options tests are CLI-only (no actual Docker container operations)
+[[profile.ci.overrides]]
+filter = 'binary(=integration_up_build_options)'
+test-group = 'smoke-cli'
+slow-timeout = "60s"
+
 [[profile.ci.overrides]]
 filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(#integration_compose_*) | binary(=integration_vulnerability_scan) | binary(=integration_progress) | binary(=up_dotfiles)'
 test-group = 'docker-exclusive'
@@ -389,7 +426,7 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.ci.overrides]]
-filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates)'
+filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
 test-group = 'fs-heavy'
 threads-required = 1
 

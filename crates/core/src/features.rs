@@ -877,6 +877,8 @@ pub struct FeatureMergeConfig {
     pub prefer_cli_features: bool,
     /// Override for feature installation order
     pub feature_install_order: Option<String>,
+    /// Skip feature auto-mapping (blocks implicit feature additions from CLI)
+    pub skip_auto_mapping: bool,
 }
 
 impl FeatureMergeConfig {
@@ -885,11 +887,13 @@ impl FeatureMergeConfig {
         additional_features: Option<String>,
         prefer_cli_features: bool,
         feature_install_order: Option<String>,
+        skip_auto_mapping: bool,
     ) -> Self {
         Self {
             additional_features,
             prefer_cli_features,
             feature_install_order,
+            skip_auto_mapping,
         }
     }
 }
@@ -987,6 +991,10 @@ impl FeatureMerger {
     }
 
     /// Merge config features with additional CLI features
+    ///
+    /// When `skip_auto_mapping` is true in `merge_config`, additional CLI features
+    /// are NOT added to the config features. Only features explicitly declared in
+    /// devcontainer.json are used.
     #[instrument(level = "debug")]
     pub fn merge_features(
         config_features: &serde_json::Value,
@@ -996,6 +1004,12 @@ impl FeatureMerger {
 
         // Start with config features
         let mut merged = config_features.clone();
+
+        // Skip adding CLI features when skip_auto_mapping is enabled
+        if merge_config.skip_auto_mapping {
+            debug!("skip_auto_mapping enabled: only using explicitly declared config features");
+            return Ok(merged);
+        }
 
         // Parse and merge additional features if provided
         if let Some(ref additional_json) = merge_config.additional_features {
@@ -1128,6 +1142,7 @@ mod merge_tests {
             Some(r#"{"docker": true, "python": "3.9"}"#.to_string()),
             false,
             None,
+            false,
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
@@ -1147,6 +1162,7 @@ mod merge_tests {
             Some(r#"{"git": false, "node": "18"}"#.to_string()),
             false, // config wins
             None,
+            false,
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
@@ -1164,6 +1180,7 @@ mod merge_tests {
             Some(r#"{"git": false, "node": "18"}"#.to_string()),
             true, // CLI wins
             None,
+            false,
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
@@ -1178,7 +1195,7 @@ mod merge_tests {
     fn test_get_effective_install_order_cli_override() {
         let config_order = Some(vec!["git".to_string(), "node".to_string()]);
         let merge_config =
-            FeatureMergeConfig::new(None, false, Some("docker,git,node".to_string()));
+            FeatureMergeConfig::new(None, false, Some("docker,git,node".to_string()), false);
 
         let result =
             FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
@@ -1196,7 +1213,7 @@ mod merge_tests {
     #[test]
     fn test_get_effective_install_order_config_fallback() {
         let config_order = Some(vec!["git".to_string(), "node".to_string()]);
-        let merge_config = FeatureMergeConfig::new(None, false, None);
+        let merge_config = FeatureMergeConfig::new(None, false, None, false);
 
         let result =
             FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
@@ -1207,7 +1224,7 @@ mod merge_tests {
     #[test]
     fn test_get_effective_install_order_none() {
         let config_order: Option<Vec<String>> = None;
-        let merge_config = FeatureMergeConfig::new(None, false, None);
+        let merge_config = FeatureMergeConfig::new(None, false, None, false);
 
         let result =
             FeatureMerger::get_effective_install_order(config_order.as_ref(), &merge_config)
@@ -2019,6 +2036,7 @@ mod tests {
             Some(r#"{"git": {"version": "3.0"}, "docker": true}"#.to_string()),
             false, // config wins
             None,
+            false,
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
@@ -2043,6 +2061,7 @@ mod tests {
             Some(r#"{"git": {"version": "3.0"}, "docker": true}"#.to_string()),
             true, // CLI wins
             None,
+            false,
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
@@ -2067,6 +2086,7 @@ mod tests {
             Some(r#"{"  docker  ": true, " python ": "3.9"}"#.to_string()),
             false,
             None,
+            false,
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
@@ -2095,6 +2115,7 @@ mod tests {
             Some(r#"{"  docker  ": true, " python ": "3.9"}"#.to_string()),
             false,
             None,
+            false,
         );
 
         // First merge
@@ -2126,7 +2147,7 @@ mod tests {
     #[test]
     fn test_merge_features_empty_additional() {
         let config_features = serde_json::json!({"git": true});
-        let merge_config = FeatureMergeConfig::new(None, false, None);
+        let merge_config = FeatureMergeConfig::new(None, false, None, false);
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
         let obj = result.as_object().unwrap();
@@ -2142,6 +2163,7 @@ mod tests {
             Some(r#"{"git": true, "invalid": json}"#.to_string()),
             false,
             None,
+            false,
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config);
@@ -2152,7 +2174,7 @@ mod tests {
     fn test_merge_features_additional_not_object() {
         let config_features = serde_json::json!({"git": true});
         let merge_config =
-            FeatureMergeConfig::new(Some(r#"["git", "node"]"#.to_string()), false, None);
+            FeatureMergeConfig::new(Some(r#"["git", "node"]"#.to_string()), false, None, false);
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config);
         assert!(result.is_err());
@@ -2165,9 +2187,73 @@ mod tests {
             Some(r#"{"git": true, "node": 123}"#.to_string()),
             false,
             None,
+            false,
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_features_skip_auto_mapping() {
+        // Test that skip_auto_mapping blocks CLI features from being added
+        let config_features = serde_json::json!({"git": true, "node": "16"});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"docker": true, "python": "3.9"}"#.to_string()),
+            false,
+            None,
+            true, // skip_auto_mapping enabled
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        // Only config features should be present, CLI features should be blocked
+        assert_eq!(obj.len(), 2);
+        assert_eq!(obj["git"], serde_json::Value::Bool(true));
+        assert_eq!(obj["node"], serde_json::Value::String("16".to_string()));
+        assert!(!obj.contains_key("docker")); // CLI feature blocked
+        assert!(!obj.contains_key("python")); // CLI feature blocked
+    }
+
+    #[test]
+    fn test_merge_features_skip_auto_mapping_preserves_config_features() {
+        // Test that skip_auto_mapping preserves config features even when CLI features exist
+        let config_features = serde_json::json!({"git": {"version": "2.0"}});
+        let merge_config = FeatureMergeConfig::new(
+            Some(r#"{"git": {"version": "3.0"}, "docker": true}"#.to_string()),
+            true, // CLI would normally win on conflicts
+            None,
+            true, // skip_auto_mapping enabled
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        // Only config features should be present
+        assert_eq!(obj.len(), 1);
+        assert_eq!(
+            obj["git"]["version"],
+            serde_json::Value::String("2.0".to_string())
+        ); // Config value preserved
+        assert!(!obj.contains_key("docker")); // CLI feature blocked
+    }
+
+    #[test]
+    fn test_merge_features_skip_auto_mapping_empty_cli_features() {
+        // Test that skip_auto_mapping works correctly when no CLI features provided
+        let config_features = serde_json::json!({"git": true, "node": "16"});
+        let merge_config = FeatureMergeConfig::new(
+            None, // No CLI features
+            false, None, true, // skip_auto_mapping enabled
+        );
+
+        let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+        let obj = result.as_object().unwrap();
+
+        // Config features should remain unchanged
+        assert_eq!(obj.len(), 2);
+        assert_eq!(obj["git"], serde_json::Value::Bool(true));
+        assert_eq!(obj["node"], serde_json::Value::String("16".to_string()));
     }
 }

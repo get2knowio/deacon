@@ -796,6 +796,7 @@ impl ComposeManager {
     ///
     /// ```no_run
     /// # use deacon_core::compose::{ComposeManager, ComposeProject};
+    /// # use indexmap::IndexMap;
     /// # use std::path::PathBuf;
     /// # fn example() -> anyhow::Result<()> {
     /// let manager = ComposeManager::new();
@@ -857,6 +858,7 @@ impl ComposeManager {
     ///
     /// ```no_run
     /// # use deacon_core::compose::{ComposeManager, ComposeProject};
+    /// # use indexmap::IndexMap;
     /// # use std::path::PathBuf;
     /// # fn example() -> anyhow::Result<()> {
     /// let manager = ComposeManager::new();

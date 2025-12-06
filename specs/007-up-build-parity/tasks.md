@@ -17,8 +17,8 @@
 
 **Purpose**: Confirm scope and locate insertion points
 
-- [ ] T001 Review scope and constraints for up build parity in specs/007-up-build-parity/plan.md and specs/007-up-build-parity/spec.md
-- [ ] T002 Map current up build and feature build flow entry points in crates/deacon/src/commands/up.rs for later wiring
+- [x] T001 Review scope and constraints for up build parity in specs/007-up-build-parity/plan.md and specs/007-up-build-parity/spec.md
+- [x] T002 Map current up build and feature build flow entry points in crates/deacon/src/commands/up.rs for later wiring
 
 ---
 
@@ -28,9 +28,9 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T003 Survey BuildKit/buildx detection helpers and gaps in crates/core/src/build/buildkit.rs to plan fail-fast checks
-- [ ] T004 Catalog feature resolution and lockfile handling behaviors in crates/core/src/features.rs and crates/core/src/lockfile.rs to understand enforcement hooks
-- [ ] T005 Review merged configuration enrichment code and tests in crates/deacon/src/commands/up.rs and crates/deacon/tests/up_merged_configuration.rs to identify metadata injection points
+- [x] T003 Survey BuildKit/buildx detection helpers and gaps in crates/core/src/build/buildkit.rs to plan fail-fast checks
+- [x] T004 Catalog feature resolution and lockfile handling behaviors in crates/core/src/features.rs and crates/core/src/lockfile.rs to understand enforcement hooks
+- [x] T005 Review merged configuration enrichment code and tests in crates/deacon/src/commands/up.rs and crates/deacon/tests/up_merged_configuration.rs to identify metadata injection points
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -44,15 +44,15 @@
 
 ### Implementation for User Story 1
 
-- [ ] T006 [P] [US1] Wire cache-from/cache-to/buildx/builder flag parsing through up CLI in crates/deacon/src/commands/up.rs (reuse shared flag helpers from build where available)
-- [ ] T007 [US1] Thread BuildOptions through up Dockerfile build invocation to docker/buildx adapter in crates/deacon/src/commands/up.rs and crates/core/src/docker.rs
-- [ ] T008 [US1] Apply BuildOptions to feature build pipeline so feature builds honor cache-from/cache-to/buildx settings in crates/core/src/feature_installer.rs
-- [ ] T009 [US1] Enforce BuildKit/buildx availability and emit fail-fast errors when requested options are unsupported in crates/core/src/build/buildkit.rs
-- [ ] T010 [P] [US1] Add integration coverage proving cache-from/cache-to/buildx propagate to Dockerfile and feature builds in crates/deacon/tests/integration_up_build_options.rs
-- [ ] T021 [US1] Audit default build invocation to ensure no cache/buildx args are injected when options are absent in crates/deacon/src/commands/up.rs and crates/core/src/docker.rs
-- [ ] T022 [P] [US1] Add integration test verifying default build behavior with no cache/buildx options remains unchanged in crates/deacon/tests/integration_up_build_options.rs
-- [ ] T023 [US1] Implement warning-and-continue handling when cache-from/cache-to endpoints are unreachable in crates/core/src/docker.rs and crates/core/src/feature_installer.rs
-- [ ] T024 [P] [US1] Add integration test for unreachable cache endpoints emitting warnings while builds proceed for Dockerfile and feature builds in crates/deacon/tests/integration_up_build_options.rs
+- [x] T006 [P] [US1] Wire cache-from/cache-to/buildx/builder flag parsing through up CLI in crates/deacon/src/commands/up.rs (reuse shared flag helpers from build where available)
+- [x] T007 [US1] Thread BuildOptions through up Dockerfile build invocation to docker/buildx adapter in crates/deacon/src/commands/up.rs and crates/core/src/docker.rs
+- [x] T008 [US1] Apply BuildOptions to feature build pipeline so feature builds honor cache-from/cache-to/buildx settings in crates/core/src/feature_installer.rs
+- [x] T009 [US1] Enforce BuildKit/buildx availability and emit fail-fast errors when requested options are unsupported in crates/core/src/build/buildkit.rs
+- [x] T010 [P] [US1] Add integration coverage proving cache-from/cache-to/buildx propagate to Dockerfile and feature builds in crates/deacon/tests/integration_up_build_options.rs
+- [x] T021 [US1] Audit default build invocation to ensure no cache/buildx args are injected when options are absent in crates/deacon/src/commands/up.rs and crates/core/src/docker.rs
+- [x] T022 [P] [US1] Add integration test verifying default build behavior with no cache/buildx options remains unchanged in crates/deacon/tests/integration_up_build_options.rs
+- [x] T023 [US1] Implement warning-and-continue handling when cache-from/cache-to endpoints are unreachable in crates/core/src/docker.rs and crates/core/src/feature_installer.rs
+- [x] T024 [P] [US1] Add integration test for unreachable cache endpoints emitting warnings while builds proceed for Dockerfile and feature builds in crates/deacon/tests/integration_up_build_options.rs
 
 **Checkpoint**: User Story 1 fully functional and testable independently
 
@@ -66,10 +66,10 @@
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Implement skip-feature-auto-mapping flag handling to block implicit feature additions in crates/deacon/src/commands/up.rs and crates/core/src/features.rs
-- [ ] T012 [US2] Enforce lockfile/frozen validation pre-build and halt on mismatch/missing using crates/core/src/lockfile.rs with entrypoint checks in crates/deacon/src/commands/up.rs
-- [ ] T013 [P] [US2] Refine user-facing errors and exit codes for skip-auto-mapping and lockfile/frozen enforcement in crates/deacon/src/commands/up.rs
-- [ ] T014 [P] [US2] Add integration tests for skip-feature-auto-mapping and lockfile/frozen fail-fast behavior in crates/deacon/tests/up_lockfile_frozen.rs
+- [x] T011 [US2] Implement skip-feature-auto-mapping flag handling to block implicit feature additions in crates/deacon/src/commands/up.rs and crates/core/src/features.rs
+- [x] T012 [US2] Enforce lockfile/frozen validation pre-build and halt on mismatch/missing using crates/core/src/lockfile.rs with entrypoint checks in crates/deacon/src/commands/up.rs
+- [x] T013 [P] [US2] Refine user-facing errors and exit codes for skip-auto-mapping and lockfile/frozen enforcement in crates/deacon/src/commands/up.rs
+- [x] T014 [P] [US2] Add integration tests for skip-feature-auto-mapping and lockfile/frozen fail-fast behavior in crates/deacon/tests/up_lockfile_frozen.rs
 
 **Checkpoint**: User Stories 1 and 2 functional and testable independently
 
@@ -83,9 +83,9 @@
 
 ### Implementation for User Story 3
 
-- [ ] T015 [US3] Ensure merged configuration always includes feature metadata entries (empty when none) in crates/core/src/config.rs and crates/deacon/src/commands/up.rs
-- [ ] T016 [P] [US3] Preserve feature order and origin when serializing mergedConfiguration metadata in crates/deacon/tests/up_merged_configuration.rs and related merge helpers
-- [ ] T017 [P] [US3] Add integration/regression test confirming mergedConfiguration JSON contains metadata for all features in crates/deacon/tests/integration_up_with_features.rs
+- [x] T015 [US3] Ensure merged configuration always includes feature metadata entries (empty when none) in crates/core/src/config.rs and crates/deacon/src/commands/up.rs
+- [x] T016 [P] [US3] Preserve feature order and origin when serializing mergedConfiguration metadata in crates/deacon/tests/up_merged_configuration.rs and related merge helpers
+- [x] T017 [P] [US3] Add integration/regression test confirming mergedConfiguration JSON contains metadata for all features in crates/deacon/tests/integration_up_with_features.rs
 
 **Checkpoint**: All user stories independently functional
 
@@ -95,11 +95,11 @@
 
 **Purpose**: Finalize documentation, configuration, and quality gates
 
-- [ ] T018 [P] Refresh contracts and quickstart to reflect new up behaviors in specs/007-up-build-parity/contracts/up.md and specs/007-up-build-parity/quickstart.md
-- [ ] T019 [P] Update nextest grouping if new integration test binaries are added in .config/nextest.toml
-- [ ] T020 Run fmt, clippy, and targeted nextest suites from workspace root per specs/007-up-build-parity/quickstart.md commands
-- [ ] T025 Run acceptance sweep to validate ≥95% pass rate across defined scenarios and record results (logs/artifacts) from workspace root
-- [ ] T026 [P] Update specs/007-up-build-parity/quickstart.md with acceptance sweep command and expected outcome
+- [x] T018 [P] Refresh contracts and quickstart to reflect new up behaviors in specs/007-up-build-parity/contracts/up.md and specs/007-up-build-parity/quickstart.md
+- [x] T019 [P] Update nextest grouping if new integration test binaries are added in .config/nextest.toml
+- [x] T020 Run fmt, clippy, and targeted nextest suites from workspace root per specs/007-up-build-parity/quickstart.md commands
+- [x] T025 Run acceptance sweep to validate ≥95% pass rate across defined scenarios and record results (logs/artifacts) from workspace root
+- [x] T026 [P] Update specs/007-up-build-parity/quickstart.md with acceptance sweep command and expected outcome
 
 ---
 

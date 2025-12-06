@@ -151,8 +151,9 @@ pub(super) async fn execute_features_plan(
 
             let merge_config = FeatureMergeConfig::new(
                 Some(additional_features_str.to_string()),
-                true, // Prefer CLI features for planner precedence
-                None, // No install order override in this context
+                true,  // Prefer CLI features for planner precedence
+                None,  // No install order override in this context
+                false, // Do not skip auto-mapping in features plan
             );
             config.features = FeatureMerger::merge_features(&config.features, &merge_config)
                 .context("Failed to merge additional features with devcontainer configuration.")?;

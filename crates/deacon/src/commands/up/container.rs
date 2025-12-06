@@ -15,6 +15,7 @@ use super::ports::handle_container_port_events;
 use super::result::UpContainerInfo;
 use crate::commands::shared::resolve_env_and_user;
 use anyhow::{Context, Result};
+use deacon_core::build::BuildOptions;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::{Docker, DockerLifecycle};
@@ -73,6 +74,7 @@ pub(crate) async fn execute_container_up(
     runtime: &ContainerRuntimeImpl,
     config_path: &Path,
     cache_folder: &Option<PathBuf>,
+    build_options: &BuildOptions,
 ) -> Result<UpContainerInfo> {
     debug!("Starting traditional development container");
 
@@ -198,9 +200,11 @@ pub(crate) async fn execute_container_up(
     {
         info!("Features detected in configuration - building feature-extended image with BuildKit");
 
-        let feature_build = build_image_with_features(&config, &identity, workspace_folder)
-            .await
-            .with_context(|| "Failed to build feature-extended image")?;
+        // Pass build_options to propagate cache-from/cache-to/buildx settings per spec (data-model.md)
+        let feature_build =
+            build_image_with_features(&config, &identity, workspace_folder, Some(build_options))
+                .await
+                .with_context(|| "Failed to build feature-extended image")?;
 
         if !feature_build.combined_env.is_empty() {
             config

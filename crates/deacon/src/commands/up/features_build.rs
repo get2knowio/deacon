@@ -6,6 +6,7 @@
 //! - `copy_dir_all` - Recursive directory copy helper
 
 use anyhow::Result;
+use deacon_core::build::BuildOptions;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::errors::DeaconError;
@@ -29,11 +30,23 @@ pub(crate) struct FeatureBuildOutput {
 /// 3. Generates a Dockerfile with BuildKit mount syntax for features
 /// 4. Builds the extended image using docker buildx build
 /// 5. Returns the tag of the newly built image and combined env from feature metadata
-#[instrument(skip(config, identity))]
+///
+/// # Arguments
+///
+/// * `config` - DevContainer configuration containing features to install
+/// * `identity` - Container identity for deterministic naming
+/// * `_workspace_folder` - Workspace folder path (reserved for future use)
+/// * `build_options` - Optional build options for cache-from/cache-to/buildx settings
+///
+/// When `build_options` is provided and not default, cache arguments are included
+/// in the generated build command. This enables cache-from/cache-to/no-cache/builder
+/// options to propagate to feature builds per spec (data-model.md).
+#[instrument(skip(config, identity, build_options))]
 pub(crate) async fn build_image_with_features(
     config: &DevContainerConfig,
     identity: &ContainerIdentity,
     _workspace_folder: &Path,
+    build_options: Option<&BuildOptions>,
 ) -> Result<FeatureBuildOutput> {
     use deacon_core::docker::CliDocker;
     use deacon_core::dockerfile_generator::{DockerfileConfig, DockerfileGenerator};
@@ -241,8 +254,27 @@ pub(crate) async fn build_image_with_features(
         .into());
     }
 
+    // Log cache configuration before feature build starts (per research.md Decision 2).
+    // Docker/BuildKit handles cache failures gracefully; we inform users of the configuration.
+    if let Some(opts) = build_options {
+        if !opts.cache_from.is_empty() {
+            info!(
+                cache_from = ?opts.cache_from,
+                "Using cache source(s) for feature build"
+            );
+        }
+        if let Some(cache_to) = &opts.cache_to {
+            info!(
+                cache_to = %cache_to,
+                "Exporting feature build cache to destination"
+            );
+        }
+    }
+
     // Build image with BuildKit
-    let build_args = generator.generate_build_args(&dockerfile_path, &extended_image_tag);
+    // Pass build_options to include cache-from/cache-to/buildx settings per spec (data-model.md)
+    let build_args =
+        generator.generate_build_args(&dockerfile_path, &extended_image_tag, build_options);
 
     // Execute build using CliDocker
     let cli_docker = CliDocker::new();

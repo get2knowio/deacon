@@ -4,6 +4,7 @@
 //! the image build phase using Docker BuildKit's mount capabilities. This approach
 //! provides proper layer caching and follows the DevContainer specification.
 
+use crate::build::BuildOptions;
 use crate::errors::{FeatureError, Result};
 use crate::features::{InstallationPlan, OptionValue, ResolvedFeature};
 use std::collections::HashMap;
@@ -174,11 +175,37 @@ impl DockerfileGenerator {
     }
 
     /// Generate build context arguments for docker buildx build command
-    pub fn generate_build_args(&self, dockerfile_path: &Path, image_tag: &str) -> Vec<String> {
-        vec![
+    ///
+    /// When `build_options` is provided and not default, cache arguments are included
+    /// in the generated command. This enables cache-from/cache-to/no-cache/builder
+    /// options to propagate to feature builds.
+    ///
+    /// Per spec (data-model.md):
+    /// - `cache_from`: ordered list of cache sources, preserved when invoking BuildKit/buildx
+    /// - `cache_to`: optional cache destination
+    /// - `builder`: optional buildx builder selection
+    /// - When `build_options.is_default()` returns true, no extra arguments are added
+    pub fn generate_build_args(
+        &self,
+        dockerfile_path: &Path,
+        image_tag: &str,
+        build_options: Option<&BuildOptions>,
+    ) -> Vec<String> {
+        let mut args = vec![
             "buildx".to_string(),
             "build".to_string(),
             "--load".to_string(),
+        ];
+
+        // Add cache/builder arguments from BuildOptions if provided and not default
+        if let Some(opts) = build_options {
+            if !opts.is_default() {
+                args.extend(opts.to_docker_args());
+            }
+        }
+
+        // Add build context and other standard arguments
+        args.extend(vec![
             "--build-context".to_string(),
             format!(
                 "{}={}",
@@ -193,7 +220,9 @@ impl DockerfileGenerator {
             "-t".to_string(),
             image_tag.to_string(),
             ".".to_string(),
-        ]
+        ]);
+
+        args
     }
 }
 
@@ -315,8 +344,11 @@ mod tests {
         };
 
         let generator = DockerfileGenerator::new(config);
-        let args =
-            generator.generate_build_args(Path::new("/tmp/Dockerfile.extended"), "test:latest");
+        let args = generator.generate_build_args(
+            Path::new("/tmp/Dockerfile.extended"),
+            "test:latest",
+            None,
+        );
 
         assert!(args.contains(&"buildx".to_string()));
         assert!(args.contains(&"build".to_string()));
@@ -325,5 +357,78 @@ mod tests {
         assert!(args.contains(&"dev_containers_feature_content_source=/tmp/features".to_string()));
         assert!(args.contains(&"-t".to_string()));
         assert!(args.contains(&"test:latest".to_string()));
+        // No cache arguments when build_options is None
+        assert!(!args.contains(&"--cache-from".to_string()));
+        assert!(!args.contains(&"--cache-to".to_string()));
+    }
+
+    #[test]
+    fn test_generate_build_args_with_cache_options() {
+        let config = DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            target_stage: "dev_containers_target_stage".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+        };
+
+        let build_options = BuildOptions {
+            no_cache: false,
+            cache_from: vec![
+                "type=registry,ref=myrepo/cache:v1".to_string(),
+                "type=local,src=/tmp/cache".to_string(),
+            ],
+            cache_to: Some("type=registry,ref=myrepo/cache:latest".to_string()),
+            builder: Some("mybuilder".to_string()),
+        };
+
+        let generator = DockerfileGenerator::new(config);
+        let args = generator.generate_build_args(
+            Path::new("/tmp/Dockerfile.extended"),
+            "test:latest",
+            Some(&build_options),
+        );
+
+        // Standard args still present
+        assert!(args.contains(&"buildx".to_string()));
+        assert!(args.contains(&"build".to_string()));
+        assert!(args.contains(&"--load".to_string()));
+
+        // Cache args from BuildOptions
+        assert!(args.contains(&"--cache-from".to_string()));
+        assert!(args.contains(&"type=registry,ref=myrepo/cache:v1".to_string()));
+        assert!(args.contains(&"type=local,src=/tmp/cache".to_string()));
+        assert!(args.contains(&"--cache-to".to_string()));
+        assert!(args.contains(&"type=registry,ref=myrepo/cache:latest".to_string()));
+        assert!(args.contains(&"--builder".to_string()));
+        assert!(args.contains(&"mybuilder".to_string()));
+    }
+
+    #[test]
+    fn test_generate_build_args_with_default_options() {
+        let config = DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            target_stage: "dev_containers_target_stage".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+        };
+
+        // Default options should not add any cache arguments
+        let build_options = BuildOptions::default();
+        assert!(build_options.is_default());
+
+        let generator = DockerfileGenerator::new(config);
+        let args = generator.generate_build_args(
+            Path::new("/tmp/Dockerfile.extended"),
+            "test:latest",
+            Some(&build_options),
+        );
+
+        // Standard args present
+        assert!(args.contains(&"buildx".to_string()));
+        assert!(args.contains(&"build".to_string()));
+
+        // No cache arguments when build_options is default
+        assert!(!args.contains(&"--cache-from".to_string()));
+        assert!(!args.contains(&"--cache-to".to_string()));
+        assert!(!args.contains(&"--no-cache".to_string()));
+        assert!(!args.contains(&"--builder".to_string()));
     }
 }
