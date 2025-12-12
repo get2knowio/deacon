@@ -47,12 +47,12 @@ slow-timeout = "60s"
 status-level = "pass"
 
 [[profile.default.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
 test-group = 'smoke-heavy'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle))'
 test-group = 'smoke-lite'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
@@ -65,6 +65,11 @@ slow-timeout = { period = "5m", terminate-after = 1 }
 filter = 'binary(=up_dotfiles)'
 test-group = 'docker-exclusive'
 slow-timeout = { period = "5m", terminate-after = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(=up_prebuild)'
+test-group = 'docker-exclusive'
+slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.default.overrides]]
 filter = 'binary(#parity_*)'
@@ -127,11 +132,11 @@ slow-timeout = "30s"
 default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/))'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
 test-group = 'smoke-heavy'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle))'
 test-group = 'smoke-lite'
 
 [[profile.dev-fast.overrides]]
@@ -140,6 +145,10 @@ test-group = 'smoke-cli'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=up_dotfiles)'
+test-group = 'docker-exclusive'
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(=up_prebuild)'
 test-group = 'docker-exclusive'
 
 [[profile.dev-fast.overrides]]
@@ -226,12 +235,12 @@ status-level = "pass"
 default-filter = 'binary(#smoke_*) | binary(#parity_*) | binary(#integration_*) | binary(=up_dotfiles)'
 
 [[profile.docker.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
 test-group = 'smoke-heavy'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.docker.overrides]]
-filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle))'
 test-group = 'smoke-lite'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
@@ -294,12 +303,12 @@ priority = 100
 
 # Apply all default overrides
 [[profile.full.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
 test-group = 'smoke-heavy'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.full.overrides]]
-filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle))'
 test-group = 'smoke-lite'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
@@ -369,11 +378,11 @@ global-timeout = "1h"
 
 # Throttle smoke and parity tests while allowing more overlap
 [[profile.ci.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
 test-group = 'smoke-heavy'
 
 [[profile.ci.overrides]]
-filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner))'
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle))'
 test-group = 'smoke-lite'
 
 [[profile.ci.overrides]]

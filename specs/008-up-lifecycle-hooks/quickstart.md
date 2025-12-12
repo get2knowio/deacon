@@ -13,7 +13,7 @@
 ## Key Code Touchpoints
 - Lifecycle ordering and markers: `crates/core/src/lifecycle.rs`, `crates/core/src/container_lifecycle.rs`, `crates/core/src/state.rs`
 - Dotfiles handling: `crates/core/src/dotfiles.rs`
-- CLI `up` orchestration and flags: `crates/deacon/src/commands/up.rs` and `crates/deacon/src/commands/shared`
+- CLI `up` orchestration and flags: `crates/deacon/src/commands/up/` (module directory, esp. `mod.rs`, `args.rs`, `lifecycle.rs`, `dotfiles.rs`) and `crates/deacon/src/commands/shared`
 - Summary/output handling: `crates/deacon/src/ui` and related renderers
 - Fixtures/tests: `crates/deacon/tests/` (e.g., `up_prebuild.rs`, `up_dotfiles.rs`, `smoke_lifecycle.rs`)
 

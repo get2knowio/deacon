@@ -50,7 +50,8 @@
       "Bash(./target/debug/deacon features:*)",
       "Bash(sg:*)",
       "Bash(docker compose:*)",
-      "Bash(rustfmt:*)"
+      "Bash(rustfmt:*)",
+      "Bash(/opt/maverick/plugins/maverick/scripts/auto-approve-hook.sh)"
     ],
     "deny": [],
     "ask": []
