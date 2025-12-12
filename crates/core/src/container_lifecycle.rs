@@ -8,6 +8,7 @@ use crate::errors::{DeaconError, Result};
 use crate::lifecycle::{ExecutionContext, ExecutionMode, LifecycleCommands, LifecyclePhase};
 use crate::progress::{ProgressEvent, ProgressTracker};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
+use crate::state::record_phase_executed;
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -1403,8 +1404,6 @@ impl ContainerLifecycleResult {
         D: Docker,
         F: Fn(ProgressEvent) -> anyhow::Result<()>,
     {
-        use crate::state::record_phase_executed;
-
         let non_blocking_phases = std::mem::take(&mut self.non_blocking_phases);
 
         for spec in non_blocking_phases {

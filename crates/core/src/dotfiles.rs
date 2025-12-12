@@ -250,7 +250,7 @@ pub struct DotfilesPhaseConfig {
     pub repository: Option<String>,
     /// Target path where dotfiles should be cloned (defaults based on user)
     pub target_path: Option<String>,
-    /// Custom install command (overrides auto-detection of install.sh/setup.sh)
+    /// Custom install command (fallback if no install.sh/setup.sh is auto-detected)
     pub install_command: Option<String>,
 }
 

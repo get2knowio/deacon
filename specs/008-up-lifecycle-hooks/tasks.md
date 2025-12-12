@@ -83,15 +83,15 @@
 
 ### Tests for User Story 3
 
-- [ ] T017 [P] [US3] Add skip-flag test verifying post* hooks and dotfiles are skipped with reasons (SC-003) in `crates/deacon/tests/up_dotfiles.rs` or adjacent file.
-- [ ] T018 [P] [US3] Add prebuild mode test ensuring stop after updateContent, dotfiles/post* skipped, and updateContent reruns on repeat prebuild (SC-004) in `crates/deacon/tests/up_prebuild.rs`.
-- [ ] T019 [P] [US3] Add transition test confirming normal `up` after prebuild reruns onCreate/updateContent despite prebuild markers (SC-004/FR-008) in `crates/deacon/tests/up_prebuild.rs`.
+- [x] T017 [P] [US3] Add skip-flag test verifying post* hooks and dotfiles are skipped with reasons (SC-003) in `crates/deacon/tests/up_dotfiles.rs` or adjacent file.
+- [x] T018 [P] [US3] Add prebuild mode test ensuring stop after updateContent, dotfiles/post* skipped, and updateContent reruns on repeat prebuild (SC-004) in `crates/deacon/tests/up_prebuild.rs`.
+- [x] T019 [P] [US3] Add transition test confirming normal `up` after prebuild reruns onCreate/updateContent despite prebuild markers (SC-004/FR-008) in `crates/deacon/tests/up_prebuild.rs`.
 
 ### Implementation for User Story 3
 
-- [ ] T020 [US3] Wire `--skip-post-create` flag handling to bypass postCreate/postStart/postAttach and dotfiles with reasons in `crates/deacon/src/commands/up.rs`.
-- [ ] T021 [P] [US3] Implement prebuild mode to stop after updateContent, skip dotfiles/post* hooks, and isolate markers in `crates/core/src/lifecycle.rs` and `crates/core/src/state.rs`.
-- [ ] T022 [US3] Ensure summary/output reflects skipped phases and prebuild isolation in `crates/deacon/src/ui/` with stdout/json purity vs stderr logs.
+- [x] T020 [US3] Wire `--skip-post-create` flag handling to bypass postCreate/postStart/postAttach and dotfiles with reasons in `crates/deacon/src/commands/up.rs`.
+- [x] T021 [P] [US3] Implement prebuild mode to stop after updateContent, skip dotfiles/post* hooks, and isolate markers in `crates/core/src/lifecycle.rs` and `crates/core/src/state.rs`.
+- [x] T022 [US3] Ensure summary/output reflects skipped phases and prebuild isolation in `crates/deacon/src/ui/` with stdout/json purity vs stderr logs.
 
 **Checkpoint**: User Story 3 independently testable via skip-flag and prebuild tests.
 
@@ -101,11 +101,11 @@
 
 **Purpose**: Final validation, docs, and quality gates
 
-- [ ] T023 [P] Update quickstart/spec references if behavior nuances change in `specs/008-up-lifecycle-hooks/quickstart.md` and `specs/008-up-lifecycle-hooks/spec.md`.
-- [ ] T024 [P] Verify OpenAPI lifecycle contract reflects final behaviors in `specs/008-up-lifecycle-hooks/contracts/up-lifecycle.yaml`.
-- [ ] T025 Run fmt/lints and targeted nextest suites (`make test-nextest-fast`, plus `make test-nextest-unit`/`make test-nextest-docker` as needed).
-- [ ] T026 Capture any Deferred Work tasks (if introduced) in `specs/008-up-lifecycle-hooks/tasks.md` under "Deferred Work" with research.md references.
-- [ ] T027 [P] Verify stdout/json purity and stderr logging for lifecycle summaries and JSON modes in `crates/deacon/tests/` (adjust or add integration coverage).
+- [x] T023 [P] Update quickstart/spec references if behavior nuances change in `specs/008-up-lifecycle-hooks/quickstart.md` and `specs/008-up-lifecycle-hooks/spec.md`.
+- [x] T024 [P] Verify OpenAPI lifecycle contract reflects final behaviors in `specs/008-up-lifecycle-hooks/contracts/up-lifecycle.yaml`.
+- [x] T025 Run fmt/lints and targeted nextest suites (`make test-nextest-fast`, plus `make test-nextest-unit`/`make test-nextest-docker` as needed).
+- [x] T026 Capture any Deferred Work tasks (if introduced) in `specs/008-up-lifecycle-hooks/tasks.md` under "Deferred Work" with research.md references.
+- [x] T027 [P] Verify stdout/json purity and stderr logging for lifecycle summaries and JSON modes in `crates/deacon/tests/` (adjust or add integration coverage).
 
 ---
 
