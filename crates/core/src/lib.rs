@@ -53,6 +53,9 @@ pub mod user_mapping;
 pub mod variable;
 pub mod workspace;
 
+// Re-export IndexMap for use by dependent crates (preserves insertion order for ordered maps)
+pub use indexmap::IndexMap;
+
 /// Get the version of the core library
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")

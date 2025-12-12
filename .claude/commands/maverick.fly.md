@@ -1,79 +1,25 @@
 # Development Workflow
 
-Implement features from the task list, perform code review and cleanup, update project conventions, and manage the PR.
-
-**Usage:** `/maverick.fly [branch-name]`
-- If `branch-name` is provided, switch to that branch before starting
-- If not provided, work on the current branch
-
----
-
-## Part 0: Setup and Sync
-
-Run `.claude/scripts/sync-branch.sh $ARGUMENTS` and parse the JSON output.
-
-The `$ARGUMENTS` variable contains the optional branch name passed to this command. If empty, the script uses the current branch.
-
-**If status is "conflicts":**
-- Report the conflicting files to the user
-- Pause and wait for human intervention
-- After conflicts are resolved, user should run `git rebase --continue`
-
-**If status is "error":**
-- Report the error (missing spec directory or tasks file)
-- Halt execution
-
-**If status is "ok":**
-- Store `branch`, `spec_dir`, and `tasks_file` for use in subsequent steps
-- Proceed to Part 1
-
----
-
 ## Part 1: Feature Implementation
 
-Evaluate the tasks file at `{tasks_file}` (from Part 0). For each uncompleted task:
+Invoke the slash-command `/speckit.implement` along with the following prompt:
 
-### Processing Rules
-
-1. **Read the tasks file** and identify all incomplete tasks (not marked done)
-
-2. **Process tasks serially by default**, with one exception:
-   - Adjacent tasks marked with **"P"** can be processed in **parallel**
-   - Each parallel task gets its own subagent
-
-3. **For each task (or parallel batch), spawn subagent(s) that invoke the following slash-command:**
 ```
-/speckit.implement
+Implement the tasks in {tasks_file}, each in their own subagent, parallelizing where possible. Each subagent should run as a speckit-rust-implementer.
 
-Task: {task_content}
-
-Follow the specification in {spec_dir}/ for this task.
-Report back with:
-- What was implemented
-- Any issues encountered
-- Any deviations from spec (and why)
+Specification directory: {spec_dir}/
 ```
 
-   Where `{task_content}` is the full text of the task from the tasks file.
+This single command handles:
+- Reading and parsing the tasks file
+- Processing tasks serially by default
+- Parallelizing adjacent tasks marked with "P"
+- Loading spec context for each task
+- Marking tasks complete as they finish
+- Running validation checks
+- Reporting overall completion status
 
-4. **After each task/batch completes:**
-   - Mark task(s) complete in `{tasks_file}`
-   - Run `cargo check` to verify compilation
-   - Proceed to next task(s)
-
-5. **Continue until all tasks are complete**
-
-### Parallel Example
-
-If tasks file contains:
-```
-- [ ] P: Implement user authentication
-- [ ] P: Implement session management  
-- [ ] P: Add rate limiting middleware
-- [ ] Integrate auth with existing endpoints
-```
-
-The first three (marked "P", adjacent) run in parallel, then the fourth runs after they complete.
+Wait for `/speckit.implement` to complete before proceeding to Part 2. **Do not work through the task list in any other way except via /speckit.implement**
 
 ---
 
@@ -81,7 +27,7 @@ The first three (marked "P", adjacent) run in parallel, then the fourth runs aft
 
 ### Phase 2.1: Parallel Reviews
 
-Launch two subagents simultaneously:
+Launch three subagents simultaneously:
 
 **Subagent 1: CodeRabbit Review**
 ```
@@ -89,19 +35,9 @@ Run `coderabbit review --prompt-only` and return the complete output.
 Do not summarize - return everything.
 ```
 
-**Subagent 2: Architecture & Specification Review**
+**Subagent 2: Technical Code Review**
 ```
-Review all changes in this branch against clean code principles, clean architecture, and spec compliance.
-
-First, run `.claude/scripts/get-changed-files.sh` to identify changed files.
-
-Review criteria:
-
-1. **Clean Code**: Single responsibility, DRY, naming, function size, comments, error handling
-
-2. **Clean Architecture**: Dependency direction, layer separation, abstraction boundaries, coupling, testability
-
-3. **Specification Compliance**: Read all files in {spec_dir}/, verify implementation matches requirements
+Use rust-code-reviewer to do a thorough code review of the changes on this branch (both committed and uncommitted).
 
 Return structured report with:
 - File-by-file findings
@@ -109,10 +45,21 @@ Return structured report with:
 - Line numbers where applicable
 - Concrete recommendations
 ```
+**Subagent 3: Spec Compliance Review**
+```
+Use spec-compliance-reviewer to do a thorough spec compliance review of the changes in this branch (both committed and uncommitted).
+
+Return structured report with:
+- File-by-file findings
+- Severity (critical/major/minor/suggestion)
+- Line numbers where applicable
+- Spec references where possible
+- Concrete recommendations
+```
 
 ### Phase 2.2: Consolidate Findings
 
-Synthesize both reviews:
+Synthesize all three reviews:
 
 1. **Deduplicate** overlapping findings
 
@@ -128,6 +75,8 @@ Synthesize both reviews:
    - Issues in different files → can parallelize
    - Same file or dependencies → must serialize
    - Max 3-4 parallel subagents
+
+5. **Identify deferrals**: For issues that are out of scope or require significant refactoring, note them for Phase 2.5
 
 ### Phase 2.3: Execute Improvements
 
@@ -151,7 +100,7 @@ After each batch: review changes, resolve conflicts, update TODO, proceed.
 
 Run `.claude/scripts/run-validation.sh` and parse results.
 
-**If `all_passed` is true:** Proceed to Part 3
+**If `all_passed` is true:** Proceed to Phase 2.5
 
 **If any check failed:**
 1. Parse error output from failed checks
@@ -169,6 +118,34 @@ File: [location]
 Investigate whether it's a test bug or implementation bug.
 Fix the actual issue - do NOT weaken assertions.
 ```
+
+### Phase 2.5: Create Tech Debt Issues
+
+For each deferred issue identified during consolidation (Phase 2.2), create a GitHub issue directly:
+
+```bash
+python3 .claude/scripts/create_tech_debt_issue.py \
+    --title "Brief descriptive title" \
+    --problem "What's wrong and why it matters" \
+    --rationale "Why this was deferred (pre-existing, out of scope, etc.)" \
+    --pattern "Reference to correct pattern if applicable" \
+    --files path/to/file1.rs path/to/file2.rs \
+    --acceptance "What 'done' looks like" \
+    --labels component1 component2 \
+    --source-branch {branch}
+```
+
+The script:
+- Creates a GitHub issue with `tech-debt` label plus specified component labels
+- Returns the issue URL
+- Supports `--dry-run` to preview and `--json` for structured output
+
+**Collect all created issue URLs** for the PR description in Part 4.
+
+**Deferral criteria** - Only defer when:
+- The issue is pre-existing tech debt unrelated to the feature
+- Fixing requires architectural changes beyond the feature scope
+- The issue is a spec compliance gap that doesn't affect core functionality
 
 ---
 
@@ -244,7 +221,7 @@ Create the report (this becomes the PR description):
 
 ## Improvements Made
 - Critical: X
-- Major: Y  
+- Major: Y
 - Minor: Z
 - Style: W
 
@@ -256,6 +233,10 @@ Create the report (this becomes the PR description):
 - cargo clippy: ✅/❌
 - cargo build: ✅/❌
 - cargo test: ✅/❌ (X passed, Y failed)
+
+## Tech Debt Created
+- [List any tech debt issues created with their GitHub URLs]
+- Or "None"
 
 ## Convention Updates
 - [Summary of changes made via /speckit.constitution, or "None needed"]
@@ -276,7 +257,7 @@ Create the report (this becomes the PR description):
    - `docs(scope):` - Documentation
    - `test(scope):` - Tests
    - `chore(scope):` - Maintenance
-   
+
    Scope = branch name or primary area of change
 
 2. **Save report to temp file:**
@@ -296,8 +277,9 @@ Create the report (this becomes the PR description):
 ## Execution Notes
 
 - Commit after Part 1 (feature implementation)
-- Commit after Part 2 (code review fixes)  
+- Commit after Part 2 (code review fixes)
 - Commit after Part 3 (convention updates) if changes were made
 - Subagent timeout: 5 minutes, then proceed
 - Prefer many small subagents over few large ones
 - When uncertain about parallelization, run sequentially
+- Tech debt goes directly to GitHub issues (not tracked in tasks.md)

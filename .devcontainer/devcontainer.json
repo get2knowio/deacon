@@ -23,6 +23,8 @@
     "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.coderabbit,target=/home/vscode/.coderabbit,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.local/bin,target=/home/vscode/.host-local/bin,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/GitHub/maverick,target=/home/vscode/maverick,type=bind"
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude.json,target=/home/vscode/.claude.json,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/projects/maverick,target=/opt/maverick,type=bind,consistency=cached"
   ]
 }

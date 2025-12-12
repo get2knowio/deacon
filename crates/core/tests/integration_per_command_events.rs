@@ -73,6 +73,8 @@ async fn test_per_command_events_emitted() {
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
         force_pty: false,
+        dotfiles: None,
+        is_prebuild: false,
     };
 
     // Create lifecycle commands with multiple commands in a phase

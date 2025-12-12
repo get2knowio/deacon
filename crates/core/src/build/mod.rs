@@ -18,6 +18,96 @@ use std::path::PathBuf;
 pub mod buildkit;
 pub mod metadata;
 
+/// Build options that apply to both Dockerfile and feature builds.
+///
+/// This struct aggregates all cache and builder options passed via CLI flags.
+/// When any option is set that requires BuildKit, the `requires_buildkit()` method
+/// returns true to enable fail-fast validation before build execution.
+///
+/// # Spec Alignment
+///
+/// Per data-model.md:
+/// - `cache_from`: ordered list of cache sources supplied by user; preserved order used when invoking BuildKit/buildx
+/// - `cache_to`: optional cache destination supplied by user
+/// - `builder`: optional buildx/builder selection applied to Dockerfile and feature builds
+/// - Scope: applies to the entire `up` run and must be threaded to both Dockerfile and feature builds
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildOptions {
+    /// Skip Docker layer cache during build (--no-cache flag).
+    pub no_cache: bool,
+
+    /// Ordered list of external cache sources (e.g., `type=registry,ref=<image>`).
+    /// Order is preserved when passing to BuildKit/buildx.
+    pub cache_from: Vec<String>,
+
+    /// External cache destination (e.g., `type=registry,ref=<image>`).
+    pub cache_to: Option<String>,
+
+    /// Optional buildx builder name to use for builds.
+    /// When set, builds use `docker buildx build --builder <name>`.
+    pub builder: Option<String>,
+}
+
+impl BuildOptions {
+    /// Creates a new BuildOptions with all fields set to defaults.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns true if any option is set that requires BuildKit/buildx availability.
+    ///
+    /// BuildKit is required when:
+    /// - Any cache-from sources are specified (requires `--cache-from` support)
+    /// - A cache-to destination is specified (requires `--cache-to` support)
+    /// - A specific builder is requested (requires `docker buildx`)
+    ///
+    /// When this returns true, build execution should verify BuildKit availability
+    /// before proceeding and emit a fail-fast error if unavailable.
+    pub fn requires_buildkit(&self) -> bool {
+        !self.cache_from.is_empty() || self.cache_to.is_some() || self.builder.is_some()
+    }
+
+    /// Returns true if no cache/builder options are set.
+    ///
+    /// When this is true, builds should use default behavior without injecting
+    /// any cache or buildx-specific arguments.
+    pub fn is_default(&self) -> bool {
+        !self.no_cache
+            && self.cache_from.is_empty()
+            && self.cache_to.is_none()
+            && self.builder.is_none()
+    }
+
+    /// Generates the Docker build arguments for cache options.
+    ///
+    /// Returns a vector of argument strings (e.g., `["--cache-from", "type=registry,ref=foo"]`)
+    /// that should be appended to the Docker build command.
+    pub fn to_docker_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+
+        if self.no_cache {
+            args.push("--no-cache".to_string());
+        }
+
+        for cache_source in &self.cache_from {
+            args.push("--cache-from".to_string());
+            args.push(cache_source.clone());
+        }
+
+        if let Some(cache_dest) = &self.cache_to {
+            args.push("--cache-to".to_string());
+            args.push(cache_dest.clone());
+        }
+
+        if let Some(builder) = &self.builder {
+            args.push("--builder".to_string());
+            args.push(builder.clone());
+        }
+
+        args
+    }
+}
+
 /// Aggregates all inputs required to execute `deacon build`.
 ///
 /// This struct represents a validated build request with all CLI arguments,
@@ -380,5 +470,111 @@ mod tests {
             false,
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_options_default() {
+        let opts = BuildOptions::default();
+        assert!(!opts.no_cache);
+        assert!(opts.cache_from.is_empty());
+        assert!(opts.cache_to.is_none());
+        assert!(opts.builder.is_none());
+        assert!(opts.is_default());
+        assert!(!opts.requires_buildkit());
+    }
+
+    #[test]
+    fn test_build_options_requires_buildkit_cache_from() {
+        let opts = BuildOptions {
+            cache_from: vec!["type=registry,ref=myrepo/cache".to_string()],
+            ..Default::default()
+        };
+        assert!(opts.requires_buildkit());
+        assert!(!opts.is_default());
+    }
+
+    #[test]
+    fn test_build_options_requires_buildkit_cache_to() {
+        let opts = BuildOptions {
+            cache_to: Some("type=registry,ref=myrepo/cache".to_string()),
+            ..Default::default()
+        };
+        assert!(opts.requires_buildkit());
+        assert!(!opts.is_default());
+    }
+
+    #[test]
+    fn test_build_options_requires_buildkit_builder() {
+        let opts = BuildOptions {
+            builder: Some("mybuilder".to_string()),
+            ..Default::default()
+        };
+        assert!(opts.requires_buildkit());
+        assert!(!opts.is_default());
+    }
+
+    #[test]
+    fn test_build_options_no_cache_does_not_require_buildkit() {
+        let opts = BuildOptions {
+            no_cache: true,
+            ..Default::default()
+        };
+        // no_cache alone doesn't require BuildKit - legacy docker build supports it
+        assert!(!opts.requires_buildkit());
+        // But it's not default behavior
+        assert!(!opts.is_default());
+    }
+
+    #[test]
+    fn test_build_options_to_docker_args_empty() {
+        let opts = BuildOptions::default();
+        let args = opts.to_docker_args();
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn test_build_options_to_docker_args_full() {
+        let opts = BuildOptions {
+            no_cache: true,
+            cache_from: vec![
+                "type=registry,ref=repo/cache:v1".to_string(),
+                "type=local,src=/tmp/cache".to_string(),
+            ],
+            cache_to: Some("type=registry,ref=repo/cache:latest".to_string()),
+            builder: Some("mybuilder".to_string()),
+        };
+        let args = opts.to_docker_args();
+
+        assert_eq!(args.len(), 9);
+        assert_eq!(args[0], "--no-cache");
+        assert_eq!(args[1], "--cache-from");
+        assert_eq!(args[2], "type=registry,ref=repo/cache:v1");
+        assert_eq!(args[3], "--cache-from");
+        assert_eq!(args[4], "type=local,src=/tmp/cache");
+        assert_eq!(args[5], "--cache-to");
+        assert_eq!(args[6], "type=registry,ref=repo/cache:latest");
+        assert_eq!(args[7], "--builder");
+        assert_eq!(args[8], "mybuilder");
+    }
+
+    #[test]
+    fn test_build_options_to_docker_args_preserves_cache_from_order() {
+        let opts = BuildOptions {
+            cache_from: vec![
+                "first".to_string(),
+                "second".to_string(),
+                "third".to_string(),
+            ],
+            ..Default::default()
+        };
+        let args = opts.to_docker_args();
+
+        // Verify order is preserved
+        assert_eq!(args[0], "--cache-from");
+        assert_eq!(args[1], "first");
+        assert_eq!(args[2], "--cache-from");
+        assert_eq!(args[3], "second");
+        assert_eq!(args[4], "--cache-from");
+        assert_eq!(args[5], "third");
     }
 }

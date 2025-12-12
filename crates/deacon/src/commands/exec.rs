@@ -14,6 +14,7 @@ use deacon_core::container::ContainerIdentity;
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::{CliDocker, Docker, TerminalSize};
 use deacon_core::errors::{ConfigError, DeaconError};
+use deacon_core::IndexMap;
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -413,7 +414,8 @@ where
         tracing::info!("Executing command in container: {:?}", args.command);
 
         // Parse environment variables early to catch format errors
-        let mut env_map = HashMap::new();
+        // Using IndexMap to preserve CLI argument order
+        let mut env_map: IndexMap<String, String> = IndexMap::new();
         for env_var in &args.env {
             let parsed_env = NormalizedRemoteEnv::parse(env_var)?;
             env_map.insert(parsed_env.name, parsed_env.value);

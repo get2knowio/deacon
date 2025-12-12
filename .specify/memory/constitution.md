@@ -1,16 +1,20 @@
 <!--
 Sync Impact Report
-- Version change: 1.10.0 → 1.11.0
+- Version change: 1.11.0 → 1.12.0
 - Modified principles:
-  - I. Spec-Parity as Source of Truth: Added "Deferral Tracking" subsection requiring deferrals to be
-    added to tasks.md under a "Deferred Work" section. Spec not complete until deferrals resolved.
+  - III. No Silent Fallbacks — Fail Fast: Added "CLI Argument Validation" subsection requiring
+    validation of CLI arguments at ingress with clear error messages for invalid values.
+  - IV. Idiomatic, Safe Rust: Added "Pattern Matching Over Unwrap" guideline for nested Options
+    and "Documentation-Code Sync" requirement for keeping docstrings accurate after refactoring.
+  - VII. Subcommand Consistency & Shared Abstractions: Added "Avoid Redundant Operations" guideline
+    to prevent duplicate filesystem/network calls across shared and subcommand-specific code.
 - Added sections: None
 - Removed sections: None
 - Templates requiring updates/alignment:
   - ✅ .specify/templates/plan-template.md (constitution check remains valid)
   - ✅ .specify/templates/spec-template.md (no changes needed)
-  - ✅ .specify/templates/tasks-template.md (add Deferred Work section example)
-  - ✅ CLAUDE.md (updated with deferral tracking guidance)
+  - ✅ .specify/templates/tasks-template.md (no changes needed)
+  - ✅ CLAUDE.md (no changes needed - existing guidance covers new additions)
 - Follow-up TODOs: None
 -->
 
@@ -108,6 +112,17 @@ refs, only semver tags), the implementation MUST filter or skip invalid entries 
 to downstream logic where they cause confusing errors or bogus output. Explicit parsing and validation at ingress
 points prevents cascading failures and keeps error messages clear and actionable.
 
+**CLI Argument Validation**: CLI arguments with constrained value sets (e.g., `--consistency` accepting only "cached",
+"consistent", "delegated") MUST be validated at the argument parsing/normalization layer with clear error messages
+listing valid options. Do not defer validation to downstream code where invalid values cause opaque runtime failures.
+Define valid values as constants and validate against them early:
+```rust
+const VALID_CONSISTENCY: &[&str] = &["cached", "consistent", "delegated"];
+if !VALID_CONSISTENCY.contains(&value.as_str()) {
+    return Err(anyhow!("Invalid value '{}'. Valid: {}", value, VALID_CONSISTENCY.join(", ")));
+}
+```
+
 ### IV. Idiomatic, Safe Rust
 Code MUST be modern, idiomatic Rust (Edition 2021) with clear module boundaries, no `unsafe` (unless absolutely
 required and fully justified with documented safety invariants). Error handling: prefer `thiserror` for domain
@@ -134,6 +149,26 @@ of duplicating logic in sprawling single files.
 **Dependency Hygiene**: Keep dependencies current and avoid deprecated crates. When a dependency is deprecated or
 superseded (e.g., `atty` → `is-terminal`), migrate promptly. Prefer minimal, stable dependencies with active
 maintenance.
+
+**Pattern Matching Over Unwrap**: When extracting values from nested `Option` types or `Result` types where the value
+is logically guaranteed to exist, use pattern matching or `if let` instead of `.unwrap()`. This prevents fragile code
+that could panic if invariants change:
+```rust
+// BAD: Fragile unwrap on nested Option
+if let Some(result) = find_root(&path)? {
+    return Ok(result.root.unwrap());  // panics if invariant broken
+}
+
+// GOOD: Pattern matching enforces the invariant structurally
+if let Some(Result { root: Some(path), .. }) = find_root(&path)? {
+    return Ok(path);  // type system ensures path exists
+}
+```
+
+**Documentation-Code Sync**: When refactoring functions to change their behavior, docstrings MUST be updated in the
+same commit. Stale documentation that contradicts actual behavior is a bug. Use `cargo doc --open` to verify rendered
+documentation matches implementation. Pay particular attention to "Note:" sections that describe what a function does
+NOT do—these often become incorrect after capability additions.
 
 **Environment Variable Constants**: Environment variable names used in multiple places MUST be defined as constants
 (e.g., `const ENV_FORCE_TTY_IF_JSON: &str = "DEACON_FORCE_TTY_IF_JSON";`) rather than repeated string literals.
@@ -225,6 +260,12 @@ hand‑implemented per subcommand—these flows belong in shared modules consume
 **Drift Remediation**: When inconsistencies are discovered, record them in the shared backlog immediately
 and remediate before unrelated feature work. Reordering or deleting backlog items requires the same
 approval rigor as modifying this constitution.
+
+**Avoid Redundant Operations**: When shared code performs an expensive operation (e.g., `canonicalize()`, network
+fetch, container inspection), subcommand-specific code MUST NOT repeat that operation. Trust the result from the
+shared layer. Redundant operations waste resources and introduce race conditions where filesystem/network state
+may change between calls. Document in shared code comments which invariants are guaranteed (e.g., "workspace_folder
+is already canonicalized").
 
 **Builder Pattern for Configuration Objects**: When constructing complex configuration or output objects
 that have optional enrichment (e.g., `EnrichedMergedConfiguration`), use builder-style methods:
@@ -365,4 +406,4 @@ This checklist prevents spec drift and reduces rework. Document deviations with 
 - Compliance Review: All PRs MUST include a quick constitution compliance check (in PR body or checklist). Reviewers
   SHALL block merges on violations of Principles I–VIII or on missing updates to tests/examples.
 
-**Version**: 1.11.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-27
+**Version**: 1.12.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-28

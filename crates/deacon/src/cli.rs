@@ -221,6 +221,13 @@ pub enum Commands {
         /// Skip feature auto-mapping (hidden testing flag)
         #[arg(long, hide = true)]
         skip_feature_auto_mapping: bool,
+        /// Path to feature lockfile for validation (experimental, hidden)
+        #[arg(long, hide = true)]
+        experimental_lockfile: Option<PathBuf>,
+        /// Require lockfile to exist and match config features exactly (experimental, hidden)
+        /// Implies --experimental-lockfile if not specified; uses default lockfile location.
+        #[arg(long, hide = true)]
+        experimental_frozen_lockfile: bool,
         /// Dotfiles repository URL
         #[arg(long)]
         dotfiles_repository: Option<String>,
@@ -1085,6 +1092,8 @@ impl Cli {
                 prefer_cli_features,
                 feature_install_order,
                 skip_feature_auto_mapping,
+                experimental_lockfile,
+                experimental_frozen_lockfile,
                 dotfiles_repository,
                 dotfiles_install_command,
                 dotfiles_target_path,
@@ -1121,6 +1130,8 @@ impl Cli {
                     cache_to,
                     buildkit,
                     skip_feature_auto_mapping,
+                    experimental_lockfile,
+                    experimental_frozen_lockfile,
                     dotfiles_repository,
                     dotfiles_install_command,
                     dotfiles_target_path,
@@ -1170,6 +1181,26 @@ impl Cli {
                         // Add compose project name if present
                         if let Some(project_name) = container_info.compose_project_name {
                             result = result.with_compose_project_name(project_name);
+                        }
+
+                        // Add effective mounts if present
+                        if let Some(mounts) = container_info.effective_mounts {
+                            result = result.with_effective_mounts(mounts);
+                        }
+
+                        // Add effective env if present
+                        if let Some(env) = container_info.effective_env {
+                            result = result.with_effective_env(env);
+                        }
+
+                        // Add profiles applied if present
+                        if let Some(profiles) = container_info.profiles_applied {
+                            result = result.with_profiles_applied(profiles);
+                        }
+
+                        // Add external volumes preserved if present
+                        if let Some(volumes) = container_info.external_volumes_preserved {
+                            result = result.with_external_volumes_preserved(volumes);
                         }
 
                         // Add configuration if requested

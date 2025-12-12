@@ -41,6 +41,8 @@ async fn test_non_blocking_phases_are_deferred() {
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
         force_pty: false,
+        dotfiles: None,
+        is_prebuild: false,
     };
 
     // Create lifecycle commands with all phases
@@ -137,6 +139,8 @@ async fn test_skip_non_blocking_commands_behavior() {
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
         force_pty: false,
+        dotfiles: None,
+        is_prebuild: false,
     };
 
     // Create lifecycle commands with all phases
@@ -208,6 +212,8 @@ async fn test_non_blocking_phases_sync_execution() {
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
         force_pty: false,
+        dotfiles: None,
+        is_prebuild: false,
     };
 
     // Create lifecycle commands with all phases
@@ -329,6 +335,8 @@ async fn test_non_blocking_phase_command_failures_are_handled() {
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
         force_pty: false,
+        dotfiles: None,
+        is_prebuild: false,
     };
 
     // Create lifecycle commands with all phases
@@ -437,6 +445,8 @@ async fn test_non_blocking_phase_timeout_handling() {
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
         force_pty: false,
+        dotfiles: None,
+        is_prebuild: false,
     };
 
     // Create lifecycle commands
@@ -511,6 +521,8 @@ async fn test_non_blocking_phases_with_progress_streaming() {
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
         force_pty: false,
+        dotfiles: None,
+        is_prebuild: false,
     };
 
     // Create lifecycle commands with non-blocking phases

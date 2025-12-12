@@ -107,7 +107,8 @@ fn test_compose_project_all_services_inclusion() {
         env_files: Vec::new(),
         additional_mounts: Vec::new(),
         profiles: Vec::new(),
-        additional_env: std::collections::HashMap::new(),
+        additional_env: deacon_core::IndexMap::new(),
+        external_volumes: Vec::new(),
     };
 
     let all_services = project.get_all_services();
@@ -216,7 +217,8 @@ fn test_compose_get_all_container_ids() {
         env_files: Vec::new(),
         additional_mounts: Vec::new(),
         profiles: Vec::new(),
-        additional_env: std::collections::HashMap::new(),
+        additional_env: deacon_core::IndexMap::new(),
+        external_volumes: Vec::new(),
     };
 
     let compose_manager = ComposeManager::new();
@@ -268,7 +270,8 @@ fn test_compose_service_targeting() {
         env_files: Vec::new(),
         additional_mounts: Vec::new(),
         profiles: Vec::new(),
-        additional_env: std::collections::HashMap::new(),
+        additional_env: deacon_core::IndexMap::new(),
+        external_volumes: Vec::new(),
     };
 
     // Verify all services are accessible

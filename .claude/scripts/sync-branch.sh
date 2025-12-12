@@ -44,6 +44,9 @@ TASKS_FILE="$SPEC_DIR/tasks.md"
 # Fetch latest
 git fetch origin 2>/dev/null
 
+# Check if we have local commits not in origin/main
+LOCAL_COMMITS=$(git rev-list origin/main..HEAD 2>/dev/null | wc -l | tr -d ' ')
+
 # Attempt rebase
 if ! git rebase origin/main 2>/dev/null; then
     CONFLICTS=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
@@ -53,7 +56,8 @@ if ! git rebase origin/main 2>/dev/null; then
   "branch": "$BRANCH_NAME",
   "spec_dir": "$SPEC_DIR",
   "tasks_file": "$TASKS_FILE",
-  "conflicts": "$CONFLICTS"
+  "conflicts": "$CONFLICTS",
+  "local_commits": $LOCAL_COMMITS
 }
 EOF
     exit 1
@@ -92,6 +96,8 @@ cat <<EOF
   "status": "ok",
   "branch": "$BRANCH_NAME",
   "spec_dir": "$SPEC_DIR",
-  "tasks_file": "$TASKS_FILE"
+  "tasks_file": "$TASKS_FILE",
+  "local_commits": $LOCAL_COMMITS,
+  "synced_with": "origin/main"
 }
 EOF

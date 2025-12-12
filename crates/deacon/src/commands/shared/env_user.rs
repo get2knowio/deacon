@@ -1,5 +1,6 @@
 use deacon_core::container_env_probe::{ContainerEnvironmentProber, ContainerProbeMode};
 use deacon_core::docker::Docker;
+use deacon_core::IndexMap;
 use std::collections::HashMap;
 use tracing::warn;
 
@@ -23,7 +24,7 @@ pub async fn resolve_env_and_user<D: Docker>(
     config_remote_user: Option<String>,
     probe_mode: ContainerProbeMode,
     config_remote_env: Option<&HashMap<String, Option<String>>>,
-    cli_env: &HashMap<String, String>,
+    cli_env: &IndexMap<String, String>,
     cache_folder: Option<&std::path::Path>,
 ) -> EnvUserResolution {
     let effective_user = cli_user.or(config_remote_user);

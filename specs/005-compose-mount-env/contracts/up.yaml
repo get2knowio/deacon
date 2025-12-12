@@ -1,0 +1,109 @@
+openapi: 3.0.3
+info:
+  title: Compose Up Injection Contract
+  version: "1.0.0"
+paths:
+  /up:
+    post:
+      summary: Start compose project with CLI mount and remote env injection targeting the primary service
+      description: Applies CLI-provided mounts (including mountWorkspaceGitRoot) and remote environment entries to the primary service while preserving external volumes, profiles, env-files, and project naming.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                primaryService:
+                  type: string
+                  description: Service name selected for injection (auto-detected or user-provided)
+                cliMounts:
+                  type: array
+                  description: Ordered list of bind mounts to inject
+                  items:
+                    type: object
+                    required: [source, target]
+                    properties:
+                      source:
+                        type: string
+                        description: Host path for the bind mount
+                      target:
+                        type: string
+                        description: Container path where the mount should appear
+                      options:
+                        type: array
+                        items:
+                          type: string
+                        description: Mount options (e.g., rw/ro, consistency)
+                mountWorkspaceGitRoot:
+                  type: boolean
+                  description: Whether to add the workspace Git root using the same conventions as other CLI mounts
+                remoteEnv:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Key/value env entries that override existing env-file or service defaults
+                profiles:
+                  type: array
+                  items:
+                    type: string
+                  description: Compose profiles to activate
+                envFiles:
+                  type: array
+                  items:
+                    type: string
+                  description: Env-file paths respected alongside injected env
+                projectName:
+                  type: string
+                  description: Compose project name to preserve for resources
+                externalVolumes:
+                  type: array
+                  items:
+                    type: string
+                  description: External volume names that must remain referenced, not replaced
+              required:
+                - primaryService
+      responses:
+        "200":
+          description: Primary service started with mounts/env injected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [started]
+                  effectiveMounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source:
+                          type: string
+                        target:
+                          type: string
+                        options:
+                          type: array
+                          items:
+                            type: string
+                  effectiveEnv:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  profilesApplied:
+                    type: array
+                    items:
+                      type: string
+                  projectName:
+                    type: string
+                  externalVolumesPreserved:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: Invalid request (e.g., ambiguous primary service, missing external volume)
+        "409":
+          description: Conflict when applying mounts/env (e.g., overlapping mount targets)
+        "500":
+          description: Unexpected failure while preparing compose project

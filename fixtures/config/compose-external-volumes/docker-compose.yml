@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  app:
+    image: ubuntu:22.04
+    command: sleep infinity
+    volumes:
+      - .:/workspace
+      - shared_data:/app/data
+      - cache:/app/cache
+
+volumes:
+  # External volume - simple form
+  shared_data:
+    external: true
+
+  # Local volume (not external)
+  cache:
+    driver: local

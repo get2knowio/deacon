@@ -17,8 +17,8 @@
 
 **Purpose**: Confirm docs and entry points for lifecycle work
 
-- [ ] T001 Review spec and plan alignment in `specs/008-up-lifecycle-hooks/spec.md` and `specs/008-up-lifecycle-hooks/plan.md` to confirm scope/acceptance items.
-- [ ] T002 [P] Validate code touchpoints listed in `specs/008-up-lifecycle-hooks/quickstart.md` against current files under `crates/core/src/` and `crates/deacon/src/commands/`.
+- [x] T001 Review spec and plan alignment in `specs/008-up-lifecycle-hooks/spec.md` and `specs/008-up-lifecycle-hooks/plan.md` to confirm scope/acceptance items.
+- [x] T002 [P] Validate code touchpoints listed in `specs/008-up-lifecycle-hooks/quickstart.md` against current files under `crates/core/src/` and `crates/deacon/src/commands/`.
 
 ---
 
@@ -26,9 +26,9 @@
 
 **Purpose**: Shared lifecycle primitives required before story work
 
-- [ ] T003 Align lifecycle phase state structures with data model (status/reason/marker paths) in `crates/core/src/state.rs` and `crates/core/src/lifecycle.rs`.
-- [ ] T004 [P] Ensure invocation context/flag parsing covers resume, prebuild, and `--skip-post-create` in `crates/deacon/src/commands/up.rs` and `crates/deacon/src/commands/shared/`.
-- [ ] T005 [P] Centralize phase marker read/write helpers (including isolated prebuild markers) in `crates/core/src/state.rs` for reuse across stories.
+- [x] T003 Align lifecycle phase state structures with data model (status/reason/marker paths) in `crates/core/src/state.rs` and `crates/core/src/lifecycle.rs`.
+- [x] T004 [P] Ensure invocation context/flag parsing covers resume, prebuild, and `--skip-post-create` in `crates/deacon/src/commands/up.rs` and `crates/deacon/src/commands/shared/`.
+- [x] T005 [P] Centralize phase marker read/write helpers (including isolated prebuild markers) in `crates/core/src/state.rs` for reuse across stories.
 
 ---
 
@@ -40,15 +40,15 @@
 
 ### Tests for User Story 1
 
-- [ ] T006 [P] [US1] Add/extend ordering integration test to assert SC-001: onCreate→updateContent→postCreate→dotfiles→postStart→postAttach run exactly once with no reordering/duplication in `crates/deacon/tests/smoke_lifecycle.rs` (or nearest lifecycle integration).
-- [ ] T007 [P] [US1] Add dotfiles ordering test to ensure dotfiles execute exactly once between postCreate and postStart (SC-001) in `crates/deacon/tests/up_dotfiles.rs`.
+- [x] T006 [P] [US1] Add/extend ordering integration test to assert SC-001: onCreate→updateContent→postCreate→dotfiles→postStart→postAttach run exactly once with no reordering/duplication in `crates/deacon/tests/smoke_lifecycle.rs` (or nearest lifecycle integration).
+- [x] T007 [P] [US1] Add dotfiles ordering test to ensure dotfiles execute exactly once between postCreate and postStart (SC-001) in `crates/deacon/tests/up_dotfiles.rs`.
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Enforce lifecycle execution order and single-run guards in `crates/core/src/lifecycle.rs` and `crates/deacon/src/commands/up.rs`.
-- [ ] T009 [P] [US1] Integrate dotfiles execution at postCreate→dotfiles→postStart boundary in `crates/core/src/dotfiles.rs` and orchestrate from `crates/core/src/lifecycle.rs`.
-- [ ] T010 [US1] Record per-phase markers (including dotfiles) in order for fresh runs in `crates/core/src/state.rs`.
-- [ ] T011 [US1] Render ordered phase summary (executed/skipped) in `crates/deacon/src/ui/` consistent with spec ordering and maintain stdout/json purity vs stderr logs.
+- [x] T008 [US1] Enforce lifecycle execution order and single-run guards in `crates/core/src/lifecycle.rs` and `crates/deacon/src/commands/up.rs`.
+- [x] T009 [P] [US1] Integrate dotfiles execution at postCreate→dotfiles→postStart boundary in `crates/core/src/dotfiles.rs` and orchestrate from `crates/core/src/lifecycle.rs`.
+- [x] T010 [US1] Record per-phase markers (including dotfiles) in order for fresh runs in `crates/core/src/state.rs`.
+- [x] T011 [US1] Render ordered phase summary (executed/skipped) in `crates/deacon/src/ui/` consistent with spec ordering and maintain stdout/json purity vs stderr logs.
 
 **Checkpoint**: User Story 1 independently testable via added integration tests.
 
@@ -62,14 +62,14 @@
 
 ### Tests for User Story 2
 
-- [ ] T012 [P] [US2] Add resume integration test asserting SC-002: only postStart/postAttach rerun when markers exist in `crates/deacon/tests/up_reconnect.rs` (or equivalent).
-- [ ] T013 [P] [US2] Add recovery test ensuring rerun starts from earliest incomplete marker before runtime hooks (SC-002/FR-004) in `crates/deacon/tests/up_validation.rs` or new targeted file.
+- [x] T012 [P] [US2] Add resume integration test asserting SC-002: only postStart/postAttach rerun when markers exist in `crates/deacon/tests/smoke_lifecycle.rs`.
+- [x] T013 [P] [US2] Add recovery test ensuring rerun starts from earliest incomplete marker before runtime hooks (SC-002/FR-004) in `crates/deacon/tests/up_lifecycle_recovery.rs`.
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Implement resume decision logic using per-phase markers to skip onCreate/updateContent/postCreate/dotfiles in `crates/core/src/lifecycle.rs` and `crates/deacon/src/commands/up.rs`.
-- [ ] T015 [P] [US2] Handle corrupted/missing markers by rerunning from earliest phase and updating summaries in `crates/core/src/state.rs` and `crates/deacon/src/ui/` while keeping stdout/json purity vs stderr logs.
-- [ ] T016 [US2] Ensure runtime hook reruns (postStart/postAttach) execute in order with markers updated in `crates/core/src/container_lifecycle.rs`.
+- [x] T014 [US2] Implement resume decision logic using per-phase markers to skip onCreate/updateContent/postCreate/dotfiles in `crates/core/src/lifecycle.rs` and `crates/deacon/src/commands/up.rs`.
+- [x] T015 [P] [US2] Handle corrupted/missing markers by rerunning from earliest phase and updating summaries in `crates/core/src/state.rs` and `crates/deacon/src/ui/` while keeping stdout/json purity vs stderr logs.
+- [x] T016 [US2] Ensure runtime hook reruns (postStart/postAttach) execute in order with markers updated in `crates/core/src/container_lifecycle.rs`.
 
 **Checkpoint**: User Story 2 independently testable via resume/recovery tests.
 
