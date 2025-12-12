@@ -1,7 +1,14 @@
 //! Dotfiles installation for the up command.
 //!
+//! **DEPRECATED**: As of T009, dotfiles execution has been integrated into
+//! `container_lifecycle.rs` to ensure correct lifecycle ordering:
+//! `postCreate -> dotfiles -> postStart` (per spec SC-001).
+//!
+//! This module is kept for reference but the `execute_dotfiles_installation`
+//! function is no longer called. It may be removed in a future release.
+//!
 //! This module contains:
-//! - `execute_dotfiles_installation` - Install dotfiles in container
+//! - `execute_dotfiles_installation` - Install dotfiles in container (DEPRECATED)
 
 use super::args::UpArgs;
 use anyhow::Result;
@@ -12,9 +19,13 @@ use tracing::{debug, info, instrument};
 
 /// Execute dotfiles installation in the container if dotfiles flags are provided.
 ///
+/// **DEPRECATED**: This function is no longer used. Dotfiles execution is now
+/// integrated into `container_lifecycle.rs` via `execute_dotfiles_in_container`.
+/// See T009 implementation for details.
+///
 /// T015: Dotfiles integration with container-side execution.
 /// Per specs/001-up-gap-spec/ User Story 2:
-/// - Dotfiles run after updateContent and before postCreate
+/// - Dotfiles run after postCreate and before postStart (corrected ordering per SC-001)
 /// - Dotfiles are user-specific and should NOT run in prebuild mode
 /// - Uses git to clone repository inside container and executes install script
 ///
@@ -26,6 +37,11 @@ use tracing::{debug, info, instrument};
 /// # Returns
 /// Ok(()) if dotfiles installation succeeds or if no dotfiles are configured.
 /// Error if dotfiles installation fails.
+#[deprecated(
+    since = "0.1.5",
+    note = "Use container_lifecycle.rs dotfiles integration instead (T009)"
+)]
+#[allow(dead_code)]
 #[instrument(skip(config, args))]
 pub(crate) async fn execute_dotfiles_installation(
     container_id: &str,
