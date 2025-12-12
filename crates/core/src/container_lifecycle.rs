@@ -14,6 +14,27 @@ use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{debug, error, info, instrument, warn};
 
+/// Configuration for dotfiles installation during lifecycle execution.
+///
+/// Dotfiles are installed at the `postCreate -> dotfiles -> postStart` boundary
+/// per spec FR-001 (SC-001 in specs/008-up-lifecycle-hooks/).
+#[derive(Debug, Clone, Default)]
+pub struct DotfilesConfig {
+    /// Git repository URL for dotfiles (None means no dotfiles configured)
+    pub repository: Option<String>,
+    /// Target path where dotfiles should be cloned (defaults based on user)
+    pub target_path: Option<String>,
+    /// Custom install command (overrides auto-detection of install.sh/setup.sh)
+    pub install_command: Option<String>,
+}
+
+impl DotfilesConfig {
+    /// Check if dotfiles are configured
+    pub fn is_configured(&self) -> bool {
+        self.repository.is_some()
+    }
+}
+
 /// Configuration for container lifecycle execution
 #[derive(Debug, Clone)]
 pub struct ContainerLifecycleConfig {
@@ -42,6 +63,11 @@ pub struct ContainerLifecycleConfig {
     /// Primarily used with JSON log mode to support interactive lifecycle commands.
     /// Controlled by CLI flag `--force-tty-if-json` or env var `DEACON_FORCE_TTY_IF_JSON`.
     pub force_pty: bool,
+    /// Dotfiles configuration for installation after postCreate phase.
+    /// Per spec SC-001: dotfiles execute exactly once at `postCreate -> dotfiles -> postStart` boundary.
+    pub dotfiles: Option<DotfilesConfig>,
+    /// Whether running in prebuild mode (skips dotfiles)
+    pub is_prebuild: bool,
 }
 
 /// Execute lifecycle commands in a container with full variable substitution
@@ -301,6 +327,37 @@ where
         info!("Skipping postCreate phase");
     }
 
+    // Execute dotfiles phase (postCreate -> dotfiles -> postStart boundary per SC-001)
+    // Dotfiles are skipped in prebuild mode and when skip_post_create is set
+    if !updated_config.is_prebuild && !updated_config.skip_post_create {
+        if let Some(ref dotfiles_config) = config.dotfiles {
+            if dotfiles_config.is_configured() {
+                info!("Executing dotfiles phase (after postCreate, before postStart)");
+                result.phases.push(
+                    execute_dotfiles_in_container(
+                        dotfiles_config,
+                        &updated_config,
+                        docker,
+                        detected_shell.as_deref(),
+                        progress_callback.as_ref(),
+                    )
+                    .await?,
+                );
+            } else {
+                debug!("Dotfiles not configured, skipping dotfiles phase");
+            }
+        } else {
+            debug!("No dotfiles configuration provided, skipping dotfiles phase");
+        }
+    } else if updated_config.is_prebuild {
+        info!("Skipping dotfiles phase (prebuild mode)");
+    } else {
+        info!("Skipping dotfiles phase (skip_post_create flag)");
+    }
+
+    // Derive workspace folder from substitution context for marker persistence
+    let workspace_folder = std::path::PathBuf::from(&container_context.local_workspace_folder);
+
     // Execute postStart phase (if not skipped by non-blocking commands flag)
     if !updated_config.skip_non_blocking_commands {
         if let Some(post_start_commands) = &commands.post_start {
@@ -312,6 +369,8 @@ where
                 context: container_context.clone(),
                 timeout: updated_config.non_blocking_timeout,
                 detected_shell: detected_shell.clone(),
+                workspace_folder: workspace_folder.clone(),
+                prebuild: updated_config.is_prebuild,
             });
             info!("Added postStart phase for non-blocking execution");
         }
@@ -330,6 +389,8 @@ where
                 context: container_context.clone(),
                 timeout: updated_config.non_blocking_timeout,
                 detected_shell: detected_shell.clone(),
+                workspace_folder: workspace_folder.clone(),
+                prebuild: updated_config.is_prebuild,
             });
             info!("Added postAttach phase for non-blocking execution");
         }
@@ -786,6 +847,307 @@ where
     Ok(phase_result)
 }
 
+/// Execute dotfiles installation in the container
+///
+/// Per spec SC-001, dotfiles execute at the `postCreate -> dotfiles -> postStart` boundary.
+/// This function:
+/// 1. Clones the dotfiles repository into the container
+/// 2. Executes the install script (custom or auto-detected install.sh/setup.sh)
+///
+/// # Arguments
+///
+/// * `dotfiles_config` - Configuration for dotfiles (repository, target path, install command)
+/// * `lifecycle_config` - Container lifecycle configuration
+/// * `docker` - Docker client for executing commands
+/// * `detected_shell` - Shell detected for the container
+/// * `progress_callback` - Optional callback for progress events
+#[instrument(skip(dotfiles_config, lifecycle_config, docker, progress_callback))]
+async fn execute_dotfiles_in_container<D, F>(
+    dotfiles_config: &DotfilesConfig,
+    lifecycle_config: &ContainerLifecycleConfig,
+    docker: &D,
+    detected_shell: Option<&str>,
+    progress_callback: Option<&F>,
+) -> Result<PhaseResult>
+where
+    D: Docker,
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
+    let phase = LifecyclePhase::Dotfiles;
+    let phase_start = Instant::now();
+
+    info!(
+        "Executing dotfiles phase in container: {}",
+        lifecycle_config.container_id
+    );
+
+    // Emit phase begin event
+    if let Some(callback) = progress_callback {
+        let event = ProgressEvent::LifecyclePhaseBegin {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: phase.as_str().to_string(),
+            commands: vec![format!(
+                "dotfiles: {}",
+                dotfiles_config.repository.as_deref().unwrap_or("none")
+            )],
+        };
+        if let Err(e) = callback(event) {
+            debug!("Failed to emit phase begin event: {}", e);
+        }
+    }
+
+    let mut phase_result = PhaseResult {
+        phase,
+        commands: Vec::new(),
+        total_duration: Duration::default(),
+        success: true,
+    };
+
+    // Get repository URL
+    let repository = match &dotfiles_config.repository {
+        Some(repo) => repo.clone(),
+        None => {
+            debug!("No dotfiles repository configured");
+            phase_result.total_duration = phase_start.elapsed();
+            return Ok(phase_result);
+        }
+    };
+
+    // Determine user and target path
+    let user = lifecycle_config
+        .user
+        .clone()
+        .unwrap_or_else(|| "root".to_string());
+    let default_target_path = if user == "root" {
+        "/root/.dotfiles".to_string()
+    } else {
+        format!("/home/{}/.dotfiles", user)
+    };
+
+    let target_path = dotfiles_config
+        .target_path
+        .clone()
+        .unwrap_or(default_target_path);
+
+    debug!(
+        "Installing dotfiles to container path: {} as user: {}",
+        target_path, user
+    );
+
+    let exec_config = ExecConfig {
+        user: Some(user.clone()),
+        working_dir: None,
+        env: lifecycle_config.container_env.clone(),
+        tty: lifecycle_config.force_pty,
+        interactive: false,
+        detach: false,
+        silent: false,
+        terminal_size: None,
+    };
+
+    // Step 1: Check if dotfiles directory already exists (idempotency)
+    let check_exists_command = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        format!("test -d {}", target_path),
+    ];
+
+    let exists_result = docker
+        .exec(
+            &lifecycle_config.container_id,
+            &check_exists_command,
+            exec_config.clone(),
+        )
+        .await
+        .map_err(|e| {
+            DeaconError::Lifecycle(format!("Failed to check dotfiles directory: {}", e))
+        })?;
+
+    if exists_result.success {
+        info!(
+            "Dotfiles directory already exists at {}, removing to clone fresh",
+            target_path
+        );
+        let remove_command = vec!["rm".to_string(), "-rf".to_string(), target_path.clone()];
+        let remove_result = docker
+            .exec(
+                &lifecycle_config.container_id,
+                &remove_command,
+                exec_config.clone(),
+            )
+            .await
+            .map_err(|e| {
+                DeaconError::Lifecycle(format!("Failed to remove existing dotfiles: {}", e))
+            })?;
+
+        if !remove_result.success {
+            phase_result.success = false;
+            phase_result.total_duration = phase_start.elapsed();
+            emit_phase_end_event(progress_callback, &phase_result);
+            return Err(DeaconError::Lifecycle(format!(
+                "Failed to remove existing dotfiles directory (exit code {}): {}{}",
+                remove_result.exit_code, remove_result.stdout, remove_result.stderr
+            )));
+        }
+    }
+
+    // Step 2: Clone dotfiles repository inside container
+    info!("Cloning dotfiles repository: {}", repository);
+    let clone_command = vec![
+        "git".to_string(),
+        "clone".to_string(),
+        repository.clone(),
+        target_path.clone(),
+    ];
+
+    let clone_start = Instant::now();
+    let clone_result = docker
+        .exec(
+            &lifecycle_config.container_id,
+            &clone_command,
+            exec_config.clone(),
+        )
+        .await
+        .map_err(|e| DeaconError::Lifecycle(format!("Failed to execute git clone: {}", e)))?;
+
+    phase_result.commands.push(CommandResult {
+        command: format!("git clone {} {}", repository, target_path),
+        exit_code: clone_result.exit_code,
+        duration: clone_start.elapsed(),
+        success: clone_result.success,
+        stdout: clone_result.stdout.clone(),
+        stderr: clone_result.stderr.clone(),
+    });
+
+    if !clone_result.success {
+        phase_result.success = false;
+        phase_result.total_duration = phase_start.elapsed();
+        emit_phase_end_event(progress_callback, &phase_result);
+        return Err(DeaconError::Lifecycle(format!(
+            "Failed to clone dotfiles repository (exit code {}): {}{}. Ensure git is installed and the repository URL is valid.",
+            clone_result.exit_code, clone_result.stdout, clone_result.stderr
+        )));
+    }
+
+    info!("Dotfiles repository cloned successfully");
+
+    // Step 3: Determine and execute install command
+    let install_command_str = if let Some(ref custom_command) = dotfiles_config.install_command {
+        debug!("Using custom dotfiles install command: {}", custom_command);
+        Some(custom_command.clone())
+    } else {
+        // Auto-detect install script
+        debug!("Auto-detecting install script in dotfiles repository");
+
+        let detect_script_command = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            format!(
+                "if [ -f {}/install.sh ]; then echo 'install.sh'; elif [ -f {}/setup.sh ]; then echo 'setup.sh'; fi",
+                target_path, target_path
+            ),
+        ];
+
+        let detect_result = docker
+            .exec(
+                &lifecycle_config.container_id,
+                &detect_script_command,
+                exec_config.clone(),
+            )
+            .await;
+
+        match detect_result {
+            Ok(result) if !result.stdout.trim().is_empty() => {
+                let script_name = result.stdout.trim();
+                debug!("Auto-detected install script: {}", script_name);
+
+                // Use detected shell or fallback to bash
+                let shell = detected_shell.unwrap_or("bash");
+                Some(format!("{} {}/{}", shell, target_path, script_name))
+            }
+            _ => {
+                debug!("No install script found in dotfiles repository");
+                None
+            }
+        }
+    };
+
+    // Step 4: Execute install command if present
+    if let Some(install_cmd) = install_command_str {
+        info!("Executing dotfiles install command: {}", install_cmd);
+
+        let install_command = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            format!("cd {} && {}", target_path, install_cmd),
+        ];
+
+        let install_start = Instant::now();
+        let install_result = docker
+            .exec(
+                &lifecycle_config.container_id,
+                &install_command,
+                exec_config,
+            )
+            .await
+            .map_err(|e| {
+                DeaconError::Lifecycle(format!("Failed to execute install command: {}", e))
+            })?;
+
+        phase_result.commands.push(CommandResult {
+            command: install_cmd.clone(),
+            exit_code: install_result.exit_code,
+            duration: install_start.elapsed(),
+            success: install_result.success,
+            stdout: install_result.stdout.clone(),
+            stderr: install_result.stderr.clone(),
+        });
+
+        if !install_result.success {
+            phase_result.success = false;
+            phase_result.total_duration = phase_start.elapsed();
+            emit_phase_end_event(progress_callback, &phase_result);
+            return Err(DeaconError::Lifecycle(format!(
+                "Dotfiles install script failed (exit code {}): {}{}",
+                install_result.exit_code, install_result.stdout, install_result.stderr
+            )));
+        }
+
+        info!("Dotfiles install command completed successfully");
+    } else {
+        info!("No install script to execute, dotfiles cloned only");
+    }
+
+    phase_result.total_duration = phase_start.elapsed();
+    emit_phase_end_event(progress_callback, &phase_result);
+
+    debug!(
+        "Completed dotfiles phase in {:?}",
+        phase_result.total_duration
+    );
+    Ok(phase_result)
+}
+
+/// Helper to emit phase end event
+fn emit_phase_end_event<F>(progress_callback: Option<&F>, phase_result: &PhaseResult)
+where
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
+    if let Some(callback) = progress_callback {
+        let event = ProgressEvent::LifecyclePhaseEnd {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: phase_result.phase.as_str().to_string(),
+            duration_ms: phase_result.total_duration.as_millis() as u64,
+            success: phase_result.success,
+        };
+        if let Err(e) = callback(event) {
+            debug!("Failed to emit phase end event: {}", e);
+        }
+    }
+}
+
 /// Commands for each lifecycle phase
 #[derive(Debug, Clone, Default)]
 pub struct ContainerLifecycleCommands {
@@ -902,6 +1264,11 @@ pub struct NonBlockingPhaseSpec {
     pub timeout: Duration,
     /// Detected shell for lifecycle execution
     pub detected_shell: Option<String>,
+    /// Workspace folder path for marker persistence (derived from context)
+    /// Used to write completion markers after runtime hook execution per FR-002.
+    pub workspace_folder: std::path::PathBuf,
+    /// Whether running in prebuild mode (affects marker directory per FR-008)
+    pub prebuild: bool,
 }
 
 impl Default for ContainerLifecycleResult {
@@ -1036,6 +1403,8 @@ impl ContainerLifecycleResult {
         D: Docker,
         F: Fn(ProgressEvent) -> anyhow::Result<()>,
     {
+        use crate::state::record_phase_executed;
+
         let non_blocking_phases = std::mem::take(&mut self.non_blocking_phases);
 
         for spec in non_blocking_phases {
@@ -1064,6 +1433,29 @@ impl ContainerLifecycleResult {
                         "Non-blocking phase {} completed successfully",
                         spec.phase.as_str()
                     );
+
+                    // Per FR-002/SC-002: Record marker for runtime hooks on successful execution.
+                    // Runtime hooks (postStart, postAttach) always rerun on resume but still
+                    // need their markers updated with new timestamps per data-model.md.
+                    if phase_result.success {
+                        if let Err(e) =
+                            record_phase_executed(&spec.workspace_folder, spec.phase, spec.prebuild)
+                        {
+                            warn!(
+                                "Failed to record marker for phase {}: {}",
+                                spec.phase.as_str(),
+                                e
+                            );
+                        } else {
+                            debug!(
+                                "Recorded marker for runtime hook {} at {} (prebuild={})",
+                                spec.phase.as_str(),
+                                spec.workspace_folder.display(),
+                                spec.prebuild
+                            );
+                        }
+                    }
+
                     self.phases.push(phase_result);
                 }
                 Ok(Err(e)) => {
@@ -1109,6 +1501,8 @@ mod tests {
             user_env_probe: crate::container_env_probe::ContainerProbeMode::LoginShell,
             cache_folder: None,
             force_pty: false,
+            dotfiles: None,
+            is_prebuild: false,
         };
 
         assert_eq!(config.container_id, "test-container");
@@ -1118,6 +1512,32 @@ mod tests {
         assert!(!config.skip_non_blocking_commands);
         assert_eq!(config.non_blocking_timeout, Duration::from_secs(300));
         assert!(config.use_login_shell);
+        assert!(config.dotfiles.is_none());
+        assert!(!config.is_prebuild);
+    }
+
+    #[test]
+    fn test_dotfiles_config() {
+        // Test default
+        let default_config = DotfilesConfig::default();
+        assert!(!default_config.is_configured());
+        assert!(default_config.repository.is_none());
+        assert!(default_config.target_path.is_none());
+        assert!(default_config.install_command.is_none());
+
+        // Test configured
+        let config = DotfilesConfig {
+            repository: Some("https://github.com/user/dotfiles".to_string()),
+            target_path: Some("/home/user/.dotfiles".to_string()),
+            install_command: Some("./install.sh".to_string()),
+        };
+        assert!(config.is_configured());
+        assert_eq!(
+            config.repository,
+            Some("https://github.com/user/dotfiles".to_string())
+        );
+        assert_eq!(config.target_path, Some("/home/user/.dotfiles".to_string()));
+        assert_eq!(config.install_command, Some("./install.sh".to_string()));
     }
 
     #[test]
@@ -1216,6 +1636,7 @@ mod tests {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
 
+        let workspace_folder = temp_dir.path().to_path_buf();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
             commands: vec!["echo 'test'".to_string()],
@@ -1231,10 +1652,14 @@ mod tests {
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
                 force_pty: false,
+                dotfiles: None,
+                is_prebuild: false,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
             detected_shell: None,
+            workspace_folder,
+            prebuild: false,
         });
 
         // Execute without callback (None branch)
@@ -1274,6 +1699,7 @@ mod tests {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
 
+        let workspace_folder = temp_dir.path().to_path_buf();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
             commands: vec!["echo 'test'".to_string()],
@@ -1289,10 +1715,14 @@ mod tests {
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
                 force_pty: false,
+                dotfiles: None,
+                is_prebuild: false,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
             detected_shell: None,
+            workspace_folder,
+            prebuild: false,
         });
 
         // Track callback invocations
@@ -1346,6 +1776,7 @@ mod tests {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
 
+        let workspace_folder = temp_dir.path().to_path_buf();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
             commands: vec!["echo 'test'".to_string()],
@@ -1361,10 +1792,14 @@ mod tests {
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
                 force_pty: false,
+                dotfiles: None,
+                is_prebuild: false,
             },
             context: substitution_context,
             timeout: Duration::from_millis(100), // Very short timeout
             detected_shell: None,
+            workspace_folder,
+            prebuild: false,
         });
 
         // Execute with callback - should timeout
@@ -1405,6 +1840,7 @@ mod tests {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
 
+        let workspace_folder = temp_dir.path().to_path_buf();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
             commands: vec!["echo 'test'".to_string()],
@@ -1420,10 +1856,14 @@ mod tests {
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
                 force_pty: false,
+                dotfiles: None,
+                is_prebuild: false,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
             detected_shell: None,
+            workspace_folder,
+            prebuild: false,
         });
 
         // Execute with callback - command should fail but not propagate error
@@ -1446,5 +1886,288 @@ mod tests {
             0,
             "Non-blocking command failures should not add to background_errors"
         );
+    }
+
+    /// Test that runtime hook markers are written after successful non-blocking phase execution.
+    /// Per FR-002/SC-002: "The system MUST record completion markers per lifecycle phase"
+    #[tokio::test]
+    async fn test_runtime_hook_markers_written_on_success() {
+        use crate::docker::mock::{MockDocker, MockDockerConfig, MockExecResponse};
+        use crate::lifecycle::LifecyclePhase;
+        use crate::state::marker_exists;
+        use crate::variable::SubstitutionContext;
+
+        // Create mock docker that succeeds
+        let config = MockDockerConfig {
+            default_exec_response: MockExecResponse {
+                exit_code: 0,
+                success: true,
+                delay: None,
+                stdout: None,
+                stderr: None,
+            },
+            ..Default::default()
+        };
+        let docker = MockDocker::with_config(config);
+
+        // Create a temp workspace for markers
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let workspace_folder = temp_dir.path().to_path_buf();
+        let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
+
+        // Verify no markers exist before execution
+        assert!(
+            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false),
+            "postStart marker should not exist before execution"
+        );
+        assert!(
+            !marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false),
+            "postAttach marker should not exist before execution"
+        );
+
+        // Create a result with both postStart and postAttach phases
+        let mut result = ContainerLifecycleResult::new();
+        result.non_blocking_phases.push(NonBlockingPhaseSpec {
+            phase: LifecyclePhase::PostStart,
+            commands: vec!["echo 'postStart'".to_string()],
+            config: ContainerLifecycleConfig {
+                container_id: "test".to_string(),
+                user: None,
+                container_workspace_folder: "/workspace".to_string(),
+                container_env: HashMap::new(),
+                skip_post_create: false,
+                skip_non_blocking_commands: false,
+                non_blocking_timeout: Duration::from_secs(30),
+                use_login_shell: false,
+                user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
+                cache_folder: None,
+                force_pty: false,
+                dotfiles: None,
+                is_prebuild: false,
+            },
+            context: substitution_context.clone(),
+            timeout: Duration::from_secs(30),
+            detected_shell: None,
+            workspace_folder: workspace_folder.clone(),
+            prebuild: false,
+        });
+        result.non_blocking_phases.push(NonBlockingPhaseSpec {
+            phase: LifecyclePhase::PostAttach,
+            commands: vec!["echo 'postAttach'".to_string()],
+            config: ContainerLifecycleConfig {
+                container_id: "test".to_string(),
+                user: None,
+                container_workspace_folder: "/workspace".to_string(),
+                container_env: HashMap::new(),
+                skip_post_create: false,
+                skip_non_blocking_commands: false,
+                non_blocking_timeout: Duration::from_secs(30),
+                use_login_shell: false,
+                user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
+                cache_folder: None,
+                force_pty: false,
+                dotfiles: None,
+                is_prebuild: false,
+            },
+            context: substitution_context,
+            timeout: Duration::from_secs(30),
+            detected_shell: None,
+            workspace_folder: workspace_folder.clone(),
+            prebuild: false,
+        });
+
+        // Execute non-blocking phases
+        let final_result = result
+            .execute_non_blocking_phases_sync(&docker)
+            .await
+            .unwrap();
+
+        // Verify both phases executed successfully
+        assert_eq!(final_result.phases.len(), 2, "Both phases should execute");
+        assert!(final_result.phases[0].success, "postStart should succeed");
+        assert!(final_result.phases[1].success, "postAttach should succeed");
+
+        // Verify markers were written for both phases
+        assert!(
+            marker_exists(&workspace_folder, LifecyclePhase::PostStart, false),
+            "postStart marker should exist after successful execution"
+        );
+        assert!(
+            marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false),
+            "postAttach marker should exist after successful execution"
+        );
+    }
+
+    /// Test that runtime hook markers are NOT written when phase fails.
+    /// Per FR-002: markers should only be written on successful execution.
+    #[tokio::test]
+    async fn test_runtime_hook_markers_not_written_on_failure() {
+        use crate::docker::mock::{MockDocker, MockDockerConfig, MockExecResponse};
+        use crate::lifecycle::LifecyclePhase;
+        use crate::state::marker_exists;
+        use crate::variable::SubstitutionContext;
+
+        // Create mock docker that fails (exit code 1)
+        let config = MockDockerConfig {
+            default_exec_response: MockExecResponse {
+                exit_code: 1,
+                success: false,
+                delay: None,
+                stdout: None,
+                stderr: None,
+            },
+            ..Default::default()
+        };
+        let docker = MockDocker::with_config(config);
+
+        // Create a temp workspace for markers
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let workspace_folder = temp_dir.path().to_path_buf();
+        let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
+
+        // Create a result with a postStart phase that will fail
+        let mut result = ContainerLifecycleResult::new();
+        result.non_blocking_phases.push(NonBlockingPhaseSpec {
+            phase: LifecyclePhase::PostStart,
+            commands: vec!["exit 1".to_string()],
+            config: ContainerLifecycleConfig {
+                container_id: "test".to_string(),
+                user: None,
+                container_workspace_folder: "/workspace".to_string(),
+                container_env: HashMap::new(),
+                skip_post_create: false,
+                skip_non_blocking_commands: false,
+                non_blocking_timeout: Duration::from_secs(30),
+                use_login_shell: false,
+                user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
+                cache_folder: None,
+                force_pty: false,
+                dotfiles: None,
+                is_prebuild: false,
+            },
+            context: substitution_context,
+            timeout: Duration::from_secs(30),
+            detected_shell: None,
+            workspace_folder: workspace_folder.clone(),
+            prebuild: false,
+        });
+
+        // Execute non-blocking phases
+        let final_result = result
+            .execute_non_blocking_phases_sync(&docker)
+            .await
+            .unwrap();
+
+        // Verify phase executed but failed
+        assert_eq!(final_result.phases.len(), 1, "Phase should execute");
+        assert!(!final_result.phases[0].success, "postStart should fail");
+
+        // Verify marker was NOT written because phase failed
+        assert!(
+            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false),
+            "postStart marker should NOT exist after failed execution"
+        );
+    }
+
+    /// Test that runtime hooks execute in correct order (postStart before postAttach).
+    /// Per spec FR-003: "rerun only postStart followed by postAttach"
+    #[tokio::test]
+    async fn test_runtime_hook_execution_order() {
+        use crate::docker::mock::{MockDocker, MockDockerConfig, MockExecResponse};
+        use crate::lifecycle::LifecyclePhase;
+        use crate::variable::SubstitutionContext;
+        use std::sync::{Arc, Mutex};
+
+        // Create mock docker that succeeds
+        let config = MockDockerConfig {
+            default_exec_response: MockExecResponse {
+                exit_code: 0,
+                success: true,
+                delay: None,
+                stdout: None,
+                stderr: None,
+            },
+            ..Default::default()
+        };
+        let docker = MockDocker::with_config(config);
+
+        // Create a temp workspace
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let workspace_folder = temp_dir.path().to_path_buf();
+        let substitution_context = SubstitutionContext::new(temp_dir.path()).unwrap();
+
+        // Track execution order via callback
+        let execution_order = Arc::new(Mutex::new(Vec::new()));
+        let execution_order_clone = execution_order.clone();
+
+        let progress_callback = move |event: ProgressEvent| {
+            if let crate::progress::ProgressEvent::LifecyclePhaseBegin { phase, .. } = event {
+                execution_order_clone.lock().unwrap().push(phase);
+            }
+            Ok(())
+        };
+
+        // Create a result with postStart and postAttach in that order
+        let mut result = ContainerLifecycleResult::new();
+        result.non_blocking_phases.push(NonBlockingPhaseSpec {
+            phase: LifecyclePhase::PostStart,
+            commands: vec!["echo 'postStart'".to_string()],
+            config: ContainerLifecycleConfig {
+                container_id: "test".to_string(),
+                user: None,
+                container_workspace_folder: "/workspace".to_string(),
+                container_env: HashMap::new(),
+                skip_post_create: false,
+                skip_non_blocking_commands: false,
+                non_blocking_timeout: Duration::from_secs(30),
+                use_login_shell: false,
+                user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
+                cache_folder: None,
+                force_pty: false,
+                dotfiles: None,
+                is_prebuild: false,
+            },
+            context: substitution_context.clone(),
+            timeout: Duration::from_secs(30),
+            detected_shell: None,
+            workspace_folder: workspace_folder.clone(),
+            prebuild: false,
+        });
+        result.non_blocking_phases.push(NonBlockingPhaseSpec {
+            phase: LifecyclePhase::PostAttach,
+            commands: vec!["echo 'postAttach'".to_string()],
+            config: ContainerLifecycleConfig {
+                container_id: "test".to_string(),
+                user: None,
+                container_workspace_folder: "/workspace".to_string(),
+                container_env: HashMap::new(),
+                skip_post_create: false,
+                skip_non_blocking_commands: false,
+                non_blocking_timeout: Duration::from_secs(30),
+                use_login_shell: false,
+                user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
+                cache_folder: None,
+                force_pty: false,
+                dotfiles: None,
+                is_prebuild: false,
+            },
+            context: substitution_context,
+            timeout: Duration::from_secs(30),
+            detected_shell: None,
+            workspace_folder,
+            prebuild: false,
+        });
+
+        // Execute non-blocking phases with callback
+        let _final_result = result
+            .execute_non_blocking_phases_sync_with_callback(&docker, Some(progress_callback))
+            .await
+            .unwrap();
+
+        // Verify execution order: postStart must come before postAttach
+        let order = execution_order.lock().unwrap();
+        assert_eq!(order.len(), 2, "Both phases should have been executed");
+        assert_eq!(order[0], "postStart", "postStart should execute first");
+        assert_eq!(order[1], "postAttach", "postAttach should execute second");
     }
 }
