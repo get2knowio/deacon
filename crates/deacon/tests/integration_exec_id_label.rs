@@ -1,161 +1,95 @@
 //! Docker-backed tests for `deacon exec --id-label` matching behavior.
 
 use assert_cmd::Command;
-use std::process::{Command as StdCommand, Stdio};
+use testcontainers::runners::AsyncRunner;
 
 mod support;
+mod testcontainers_helpers;
 use support::unique_name;
+use testcontainers_helpers::{alpine_sleep_with_labels, container_id};
 
-fn is_docker_available() -> bool {
-    StdCommand::new("docker")
-        .arg("info")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-fn create_test_container(name: &str, labels: &[(&str, &str)]) -> Result<String, String> {
-    let mut cmd = StdCommand::new("docker");
-    cmd.arg("run").arg("-d").arg("--name").arg(name).arg("--rm");
-
-    for (key, value) in labels {
-        cmd.arg("--label").arg(format!("{}={}", key, value));
-    }
-
-    cmd.arg("alpine:3.19").arg("sh").arg("-c").arg("sleep 3600");
-
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run docker: {}", e))?;
-
-    if output.status.success() {
-        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(container_id)
-    } else {
-        Err(format!(
-            "Failed to create container: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ))
-    }
-}
-
-fn cleanup_container(name: &str) {
-    let _ = StdCommand::new("docker")
-        .arg("rm")
-        .arg("-f")
-        .arg(name)
-        .output();
-}
-
-#[test]
-fn test_exec_id_label_successful_unique_match() {
+#[tokio::test]
+async fn test_exec_id_label_successful_unique_match() {
     // Test successful execution with a uniquely matched container
-    if !is_docker_available() {
-        eprintln!("Skipping test: Docker is not available");
-        return;
-    }
+    // Use a unique label value to ensure we match only our container
+    let unique_value = unique_name("unique-match");
 
-    let container_name = unique_name("deacon-test-unique-match");
-
-    // Create a test container with unique labels
+    // Create a test container with unique labels using testcontainers
     let labels = &[
-        ("com.example.test", "unique-match"),
+        ("com.example.test", unique_value.as_str()),
         ("com.example.role", "test-container"),
     ];
 
-    match create_test_container(&container_name, labels) {
-        Ok(_container_id) => {
-            // Give container a moment to start
-            std::thread::sleep(std::time::Duration::from_secs(1));
+    let container = alpine_sleep_with_labels(labels).start().await.unwrap();
+    let _id = container_id(&container).await;
 
-            // Execute a command in the container using id-label
-            let mut cmd = Command::cargo_bin("deacon").unwrap();
-            let result = cmd
-                .arg("exec")
-                .arg("--id-label")
-                .arg("com.example.test=unique-match")
-                .arg("--")
-                .arg("echo")
-                .arg("success")
-                .assert()
-                .success()
-                .code(0);
+    // Give container a moment to start
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-            // Verify output contains expected text
-            let output = result.get_output();
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(
-                stdout.contains("success"),
-                "Expected 'success' in output, got: {}",
-                stdout
-            );
+    // Execute a command in the container using id-label
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let result = cmd
+        .arg("exec")
+        .arg("--id-label")
+        .arg(format!("com.example.test={}", unique_value))
+        .arg("--")
+        .arg("echo")
+        .arg("success")
+        .assert()
+        .success()
+        .code(0);
 
-            // Cleanup
-            cleanup_container(&container_name);
-        }
-        Err(e) => {
-            cleanup_container(&container_name);
-            eprintln!("Skipping test: Failed to create test container: {}", e);
-        }
-    }
+    // Verify output contains expected text
+    let output = result.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("success"),
+        "Expected 'success' in output, got: {}",
+        stdout
+    );
+
+    // Container automatically cleaned up when dropped
 }
 
-#[test]
-fn test_exec_id_label_ambiguous_match_lists_candidates() {
+#[tokio::test]
+async fn test_exec_id_label_ambiguous_match_lists_candidates() {
     // Test that when multiple containers match, we use the first one (deterministic behavior)
-    if !is_docker_available() {
-        eprintln!("Skipping test: Docker is not available");
-        return;
-    }
+    // Use a unique label value to ensure we match only our containers
+    let unique_value = unique_name("ambiguous-match");
 
-    let container1_name = unique_name("deacon-test-ambiguous-1");
-    let container2_name = unique_name("deacon-test-ambiguous-2");
+    // Create two test containers with the same label using testcontainers
+    let labels = &[("com.example.test", unique_value.as_str())];
 
-    // Create two test containers with the same label
-    let labels = &[("com.example.test", "ambiguous-match")];
+    let container1 = alpine_sleep_with_labels(labels).start().await.unwrap();
+    let _id1 = container_id(&container1).await;
 
-    let container1_result = create_test_container(&container1_name, labels);
-    let container2_result = create_test_container(&container2_name, labels);
+    let container2 = alpine_sleep_with_labels(labels).start().await.unwrap();
+    let _id2 = container_id(&container2).await;
 
-    match (container1_result, container2_result) {
-        (Ok(_id1), Ok(_id2)) => {
-            // Give containers a moment to start
-            std::thread::sleep(std::time::Duration::from_secs(1));
+    // Give containers a moment to start
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-            // Try to execute a command - should succeed using the first container
-            let mut cmd = Command::cargo_bin("deacon").unwrap();
-            let result = cmd
-                .arg("exec")
-                .arg("--id-label")
-                .arg("com.example.test=ambiguous-match")
-                .arg("--")
-                .arg("echo")
-                .arg("test")
-                .assert()
-                .success()
-                .code(0);
+    // Try to execute a command - should succeed using the first container
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let result = cmd
+        .arg("exec")
+        .arg("--id-label")
+        .arg(format!("com.example.test={}", unique_value))
+        .arg("--")
+        .arg("echo")
+        .arg("test")
+        .assert()
+        .success()
+        .code(0);
 
-            // Verify output contains expected text
-            let output = result.get_output();
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(
-                stdout.contains("test"),
-                "Expected 'test' in output, got: {}",
-                stdout
-            );
+    // Verify output contains expected text
+    let output = result.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("test"),
+        "Expected 'test' in output, got: {}",
+        stdout
+    );
 
-            // Cleanup
-            cleanup_container(&container1_name);
-            cleanup_container(&container2_name);
-        }
-        _ => {
-            cleanup_container(&container1_name);
-            cleanup_container(&container2_name);
-            eprintln!(
-                "Skipping test: Failed to create test containers (Docker may not be available)"
-            );
-        }
-    }
+    // Containers automatically cleaned up when dropped
 }

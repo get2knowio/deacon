@@ -3,6 +3,8 @@
 //! This module provides reusable patterns for container-based testing using testcontainers.
 //! All containers are automatically cleaned up when dropped (RAII pattern).
 
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -20,6 +22,20 @@ pub fn alpine_sleep_image() -> ContainerRequest<GenericImage> {
     GenericImage::new("alpine", "3.18")
         .with_wait_for(WaitFor::Nothing)
         .with_cmd(["sleep", "infinity"])
+}
+
+/// Create an Alpine container with custom labels.
+/// Useful for tests that need to find containers by label.
+pub fn alpine_sleep_with_labels(labels: &[(&str, &str)]) -> ContainerRequest<GenericImage> {
+    let mut request = GenericImage::new("alpine", "3.18")
+        .with_wait_for(WaitFor::Nothing)
+        .with_cmd(["sleep", "infinity"]);
+
+    for (key, value) in labels {
+        request = request.with_label(*key, *value);
+    }
+
+    request
 }
 
 /// Create a container request running a simple HTTP server.
