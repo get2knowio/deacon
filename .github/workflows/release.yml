@@ -383,3 +383,79 @@ jobs:
             deacon-*.tar.gz
             deacon-*.zip
             SHA256SUMS
+
+  deploy-pages:
+    name: Deploy Install Script to GitHub Pages
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.version }}
+
+      - name: Prepare Pages content
+        run: |
+          mkdir -p _site
+          cp scripts/install.sh _site/install.sh
+
+          # Create a simple index page
+          cat > _site/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Deacon - Development Containers CLI</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+              h1 { color: #333; }
+              code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }
+              pre { background: #f4f4f4; padding: 1rem; border-radius: 5px; overflow-x: auto; }
+              a { color: #0366d6; }
+            </style>
+          </head>
+          <body>
+            <h1>Deacon</h1>
+            <p>A Rust implementation of the Development Containers CLI.</p>
+
+            <h2>Quick Install</h2>
+            <pre><code>curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash</code></pre>
+
+            <h2>Install Options</h2>
+            <pre><code># Install a specific version
+          curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_VERSION=0.1.4 bash
+
+          # Install to a custom directory
+          curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_INSTALL_DIR=~/.local/bin bash
+
+          # Force overwrite without prompt
+          curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_FORCE=true bash</code></pre>
+
+            <h2>Links</h2>
+            <ul>
+              <li><a href="https://github.com/get2knowio/deacon">GitHub Repository</a></li>
+              <li><a href="https://github.com/get2knowio/deacon/releases">Releases</a></li>
+              <li><a href="./install.sh">install.sh</a> (direct link)</li>
+            </ul>
+          </body>
+          </html>
+          HTMLEOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

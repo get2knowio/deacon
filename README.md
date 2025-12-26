@@ -27,26 +27,26 @@ A Rust implementation of the Development Containers CLI, following the [containe
 
 ### Install with Script (Recommended)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | bash
+curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash
 ```
 
 This will automatically detect your platform, download the latest release, verify checksums, and install to your PATH.
 
 #### Script options (env vars)
-You can steer the installer using the following environment variables:
+You can customize the installer using the following environment variables:
 
 - `DEACON_VERSION` — Specific version to install (default: latest). Accepts `v0.1.4` or `0.1.4`.
-- `DEACON_BASE_URL` — Base URL for release downloads (default: GitHub Releases). Useful for mirrors.
-- `DEACON_INSTALL_DIR` — Install directory (default: `/usr/local/bin` if writable, otherwise `~/.local/bin`).
+- `DEACON_INSTALL_DIR` — Install directory (default: `~/.local/bin` or `/usr/local/bin` if writable).
 - `DEACON_FORCE` — Set to `true` to overwrite an existing binary without a prompt.
+- `DEACON_NO_MODIFY_PATH` — Set to `true` to skip PATH modification suggestions.
 
 Examples:
 ```bash
 # Install a specific version
-curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | DEACON_VERSION=0.1.4 bash
+curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_VERSION=0.1.4 bash
 
 # Install to a custom directory and overwrite without prompt
-curl -fsSL https://raw.githubusercontent.com/get2knowio/deacon/main/scripts/install.sh | \
+curl -fsSL https://get2knowio.github.io/deacon/install.sh | \
   DEACON_VERSION=v0.1.4 DEACON_INSTALL_DIR="$HOME/.local/bin" DEACON_FORCE=true bash
 ```
 
