@@ -15,10 +15,7 @@ async fn test_exec_with_container_id_selection() {
     // T008: Integration: direct ID selection
     // Start a container using testcontainers (auto-cleanup on drop)
     let container = alpine_sleep_image().start().await.unwrap();
-    let id = container_id(&container).await;
-
-    // Give container a moment to start
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    let id = container_id(&container);
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("exec")

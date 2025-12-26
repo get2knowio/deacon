@@ -6,7 +6,7 @@ use testcontainers::runners::AsyncRunner;
 mod support;
 mod testcontainers_helpers;
 use support::unique_name;
-use testcontainers_helpers::{alpine_sleep_with_labels, container_id};
+use testcontainers_helpers::alpine_sleep_with_labels;
 
 #[tokio::test]
 async fn test_exec_id_label_successful_unique_match() {
@@ -21,10 +21,6 @@ async fn test_exec_id_label_successful_unique_match() {
     ];
 
     let container = alpine_sleep_with_labels(labels).start().await.unwrap();
-    let _id = container_id(&container).await;
-
-    // Give container a moment to start
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Execute a command in the container using id-label
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -49,6 +45,7 @@ async fn test_exec_id_label_successful_unique_match() {
     );
 
     // Container automatically cleaned up when dropped
+    drop(container);
 }
 
 #[tokio::test]
@@ -61,13 +58,7 @@ async fn test_exec_id_label_ambiguous_match_lists_candidates() {
     let labels = &[("com.example.test", unique_value.as_str())];
 
     let container1 = alpine_sleep_with_labels(labels).start().await.unwrap();
-    let _id1 = container_id(&container1).await;
-
     let container2 = alpine_sleep_with_labels(labels).start().await.unwrap();
-    let _id2 = container_id(&container2).await;
-
-    // Give containers a moment to start
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Try to execute a command - should succeed using the first container
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -92,4 +83,6 @@ async fn test_exec_id_label_ambiguous_match_lists_candidates() {
     );
 
     // Containers automatically cleaned up when dropped
+    drop(container1);
+    drop(container2);
 }
