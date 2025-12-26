@@ -1,7 +1,9 @@
 use crate::commands::shared::TerminalDimensions;
 use crate::ui::spinner::{PlainSpinner, SpinnerEmitter};
 use anyhow::Result;
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+#[cfg(feature = "full")]
+use clap::ArgAction;
+use clap::{Parser, Subcommand, ValueEnum};
 use deacon_core::container_env_probe::ContainerProbeMode;
 
 /// CLI-facing probe enum (value_enum for clap) to map into core probe mode
@@ -147,6 +149,7 @@ pub struct CliContext {
 
 /// DevContainer CLI subcommands
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Commands {
     /// Create and run development container
     Up {
@@ -299,6 +302,7 @@ pub enum Commands {
     },
 
     /// Build development container image
+    #[cfg(feature = "full")]
     Build {
         /// Build without cache
         #[arg(long)]
@@ -466,6 +470,7 @@ pub enum Commands {
     },
 
     /// Configuration management commands
+    #[cfg(feature = "full")]
     Config {
         /// Config subcommand
         #[command(subcommand)]
@@ -473,6 +478,7 @@ pub enum Commands {
     },
 
     /// Feature management commands
+    #[cfg(feature = "full")]
     Features {
         /// Feature subcommand
         #[command(subcommand)]
@@ -480,6 +486,7 @@ pub enum Commands {
     },
 
     /// Template management commands
+    #[cfg(feature = "full")]
     Templates {
         /// Template subcommand
         #[command(subcommand)]
@@ -487,6 +494,7 @@ pub enum Commands {
     },
 
     /// Run user-defined lifecycle commands
+    #[cfg(feature = "full")]
     #[allow(clippy::enum_variant_names)]
     RunUserCommands {
         /// Skip postCreate lifecycle phase
@@ -534,6 +542,7 @@ pub enum Commands {
     /// Environment diagnostics and support bundle creation
     ///
     /// Collects system information for troubleshooting and support
+    #[cfg(feature = "full")]
     Doctor {
         /// Output in JSON format
         #[arg(long)]
@@ -557,6 +566,7 @@ pub enum Commands {
     /// `--output json` is specified a compact JSON map is written to stdout and
     /// all logs/diagnostic messages are sent to stderr. This ensures deterministic
     /// machine-readable behavior for CI and tooling.
+    #[cfg(feature = "full")]
     Outdated {
         /// Workspace folder to inspect (default: current directory)
         #[arg(long, value_name = "PATH")]
@@ -571,6 +581,7 @@ pub enum Commands {
 }
 
 /// Feature management subcommands
+#[cfg(feature = "full")]
 #[derive(Debug, Clone, Subcommand)]
 pub enum FeatureCommands {
     /// Test feature implementations
@@ -701,6 +712,7 @@ pub enum FeatureCommands {
 }
 
 /// Template management subcommands
+#[cfg(feature = "full")]
 #[derive(Debug, Clone, Subcommand)]
 pub enum TemplateCommands {
     /// Apply template to current project
@@ -761,6 +773,7 @@ pub enum TemplateCommands {
 }
 
 /// Configuration management subcommands
+#[cfg(feature = "full")]
 #[derive(Debug, Clone, Subcommand)]
 pub enum ConfigCommands {
     /// Apply variable substitution to configuration and preview results
@@ -1226,18 +1239,23 @@ impl Cli {
                         let json = serde_json::to_string_pretty(&result)?;
                         println!("{}", json);
 
-                        // Extract message for exit error
-                        let message = if let crate::commands::UpResult::Error(ref err) = result {
-                            err.message.clone()
+                        // Extract message and description for exit error
+                        let error_text = if let crate::commands::UpResult::Error(ref err) = result {
+                            if !err.description.is_empty() {
+                                format!("{}\n{}", err.message, err.description)
+                            } else {
+                                err.message.clone()
+                            }
                         } else {
                             "Unknown error".to_string()
                         };
 
                         // Return error to trigger exit code 1
-                        Err(anyhow::anyhow!(message))
+                        Err(anyhow::anyhow!(error_text))
                     }
                 }
             }
+            #[cfg(feature = "full")]
             Some(Commands::Build {
                 no_cache,
                 platform,
@@ -1400,6 +1418,7 @@ impl Cli {
                 execute_read_configuration(args).await?;
                 Ok(())
             }
+            #[cfg(feature = "full")]
             Some(Commands::Config { command }) => {
                 use crate::commands::config::{execute_config, ConfigArgs};
 
@@ -1414,6 +1433,7 @@ impl Cli {
 
                 execute_config(args).await
             }
+            #[cfg(feature = "full")]
             Some(Commands::Features { command }) => {
                 use crate::commands::features::{execute_features, FeaturesArgs};
 
@@ -1436,6 +1456,7 @@ impl Cli {
 
                 execute_features(args).await
             }
+            #[cfg(feature = "full")]
             Some(Commands::Templates { command }) => {
                 use crate::commands::templates::{execute_templates, TemplatesArgs};
 
@@ -1447,6 +1468,7 @@ impl Cli {
 
                 execute_templates(args).await
             }
+            #[cfg(feature = "full")]
             Some(Commands::RunUserCommands {
                 skip_post_create,
                 skip_post_attach,
@@ -1522,6 +1544,7 @@ impl Cli {
                     execute_down(args).await
                 }
             }
+            #[cfg(feature = "full")]
             Some(Commands::Outdated {
                 workspace_folder,
                 output,
@@ -1549,6 +1572,7 @@ impl Cli {
                 run_outdated(args).await
             }
 
+            #[cfg(feature = "full")]
             Some(Commands::Doctor { json, bundle }) => {
                 // Create a DoctorContext for doctor command
                 let context = deacon_core::doctor::DoctorContext {
@@ -1658,6 +1682,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "full")]
     fn test_global_flags_with_subcommand() {
         let cli = Cli::parse_from([
             "deacon",
