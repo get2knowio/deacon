@@ -1,88 +1,48 @@
 # deacon
 
+A fast, Rust-based [Dev Containers](https://containers.dev) CLI.
+
 <!-- Badges -->
 <p>
+  <a href="https://github.com/get2knowio/deacon/releases/latest">
+    <img alt="Latest Release" src="https://img.shields.io/github/v/release/get2knowio/deacon" />
+  </a>
   <a href="https://github.com/get2knowio/deacon/actions/workflows/ci.yml">
     <img alt="Build Status" src="https://github.com/get2knowio/deacon/actions/workflows/ci.yml/badge.svg" />
-  </a>
-  <a href="https://coveralls.io/github/get2knowio/deacon?branch=main">
-    <img alt="Coverage Status" src="https://coveralls.io/repos/github/get2knowio/deacon/badge.svg?branch=main" />
   </a>
   <a href="https://github.com/get2knowio/deacon/blob/main/LICENSE">
     <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg" />
   </a>
-  <a href="https://github.com/get2knowio/deacon/releases/latest">
-    <img alt="Latest Release" src="https://img.shields.io/github/v/release/get2knowio/deacon" />
-  </a>
-  <img alt="Rust 2021" src="https://img.shields.io/badge/rust-2021-orange" />
 </p>
 
-A Rust implementation of the Development Containers CLI, following the [containers.dev specification](https://containers.dev).
+## Install
 
- 
-
-
-
-## Quick Start
-
-### Install with Script (Recommended)
 ```bash
 curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash
 ```
 
-This will automatically detect your platform, download the latest release, verify checksums, and install to your PATH.
+<details>
+<summary>Other installation methods</summary>
 
-#### Script options (env vars)
-You can customize the installer using the following environment variables:
-
-- `DEACON_VERSION` — Specific version to install (default: latest). Accepts `v0.1.4` or `0.1.4`.
-- `DEACON_INSTALL_DIR` — Install directory (default: `~/.local/bin` or `/usr/local/bin` if writable).
-- `DEACON_FORCE` — Set to `true` to overwrite an existing binary without a prompt.
-- `DEACON_NO_MODIFY_PATH` — Set to `true` to skip PATH modification suggestions.
-
-Examples:
+### macOS (Homebrew) - Coming Soon
 ```bash
-# Install a specific version
-curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_VERSION=0.1.4 bash
-
-# Install to a custom directory and overwrite without prompt
-curl -fsSL https://get2knowio.github.io/deacon/install.sh | \
-  DEACON_VERSION=v0.1.4 DEACON_INSTALL_DIR="$HOME/.local/bin" DEACON_FORCE=true bash
+brew install get2knowio/tap/deacon
 ```
 
-Note: On Linux, the installer auto-detects your libc (GNU vs musl) and selects the matching asset (e.g., Alpine → musl).
+### Manual Download
+Download from [releases](https://github.com/get2knowio/deacon/releases/latest):
 
-### Manual Installation
-Download the latest release for your platform from the [releases page](https://github.com/get2knowio/deacon/releases):
+| Platform | Architecture | Download |
+|----------|--------------|----------|
+| Linux | x86_64 | [deacon-linux-x86_64.tar.gz](https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.2.0-x86_64-unknown-linux-gnu.tar.gz) |
+| Linux | ARM64 | [deacon-linux-arm64.tar.gz](https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.2.0-aarch64-unknown-linux-gnu.tar.gz) |
+| Linux (musl) | x86_64 | [deacon-linux-musl-x86_64.tar.gz](https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.2.0-x86_64-unknown-linux-musl.tar.gz) |
+| macOS | x86_64 | [deacon-darwin-x86_64.tar.gz](https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.2.0-x86_64-apple-darwin.tar.gz) |
+| macOS | ARM64 (Apple Silicon) | [deacon-darwin-arm64.tar.gz](https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.2.0-aarch64-apple-darwin.tar.gz) |
+| Windows | x86_64 | [deacon-windows-x86_64.zip](https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.2.0-x86_64-pc-windows-msvc.zip) |
+| Windows | ARM64 | [deacon-windows-arm64.zip](https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.2.0-aarch64-pc-windows-msvc.zip) |
 
-```bash
-# For Linux x86_64 (glibc)
-curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-x86_64-unknown-linux-gnu.tar.gz -o deacon.tar.gz
-tar -xzf deacon.tar.gz
-sudo mv deacon /usr/local/bin/
-
-# For Linux x86_64 (musl/Alpine)
-curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-x86_64-unknown-linux-musl.tar.gz -o deacon.tar.gz
-tar -xzf deacon.tar.gz
-sudo mv deacon /usr/local/bin/
-
-# For macOS x86_64
-curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-x86_64-apple-darwin.tar.gz -o deacon.tar.gz
-tar -xzf deacon.tar.gz
-sudo mv deacon /usr/local/bin/
-
-# For macOS ARM64 (Apple Silicon)
-curl -L https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-aarch64-apple-darwin.tar.gz -o deacon.tar.gz
-tar -xzf deacon.tar.gz
-sudo mv deacon /usr/local/bin/
-
-# For Windows x86_64 (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/get2knowio/deacon/releases/latest/download/deacon-v0.1.4-x86_64-pc-windows-msvc.zip" -OutFile "deacon.zip"
-Expand-Archive -Path "deacon.zip" -DestinationPath "."
-# Move deacon.exe to a directory in your PATH
-```
-
-### Install from Source
+### From Source
 ```bash
 git clone https://github.com/get2knowio/deacon.git
 cd deacon
@@ -90,24 +50,35 @@ cargo build --release
 ./target/release/deacon --help
 ```
 
-#### Install from Source (Standard Build)
+### Installer Options
+The install script supports these environment variables:
+- `DEACON_VERSION` — Specific version (default: latest)
+- `DEACON_INSTALL_DIR` — Install directory (default: `~/.local/bin`)
+- `DEACON_FORCE=true` — Overwrite existing binary without prompt
+
 ```bash
-git clone https://github.com/get2knowio/deacon.git
-cd deacon
-cargo build --release
-./target/release/deacon --version
+# Install specific version
+curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_VERSION=0.2.0 bash
 ```
 
-### Install from Cargo (Future)
-*Note: Publishing to crates.io is planned for a future release.*
+</details>
+
+## Quick Start
+
 ```bash
-# This will be available in the future
-cargo install deacon
+# Start a dev container
+deacon up
+
+# Run a command in the container
+deacon exec -- npm install
+
+# Stop and remove the container
+deacon down
 ```
 
-### Verify Installation
+Verify installation:
 ```bash
-deacon --help
+deacon --version
 ```
 
 ## Examples
