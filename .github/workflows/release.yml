@@ -42,8 +42,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy (deny warnings, MVP features)
         run: cargo clippy --all-targets --no-default-features -- -D warnings
-      - name: Tests (single thread, MVP features)
-        run: cargo test --workspace --no-default-features -- --test-threads=1
+      - name: Unit tests (MVP features only, no Docker-dependent tests)
+        run: cargo test --workspace --no-default-features --lib -- --test-threads=1
 
   create-release:
     name: Create Release
