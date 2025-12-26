@@ -794,13 +794,15 @@ fn test_lifecycle_phase_order_sc001() {
         collected_markers.push((phase_name.to_string(), seq, ts));
     }
 
-    // Verify ordering: timestamps should be strictly increasing
+    // Verify ordering: timestamps should be non-decreasing
+    // Note: Using >= instead of > because phases can execute within the same second
+    // The sequence number check below provides the definitive ordering verification
     for i in 1..collected_markers.len() {
         let (prev_name, _, prev_ts) = &collected_markers[i - 1];
         let (curr_name, _, curr_ts) = &collected_markers[i];
 
         assert!(
-            curr_ts > prev_ts,
+            curr_ts >= prev_ts,
             "Lifecycle phases executed out of order: {} (ts={}) should come before {} (ts={})",
             prev_name,
             prev_ts,
@@ -1000,12 +1002,13 @@ echo "$seq,$ts" > /tmp/lifecycle_order_dotfiles
                         .map(|(_, _, ts)| *ts);
 
                     if let (Some(pc_ts), Some(ps_ts)) = (post_create_ts, post_start_ts) {
+                        // Use >= and <= because phases can execute within the same second
                         assert!(
-                            ts > pc_ts && ts < ps_ts,
+                            ts >= pc_ts && ts <= ps_ts,
                             "Dotfiles (ts={}) should execute between postCreate (ts={}) and postStart (ts={})",
                             ts, pc_ts, ps_ts
                         );
-                        println!("Dotfiles executed at correct position: postCreate < dotfiles < postStart");
+                        println!("Dotfiles executed at correct position: postCreate <= dotfiles <= postStart");
                         dotfiles_executed = true;
                     }
                 }
@@ -1013,13 +1016,14 @@ echo "$seq,$ts" > /tmp/lifecycle_order_dotfiles
         }
     }
 
-    // Verify timestamps are strictly increasing for collected markers
+    // Verify timestamps are non-decreasing for collected markers
+    // Note: Using >= instead of > because phases can execute within the same second
     for i in 1..collected_markers.len() {
         let (prev_name, _, prev_ts) = &collected_markers[i - 1];
         let (curr_name, _, curr_ts) = &collected_markers[i];
 
         assert!(
-            curr_ts > prev_ts,
+            curr_ts >= prev_ts,
             "Phases out of order: {} (ts={}) should come before {} (ts={})",
             prev_name,
             prev_ts,
