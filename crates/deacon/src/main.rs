@@ -15,6 +15,7 @@ async fn main() -> Result<()> {
         Ok(()) => Ok(()),
         Err(err) => {
             // Check for OutdatedExitCode (exit code 2 for --fail-on-outdated)
+            #[cfg(feature = "full")]
             if let Some(outdated_exit) = err.downcast_ref::<commands::outdated::OutdatedExitCode>()
             {
                 std::process::exit(outdated_exit.0);
