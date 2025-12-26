@@ -16,13 +16,28 @@ Replace manual container lifecycle management with [testcontainers-rs](https://r
 Tests using `Command::new("docker")` or `docker run`:
 
 1. `crates/deacon/tests/test_utils.rs` - Core cleanup utilities (DeaconGuard)
-2. `crates/deacon/tests/parity_utils.rs` - Parity test utilities
-3. `crates/deacon/tests/up_*.rs` - Up command tests (7 files)
-4. `crates/deacon/tests/integration_exec_selection.rs` - Uses `docker run` for test containers
-5. `crates/deacon/tests/integration_exec_id_label.rs` - Uses `docker run` for test containers
-6. `crates/deacon/tests/integration_build_args.rs` - Build tests
-7. `crates/deacon/tests/integration_custom_container_name.rs` - Container naming
-8. `crates/deacon/tests/parity_*.rs` - Parity tests (2 files)
+2. `crates/deacon/tests/up_*.rs` - Up command tests (7 files)
+3. `crates/deacon/tests/integration_exec_selection.rs` - Uses `docker run` for test containers
+4. `crates/deacon/tests/integration_exec_id_label.rs` - Uses `docker run` for test containers
+5. `crates/deacon/tests/integration_build_args.rs` - Build tests
+6. `crates/deacon/tests/integration_custom_container_name.rs` - Container naming
+
+### Not Applicable (Parity Tests)
+
+Parity tests compare `deacon` behavior to the upstream `devcontainer` CLI. These do NOT
+need testcontainers migration because:
+
+1. **`parity_utils.rs`**: Contains only utility functions. The only Docker command is
+   `docker version` to check Docker availability.
+
+2. **`parity_build.rs`**: Tests the CLI's `build` command. Uses Docker commands only for
+   image inspection (`docker images`, `docker inspect`) and cleanup (`docker rmi`).
+   Testcontainers manages running containers, not image builds.
+
+3. **`parity_up_exec.rs`**: Tests the CLI's `up` and `exec` commands. Containers are
+   created by `deacon up` and `devcontainer up` (the CLIs being tested), not by direct
+   `docker run` calls. Docker commands are used only for inspection (`docker ps`,
+   `docker inspect`) to verify labels.
 
 ### Not Applicable (CLI-Managed Containers)
 
