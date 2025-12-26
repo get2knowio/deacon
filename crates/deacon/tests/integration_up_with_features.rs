@@ -494,6 +494,7 @@ fn run_up(extra_args: &[&str], guard: &ContainerGuard) -> (String, String) {
             "up",
             "--workspace-folder",
             &*workspace_str,
+            "--mount-workspace-git-root=false",
             "--remove-existing-container",
             "--skip-post-create",
         ])
