@@ -67,7 +67,7 @@ These tests only use `docker info` for availability detection and rely on `Deaco
 - [ ] Migrate `test_utils.rs` (DeaconGuard pattern)
 - [x] ~~Migrate smoke tests~~ - NOT APPLICABLE (see above)
 - [ ] Migrate up command tests
-- [ ] Migrate exec tests (`integration_exec_selection.rs`, `integration_exec_id_label.rs`)
+- [x] Migrate exec tests (`integration_exec_selection.rs`, `integration_exec_id_label.rs`)
 
 ### Phase 3: Cleanup & Validation
 - [ ] Remove manual cleanup code
@@ -81,6 +81,20 @@ These tests only use `docker info` for availability detection and rely on `Deaco
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["blocking"] }
 ```
+
+## Development Tips
+
+### Keeping Containers for Debugging
+
+When debugging failing tests, you can prevent testcontainers from removing containers by setting:
+
+```bash
+TESTCONTAINERS_COMMAND=keep cargo nextest run test_name
+```
+
+This keeps the container running after the test completes, allowing you to inspect logs,
+exec into the container, or debug issues interactively. Remember to manually clean up
+containers afterward with `docker rm -f <container_id>`.
 
 ## Reference
 

@@ -45,7 +45,6 @@ assert_cmd = "2.0"
 tokio-test = "0.4"
 wiremock = "0.6"
 testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["blocking"] }
 
 [lints]
 workspace = true

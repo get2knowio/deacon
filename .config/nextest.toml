@@ -93,6 +93,11 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
 
+[[profile.default.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
+
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 # They test argument parsing and BuildOptions/BuildKitOptions behavior without spawning containers
 [[profile.default.overrides]]
@@ -177,6 +182,11 @@ test-group = 'parity-cli'
 [[profile.dev-fast.overrides]]
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
 
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 [[profile.dev-fast.overrides]]
@@ -275,6 +285,11 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
 
+[[profile.docker.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
+
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 [[profile.docker.overrides]]
 filter = 'binary(=integration_up_build_options)'
@@ -342,6 +357,11 @@ test-group = 'parity-cli'
 [[profile.full.overrides]]
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
+
+[[profile.full.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
 
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 [[profile.full.overrides]]
@@ -415,6 +435,11 @@ test-group = 'parity-cli'
 [[profile.ci.overrides]]
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
+
+[[profile.ci.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
 
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 [[profile.ci.overrides]]
