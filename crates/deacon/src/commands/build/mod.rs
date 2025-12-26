@@ -1573,6 +1573,12 @@ async fn execute_docker_build(
             build_args.push(output.clone());
         }
 
+        // When using BuildKit without --push or --output, add --load to ensure
+        // the image is loaded into the local Docker daemon (BuildKit doesn't do this by default)
+        if use_buildkit && !args.push && args.output.is_none() {
+            build_args.push("--load".to_string());
+        }
+
         // Add quiet flag to reduce output noise (only if not pushing/exporting)
         if !args.push && args.output.is_none() {
             build_args.push("-q".to_string());

@@ -318,12 +318,38 @@ pub(crate) async fn execute_lifecycle_commands(
         result.non_blocking_phases.len()
     );
 
-    // Log what non-blocking phases would be executed; do not block CLI
-    result.log_non_blocking_phases();
-
     // T009: Dotfiles execution is now integrated into container_lifecycle.rs
     // per SC-001 lifecycle ordering: postCreate -> dotfiles -> postStart
     // Dotfiles are automatically skipped in prebuild mode and when skip_post_create is set
+
+    // Execute non-blocking phases (postStart, postAttach) synchronously
+    // This ensures they run before the up command returns
+    if !result.non_blocking_phases.is_empty() {
+        use deacon_core::docker::CliDocker;
+
+        debug!(
+            "Executing {} non-blocking phases synchronously",
+            result.non_blocking_phases.len()
+        );
+
+        let docker = CliDocker::new();
+
+        // Create progress callback for non-blocking phases
+        let emit_progress_event_fn = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
+            if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
+                if let Some(ref mut tracker) = tracker_guard.as_mut() {
+                    tracker.emit_event(event)?;
+                }
+            }
+            Ok(())
+        };
+
+        let _final_result = result
+            .execute_non_blocking_phases_sync_with_callback(&docker, Some(emit_progress_event_fn))
+            .await?;
+
+        debug!("Non-blocking phases execution completed");
+    }
 
     Ok(())
 }

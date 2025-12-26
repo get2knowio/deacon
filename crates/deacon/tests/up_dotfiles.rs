@@ -87,6 +87,15 @@ fn test_dotfiles_installation_with_custom_command() {
     let fixture_path = feature_dotfiles_fixture();
     let config_path = fixture_path.join("devcontainer.json");
 
+    // Clean up any existing state to ensure fresh lifecycle execution
+    // The workspace resolves to the git root, so clean markers there
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let git_root = manifest_dir.parent().unwrap().parent().unwrap();
+    let state_dir = git_root.join(".devcontainer-state");
+    if state_dir.exists() {
+        let _ = std::fs::remove_dir_all(&state_dir);
+    }
+
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
         .arg("--workspace-folder")
@@ -98,6 +107,7 @@ fn test_dotfiles_installation_with_custom_command() {
         .arg("--dotfiles-install-command")
         .arg("echo 'Custom dotfiles install'")
         .arg("--skip-non-blocking-commands")
+        .arg("--remove-existing-container") // Ensure fresh container with git installed
         .assert()
         .success()
         .stdout(predicate::str::contains("outcome").and(predicate::str::contains("success")));

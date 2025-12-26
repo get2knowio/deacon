@@ -71,6 +71,12 @@ filter = 'binary(=up_prebuild)'
 test-group = 'docker-exclusive'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
+# Build consistency tests use Docker buildx and can conflict with parallel builds
+[[profile.default.overrides]]
+filter = 'binary(=build_consistency)'
+test-group = 'docker-exclusive'
+slow-timeout = { period = "5m", terminate-after = 1 }
+
 [[profile.default.overrides]]
 filter = 'binary(#parity_*)'
 test-group = 'parity'
@@ -149,6 +155,11 @@ test-group = 'docker-exclusive'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=up_prebuild)'
+test-group = 'docker-exclusive'
+
+# Build consistency tests use Docker buildx and can conflict with parallel builds
+[[profile.dev-fast.overrides]]
+filter = 'binary(=build_consistency)'
 test-group = 'docker-exclusive'
 
 [[profile.dev-fast.overrides]]

@@ -276,53 +276,107 @@ where
         );
     }
 
+    // Derive workspace folder from substitution context for marker persistence
+    let workspace_folder = std::path::PathBuf::from(&container_context.local_workspace_folder);
+
     // Execute onCreate phase
     if let Some(on_create_commands) = &commands.on_create {
-        result.phases.push(
-            execute_lifecycle_phase(
+        let phase_result = execute_lifecycle_phase(
+            LifecyclePhase::OnCreate,
+            on_create_commands,
+            &updated_config,
+            docker,
+            &container_context,
+            detected_shell.as_deref(),
+            progress_callback.as_ref(),
+        )
+        .await?;
+
+        // Per FR-002: Record marker for blocking phase on successful execution
+        if phase_result.success {
+            if let Err(e) = record_phase_executed(
+                &workspace_folder,
                 LifecyclePhase::OnCreate,
-                on_create_commands,
-                &updated_config,
-                docker,
-                &container_context,
-                detected_shell.as_deref(),
-                progress_callback.as_ref(),
-            )
-            .await?,
-        );
+                updated_config.is_prebuild,
+            ) {
+                warn!("Failed to record marker for phase onCreate: {}", e);
+            } else {
+                debug!(
+                    "Recorded marker for blocking phase onCreate at {} (prebuild={})",
+                    workspace_folder.display(),
+                    updated_config.is_prebuild
+                );
+            }
+        }
+
+        result.phases.push(phase_result);
     }
 
     // Execute updateContent phase if provided
     if let Some(update_content_commands) = &commands.update_content {
-        result.phases.push(
-            execute_lifecycle_phase(
+        let phase_result = execute_lifecycle_phase(
+            LifecyclePhase::UpdateContent,
+            update_content_commands,
+            &updated_config,
+            docker,
+            &container_context,
+            detected_shell.as_deref(),
+            progress_callback.as_ref(),
+        )
+        .await?;
+
+        // Per FR-002: Record marker for blocking phase on successful execution
+        if phase_result.success {
+            if let Err(e) = record_phase_executed(
+                &workspace_folder,
                 LifecyclePhase::UpdateContent,
-                update_content_commands,
-                &updated_config,
-                docker,
-                &container_context,
-                detected_shell.as_deref(),
-                progress_callback.as_ref(),
-            )
-            .await?,
-        );
+                updated_config.is_prebuild,
+            ) {
+                warn!("Failed to record marker for phase updateContent: {}", e);
+            } else {
+                debug!(
+                    "Recorded marker for blocking phase updateContent at {} (prebuild={})",
+                    workspace_folder.display(),
+                    updated_config.is_prebuild
+                );
+            }
+        }
+
+        result.phases.push(phase_result);
     }
 
     // Execute postCreate phase (if not skipped)
     if !updated_config.skip_post_create {
         if let Some(post_create_commands) = &commands.post_create {
-            result.phases.push(
-                execute_lifecycle_phase(
+            let phase_result = execute_lifecycle_phase(
+                LifecyclePhase::PostCreate,
+                post_create_commands,
+                &updated_config,
+                docker,
+                &container_context,
+                detected_shell.as_deref(),
+                progress_callback.as_ref(),
+            )
+            .await?;
+
+            // Per FR-002: Record marker for blocking phase on successful execution
+            if phase_result.success {
+                if let Err(e) = record_phase_executed(
+                    &workspace_folder,
                     LifecyclePhase::PostCreate,
-                    post_create_commands,
-                    &updated_config,
-                    docker,
-                    &container_context,
-                    detected_shell.as_deref(),
-                    progress_callback.as_ref(),
-                )
-                .await?,
-            );
+                    updated_config.is_prebuild,
+                ) {
+                    warn!("Failed to record marker for phase postCreate: {}", e);
+                } else {
+                    debug!(
+                        "Recorded marker for blocking phase postCreate at {} (prebuild={})",
+                        workspace_folder.display(),
+                        updated_config.is_prebuild
+                    );
+                }
+            }
+
+            result.phases.push(phase_result);
         }
     } else {
         info!("Skipping postCreate phase");
@@ -334,16 +388,33 @@ where
         if let Some(ref dotfiles_config) = config.dotfiles {
             if dotfiles_config.is_configured() {
                 info!("Executing dotfiles phase (after postCreate, before postStart)");
-                result.phases.push(
-                    execute_dotfiles_in_container(
-                        dotfiles_config,
-                        &updated_config,
-                        docker,
-                        detected_shell.as_deref(),
-                        progress_callback.as_ref(),
-                    )
-                    .await?,
-                );
+                let phase_result = execute_dotfiles_in_container(
+                    dotfiles_config,
+                    &updated_config,
+                    docker,
+                    detected_shell.as_deref(),
+                    progress_callback.as_ref(),
+                )
+                .await?;
+
+                // Per FR-002: Record marker for blocking phase on successful execution
+                if phase_result.success {
+                    if let Err(e) = record_phase_executed(
+                        &workspace_folder,
+                        LifecyclePhase::Dotfiles,
+                        updated_config.is_prebuild,
+                    ) {
+                        warn!("Failed to record marker for phase dotfiles: {}", e);
+                    } else {
+                        debug!(
+                            "Recorded marker for blocking phase dotfiles at {} (prebuild={})",
+                            workspace_folder.display(),
+                            updated_config.is_prebuild
+                        );
+                    }
+                }
+
+                result.phases.push(phase_result);
             } else {
                 debug!("Dotfiles not configured, skipping dotfiles phase");
             }
@@ -355,9 +426,6 @@ where
     } else {
         info!("Skipping dotfiles phase (skip_post_create flag)");
     }
-
-    // Derive workspace folder from substitution context for marker persistence
-    let workspace_folder = std::path::PathBuf::from(&container_context.local_workspace_folder);
 
     // Execute postStart phase (if not skipped by non-blocking commands flag)
     if !updated_config.skip_non_blocking_commands {
