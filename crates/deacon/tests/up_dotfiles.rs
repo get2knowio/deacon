@@ -139,6 +139,7 @@ fn test_dotfiles_idempotency_on_rerun() {
         .arg("--dotfiles-repository")
         .arg("https://github.com/devcontainers/cli")
         .arg("--skip-non-blocking-commands")
+        .arg("--remove-existing-container") // Ensure fresh container with git installed
         .assert()
         .success();
 
@@ -184,6 +185,7 @@ fn test_dotfiles_auto_detected_install_script() {
         .arg("--dotfiles-repository")
         .arg("https://github.com/devcontainers/cli")
         .arg("--skip-non-blocking-commands")
+        .arg("--remove-existing-container") // Ensure fresh container with git installed
         .assert()
         .success()
         .stdout(predicate::str::contains("outcome").and(predicate::str::contains("success")));
@@ -215,6 +217,7 @@ fn test_dotfiles_custom_target_path() {
         .arg("--dotfiles-target-path")
         .arg("/root/.config/dotfiles")
         .arg("--skip-non-blocking-commands")
+        .arg("--remove-existing-container") // Ensure fresh container with git installed
         .assert()
         .success()
         .stdout(predicate::str::contains("outcome").and(predicate::str::contains("success")));
@@ -311,6 +314,7 @@ fn test_dotfiles_without_features() {
         .arg("--dotfiles-repository")
         .arg("https://github.com/devcontainers/cli")
         .arg("--skip-non-blocking-commands")
+        .arg("--remove-existing-container") // Ensure fresh container with git installed
         .assert()
         .success()
         .stdout(predicate::str::contains("outcome").and(predicate::str::contains("success")));
@@ -342,6 +346,7 @@ fn test_dotfiles_with_prebuild_mode() {
         .arg("--dotfiles-repository")
         .arg("https://github.com/devcontainers/cli")
         .arg("--skip-non-blocking-commands")
+        .arg("--remove-existing-container") // Ensure fresh container with git installed
         .assert()
         .success();
 
