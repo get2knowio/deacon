@@ -188,7 +188,7 @@ pub enum Commands {
         #[arg(long)]
         remote_env: Vec<String>,
         /// Mount workspace git root instead of workspace folder
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         mount_workspace_git_root: bool,
         /// Workspace mount consistency (consistent, cached, delegated)
         #[arg(long)]

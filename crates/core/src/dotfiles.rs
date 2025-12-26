@@ -2,11 +2,47 @@
 //!
 //! This module provides functionality to clone dotfiles repositories and
 //! execute their installation scripts, following the DevContainer CLI specification.
+//!
+//! ## Lifecycle Integration
+//!
+//! Dotfiles execute as part of the devcontainer lifecycle, specifically in the
+//! `postCreate -> dotfiles -> postStart` boundary. The `DotfilesPhaseConfig` struct
+//! and `execute_dotfiles_phase` function provide the integration point for the
+//! `LifecycleOrchestrator`.
+//!
+//! ### Ordering Guarantees (per spec FR-001)
+//!
+//! The dotfiles phase:
+//! - Runs exactly once during fresh `up` runs
+//! - Runs after `postCreate` and before `postStart`
+//! - Is skipped in prebuild mode (spec FR-006)
+//! - Is skipped when `--skip-post-create` is provided (spec FR-005)
+//! - Is skipped on resume runs if prior marker exists (spec FR-003)
+//!
+//! ### Example
+//!
+//! ```no_run
+//! use deacon_core::dotfiles::{DotfilesPhaseConfig, execute_dotfiles_phase};
+//!
+//! # async fn example() -> deacon_core::errors::Result<()> {
+//! let config = DotfilesPhaseConfig {
+//!     repository: Some("https://github.com/user/dotfiles".to_string()),
+//!     target_path: Some("/home/user/.dotfiles".to_string()),
+//!     install_command: None,
+//! };
+//!
+//! // Returns Ok(None) if no dotfiles configured (graceful skip)
+//! // Returns Ok(Some(result)) on success
+//! // Returns Err on failure
+//! let result = execute_dotfiles_phase(&config).await?;
+//! # Ok(())
+//! # }
+//! ```
 
 use crate::errors::{GitError, Result};
 use std::path::Path;
 use tokio::process::Command;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// Configuration for dotfiles integration
 #[derive(Debug, Clone)]
@@ -27,7 +63,7 @@ pub struct DotfilesOptions {
 }
 
 /// Result of dotfiles application
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DotfilesResult {
     /// Path where dotfiles were cloned
     pub target_path: String,
@@ -195,6 +231,248 @@ pub async fn apply_dotfiles(
         script_executed,
         script_name,
     })
+}
+
+// =============================================================================
+// Lifecycle Integration
+// =============================================================================
+
+/// Configuration for executing dotfiles as a lifecycle phase.
+///
+/// This struct captures the CLI arguments and configuration needed to execute
+/// dotfiles during the `LifecyclePhase::Dotfiles` phase of container setup.
+///
+/// Per spec FR-001, dotfiles execute in the order:
+/// `onCreate -> updateContent -> postCreate -> dotfiles -> postStart -> postAttach`
+#[derive(Debug, Clone, Default)]
+pub struct DotfilesPhaseConfig {
+    /// Git repository URL for dotfiles (None means no dotfiles configured)
+    pub repository: Option<String>,
+    /// Target path where dotfiles should be cloned (defaults based on user)
+    pub target_path: Option<String>,
+    /// Custom install command (fallback if no install.sh/setup.sh is auto-detected)
+    pub install_command: Option<String>,
+}
+
+impl DotfilesPhaseConfig {
+    /// Create a new empty configuration (no dotfiles)
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create configuration with a repository
+    pub fn with_repository(mut self, repo: impl Into<String>) -> Self {
+        self.repository = Some(repo.into());
+        self
+    }
+
+    /// Set the target path for cloning
+    pub fn with_target_path(mut self, path: impl Into<String>) -> Self {
+        self.target_path = Some(path.into());
+        self
+    }
+
+    /// Set a custom install command
+    pub fn with_install_command(mut self, cmd: impl Into<String>) -> Self {
+        self.install_command = Some(cmd.into());
+        self
+    }
+
+    /// Check if dotfiles are configured
+    pub fn is_configured(&self) -> bool {
+        self.repository.is_some()
+    }
+}
+
+/// Result of dotfiles phase execution in the lifecycle.
+///
+/// This extends `DotfilesResult` with lifecycle-specific information.
+#[derive(Debug, Clone)]
+pub struct DotfilesPhaseResult {
+    /// Whether dotfiles were configured and attempted
+    pub was_configured: bool,
+    /// Whether the phase was skipped (no dotfiles configured)
+    pub skipped: bool,
+    /// Reason for skipping (if skipped)
+    pub skip_reason: Option<String>,
+    /// Underlying dotfiles result (if executed)
+    pub result: Option<DotfilesResult>,
+}
+
+impl DotfilesPhaseResult {
+    /// Create a result indicating dotfiles were skipped
+    pub fn skipped(reason: impl Into<String>) -> Self {
+        Self {
+            was_configured: false,
+            skipped: true,
+            skip_reason: Some(reason.into()),
+            result: None,
+        }
+    }
+
+    /// Create a result indicating dotfiles executed successfully
+    pub fn executed(result: DotfilesResult) -> Self {
+        Self {
+            was_configured: true,
+            skipped: false,
+            skip_reason: None,
+            result: Some(result),
+        }
+    }
+}
+
+/// Execute dotfiles as a lifecycle phase.
+///
+/// This function is designed to be called from the `LifecycleOrchestrator` during
+/// the `LifecyclePhase::Dotfiles` phase. It handles:
+///
+/// 1. **Graceful skip**: Returns `Ok(result)` with `skipped=true` if no dotfiles are configured
+/// 2. **Execution**: Clones repository and runs install script if configured
+/// 3. **Error propagation**: Returns `Err` if dotfiles execution fails
+///
+/// # Arguments
+///
+/// * `config` - Configuration specifying repository, target path, and install command
+///
+/// # Returns
+///
+/// * `Ok(DotfilesPhaseResult)` - Phase completed (check `skipped` field)
+/// * `Err` - Phase failed and should halt lifecycle
+///
+/// # Example
+///
+/// ```no_run
+/// use deacon_core::dotfiles::{DotfilesPhaseConfig, execute_dotfiles_phase};
+///
+/// # async fn example() -> deacon_core::errors::Result<()> {
+/// // No dotfiles configured - returns skipped result
+/// let empty_config = DotfilesPhaseConfig::new();
+/// let result = execute_dotfiles_phase(&empty_config).await?;
+/// assert!(result.skipped);
+///
+/// // Dotfiles configured - executes and returns result
+/// let config = DotfilesPhaseConfig::new()
+///     .with_repository("https://github.com/user/dotfiles")
+///     .with_target_path("/home/user/.dotfiles");
+/// let result = execute_dotfiles_phase(&config).await?;
+/// assert!(!result.skipped);
+/// # Ok(())
+/// # }
+/// ```
+#[instrument(skip(config))]
+pub async fn execute_dotfiles_phase(config: &DotfilesPhaseConfig) -> Result<DotfilesPhaseResult> {
+    // Check if dotfiles are configured
+    let repository = match &config.repository {
+        Some(repo) => repo.clone(),
+        None => {
+            debug!("No dotfiles repository configured, skipping dotfiles phase");
+            return Ok(DotfilesPhaseResult::skipped(
+                "no dotfiles repository configured",
+            ));
+        }
+    };
+
+    // Determine target path (default to ~/.dotfiles if not specified)
+    let target_path = config
+        .target_path
+        .clone()
+        .unwrap_or_else(|| "~/.dotfiles".to_string());
+
+    // Expand ~ to home directory for host-side execution
+    let expanded_target = if target_path.starts_with('~') {
+        if let Some(base_dirs) = directories_next::BaseDirs::new() {
+            target_path.replacen('~', &base_dirs.home_dir().to_string_lossy(), 1)
+        } else {
+            warn!("Could not determine home directory, using target path as-is");
+            target_path.clone()
+        }
+    } else {
+        target_path.clone()
+    };
+
+    let target = std::path::Path::new(&expanded_target);
+
+    info!(
+        "Executing dotfiles phase: repository={}, target={}",
+        repository,
+        target.display()
+    );
+
+    // Execute dotfiles with custom install command if provided
+    let options = DotfilesOptions::default();
+    let result = apply_dotfiles(&repository, target, &options).await?;
+
+    // If custom install command was provided and no script was auto-detected,
+    // execute the custom command
+    if let Some(ref custom_cmd) = config.install_command {
+        if !result.script_executed {
+            info!("Executing custom dotfiles install command: {}", custom_cmd);
+            execute_custom_install_command(target, custom_cmd).await?;
+        }
+    }
+
+    Ok(DotfilesPhaseResult::executed(result))
+}
+
+/// Execute a custom install command in the dotfiles directory
+#[instrument]
+async fn execute_custom_install_command(target: &Path, command: &str) -> Result<()> {
+    let output = Command::new("bash")
+        .arg("-c")
+        .arg(command)
+        .current_dir(target)
+        .output()
+        .await
+        .map_err(|e| {
+            GitError::CLIError(format!("Failed to execute custom install command: {}", e))
+        })?;
+
+    if output.status.success() {
+        info!("Custom install command executed successfully");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(GitError::CLIError(format!("Custom install command failed: {}", stderr)).into())
+    }
+}
+
+/// Check if the dotfiles phase should be skipped based on lifecycle context.
+///
+/// This helper function encapsulates the skip logic for the dotfiles phase:
+/// - Prebuild mode: Skip dotfiles (spec FR-006)
+/// - --skip-post-create flag: Skip dotfiles (spec FR-005)
+/// - Resume with marker: Skip dotfiles (spec FR-003)
+/// - No dotfiles configured: Skip with reason
+///
+/// # Arguments
+///
+/// * `config` - Dotfiles phase configuration
+/// * `is_prebuild` - Whether running in prebuild mode
+/// * `skip_post_create` - Whether --skip-post-create flag is set
+/// * `has_prior_marker` - Whether a prior completion marker exists
+///
+/// # Returns
+///
+/// `Some(reason)` if phase should be skipped, `None` if it should execute.
+pub fn should_skip_dotfiles_phase(
+    config: &DotfilesPhaseConfig,
+    is_prebuild: bool,
+    skip_post_create: bool,
+    has_prior_marker: bool,
+) -> Option<&'static str> {
+    if is_prebuild {
+        return Some("prebuild mode");
+    }
+    if skip_post_create {
+        return Some("--skip-post-create flag");
+    }
+    if has_prior_marker {
+        return Some("prior completion marker");
+    }
+    if !config.is_configured() {
+        return Some("no dotfiles configured");
+    }
+    None
 }
 
 #[cfg(test)]
@@ -476,5 +754,158 @@ mod tests {
         let options = DotfilesOptions::default();
         // Currently no fields to test, but ensures Default trait works
         assert!(format!("{:?}", options).contains("DotfilesOptions"));
+    }
+
+    // =========================================================================
+    // Lifecycle Integration Tests
+    // =========================================================================
+
+    #[test]
+    fn test_dotfiles_phase_config_default() {
+        let config = DotfilesPhaseConfig::new();
+        assert!(config.repository.is_none());
+        assert!(config.target_path.is_none());
+        assert!(config.install_command.is_none());
+        assert!(!config.is_configured());
+    }
+
+    #[test]
+    fn test_dotfiles_phase_config_builder() {
+        let config = DotfilesPhaseConfig::new()
+            .with_repository("https://github.com/user/dotfiles")
+            .with_target_path("/home/user/.dotfiles")
+            .with_install_command("./setup.sh");
+
+        assert_eq!(
+            config.repository,
+            Some("https://github.com/user/dotfiles".to_string())
+        );
+        assert_eq!(config.target_path, Some("/home/user/.dotfiles".to_string()));
+        assert_eq!(config.install_command, Some("./setup.sh".to_string()));
+        assert!(config.is_configured());
+    }
+
+    #[test]
+    fn test_dotfiles_phase_config_is_configured() {
+        // Not configured without repository
+        let empty = DotfilesPhaseConfig::new();
+        assert!(!empty.is_configured());
+
+        // Configured with only repository
+        let with_repo =
+            DotfilesPhaseConfig::new().with_repository("https://github.com/user/dotfiles");
+        assert!(with_repo.is_configured());
+
+        // Target path alone does not make it configured
+        let with_target_only = DotfilesPhaseConfig {
+            repository: None,
+            target_path: Some("/path".to_string()),
+            install_command: None,
+        };
+        assert!(!with_target_only.is_configured());
+    }
+
+    #[test]
+    fn test_dotfiles_phase_result_skipped() {
+        let result = DotfilesPhaseResult::skipped("test reason");
+        assert!(!result.was_configured);
+        assert!(result.skipped);
+        assert_eq!(result.skip_reason, Some("test reason".to_string()));
+        assert!(result.result.is_none());
+    }
+
+    #[test]
+    fn test_dotfiles_phase_result_executed() {
+        let dotfiles_result = DotfilesResult {
+            target_path: "/home/user/.dotfiles".to_string(),
+            script_executed: true,
+            script_name: Some("install.sh".to_string()),
+        };
+
+        let result = DotfilesPhaseResult::executed(dotfiles_result);
+        assert!(result.was_configured);
+        assert!(!result.skipped);
+        assert!(result.skip_reason.is_none());
+        assert!(result.result.is_some());
+
+        let inner = result.result.unwrap();
+        assert_eq!(inner.target_path, "/home/user/.dotfiles");
+        assert!(inner.script_executed);
+        assert_eq!(inner.script_name, Some("install.sh".to_string()));
+    }
+
+    #[test]
+    fn test_should_skip_dotfiles_phase_prebuild() {
+        let config = DotfilesPhaseConfig::new().with_repository("https://github.com/user/dotfiles");
+
+        // Prebuild mode should skip
+        let reason = should_skip_dotfiles_phase(&config, true, false, false);
+        assert_eq!(reason, Some("prebuild mode"));
+    }
+
+    #[test]
+    fn test_should_skip_dotfiles_phase_skip_post_create() {
+        let config = DotfilesPhaseConfig::new().with_repository("https://github.com/user/dotfiles");
+
+        // --skip-post-create should skip
+        let reason = should_skip_dotfiles_phase(&config, false, true, false);
+        assert_eq!(reason, Some("--skip-post-create flag"));
+    }
+
+    #[test]
+    fn test_should_skip_dotfiles_phase_prior_marker() {
+        let config = DotfilesPhaseConfig::new().with_repository("https://github.com/user/dotfiles");
+
+        // Prior marker should skip
+        let reason = should_skip_dotfiles_phase(&config, false, false, true);
+        assert_eq!(reason, Some("prior completion marker"));
+    }
+
+    #[test]
+    fn test_should_skip_dotfiles_phase_not_configured() {
+        let config = DotfilesPhaseConfig::new();
+
+        // No repository configured should skip
+        let reason = should_skip_dotfiles_phase(&config, false, false, false);
+        assert_eq!(reason, Some("no dotfiles configured"));
+    }
+
+    #[test]
+    fn test_should_skip_dotfiles_phase_should_execute() {
+        let config = DotfilesPhaseConfig::new().with_repository("https://github.com/user/dotfiles");
+
+        // All conditions false, should execute
+        let reason = should_skip_dotfiles_phase(&config, false, false, false);
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn test_should_skip_dotfiles_phase_precedence() {
+        let config = DotfilesPhaseConfig::new().with_repository("https://github.com/user/dotfiles");
+
+        // Multiple reasons: prebuild takes precedence
+        let reason = should_skip_dotfiles_phase(&config, true, true, true);
+        assert_eq!(reason, Some("prebuild mode"));
+
+        // Without prebuild, skip_post_create takes precedence
+        let reason = should_skip_dotfiles_phase(&config, false, true, true);
+        assert_eq!(reason, Some("--skip-post-create flag"));
+
+        // Without prebuild and skip_post_create, prior_marker is used
+        let reason = should_skip_dotfiles_phase(&config, false, false, true);
+        assert_eq!(reason, Some("prior completion marker"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_dotfiles_phase_not_configured() {
+        let config = DotfilesPhaseConfig::new();
+        let result = execute_dotfiles_phase(&config).await.unwrap();
+
+        assert!(result.skipped);
+        assert_eq!(
+            result.skip_reason,
+            Some("no dotfiles repository configured".to_string())
+        );
+        assert!(result.result.is_none());
     }
 }

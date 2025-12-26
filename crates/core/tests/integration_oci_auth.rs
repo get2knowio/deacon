@@ -477,8 +477,8 @@ async fn test_custom_ca_bundle() {
 
     // The client creation might fail due to invalid cert format, but it should at least
     // attempt to read the file (which means our code path is working)
-    if client_result.is_err() {
-        let error_msg = client_result.unwrap_err().to_string();
+    if let Err(e) = client_result {
+        let error_msg = e.to_string();
         assert!(
             error_msg.contains("certificate")
                 || error_msg.contains("pem")

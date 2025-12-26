@@ -484,15 +484,17 @@ fn test_up_with_skip_feature_auto_mapping() {
 
 fn run_up(extra_args: &[&str], guard: &ContainerGuard) -> (String, String) {
     let workspace = workspace_path();
+    let workspace_str = workspace.to_string_lossy();
 
     let mut cmd = Command::cargo_bin("deacon").expect("deacon binary");
     let assert = cmd
-        .current_dir(workspace)
+        .current_dir(&workspace)
         .env("DEACON_LOG", "warn")
         .args([
             "up",
             "--workspace-folder",
-            ".",
+            &*workspace_str,
+            "--mount-workspace-git-root=false",
             "--remove-existing-container",
             "--skip-post-create",
         ])

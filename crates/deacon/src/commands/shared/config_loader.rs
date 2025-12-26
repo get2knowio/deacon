@@ -49,11 +49,19 @@ pub fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
     };
 
     let mut config_path = if let Some(path) = args.config_path {
-        // Validate filename per spec: must be devcontainer.json or .devcontainer.json
+        // Validate filename per spec: must be devcontainer.json(c) or .devcontainer.json(c)
+        // The .jsonc extension is allowed for JSON with comments
         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-            if file_name != "devcontainer.json" && file_name != ".devcontainer.json" {
+            let valid_names = [
+                "devcontainer.json",
+                "devcontainer.jsonc",
+                ".devcontainer.json",
+                ".devcontainer.jsonc",
+            ];
+            if !valid_names.contains(&file_name) {
                 return Err(DeaconError::Config(ConfigError::Validation {
-                    message: "Filename must be devcontainer.json or .devcontainer.json".to_string(),
+                    message: "Filename must be devcontainer.json(c) or .devcontainer.json(c)"
+                        .to_string(),
                 }));
             }
         }

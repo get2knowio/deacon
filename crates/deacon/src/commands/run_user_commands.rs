@@ -137,6 +137,9 @@ async fn execute_lifecycle_commands(
         // Per FR-006: force_pty toggle only applies to 'up' workflow lifecycle exec,
         // not to run-user-commands which is a separate entry point
         force_pty: false,
+        // run-user-commands does not install dotfiles - that is handled by `up` command
+        dotfiles: None,
+        is_prebuild: false,
     };
 
     // Build lifecycle commands from configuration

@@ -27,8 +27,8 @@ fn test_output_format_text() {
 
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("Manifest"))
-        .stdout(predicate::str::contains("Canonical Identifier"));
+        .stdout(predicates::str::contains("Manifest"))
+        .stdout(predicates::str::contains("Canonical Identifier"));
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn test_output_format_invalid() {
         .arg("invalid");
 
     cmd.assert().failure().stderr(
-        predicate::str::contains("invalid value 'invalid'").or(predicate::str::contains("error")),
+        predicates::str::contains("invalid value 'invalid'").or(predicates::str::contains("error")),
     );
 }
 
@@ -110,7 +110,7 @@ fn test_log_level_debug() {
 
     cmd.assert()
         .success()
-        .stderr(predicate::str::contains("DEBUG").or(predicate::str::is_empty()));
+        .stderr(predicates::str::contains("DEBUG").or(predicates::str::is_empty()));
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn test_log_level_trace() {
 
     cmd.assert()
         .success()
-        .stderr(predicate::str::contains("TRACE").or(predicate::str::is_empty()));
+        .stderr(predicates::str::contains("TRACE").or(predicates::str::is_empty()));
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn test_log_level_invalid() {
         .arg("invalid");
 
     cmd.assert().failure().stderr(
-        predicate::str::contains("invalid value 'invalid'").or(predicate::str::contains("error")),
+        predicates::str::contains("invalid value 'invalid'").or(predicates::str::contains("error")),
     );
 }
 
@@ -197,7 +197,7 @@ fn test_missing_required_mode() {
         .arg("ghcr.io/devcontainers/features/node:1");
 
     cmd.assert().failure().stderr(
-        predicate::str::contains("required arguments").or(predicate::str::contains("MODE")),
+        predicates::str::contains("required arguments").or(predicates::str::contains("MODE")),
     );
 }
 
@@ -207,7 +207,7 @@ fn test_missing_required_feature() {
     cmd.arg("features").arg("info").arg("manifest");
 
     cmd.assert().failure().stderr(
-        predicate::str::contains("required arguments").or(predicate::str::contains("FEATURE")),
+        predicates::str::contains("required arguments").or(predicates::str::contains("FEATURE")),
     );
 }
 
@@ -221,7 +221,7 @@ fn test_invalid_mode() {
 
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("invalid-mode").or(predicate::str::contains("error")));
+        .stderr(predicates::str::contains("invalid-mode").or(predicates::str::contains("error")));
 }
 
 #[test]
@@ -231,11 +231,11 @@ fn test_help_flag() {
 
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("features info"))
-        .stdout(predicate::str::contains("MODE"))
-        .stdout(predicate::str::contains("FEATURE"))
-        .stdout(predicate::str::contains("--output-format"))
-        .stdout(predicate::str::contains("--log-level"));
+        .stdout(predicates::str::contains("features info"))
+        .stdout(predicates::str::contains("MODE"))
+        .stdout(predicates::str::contains("FEATURE"))
+        .stdout(predicates::str::contains("--output-format"))
+        .stdout(predicates::str::contains("--log-level"));
 }
 
 #[test]

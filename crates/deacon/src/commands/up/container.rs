@@ -342,6 +342,21 @@ pub(crate) async fn execute_container_up(
     )
     .await;
 
+    // T014: Read prior lifecycle markers for resume decision logic
+    // Per SC-002: On resume, skip onCreate, updateContent, postCreate, dotfiles; run postStart, postAttach
+    // Per FR-004: On partial resume, skip completed phases, run remaining from earliest incomplete
+    let prior_markers = deacon_core::state::read_all_markers(workspace_folder, args.prebuild)
+        .unwrap_or_else(|e| {
+            debug!("Failed to read prior lifecycle markers: {}", e);
+            Vec::new()
+        });
+
+    debug!(
+        "Prior lifecycle markers: {} markers loaded (prebuild={})",
+        prior_markers.len(),
+        args.prebuild
+    );
+
     // Execute lifecycle commands if not skipped
     execute_lifecycle_commands(
         &container_result.container_id,
@@ -351,6 +366,7 @@ pub(crate) async fn execute_container_up(
         env_user_resolution.effective_env.clone(),
         env_user_resolution.effective_user.clone(),
         cache_folder,
+        prior_markers,
     )
     .await?;
 

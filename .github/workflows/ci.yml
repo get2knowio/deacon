@@ -238,84 +238,84 @@ jobs:
           fi
         fi
 
-      long-running:
-        name: Long-running integration tests (nextest) (ubuntu)
-        needs: lint
-        runs-on: ubuntu-latest
-        timeout-minutes: 90
-        env:
-          # Enable network tests for integration tests that require OCI registry access
-          DEACON_NETWORK_TESTS: "1"
-        steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
+  long-running:
+    name: Long-running integration tests (nextest) (ubuntu)
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      # Enable network tests for integration tests that require OCI registry access
+      DEACON_NETWORK_TESTS: "1"
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-        - name: Install Rust toolchain
-          uses: dtolnay/rust-toolchain@stable
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
 
-        - name: Cache cargo registry and target
-          uses: actions/cache@v4
-          with:
-            path: |
-              ~/.cargo/registry
-              ~/.cargo/git
-              target
-            key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}-long
-            restore-keys: |
-              ${{ runner.os }}-cargo-nextest-
-              ${{ runner.os }}-cargo-
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}-long
+        restore-keys: |
+          ${{ runner.os }}-cargo-nextest-
+          ${{ runner.os }}-cargo-
 
-        - name: Install cargo-nextest
-          uses: taiki-e/install-action@v2
-          with:
-            tool: cargo-nextest
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
 
-        - name: Ensure Docker is running
-          run: |
-            sudo service docker start
-            docker info
+    - name: Ensure Docker is running
+      run: |
+        sudo service docker start
+        docker info
 
-        - name: Acquire GHCR bearer token (read-only)
-          run: |
-            set -euo pipefail
-            echo "Requesting multi-scope GHCR token..."
-            TOKEN_URL="https://ghcr.io/token?service=ghcr.io\
-            &scope=repository:devcontainers/features/node:pull\
-            &scope=repository:devcontainers/features/common-utils:pull\
-            &scope=repository:devcontainers/features/docker-in-docker:pull\
-            &scope=repository:devcontainers/features/python:pull\
-            &scope=repository:devcontainers/features/git:pull"
-            TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
-            if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
-              echo "Failed to acquire GHCR token" >&2
-              exit 1
-            fi
-            echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+    - name: Acquire GHCR bearer token (read-only)
+      run: |
+        set -euo pipefail
+        echo "Requesting multi-scope GHCR token..."
+        TOKEN_URL="https://ghcr.io/token?service=ghcr.io\
+        &scope=repository:devcontainers/features/node:pull\
+        &scope=repository:devcontainers/features/common-utils:pull\
+        &scope=repository:devcontainers/features/docker-in-docker:pull\
+        &scope=repository:devcontainers/features/python:pull\
+        &scope=repository:devcontainers/features/git:pull"
+        TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+        if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
+          echo "Failed to acquire GHCR token" >&2
+          exit 1
+        fi
+        echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-        - name: Run nextest long-running profile via Makefile
-          run: make test-nextest-long-running
+    - name: Run nextest long-running profile via Makefile
+      run: make test-nextest-long-running
 
-        - name: Upload timing artifacts (long-running)
-          if: always()
-          uses: actions/upload-artifact@v4
-          with:
-            name: nextest-long-running-timing-ubuntu
-            path: artifacts/nextest/long-running-timing.json
-            if-no-files-found: warn
+    - name: Upload timing artifacts (long-running)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: nextest-long-running-timing-ubuntu
+        path: artifacts/nextest/long-running-timing.json
+        if-no-files-found: warn
 
-        - name: Generate long-running timing summary
-          if: always()
-          run: |
-            if [[ -f artifacts/nextest/long-running-timing.json ]]; then
-              echo "## Nextest Long-running Timing Results" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              lr_duration=$(jq -r '.duration_seconds // 0' artifacts/nextest/long-running-timing.json)
-              lr_timestamp=$(jq -r '.timestamp_utc // "N/A"' artifacts/nextest/long-running-timing.json)
-              echo "- **Profile**: long-running" >> $GITHUB_STEP_SUMMARY
-              echo "- **Duration**: ${lr_duration}s" >> $GITHUB_STEP_SUMMARY
-              echo "- **Timestamp**: ${lr_timestamp}" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-            fi
+    - name: Generate long-running timing summary
+      if: always()
+      run: |
+        if [[ -f artifacts/nextest/long-running-timing.json ]]; then
+          echo "## Nextest Long-running Timing Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          lr_duration=$(jq -r '.duration_seconds // 0' artifacts/nextest/long-running-timing.json)
+          lr_timestamp=$(jq -r '.timestamp_utc // "N/A"' artifacts/nextest/long-running-timing.json)
+          echo "- **Profile**: long-running" >> $GITHUB_STEP_SUMMARY
+          echo "- **Duration**: ${lr_duration}s" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: ${lr_timestamp}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
 
   test-podman:
     name: Podman runtime tests (ubuntu)

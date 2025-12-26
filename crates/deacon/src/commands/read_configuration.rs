@@ -454,11 +454,8 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
 
         debug!("Container-based merged configuration computed successfully");
         Ok(serde_json::to_value(&merged)?)
-    } else if features_config.is_some() {
+    } else if let Some(features_config) = features_config {
         debug!("Computing features-based merged configuration");
-
-        // Extract features configuration
-        let features_config = features_config.unwrap();
 
         // Derive configuration from features metadata
         let mut derived_config = deacon_core::config::DevContainerConfig::default();
