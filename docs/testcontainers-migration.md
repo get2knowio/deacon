@@ -17,23 +17,42 @@ Tests using `Command::new("docker")` or `docker run`:
 
 1. `crates/deacon/tests/test_utils.rs` - Core cleanup utilities (DeaconGuard)
 2. `crates/deacon/tests/parity_utils.rs` - Parity test utilities
-3. `crates/deacon/tests/smoke_*.rs` - Smoke tests (6 files)
-4. `crates/deacon/tests/up_*.rs` - Up command tests (7 files)
-5. `crates/deacon/tests/integration_exec_*.rs` - Exec tests
+3. `crates/deacon/tests/up_*.rs` - Up command tests (7 files)
+4. `crates/deacon/tests/integration_exec_selection.rs` - Uses `docker run` for test containers
+5. `crates/deacon/tests/integration_exec_id_label.rs` - Uses `docker run` for test containers
 6. `crates/deacon/tests/integration_build_args.rs` - Build tests
 7. `crates/deacon/tests/integration_custom_container_name.rs` - Container naming
 8. `crates/deacon/tests/parity_*.rs` - Parity tests (2 files)
 
+### Not Applicable (CLI-Managed Containers)
+
+The following smoke tests do NOT need testcontainers migration because they test the
+`deacon` CLI's container lifecycle management. Using testcontainers would bypass the
+very functionality being tested:
+
+- `crates/deacon/tests/smoke_basic.rs` - Tests `deacon build`, `deacon up`, `deacon exec`
+- `crates/deacon/tests/smoke_lifecycle.rs` - Tests lifecycle hooks via `deacon up`
+- `crates/deacon/tests/smoke_compose_edges.rs` - Tests compose-based `deacon up`
+- `crates/deacon/tests/smoke_down.rs` - Tests `deacon down` command
+- `crates/deacon/tests/smoke_exec.rs` - Tests `deacon exec` behavior
+- `crates/deacon/tests/smoke_exec_stdin.rs` - Tests `deacon exec` stdin streaming
+- `crates/deacon/tests/smoke_up_idempotent.rs` - Tests `deacon up` idempotency
+- `crates/deacon/tests/smoke_spinner.rs` - Tests spinner output in `deacon up`/`deacon down`
+
+These tests only use `docker info` for availability detection and rely on `DeaconGuard`
+(which calls `deacon down`) for cleanup. The container lifecycle is managed by the
+`deacon` CLI being tested, not by the tests themselves.
+
 ### Phase 1: Foundation
-- [ ] Add `testcontainers` and `testcontainers-modules` dev-dependencies
-- [ ] Create shared testcontainers helpers module
+- [x] Add `testcontainers` and `testcontainers-modules` dev-dependencies
+- [x] Create shared testcontainers helpers module
 - [ ] Update nextest config for improved parallelization
 
 ### Phase 2: Core Test Migration
 - [ ] Migrate `test_utils.rs` (DeaconGuard pattern)
-- [ ] Migrate smoke tests
+- [x] ~~Migrate smoke tests~~ - NOT APPLICABLE (see above)
 - [ ] Migrate up command tests
-- [ ] Migrate exec tests
+- [ ] Migrate exec tests (`integration_exec_selection.rs`, `integration_exec_id_label.rs`)
 
 ### Phase 3: Cleanup & Validation
 - [ ] Remove manual cleanup code
