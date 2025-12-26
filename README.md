@@ -81,6 +81,21 @@ Verify installation:
 deacon --version
 ```
 
+## In Progress
+
+The following features are planned but not yet ready for use:
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Docker Compose profiles | Planned | Basic Compose works, profile selection coming soon |
+| Features installation during `up` | Experimental | Feature config merges, but installation may be incomplete |
+| Dotfiles (container-side) | Planned | Host-side dotfiles work, container clone/install coming |
+| `--expect-existing-container` | Planned | Flag exists but validation not implemented |
+| Port forwarding | Planned | Flags exist, functionality deferred |
+| Podman runtime | Planned | Docker is fully supported; Podman coming later |
+
+For the full roadmap, see [docs/MVP-ROADMAP.md](docs/MVP-ROADMAP.md).
+
 ## Examples
 
 Self-contained categorized examples live under [`examples/`](examples/README.md):
