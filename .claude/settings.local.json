@@ -51,7 +51,14 @@
       "Bash(sg:*)",
       "Bash(docker compose:*)",
       "Bash(rustfmt:*)",
-      "Bash(/opt/maverick/plugins/maverick/scripts/auto-approve-hook.sh)"
+      "Bash(/opt/maverick/plugins/maverick/scripts/auto-approve-hook.sh)",
+      "WebFetch(domain:containers.dev)",
+      "Bash(./target/release/deacon:*)",
+      "Bash(./target/debug/deacon:*)",
+      "WebSearch",
+      "Bash(/workspaces/deacon/target/release/deacon exec:*)",
+      "Bash(/workspaces/deacon/target/release/deacon down:*)",
+      "Bash(shellcheck:*)"
     ],
     "deny": [],
     "ask": []
