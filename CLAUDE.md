@@ -43,6 +43,13 @@ Development loop options:
 - Targeted: `make test-nextest-unit` (unit only), `make test-nextest-docker` (docker integration)
 - Full gate (before PR): `make test-nextest` - complete parallel test suite
 
+**Fix All Failures - Even Unrelated Ones:**
+If you encounter build or test failures during CI or local testing, fix them even if they're unrelated to your current work. A broken build blocks everyone. Never defer failures to "fix later" - address them before completing your current task. This includes:
+- Pre-existing test failures discovered during your work
+- Flaky tests that fail intermittently
+- Lint or format issues in files you didn't modify
+- Documentation or doctest compilation errors
+
 **3. No Silent Fallbacks - Fail Fast**
 - Production code MUST emit clear errors when capabilities are unavailable
 - Mocks/fakes are ONLY for tests, never in runtime code paths
