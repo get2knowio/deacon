@@ -16,7 +16,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RELEASE_FEATURE_FLAGS: --all-features
+  # MVP-only build: excludes non-MVP subcommands (build, features, templates, doctor, outdated, etc.)
+  RELEASE_FEATURE_FLAGS: --no-default-features
 
 jobs:
   verify:
@@ -39,10 +40,10 @@ jobs:
             ${{ runner.os }}-verify-
       - name: Fmt check
         run: cargo fmt --all -- --check
-      - name: Clippy (deny warnings)
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Tests (single thread)
-        run: cargo test --workspace -- --test-threads=1
+      - name: Clippy (deny warnings, MVP features)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+      - name: Tests (single thread, MVP features)
+        run: cargo test --workspace --no-default-features -- --test-threads=1
 
   create-release:
     name: Create Release
