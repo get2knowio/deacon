@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for progress events functionality
 
 use std::io::Read;

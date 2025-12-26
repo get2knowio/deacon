@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Tests for JSON output purity and stdout/stderr contract enforcement
 
 use anyhow::Result;

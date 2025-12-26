@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Parity tests comparing deacon vs upstream devcontainer CLI for `build` functionality.
 //!
 //! These tests verify that deacon's build command behaves functionally equivalent to

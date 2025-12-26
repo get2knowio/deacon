@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Tests verifying build command consistency with up/exec commands.
 //!
 //! This test suite ensures the build command shares config loading and

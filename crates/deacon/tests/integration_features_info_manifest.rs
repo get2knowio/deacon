@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for `deacon features info manifest` subcommand
 //!
 //! Tests text and JSON output formats, plus error handling for invalid refs.

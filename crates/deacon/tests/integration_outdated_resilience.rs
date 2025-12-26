@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 // T042: Resilience test for outdated subcommand (User Story 3)
 //
 // Tests graceful handling of registry failures, network issues, and invalid references

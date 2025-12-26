@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 // Integration test for outdated subcommand with extends resolution
 //
 // Tests that features from extended configurations are properly resolved

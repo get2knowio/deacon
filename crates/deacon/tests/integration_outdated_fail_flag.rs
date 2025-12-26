@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 // T041: CLI integration test for --fail-on-outdated exit 2 (User Story 2)
 //
 // Tests that the --fail-on-outdated flag causes exit code 2 when outdated features are detected

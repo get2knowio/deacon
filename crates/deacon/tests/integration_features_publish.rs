@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for features publish JSON output purity
 //!
 //! These tests verify that the features publish command produces

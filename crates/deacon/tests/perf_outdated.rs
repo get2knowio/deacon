@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 // T045: Performance validation for ~20 features with mocked registry (≤10s)
 //
 // Tests that the outdated command completes within acceptable time limits

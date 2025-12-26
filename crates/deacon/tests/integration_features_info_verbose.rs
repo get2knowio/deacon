@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for `deacon features info verbose` subcommand
 //!
 //! Tests text and JSON output formats, plus partial-failure scenarios.

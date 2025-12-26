@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::error::Error;

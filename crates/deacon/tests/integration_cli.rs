@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 use assert_cmd::Command;
 use predicates::prelude::*;
 

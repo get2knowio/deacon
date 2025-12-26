@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 // T040: CLI integration test for JSON output (User Story 2)
 //
 // Tests JSON serialization, schema stability, and compact/pretty formatting

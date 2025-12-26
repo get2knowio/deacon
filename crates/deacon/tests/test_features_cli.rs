@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for features CLI commands
 //!
 //! These tests verify that the features CLI commands work correctly

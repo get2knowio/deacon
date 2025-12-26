@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for the build command
 //!
 //! These tests verify that the build command works with real Docker builds.

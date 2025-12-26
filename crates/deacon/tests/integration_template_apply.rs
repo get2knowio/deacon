@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for template application workflow
 //!
 //! Tests the template apply command with option resolution, file materialization,

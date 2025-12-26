@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! CLI-only smoke tests that don't require Docker.
 
 use assert_cmd::Command;

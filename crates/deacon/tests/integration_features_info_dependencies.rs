@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for `deacon features info dependencies` subcommand
 //!
 //! Tests text output with Mermaid graph and JSON mode rejection behavior.

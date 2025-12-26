@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for `features info` CLI flag handling
 //!
 //! These tests verify that the `features info` subcommand properly handles

@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Deacon-only integration test for build args propagation
 //!
 //! Verifies that values from devcontainer.json build.args are passed to Docker

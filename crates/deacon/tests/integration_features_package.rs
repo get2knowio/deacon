@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for features package command
 //!
 //! These tests verify that the features package command works end-to-end

@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Smoke tests for compose path and edge case detection
 //!
 //! Scenarios covered:

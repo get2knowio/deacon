@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for the doctor command
 
 use assert_cmd::Command;

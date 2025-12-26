@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for features test JSON output
 //!
 //! These tests verify that the features test command produces correct JSON output

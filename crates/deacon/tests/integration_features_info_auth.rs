@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for `features info` authentication failures
 //!
 //! These tests verify that authentication errors are properly handled and reported

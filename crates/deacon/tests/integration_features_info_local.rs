@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration tests for `features info` with local feature paths
 //!
 //! These tests verify that local feature paths are properly handled:

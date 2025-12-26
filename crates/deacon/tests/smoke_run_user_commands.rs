@@ -1,3 +1,4 @@
+#![cfg(feature = "full")]
 //! Integration test for run-user-commands command functionality
 
 use assert_cmd::Command;
