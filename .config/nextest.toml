@@ -400,12 +400,14 @@ filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_ide
 priority = 100
 
 # CI profile: Conservative settings for deterministic CI execution
+# Excludes smoke_* tests since they're run in dedicated smoke job
 [profile.ci]
 retries = 0
 slow-timeout = { period = "120s", terminate-after = 1 }
 status-level = "all"
 fail-fast = false
 global-timeout = "1h"
+default-filter = 'not binary(#smoke_*)'
 
 # Throttle smoke and parity tests while allowing more overlap
 [[profile.ci.overrides]]
