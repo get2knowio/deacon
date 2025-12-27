@@ -261,6 +261,29 @@ test-nextest-smoke: install-nextest ## Run smoke tests via cargo-nextest with co
 		exit $$exit_code; \
 	fi
 
+.PHONY: test-nextest-mvp-integration
+test-nextest-mvp-integration: install-nextest ## Run MVP integration tests (smoke + parity + core Docker tests)
+	@set -euo pipefail; \
+	./scripts/nextest/assert-installed.sh; \
+	mkdir -p artifacts/nextest; \
+	echo "Running MVP integration tests (smoke + parity + core Docker)..."; \
+	start_time=$$(date +%s); \
+	if cargo nextest run --profile mvp-integration $(THREAD_ARGS) $(MVP_FLAGS) $(OUTPUT_ARGS); then \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"mvp-integration\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":0}" > artifacts/nextest/mvp-integration-timing.json; \
+		echo "✓ MVP integration tests passed in $${duration}s"; \
+	else \
+		exit_code=$$?; \
+		end_time=$$(date +%s); \
+		duration=$$((end_time - start_time)); \
+		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+		echo "{\"profile\":\"mvp-integration\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":$$exit_code}" > artifacts/nextest/mvp-integration-timing.json; \
+		echo "✗ MVP integration tests failed after $${duration}s"; \
+		exit $$exit_code; \
+	fi
+
 test-nextest-ci: install-nextest ## Run CI test suite with cargo-nextest (two-pass: general + auth-failure tests without token)
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \

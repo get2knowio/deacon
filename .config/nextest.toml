@@ -480,3 +480,45 @@ threads-required = 1
 [[profile.ci.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
+
+# MVP Integration profile: Consolidated smoke + parity + core Docker integration tests
+# Used by CI for MVP-focused testing without running full feature tests
+[profile.mvp-integration]
+retries = 0
+slow-timeout = { period = "5m", terminate-after = 1 }
+status-level = "pass"
+fail-fast = false
+# MVP integration tests: smoke, parity, and core integration tests for up/exec/down/read-configuration
+default-filter = 'binary(#smoke_*) | binary(#parity_*) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*)'
+
+# Smoke test grouping
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
+test-group = 'smoke-heavy'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.mvp-integration.overrides]]
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle))'
+test-group = 'smoke-lite'
+
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=smoke_cli)'
+test-group = 'smoke-cli'
+
+# Parity test grouping
+[[profile.mvp-integration.overrides]]
+filter = 'binary(#parity_*)'
+test-group = 'parity'
+
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=parity_read_configuration) | binary(=parity_remote_env_flags)'
+test-group = 'parity-cli'
+
+# Docker integration grouping
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(#integration_env_probe_*)'
+test-group = 'docker-shared'
+
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=integration_config)'
+test-group = 'fs-heavy'
