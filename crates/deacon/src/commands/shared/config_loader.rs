@@ -144,9 +144,12 @@ mod tests {
 
         match err {
             DeaconError::Config(ConfigError::NotFound { path }) => {
+                // Use Path for cross-platform path comparison
+                let path = std::path::Path::new(&path);
                 assert!(
-                    path.ends_with(".devcontainer/devcontainer.json"),
-                    "unexpected path: {path}"
+                    path.ends_with(".devcontainer/devcontainer.json")
+                        || path.ends_with(r".devcontainer\devcontainer.json"),
+                    "unexpected path: {path:?}"
                 );
             }
             other => panic!("unexpected error variant: {other}"),
