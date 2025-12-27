@@ -51,7 +51,7 @@
 
 | Feature | Test File | Tests Passing |
 |---------|-----------|---------------|
-| Dotfiles installation | `up_dotfiles.rs` | 12 tests passing |
+| Dotfiles installation | `up_dotfiles.rs` | 13 tests ignored (not in MVP) |
 | Build options (cache, BuildKit) | `integration_up_build_options.rs` | Tests passing |
 | Features during up | `integration_up_with_features.rs` | Tests passing |
 | Host requirements | `integration_host_requirements.rs` | Tests passing |
