@@ -1,6 +1,9 @@
 //! Integration tests for host requirements evaluation
 //!
 //! Tests the complete flow of host requirements validation in CLI commands.
+//!
+//! Note: These tests rely on Unix-specific host detection mechanisms.
+#![cfg(unix)]
 
 use deacon::commands::up::{execute_up, UpArgs};
 use deacon_core::config::{HostRequirements, ResourceSpec};
