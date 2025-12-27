@@ -600,7 +600,6 @@ mod tests {
         assert!(!evaluation.requirements_met);
     }
 
-    #[cfg(unix)]
     #[test]
     fn test_real_disk_space_current_directory() {
         // Test that the real implementation works for current directory
@@ -622,7 +621,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn test_real_disk_space_with_workspace_path() {
         use tempfile::TempDir;
@@ -642,7 +640,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn test_host_requirements_evaluation() {
         let mut evaluator = HostRequirementsEvaluator::new();
@@ -655,7 +652,11 @@ mod tests {
         };
 
         let result = evaluator.evaluate_requirements(&requirements, None);
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "evaluate_requirements failed: {:?}",
+            result.err()
+        );
 
         let evaluation = result.unwrap();
         assert!(evaluation.cpu_evaluation.is_some());
@@ -663,7 +664,6 @@ mod tests {
         assert!(evaluation.storage_evaluation.is_some());
     }
 
-    #[cfg(unix)]
     #[test]
     fn test_validation_with_ignore_failures() {
         let mut evaluator = HostRequirementsEvaluator::new();
