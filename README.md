@@ -115,34 +115,15 @@ See the full details and additional commands in `examples/README.md`.
 
 ## Runtime Selection
 
-Deacon supports multiple container runtimes. You can choose between Docker (default) and Podman:
+Deacon uses Docker as its container runtime. Podman support is planned for a future release.
 
-### Via CLI Flag
 ```bash
-# Use Docker (default)
+# Explicitly select Docker (optional, it's the default)
 deacon --runtime docker up
 
-# Use Podman (future support)
-deacon --runtime podman up
+# Or via environment variable
+DEACON_RUNTIME=docker deacon up
 ```
-
-### Via Environment Variable
-```bash
-# Set runtime via environment variable
-export DEACON_RUNTIME=podman
-deacon up
-
-# One-time override
-DEACON_RUNTIME=podman deacon up
-```
-
-### Precedence
-Runtime selection follows this precedence:
-1. CLI flag (`--runtime`)
-2. Environment variable (`DEACON_RUNTIME`)
-3. Default (docker)
-
-Note: Podman support is currently in development. Using `--runtime podman` will show a "Not implemented yet" error with clear next steps.
 
 ## Runtime Configuration
 
