@@ -4,6 +4,9 @@
 //! propagated through both Docker and Compose mount rendering paths, and that
 //! git-root workspace discovery works correctly.
 //!
+//! Note: These tests require Docker and are only compiled on Unix systems.
+#![cfg(unix)]
+//!
 //! ## Test Coverage
 //!
 //! ### User Story 1: Workspace Mount Consistency

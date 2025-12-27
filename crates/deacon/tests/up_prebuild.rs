@@ -6,6 +6,9 @@
 //! - Does not run postCreateCommand when --prebuild is set
 //! - Does not run postAttachCommand when --prebuild is set
 //! - Features are installed and metadata merged before updateContent
+//!
+//! Note: These tests require Docker and are only compiled on Unix systems.
+#![cfg(unix)]
 
 use assert_cmd::Command;
 use predicates::prelude::*;

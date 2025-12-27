@@ -12,6 +12,9 @@
 //! Host-side dotfiles work, but container clone/install is deferred to Iteration 1.
 //!
 //! To run these tests manually: cargo test --test up_dotfiles -- --ignored
+//!
+//! Note: These tests require Docker and are only compiled on Unix systems.
+#![cfg(unix)]
 
 use assert_cmd::Command;
 use predicates::prelude::*;
