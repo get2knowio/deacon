@@ -89,7 +89,7 @@ jobs:
 
   test-integration:
     name: Test (MVP integration)
-    needs: lint
+    needs: [lint, test-fast]  # Serial: fail-fast if unit tests fail
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
