@@ -115,9 +115,11 @@ fn discover_test_collection_with_relative_path() {
 }
 
 #[test]
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), ignore)]
 fn discover_features_case_sensitive() {
     // Create features with names that differ only in case
-    // Note: This test behavior depends on filesystem case-sensitivity
+    // Note: This test requires a case-sensitive filesystem (Linux)
+    // Skipped on macOS/Windows where filesystems are case-insensitive by default
     let tmp = create_test_collection_with_features(&["Color", "color"]);
 
     let collection = discovery::discover_test_collection(tmp.path()).expect("discover collection");

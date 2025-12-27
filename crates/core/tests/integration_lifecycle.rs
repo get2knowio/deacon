@@ -2,6 +2,9 @@
 //!
 //! These tests verify that the lifecycle harness can execute commands,
 //! capture output, handle errors, and maintain proper phase ordering.
+//!
+//! Note: These tests use Unix-specific APIs and are only compiled on Unix systems.
+#![cfg(unix)]
 
 use deacon_core::lifecycle::{run_phase, ExecutionContext, LifecycleCommands, LifecyclePhase};
 use serde_json::json;
