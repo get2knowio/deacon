@@ -136,11 +136,12 @@ slow-timeout = "5m"
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
-# Fast feedback loop profile: skip smoke/parity suites and throttled Docker tests
+# Fast feedback loop profile: skip smoke/parity suites, Docker tests, and testcontainers tests
 [profile.dev-fast]
 retries = 0
 slow-timeout = "30s"
-default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/))'
+# Exclude: smoke, parity, Docker-dependent tests, testcontainers-based tests
+default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers))'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
