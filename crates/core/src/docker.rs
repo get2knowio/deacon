@@ -2040,23 +2040,52 @@ impl CliRuntime {
             }
 
             // Parse the image ID from the output
-            // BuildKit outputs "writing image sha256:<image_id>" in the logs
+            // BuildKit output format varies by version:
+            // - Older: "writing image sha256:<id>"
+            // - Newer: "exporting manifest sha256:<id> done" or "naming to moby-dangling@sha256:<id>"
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
             let combined = format!("{}\n{}", stdout, stderr);
 
-            // Look for the image ID in the output
+            // Extract sha256 hash from a line, handling various formats
+            let extract_sha256 = |line: &str| -> Option<String> {
+                if let Some(sha_start) = line.find("sha256:") {
+                    let after_sha = &line[sha_start + 7..];
+                    // Extract the 64-character hex hash (or until whitespace/non-hex)
+                    let hash: String = after_sha
+                        .chars()
+                        .take_while(|c| c.is_ascii_hexdigit())
+                        .collect();
+                    if hash.len() == 64 {
+                        return Some(hash);
+                    }
+                }
+                None
+            };
+
+            // Look for the image ID in the output, trying multiple patterns
             for line in combined.lines() {
+                // Pattern 1: Older BuildKit format
                 if line.contains("writing image sha256:") {
-                    if let Some(sha_start) = line.find("sha256:") {
-                        let image_id = &line[sha_start + 7..];
-                        // Extract just the ID (up to next space or end of line)
-                        let image_id = image_id
-                            .split_whitespace()
-                            .next()
-                            .unwrap_or(image_id)
-                            .to_string();
-                        debug!("Built image ID: {}", image_id);
+                    if let Some(image_id) = extract_sha256(line) {
+                        debug!("Built image ID (writing image): {}", image_id);
+                        return Ok(image_id);
+                    }
+                }
+                // Pattern 2: Newer BuildKit format - exporting manifest
+                if line.contains("exporting manifest sha256:") && line.contains("done") {
+                    if let Some(image_id) = extract_sha256(line) {
+                        debug!("Built image ID (exporting manifest): {}", image_id);
+                        return Ok(image_id);
+                    }
+                }
+            }
+
+            // Pattern 3: Fallback - naming to moby-dangling@sha256:
+            for line in combined.lines() {
+                if line.contains("naming to") && line.contains("@sha256:") {
+                    if let Some(image_id) = extract_sha256(line) {
+                        debug!("Built image ID (naming): {}", image_id);
                         return Ok(image_id);
                     }
                 }
@@ -2064,7 +2093,7 @@ impl CliRuntime {
 
             // If we can't find the image ID in the output, return an error
             // The image was likely built but we couldn't parse its ID from the output
-            debug!("Could not parse image ID from build output");
+            debug!("Could not parse image ID from build output. Output was:\n{}", combined);
             Err(DockerError::CLIError(
                 "Could not determine image ID from build output. Image may have been built successfully.".to_string(),
             ))

@@ -4,55 +4,23 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-
 use tempfile::TempDir;
+use testcontainers::runners::AsyncRunner;
 
-#[test]
-fn test_exec_with_container_id_selection() {
+mod testcontainers_helpers;
+use testcontainers_helpers::{alpine_sleep_image, container_id};
+
+#[tokio::test]
+async fn test_exec_with_container_id_selection() {
     // T008: Integration: direct ID selection
-    // This test requires Docker; skip if not available.
-    use std::process::Command as StdCommand;
-    let docker_available = StdCommand::new("docker")
-        .arg("info")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !docker_available {
-        eprintln!("Skipping test: Docker not available");
-        return;
-    }
-
-    // Create container
-    let output = StdCommand::new("docker")
-        .arg("run")
-        .arg("-d")
-        .arg("--rm")
-        .arg("--name")
-        .arg("deacon-test-exec-id")
-        .arg("alpine:3.19")
-        .arg("sh")
-        .arg("-c")
-        .arg("sleep 3600")
-        .output()
-        .expect("docker run failed");
-
-    if !output.status.success() {
-        eprintln!(
-            "Failed to create test container: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return;
-    }
-
-    let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    // Start a container using testcontainers (auto-cleanup on drop)
+    let container = alpine_sleep_image().start().await.unwrap();
+    let id = container_id(&container);
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("exec")
         .arg("--container-id")
-        .arg(&container_id)
+        .arg(&id)
         .arg("--")
         .arg("echo")
         .arg("hello")
@@ -60,12 +28,7 @@ fn test_exec_with_container_id_selection() {
         .success()
         .stdout(predicate::str::contains("hello"));
 
-    // Cleanup
-    let _ = StdCommand::new("docker")
-        .arg("rm")
-        .arg("-f")
-        .arg(&container_id)
-        .output();
+    // Container automatically cleaned up when dropped
 }
 
 #[test]

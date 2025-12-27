@@ -93,6 +93,11 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
 
+[[profile.default.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
+
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 # They test argument parsing and BuildOptions/BuildKitOptions behavior without spawning containers
 [[profile.default.overrides]]
@@ -131,11 +136,12 @@ slow-timeout = "5m"
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
-# Fast feedback loop profile: skip smoke/parity suites and throttled Docker tests
+# Fast feedback loop profile: skip smoke/parity suites, Docker tests, and testcontainers tests
 [profile.dev-fast]
 retries = 0
 slow-timeout = "30s"
-default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/))'
+# Exclude: smoke, parity, Docker-dependent tests, testcontainers-based tests
+default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=up_dotfiles))'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -177,6 +183,11 @@ test-group = 'parity-cli'
 [[profile.dev-fast.overrides]]
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
 
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 [[profile.dev-fast.overrides]]
@@ -275,6 +286,11 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
 
+[[profile.docker.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
+
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 [[profile.docker.overrides]]
 filter = 'binary(=integration_up_build_options)'
@@ -343,6 +359,11 @@ test-group = 'parity-cli'
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
 
+[[profile.full.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
+
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 [[profile.full.overrides]]
 filter = 'binary(=integration_up_build_options)'
@@ -380,12 +401,14 @@ filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_ide
 priority = 100
 
 # CI profile: Conservative settings for deterministic CI execution
+# Excludes smoke_* tests since they're run in dedicated smoke job
 [profile.ci]
 retries = 0
 slow-timeout = { period = "120s", terminate-after = 1 }
 status-level = "all"
 fail-fast = false
 global-timeout = "1h"
+default-filter = 'not binary(#smoke_*)'
 
 # Throttle smoke and parity tests while allowing more overlap
 [[profile.ci.overrides]]
@@ -415,6 +438,11 @@ test-group = 'parity-cli'
 [[profile.ci.overrides]]
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
+
+[[profile.ci.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label)'
+test-group = 'docker-shared'
+slow-timeout = { period = "5m", terminate-after = 1 }
 
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 [[profile.ci.overrides]]
@@ -453,3 +481,45 @@ threads-required = 1
 [[profile.ci.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
+
+# MVP Integration profile: Consolidated smoke + parity + core Docker integration tests
+# Used by CI for MVP-focused testing without running full feature tests
+[profile.mvp-integration]
+retries = 0
+slow-timeout = { period = "5m", terminate-after = 1 }
+status-level = "pass"
+fail-fast = false
+# MVP integration tests: smoke, parity, and core integration tests for up/exec/down/read-configuration
+default-filter = 'binary(#smoke_*) | binary(#parity_*) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*)'
+
+# Smoke test grouping
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
+test-group = 'smoke-heavy'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.mvp-integration.overrides]]
+filter = 'binary(#smoke_*) & not (binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle))'
+test-group = 'smoke-lite'
+
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=smoke_cli)'
+test-group = 'smoke-cli'
+
+# Parity test grouping
+[[profile.mvp-integration.overrides]]
+filter = 'binary(#parity_*)'
+test-group = 'parity'
+
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=parity_read_configuration) | binary(=parity_remote_env_flags)'
+test-group = 'parity-cli'
+
+# Docker integration grouping
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(#integration_env_probe_*)'
+test-group = 'docker-shared'
+
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=integration_config)'
+test-group = 'fs-heavy'

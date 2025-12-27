@@ -1,4 +1,7 @@
 //! Integration tests for OCI feature fetch and install functionality
+//!
+//! Note: These tests use Unix-specific APIs and are only compiled on Unix systems.
+#![cfg(unix)]
 
 use bytes::Bytes;
 use deacon_core::oci::{FeatureFetcher, FeatureRef, MockHttpClient, ReqwestClient};

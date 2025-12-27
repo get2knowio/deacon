@@ -1,0 +1,74 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  MIN_COVERAGE: "80"
+
+jobs:
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    env:
+      DEACON_NETWORK_TESTS: "1"
+    steps:
+    - name: Free disk space (before cache restore)
+      run: |
+        # Remove pre-installed software to free ~30GB BEFORE cache restore
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+        echo "=== Disk space after pre-cleanup ==="
+        df -h
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: llvm-tools-preview
+
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-llvm-cov
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-llvmcov-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-llvmcov-
+
+    - name: Ensure Docker is running and clean
+      run: |
+        sudo service docker start
+        docker info
+        # Clean Docker after cache restore
+        sudo docker system prune -af --volumes
+        sudo docker builder prune -af
+        echo "=== Disk space after Docker cleanup ==="
+        df -h
+
+    - name: Generate coverage (fail under ${{ env.MIN_COVERAGE }}%)
+      run: |
+        mkdir -p coverage
+        cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info --text --fail-under-lines ${{ env.MIN_COVERAGE }} -- --test-threads=1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload lcov artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-lcov
+        path: coverage/lcov.info
+
+    - name: Upload coverage to Coveralls
+      uses: coverallsapp/github-action@v2
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        path-to-lcov: coverage/lcov.info

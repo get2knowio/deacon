@@ -40,3 +40,4 @@ predicates = "3.1"
 tempfile = "3.12"
 zip = "2.4"
 serde_json = { version = "1.0", features = ["preserve_order"] }
+testcontainers = "0.23"

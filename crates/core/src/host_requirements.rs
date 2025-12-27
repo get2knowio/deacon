@@ -652,7 +652,11 @@ mod tests {
         };
 
         let result = evaluator.evaluate_requirements(&requirements, None);
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "evaluate_requirements failed: {:?}",
+            result.err()
+        );
 
         let evaluation = result.unwrap();
         assert!(evaluation.cpu_evaluation.is_some());

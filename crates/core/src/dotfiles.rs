@@ -542,6 +542,7 @@ mod tests {
         assert_eq!(result, None);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_execute_install_script_success() {
         let temp_dir = TempDir::new().unwrap();
@@ -574,6 +575,7 @@ mod tests {
         assert!(content.contains("Install executed"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_apply_dotfiles_with_local_fixture() {
         // Create a local git repository fixture for testing
