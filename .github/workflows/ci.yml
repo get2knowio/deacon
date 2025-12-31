@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt,clippy
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Compile (check)
+      run: cargo check --workspace --all-targets
+
+    - name: Run clippy
+      run: cargo clippy --all-targets -- -D warnings
+
+    - name: Run doctests
+      run: cargo test --doc --workspace
+
+  test-fast:
+    name: Test (MVP fast) (${{ matrix.os }})
+    needs: lint
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu
+            runs_on: ubuntu-latest
+          - os: macos
+            runs_on: macos-14
+          # Windows disabled until bespoke runner with Docker support is available
+          # - os: windows
+          #   runs_on: windows-latest
+    steps:
+    - name: Free disk space (Ubuntu)
+      if: matrix.os == 'ubuntu'
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-nextest-
+          ${{ runner.os }}-cargo-
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
+
+    - name: Run MVP fast tests
+      run: cargo nextest run --profile dev-fast --no-default-features
+
+  test-integration:
+    name: Test (MVP integration)
+    needs: test-fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEACON_NETWORK_TESTS: "1"
+    steps:
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-nextest-
+          ${{ runner.os }}-cargo-
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
+
+    - name: Ensure Docker is running and clean
+      run: |
+        sudo service docker start
+        docker info
+        sudo docker system prune -af --volumes
+        sudo docker builder prune -af
+
+    - name: Acquire GHCR bearer token (read-only)
+      run: |
+        set -euo pipefail
+        TOKEN_URL="https://ghcr.io/token?service=ghcr.io\
+        &scope=repository:devcontainers/features/node:pull\
+        &scope=repository:devcontainers/features/common-utils:pull\
+        &scope=repository:devcontainers/features/docker-in-docker:pull\
+        &scope=repository:devcontainers/features/python:pull\
+        &scope=repository:devcontainers/features/git:pull"
+        TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+        if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
+          echo "Failed to acquire GHCR token" >&2
+          exit 1
+        fi
+        echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+    - name: Run MVP integration tests
+      run: make test-nextest-mvp-integration
+
+    - name: Upload timing artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: nextest-mvp-integration-timing
+        path: artifacts/nextest/mvp-integration-timing.json
+        if-no-files-found: warn

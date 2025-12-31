@@ -1,0 +1,42 @@
+{"type":"container.create.begin","id":1,"timestamp":1763560215448,"name":"Single Container Test","image":"mcr.microsoft.com/devcontainers/base:ubuntu"}
+{"type":"container.create.end","id":2,"timestamp":1763560215473,"name":"Single Container Test","duration_ms":25,"success":false,"container_id":null}
+{"type":"container.create.begin","id":1,"timestamp":1763560220561,"name":"Single Container Test","image":"mcr.microsoft.com/devcontainers/base:ubuntu"}
+{"type":"container.create.end","id":2,"timestamp":1763560220620,"name":"Single Container Test","duration_ms":59,"success":false,"container_id":null}
+{"type":"container.create.begin","id":1,"timestamp":1763560225357,"name":"Single Container Test","image":"mcr.microsoft.com/devcontainers/base:ubuntu"}
+{"type":"container.create.end","id":2,"timestamp":1763560225389,"name":"Single Container Test","duration_ms":31,"success":false,"container_id":null}
+{"type":"container.create.begin","id":1,"timestamp":1763560247073,"name":"Single Container Test","image":"ubuntu:22.04"}
+{"type":"container.create.end","id":2,"timestamp":1763560247240,"name":"Single Container Test","duration_ms":166,"success":true,"container_id":"e265d21567200909a28a1edb2fc1d1057cae375671842243b94d258960294b61"}
+{"type":"lifecycle.phase.begin","id":3,"timestamp":1763560247430,"phase":"updateContent","commands":["echo 'Update content command executed'"]}
+{"type":"lifecycle.command.begin","id":4,"timestamp":1763560247431,"phase":"updateContent","command_id":"updateContent-1","command":"echo 'Update content command executed'"}
+{"type":"lifecycle.command.end","id":5,"timestamp":1763560247452,"phase":"updateContent","command_id":"updateContent-1","duration_ms":21,"success":true,"exit_code":0}
+{"type":"lifecycle.phase.end","id":6,"timestamp":1763560247452,"phase":"updateContent","duration_ms":22,"success":true}
+{"type":"container.create.begin","id":1,"timestamp":1763560252247,"name":"Single Container Test","image":"ubuntu:22.04"}
+{"type":"container.create.end","id":2,"timestamp":1763560252451,"name":"Single Container Test","duration_ms":203,"success":true,"container_id":"92b2c95c6ff3407aa2c761a3946d1c6c1383ae3dede24447280fe46d829b1854"}
+{"type":"lifecycle.phase.begin","id":3,"timestamp":1763560252607,"phase":"updateContent","commands":["echo 'Update content command executed'"]}
+{"type":"lifecycle.command.begin","id":4,"timestamp":1763560252609,"phase":"updateContent","command_id":"updateContent-1","command":"echo 'Update content command executed'"}
+{"type":"lifecycle.command.end","id":5,"timestamp":1763560252628,"phase":"updateContent","command_id":"updateContent-1","duration_ms":20,"success":true,"exit_code":0}
+{"type":"lifecycle.phase.end","id":6,"timestamp":1763560252628,"phase":"updateContent","duration_ms":21,"success":true}
+{"type":"container.create.begin","id":1,"timestamp":1763560259431,"name":"Single Container Test","image":"ubuntu:22.04"}
+{"type":"container.create.end","id":2,"timestamp":1763560259621,"name":"Single Container Test","duration_ms":189,"success":true,"container_id":"1b55120146232cf261603611ce9c0ac50408f7d0d5589095df9f2ce5e9e95c78"}
+{"type":"lifecycle.phase.begin","id":3,"timestamp":1763560259857,"phase":"updateContent","commands":["echo 'Update content command executed'"]}
+{"type":"lifecycle.command.begin","id":4,"timestamp":1763560259859,"phase":"updateContent","command_id":"updateContent-1","command":"echo 'Update content command executed'"}
+{"type":"lifecycle.command.end","id":5,"timestamp":1763560259895,"phase":"updateContent","command_id":"updateContent-1","duration_ms":38,"success":true,"exit_code":0}
+{"type":"lifecycle.phase.end","id":6,"timestamp":1763560259895,"phase":"updateContent","duration_ms":38,"success":true}
+{"type":"container.create.begin","id":1,"timestamp":1763560269637,"name":"Single Container Test","image":"ubuntu:22.04"}
+{"type":"container.create.end","id":2,"timestamp":1763560269663,"name":"Single Container Test","duration_ms":26,"success":true,"container_id":"1b5512014623"}
+{"type":"lifecycle.phase.begin","id":3,"timestamp":1763560269889,"phase":"updateContent","commands":["echo 'Update content command executed'"]}
+{"type":"lifecycle.command.begin","id":4,"timestamp":1763560269891,"phase":"updateContent","command_id":"updateContent-1","command":"echo 'Update content command executed'"}
+{"type":"lifecycle.command.end","id":5,"timestamp":1763560269910,"phase":"updateContent","command_id":"updateContent-1","duration_ms":20,"success":true,"exit_code":0}
+{"type":"lifecycle.phase.end","id":6,"timestamp":1763560269910,"phase":"updateContent","duration_ms":21,"success":true}
+{"type":"container.create.begin","id":1,"timestamp":1763560274584,"name":"Single Container Test","image":"ubuntu:22.04"}
+{"type":"container.create.end","id":2,"timestamp":1763560274610,"name":"Single Container Test","duration_ms":25,"success":true,"container_id":"1b5512014623"}
+{"type":"lifecycle.phase.begin","id":3,"timestamp":1763560274852,"phase":"updateContent","commands":["echo 'Update content command executed'"]}
+{"type":"lifecycle.command.begin","id":4,"timestamp":1763560274854,"phase":"updateContent","command_id":"updateContent-1","command":"echo 'Update content command executed'"}
+{"type":"lifecycle.command.end","id":5,"timestamp":1763560274875,"phase":"updateContent","command_id":"updateContent-1","duration_ms":22,"success":true,"exit_code":0}
+{"type":"lifecycle.phase.end","id":6,"timestamp":1763560274875,"phase":"updateContent","duration_ms":23,"success":true}
+{"type":"container.create.begin","id":1,"timestamp":1766782631659,"name":"Dev Container with Features","image":"ubuntu:22.04"}
+{"type":"container.create.begin","id":1,"timestamp":1766782685717,"name":"Dev Container with Features","image":"ubuntu:22.04"}
+{"type":"container.create.begin","id":1,"timestamp":1766782808487,"name":"Dev Container with Features","image":"ubuntu:22.04"}
+{"type":"container.create.begin","id":1,"timestamp":1766782913959,"name":"Dev Container with Features","image":"ubuntu:22.04"}
+{"type":"container.create.begin","id":1,"timestamp":1766784203519,"name":"Dev Container with Features","image":"ubuntu:22.04"}
+{"type":"container.create.end","id":4,"timestamp":1766784261959,"name":"Dev Container with Features","duration_ms":58439,"success":true,"container_id":"0c6829e4ca289707a3a0b7991c1085092059a48b87191c00c3f5d4da173cd4ad"}

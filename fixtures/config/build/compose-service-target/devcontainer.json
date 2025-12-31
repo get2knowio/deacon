@@ -1,0 +1,6 @@
+{
+  "name": "Compose Test Fixture",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "test-app",
+  "workspaceFolder": "/workspace"
+}

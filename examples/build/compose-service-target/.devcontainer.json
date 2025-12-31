@@ -1,0 +1,6 @@
+{
+  "name": "Compose Service Target Example",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace"
+}

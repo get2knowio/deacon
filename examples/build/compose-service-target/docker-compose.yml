@@ -1,0 +1,14 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    network_mode: bridge
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_PASSWORD: password
+    network_mode: bridge

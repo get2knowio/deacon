@@ -1,0 +1,50 @@
+[package]
+name = "deacon-core"
+version = "0.2.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+json5 = "0.4"
+regex = "1.0"
+tokio = { version = "1.0", features = ["rt", "process", "macros", "io-util"] }
+once_cell.workspace = true
+# Use rustls for a pure-Rust TLS stack to simplify cross-compilation (musl, aarch64) and avoid OpenSSL toolchain requirements.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tar = "0.4"
+sha2 = "0.10"
+bytes = "1.0"
+async-trait = "0.1"
+linked-hash-map = "0.5"
+indexmap = { version = "2.0", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+bincode = "1.3"
+zip = "2.1"
+fastrand = "2.3.0"
+base64 = "0.22"
+sysinfo = "0.37.0"
+num_cpus = "1.0"
+directories-next = "2.0"
+bytesize = "2.0.1"
+semver = "1.0"
+blake3 = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3.12"
+assert_cmd = "2.0"
+tokio-test = "0.4"
+wiremock = "0.6"
+testcontainers = "0.23"
+
+[lints]
+workspace = true

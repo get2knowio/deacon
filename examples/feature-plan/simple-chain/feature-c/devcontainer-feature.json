@@ -1,0 +1,7 @@
+{
+  "id": "feature-c",
+  "version": "1.0.0",
+  "name": "Feature C (leaf)",
+  "description": "Leaf feature",
+  "installsAfter": ["feature-b"]
+}

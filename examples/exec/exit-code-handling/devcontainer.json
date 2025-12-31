@@ -1,0 +1,6 @@
+{
+  "name": "Exec Exit Code Example",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspace"
+}

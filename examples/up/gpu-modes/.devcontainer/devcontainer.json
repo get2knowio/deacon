@@ -1,0 +1,7 @@
+{
+	"name": "GPU Modes Up Example",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"postCreateCommand": "echo 'GPU mode demonstration container ready'"
+}

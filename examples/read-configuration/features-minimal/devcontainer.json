@@ -1,0 +1,7 @@
+{
+  "name": "rc-features-minimal",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "features": {
+    "./minimal-feature": {}
+  }
+}

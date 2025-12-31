@@ -1,0 +1,23 @@
+{
+  "name": "Base Container Configuration",
+  "image": "ubuntu:22.04",
+  "containerEnv": {
+    "BASE_VAR": "base_value",
+    "SHARED_VAR": "from_base"
+  },
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/usr/local/bin"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:1": {
+      "installZsh": true
+    }
+  },
+  "runArgs": ["--init"],
+  "forwardPorts": [3000],
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-vscode.vscode-typescript-next"]
+    }
+  }
+}

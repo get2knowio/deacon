@@ -1,0 +1,7 @@
+{
+  "name": "Secrets and SSH Build Example",
+  "dockerFile": "Dockerfile",
+  "build": {
+    "context": "."
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "name": "Image Reference Test Fixture",
+  "image": "alpine:3.19"
+}

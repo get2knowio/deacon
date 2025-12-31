@@ -1,0 +1,14 @@
+{
+  "name": "Exec ID Label Example",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "remoteUser": "vscode",
+  "containerLabels": {
+    "app.name": "exec-example",
+    "app.environment": "development",
+    "app.version": "1.0"
+  },
+  "remoteEnv": {
+    "APP_NAME": "exec-label-demo"
+  },
+  "workspaceFolder": "/workspace"
+}

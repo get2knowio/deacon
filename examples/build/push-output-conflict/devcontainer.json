@@ -1,0 +1,5 @@
+{
+  "name": "push-output-conflict",
+  "build": { "dockerfile": "Dockerfile" },
+  "remoteUser": "root"
+}

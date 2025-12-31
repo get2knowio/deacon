@@ -1,0 +1,72 @@
+openapi: 3.0.3
+info:
+  title: Deacon Up GPU Handling
+  version: "1.0.0"
+  description: Contract for GPU mode handling applied by the `up` workflow across docker run/build/compose actions.
+paths:
+  /up:
+    post:
+      summary: Start devcontainer environment with selected GPU mode
+      description: Applies the chosen GPU mode uniformly to docker run/build and compose service starts.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpRequest'
+      responses:
+        '200':
+          description: Up started with GPU handling applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpResponse'
+        '400':
+          description: Invalid GPU mode value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    UpRequest:
+      type: object
+      properties:
+        gpuMode:
+          $ref: '#/components/schemas/GpuMode'
+          default: none
+        services:
+          type: array
+          description: Optional list of services to start (compose-aware)
+          items:
+            type: string
+      additionalProperties: false
+    UpResponse:
+      type: object
+      required:
+        - appliedGpuMode
+        - warnings
+      properties:
+        appliedGpuMode:
+          $ref: '#/components/schemas/GpuMode'
+        gpuRequested:
+          type: boolean
+          description: Whether GPU flags were sent to docker run/build/compose
+        warnings:
+          type: array
+          description: User-facing warnings emitted during startup (empty if none)
+          items:
+            type: string
+      additionalProperties: false
+    GpuMode:
+      type: string
+      enum: [all, detect, none]
+      description: GPU handling mode. Defaults to `none` when unspecified.
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+      additionalProperties: false

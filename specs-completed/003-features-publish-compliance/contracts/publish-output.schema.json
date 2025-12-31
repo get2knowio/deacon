@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://get2know.io/deacon/specs/003/publish-output.schema.json",
+  "title": "Features Publish Output",
+  "type": "object",
+  "properties": {
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "featureId",
+          "version",
+          "digest",
+          "publishedTags",
+          "skippedTags",
+          "movedLatest",
+          "registry",
+          "namespace"
+        ],
+        "properties": {
+          "featureId": { "type": "string", "minLength": 1 },
+          "version": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+          },
+          "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "publishedTags": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "skippedTags": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "movedLatest": { "type": "boolean" },
+          "registry": { "type": "string", "minLength": 1 },
+          "namespace": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "properties": {
+        "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      },
+      "required": ["digest"],
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "features": { "type": "integer", "minimum": 0 },
+        "publishedTags": { "type": "integer", "minimum": 0 },
+        "skippedTags": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["features", "publishedTags", "skippedTags"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["features", "summary"],
+  "additionalProperties": false
+}

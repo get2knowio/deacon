@@ -1,0 +1,6 @@
+{
+  "name": "duplicate-tags",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {},
+  "remoteUser": "root"
+}

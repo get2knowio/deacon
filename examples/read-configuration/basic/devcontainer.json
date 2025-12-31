@@ -1,0 +1,7 @@
+{
+  "name": "rc-basic",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "remoteEnv": {
+    "EXAMPLE": "basic"
+  }
+}

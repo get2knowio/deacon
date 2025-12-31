@@ -1,0 +1,9 @@
+{
+  // Overrides remoteEnv and workspaceFolder
+  "workspaceFolder": "/workspaces/override-demo",
+  "remoteEnv": {
+    "BASE": "from-override",
+    "COMMON": "override",
+    "ONLY_OVERRIDE": "yes"
+  }
+}

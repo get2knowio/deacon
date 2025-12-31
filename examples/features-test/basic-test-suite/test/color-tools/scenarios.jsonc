@@ -1,0 +1,20 @@
+[
+  {
+    "name": "with-red",
+    "image": "ubuntu:focal",
+    "features": {
+      "color-tools": {
+        "favoriteColor": "red"
+      }
+    }
+  },
+  {
+    "name": "with-blue",
+    "image": "ubuntu:focal",
+    "features": {
+      "color-tools": {
+        "favoriteColor": "blue"
+      }
+    }
+  }
+]

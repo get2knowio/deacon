@@ -1,0 +1,7 @@
+{
+  "name": "rc-extends-mid",
+  "extends": "../base/devcontainer.json",
+  "remoteEnv": {
+    "MID": "1"
+  }
+}

@@ -1,0 +1,4 @@
+[
+  {"name": "ubuntu", "image": "ubuntu:focal"},
+  {"name": "alpine", "image": "alpine:latest"}
+]

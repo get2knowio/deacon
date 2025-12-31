@@ -1,0 +1,28 @@
+{
+  "name": "Non-Blocking and Skip Flags Demo",
+  "image": "alpine:3.19",
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "DEMO_PHASE": "lifecycle-skip-example"
+  },
+  "onCreateCommand": [
+    "echo 'onCreate: Setting up container (always runs)'",
+    "mkdir -p /tmp/markers",
+    "echo 'onCreate completed' > /tmp/markers/onCreate"
+  ],
+  "postCreateCommand": [
+    "echo 'postCreate: Installing dependencies (runs unless --skip-post-create)'",
+    "echo 'postCreate completed' > /tmp/markers/postCreate"
+  ],
+  "postStartCommand": [
+    "echo 'postStart: Starting services (non-blocking, skipped with --skip-non-blocking-commands)'",
+    "echo 'postStart completed' > /tmp/markers/postStart"
+  ],
+  "postAttachCommand": [
+    "echo 'postAttach: Ready for development (non-blocking, skipped with --skip-non-blocking-commands)'",
+    "echo 'postAttach completed' > /tmp/markers/postAttach",
+    "echo '---'",
+    "echo 'Lifecycle markers created:'",
+    "ls -1 /tmp/markers/ 2>/dev/null || echo 'No markers found'"
+  ]
+}

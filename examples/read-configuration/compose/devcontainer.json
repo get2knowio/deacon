@@ -1,0 +1,10 @@
+{
+  "name": "rc-compose",
+  "dockerComposeFile": [
+    "./docker-compose.yml"
+  ],
+  "service": "app",
+  "remoteEnv": {
+    "FROM_COMPOSE": "true"
+  }
+}

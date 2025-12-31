@@ -1,0 +1,7 @@
+{
+	"name": "Basic Image Up Example",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"postCreateCommand": "echo 'Container setup complete!'"
+}

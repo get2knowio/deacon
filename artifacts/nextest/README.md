@@ -1,0 +1,216 @@
+# Nextest Timing Artifacts
+
+This directory stores timing data captured during `cargo nextest` test runs. These artifacts enable performance tracking and comparison across different test profiles and environments.
+
+## Artifact Files
+
+- **`dev-fast-timing.json`**: Timing data from the fast local development profile (`make test-nextest-fast`)
+- **`full-timing.json`**: Timing data from the complete local test suite (`make test-nextest`)
+- **`ci-timing.json`**: Timing data from the conservative CI profile (`make test-nextest-ci`)
+
+## Artifact Format
+
+Each timing artifact is a JSON file with the following structure:
+
+```json
+{
+  "profile": "dev-fast|full|ci",
+  "duration_seconds": 42.5,
+  "timestamp_utc": "2025-11-09T12:34:56Z",
+  "test_count": 245,
+  "passed": 245,
+  "failed": 0,
+  "skipped": 0
+}
+```
+
+### Fields
+
+- **`profile`**: Name of the nextest profile used (`dev-fast`, `full`, or `ci`)
+- **`duration_seconds`**: Total wall-clock time for test execution in seconds
+- **`timestamp_utc`**: ISO 8601 timestamp when the test run completed
+- **`test_count`**: Total number of tests executed
+- **`passed`**: Number of tests that passed
+- **`failed`**: Number of tests that failed
+- **`skipped`**: Number of tests that were skipped
+
+## Baseline Comparison Process
+
+### Establishing a Baseline
+
+1. **Run the serial baseline** (using traditional `cargo test`):
+   ```bash
+   make test
+   ```
+   Record the total duration from the test output.
+
+2. **Run the parallel nextest profile**:
+   ```bash
+   make test-nextest-fast  # For local development
+   # OR
+   make test-nextest       # For full suite
+   ```
+
+3. **Compare durations**:
+   - Extract `duration_seconds` from the generated JSON artifact
+   - Calculate speedup: `(baseline_duration - nextest_duration) / baseline_duration * 100`
+   - Expected improvements:
+     - **Local dev-fast**: ≥40% faster than serial baseline
+     - **CI profile**: 50-70% runtime reduction compared to serial CI runs
+
+### Example Comparison
+
+```bash
+# Run serial baseline
+$ time make test
+# Output: real 2m30.500s → 150.5 seconds baseline
+
+# Run parallel nextest
+$ make test-nextest-fast
+# Check artifacts/nextest/dev-fast-timing.json
+$ jq '.duration_seconds' artifacts/nextest/dev-fast-timing.json
+# Output: 75.2
+
+# Calculate speedup
+$ echo "scale=2; (150.5 - 75.2) / 150.5 * 100" | bc
+# Output: 50.03% speedup ✓ Exceeds 40% target
+```
+
+## Interpreting Timing Data
+
+### Performance Goals
+
+| Profile | Target Speedup | Context |
+|---------|---------------|---------|
+| `dev-fast` | ≥40% | Fast feedback loop for local development |
+| `full` | 40-60% | Complete test suite with all groups |
+| `ci` | 50-70% | Conservative CI execution with controlled concurrency |
+
+### Troubleshooting Slow Runs
+
+If timing artifacts show **less than expected speedup**:
+
+1. **Check test group classification**:
+   ```bash
+   cargo nextest list --status --profile full
+   ```
+   Verify tests are assigned to appropriate concurrency groups.
+
+2. **Review resource contention**:
+   - Docker-exclusive tests may be bottlenecked by daemon capacity
+   - File-heavy tests may contend on I/O
+   - Check CPU core count: nextest defaults to `num_cpus` threads
+
+3. **Inspect individual test duration**:
+   ```bash
+   cargo nextest run --profile dev-fast --verbose
+   ```
+   Look for outliers that dominate execution time.
+
+4. **Verify profile configuration**:
+   Review `.config/nextest.toml` to ensure:
+   - Correct test groups are selected
+   - Concurrency limits match hardware capabilities
+   - Filters exclude unnecessary tests
+
+### CI Performance Tracking
+
+1. **Download artifacts from GitHub Actions**:
+   - Navigate to workflow run → Artifacts section
+   - Download `nextest-timing` artifact
+
+2. **Compare across runs**:
+   ```bash
+   # Extract timing from multiple runs
+   jq '.duration_seconds' run1/ci-timing.json run2/ci-timing.json
+   
+   # Track trends over time
+   # Expected: consistent 50-70% improvement vs serial baseline
+   ```
+
+3. **Investigate regressions**:
+   - If CI timing increases significantly:
+     - Check for new slow tests added without proper grouping
+     - Review test group balance (one large group can bottleneck)
+     - Verify CI runner capacity hasn't changed
+
+## Success Criteria Reference
+
+Per specification success criteria SC-007:
+
+> **SC-007**: The CI pipeline emits a timing comparison summary showing at least 50% faster total runtime than the legacy `cargo test --all` serial approach, with metrics captured as workflow artifacts.
+
+**Validation Process**:
+
+1. Locate historical serial CI run duration (before nextest adoption)
+2. Compare with current `ci-timing.json` artifact duration
+3. Verify: `(serial_duration - nextest_duration) / serial_duration ≥ 0.50`
+4. CI workflow should emit this comparison in job summary output
+
+## Artifact Lifecycle
+
+### Local Development
+
+- **Creation**: Automatically generated by `make test-nextest-*` targets
+- **Retention**: Kept in working tree (tracked in `.gitignore` by default)
+- **Cleanup**: Remove with `make clean` or `rm artifacts/nextest/*.json`
+
+### CI Environment
+
+- **Creation**: Generated during test job execution
+- **Retention**: Uploaded as GitHub Actions artifacts (90-day retention by default)
+- **Access**: Download from workflow run "Artifacts" section
+
+## Related Documentation
+
+- **Test Classification**: See `docs/testing/nextest.md` for test group definitions
+- **Nextest Configuration**: Review `.config/nextest.toml` for profile settings
+- **CLI Usage**: See `README.md` development workflow section
+- **CI Integration**: Review `.github/workflows/ci.yml` for workflow details
+
+## Troubleshooting
+
+### Missing Timing Artifacts
+
+If `*.json` files are not generated:
+
+1. Verify `cargo-nextest` is installed: `cargo nextest --version`
+2. Check that `scripts/nextest/capture-timing.sh` exists and is executable
+3. Review Make target output for errors during timing capture
+4. Ensure sufficient disk space in `artifacts/nextest/` directory
+
+### Invalid JSON Format
+
+If artifacts cannot be parsed:
+
+1. Validate JSON syntax: `jq '.' artifacts/nextest/dev-fast-timing.json`
+2. Check for partial writes (file truncation during interruption)
+3. Re-run the test command to regenerate the artifact
+4. Review nextest version compatibility (requires 0.9.x or later)
+
+### Inconsistent Measurements
+
+If timing varies significantly between identical runs:
+
+1. **Expected variation**: ±5-10% due to system load, caching effects
+2. **Excessive variation** (>20%):
+   - Check for background processes consuming resources
+   - Verify consistent Docker daemon state
+   - Ensure warm filesystem cache (run twice, compare second runs)
+   - Review test determinism (especially for timing-sensitive tests)
+
+## Migration Notes
+
+When transitioning from serial `cargo test` to parallel `cargo nextest`:
+
+1. **Preserve serial baseline**: Keep `make test` target unchanged for comparison
+2. **Document baseline**: Record initial serial timing as reference point
+3. **Track adoption**: Monitor artifact generation across team members
+4. **Validate improvements**: Confirm all profiles meet speedup targets
+5. **Update CI dashboards**: Integrate timing metrics into observability tools
+
+---
+
+**Last Updated**: 2025-11-09  
+**Related Spec**: `specs/001-nextest-parallel-tests/spec.md`  
+**Maintainer**: deacon-project team

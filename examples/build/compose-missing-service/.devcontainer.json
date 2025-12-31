@@ -1,0 +1,6 @@
+{
+  "name": "compose-missing-service",
+  "dockerComposeFile": ["docker-compose.yml"],
+  "service": "app",  // 'app' does not exist below; should error
+  "remoteUser": "root"
+}

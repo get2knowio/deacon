@@ -1,0 +1,21 @@
+{
+  "id": "template-with-options",
+  "version": "1.0.0",
+  "name": "Template with Options",
+  "description": "A DevContainer template with various option types",
+  "documentationURL": "https://example.com/docs",
+  "options": {
+    "enableFeature": {"type": "boolean", "default": true, "description": "Enable the experimental feature"},
+    "version": {"type": "string", "enum": ["latest","stable","beta"], "default": "stable", "description": "Version to install"},
+    "customName": {"type": "string", "default": "my-project", "description": "Custom project name"},
+    "debugMode": {"type": "boolean", "default": false, "description": "Enable debug mode"}
+  },
+  "recommendedFeatures": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {"version": "latest"}
+  },
+  "files": ["Dockerfile","README.md","src/main.py","config/app.conf"],
+  "platforms": ["linux","darwin"],
+  "publisher": "Test Publisher",
+  "keywords": ["test","template","options"]
+}

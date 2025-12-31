@@ -1,0 +1,10 @@
+{
+  "name": "Build Secrets Example",
+  "dockerFile": "Dockerfile",
+  "build": {
+    "context": ".",
+    "options": {
+      "BUILDKIT_INLINE_CACHE": "1"
+    }
+  }
+}

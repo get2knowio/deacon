@@ -1,0 +1,14 @@
+{
+  "name": "Port Events Compose Example",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "web",
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": {
+      "label": "Web Server",
+      "onAutoForward": "notify"
+    }
+  },
+  "shutdownAction": "stopCompose"
+}

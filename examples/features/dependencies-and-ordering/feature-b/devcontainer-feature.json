@@ -1,0 +1,6 @@
+{
+	"id": "feature-b",
+	"version": "1.0.0",
+	"name": "Feature B (Independent)",
+	"description": "Another simple feature with no dependencies"
+}

@@ -1,0 +1,16 @@
+{
+  "extends": "../base/devcontainer.json",
+  "name": "Middle Container Configuration",
+  "containerEnv": {
+    "MIDDLE_VAR": "middle_value",
+    "SHARED_VAR": "from_middle"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "latest"
+    }
+  },
+  "runArgs": ["--privileged"],
+  "forwardPorts": [8080],
+  "onCreateCommand": "echo 'Middle layer setup'"
+}

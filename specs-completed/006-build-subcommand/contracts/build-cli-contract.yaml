@@ -1,0 +1,147 @@
+openapi: 3.1.0
+info:
+  title: deacon build CLI Contract
+  version: 1.0.0
+  description: >-
+    Canonical contract describing the input options and stdout payloads for the
+    `deacon build` subcommand when executed in JSON mode.
+servers: []
+paths:
+  /cli/deacon/build:
+    post:
+      summary: Invoke the build workflow from the CLI
+      description: >-
+        Logical representation of the CLI invocation, treating the command as a
+        request/response pair for contract validation purposes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildRequest'
+      responses:
+        '200':
+          description: Successful build
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildSuccess'
+        '400':
+          description: User error (validation failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildError'
+        '500':
+          description: Unexpected runtime failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildError'
+components:
+  schemas:
+    BuildRequest:
+      type: object
+      required:
+        - workspaceFolder
+      properties:
+        workspaceFolder:
+          type: string
+          description: Absolute path to the workspace folder.
+        configFile:
+          type: string
+          nullable: true
+          description: Optional explicit path to the devcontainer config file.
+        imageNames:
+          type: array
+          description: Ordered list of tags provided via `--image-name`.
+          items:
+            type: string
+        push:
+          type: boolean
+          description: Indicates whether `--push` was supplied.
+          default: false
+        output:
+          type: string
+          nullable: true
+          description: BuildKit export spec provided via `--output`.
+        labels:
+          type: array
+          items:
+            type: object
+            required: [name, value]
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+          description: User supplied metadata labels.
+        additionalFeatures:
+          type: object
+          additionalProperties: true
+          description: JSON provided to `--additional-features` merged into config.
+        buildkitMode:
+          type: string
+          enum: [auto, enable, disable]
+          default: auto
+        platform:
+          type: string
+          nullable: true
+        cacheFrom:
+          type: array
+          items:
+            type: string
+        cacheTo:
+          type: string
+          nullable: true
+        skipFeatureAutoMapping:
+          type: boolean
+          default: false
+        skipPersistCustomizations:
+          type: boolean
+          default: false
+        experimentalLockfile:
+          type: boolean
+          default: false
+        experimentalFrozenLockfile:
+          type: boolean
+          default: false
+        omitSyntaxDirective:
+          type: boolean
+          default: false
+    BuildSuccess:
+      type: object
+      required: [outcome, imageName]
+      properties:
+        outcome:
+          type: string
+          const: success
+        imageName:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Deterministic fallback tag or list of tags when multiple provided.
+        exportPath:
+          type: string
+          nullable: true
+          description: Destination written when `--output` is used.
+        pushed:
+          type: boolean
+          nullable: true
+          description: Indicates registry push was attempted and succeeded.
+    BuildError:
+      type: object
+      required: [outcome, message]
+      properties:
+        outcome:
+          type: string
+          const: error
+        message:
+          type: string
+          description: Short validation or failure message matching spec text.
+        description:
+          type: string
+          nullable: true
+          description: Additional context for the error.

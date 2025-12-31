@@ -1,0 +1,8 @@
+{
+  "id": "minimal",
+  "version": "0.0.1",
+  "name": "Minimal Local Feature",
+  "description": "A minimal local feature for read-configuration demos.",
+  "options": {},
+  "installsAfter": []
+}

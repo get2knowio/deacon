@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Features Info - Tags",
+  "type": "object",
+  "description": "Published tags output contract for features info tags mode",
+  "required": ["publishedTags"],
+  "properties": {
+    "publishedTags": {
+      "type": "array",
+      "description": "List of published tags sorted lexicographically or by registry order",
+      "items": {
+        "type": "string",
+        "description": "A tag name (e.g., 'latest', '1.0.0', '1')"
+      }
+    }
+  },
+  "additionalProperties": false
+}

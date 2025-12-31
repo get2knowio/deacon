@@ -1,0 +1,116 @@
+openapi: 3.0.3
+info:
+  title: Deacon Up Lifecycle Contract
+  version: "0.0.1"
+  description: >
+    Conceptual contract for the `up` lifecycle behavior covering ordered hooks,
+    resume handling, skip-post-create, prebuild mode, and dotfiles execution.
+servers:
+  - url: https://cli.local/devcontainers
+    description: Local CLI invocation (conceptual)
+paths:
+  /up:
+    post:
+      summary: Run devcontainer lifecycle for `up`
+      description: >
+        Executes lifecycle phases in order for a workspace, honoring resume markers,
+        skip flags, prebuild mode, and dotfiles ordering. Prebuild uses isolated markers.
+      parameters:
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [fresh, resume, prebuild]
+          description: >
+            Execution mode; defaults to `fresh` when markers absent, `resume` when markers present,
+            and `prebuild` for content-only runs.
+        - name: skipPostCreate
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Skip postCreate/postStart/postAttach and dotfiles when true.
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Absolute path to workspace root.
+      responses:
+        "200":
+          description: Lifecycle executed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LifecycleRun"
+        "400":
+          description: Invalid mode or parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Lifecycle incomplete due to failure; resume required from earliest incomplete phase.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LifecycleRun"
+        "500":
+          description: Unexpected error during lifecycle execution.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    LifecycleRun:
+      type: object
+      required: [mode, phases, summary]
+      properties:
+        mode:
+          type: string
+          enum: [fresh, resume, prebuild, skip_post_create]
+        phases:
+          type: array
+          description: Phases in lifecycle order with execution results.
+          items:
+            $ref: "#/components/schemas/PhaseExecution"
+        dotfiles:
+          $ref: "#/components/schemas/PhaseExecution"
+        summary:
+          type: object
+          required: [resumeRequired]
+          properties:
+            resumeRequired:
+              type: boolean
+              description: Indicates if rerun needed due to failure/interruption.
+            message:
+              type: string
+              description: Human-readable status including skipped reasons.
+    PhaseExecution:
+      type: object
+      required: [phase, status]
+      properties:
+        phase:
+          type: string
+          enum: [onCreate, updateContent, postCreate, dotfiles, postStart, postAttach]
+        status:
+          type: string
+          enum: [executed, skipped, failed]
+        reason:
+          type: string
+          nullable: true
+        markerPersisted:
+          type: boolean
+          description: Indicates whether a completion marker was written for this phase.
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string

@@ -1,0 +1,6 @@
+{
+  "name": "compose-unsupported-flags",
+  "dockerComposeFile": ["docker-compose.yml"],
+  "service": "app",
+  "remoteUser": "root"
+}

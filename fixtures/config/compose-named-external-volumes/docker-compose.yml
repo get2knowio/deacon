@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  app:
+    image: ubuntu:22.04
+    command: sleep infinity
+    volumes:
+      - .:/workspace
+      - data_vol:/app/data
+
+volumes:
+  # External volume with explicit name (object form)
+  data_vol:
+    external:
+      name: shared-company-data

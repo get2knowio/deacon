@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://get2know.io/deacon/schemas/plan.json",
+  "title": "Deacon Features Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["order", "graph"],
+  "properties": {
+    "order": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "graph": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}

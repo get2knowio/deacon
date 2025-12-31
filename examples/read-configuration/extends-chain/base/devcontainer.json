@@ -1,0 +1,7 @@
+{
+  "name": "rc-extends-base",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "remoteEnv": {
+    "BASE": "1"
+  }
+}

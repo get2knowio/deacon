@@ -1,0 +1,6 @@
+{
+  "name": "Custom Container Name Example",
+  "image": "ubuntu:22.04",
+  "remoteUser": "root",
+  "workspaceFolder": "/workspace"
+}

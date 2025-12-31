@@ -1,0 +1,6 @@
+{
+  "name": "push-example",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {},
+  "remoteUser": "root"
+}

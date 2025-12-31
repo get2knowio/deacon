@@ -1,0 +1,7 @@
+{
+  "name": "rc-legacy-normalization",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "containerEnv": {
+    "FOO": "bar"
+  }
+}

@@ -1,0 +1,29 @@
+[workspace]
+members = [
+    "crates/deacon",
+    "crates/core"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+authors = ["get2knowio <dev@get2know.io>"]
+repository = "https://github.com/get2knowio/deacon"
+rust-version = "1.70"
+
+[workspace.dependencies]
+deacon-core = { path = "crates/core" }
+clap = { version = "4.5", features = ["derive", "color"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-error = "0.2"
+color-eyre = "0.6"
+once_cell = "1.21"
+toml = "0.8"
+shell-words = "1.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

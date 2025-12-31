@@ -1,0 +1,11 @@
+{
+  "name": "Single Container Test",
+  "image": "ubuntu:22.04",
+  "remoteUser": "root",
+  "workspaceFolder": "/workspace",
+  "remoteEnv": {
+    "TEST_ENV": "single-container"
+  },
+  "postCreateCommand": "echo 'Post-create command executed'",
+  "updateContentCommand": "apt-get update && apt-get install -y git && echo 'Update content command executed'"
+}

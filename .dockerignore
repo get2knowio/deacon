@@ -1,0 +1,65 @@
+# Rust build artifacts
+target/
+debug/
+release/
+**/*.rs.bk
+*.pdb
+
+# Git
+.git/
+.gitignore
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Coverage
+coverage/
+lcov.info
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Node.js (if any examples use it)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Documentation build
+docs/build/
+docs/.doctrees/
+
+# Test artifacts
+**/mutants.out*/
+
+# CI/CD
+.github/workflows/*.log
+
+# Project artifacts
+artifacts/
+.deacon
+
+# Dockerfiles and env
+Dockerfile*
+.env*

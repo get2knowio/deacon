@@ -1,0 +1,9 @@
+{
+  "name": "example-app",
+  "version": "1.0.0",
+  "description": "Example app for build secrets demo",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  }
+}

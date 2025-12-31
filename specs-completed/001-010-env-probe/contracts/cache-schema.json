@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EnvProbeCache",
+  "description": "Container environment variables cache file schema",
+  "type": "object",
+  "patternProperties": {
+    "^[A-Za-z_][A-Za-z0-9_]*$": {
+      "type": "string",
+      "description": "Environment variable value (all env vars are strings in POSIX)"
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin",
+      "HOME": "/home/vscode",
+      "SHELL": "/bin/bash",
+      "USER": "vscode",
+      "LANG": "en_US.UTF-8",
+      "NVM_DIR": "/home/vscode/.nvm",
+      "NODE_VERSION": "18.16.0"
+    }
+  ],
+  "notes": [
+    "Cache file location: {cache_folder}/env_probe_{container_id}_{user}.json",
+    "Key format: Environment variable name (typically uppercase with underscores)",
+    "Value format: String (all environment variables are strings)",
+    "File size: Typically 1-5 KB (50-200 variables)",
+    "Lifecycle: Created on first probe, read on subsequent probes, invalidated on container rebuild"
+  ]
+}

@@ -1,0 +1,49 @@
+openapi: 3.0.3
+info:
+  title: Deacon Outdated (Conceptual)
+  version: 0.1.0
+  description: Conceptual API contract mirroring CLI JSON output for `outdated`.
+servers:
+  - url: https://example.invalid
+paths:
+  /features/outdated:
+    get:
+      summary: Report current, wanted, and latest versions for Features
+      parameters:
+        - in: query
+          name: workspace
+          schema: { type: string }
+          required: false
+          description: Workspace folder
+        - in: query
+          name: config
+          schema: { type: string }
+          required: false
+          description: Explicit config file path
+      responses:
+        '200':
+          description: Outdated report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutdatedResult'
+components:
+  schemas:
+    FeatureVersionInfo:
+      type: object
+      additionalProperties: false
+      properties:
+        current: { type: [string, 'null'] }
+        wanted: { type: [string, 'null'] }
+        wantedMajor: { type: [string, 'null'] }
+        latest: { type: [string, 'null'] }
+        latestMajor: { type: [string, 'null'] }
+    OutdatedResult:
+      type: object
+      required: [features]
+      properties:
+        features:
+          type: object
+          description: Map keyed by canonical fully‑qualified feature ID without version
+          additionalProperties:
+            $ref: '#/components/schemas/FeatureVersionInfo'

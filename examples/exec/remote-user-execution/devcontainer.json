@@ -1,0 +1,9 @@
+{
+  "name": "Exec Remote User Example",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:18",
+  "remoteUser": "node",
+  "workspaceFolder": "/workspace",
+  "remoteEnv": {
+    "USER_TYPE": "non-root"
+  }
+}

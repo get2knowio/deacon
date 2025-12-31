@@ -1,0 +1,6 @@
+{
+  "name": "output-archive",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {},
+  "remoteUser": "root"
+}

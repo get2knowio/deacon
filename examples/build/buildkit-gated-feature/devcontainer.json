@@ -1,0 +1,6 @@
+{
+  "name": "buildkit-gated-feature",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": { "./features/buildkit-only": {} },
+  "remoteUser": "root"
+}

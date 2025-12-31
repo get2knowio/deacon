@@ -1,0 +1,22 @@
+#!/bin/bash
+# Script to display environment variables for verification
+
+echo "=== Environment Variables Check ==="
+echo ""
+echo "Config-defined variables:"
+echo "  APP_MODE      = ${APP_MODE:-not-set}"
+echo "  API_URL       = ${API_URL:-not-set}"
+echo "  LOG_LEVEL     = ${LOG_LEVEL:-not-set}"
+echo "  CONFIG_SOURCE = ${CONFIG_SOURCE:-not-set}"
+echo ""
+echo "CLI-provided variables (if any):"
+echo "  CUSTOM_VAR    = ${CUSTOM_VAR:-not-set}"
+echo "  DEBUG         = ${DEBUG:-not-set}"
+echo "  EMPTY_VAR     = '${EMPTY_VAR:-not-set}'"
+echo ""
+echo "Shell-derived variables (sample):"
+echo "  USER          = ${USER:-not-set}"
+echo "  HOME          = ${HOME:-not-set}"
+echo "  PATH          = ${PATH:-not-set}"
+echo ""
+echo "=== Check Complete ==="

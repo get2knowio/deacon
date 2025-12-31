@@ -1,0 +1,4 @@
+{
+  "extends": "cycle.json",
+  "name": "This creates a cycle and should be detected"
+}

@@ -1,0 +1,7 @@
+{
+	"name": "Cache Reuse Demo",
+	"image": "mcr.microsoft.com/devcontainers/base:alpine",
+	"features": {
+		"./cached-feature": {}
+	}
+}

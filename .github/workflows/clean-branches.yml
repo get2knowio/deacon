@@ -1,0 +1,34 @@
+name: Clean merged branches
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'  # Every Monday at 04:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # required to push branch deletions
+
+jobs:
+  clean-merged-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Install dependencies (Rust toolchain not required)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y git
+
+      - name: Clean merged branches
+        run: |
+          make clean-branches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,6 @@
+{
+  "id": "feature-a",
+  "version": "1.0.0",
+  "name": "Feature A (root)",
+  "description": "Root feature in chain"
+}

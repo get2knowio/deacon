@@ -1,0 +1,7 @@
+services:
+  test-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    network_mode: bridge

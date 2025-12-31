@@ -1,0 +1,80 @@
+# CodeRabbit configuration for deacon
+# Reference: https://docs.coderabbit.ai/reference/configuration
+
+language: "en-US"
+early_access: false
+enable_free_tier: true
+
+tone_instructions: "After listing actionable suggestions, append a final line exactly: 'You have the controls.'"
+
+reviews:
+  profile: "chill"
+  high_level_summary: false
+  review_status: false
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: true
+
+  # Keep commit status enabled so manual runs still surface status checks.
+  commit_status: true
+
+  # Keep suggestions and walkthrough useful but lightweight.
+  changed_files_summary: false
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  assess_linked_issues: true
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  auto_apply_labels: false
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+  in_progress_fortune: false
+  poem: false
+
+  # Restrict review surface to meaningful paths for this Rust workspace.
+  path_filters:
+    - "crates/**"
+    - "docs/**"
+    - "fixtures/**"
+    - "scripts/**"
+    - "!target/**"
+    - "!coverage/**"
+    - "!**/*.min.*"
+
+  # Enable tools relevant to this repo. Prefer Rust and general safety.
+  tools:
+    clippy:
+      enabled: true
+    yamllint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    semgrep:
+      enabled: true
+
+  # Pre-merge nudges without blocking merges unless desired later.
+  pre_merge_checks:
+    title:
+      mode: "off"
+    description:
+      mode: "off"
+    docstrings:
+      mode: "off"
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    # Teach CodeRabbit our repo rules and instructions
+    filePatterns:
+      - ".github/copilot-instructions.md"
+      - "AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "docs/subcommand-specs/**"
+      - "docs/PARITY_APPROACH.md"

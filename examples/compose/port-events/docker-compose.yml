@@ -1,0 +1,11 @@
+services:
+  web:
+    image: alpine:latest
+    command: sh -c "while true; do echo 'HTTP/1.1 200 OK\n\nHello from port 8080' | nc -l -p 8080; done"
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace:cached
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080

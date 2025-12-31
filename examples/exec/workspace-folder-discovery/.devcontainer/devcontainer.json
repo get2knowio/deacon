@@ -1,0 +1,15 @@
+{
+  "name": "Exec Workspace Discovery Example",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:18",
+  "remoteUser": "node",
+  "remoteEnv": {
+    "NODE_ENV": "development",
+    "WORKSPACE_NAME": "exec-workspace-example"
+  },
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint"]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "CLI Port Forwarding Example",
+  "image": "nginx:alpine",
+  "workspaceFolder": "/workspace",
+  "portsAttributes": {
+    "80": {
+      "label": "Nginx Web Server",
+      "onAutoForward": "notify",
+      "description": "Main web server port"
+    }
+  }
+}

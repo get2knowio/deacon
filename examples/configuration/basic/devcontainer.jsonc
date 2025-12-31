@@ -1,0 +1,35 @@
+{
+  "name": "Basic Rust Dev Container",
+  "image": "rust:1.70",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:1": {
+      "installZsh": true,
+      "username": "vscode"
+    },
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "os-provided"
+    }
+  },
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "RUST_LOG": "debug",
+    "ENVIRONMENT": "development"
+  },
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/usr/local/cargo/bin"
+  },
+  "forwardPorts": [3000, 8080],
+  "runArgs": ["--init", "--privileged"],
+  "shutdownAction": "stopContainer",
+  "overrideCommand": false,
+  "onCreateCommand": "cargo install cargo-watch",
+  "postCreateCommand": [
+    "rustup component add clippy",
+    "rustup component add rustfmt"
+  ],
+  "postStartCommand": "echo 'Container started successfully!'",
+  "postAttachCommand": "echo 'Welcome to the Rust development environment!'",
+  "mounts": [
+    "source=${localWorkspaceFolder}/.cargo,target=/usr/local/cargo,type=bind,consistency=cached"
+  ]
+}

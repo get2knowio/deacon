@@ -1,0 +1,26 @@
+{
+  "id": "feature-with-options",
+  "version": "1.0.0",
+  "name": "Feature with Options",
+  "description": "A test feature with various option types",
+  "documentationURL": "https://example.com/docs",
+  "options": {
+    "enableFeature": {"type": "boolean", "default": true, "description": "Enable the main feature functionality"},
+    "version": {"type": "string", "enum": ["latest","stable","beta"], "default": "stable", "description": "Version to install"},
+    "customPath": {"type": "string", "proposals": ["/usr/local","/opt","/home/user"], "default": "/usr/local", "description": "Installation path"},
+    "debugMode": {"type": "boolean", "default": false, "description": "Enable debug mode"}
+  },
+  "containerEnv": {"FEATURE_ENABLED": "true", "FEATURE_PATH": "/usr/local/feature"},
+  "mounts": [
+    "source=feature-cache,target=/usr/local/cache,type=volume"
+  ],
+  "init": true,
+  "privileged": false,
+  "capAdd": ["SYS_PTRACE"],
+  "securityOpt": ["seccomp=unconfined"],
+  "installsAfter": ["common-utils"],
+  "dependsOn": {"common-utils": "latest"},
+  "onCreateCommand": "echo 'Feature created'",
+  "postCreateCommand": ["echo", "Feature post-create"],
+  "postStartCommand": {"command": "echo", "args": ["Feature post-start"]}
+}

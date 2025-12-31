@@ -1,0 +1,462 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to (re)build and publish assets for (e.g. v0.1.4)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # MVP-only build: excludes non-MVP subcommands (build, features, templates, doctor, outdated, etc.)
+  RELEASE_FEATURE_FLAGS: --no-default-features
+
+jobs:
+  verify:
+    name: Verify (tests & lint) before release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-verify-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-verify-
+      - name: Fmt check
+        run: cargo fmt --all -- --check
+      - name: Clippy (deny warnings, MVP features)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+      - name: Unit tests (MVP features only, no Docker-dependent tests)
+        run: cargo test --workspace --no-default-features --lib -- --test-threads=1
+
+  create-release:
+    name: Create Release
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Extract tag version (from input or ref)
+        id: get_version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+      - name: Checkout code at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.get_version.outputs.version }}
+      - name: Validate tag matches crate version
+        run: |
+          TAG_VERSION='${{ steps.get_version.outputs.version }}'
+          CRATE_VERSION=$(grep '^version = ' crates/deacon/Cargo.toml | head -n1 | sed -E 's/version = "(.*)"/v\1/')
+          echo "Tag version:    $TAG_VERSION"
+            echo "Crate version:  $CRATE_VERSION"
+          if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+            echo "Tag version does not match crates/deacon/Cargo.toml version" >&2
+            exit 1
+          fi
+      - name: Install Rust toolchain (capture version)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Capture rustc version
+        run: |
+          rustc -Vv > RUSTC_VERSION.txt
+          cat RUSTC_VERSION.txt
+      - name: Create GitHub Release (idempotent, with notes)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          # Create release if it doesn't exist
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            # Use GitHub auto-generated notes for a descriptive changelog
+            gh release create "$VERSION" -t "Release $VERSION" --generate-notes --verify-tag
+          fi
+          # Upload rustc version provenance snippet
+          gh release upload "$VERSION" RUSTC_VERSION.txt --clobber
+      - name: Enhance release notes (append sections)
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch current body (may be auto-generated)
+          BODY=$(gh release view "$VERSION" --json body -q '.body' || echo "")
+          # Only append if our sections are not already present
+          if ! printf "%s" "$BODY" | grep -q "## Install"; then
+            {
+              printf "%s\n\n" "$BODY"
+              echo "## Install"
+              echo "- Linux/macOS: download the archive for your platform from Assets, extract, and place 'deacon' in your PATH."
+              echo "- Windows: download the .zip, extract 'deacon.exe' and add its location to your PATH."
+              echo
+              echo "## Verify checksums"
+              echo "Download SHA256SUMS from Assets and verify the archive integrity:"
+              echo '```bash'
+              echo 'sha256sum -c SHA256SUMS'
+              echo '```'
+              echo
+              echo "## Artifacts and SBOM"
+              echo "Each archive bundles README and LICENSE. SPDX SBOMs are attached as sbom-<version>-<target>.spdx.json."
+              echo
+              echo "## Changes"
+              echo "The auto-generated notes above enumerate PRs and commits since the previous release."
+            } > RELEASE_NOTES_ENHANCED.md
+
+            gh release edit "$VERSION" --notes-file RELEASE_NOTES_ENHANCED.md
+          fi
+
+  build:
+    name: Build & Package (${{ matrix.target }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Minimal matrix while stabilizing the pipeline
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # Incrementally re-added: macOS x86_64 (runs under Rosetta on GitHub runners)
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          # Incrementally re-added: Linux x86_64 musl (static-ish)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          # Incrementally re-added: Linux aarch64 musl
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+          # Incrementally re-added: Linux aarch64 gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          # Incrementally re-added: Windows ARM64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+    env:
+      VERSION: ${{ needs.create-release.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Ensure we build from the exact tag commit when dispatched manually
+          ref: ${{ env.VERSION }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross (for musl targets)
+        if: contains(matrix.target, 'musl')
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Install musl tools (x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install musl tools (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+      - name: Install cross-compiler (aarch64 gnu)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+      - name: Build (musl)
+        if: contains(matrix.target, 'musl')
+        run: cross build --release --target ${{ matrix.target }} $RELEASE_FEATURE_FLAGS
+      - name: Build (standard)
+        if: ${{ !contains(matrix.target, 'musl') && matrix.target != 'aarch64-unknown-linux-gnu' }}
+        run: cargo build --release --target ${{ matrix.target }} $RELEASE_FEATURE_FLAGS
+      - name: Build (standard, aarch64 gnu)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target ${{ matrix.target }} $RELEASE_FEATURE_FLAGS
+      - name: Smoke run (Unix native)
+        if: runner.os != 'Windows' && !contains(matrix.target, 'aarch64') && !contains(matrix.target, 'arm')
+        run: |
+          BIN=target/${{ matrix.target }}/release/deacon
+          "$BIN" --version
+          "$BIN" --help | head -n 20
+      - name: Skip note (cross-compiled ARM64 on x86 runner)
+        if: runner.os != 'Windows' && (contains(matrix.target, 'aarch64') || contains(matrix.target, 'arm'))
+        run: echo "Skipping runtime smoke test for ${{ matrix.target }} (cross-compiled binary cannot execute on x86 runner)."
+      - name: Smoke run (Windows)
+        if: runner.os == 'Windows' && matrix.target == 'x86_64-pc-windows-msvc'
+        run: |
+          $bin = "target/${{ matrix.target }}/release/deacon.exe"
+          & $bin --version
+          & $bin --help | Select-Object -First 20
+      - name: Skip note (Windows ARM64 unsupported exec on x64 runner)
+        if: runner.os == 'Windows' && matrix.target == 'aarch64-pc-windows-msvc'
+        run: echo "Skipping runtime smoke test for ${{ matrix.target }} (host runner cannot execute ARM64 binary)."
+      - name: Prepare packaging files (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp README.md LICENSE target/${{ matrix.target }}/release/
+          # Attempt to strip (ignore failures on unsupported formats)
+          strip target/${{ matrix.target }}/release/deacon || true
+      - name: Prepare packaging files (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Copy-Item README.md target/${{ matrix.target }}\release\
+          Copy-Item LICENSE target/${{ matrix.target }}\release\
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czf ../../../deacon-${{ env.VERSION }}-${{ matrix.target }}.tar.gz deacon README.md LICENSE
+          cd ../../..
+      - name: Create archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}\release
+          7z a ..\..\..\deacon-${{ env.VERSION }}-${{ matrix.target }}.zip deacon.exe README.md LICENSE
+          cd ..\..\..
+      - name: Generate checksum (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          sha256sum deacon-${{ env.VERSION }}-${{ matrix.target }}.tar.gz | tee deacon-${{ env.VERSION }}-${{ matrix.target }}.tar.gz.sha256
+          sha256sum -c deacon-${{ env.VERSION }}-${{ matrix.target }}.tar.gz.sha256
+      - name: Generate checksum (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 deacon-${{ env.VERSION }}-${{ matrix.target }}.zip).Hash.ToLower()
+          "$hash  deacon-${{ env.VERSION }}-${{ matrix.target }}.zip" | Tee-Object -FilePath deacon-${{ env.VERSION }}-${{ matrix.target }}.zip.sha256
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: target/${{ matrix.target }}/release
+          output-file: sbom-${{ env.VERSION }}-${{ matrix.target }}.spdx.json
+          artifact-name: sbom-${{ matrix.target }}
+          # Avoid release upload here to prevent duplicate asset errors on re-runs;
+          # we upload the SBOM explicitly in the next step with --clobber
+          upload-release-assets: false
+      - name: Upload release assets (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          ARCHIVE="deacon-${VERSION}-${{ matrix.target }}.tar.gz"
+          gh release upload "$VERSION" "$ARCHIVE" "${ARCHIVE}.sha256" "sbom-${VERSION}-${{ matrix.target }}.spdx.json" --clobber
+      - name: Upload release assets (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "deacon-$env:VERSION-${{ matrix.target }}.zip"
+          gh release upload "$env:VERSION" "$archive" "${archive}.sha256" "sbom-$env:VERSION-${{ matrix.target }}.spdx.json" --clobber
+      - name: Upload checksum artifact (for aggregation)
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksum-${{ matrix.target }}
+          path: |
+            deacon-${{ env.VERSION }}-${{ matrix.target }}.*.sha256
+
+  checksums:
+    name: Aggregate & Sign Checksums
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ needs.create-release.outputs.version }}
+    steps:
+      - name: Download checksum artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: checksum-*
+          merge-multiple: true
+      - name: Detect signing capability
+        run: |
+          echo "SIGNING_ENABLED=false" >> $GITHUB_ENV  # Placeholder until GPG secrets added
+      - name: Assemble SHA256SUMS
+        run: |
+          # List downloaded files for debugging
+          echo "Downloaded checksum files:"
+          ls -la *.sha256 || echo "WARNING: No .sha256 files found!"
+
+          # Verify that we have checksum files
+          if ! ls *.sha256 1>/dev/null 2>&1; then
+            echo "ERROR: No checksum files (.sha256) found in workspace!"
+            echo "This likely means the build jobs didn't upload checksum artifacts."
+            exit 1
+          fi
+
+          # Combine all checksums into SHA256SUMS
+          cat *.sha256 > SHA256SUMS
+
+          # Verify SHA256SUMS is not empty
+          if [ ! -s SHA256SUMS ]; then
+            echo "ERROR: SHA256SUMS file is empty!"
+            exit 1
+          fi
+
+          echo "Combined checksums:"
+          cat SHA256SUMS
+      # TODO: Re-introduce GPG import & signing once secrets are configured (see issues #241 and #243)
+      - name: Upload checksum assets
+        run: |
+          # Verify VERSION is set
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: VERSION environment variable is not set!"
+            exit 1
+          fi
+
+          # Verify SHA256SUMS exists and is not empty
+          if [ ! -f SHA256SUMS ]; then
+            echo "ERROR: SHA256SUMS file not found!"
+            exit 1
+          fi
+
+          if [ ! -s SHA256SUMS ]; then
+            echo "ERROR: SHA256SUMS file is empty!"
+            exit 1
+          fi
+
+          echo "Uploading SHA256SUMS to release $VERSION"
+          echo "File size: $(wc -c < SHA256SUMS) bytes"
+          echo "Number of checksums: $(wc -l < SHA256SUMS)"
+
+          if [ -f SHA256SUMS.asc ]; then
+            gh release upload "$VERSION" SHA256SUMS SHA256SUMS.asc --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release upload "$VERSION" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+          fi
+      - name: Verify (optional) presence
+        run: gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'
+
+  provenance:
+    name: Generate Build Provenance (SLSA)
+    needs: [create-release, checksums]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.create-release.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Download release artifacts for attestation
+        run: |
+          # Download archives and SHA256SUMS from the GitHub release
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --pattern "deacon-*.tar.gz" \
+            --pattern "deacon-*.zip" \
+            --pattern "SHA256SUMS" || {
+            echo "WARNING: Failed to download release artifacts for attestation"
+            echo "Provenance will be skipped for this release"
+            exit 0
+          }
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            deacon-*.tar.gz
+            deacon-*.zip
+            SHA256SUMS
+
+  deploy-pages:
+    name: Deploy Install Script to GitHub Pages
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.version }}
+
+      - name: Prepare Pages content
+        run: |
+          mkdir -p _site
+          cp scripts/install.sh _site/install.sh
+
+          # Create a simple index page
+          cat > _site/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Deacon - Development Containers CLI</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+              h1 { color: #333; }
+              code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }
+              pre { background: #f4f4f4; padding: 1rem; border-radius: 5px; overflow-x: auto; }
+              a { color: #0366d6; }
+            </style>
+          </head>
+          <body>
+            <h1>Deacon</h1>
+            <p>A Rust implementation of the Development Containers CLI.</p>
+
+            <h2>Quick Install</h2>
+            <pre><code>curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash</code></pre>
+
+            <h2>Install Options</h2>
+            <pre><code># Install a specific version
+          curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_VERSION=0.1.4 bash
+
+          # Install to a custom directory
+          curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_INSTALL_DIR=~/.local/bin bash
+
+          # Force overwrite without prompt
+          curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_FORCE=true bash</code></pre>
+
+            <h2>Links</h2>
+            <ul>
+              <li><a href="https://github.com/get2knowio/deacon">GitHub Repository</a></li>
+              <li><a href="https://github.com/get2knowio/deacon/releases">Releases</a></li>
+              <li><a href="./install.sh">install.sh</a> (direct link)</li>
+            </ul>
+          </body>
+          </html>
+          HTMLEOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

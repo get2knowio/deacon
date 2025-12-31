@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Features Info - Verbose JSON Output",
+  "type": "object",
+  "properties": {
+    "manifest": {
+      "$ref": "./features-info.manifest.json"
+    },
+    "canonicalId": {
+      "anyOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "publishedTags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "required": ["canonicalId"],
+  "additionalProperties": true
+}

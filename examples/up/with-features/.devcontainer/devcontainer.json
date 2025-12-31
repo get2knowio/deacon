@@ -1,0 +1,23 @@
+{
+	"name": "Dev Container with Features",
+	"image": "ubuntu:22.04",
+	"features": {
+		"ghcr.io/devcontainers/features/common-utils:2": {
+			"installZsh": true,
+			"installOhMyZsh": true,
+			"username": "vscode",
+			"userUid": 1000,
+			"userGid": 1000
+		},
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "20"
+		}
+	},
+	"remoteUser": "vscode",
+	"command": [
+		"sleep",
+		"infinity"
+	],
+	"workspaceFolder": "/workspace",
+	"postCreateCommand": "node --version && zsh --version"
+}

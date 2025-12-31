@@ -1,0 +1,8 @@
+{
+  "id": "feature-extension",
+  "version": "1.0.0",
+  "name": "Extension",
+  "description": "Requires both plugins and installs after plugin-1",
+  "dependsOn": { "feature-plugin-1": true, "feature-plugin-2": true },
+  "installsAfter": ["feature-plugin-1"]
+}

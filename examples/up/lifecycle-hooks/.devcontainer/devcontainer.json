@@ -1,0 +1,35 @@
+{
+	"name": "Lifecycle Hooks Example",
+	"image": "ubuntu:22.04",
+	"remoteUser": "devuser",
+	"workspaceFolder": "/workspace",
+	
+	"onCreateCommand": {
+		"install-deps": "apt-get update && apt-get install -y curl git",
+		"create-marker": "echo 'onCreate completed' > /tmp/oncreate.marker"
+	},
+	
+	"updateContentCommand": [
+		"echo 'Updating content...'",
+		"mkdir -p /tmp/updates",
+		"date > /tmp/updates/last-update.txt"
+	],
+	
+	"postCreateCommand": "echo 'Setup directory structure' && mkdir -p /workspace/{src,tests,docs}",
+	
+	"postStartCommand": {
+		"log-start": "echo \"Container started at $(date)\" >> /tmp/start.log",
+		"check-git": "git --version"
+	},
+	
+	"postAttachCommand": [
+		"echo 'Welcome to the dev container!'",
+		"echo 'Workspace: /workspace'",
+		"echo 'User: $(whoami)'"
+	],
+	
+	"remoteEnv": {
+		"LIFECYCLE_TEST": "true",
+		"WORKSPACE_NAME": "${localWorkspaceFolderBasename}"
+	}
+}

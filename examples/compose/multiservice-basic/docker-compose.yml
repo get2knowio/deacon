@@ -1,0 +1,19 @@
+services:
+  app:
+    image: alpine:latest
+    command: sleep infinity
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace:cached
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

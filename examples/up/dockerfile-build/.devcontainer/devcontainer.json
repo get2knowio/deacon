@@ -1,0 +1,10 @@
+{
+	"name": "Dockerfile Build Example",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": ".."
+	},
+	"workspaceFolder": "/workspace",
+	"remoteUser": "devuser",
+	"postCreateCommand": "node --version && npm --version"
+}

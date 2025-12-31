@@ -1,0 +1,17 @@
+{
+	"id": "app-feature",
+	"version": "2.1.0",
+	"name": "Application Stack Feature",
+	"description": "Complex feature with multiple dependencies and ordering constraints",
+	"dependsOn": {
+		"ghcr.io/devcontainers/features/common-utils": "2",
+		"ghcr.io/devcontainers/features/node": "1",
+		"ghcr.io/devcontainers/features/docker-in-docker": "2",
+		"./custom-tools": true
+	},
+	"installsAfter": [
+		"ghcr.io/devcontainers/features/common-utils",
+		"ghcr.io/devcontainers/features/node",
+		"./custom-tools"
+	]
+}

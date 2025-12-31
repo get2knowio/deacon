@@ -1,0 +1,7 @@
+{
+  "name": "Exec UserEnvProbe Example",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "remoteUser": "vscode",
+  "userEnvProbe": "loginInteractiveShell",
+  "workspaceFolder": "/workspace"
+}

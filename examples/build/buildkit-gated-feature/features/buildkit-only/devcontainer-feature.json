@@ -1,0 +1,7 @@
+{
+  "id": "buildkit-only",
+  "version": "1.0.0",
+  "name": "BuildKit Only Feature",
+  "description": "Illustrative feature requiring BuildKit-specific capability (e.g. advanced cache mounts)",
+  "buildKitRequired": true
+}

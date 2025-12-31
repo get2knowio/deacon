@@ -1,0 +1,11 @@
+{
+  "name": "Features Plan — Complex Graph",
+  "image": "mcr.microsoft.com/devcontainers/base:alpine",
+  "features": {
+    "./feature-core": {},
+    "./feature-plugin-1": {},
+    "./feature-plugin-2": {},
+    "./feature-extension": {},
+    "./feature-aux": {}
+  }
+}

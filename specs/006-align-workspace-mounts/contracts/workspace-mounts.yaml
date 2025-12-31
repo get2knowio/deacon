@@ -1,0 +1,118 @@
+openapi: 3.1.0
+info:
+  title: Workspace Mount Consistency and Git-Root Handling
+  version: "1.0.0"
+  description: |
+    Contract describing how the CLI resolves workspace mounts for Docker and Compose
+    with support for consistency values and git-root selection.
+paths:
+  /workspace-mounts/docker:
+    post:
+      summary: Generate Docker workspace mount
+      description: Resolve the host path and consistency for the default workspace mount when launching Docker.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceMountRequest"
+      responses:
+        "200":
+          description: Workspace mount definition for Docker launch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DockerMountResponse"
+  /workspace-mounts/compose:
+    post:
+      summary: Generate Compose workspace mounts
+      description: Resolve the host path and consistency for workspace mounts applied to Compose services.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceMountRequest"
+      responses:
+        "200":
+          description: Workspace mount definitions for Compose services
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComposeMountResponse"
+components:
+  schemas:
+    WorkspaceMountRequest:
+      type: object
+      required:
+        - workspaceRoot
+      properties:
+        workspaceRoot:
+          type: string
+          description: Absolute path of the detected workspace root.
+        workingDirectory:
+          type: string
+          description: Invocation working directory (used for git-root discovery).
+        gitRootRequested:
+          type: boolean
+          description: Whether to mount the repository root instead of the workspace root.
+        consistency:
+          type: string
+          nullable: true
+          description: User-specified consistency value to apply to the workspace mount.
+        services:
+          type: array
+          description: Service names receiving the workspace mount (Compose only).
+          items:
+            type: string
+    DockerMountResponse:
+      type: object
+      required:
+        - mount
+      properties:
+        mount:
+          $ref: "#/components/schemas/WorkspaceMount"
+        fallback:
+          type: string
+          nullable: true
+          description: Note indicating fallback to workspace root when git root not found.
+    ComposeMountResponse:
+      type: object
+      required:
+        - mounts
+      properties:
+        mounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceMount"
+        fallback:
+          type: string
+          nullable: true
+          description: Note indicating fallback to workspace root when git root not found.
+    WorkspaceMount:
+      type: object
+      required:
+        - hostPath
+        - containerPath
+      properties:
+        hostPath:
+          type: string
+          description: Host path for the workspace mount (git root if requested and found).
+        containerPath:
+          type: string
+          description: Container path where the workspace is mounted.
+        consistency:
+          type: string
+          nullable: true
+          description: Consistency value applied to the mount; null if not provided.
+    ServiceMount:
+      type: object
+      required:
+        - service
+        - mount
+      properties:
+        service:
+          type: string
+          description: Compose service name receiving the mount.
+        mount:
+          $ref: "#/components/schemas/WorkspaceMount"

@@ -1,0 +1,19 @@
+{
+	"id": "sample-local-feature",
+	"version": "1.0.0",
+	"name": "Sample Local Feature",
+	"description": "A local feature for demonstrating manifest inspection without registry access",
+	"options": {
+		"version": {
+			"type": "string",
+			"default": "latest",
+			"description": "Version to install"
+		},
+		"enableCache": {
+			"type": "boolean",
+			"default": true,
+			"description": "Enable caching"
+		}
+	},
+	"installsAfter": ["ghcr.io/devcontainers/features/common-utils"]
+}

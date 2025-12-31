@@ -1,0 +1,51 @@
+{
+  "name": "Advanced Container Lifecycle",
+  "image": "node:18",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "os-provided"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest"
+    }
+  },
+  "workspaceFolder": "/workspaces/advanced-project",
+  "containerEnv": {
+    "NODE_ENV": "development",
+    "PROJECT_NAME": "advanced-container-lifecycle",
+    "SETUP_MODE": "full"
+  },
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/workspaces/advanced-project/node_modules/.bin"
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/.npm,target=/root/.npm,type=bind,consistency=cached",
+    "source=node_modules,target=/workspaces/advanced-project/node_modules,type=volume"
+  ],
+  "onCreateCommand": {
+    "setup-dirs": "mkdir -p /tmp/lifecycle-logs /workspaces/advanced-project/{src,tests,docs}",
+    "log-creation": "echo '[onCreate] Container created at $(date)' | tee /tmp/lifecycle-logs/onCreate.log",
+    "validate-env": "echo '[onCreate] Environment: NODE_ENV=${NODE_ENV}, PROJECT_NAME=${PROJECT_NAME}' | tee -a /tmp/lifecycle-logs/onCreate.log"
+  },
+  "postCreateCommand": [
+    "echo '[postCreate] Starting dependency installation...' | tee /tmp/lifecycle-logs/postCreate.log",
+    "cd /workspaces/advanced-project && npm init -y",
+    "cd /workspaces/advanced-project && npm install express jest nodemon --save-dev",
+    "echo '[postCreate] Dependencies installed successfully' | tee -a /tmp/lifecycle-logs/postCreate.log"
+  ],
+  "postStartCommand": {
+    "log-start": "echo '[postStart] Container started at $(date)' | tee /tmp/lifecycle-logs/postStart.log",
+    "check-services": "docker --version >> /tmp/lifecycle-logs/postStart.log 2>&1 || echo 'Docker not ready yet' >> /tmp/lifecycle-logs/postStart.log",
+    "setup-workspace": "cd /workspaces/advanced-project && [ ! -f package.json ] && npm init -y || echo 'package.json exists'"
+  },
+  "postAttachCommand": [
+    "echo '[postAttach] === Development Environment Ready ==='",
+    "echo '[postAttach] Project: ${PROJECT_NAME}'",
+    "echo '[postAttach] Node version:' && node --version",
+    "echo '[postAttach] NPM version:' && npm --version",
+    "echo '[postAttach] Lifecycle logs:' && ls -la /tmp/lifecycle-logs/ 2>/dev/null || echo 'No lifecycle logs found'",
+    "echo '[postAttach] Workspace contents:' && ls -la /workspaces/advanced-project/"
+  ],
+  "forwardPorts": [3000, 8080, 9229],
+  "shutdownAction": "stopContainer"
+}

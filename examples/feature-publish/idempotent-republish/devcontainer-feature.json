@@ -1,0 +1,6 @@
+{
+  "id": "republish-feature",
+  "version": "3.0.0",
+  "name": "Republish Test Feature",
+  "description": "Feature to demonstrate idempotent publish behavior"
+}

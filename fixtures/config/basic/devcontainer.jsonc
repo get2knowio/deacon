@@ -1,0 +1,67 @@
+{
+    // DevContainer configuration example with comments and trailing commas
+    "name": "Rust Development Container",
+    "image": "rust:1.70",
+    
+    // Features to install
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:1": {
+            "installZsh": true,
+            "username": "vscode"
+        },
+        "ghcr.io/devcontainers/features/git:1": {
+            "version": "os-provided"
+        },
+    },
+    
+    // VS Code customizations
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "tamasfe.even-better-toml",
+                "vadimcn.vscode-lldb",
+            ],
+            "settings": {
+                "rust-analyzer.cargo.features": "all",
+                "rust-analyzer.checkOnSave.command": "clippy"
+            }
+        }
+    },
+    
+    // Workspace configuration
+    "workspaceFolder": "/workspace",
+    "containerEnv": {
+        "RUST_LOG": "debug",
+        "ENVIRONMENT": "development"
+    },
+    "remoteEnv": {
+        "PATH": "${containerEnv:PATH}:/usr/local/cargo/bin"
+    },
+    
+    // Port forwarding
+    "forwardPorts": [3000, 8080],
+    "appPort": 3000,
+    
+    // Container runtime options
+    "runArgs": [
+        "--init",
+        "--privileged"
+    ],
+    "shutdownAction": "stopContainer",
+    "overrideCommand": false,
+    
+    // Lifecycle commands
+    "onCreateCommand": "cargo install cargo-watch",
+    "postCreateCommand": [
+        "rustup component add clippy",
+        "rustup component add rustfmt"
+    ],
+    "postStartCommand": "echo 'Container started successfully!'",
+    "postAttachCommand": "echo 'Welcome to the Rust development environment!'",
+    
+    // Additional mounts
+    "mounts": [
+        "source=${localWorkspaceFolder}/.cargo,target=/usr/local/cargo,type=bind,consistency=cached"
+    ],
+}

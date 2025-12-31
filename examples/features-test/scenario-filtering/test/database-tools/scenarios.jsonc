@@ -1,0 +1,8 @@
+[
+  {"name": "minimal-postgres", "image": "ubuntu:focal"},
+  {"name": "minimal-mysql", "image": "ubuntu:focal"},
+  {"name": "full-postgres", "image": "ubuntu:focal"},
+  {"name": "full-mysql", "image": "ubuntu:focal"},
+  {"name": "benchmark-postgres", "image": "ubuntu:focal"},
+  {"name": "benchmark-mysql", "image": "ubuntu:focal"}
+]

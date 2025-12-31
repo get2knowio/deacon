@@ -1,0 +1,12 @@
+{
+	"name": "Remote Env and Secrets Example",
+	"image": "ubuntu:22.04",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"remoteEnv": {
+		"APP_ENV": "development",
+		"LOG_LEVEL": "debug",
+		"FEATURE_FLAG_NEW_UI": "true"
+	},
+	"postCreateCommand": "echo 'Environment:' && env | grep -E '(APP_|LOG_|FEATURE_|API_|DB_)' | sort"
+}

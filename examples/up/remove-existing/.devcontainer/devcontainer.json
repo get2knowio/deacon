@@ -1,0 +1,8 @@
+{
+	"name": "Remove Existing Container Example",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"onCreateCommand": "echo 'Container created at:' > /tmp/created.txt && date >> /tmp/created.txt",
+	"postCreateCommand": "cat /tmp/created.txt"
+}

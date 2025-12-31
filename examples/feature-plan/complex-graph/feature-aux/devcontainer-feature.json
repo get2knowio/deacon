@@ -1,0 +1,6 @@
+{
+  "id": "feature-aux",
+  "version": "1.0.0",
+  "name": "Auxiliary feature",
+  "description": "Independent feature used to test lexicographic tie-breakers"
+}

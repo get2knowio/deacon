@@ -1,0 +1,6 @@
+[
+  {
+    "name": "sanity-check",
+    "image": "ubuntu:focal"
+  }
+]
