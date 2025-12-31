@@ -63,7 +63,13 @@
       "Bash(DEACON_LOG=debug ./target/debug/deacon up:*)",
       "Bash(DEACON_LOG=trace ./target/debug/deacon up:*)",
       "Bash(docker rm:*)",
-      "Bash(docker buildx prune:*)"
+      "Bash(docker buildx prune:*)",
+      "Bash(.specify/scripts/bash/create-new-feature.sh:*)",
+      "Bash(.specify/scripts/bash/setup-plan.sh:*)",
+      "Bash(.specify/scripts/bash/update-agent-context.sh:*)",
+      "Bash(tar:*)",
+      "Bash(/bin/bash -c 'cd /workspaces/deacon && pwd')",
+      "Bash(/bin/ls:*)"
     ],
     "deny": [],
     "ask": []
