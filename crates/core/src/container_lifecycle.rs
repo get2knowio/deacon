@@ -10,10 +10,45 @@ use crate::progress::{ProgressEvent, ProgressTracker};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
 use crate::state::record_phase_executed;
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
+use serde_json;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{debug, error, info, instrument, warn};
+
+/// Source attribution for a lifecycle command.
+///
+/// Tracks whether a lifecycle command originated from a feature or from the
+/// devcontainer.json configuration. This enables proper error attribution and
+/// ordering when aggregating lifecycle commands during the up command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LifecycleCommandSource {
+    /// Command from a feature (includes feature ID for attribution)
+    Feature { id: String },
+    /// Command from devcontainer.json config
+    Config,
+}
+
+impl std::fmt::Display for LifecycleCommandSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Feature { id } => write!(f, "feature:{}", id),
+            Self::Config => write!(f, "config"),
+        }
+    }
+}
+
+/// A lifecycle command ready for execution with source tracking.
+///
+/// Combines a lifecycle command (which can be a string, array, or object per the
+/// devcontainer spec) with its source attribution for error reporting and debugging.
+#[derive(Debug, Clone)]
+pub struct AggregatedLifecycleCommand {
+    /// The command to execute (can be string, array, or object)
+    pub command: serde_json::Value,
+    /// Where this command came from
+    pub source: LifecycleCommandSource,
+}
 
 /// Configuration for dotfiles installation during lifecycle execution.
 ///
@@ -2236,5 +2271,156 @@ mod tests {
         assert_eq!(order.len(), 2, "Both phases should have been executed");
         assert_eq!(order[0], "postStart", "postStart should execute first");
         assert_eq!(order[1], "postAttach", "postAttach should execute second");
+    }
+
+    #[test]
+    fn test_lifecycle_command_source_feature() {
+        let source = LifecycleCommandSource::Feature {
+            id: "ghcr.io/devcontainers/features/node".to_string(),
+        };
+
+        // Test Debug trait
+        assert_eq!(
+            format!("{:?}", source),
+            "Feature { id: \"ghcr.io/devcontainers/features/node\" }"
+        );
+
+        // Test Display trait
+        assert_eq!(
+            source.to_string(),
+            "feature:ghcr.io/devcontainers/features/node"
+        );
+
+        // Test Clone and PartialEq
+        let cloned = source.clone();
+        assert_eq!(source, cloned);
+    }
+
+    #[test]
+    fn test_lifecycle_command_source_config() {
+        let source = LifecycleCommandSource::Config;
+
+        // Test Debug trait
+        assert_eq!(format!("{:?}", source), "Config");
+
+        // Test Display trait
+        assert_eq!(source.to_string(), "config");
+
+        // Test Clone and PartialEq
+        let cloned = source.clone();
+        assert_eq!(source, cloned);
+    }
+
+    #[test]
+    fn test_lifecycle_command_source_equality() {
+        let feature1 = LifecycleCommandSource::Feature {
+            id: "node".to_string(),
+        };
+        let feature2 = LifecycleCommandSource::Feature {
+            id: "node".to_string(),
+        };
+        let feature3 = LifecycleCommandSource::Feature {
+            id: "python".to_string(),
+        };
+        let config1 = LifecycleCommandSource::Config;
+        let config2 = LifecycleCommandSource::Config;
+
+        // Same feature IDs should be equal
+        assert_eq!(feature1, feature2);
+
+        // Different feature IDs should not be equal
+        assert_ne!(feature1, feature3);
+
+        // Config sources should be equal
+        assert_eq!(config1, config2);
+
+        // Feature and Config should not be equal
+        assert_ne!(feature1, config1);
+    }
+
+    #[test]
+    fn test_aggregated_lifecycle_command_creation() {
+        let source = LifecycleCommandSource::Feature {
+            id: "node".to_string(),
+        };
+        let command = serde_json::json!("npm install");
+
+        let aggregated = AggregatedLifecycleCommand {
+            command: command.clone(),
+            source: source.clone(),
+        };
+
+        // Verify fields
+        assert_eq!(aggregated.command, command);
+        assert_eq!(aggregated.source, source);
+    }
+
+    #[test]
+    fn test_aggregated_lifecycle_command_with_different_command_types() {
+        // Test with string command
+        let string_cmd = AggregatedLifecycleCommand {
+            command: serde_json::json!("echo hello"),
+            source: LifecycleCommandSource::Config,
+        };
+        assert_eq!(string_cmd.command, serde_json::json!("echo hello"));
+
+        // Test with array command
+        let array_cmd = AggregatedLifecycleCommand {
+            command: serde_json::json!(["npm", "install", "--verbose"]),
+            source: LifecycleCommandSource::Feature {
+                id: "node".to_string(),
+            },
+        };
+        assert_eq!(
+            array_cmd.command,
+            serde_json::json!(["npm", "install", "--verbose"])
+        );
+
+        // Test with object command (parallel commands)
+        let object_cmd = AggregatedLifecycleCommand {
+            command: serde_json::json!({
+                "npm": "npm install",
+                "build": "npm run build"
+            }),
+            source: LifecycleCommandSource::Feature {
+                id: "node".to_string(),
+            },
+        };
+        assert_eq!(
+            object_cmd.command,
+            serde_json::json!({
+                "npm": "npm install",
+                "build": "npm run build"
+            })
+        );
+    }
+
+    #[test]
+    fn test_aggregated_lifecycle_command_clone() {
+        let original = AggregatedLifecycleCommand {
+            command: serde_json::json!(["test", "command"]),
+            source: LifecycleCommandSource::Feature {
+                id: "python".to_string(),
+            },
+        };
+
+        let cloned = original.clone();
+
+        // Verify clone has same values
+        assert_eq!(cloned.command, original.command);
+        assert_eq!(cloned.source, original.source);
+    }
+
+    #[test]
+    fn test_aggregated_lifecycle_command_debug() {
+        let cmd = AggregatedLifecycleCommand {
+            command: serde_json::json!("test"),
+            source: LifecycleCommandSource::Config,
+        };
+
+        let debug_str = format!("{:?}", cmd);
+        assert!(debug_str.contains("AggregatedLifecycleCommand"));
+        assert!(debug_str.contains("command"));
+        assert!(debug_str.contains("source"));
     }
 }

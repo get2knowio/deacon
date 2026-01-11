@@ -446,6 +446,42 @@ pub fn parse_feature_metadata(path: &Path) -> Result<FeatureMetadata> {
     Ok(metadata)
 }
 
+/// Security options merged from config and all resolved features
+///
+/// This struct combines security options from the devcontainer configuration
+/// and all installed features, applying specific merge rules per the DevContainer spec.
+///
+/// # Merge Rules
+///
+/// - `privileged`: OR logic - true if ANY source declares privileged
+/// - `init`: OR logic - true if ANY source declares init
+/// - `cap_add`: Union of all capabilities, deduplicated and uppercase-normalized
+/// - `security_opt`: Union of all security options, deduplicated (case-preserved)
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::features::MergedSecurityOptions;
+///
+/// let merged = MergedSecurityOptions {
+///     privileged: true,
+///     init: false,
+///     cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
+///     security_opt: vec!["seccomp:unconfined".to_string()],
+/// };
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MergedSecurityOptions {
+    /// True if ANY source declares privileged (OR logic)
+    pub privileged: bool,
+    /// True if ANY source declares init (OR logic)
+    pub init: bool,
+    /// Union of all capabilities, deduplicated and uppercase-normalized
+    pub cap_add: Vec<String>,
+    /// Union of all security options, deduplicated
+    pub security_opt: Vec<String>,
+}
+
 /// Represents a feature with its resolved configuration
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedFeature {
@@ -866,6 +902,46 @@ impl Feature {
     pub fn install() -> anyhow::Result<()> {
         Ok(())
     }
+}
+
+/// Entrypoint configuration after chaining feature entrypoints
+///
+/// When multiple features define entrypoints, they must be chained via a wrapper
+/// script to ensure all initialization occurs in the correct order.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::features::EntrypointChain;
+///
+/// // No entrypoint specified
+/// let none = EntrypointChain::None;
+///
+/// // Single entrypoint (no wrapper needed)
+/// let single = EntrypointChain::Single("/usr/local/bin/init.sh".to_string());
+///
+/// // Multiple entrypoints requiring wrapper
+/// let chained = EntrypointChain::Chained {
+///     wrapper_path: "/devcontainer/entrypoint-wrapper.sh".to_string(),
+///     entrypoints: vec![
+///         "/feature1/init.sh".to_string(),
+///         "/feature2/init.sh".to_string(),
+///     ],
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntrypointChain {
+    /// No entrypoint specified by any source
+    None,
+    /// Single entrypoint (no wrapper needed)
+    Single(String),
+    /// Multiple entrypoints requiring wrapper
+    Chained {
+        /// Path to wrapper script in container
+        wrapper_path: String,
+        /// Original entrypoints in execution order
+        entrypoints: Vec<String>,
+    },
 }
 
 /// Configuration for feature merging behavior

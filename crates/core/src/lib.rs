@@ -18,6 +18,7 @@ pub mod entrypoint;
 pub mod env_probe;
 pub mod errors;
 pub mod feature_installer;
+pub mod feature_ref;
 pub mod features;
 pub mod features_info;
 /// Feature testing infrastructure for dev container features.

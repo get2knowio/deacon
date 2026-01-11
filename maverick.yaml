@@ -1,0 +1,29 @@
+project_type: rust
+github:
+  owner: get2knowio
+  repo: deacon
+  default_branch: main
+validation:
+  format_cmd:
+  - cargo
+  - fmt
+  lint_cmd:
+  - cargo
+  - clippy
+  - --fix
+  - --allow-dirty
+  test_cmd:
+  - cargo
+  - test
+  timeout_seconds: 300
+  max_errors: 50
+model:
+  model_id: claude-sonnet-4-5-20250929
+  max_tokens: 64000
+  temperature: 0.0
+notifications:
+  enabled: false
+parallel:
+  max_agents: 3
+  max_tasks: 5
+verbosity: warning

@@ -24,12 +24,12 @@
 
 **Purpose**: Create new data types and extend existing structures required by all user stories
 
-- [ ] T001 Create FeatureRefType enum and parsing logic in crates/core/src/feature_ref.rs
-- [ ] T002 [P] Create MergedSecurityOptions struct in crates/core/src/features.rs
-- [ ] T003 [P] Create LifecycleCommandSource and AggregatedLifecycleCommand types in crates/core/src/container_lifecycle.rs
-- [ ] T004 [P] Create MergedMounts struct in crates/core/src/mount.rs
-- [ ] T005 [P] Create EntrypointChain enum in crates/core/src/features.rs
-- [ ] T006 Extend FeatureBuildOutput to include merged_security, merged_mounts, entrypoint_chain in crates/core/src/features.rs
+- [x] T001 Create FeatureRefType enum and parsing logic in crates/core/src/feature_ref.rs
+- [x] T002 [P] Create MergedSecurityOptions struct in crates/core/src/features.rs
+- [x] T003 [P] Create LifecycleCommandSource and AggregatedLifecycleCommand types in crates/core/src/container_lifecycle.rs
+- [x] T004 [P] Create MergedMounts struct in crates/core/src/mount.rs
+- [x] T005 [P] Create EntrypointChain enum in crates/core/src/features.rs
+- [x] T006 Extend FeatureBuildOutput to include merged_security, merged_mounts, entrypoint_chain in crates/core/src/features.rs
 
 ---
 

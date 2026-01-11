@@ -302,6 +302,34 @@ impl Mount {
     }
 }
 
+/// Mounts merged from features and config
+///
+/// Config mounts take precedence for same target path.
+/// This struct holds the final deduplicated mount strings ready to be applied
+/// to container creation.
+///
+/// # Merge Rules
+/// - Features are processed in installation order
+/// - Config mounts override feature mounts for the same target path
+/// - All mounts are normalized to Docker CLI string format
+///
+/// # Example
+/// ```rust
+/// use deacon_core::mount::MergedMounts;
+///
+/// let merged = MergedMounts {
+///     mounts: vec![
+///         "type=bind,source=/host/path,target=/container/path".to_string(),
+///         "type=volume,source=myvolume,target=/data".to_string(),
+///     ],
+/// };
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MergedMounts {
+    /// Final mount strings to apply (deduplicated by target)
+    pub mounts: Vec<String>,
+}
+
 /// Mount parser for DevContainer mount specifications
 pub struct MountParser;
 
