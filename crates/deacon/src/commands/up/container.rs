@@ -20,6 +20,7 @@ use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::{Docker, DockerLifecycle};
 use deacon_core::errors::{DeaconError, DockerError};
+use deacon_core::features::merge_security_options;
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ContainerState, StateManager};
 use deacon_core::IndexMap;
@@ -223,6 +224,33 @@ pub(crate) async fn execute_container_up(
         None
     };
 
+    // Merge security options from config and features
+    debug!("Merging security options from config and features");
+    let merged_security = merge_security_options(
+        &config,
+        resolved_features.as_deref()
+            .unwrap_or(&[]),
+    );
+    debug!(
+        privileged = merged_security.privileged,
+        init = merged_security.init,
+        cap_add_count = merged_security.cap_add.len(),
+        security_opt_count = merged_security.security_opt.len(),
+        "Merged security options from config and features"
+    );
+    if !merged_security.cap_add.is_empty() {
+        debug!(
+            cap_add = ?merged_security.cap_add,
+            "Merged capabilities"
+        );
+    }
+    if !merged_security.security_opt.is_empty() {
+        debug!(
+            security_opt = ?merged_security.security_opt,
+            "Merged security options"
+        );
+    }
+
     // Log GPU mode application
     if args.gpu_mode == deacon_core::gpu::GpuMode::All {
         info!("Applying GPU mode: all - requesting GPU access for container");
@@ -238,6 +266,7 @@ pub(crate) async fn execute_container_up(
             workspace_folder,
             args.remove_existing_container,
             args.gpu_mode,
+            &merged_security,
         )
         .await;
 
@@ -310,17 +339,16 @@ pub(crate) async fn execute_container_up(
     // - UID update flow: update container user UID/GID to match host user
     // - Security options: privileged, capAdd, securityOpt, init
     //
-    // Current implementation: User mapping is partially implemented (has TODO at line 1804)
-    // Security options (privileged, capAdd, securityOpt) are defined in config but not yet
-    // applied to container creation.
+    // Current implementation:
+    // - User mapping is partially implemented (has TODO at line 1804)
+    // - Security options (privileged, capAdd, securityOpt, init) are merged from config and features
+    //   and applied to container creation (see lines 227-257)
     //
-    // Full implementation requires:
+    // Remaining work:
     // 1. UID update: Execute usermod/groupmod commands in container to update remote user UID/GID
-    // 2. Security options: Pass config.privileged, config.cap_add, config.security_opt to docker run/create
-    // 3. Init process: Apply config.init (if present) to enable proper signal handling
-    // 4. Entrypoint override: Handle config.override_command for security-related entrypoint changes
+    // 2. Entrypoint override: Handle config.override_command for security-related entrypoint changes
     //
-    // TODO T017: Complete UID update flow and security options application
+    // TODO T017: Complete UID update flow
     // Foundation is in place (config fields exist, user_mapping module available)
     if config.remote_user.is_some() || config.container_user.is_some() {
         apply_user_mapping(&container_result.container_id, &config, workspace_folder).await?;

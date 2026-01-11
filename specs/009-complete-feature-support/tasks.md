@@ -57,18 +57,18 @@
 
 ### Tests for User Story 1
 
-- [ ] T012 [P] [US1] Unit tests for merge_security_options() in crates/core/src/features.rs (all merge rules from contract)
-- [ ] T013 [P] [US1] Integration test for privileged mode in crates/deacon/tests/integration_feature_security.rs (docker-shared group)
+- [x] T012 [P] [US1] Unit tests for merge_security_options() in crates/core/src/features.rs (all merge rules from contract)
+- [x] T013 [P] [US1] Integration test for privileged mode in crates/deacon/tests/integration_feature_security.rs (docker-shared group)
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] Implement merge_security_options() function per contract in crates/core/src/features.rs
-- [ ] T015 [US1] Update container.rs to call merge_security_options() and apply to Docker create in crates/deacon/src/commands/up/container.rs
-- [ ] T016 [US1] Pass --privileged flag when merged_security.privileged is true in crates/core/src/docker.rs
-- [ ] T017 [US1] Pass --init flag when merged_security.init is true in crates/core/src/docker.rs
-- [ ] T018 [US1] Pass --cap-add flags for all merged capabilities in crates/core/src/docker.rs
-- [ ] T019 [US1] Pass --security-opt flags for all merged security options in crates/core/src/docker.rs
-- [ ] T020 [US1] Add tracing spans for security options merging in crates/deacon/src/commands/up/container.rs
+- [x] T014 [US1] Implement merge_security_options() function per contract in crates/core/src/features.rs
+- [x] T015 [US1] Update container.rs to call merge_security_options() and apply to Docker create in crates/deacon/src/commands/up/container.rs
+- [x] T016 [US1] Pass --privileged flag when merged_security.privileged is true in crates/core/src/docker.rs
+- [x] T017 [US1] Pass --init flag when merged_security.init is true in crates/core/src/docker.rs
+- [x] T018 [US1] Pass --cap-add flags for all merged capabilities in crates/core/src/docker.rs
+- [x] T019 [US1] Pass --security-opt flags for all merged security options in crates/core/src/docker.rs
+- [x] T020 [US1] Add tracing spans for security options merging in crates/deacon/src/commands/up/container.rs
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 

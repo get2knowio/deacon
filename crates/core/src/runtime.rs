@@ -179,16 +179,17 @@ impl ContainerOps for ContainerRuntimeImpl {
         config: &DevContainerConfig,
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<String> {
         match self {
             Self::Docker(runtime) => {
                 runtime
-                    .create_container(identity, config, workspace_path, gpu_mode)
+                    .create_container(identity, config, workspace_path, gpu_mode, merged_security)
                     .await
             }
             Self::Podman(runtime) => {
                 runtime
-                    .create_container(identity, config, workspace_path, gpu_mode)
+                    .create_container(identity, config, workspace_path, gpu_mode, merged_security)
                     .await
             }
         }
@@ -232,16 +233,31 @@ impl DockerLifecycle for ContainerRuntimeImpl {
         workspace_path: &Path,
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<ContainerResult> {
         match self {
             Self::Docker(runtime) => {
                 runtime
-                    .up(identity, config, workspace_path, remove_existing, gpu_mode)
+                    .up(
+                        identity,
+                        config,
+                        workspace_path,
+                        remove_existing,
+                        gpu_mode,
+                        merged_security,
+                    )
                     .await
             }
             Self::Podman(runtime) => {
                 runtime
-                    .up(identity, config, workspace_path, remove_existing, gpu_mode)
+                    .up(
+                        identity,
+                        config,
+                        workspace_path,
+                        remove_existing,
+                        gpu_mode,
+                        merged_security,
+                    )
                     .await
             }
         }
@@ -320,9 +336,10 @@ impl ContainerOps for DockerRuntime {
         config: &DevContainerConfig,
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<String> {
         self.docker
-            .create_container(identity, config, workspace_path, gpu_mode)
+            .create_container(identity, config, workspace_path, gpu_mode, merged_security)
             .await
     }
 
@@ -352,9 +369,17 @@ impl DockerLifecycle for DockerRuntime {
         workspace_path: &Path,
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<ContainerResult> {
         self.docker
-            .up(identity, config, workspace_path, remove_existing, gpu_mode)
+            .up(
+                identity,
+                config,
+                workspace_path,
+                remove_existing,
+                gpu_mode,
+                merged_security,
+            )
             .await
     }
 }
@@ -437,9 +462,10 @@ impl ContainerOps for PodmanRuntime {
         config: &DevContainerConfig,
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<String> {
         self.runtime
-            .create_container(identity, config, workspace_path, gpu_mode)
+            .create_container(identity, config, workspace_path, gpu_mode, merged_security)
             .await
     }
 
@@ -469,9 +495,17 @@ impl DockerLifecycle for PodmanRuntime {
         workspace_path: &Path,
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<ContainerResult> {
         self.runtime
-            .up(identity, config, workspace_path, remove_existing, gpu_mode)
+            .up(
+                identity,
+                config,
+                workspace_path,
+                remove_existing,
+                gpu_mode,
+                merged_security,
+            )
             .await
     }
 }

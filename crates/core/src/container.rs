@@ -60,6 +60,7 @@ pub trait ContainerOps {
         config: &DevContainerConfig,
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<String>;
 
     /// Start a container by ID

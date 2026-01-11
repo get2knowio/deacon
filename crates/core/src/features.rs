@@ -538,6 +538,148 @@ pub struct MergedSecurityOptions {
     pub security_opt: Vec<String>,
 }
 
+impl MergedSecurityOptions {
+    /// Convert merged security options to Docker CLI arguments
+    ///
+    /// # Returns
+    /// Vector of Docker CLI arguments representing these security options
+    ///
+    /// # Example
+    /// ```
+    /// use deacon_core::features::MergedSecurityOptions;
+    ///
+    /// let options = MergedSecurityOptions {
+    ///     privileged: true,
+    ///     init: true,
+    ///     cap_add: vec!["SYS_PTRACE".to_string()],
+    ///     security_opt: vec!["seccomp:unconfined".to_string()],
+    /// };
+    ///
+    /// let args = options.to_docker_args();
+    /// assert!(args.contains(&"--privileged".to_string()));
+    /// assert!(args.contains(&"--init".to_string()));
+    /// ```
+    pub fn to_docker_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+
+        if self.privileged {
+            args.push("--privileged".to_string());
+        }
+
+        if self.init {
+            args.push("--init".to_string());
+        }
+
+        for cap in &self.cap_add {
+            args.push("--cap-add".to_string());
+            args.push(cap.clone());
+        }
+
+        for security_opt in &self.security_opt {
+            args.push("--security-opt".to_string());
+            args.push(security_opt.clone());
+        }
+
+        args
+    }
+}
+
+/// Merge security options from devcontainer config and resolved features
+///
+/// Implements the DevContainer security merging specification with four distinct rules:
+///
+/// # Rules
+///
+/// ## Rule 1: Privileged Mode (OR Logic)
+/// - Returns `true` if ANY source (config or any feature) has `Some(true)`
+/// - Returns `false` otherwise
+///
+/// ## Rule 2: Init Mode (OR Logic)
+/// - Returns `true` if ANY source (config or any feature) has `Some(true)`
+/// - Returns `false` otherwise
+///
+/// ## Rule 3: Capabilities (Union + Deduplicate + Uppercase)
+/// - Collects all capability strings from config and features
+/// - Converts to uppercase (e.g., "net_admin" → "NET_ADMIN")
+/// - Deduplicates while preserving first occurrence order
+///
+/// ## Rule 4: Security Options (Union + Deduplicate)
+/// - Collects all security option strings from config and features
+/// - Deduplicates while preserving first occurrence order
+/// - Preserves case (security options are case-sensitive)
+///
+/// # Arguments
+/// * `config` - DevContainerConfig with user-specified security options
+/// * `features` - Resolved features in installation order
+///
+/// # Returns
+/// MergedSecurityOptions with combined security settings
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::features::{merge_security_options, MergedSecurityOptions, ResolvedFeature};
+/// use deacon_core::config::DevContainerConfig;
+///
+/// let config = DevContainerConfig {
+///     privileged: Some(true),
+///     cap_add: vec!["SYS_PTRACE".to_string()],
+///     ..Default::default()
+/// };
+/// let features = vec![];
+///
+/// let merged = merge_security_options(&config, &features);
+/// assert_eq!(merged.privileged, true);
+/// assert_eq!(merged.cap_add, vec!["SYS_PTRACE"]);
+/// ```
+pub fn merge_security_options(
+    config: &crate::config::DevContainerConfig,
+    features: &[ResolvedFeature],
+) -> MergedSecurityOptions {
+    // Rule 1 & 2: Privileged and Init (OR Logic)
+    // Check if config or any feature has Some(true)
+    let privileged = config.privileged == Some(true)
+        || features.iter().any(|f| f.metadata.privileged == Some(true));
+
+    let init = config.init == Some(true) || features.iter().any(|f| f.metadata.init == Some(true));
+
+    // Rule 3: Capabilities (Union + Deduplicate + Uppercase)
+    // Collect all capabilities from config and features
+    let all_caps = std::iter::once(config.cap_add.as_slice())
+        .chain(features.iter().map(|f| f.metadata.cap_add.as_slice()))
+        .flatten()
+        .map(|s| s.as_str());
+
+    let cap_add = deduplicate_uppercase(all_caps);
+
+    // Rule 4: Security Options (Union + Deduplicate, preserve case)
+    let mut seen = HashSet::new();
+    let mut security_opt = Vec::new();
+
+    // First add from config
+    for opt in &config.security_opt {
+        if seen.insert(opt.clone()) {
+            security_opt.push(opt.clone());
+        }
+    }
+
+    // Then add from features in order
+    for feature in features {
+        for opt in &feature.metadata.security_opt {
+            if seen.insert(opt.clone()) {
+                security_opt.push(opt.clone());
+            }
+        }
+    }
+
+    MergedSecurityOptions {
+        privileged,
+        init,
+        cap_add,
+        security_opt,
+    }
+}
+
 /// Represents a feature with its resolved configuration
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedFeature {
@@ -2387,5 +2529,960 @@ mod tests {
         assert_eq!(obj.len(), 2);
         assert_eq!(obj["git"], serde_json::Value::Bool(true));
         assert_eq!(obj["node"], serde_json::Value::String("16".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod security_merge_tests {
+    use super::*;
+    use crate::config::DevContainerConfig;
+
+    /// Helper function to create a DevContainerConfig with specified security options
+    fn create_config(
+        privileged: Option<bool>,
+        init: Option<bool>,
+        cap_add: Vec<String>,
+        security_opt: Vec<String>,
+    ) -> DevContainerConfig {
+        DevContainerConfig {
+            privileged,
+            init,
+            cap_add,
+            security_opt,
+            // All other fields use defaults
+            ..Default::default()
+        }
+    }
+
+    /// Helper function to create a ResolvedFeature with specified security options
+    fn create_feature_with_security(
+        id: &str,
+        privileged: Option<bool>,
+        init: Option<bool>,
+        cap_add: Vec<String>,
+        security_opt: Vec<String>,
+    ) -> ResolvedFeature {
+        let metadata = FeatureMetadata {
+            id: id.to_string(),
+            version: None,
+            name: Some(format!("Test Feature {}", id)),
+            description: None,
+            documentation_url: None,
+            license_url: None,
+            options: HashMap::new(),
+            container_env: HashMap::new(),
+            mounts: vec![],
+            init,
+            privileged,
+            cap_add,
+            security_opt,
+            entrypoint: None,
+            installs_after: vec![],
+            depends_on: HashMap::new(),
+            on_create_command: None,
+            update_content_command: None,
+            post_create_command: None,
+            post_start_command: None,
+            post_attach_command: None,
+        };
+
+        ResolvedFeature {
+            id: id.to_string(),
+            source: format!("test://features/{}", id),
+            options: HashMap::new(),
+            metadata,
+        }
+    }
+
+    // ==================== Rule 1: Privileged Mode (OR Logic) ====================
+
+    #[test]
+    fn test_privileged_none_none_none() {
+        // Config: None, Feature1: None, Feature2: None => Result: false
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.privileged, false);
+    }
+
+    #[test]
+    fn test_privileged_some_false_none_none() {
+        // Config: Some(false), Feature1: None, Feature2: None => Result: false
+        let config = create_config(Some(false), None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.privileged, false);
+    }
+
+    #[test]
+    fn test_privileged_some_true_none_none() {
+        // Config: Some(true), Feature1: None, Feature2: None => Result: true
+        let config = create_config(Some(true), None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.privileged, true);
+    }
+
+    #[test]
+    fn test_privileged_some_false_some_true_none() {
+        // Config: Some(false), Feature1: Some(true), Feature2: None => Result: true
+        let config = create_config(Some(false), None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", Some(true), None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.privileged, true);
+    }
+
+    #[test]
+    fn test_privileged_some_false_some_false_some_true() {
+        // Config: Some(false), Feature1: Some(false), Feature2: Some(true) => Result: true
+        let config = create_config(Some(false), None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", Some(false), None, vec![], vec![]),
+            create_feature_with_security("feature2", Some(true), None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.privileged, true);
+    }
+
+    #[test]
+    fn test_privileged_none_some_false_some_false() {
+        // Config: None, Feature1: Some(false), Feature2: Some(false) => Result: false
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", Some(false), None, vec![], vec![]),
+            create_feature_with_security("feature2", Some(false), None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.privileged, false);
+    }
+
+    #[test]
+    fn test_privileged_multiple_true() {
+        // Config: Some(true), Feature1: Some(true), Feature2: Some(true) => Result: true
+        let config = create_config(Some(true), None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", Some(true), None, vec![], vec![]),
+            create_feature_with_security("feature2", Some(true), None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.privileged, true);
+    }
+
+    #[test]
+    fn test_privileged_no_features() {
+        // Config: None, No features => Result: false
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.privileged, false);
+    }
+
+    #[test]
+    fn test_privileged_config_true_no_features() {
+        // Config: Some(true), No features => Result: true
+        let config = create_config(Some(true), None, vec![], vec![]);
+        let features = vec![];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.privileged, true);
+    }
+
+    // ==================== Rule 2: Init Mode (OR Logic) ====================
+
+    #[test]
+    fn test_init_none_none_none() {
+        // Config: None, Feature1: None, Feature2: None => Result: false
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.init, false);
+    }
+
+    #[test]
+    fn test_init_some_false_none_none() {
+        // Config: Some(false), Feature1: None, Feature2: None => Result: false
+        let config = create_config(None, Some(false), vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.init, false);
+    }
+
+    #[test]
+    fn test_init_some_true_none_none() {
+        // Config: Some(true), Feature1: None, Feature2: None => Result: true
+        let config = create_config(None, Some(true), vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.init, true);
+    }
+
+    #[test]
+    fn test_init_some_false_some_true_none() {
+        // Config: Some(false), Feature1: Some(true), Feature2: None => Result: true
+        let config = create_config(None, Some(false), vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, Some(true), vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.init, true);
+    }
+
+    #[test]
+    fn test_init_some_false_some_false_some_true() {
+        // Config: Some(false), Feature1: Some(false), Feature2: Some(true) => Result: true
+        let config = create_config(None, Some(false), vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, Some(false), vec![], vec![]),
+            create_feature_with_security("feature2", None, Some(true), vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.init, true);
+    }
+
+    #[test]
+    fn test_init_none_some_false_some_false() {
+        // Config: None, Feature1: Some(false), Feature2: Some(false) => Result: false
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, Some(false), vec![], vec![]),
+            create_feature_with_security("feature2", None, Some(false), vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.init, false);
+    }
+
+    #[test]
+    fn test_init_multiple_true() {
+        // Config: Some(true), Feature1: Some(true), Feature2: Some(true) => Result: true
+        let config = create_config(None, Some(true), vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, Some(true), vec![], vec![]),
+            create_feature_with_security("feature2", None, Some(true), vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.init, true);
+    }
+
+    #[test]
+    fn test_init_no_features() {
+        // Config: None, No features => Result: false
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.init, false);
+    }
+
+    #[test]
+    fn test_init_config_true_no_features() {
+        // Config: Some(true), No features => Result: true
+        let config = create_config(None, Some(true), vec![], vec![]);
+        let features = vec![];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.init, true);
+    }
+
+    // ==================== Rule 3: Capabilities (Union + Deduplicate + Uppercase) ====================
+
+    #[test]
+    fn test_cap_add_all_empty() {
+        // Config: [], Feature1: [], Feature2: [] => Result: []
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.cap_add, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_cap_add_config_only() {
+        // Config: ["SYS_PTRACE"], Feature1: [], Feature2: [] => Result: ["SYS_PTRACE"]
+        let config = create_config(None, None, vec!["SYS_PTRACE".to_string()], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.cap_add, vec!["SYS_PTRACE"]);
+    }
+
+    #[test]
+    fn test_cap_add_duplicate_same_case() {
+        // Config: ["SYS_PTRACE"], Feature1: ["SYS_PTRACE"], Feature2: [] => Result: ["SYS_PTRACE"]
+        let config = create_config(None, None, vec!["SYS_PTRACE".to_string()], vec![]);
+        let features = vec![create_feature_with_security(
+            "feature1",
+            None,
+            None,
+            vec!["SYS_PTRACE".to_string()],
+            vec![],
+        )];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.cap_add, vec!["SYS_PTRACE"]);
+    }
+
+    #[test]
+    fn test_cap_add_duplicate_different_case() {
+        // Config: ["SYS_PTRACE"], Feature1: ["sys_ptrace"], Feature2: [] => Result: ["SYS_PTRACE"]
+        let config = create_config(None, None, vec!["SYS_PTRACE".to_string()], vec![]);
+        let features = vec![create_feature_with_security(
+            "feature1",
+            None,
+            None,
+            vec!["sys_ptrace".to_string()],
+            vec![],
+        )];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.cap_add, vec!["SYS_PTRACE"]);
+    }
+
+    #[test]
+    fn test_cap_add_multiple_unique() {
+        // Config: ["NET_ADMIN"], Feature1: ["SYS_PTRACE"], Feature2: [] => Result: ["NET_ADMIN", "SYS_PTRACE"]
+        let config = create_config(None, None, vec!["NET_ADMIN".to_string()], vec![]);
+        let features = vec![create_feature_with_security(
+            "feature1",
+            None,
+            None,
+            vec!["SYS_PTRACE".to_string()],
+            vec![],
+        )];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.cap_add, vec!["NET_ADMIN", "SYS_PTRACE"]);
+    }
+
+    #[test]
+    fn test_cap_add_mixed_case_with_duplicates() {
+        // Config: [], Feature1: ["net_admin", "sys_ptrace"], Feature2: ["NET_ADMIN"] => Result: ["NET_ADMIN", "SYS_PTRACE"]
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                None,
+                None,
+                vec!["net_admin".to_string(), "sys_ptrace".to_string()],
+                vec![],
+            ),
+            create_feature_with_security(
+                "feature2",
+                None,
+                None,
+                vec!["NET_ADMIN".to_string()],
+                vec![],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.cap_add, vec!["NET_ADMIN", "SYS_PTRACE"]);
+    }
+
+    #[test]
+    fn test_cap_add_lowercase_normalization() {
+        // All lowercase capabilities should be converted to uppercase
+        let config = create_config(None, None, vec!["net_admin".to_string()], vec![]);
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                None,
+                None,
+                vec!["sys_ptrace".to_string()],
+                vec![],
+            ),
+            create_feature_with_security(
+                "feature2",
+                None,
+                None,
+                vec!["net_raw".to_string()],
+                vec![],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.cap_add, vec!["NET_ADMIN", "SYS_PTRACE", "NET_RAW"]);
+    }
+
+    #[test]
+    fn test_cap_add_preserve_first_occurrence_order() {
+        // Deduplication should preserve order of first occurrence
+        let config = create_config(
+            None,
+            None,
+            vec!["CAP_A".to_string(), "CAP_B".to_string()],
+            vec![],
+        );
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                None,
+                None,
+                vec!["CAP_C".to_string(), "cap_a".to_string()],
+                vec![],
+            ),
+            create_feature_with_security(
+                "feature2",
+                None,
+                None,
+                vec!["CAP_D".to_string(), "cap_b".to_string()],
+                vec![],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        // CAP_A and CAP_B appear first from config, then CAP_C (new), then CAP_A duplicate (ignored), then CAP_D (new), then CAP_B duplicate (ignored)
+        assert_eq!(result.cap_add, vec!["CAP_A", "CAP_B", "CAP_C", "CAP_D"]);
+    }
+
+    #[test]
+    fn test_cap_add_no_features() {
+        // Config: ["SYS_PTRACE"], No features => Result: ["SYS_PTRACE"]
+        let config = create_config(None, None, vec!["SYS_PTRACE".to_string()], vec![]);
+        let features = vec![];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.cap_add, vec!["SYS_PTRACE"]);
+    }
+
+    #[test]
+    fn test_cap_add_feature_only() {
+        // Config: [], Feature1: ["SYS_PTRACE"] => Result: ["SYS_PTRACE"]
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![create_feature_with_security(
+            "feature1",
+            None,
+            None,
+            vec!["SYS_PTRACE".to_string()],
+            vec![],
+        )];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.cap_add, vec!["SYS_PTRACE"]);
+    }
+
+    #[test]
+    fn test_cap_add_multiple_features() {
+        // Test with 3 features, each adding capabilities
+        let config = create_config(None, None, vec!["CAP_CONFIG".to_string()], vec![]);
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                None,
+                None,
+                vec!["CAP_F1".to_string()],
+                vec![],
+            ),
+            create_feature_with_security(
+                "feature2",
+                None,
+                None,
+                vec!["CAP_F2".to_string()],
+                vec![],
+            ),
+            create_feature_with_security(
+                "feature3",
+                None,
+                None,
+                vec!["CAP_F3".to_string()],
+                vec![],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(
+            result.cap_add,
+            vec!["CAP_CONFIG", "CAP_F1", "CAP_F2", "CAP_F3"]
+        );
+    }
+
+    // ==================== Rule 4: Security Options (Union + Deduplicate) ====================
+
+    #[test]
+    fn test_security_opt_all_empty() {
+        // Config: [], Feature1: [], Feature2: [] => Result: []
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.security_opt, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_security_opt_config_only() {
+        // Config: ["seccomp:unconfined"], Feature1: [], Feature2: [] => Result: ["seccomp:unconfined"]
+        let config = create_config(None, None, vec![], vec!["seccomp:unconfined".to_string()]);
+        let features = vec![
+            create_feature_with_security("feature1", None, None, vec![], vec![]),
+            create_feature_with_security("feature2", None, None, vec![], vec![]),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.security_opt, vec!["seccomp:unconfined"]);
+    }
+
+    #[test]
+    fn test_security_opt_duplicate_exact() {
+        // Config: ["seccomp:unconfined"], Feature1: ["seccomp:unconfined"], Feature2: [] => Result: ["seccomp:unconfined"]
+        let config = create_config(None, None, vec![], vec!["seccomp:unconfined".to_string()]);
+        let features = vec![create_feature_with_security(
+            "feature1",
+            None,
+            None,
+            vec![],
+            vec!["seccomp:unconfined".to_string()],
+        )];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.security_opt, vec!["seccomp:unconfined"]);
+    }
+
+    #[test]
+    fn test_security_opt_multiple_unique() {
+        // Config: ["apparmor:unconfined"], Feature1: ["seccomp:unconfined"], Feature2: [] => Result: ["apparmor:unconfined", "seccomp:unconfined"]
+        let config = create_config(None, None, vec![], vec!["apparmor:unconfined".to_string()]);
+        let features = vec![create_feature_with_security(
+            "feature1",
+            None,
+            None,
+            vec![],
+            vec!["seccomp:unconfined".to_string()],
+        )];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(
+            result.security_opt,
+            vec!["apparmor:unconfined", "seccomp:unconfined"]
+        );
+    }
+
+    #[test]
+    fn test_security_opt_case_sensitive() {
+        // Security options are case-sensitive, so different cases should be treated as different
+        let config = create_config(None, None, vec![], vec!["Seccomp:Unconfined".to_string()]);
+        let features = vec![create_feature_with_security(
+            "feature1",
+            None,
+            None,
+            vec![],
+            vec!["seccomp:unconfined".to_string()],
+        )];
+
+        let result = merge_security_options(&config, &features);
+        // Both should be preserved because they differ in case
+        assert_eq!(
+            result.security_opt,
+            vec!["Seccomp:Unconfined", "seccomp:unconfined"]
+        );
+    }
+
+    #[test]
+    fn test_security_opt_preserve_first_occurrence_order() {
+        // Deduplication should preserve order of first occurrence
+        let config = create_config(
+            None,
+            None,
+            vec![],
+            vec!["opt-a".to_string(), "opt-b".to_string()],
+        );
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                None,
+                None,
+                vec![],
+                vec!["opt-c".to_string(), "opt-a".to_string()],
+            ),
+            create_feature_with_security(
+                "feature2",
+                None,
+                None,
+                vec![],
+                vec!["opt-d".to_string(), "opt-b".to_string()],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        // opt-a and opt-b appear first from config, then opt-c (new), then opt-a duplicate (ignored), then opt-d (new), then opt-b duplicate (ignored)
+        assert_eq!(
+            result.security_opt,
+            vec!["opt-a", "opt-b", "opt-c", "opt-d"]
+        );
+    }
+
+    #[test]
+    fn test_security_opt_no_features() {
+        // Config: ["seccomp:unconfined"], No features => Result: ["seccomp:unconfined"]
+        let config = create_config(None, None, vec![], vec!["seccomp:unconfined".to_string()]);
+        let features = vec![];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.security_opt, vec!["seccomp:unconfined"]);
+    }
+
+    #[test]
+    fn test_security_opt_feature_only() {
+        // Config: [], Feature1: ["seccomp:unconfined"] => Result: ["seccomp:unconfined"]
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![create_feature_with_security(
+            "feature1",
+            None,
+            None,
+            vec![],
+            vec!["seccomp:unconfined".to_string()],
+        )];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(result.security_opt, vec!["seccomp:unconfined"]);
+    }
+
+    #[test]
+    fn test_security_opt_multiple_features() {
+        // Test with 3 features, each adding security options
+        let config = create_config(None, None, vec![], vec!["opt-config".to_string()]);
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                None,
+                None,
+                vec![],
+                vec!["opt-f1".to_string()],
+            ),
+            create_feature_with_security(
+                "feature2",
+                None,
+                None,
+                vec![],
+                vec!["opt-f2".to_string()],
+            ),
+            create_feature_with_security(
+                "feature3",
+                None,
+                None,
+                vec![],
+                vec!["opt-f3".to_string()],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(
+            result.security_opt,
+            vec!["opt-config", "opt-f1", "opt-f2", "opt-f3"]
+        );
+    }
+
+    #[test]
+    fn test_security_opt_complex_values() {
+        // Test with more complex security option values
+        let config = create_config(
+            None,
+            None,
+            vec![],
+            vec!["seccomp=/path/to/profile.json".to_string()],
+        );
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                None,
+                None,
+                vec![],
+                vec!["apparmor=docker-default".to_string()],
+            ),
+            create_feature_with_security(
+                "feature2",
+                None,
+                None,
+                vec![],
+                vec!["label=type:container_runtime_t".to_string()],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+        assert_eq!(
+            result.security_opt,
+            vec![
+                "seccomp=/path/to/profile.json",
+                "apparmor=docker-default",
+                "label=type:container_runtime_t"
+            ]
+        );
+    }
+
+    // ==================== Combined Tests ====================
+
+    #[test]
+    fn test_all_options_combined() {
+        // Test merging all security options together
+        let config = create_config(
+            Some(false),
+            Some(false),
+            vec!["NET_ADMIN".to_string()],
+            vec!["seccomp:unconfined".to_string()],
+        );
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                Some(true),
+                Some(false),
+                vec!["SYS_PTRACE".to_string()],
+                vec!["apparmor:unconfined".to_string()],
+            ),
+            create_feature_with_security(
+                "feature2",
+                Some(false),
+                Some(true),
+                vec!["net_admin".to_string(), "NET_RAW".to_string()],
+                vec!["label=disable".to_string()],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+
+        // Privileged: OR logic - feature1 has Some(true)
+        assert_eq!(result.privileged, true);
+
+        // Init: OR logic - feature2 has Some(true)
+        assert_eq!(result.init, true);
+
+        // Cap_add: Union + deduplicate + uppercase
+        assert_eq!(result.cap_add, vec!["NET_ADMIN", "SYS_PTRACE", "NET_RAW"]);
+
+        // Security_opt: Union + deduplicate
+        assert_eq!(
+            result.security_opt,
+            vec!["seccomp:unconfined", "apparmor:unconfined", "label=disable"]
+        );
+    }
+
+    #[test]
+    fn test_empty_config_empty_features() {
+        // Test with completely empty inputs
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![];
+
+        let result = merge_security_options(&config, &features);
+
+        assert_eq!(result.privileged, false);
+        assert_eq!(result.init, false);
+        assert_eq!(result.cap_add, Vec::<String>::new());
+        assert_eq!(result.security_opt, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_config_only_all_options() {
+        // Test with config only, no features
+        let config = create_config(
+            Some(true),
+            Some(true),
+            vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
+            vec![
+                "seccomp:unconfined".to_string(),
+                "apparmor:unconfined".to_string(),
+            ],
+        );
+        let features = vec![];
+
+        let result = merge_security_options(&config, &features);
+
+        assert_eq!(result.privileged, true);
+        assert_eq!(result.init, true);
+        assert_eq!(result.cap_add, vec!["SYS_PTRACE", "NET_ADMIN"]);
+        assert_eq!(
+            result.security_opt,
+            vec!["seccomp:unconfined", "apparmor:unconfined"]
+        );
+    }
+
+    #[test]
+    fn test_features_only_all_options() {
+        // Test with features only, empty config
+        let config = create_config(None, None, vec![], vec![]);
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                Some(true),
+                Some(true),
+                vec!["SYS_PTRACE".to_string()],
+                vec!["seccomp:unconfined".to_string()],
+            ),
+            create_feature_with_security(
+                "feature2",
+                None,
+                None,
+                vec!["NET_ADMIN".to_string()],
+                vec!["apparmor:unconfined".to_string()],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+
+        assert_eq!(result.privileged, true);
+        assert_eq!(result.init, true);
+        assert_eq!(result.cap_add, vec!["SYS_PTRACE", "NET_ADMIN"]);
+        assert_eq!(
+            result.security_opt,
+            vec!["seccomp:unconfined", "apparmor:unconfined"]
+        );
+    }
+
+    #[test]
+    fn test_many_duplicates() {
+        // Test with many duplicate capabilities and security options across multiple sources
+        let config = create_config(
+            None,
+            None,
+            vec![
+                "SYS_PTRACE".to_string(),
+                "NET_ADMIN".to_string(),
+                "sys_ptrace".to_string(),
+            ],
+            vec![
+                "seccomp:unconfined".to_string(),
+                "apparmor:unconfined".to_string(),
+                "seccomp:unconfined".to_string(),
+            ],
+        );
+        let features = vec![
+            create_feature_with_security(
+                "feature1",
+                None,
+                None,
+                vec!["net_admin".to_string(), "SYS_PTRACE".to_string()],
+                vec![
+                    "seccomp:unconfined".to_string(),
+                    "label=disable".to_string(),
+                ],
+            ),
+            create_feature_with_security(
+                "feature2",
+                None,
+                None,
+                vec!["NET_ADMIN".to_string(), "NET_RAW".to_string()],
+                vec![
+                    "apparmor:unconfined".to_string(),
+                    "label=disable".to_string(),
+                ],
+            ),
+        ];
+
+        let result = merge_security_options(&config, &features);
+
+        // Capabilities should be deduplicated and uppercased
+        assert_eq!(result.cap_add, vec!["SYS_PTRACE", "NET_ADMIN", "NET_RAW"]);
+
+        // Security options should be deduplicated (preserving first occurrence)
+        assert_eq!(
+            result.security_opt,
+            vec!["seccomp:unconfined", "apparmor:unconfined", "label=disable"]
+        );
+    }
+
+    #[test]
+    fn test_merged_security_options_to_docker_args() {
+        // Test with all options enabled
+        let options = MergedSecurityOptions {
+            privileged: true,
+            init: true,
+            cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
+            security_opt: vec!["seccomp:unconfined".to_string()],
+        };
+
+        let args = options.to_docker_args();
+
+        // Should contain --privileged
+        assert!(args.contains(&"--privileged".to_string()));
+
+        // Should contain --init
+        assert!(args.contains(&"--init".to_string()));
+
+        // Should contain capabilities
+        assert!(args.contains(&"--cap-add".to_string()));
+        assert!(args.contains(&"SYS_PTRACE".to_string()));
+        assert!(args.contains(&"NET_ADMIN".to_string()));
+
+        // Should contain security options
+        assert!(args.contains(&"--security-opt".to_string()));
+        assert!(args.contains(&"seccomp:unconfined".to_string()));
+    }
+
+    #[test]
+    fn test_merged_security_options_to_docker_args_init_only() {
+        // Test with only init enabled
+        let options = MergedSecurityOptions {
+            privileged: false,
+            init: true,
+            cap_add: vec![],
+            security_opt: vec![],
+        };
+
+        let args = options.to_docker_args();
+
+        // Should contain --init
+        assert!(args.contains(&"--init".to_string()));
+
+        // Should NOT contain --privileged
+        assert!(!args.contains(&"--privileged".to_string()));
+
+        // Should NOT contain capability flags
+        assert!(!args.contains(&"--cap-add".to_string()));
+
+        // Should NOT contain security option flags
+        assert!(!args.contains(&"--security-opt".to_string()));
+    }
+
+    #[test]
+    fn test_merged_security_options_to_docker_args_none() {
+        // Test with no options enabled
+        let options = MergedSecurityOptions::default();
+
+        let args = options.to_docker_args();
+
+        // Should be empty
+        assert!(args.is_empty());
     }
 }

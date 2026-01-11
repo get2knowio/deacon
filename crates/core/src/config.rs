@@ -545,6 +545,12 @@ pub struct DevContainerConfig {
     #[serde(default)]
     pub privileged: Option<bool>,
 
+    /// Whether to use an init inside the container.
+    ///
+    /// Reference: [Container Configuration - init](https://containers.dev/implementors/json_reference/#general-properties)
+    #[serde(default)]
+    pub init: Option<bool>,
+
     /// Linux capabilities to add to the container.
     ///
     /// Reference: [Container Configuration - capAdd](https://containers.dev/implementors/json_reference/#cap-add)
@@ -993,6 +999,7 @@ impl Default for DevContainerConfig {
             update_content_command: None,
             host_requirements: None,
             privileged: None,
+            init: None,
             cap_add: Vec::new(),
             security_opt: Vec::new(),
         }
@@ -1168,8 +1175,9 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.host_requirements.clone()),
 
-            // Security options: last writer wins for privileged, concatenate arrays for capabilities and security opts
+            // Security options: last writer wins for privileged and init, concatenate arrays for capabilities and security opts
             privileged: overlay.privileged.or(base.privileged),
+            init: overlay.init.or(base.init),
             cap_add: Self::concat_string_arrays(&base.cap_add, &overlay.cap_add),
             security_opt: Self::concat_string_arrays(&base.security_opt, &overlay.security_opt),
         }

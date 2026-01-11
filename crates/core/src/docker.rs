@@ -582,6 +582,7 @@ pub trait DockerLifecycle: Docker + ContainerOps {
         workspace_path: &Path,
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<ContainerResult>;
 }
 
@@ -1595,13 +1596,14 @@ impl ContainerOps for CliRuntime {
         Ok(container_ids)
     }
 
-    #[instrument(skip(self, config))]
+    #[instrument(skip(self, config, merged_security))]
     async fn create_container(
         &self,
         identity: &ContainerIdentity,
         config: &DevContainerConfig,
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<String> {
         debug!(
             "Creating container with identity: {:?}, gpu_mode: {:?}",
@@ -1679,17 +1681,8 @@ impl ContainerOps for CliRuntime {
             }
         }
 
-        // Add security options from configuration (centralized)
-        {
-            use crate::security::SecurityOptions;
-            let security = SecurityOptions {
-                privileged: config.privileged.unwrap_or(false),
-                cap_add: config.cap_add.clone(),
-                security_opt: config.security_opt.clone(),
-                conflicts: Vec::new(),
-            };
-            args.extend(security.to_docker_args());
-        }
+        // Add security options from merged security (config + features)
+        args.extend(merged_security.to_docker_args());
 
         // Add port forwarding from forwardPorts configuration
         for port_spec in &config.forward_ports {
@@ -1911,7 +1904,7 @@ impl ContainerOps for CliRuntime {
 }
 
 impl DockerLifecycle for CliRuntime {
-    #[instrument(skip(self, config))]
+    #[instrument(skip(self, config, merged_security))]
     async fn up(
         &self,
         identity: &ContainerIdentity,
@@ -1919,6 +1912,7 @@ impl DockerLifecycle for CliRuntime {
         workspace_path: &Path,
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
     ) -> Result<ContainerResult> {
         debug!(
             "Starting up container workflow with gpu_mode: {:?}",
@@ -1956,7 +1950,7 @@ impl DockerLifecycle for CliRuntime {
 
         // Create new container
         let container_id = self
-            .create_container(identity, config, workspace_path, gpu_mode)
+            .create_container(identity, config, workspace_path, gpu_mode, merged_security)
             .await?;
         self.start_container(&container_id).await?;
 
@@ -2548,13 +2542,14 @@ pub mod mock {
             Ok(container_ids)
         }
 
-        #[instrument(skip(self, config))]
+        #[instrument(skip(self, config, merged_security))]
         async fn create_container(
             &self,
             identity: &ContainerIdentity,
             config: &DevContainerConfig,
             workspace_path: &Path,
             gpu_mode: crate::gpu::GpuMode,
+            merged_security: &crate::features::MergedSecurityOptions,
         ) -> Result<String> {
             debug!(
                 "MockDocker create_container called with gpu_mode: {:?}",
@@ -2690,7 +2685,7 @@ pub mod mock {
 
     #[allow(async_fn_in_trait)]
     impl DockerLifecycle for MockDocker {
-        #[instrument(skip(self, config))]
+        #[instrument(skip(self, config, merged_security))]
         async fn up(
             &self,
             identity: &ContainerIdentity,
@@ -2698,6 +2693,7 @@ pub mod mock {
             workspace_path: &Path,
             remove_existing: bool,
             gpu_mode: crate::gpu::GpuMode,
+            merged_security: &crate::features::MergedSecurityOptions,
         ) -> Result<ContainerResult> {
             debug!("MockDocker up called with gpu_mode: {:?}", gpu_mode);
 
@@ -2732,7 +2728,7 @@ pub mod mock {
 
             // Create new container
             let container_id = self
-                .create_container(identity, config, workspace_path, gpu_mode)
+                .create_container(identity, config, workspace_path, gpu_mode, merged_security)
                 .await?;
             self.start_container(&container_id).await?;
 
@@ -3166,12 +3162,14 @@ mod tests {
             ..Default::default()
         };
 
+        let merged_security = crate::features::MergedSecurityOptions::default();
         let container_id = mock_docker
             .create_container(
                 &identity,
                 &config,
                 Path::new("/workspace"),
                 crate::gpu::GpuMode::None,
+                &merged_security,
             )
             .await
             .unwrap();
