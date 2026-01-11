@@ -97,6 +97,106 @@ pub fn is_empty_command(cmd: &serde_json::Value) -> bool {
     }
 }
 
+/// Aggregate lifecycle commands for a specific phase from features and config.
+///
+/// This function collects lifecycle commands from all resolved features (in installation order)
+/// and the devcontainer configuration, filtering out empty/null commands and preserving
+/// source attribution for error reporting.
+///
+/// # Ordering
+///
+/// Per the feature lifecycle contract:
+/// 1. Feature commands execute first, in installation order
+/// 2. Config command executes last
+///
+/// This ensures features set up prerequisites (environment, tools) before config commands run.
+///
+/// # Arguments
+///
+/// * `phase` - Which lifecycle phase to aggregate (onCreate, postCreate, etc.)
+/// * `features` - Resolved features in installation order
+/// * `config` - DevContainerConfig with user commands
+///
+/// # Returns
+///
+/// LifecycleCommandList with feature commands first, then config.
+/// Empty/null commands are filtered out.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::container_lifecycle::aggregate_lifecycle_commands;
+/// use deacon_core::lifecycle::LifecyclePhase;
+/// use deacon_core::features::ResolvedFeature;
+/// use deacon_core::config::DevContainerConfig;
+///
+/// // Given features with lifecycle commands and a config
+/// let features = vec![/* ... */];
+/// let config = DevContainerConfig::default();
+///
+/// // Aggregate onCreate commands
+/// let command_list = aggregate_lifecycle_commands(
+///     LifecyclePhase::OnCreate,
+///     &features,
+///     &config,
+/// );
+///
+/// // Commands are ordered: feature1, feature2, ..., config
+/// ```
+pub fn aggregate_lifecycle_commands(
+    phase: LifecyclePhase,
+    features: &[crate::features::ResolvedFeature],
+    config: &crate::config::DevContainerConfig,
+) -> LifecycleCommandList {
+    let mut commands = Vec::new();
+
+    // Feature commands first, in installation order
+    for feature in features {
+        let cmd_opt = match phase {
+            LifecyclePhase::Initialize => None, // Features don't have initialize commands
+            LifecyclePhase::OnCreate => feature.metadata.on_create_command.as_ref(),
+            LifecyclePhase::UpdateContent => feature.metadata.update_content_command.as_ref(),
+            LifecyclePhase::PostCreate => feature.metadata.post_create_command.as_ref(),
+            LifecyclePhase::Dotfiles => None, // Dotfiles phase has no corresponding command field
+            LifecyclePhase::PostStart => feature.metadata.post_start_command.as_ref(),
+            LifecyclePhase::PostAttach => feature.metadata.post_attach_command.as_ref(),
+        };
+
+        if let Some(cmd) = cmd_opt {
+            if !is_empty_command(cmd) {
+                commands.push(AggregatedLifecycleCommand {
+                    command: cmd.clone(),
+                    source: LifecycleCommandSource::Feature {
+                        id: feature.id.clone(),
+                    },
+                });
+            }
+        }
+    }
+
+    // Config command last
+    let config_cmd_opt = match phase {
+        LifecyclePhase::Initialize => config.initialize_command.as_ref(),
+        LifecyclePhase::OnCreate => config.on_create_command.as_ref(),
+        LifecyclePhase::UpdateContent => config.update_content_command.as_ref(),
+        LifecyclePhase::PostCreate => config.post_create_command.as_ref(),
+        LifecyclePhase::Dotfiles => None, // Dotfiles phase has no corresponding command field
+        LifecyclePhase::PostStart => config.post_start_command.as_ref(),
+        LifecyclePhase::PostAttach => config.post_attach_command.as_ref(),
+    };
+
+    if let Some(cmd) = config_cmd_opt {
+        if !is_empty_command(cmd) {
+            commands.push(AggregatedLifecycleCommand {
+                command: cmd.clone(),
+                source: LifecycleCommandSource::Config,
+            });
+        }
+    }
+
+    LifecycleCommandList { commands }
+}
+
 /// A lifecycle command ready for execution with source tracking.
 ///
 /// Combines a lifecycle command (which can be a string, array, or object per the
@@ -107,6 +207,33 @@ pub struct AggregatedLifecycleCommand {
     pub command: serde_json::Value,
     /// Where this command came from
     pub source: LifecycleCommandSource,
+}
+
+/// Ordered list of lifecycle commands for a specific phase.
+///
+/// Feature commands come first (in installation order), then config command.
+/// Empty/null commands are filtered out during aggregation.
+#[derive(Debug, Clone, Default)]
+pub struct LifecycleCommandList {
+    /// Commands in execution order
+    pub commands: Vec<AggregatedLifecycleCommand>,
+}
+
+impl LifecycleCommandList {
+    /// Create a new empty command list
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Check if the command list is empty
+    pub fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
+
+    /// Get the number of commands in the list
+    pub fn len(&self) -> usize {
+        self.commands.len()
+    }
 }
 
 /// Configuration for dotfiles installation during lifecycle execution.
@@ -746,6 +873,56 @@ where
     D: Docker,
     F: Fn(ProgressEvent) -> anyhow::Result<()>,
 {
+    // Convert Vec<String> to Vec<AggregatedLifecycleCommand> without source attribution
+    // This is for backward compatibility with existing code that doesn't use feature aggregation
+    let aggregated_commands: Vec<AggregatedLifecycleCommand> = commands
+        .iter()
+        .map(|cmd| AggregatedLifecycleCommand {
+            command: serde_json::Value::String(cmd.clone()),
+            source: LifecycleCommandSource::Config,
+        })
+        .collect();
+
+    execute_lifecycle_phase_impl(
+        phase,
+        &aggregated_commands,
+        config,
+        docker,
+        context,
+        detected_shell,
+        progress_callback,
+    )
+    .await
+}
+
+/// Execute a single lifecycle phase with source-attributed commands.
+///
+/// T027: This function supports fail-fast error handling with source attribution.
+/// When a command fails, execution stops immediately and the error message includes
+/// which feature or config provided the failing command.
+///
+/// # Arguments
+///
+/// * `phase` - The lifecycle phase to execute
+/// * `commands` - Commands with source attribution (from features and config)
+/// * `config` - Container lifecycle configuration
+/// * `docker` - Docker client
+/// * `context` - Variable substitution context
+/// * `detected_shell` - Shell detected in the container
+/// * `progress_callback` - Optional callback for progress events
+pub async fn execute_lifecycle_phase_with_sources<D, F>(
+    phase: LifecyclePhase,
+    commands: &[AggregatedLifecycleCommand],
+    config: &ContainerLifecycleConfig,
+    docker: &D,
+    context: &SubstitutionContext,
+    detected_shell: Option<&str>,
+    progress_callback: Option<&F>,
+) -> Result<PhaseResult>
+where
+    D: Docker,
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
     execute_lifecycle_phase_impl(
         phase,
         commands,
@@ -760,10 +937,12 @@ where
 
 /// Execute a single lifecycle phase in the container (implementation detail)
 /// This is the actual implementation extracted to support both blocking and non-blocking execution
+///
+/// T027: Now accepts AggregatedLifecycleCommand to support source attribution in error messages
 #[instrument(skip(commands, config, docker, context, progress_callback))]
 async fn execute_lifecycle_phase_impl<D, F>(
     phase: LifecyclePhase,
-    commands: &[String],
+    commands: &[AggregatedLifecycleCommand],
     config: &ContainerLifecycleConfig,
     docker: &D,
     context: &SubstitutionContext,
@@ -777,13 +956,22 @@ where
     debug!("Executing lifecycle phase: {}", phase.as_str());
     let phase_start = Instant::now();
 
+    // Convert aggregated commands to string vec for progress event
+    let command_strings: Vec<String> = commands
+        .iter()
+        .map(|agg| match &agg.command {
+            serde_json::Value::String(s) => s.clone(),
+            other => serde_json::to_string(other).unwrap_or_else(|_| "".to_string()),
+        })
+        .collect();
+
     // Emit phase begin event
     if let Some(callback) = progress_callback {
         let event = ProgressEvent::LifecyclePhaseBegin {
             id: ProgressTracker::next_event_id(),
             timestamp: ProgressTracker::current_timestamp(),
             phase: phase.as_str().to_string(),
-            commands: commands.to_vec(),
+            commands: command_strings.clone(),
         };
         if let Err(e) = callback(event) {
             debug!("Failed to emit phase begin event: {}", e);
@@ -797,12 +985,19 @@ where
         success: true,
     };
 
-    for (i, command_template) in commands.iter().enumerate() {
+    for (i, agg_cmd) in commands.iter().enumerate() {
+        // Extract command string from the aggregated command
+        let command_template = match &agg_cmd.command {
+            serde_json::Value::String(s) => s.clone(),
+            other => serde_json::to_string(other).unwrap_or_else(|_| "".to_string()),
+        };
+
         debug!(
-            "Executing command {} of {} for phase {}: {}",
+            "Executing command {} of {} for phase {} (source: {}): {}",
             i + 1,
             commands.len(),
             phase.as_str(),
+            agg_cmd.source,
             command_template
         );
 
@@ -927,15 +1122,35 @@ where
 
                 phase_result.commands.push(command_result);
 
-                // If command failed, mark phase as failed but continue with next command
+                // T027: Fail-fast behavior - stop immediately on command failure with source attribution
                 if exec_result.exit_code != 0 {
                     phase_result.success = false;
-                    error!(
-                        "Container command failed in phase {} with exit code {}: {}",
+                    let error_msg = format!(
+                        "Lifecycle command failed (source: {}) in phase {} with exit code {}: {}",
+                        agg_cmd.source,
                         phase.as_str(),
                         exec_result.exit_code,
                         substituted_command
                     );
+                    error!("{}", error_msg);
+
+                    phase_result.total_duration = phase_start.elapsed();
+
+                    // Emit phase end event before returning error
+                    if let Some(callback) = progress_callback {
+                        let event = ProgressEvent::LifecyclePhaseEnd {
+                            id: ProgressTracker::next_event_id(),
+                            timestamp: ProgressTracker::current_timestamp(),
+                            phase: phase.as_str().to_string(),
+                            duration_ms: phase_result.total_duration.as_millis() as u64,
+                            success: false,
+                        };
+                        if let Err(emit_err) = callback(event) {
+                            debug!("Failed to emit phase end event: {}", emit_err);
+                        }
+                    }
+
+                    return Err(DeaconError::Lifecycle(error_msg));
                 }
             }
             Err(e) => {
@@ -973,12 +1188,14 @@ where
                 }
 
                 error!(
-                    "Failed to execute container command in phase {}: {}",
+                    "Failed to execute container command (source: {}) in phase {}: {}",
+                    agg_cmd.source,
                     phase.as_str(),
                     e
                 );
                 return Err(DeaconError::Lifecycle(format!(
-                    "Failed to execute container command in phase {}: {}",
+                    "Failed to execute container command (source: {}) in phase {}: {}",
+                    agg_cmd.source,
                     phase.as_str(),
                     e
                 )));
@@ -2571,5 +2788,718 @@ mod tests {
         assert!(!super::is_empty_command(&json!([{}])));
         assert!(!super::is_empty_command(&json!({"nested": {}})));
         assert!(!super::is_empty_command(&json!({"nested": []})));
+    }
+
+    // ============================================================================
+    // Tests for aggregate_lifecycle_commands()
+    // ============================================================================
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_basic_ordering() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Create two features in installation order
+        let feature1 = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: Some(json!("npm install")),
+                ..Default::default()
+            },
+        };
+
+        let feature2 = ResolvedFeature {
+            id: "python".to_string(),
+            source: "ghcr.io/devcontainers/features/python".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "python".to_string(),
+                on_create_command: Some(json!("pip install -r requirements.txt")),
+                ..Default::default()
+            },
+        };
+
+        // Create config with onCreate command
+        let mut config = DevContainerConfig::default();
+        config.on_create_command = Some(json!("echo ready"));
+
+        let features = vec![feature1, feature2];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // Verify ordering: feature1, feature2, config
+        assert_eq!(commands.len(), 3);
+        assert_eq!(commands[0].command, json!("npm install"));
+        assert_eq!(
+            commands[0].source,
+            LifecycleCommandSource::Feature {
+                id: "node".to_string()
+            }
+        );
+        assert_eq!(
+            commands[1].command,
+            json!("pip install -r requirements.txt")
+        );
+        assert_eq!(
+            commands[1].source,
+            LifecycleCommandSource::Feature {
+                id: "python".to_string()
+            }
+        );
+        assert_eq!(commands[2].command, json!("echo ready"));
+        assert_eq!(commands[2].source, LifecycleCommandSource::Config);
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_empty_filtering() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Feature with null onCreate command
+        let feature1 = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: None,
+                ..Default::default()
+            },
+        };
+
+        // Feature with valid onCreate command
+        let feature2 = ResolvedFeature {
+            id: "python".to_string(),
+            source: "ghcr.io/devcontainers/features/python".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "python".to_string(),
+                on_create_command: Some(json!("pip install")),
+                ..Default::default()
+            },
+        };
+
+        // Config with empty string onCreate command
+        let mut config = DevContainerConfig::default();
+        config.on_create_command = Some(json!(""));
+
+        let features = vec![feature1, feature2];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // Only python feature command should be included
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].command, json!("pip install"));
+        assert_eq!(
+            commands[0].source,
+            LifecycleCommandSource::Feature {
+                id: "python".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_all_empty() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Feature with null onCreate command
+        let feature1 = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: None,
+                ..Default::default()
+            },
+        };
+
+        // Feature with empty array onCreate command
+        let feature2 = ResolvedFeature {
+            id: "python".to_string(),
+            source: "ghcr.io/devcontainers/features/python".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "python".to_string(),
+                on_create_command: Some(json!([])),
+                ..Default::default()
+            },
+        };
+
+        // Config with empty object onCreate command
+        let mut config = DevContainerConfig::default();
+        config.on_create_command = Some(json!({}));
+
+        let features = vec![feature1, feature2];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // No commands should be included
+        assert_eq!(commands.len(), 0);
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_no_features() {
+        use crate::config::DevContainerConfig;
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+
+        // Config with onCreate command
+        let mut config = DevContainerConfig::default();
+        config.on_create_command = Some(json!("echo hello"));
+
+        let features = vec![];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // Only config command should be included
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].command, json!("echo hello"));
+        assert_eq!(commands[0].source, LifecycleCommandSource::Config);
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_single_feature() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Single feature with onCreate command
+        let feature = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: Some(json!("npm install")),
+                ..Default::default()
+            },
+        };
+
+        // Config with no onCreate command
+        let config = DevContainerConfig::default();
+
+        let features = vec![feature];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // Only feature command should be included
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].command, json!("npm install"));
+        assert_eq!(
+            commands[0].source,
+            LifecycleCommandSource::Feature {
+                id: "node".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_complex_formats() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Feature with object command (parallel commands)
+        let feature = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: Some(json!({
+                    "npm": "npm install",
+                    "build": "npm run build"
+                })),
+                ..Default::default()
+            },
+        };
+
+        // Config with array command
+        let mut config = DevContainerConfig::default();
+        config.on_create_command = Some(json!(["./setup.sh", "--verbose"]));
+
+        let features = vec![feature];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // Both commands should be included with their complex formats
+        assert_eq!(commands.len(), 2);
+        assert_eq!(
+            commands[0].command,
+            json!({
+                "npm": "npm install",
+                "build": "npm run build"
+            })
+        );
+        assert_eq!(
+            commands[0].source,
+            LifecycleCommandSource::Feature {
+                id: "node".to_string()
+            }
+        );
+        assert_eq!(commands[1].command, json!(["./setup.sh", "--verbose"]));
+        assert_eq!(commands[1].source, LifecycleCommandSource::Config);
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_all_phases() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Feature with commands for all phases
+        let feature = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: Some(json!("onCreate-feature")),
+                update_content_command: Some(json!("updateContent-feature")),
+                post_create_command: Some(json!("postCreate-feature")),
+                post_start_command: Some(json!("postStart-feature")),
+                post_attach_command: Some(json!("postAttach-feature")),
+                ..Default::default()
+            },
+        };
+
+        // Config with commands for all phases
+        let mut config = DevContainerConfig::default();
+        config.on_create_command = Some(json!("onCreate-config"));
+        config.update_content_command = Some(json!("updateContent-config"));
+        config.post_create_command = Some(json!("postCreate-config"));
+        config.post_start_command = Some(json!("postStart-config"));
+        config.post_attach_command = Some(json!("postAttach-config"));
+
+        let features = vec![feature];
+
+        // Test OnCreate phase
+        let on_create_commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+        assert_eq!(on_create_commands.len(), 2);
+        assert_eq!(on_create_commands[0].command, json!("onCreate-feature"));
+        assert_eq!(on_create_commands[1].command, json!("onCreate-config"));
+
+        // Test UpdateContent phase
+        let update_content_commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::UpdateContent, &features, &config)
+                .commands;
+        assert_eq!(update_content_commands.len(), 2);
+        assert_eq!(
+            update_content_commands[0].command,
+            json!("updateContent-feature")
+        );
+        assert_eq!(
+            update_content_commands[1].command,
+            json!("updateContent-config")
+        );
+
+        // Test PostCreate phase
+        let post_create_commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::PostCreate, &features, &config)
+                .commands;
+        assert_eq!(post_create_commands.len(), 2);
+        assert_eq!(post_create_commands[0].command, json!("postCreate-feature"));
+        assert_eq!(post_create_commands[1].command, json!("postCreate-config"));
+
+        // Test PostStart phase
+        let post_start_commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::PostStart, &features, &config)
+                .commands;
+        assert_eq!(post_start_commands.len(), 2);
+        assert_eq!(post_start_commands[0].command, json!("postStart-feature"));
+        assert_eq!(post_start_commands[1].command, json!("postStart-config"));
+
+        // Test PostAttach phase
+        let post_attach_commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::PostAttach, &features, &config)
+                .commands;
+        assert_eq!(post_attach_commands.len(), 2);
+        assert_eq!(post_attach_commands[0].command, json!("postAttach-feature"));
+        assert_eq!(post_attach_commands[1].command, json!("postAttach-config"));
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_initialize_phase() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Feature (features don't have initialize commands)
+        let feature = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: Some(json!("npm install")),
+                ..Default::default()
+            },
+        };
+
+        // Config with initialize command
+        let mut config = DevContainerConfig::default();
+        config.initialize_command = Some(json!("initialize-config"));
+
+        let features = vec![feature];
+
+        // Test Initialize phase
+        let initialize_commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::Initialize, &features, &config)
+                .commands;
+
+        // Only config command should be included (features don't support initialize)
+        assert_eq!(initialize_commands.len(), 1);
+        assert_eq!(initialize_commands[0].command, json!("initialize-config"));
+        assert_eq!(
+            initialize_commands[0].source,
+            LifecycleCommandSource::Config
+        );
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_dotfiles_phase() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Feature with onCreate command
+        let feature = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: Some(json!("npm install")),
+                ..Default::default()
+            },
+        };
+
+        // Config with onCreate command
+        let mut config = DevContainerConfig::default();
+        config.on_create_command = Some(json!("echo ready"));
+
+        let features = vec![feature];
+
+        // Test Dotfiles phase (no corresponding command field)
+        let dotfiles_commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::Dotfiles, &features, &config)
+                .commands;
+
+        // No commands should be returned for Dotfiles phase
+        assert_eq!(dotfiles_commands.len(), 0);
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_preserves_installation_order() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Create multiple features to test ordering
+        let feature1 = ResolvedFeature {
+            id: "first".to_string(),
+            source: "first-source".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "first".to_string(),
+                on_create_command: Some(json!("first-command")),
+                ..Default::default()
+            },
+        };
+
+        let feature2 = ResolvedFeature {
+            id: "second".to_string(),
+            source: "second-source".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "second".to_string(),
+                on_create_command: Some(json!("second-command")),
+                ..Default::default()
+            },
+        };
+
+        let feature3 = ResolvedFeature {
+            id: "third".to_string(),
+            source: "third-source".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "third".to_string(),
+                on_create_command: Some(json!("third-command")),
+                ..Default::default()
+            },
+        };
+
+        let mut config = DevContainerConfig::default();
+        config.on_create_command = Some(json!("config-command"));
+
+        let features = vec![feature1, feature2, feature3];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // Verify strict ordering: first, second, third, config
+        assert_eq!(commands.len(), 4);
+        assert_eq!(commands[0].command, json!("first-command"));
+        assert_eq!(
+            commands[0].source,
+            LifecycleCommandSource::Feature {
+                id: "first".to_string()
+            }
+        );
+        assert_eq!(commands[1].command, json!("second-command"));
+        assert_eq!(
+            commands[1].source,
+            LifecycleCommandSource::Feature {
+                id: "second".to_string()
+            }
+        );
+        assert_eq!(commands[2].command, json!("third-command"));
+        assert_eq!(
+            commands[2].source,
+            LifecycleCommandSource::Feature {
+                id: "third".to_string()
+            }
+        );
+        assert_eq!(commands[3].command, json!("config-command"));
+        assert_eq!(commands[3].source, LifecycleCommandSource::Config);
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_mixed_empty_commands() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Feature 1 with valid command
+        let feature1 = ResolvedFeature {
+            id: "feature1".to_string(),
+            source: "source1".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "feature1".to_string(),
+                on_create_command: Some(json!("command1")),
+                ..Default::default()
+            },
+        };
+
+        // Feature 2 with null command
+        let feature2 = ResolvedFeature {
+            id: "feature2".to_string(),
+            source: "source2".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "feature2".to_string(),
+                on_create_command: None,
+                ..Default::default()
+            },
+        };
+
+        // Feature 3 with empty string
+        let feature3 = ResolvedFeature {
+            id: "feature3".to_string(),
+            source: "source3".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "feature3".to_string(),
+                on_create_command: Some(json!("")),
+                ..Default::default()
+            },
+        };
+
+        // Feature 4 with valid command
+        let feature4 = ResolvedFeature {
+            id: "feature4".to_string(),
+            source: "source4".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "feature4".to_string(),
+                on_create_command: Some(json!("command4")),
+                ..Default::default()
+            },
+        };
+
+        // Feature 5 with empty array
+        let feature5 = ResolvedFeature {
+            id: "feature5".to_string(),
+            source: "source5".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "feature5".to_string(),
+                on_create_command: Some(json!([])),
+                ..Default::default()
+            },
+        };
+
+        let mut config = DevContainerConfig::default();
+        config.on_create_command = Some(json!("config-command"));
+
+        let features = vec![feature1, feature2, feature3, feature4, feature5];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // Only feature1, feature4, and config should be included
+        assert_eq!(commands.len(), 3);
+        assert_eq!(commands[0].command, json!("command1"));
+        assert_eq!(
+            commands[0].source,
+            LifecycleCommandSource::Feature {
+                id: "feature1".to_string()
+            }
+        );
+        assert_eq!(commands[1].command, json!("command4"));
+        assert_eq!(
+            commands[1].source,
+            LifecycleCommandSource::Feature {
+                id: "feature4".to_string()
+            }
+        );
+        assert_eq!(commands[2].command, json!("config-command"));
+        assert_eq!(commands[2].source, LifecycleCommandSource::Config);
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_no_config_command() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Features with onCreate commands
+        let feature1 = ResolvedFeature {
+            id: "feature1".to_string(),
+            source: "source1".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "feature1".to_string(),
+                on_create_command: Some(json!("command1")),
+                ..Default::default()
+            },
+        };
+
+        let feature2 = ResolvedFeature {
+            id: "feature2".to_string(),
+            source: "source2".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "feature2".to_string(),
+                on_create_command: Some(json!("command2")),
+                ..Default::default()
+            },
+        };
+
+        // Config with no onCreate command
+        let config = DevContainerConfig::default();
+
+        let features = vec![feature1, feature2];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // Only feature commands should be included
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[0].command, json!("command1"));
+        assert_eq!(
+            commands[0].source,
+            LifecycleCommandSource::Feature {
+                id: "feature1".to_string()
+            }
+        );
+        assert_eq!(commands[1].command, json!("command2"));
+        assert_eq!(
+            commands[1].source,
+            LifecycleCommandSource::Feature {
+                id: "feature2".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_aggregate_lifecycle_commands_whitespace_not_empty() {
+        use crate::config::DevContainerConfig;
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Feature with whitespace command (should NOT be filtered)
+        let feature = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: Some(json!(" ")),
+                ..Default::default()
+            },
+        };
+
+        let config = DevContainerConfig::default();
+
+        let features = vec![feature];
+
+        // Aggregate onCreate commands
+        let commands =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .commands;
+
+        // Whitespace is not considered empty per the contract
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].command, json!(" "));
     }
 }

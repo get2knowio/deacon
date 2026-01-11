@@ -82,18 +82,18 @@
 
 ### Tests for User Story 2
 
-- [ ] T021 [P] [US2] Unit tests for aggregate_lifecycle_commands() in crates/core/src/container_lifecycle.rs (ordering, filtering)
-- [ ] T022 [P] [US2] Integration test for lifecycle ordering in crates/deacon/tests/integration_feature_lifecycle.rs (docker-shared group)
-- [ ] T023 [P] [US2] Test fail-fast behavior when feature command fails in crates/deacon/tests/integration_feature_lifecycle.rs
+- [x] T021 [P] [US2] Unit tests for aggregate_lifecycle_commands() in crates/core/src/container_lifecycle.rs (ordering, filtering)
+- [x] T022 [P] [US2] Integration test for lifecycle ordering in crates/deacon/tests/integration_feature_lifecycle.rs (docker-shared group)
+- [x] T023 [P] [US2] Test fail-fast behavior when feature command fails in crates/deacon/tests/integration_feature_lifecycle.rs
 
 ### Implementation for User Story 2
 
-- [ ] T024 [US2] Implement aggregate_lifecycle_commands() per contract in crates/core/src/container_lifecycle.rs
-- [ ] T025 [US2] Filter empty/null commands using is_empty_command() in crates/core/src/container_lifecycle.rs
-- [ ] T026 [US2] Update lifecycle.rs to use aggregate_lifecycle_commands() in crates/deacon/src/commands/up/lifecycle.rs
-- [ ] T027 [US2] Implement fail-fast error handling with source attribution in crates/deacon/src/commands/up/lifecycle.rs
-- [ ] T028 [US2] Ensure exit code 1 on lifecycle command failure in crates/deacon/src/commands/up/lifecycle.rs
-- [ ] T029 [US2] Add tracing spans for lifecycle command execution with source in crates/deacon/src/commands/up/lifecycle.rs
+- [x] T024 [US2] Implement aggregate_lifecycle_commands() per contract in crates/core/src/container_lifecycle.rs
+- [x] T025 [US2] Filter empty/null commands using is_empty_command() in crates/core/src/container_lifecycle.rs
+- [x] T026 [US2] Update lifecycle.rs to use aggregate_lifecycle_commands() in crates/deacon/src/commands/up/lifecycle.rs
+- [x] T027 [US2] Implement fail-fast error handling with source attribution in crates/deacon/src/commands/up/lifecycle.rs
+- [x] T028 [US2] Ensure exit code 1 on lifecycle command failure in crates/deacon/src/commands/up/lifecycle.rs
+- [x] T029 [US2] Add tracing spans for lifecycle command execution with source in crates/deacon/src/commands/up/lifecycle.rs
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 

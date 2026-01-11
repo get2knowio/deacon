@@ -12,13 +12,16 @@ use super::{ENV_FORCE_TTY_IF_JSON, ENV_LOG_FORMAT};
 use anyhow::Result;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_env_probe::ContainerProbeMode;
-use deacon_core::container_lifecycle::DotfilesConfig;
+use deacon_core::container_lifecycle::{aggregate_lifecycle_commands, DotfilesConfig};
 use deacon_core::errors::DeaconError;
-use deacon_core::lifecycle::{InvocationContext, InvocationFlags, LifecyclePhaseState};
+use deacon_core::features::ResolvedFeature;
+use deacon_core::lifecycle::{
+    InvocationContext, InvocationFlags, LifecyclePhase, LifecyclePhaseState,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument, span, Level};
 
 /// Resolve PTY preference for lifecycle commands based on flag, environment, and JSON mode
 ///
@@ -102,9 +105,14 @@ pub(crate) fn build_invocation_context(
 
 /// Execute configured lifecycle phases inside a running container.
 ///
-/// This runs the lifecycle command phases defined in `config` (onCreate, postCreate,
-/// postStart, postAttach) in that order, emitting per-phase progress events to
-/// `args.progress_tracker` when present and recording an overall lifecycle duration metric.
+/// This runs the lifecycle command phases defined in `config` and `resolved_features` (onCreate,
+/// updateContent, postCreate, postStart, postAttach) in that order, emitting per-phase progress
+/// events to `args.progress_tracker` when present and recording an overall lifecycle duration metric.
+///
+/// Per User Story 2 (US2) and lifecycle command aggregation contract:
+/// - Feature lifecycle commands execute BEFORE config lifecycle commands
+/// - Commands are aggregated in feature installation order, then config
+/// - Each command's source (feature ID or "config") is logged for tracing and debugging
 ///
 /// Per SC-002 and FR-004:
 /// - On resume with all non-runtime phases complete: skip onCreate, updateContent, postCreate, dotfiles; run postStart, postAttach
@@ -115,6 +123,7 @@ pub(crate) fn build_invocation_context(
 /// - `config`: devcontainer configuration containing lifecycle command definitions and environment.
 /// - `workspace_folder`: host path used to build the substitution context and to derive the container workspace path when not explicitly set in `config`.
 /// - `args`: runtime flags that influence execution (e.g., skipping post-create, non-blocking behavior) and an optional progress tracker.
+/// - `resolved_features`: Features resolved during image build, containing lifecycle commands to execute before config commands.
 /// - `prior_markers`: Previously executed phase markers for resume detection.
 ///
 /// Behavior notes:
@@ -131,6 +140,7 @@ pub(crate) async fn execute_lifecycle_commands(
     effective_env: HashMap<String, String>,
     effective_user: Option<String>,
     cache_folder: &Option<PathBuf>,
+    resolved_features: &[ResolvedFeature],
     prior_markers: Vec<LifecyclePhaseState>,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
@@ -141,6 +151,24 @@ pub(crate) async fn execute_lifecycle_commands(
     use deacon_core::variable::SubstitutionContext;
 
     debug!("Executing lifecycle commands in container");
+
+    // Log feature integration for lifecycle command aggregation
+    if !resolved_features.is_empty() {
+        info!(
+            feature_count = resolved_features.len(),
+            "Lifecycle command aggregation: {} features will have their lifecycle commands executed before config commands",
+            resolved_features.len()
+        );
+        for (idx, feature) in resolved_features.iter().enumerate() {
+            debug!(
+                feature_index = idx,
+                feature_id = %feature.id,
+                "Feature in lifecycle aggregation order"
+            );
+        }
+    } else {
+        debug!("No features with lifecycle commands; using config commands only");
+    }
 
     // T020: --skip-post-create flag handling
     // Per FR-005: When --skip-post-create is provided, up MUST perform required base setup
@@ -230,19 +258,71 @@ pub(crate) async fn execute_lifecycle_commands(
     // onCreate - skip if flagged or marked complete (not skipped by --skip-post-create per FR-005)
     if let Some(skip_reason) = invocation_context.should_skip_phase(LifecyclePhase::OnCreate) {
         debug!("Skipping onCreate: {}", skip_reason);
-    } else if let Some(ref on_create) = config.on_create_command {
-        let phase_commands = commands_from_json_value(on_create)?;
-        commands = commands.with_on_create(phase_commands);
-        debug!("onCreate phase queued for execution");
+    } else {
+        // Aggregate commands from features (in installation order) and config
+        let aggregated_commands =
+            aggregate_lifecycle_commands(LifecyclePhase::OnCreate, resolved_features, config);
+
+        if !aggregated_commands.is_empty() {
+            // Log aggregated commands with source attribution
+            let _span = span!(Level::INFO, "onCreate_aggregation").entered();
+            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+                info!(
+                    command_index = idx,
+                    source = %agg_cmd.source,
+                    "onCreate command queued for execution"
+                );
+            }
+
+            // Convert aggregated commands to string vectors for execution
+            let mut all_commands = Vec::new();
+            for agg_cmd in aggregated_commands {
+                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
+                all_commands.extend(cmd_strings);
+            }
+            commands = commands.with_on_create(all_commands);
+            debug!(
+                "onCreate phase queued for execution with {} aggregated commands",
+                commands.on_create.as_ref().map(|c| c.len()).unwrap_or(0)
+            );
+        }
     }
 
     // updateContent - skip if flagged or marked complete (not skipped by --skip-post-create per FR-005)
     if let Some(skip_reason) = invocation_context.should_skip_phase(LifecyclePhase::UpdateContent) {
         debug!("Skipping updateContent: {}", skip_reason);
-    } else if let Some(ref update_content) = config.update_content_command {
-        let phase_commands = commands_from_json_value(update_content)?;
-        commands = commands.with_update_content(phase_commands);
-        debug!("updateContent phase queued for execution");
+    } else {
+        // Aggregate commands from features (in installation order) and config
+        let aggregated_commands =
+            aggregate_lifecycle_commands(LifecyclePhase::UpdateContent, resolved_features, config);
+
+        if !aggregated_commands.is_empty() {
+            // Log aggregated commands with source attribution
+            let _span = span!(Level::INFO, "updateContent_aggregation").entered();
+            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+                info!(
+                    command_index = idx,
+                    source = %agg_cmd.source,
+                    "updateContent command queued for execution"
+                );
+            }
+
+            // Convert aggregated commands to string vectors for execution
+            let mut all_commands = Vec::new();
+            for agg_cmd in aggregated_commands {
+                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
+                all_commands.extend(cmd_strings);
+            }
+            commands = commands.with_update_content(all_commands);
+            debug!(
+                "updateContent phase queued for execution with {} aggregated commands",
+                commands
+                    .update_content
+                    .as_ref()
+                    .map(|c| c.len())
+                    .unwrap_or(0)
+            );
+        }
     }
 
     // T020: --skip-post-create and prebuild mode both skip postCreate/dotfiles/postStart/postAttach
@@ -253,19 +333,67 @@ pub(crate) async fn execute_lifecycle_commands(
     // postCreate - skip if flagged, in prebuild/skip-post-create mode, or marked complete
     if let Some(skip_reason) = invocation_context.should_skip_phase(LifecyclePhase::PostCreate) {
         debug!("Skipping postCreate: {}", skip_reason);
-    } else if let Some(ref post_create) = config.post_create_command {
-        let phase_commands = commands_from_json_value(post_create)?;
-        commands = commands.with_post_create(phase_commands);
-        debug!("postCreate phase queued for execution");
+    } else {
+        // Aggregate commands from features (in installation order) and config
+        let aggregated_commands =
+            aggregate_lifecycle_commands(LifecyclePhase::PostCreate, resolved_features, config);
+
+        if !aggregated_commands.is_empty() {
+            // Log aggregated commands with source attribution
+            let _span = span!(Level::INFO, "postCreate_aggregation").entered();
+            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+                info!(
+                    command_index = idx,
+                    source = %agg_cmd.source,
+                    "postCreate command queued for execution"
+                );
+            }
+
+            // Convert aggregated commands to string vectors for execution
+            let mut all_commands = Vec::new();
+            for agg_cmd in aggregated_commands {
+                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
+                all_commands.extend(cmd_strings);
+            }
+            commands = commands.with_post_create(all_commands);
+            debug!(
+                "postCreate phase queued for execution with {} aggregated commands",
+                commands.post_create.as_ref().map(|c| c.len()).unwrap_or(0)
+            );
+        }
     }
 
     // T020: postStart - skip if in skip-post-create or prebuild mode, otherwise always runs (runtime hook)
     if let Some(skip_reason) = invocation_context.should_skip_phase(LifecyclePhase::PostStart) {
         debug!("Skipping postStart: {}", skip_reason);
-    } else if let Some(ref post_start) = config.post_start_command {
-        let phase_commands = commands_from_json_value(post_start)?;
-        commands = commands.with_post_start(phase_commands);
-        debug!("postStart phase queued for execution (runtime hook)");
+    } else {
+        // Aggregate commands from features (in installation order) and config
+        let aggregated_commands =
+            aggregate_lifecycle_commands(LifecyclePhase::PostStart, resolved_features, config);
+
+        if !aggregated_commands.is_empty() {
+            // Log aggregated commands with source attribution
+            let _span = span!(Level::INFO, "postStart_aggregation").entered();
+            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+                info!(
+                    command_index = idx,
+                    source = %agg_cmd.source,
+                    "postStart command queued for execution (runtime hook)"
+                );
+            }
+
+            // Convert aggregated commands to string vectors for execution
+            let mut all_commands = Vec::new();
+            for agg_cmd in aggregated_commands {
+                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
+                all_commands.extend(cmd_strings);
+            }
+            commands = commands.with_post_start(all_commands);
+            debug!(
+                "postStart phase queued for execution with {} aggregated commands",
+                commands.post_start.as_ref().map(|c| c.len()).unwrap_or(0)
+            );
+        }
     }
 
     // T020: postAttach - skip if in skip-post-create or prebuild mode, or --skip-post-attach flag
@@ -274,10 +402,34 @@ pub(crate) async fn execute_lifecycle_commands(
         debug!("Skipping postAttach: {}", skip_reason);
     } else if args.skip_post_attach {
         debug!("Skipping postAttach: --skip-post-attach flag");
-    } else if let Some(ref post_attach) = config.post_attach_command {
-        let phase_commands = commands_from_json_value(post_attach)?;
-        commands = commands.with_post_attach(phase_commands);
-        debug!("postAttach phase queued for execution (runtime hook)");
+    } else {
+        // Aggregate commands from features (in installation order) and config
+        let aggregated_commands =
+            aggregate_lifecycle_commands(LifecyclePhase::PostAttach, resolved_features, config);
+
+        if !aggregated_commands.is_empty() {
+            // Log aggregated commands with source attribution
+            let _span = span!(Level::INFO, "postAttach_aggregation").entered();
+            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+                info!(
+                    command_index = idx,
+                    source = %agg_cmd.source,
+                    "postAttach command queued for execution (runtime hook)"
+                );
+            }
+
+            // Convert aggregated commands to string vectors for execution
+            let mut all_commands = Vec::new();
+            for agg_cmd in aggregated_commands {
+                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
+                all_commands.extend(cmd_strings);
+            }
+            commands = commands.with_post_attach(all_commands);
+            debug!(
+                "postAttach phase queued for execution with {} aggregated commands",
+                commands.post_attach.as_ref().map(|c| c.len()).unwrap_or(0)
+            );
+        }
     }
 
     let lifecycle_start_time = std::time::Instant::now();

@@ -226,11 +226,8 @@ pub(crate) async fn execute_container_up(
 
     // Merge security options from config and features
     debug!("Merging security options from config and features");
-    let merged_security = merge_security_options(
-        &config,
-        resolved_features.as_deref()
-            .unwrap_or(&[]),
-    );
+    let merged_security =
+        merge_security_options(&config, resolved_features.as_deref().unwrap_or(&[]));
     debug!(
         privileged = merged_security.privileged,
         init = merged_security.init,
@@ -386,6 +383,7 @@ pub(crate) async fn execute_container_up(
     );
 
     // Execute lifecycle commands if not skipped
+    // Pass resolved features for lifecycle command aggregation (feature commands execute before config)
     execute_lifecycle_commands(
         &container_result.container_id,
         &config,
@@ -394,6 +392,7 @@ pub(crate) async fn execute_container_up(
         env_user_resolution.effective_env.clone(),
         env_user_resolution.effective_user.clone(),
         cache_folder,
+        resolved_features.as_deref().unwrap_or(&[]),
         prior_markers,
     )
     .await?;
