@@ -63,6 +63,62 @@ pub fn canonicalize_feature_id(input: &str) -> String {
     input.trim().to_string()
 }
 
+/// Deduplicate and uppercase-normalize capability strings
+///
+/// This helper function is used for merging `capAdd` lists from devcontainer config
+/// and feature metadata. It performs two operations:
+/// 1. Converts all capability strings to uppercase (e.g., "net_admin" → "NET_ADMIN")
+/// 2. Deduplicates entries while preserving first occurrence order
+///
+/// # Arguments
+/// * `capabilities` - Iterator of capability string references from config and features
+///
+/// # Returns
+/// Vector of deduplicated, uppercase-normalized capability strings in order of first occurrence
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::features::deduplicate_uppercase;
+///
+/// let caps = vec!["NET_ADMIN", "sys_ptrace", "NET_ADMIN"];
+/// let result = deduplicate_uppercase(caps.iter().map(|s| s.as_ref()));
+/// assert_eq!(result, vec!["NET_ADMIN", "SYS_PTRACE"]);
+/// ```
+///
+/// ```
+/// use deacon_core::features::deduplicate_uppercase;
+///
+/// // Empty input
+/// let result = deduplicate_uppercase(std::iter::empty());
+/// assert_eq!(result, Vec::<String>::new());
+/// ```
+///
+/// ```
+/// use deacon_core::features::deduplicate_uppercase;
+///
+/// // Mixed case normalization
+/// let caps = vec!["net_admin", "SYS_PTRACE", "Net_Admin"];
+/// let result = deduplicate_uppercase(caps.iter().map(|s| s.as_ref()));
+/// assert_eq!(result, vec!["NET_ADMIN", "SYS_PTRACE"]);
+/// ```
+pub fn deduplicate_uppercase<'a, I>(capabilities: I) -> Vec<String>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+
+    for cap in capabilities {
+        let uppercase_cap = cap.to_uppercase();
+        if seen.insert(uppercase_cap.clone()) {
+            result.push(uppercase_cap);
+        }
+    }
+
+    result
+}
+
 /// Processed option value supporting different types
 ///
 /// Supports all JSON value types to ensure complete data preservation through

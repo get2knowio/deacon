@@ -38,6 +38,65 @@ impl std::fmt::Display for LifecycleCommandSource {
     }
 }
 
+/// Check if a lifecycle command value is empty or null.
+///
+/// This helper function determines whether a lifecycle command should be filtered out
+/// during command aggregation. Commands are considered empty if they are:
+/// - `null` - No command specified
+/// - Empty string `""` - Blank command
+/// - Empty array `[]` - Array with no elements
+/// - Empty object `{}` - Object with no properties
+///
+/// # Arguments
+///
+/// * `cmd` - The command value to check (from devcontainer.json or feature metadata)
+///
+/// # Returns
+///
+/// `true` if the command is empty and should be skipped, `false` otherwise
+///
+/// # Examples
+///
+/// ```
+/// use serde_json::json;
+/// use deacon_core::container_lifecycle::is_empty_command;
+///
+/// // Null command is empty
+/// assert!(is_empty_command(&json!(null)));
+///
+/// // Empty string is empty
+/// assert!(is_empty_command(&json!("")));
+///
+/// // Empty array is empty
+/// assert!(is_empty_command(&json!([])));
+///
+/// // Empty object is empty
+/// assert!(is_empty_command(&json!({})));
+///
+/// // Non-empty string is not empty
+/// assert!(!is_empty_command(&json!("npm install")));
+///
+/// // Non-empty array is not empty
+/// assert!(!is_empty_command(&json!(["npm", "install"])));
+///
+/// // Non-empty object is not empty
+/// assert!(!is_empty_command(&json!({"build": "npm run build"})));
+/// ```
+pub fn is_empty_command(cmd: &serde_json::Value) -> bool {
+    match cmd {
+        // Null is empty
+        serde_json::Value::Null => true,
+        // Empty string is empty
+        serde_json::Value::String(s) => s.is_empty(),
+        // Empty array is empty
+        serde_json::Value::Array(arr) => arr.is_empty(),
+        // Empty object is empty
+        serde_json::Value::Object(obj) => obj.is_empty(),
+        // All other values (non-empty strings, arrays, objects, numbers, booleans) are not empty
+        _ => false,
+    }
+}
+
 /// A lifecycle command ready for execution with source tracking.
 ///
 /// Combines a lifecycle command (which can be a string, array, or object per the
@@ -2422,5 +2481,95 @@ mod tests {
         assert!(debug_str.contains("AggregatedLifecycleCommand"));
         assert!(debug_str.contains("command"));
         assert!(debug_str.contains("source"));
+    }
+
+    #[test]
+    fn test_is_empty_command_null() {
+        use serde_json::json;
+        // Null value is empty
+        assert!(super::is_empty_command(&json!(null)));
+    }
+
+    #[test]
+    fn test_is_empty_command_empty_string() {
+        use serde_json::json;
+        // Empty string is empty
+        assert!(super::is_empty_command(&json!("")));
+    }
+
+    #[test]
+    fn test_is_empty_command_empty_array() {
+        use serde_json::json;
+        // Empty array is empty
+        assert!(super::is_empty_command(&json!([])));
+    }
+
+    #[test]
+    fn test_is_empty_command_empty_object() {
+        use serde_json::json;
+        // Empty object is empty
+        assert!(super::is_empty_command(&json!({})));
+    }
+
+    #[test]
+    fn test_is_empty_command_non_empty_string() {
+        use serde_json::json;
+        // Non-empty strings are not empty
+        assert!(!super::is_empty_command(&json!("npm install")));
+        assert!(!super::is_empty_command(&json!("echo hello")));
+        assert!(!super::is_empty_command(&json!(" "))); // Single space is not empty
+    }
+
+    #[test]
+    fn test_is_empty_command_non_empty_array() {
+        use serde_json::json;
+        // Non-empty arrays are not empty
+        assert!(!super::is_empty_command(&json!(["npm", "install"])));
+        assert!(!super::is_empty_command(&json!(["single_element"])));
+        assert!(!super::is_empty_command(&json!([
+            "cmd", "arg1", "arg2", "arg3"
+        ])));
+    }
+
+    #[test]
+    fn test_is_empty_command_non_empty_object() {
+        use serde_json::json;
+        // Non-empty objects are not empty
+        assert!(!super::is_empty_command(&json!({"build": "npm run build"})));
+        assert!(!super::is_empty_command(&json!({
+            "npm": "npm install",
+            "build": "npm run build"
+        })));
+    }
+
+    #[test]
+    fn test_is_empty_command_other_json_types() {
+        use serde_json::json;
+        // Numbers, booleans are not considered empty (though unusual for commands)
+        assert!(!super::is_empty_command(&json!(0)));
+        assert!(!super::is_empty_command(&json!(42)));
+        assert!(!super::is_empty_command(&json!(true)));
+        assert!(!super::is_empty_command(&json!(false)));
+    }
+
+    #[test]
+    fn test_is_empty_command_whitespace_only_strings() {
+        use serde_json::json;
+        // Whitespace-only strings are NOT considered empty per the contract
+        // The contract only specifies empty string "", not trimmed whitespace
+        assert!(!super::is_empty_command(&json!(" ")));
+        assert!(!super::is_empty_command(&json!("  ")));
+        assert!(!super::is_empty_command(&json!("\n")));
+        assert!(!super::is_empty_command(&json!("\t")));
+    }
+
+    #[test]
+    fn test_is_empty_command_nested_empty_structures() {
+        use serde_json::json;
+        // Nested structures with content are not empty
+        assert!(!super::is_empty_command(&json!([[]])));
+        assert!(!super::is_empty_command(&json!([{}])));
+        assert!(!super::is_empty_command(&json!({"nested": {}})));
+        assert!(!super::is_empty_command(&json!({"nested": []})));
     }
 }

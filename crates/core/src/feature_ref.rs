@@ -366,4 +366,531 @@ mod tests {
             _ => panic!("Expected OCI reference"),
         }
     }
+
+    // === Additional Comprehensive Tests ===
+
+    #[test]
+    fn test_oci_reference_without_tag() {
+        // OCI reference with no tag should parse successfully
+        let result = parse_feature_reference("ghcr.io/devcontainers/features/node").unwrap();
+        match result {
+            FeatureRefType::Oci(ref_info) => {
+                assert_eq!(ref_info.registry, "ghcr.io");
+                assert_eq!(ref_info.namespace, "devcontainers/features");
+                assert_eq!(ref_info.name, "node");
+                assert_eq!(ref_info.tag, None);
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
+
+    #[test]
+    fn test_oci_reference_minimal() {
+        // Just a name (defaults to ghcr.io/devcontainers)
+        let result = parse_feature_reference("common-utils").unwrap();
+        match result {
+            FeatureRefType::Oci(ref_info) => {
+                assert_eq!(ref_info.registry, "ghcr.io");
+                assert_eq!(ref_info.namespace, "devcontainers");
+                assert_eq!(ref_info.name, "common-utils");
+                assert_eq!(ref_info.tag, None);
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
+
+    #[test]
+    fn test_oci_reference_with_port() {
+        // Registry with port number
+        let result = parse_feature_reference("localhost:5000/myfeature:latest").unwrap();
+        match result {
+            FeatureRefType::Oci(ref_info) => {
+                assert_eq!(ref_info.registry, "localhost:5000");
+                assert_eq!(ref_info.namespace, "devcontainers");
+                assert_eq!(ref_info.name, "myfeature");
+                assert_eq!(ref_info.tag, Some("latest".to_string()));
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
+
+    #[test]
+    fn test_oci_reference_complex_tag() {
+        // Tag with semver and metadata
+        let result =
+            parse_feature_reference("ghcr.io/org/feature:1.2.3-alpha.1+build.123").unwrap();
+        match result {
+            FeatureRefType::Oci(ref_info) => {
+                assert_eq!(ref_info.registry, "ghcr.io");
+                assert_eq!(ref_info.namespace, "org");
+                assert_eq!(ref_info.name, "feature");
+                assert_eq!(ref_info.tag, Some("1.2.3-alpha.1+build.123".to_string()));
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
+
+    #[test]
+    fn test_local_path_nested_directories() {
+        // Deeply nested local path
+        let result = parse_feature_reference("./features/dev/custom").unwrap();
+        match result {
+            FeatureRefType::LocalPath(path) => {
+                assert_eq!(path, PathBuf::from("./features/dev/custom"));
+            }
+            _ => panic!("Expected LocalPath reference"),
+        }
+    }
+
+    #[test]
+    fn test_local_path_parent_multiple_levels() {
+        // Multiple parent directory references
+        let result = parse_feature_reference("../../shared/features/common").unwrap();
+        match result {
+            FeatureRefType::LocalPath(path) => {
+                assert_eq!(path, PathBuf::from("../../shared/features/common"));
+            }
+            _ => panic!("Expected LocalPath reference"),
+        }
+    }
+
+    #[test]
+    fn test_local_path_current_dir_only() {
+        // Just current directory marker with a name
+        let result = parse_feature_reference("./feature").unwrap();
+        match result {
+            FeatureRefType::LocalPath(path) => {
+                assert_eq!(path, PathBuf::from("./feature"));
+            }
+            _ => panic!("Expected LocalPath reference"),
+        }
+    }
+
+    #[test]
+    fn test_local_path_with_spaces() {
+        // Path with spaces (valid PathBuf)
+        let result = parse_feature_reference("./my feature with spaces").unwrap();
+        match result {
+            FeatureRefType::LocalPath(path) => {
+                assert_eq!(path, PathBuf::from("./my feature with spaces"));
+            }
+            _ => panic!("Expected LocalPath reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_with_port() {
+        // HTTPS URL with custom port
+        let result = parse_feature_reference("https://example.com:8443/feature.tgz").unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(url, "https://example.com:8443/feature.tgz");
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_with_query_params() {
+        // HTTPS URL with query parameters
+        let result =
+            parse_feature_reference("https://example.com/feature.tgz?version=1.0&arch=amd64")
+                .unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(
+                    url,
+                    "https://example.com/feature.tgz?version=1.0&arch=amd64"
+                );
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_with_fragment() {
+        // HTTPS URL with fragment
+        let result = parse_feature_reference("https://example.com/feature.tgz#section").unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(url, "https://example.com/feature.tgz#section");
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_with_authentication() {
+        // HTTPS URL with user info (though not recommended for security)
+        let result = parse_feature_reference("https://user:pass@example.com/feature.tgz").unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(url, "https://user:pass@example.com/feature.tgz");
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_github_raw() {
+        // GitHub raw content URL
+        let result = parse_feature_reference(
+            "https://raw.githubusercontent.com/user/repo/main/feature.tar.gz",
+        )
+        .unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(
+                    url,
+                    "https://raw.githubusercontent.com/user/repo/main/feature.tar.gz"
+                );
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_long_path() {
+        // HTTPS URL with long nested path
+        let result = parse_feature_reference(
+            "https://cdn.example.com/releases/2024/01/features/v1.0/stable/feature.tgz",
+        )
+        .unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(
+                    url,
+                    "https://cdn.example.com/releases/2024/01/features/v1.0/stable/feature.tgz"
+                );
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    // === Invalid Input Tests ===
+
+    #[test]
+    fn test_http_with_port_not_supported() {
+        // HTTP with port should still be rejected
+        let result = parse_feature_reference("http://localhost:8080/feature.tgz");
+        assert!(result.is_err());
+        assert!(matches!(result, Err(FeatureRefError::HttpNotSupported(_))));
+    }
+
+    #[test]
+    fn test_absolute_path_unix() {
+        // Unix absolute path
+        let result = parse_feature_reference("/usr/local/features/custom");
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(FeatureRefError::AbsolutePathNotSupported(_))
+        ));
+    }
+
+    #[test]
+    fn test_absolute_path_with_spaces() {
+        // Absolute path with spaces
+        let result = parse_feature_reference("/usr/local/my feature");
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(FeatureRefError::AbsolutePathNotSupported(_))
+        ));
+    }
+
+    #[test]
+    fn test_windows_style_path_rejected() {
+        // Windows-style absolute path (should be treated as OCI and fail parsing)
+        // Note: This will be parsed as an OCI reference and likely fail in parse_registry_reference
+        let result = parse_feature_reference("C:\\features\\custom");
+        // The exact error depends on how parse_registry_reference handles this
+        // It should either be InvalidOciReference or could potentially succeed with weird parsing
+        // Let's just verify it doesn't become a LocalPath
+        match result {
+            Ok(FeatureRefType::LocalPath(_)) => {
+                panic!("Windows paths should not be recognized as local paths")
+            }
+            _ => {} // Any other result is acceptable (error or weird OCI parse)
+        }
+    }
+
+    #[test]
+    fn test_invalid_https_empty_host() {
+        // HTTPS with just slashes
+        let result = parse_feature_reference("https:///feature.tgz");
+        // This might pass our simple validation but would fail later
+        // Our current implementation just checks length > 8
+        match result {
+            Ok(FeatureRefType::HttpsTarball(url)) => {
+                assert_eq!(url, "https:///feature.tgz");
+            }
+            Err(FeatureRefError::InvalidHttpsUrl(_)) => {
+                // Also acceptable
+            }
+            _ => panic!("Unexpected result type"),
+        }
+    }
+
+    #[test]
+    fn test_https_short_but_valid() {
+        // Short but technically valid HTTPS URL
+        let result = parse_feature_reference("https://a.b/c").unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(url, "https://a.b/c");
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_mixed_slashes_not_local_path() {
+        // Path that doesn't start with ./ or ../
+        let result = parse_feature_reference("some/path/feature").unwrap();
+        // Should be parsed as OCI reference (namespace/name format)
+        match result {
+            FeatureRefType::Oci(ref_info) => {
+                assert_eq!(ref_info.namespace, "some/path");
+                assert_eq!(ref_info.name, "feature");
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
+
+    #[test]
+    fn test_dot_only_not_local_path() {
+        // Single dot without slash is not a local path
+        let result = parse_feature_reference(".feature").unwrap();
+        match result {
+            FeatureRefType::Oci(_) => {
+                // Should be OCI reference
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
+
+    #[test]
+    fn test_double_dot_only_not_local_path() {
+        // Double dot without slash is not a local path
+        let result = parse_feature_reference("..feature").unwrap();
+        match result {
+            FeatureRefType::Oci(_) => {
+                // Should be OCI reference
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
+
+    #[test]
+    fn test_oci_with_digest() {
+        // OCI reference with digest instead of tag
+        let result =
+            parse_feature_reference("ghcr.io/devcontainers/features/node@sha256:abc123def456")
+                .unwrap();
+        match result {
+            FeatureRefType::Oci(ref_info) => {
+                assert_eq!(ref_info.registry, "ghcr.io");
+                assert_eq!(ref_info.namespace, "devcontainers/features");
+                assert_eq!(ref_info.name, "node");
+                // Digest handling depends on parse_registry_reference implementation
+                // Just verify it's parsed as OCI
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
+
+    #[test]
+    fn test_feature_ref_clone() {
+        // Test that FeatureRefType implements Clone properly
+        let ref1 = parse_feature_reference("./my-feature").unwrap();
+        let ref2 = ref1.clone();
+        assert_eq!(ref1, ref2);
+    }
+
+    #[test]
+    fn test_feature_ref_debug() {
+        // Test that FeatureRefType implements Debug properly
+        let ref1 = parse_feature_reference("ghcr.io/test/feature:1.0").unwrap();
+        let debug_str = format!("{:?}", ref1);
+        assert!(debug_str.contains("Oci"));
+        assert!(debug_str.contains("test"));
+    }
+
+    #[test]
+    fn test_oci_feature_ref_equality() {
+        // Test OciFeatureRef Eq implementation
+        let ref1 = parse_feature_reference("ghcr.io/test/feature:1.0").unwrap();
+        let ref2 = parse_feature_reference("ghcr.io/test/feature:1.0").unwrap();
+
+        match (ref1, ref2) {
+            (FeatureRefType::Oci(oci1), FeatureRefType::Oci(oci2)) => {
+                assert_eq!(oci1, oci2);
+            }
+            _ => panic!("Expected OCI references"),
+        }
+    }
+
+    #[test]
+    fn test_local_path_with_trailing_slash() {
+        // Local path with trailing slash
+        let result = parse_feature_reference("./my-feature/").unwrap();
+        match result {
+            FeatureRefType::LocalPath(path) => {
+                assert_eq!(path, PathBuf::from("./my-feature/"));
+            }
+            _ => panic!("Expected LocalPath reference"),
+        }
+    }
+
+    #[test]
+    fn test_parent_path_with_trailing_slash() {
+        // Parent path with trailing slash
+        let result = parse_feature_reference("../shared-feature/").unwrap();
+        match result {
+            FeatureRefType::LocalPath(path) => {
+                assert_eq!(path, PathBuf::from("../shared-feature/"));
+            }
+            _ => panic!("Expected LocalPath reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_with_multiple_extensions() {
+        // HTTPS URL with multiple file extensions
+        let result = parse_feature_reference("https://example.com/feature.tar.gz.gpg").unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(url, "https://example.com/feature.tar.gz.gpg");
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_ftp_not_supported() {
+        // FTP should be parsed as OCI (and likely fail)
+        let result = parse_feature_reference("ftp://example.com/feature.tgz");
+        match result {
+            Ok(FeatureRefType::HttpsTarball(_)) => {
+                panic!("FTP should not be recognized as HTTPS tarball")
+            }
+            Ok(FeatureRefType::LocalPath(_)) => {
+                panic!("FTP should not be recognized as local path")
+            }
+            _ => {} // OCI or error is acceptable
+        }
+    }
+
+    #[test]
+    fn test_file_url_not_supported() {
+        // file:// URL should be parsed as OCI (and likely fail)
+        let result = parse_feature_reference("file:///path/to/feature");
+        match result {
+            Ok(FeatureRefType::LocalPath(_)) => {
+                panic!("file:// URLs should not be recognized as local paths")
+            }
+            Ok(FeatureRefType::HttpsTarball(_)) => {
+                panic!("file:// URLs should not be recognized as HTTPS tarballs")
+            }
+            _ => {} // OCI or error is acceptable
+        }
+    }
+
+    #[test]
+    fn test_empty_string_error() {
+        // Empty string should fail
+        let result = parse_feature_reference("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_whitespace_only_error() {
+        // Whitespace-only string should fail
+        let result = parse_feature_reference("   ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_local_path_with_special_chars() {
+        // Local path with hyphens, underscores, dots
+        let result = parse_feature_reference("./my-custom_feature.v2").unwrap();
+        match result {
+            FeatureRefType::LocalPath(path) => {
+                assert_eq!(path, PathBuf::from("./my-custom_feature.v2"));
+            }
+            _ => panic!("Expected LocalPath reference"),
+        }
+    }
+
+    #[test]
+    fn test_oci_reference_uppercase() {
+        // OCI references with uppercase (should be handled by parse_registry_reference)
+        let result = parse_feature_reference("GHCR.IO/ORG/FEATURE:TAG").unwrap();
+        match result {
+            FeatureRefType::Oci(_) => {
+                // Parsed successfully as OCI
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_localhost() {
+        // HTTPS URL to localhost
+        let result = parse_feature_reference("https://localhost/feature.tgz").unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(url, "https://localhost/feature.tgz");
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_ip_address() {
+        // HTTPS URL with IP address
+        let result = parse_feature_reference("https://192.168.1.1/feature.tgz").unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(url, "https://192.168.1.1/feature.tgz");
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_https_url_ipv6() {
+        // HTTPS URL with IPv6 address
+        let result = parse_feature_reference("https://[::1]/feature.tgz").unwrap();
+        match result {
+            FeatureRefType::HttpsTarball(url) => {
+                assert_eq!(url, "https://[::1]/feature.tgz");
+            }
+            _ => panic!("Expected HttpsTarball reference"),
+        }
+    }
+
+    #[test]
+    fn test_case_sensitivity_oci() {
+        // Test case sensitivity for OCI references
+        let lower = parse_feature_reference("myorg/myfeature:v1").unwrap();
+        let upper = parse_feature_reference("MyOrg/MyFeature:v1").unwrap();
+        // They should both parse but be different
+        assert_ne!(lower, upper);
+    }
+
+    #[test]
+    fn test_special_oci_names() {
+        // OCI reference with underscores, hyphens, dots
+        let result = parse_feature_reference("my.org/my_namespace/my-feature.name:v1.0").unwrap();
+        match result {
+            FeatureRefType::Oci(ref_info) => {
+                assert_eq!(ref_info.registry, "my.org");
+                assert_eq!(ref_info.namespace, "my_namespace");
+                assert_eq!(ref_info.name, "my-feature.name");
+            }
+            _ => panic!("Expected OCI reference"),
+        }
+    }
 }

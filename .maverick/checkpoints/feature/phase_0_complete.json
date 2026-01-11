@@ -1,0 +1,45 @@
+{
+  "checkpoint_id": "phase_0_complete",
+  "workflow_name": "feature",
+  "inputs_hash": "deff94dfecbd8b17",
+  "step_results": [
+    {
+      "name": "preflight",
+      "output": {
+        "success": true,
+        "api_available": true,
+        "git_available": true,
+        "github_cli_available": true,
+        "validation_tools_available": true,
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "init",
+      "output": {
+        "branch_name": "009-complete-feature-support",
+        "base_branch": "main",
+        "is_clean": false,
+        "synced_with_base": true,
+        "task_file_path": "specs/009-complete-feature-support/tasks.md",
+        "error": null
+      }
+    },
+    {
+      "name": "get_phases",
+      "output": [
+        "Phase 1: Setup (Shared Infrastructure)",
+        "Phase 2: Foundational (Blocking Prerequisites)",
+        "Phase 3: User Story 1 - Feature Security Options Applied to Container (Priority: P1)",
+        "Phase 4: User Story 2 - Feature Lifecycle Commands Execute Before User Commands (Priority: P1)",
+        "Phase 5: User Story 3 - Feature Mounts Applied to Container (Priority: P2)",
+        "Phase 6: User Story 4 - Feature Entrypoints Wrap Container Entry (Priority: P2)",
+        "Phase 7: User Story 5 - Local Feature References Work (Priority: P2)",
+        "Phase 8: User Story 6 - HTTPS Tarball Feature References Work (Priority: P3)",
+        "Phase 9: Polish & Cross-Cutting Concerns"
+      ]
+    }
+  ],
+  "saved_at": "2026-01-11T01:48:33.693499+00:00"
+}

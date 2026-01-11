@@ -39,11 +39,11 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T007 Implement parse_feature_reference() function in crates/core/src/feature_ref.rs (detection for OCI/LocalPath/HttpsTarball)
-- [ ] T008 [P] Add is_empty_command() helper function in crates/core/src/container_lifecycle.rs
-- [ ] T009 [P] Add deduplicate_uppercase() helper for capability normalization in crates/core/src/features.rs
-- [ ] T010 Wire feature_ref.rs into crates/core/src/lib.rs exports
-- [ ] T011 Add unit tests for parse_feature_reference() in crates/core/src/feature_ref.rs
+- [x] T007 Implement parse_feature_reference() function in crates/core/src/feature_ref.rs (detection for OCI/LocalPath/HttpsTarball)
+- [x] T008 [P] Add is_empty_command() helper function in crates/core/src/container_lifecycle.rs
+- [x] T009 [P] Add deduplicate_uppercase() helper for capability normalization in crates/core/src/features.rs
+- [x] T010 Wire feature_ref.rs into crates/core/src/lib.rs exports
+- [x] T011 Add unit tests for parse_feature_reference() in crates/core/src/feature_ref.rs
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
