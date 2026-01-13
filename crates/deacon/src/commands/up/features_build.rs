@@ -10,8 +10,6 @@ use deacon_core::build::BuildOptions;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::errors::DeaconError;
-use deacon_core::features::{EntrypointChain, MergedSecurityOptions};
-use deacon_core::mount::MergedMounts;
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::{debug, info, instrument};
@@ -25,12 +23,6 @@ pub(crate) struct FeatureBuildOutput {
     pub combined_env: HashMap<String, String>,
     /// Resolved features in installation order
     pub resolved_features: Vec<deacon_core::features::ResolvedFeature>,
-    /// Merged security options from all features
-    pub merged_security: MergedSecurityOptions,
-    /// Merged mounts from all features
-    pub merged_mounts: MergedMounts,
-    /// Chained entrypoints from all features
-    pub entrypoint_chain: EntrypointChain,
 }
 
 /// Build an extended Docker image with features installed using BuildKit
@@ -85,9 +77,6 @@ pub(crate) async fn build_image_with_features(
             image_tag: base_image.clone(),
             combined_env: HashMap::new(),
             resolved_features: Vec::new(),
-            merged_security: MergedSecurityOptions::default(),
-            merged_mounts: MergedMounts::default(),
-            entrypoint_chain: EntrypointChain::None,
         });
     }
 
@@ -301,9 +290,6 @@ pub(crate) async fn build_image_with_features(
         image_tag: extended_image_tag,
         combined_env,
         resolved_features: installation_plan.features.clone(),
-        merged_security: MergedSecurityOptions::default(),
-        merged_mounts: MergedMounts::default(),
-        entrypoint_chain: EntrypointChain::None,
     })
 }
 
