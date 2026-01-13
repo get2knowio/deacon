@@ -107,16 +107,16 @@
 
 ### Tests for User Story 3
 
-- [ ] T030 [P] [US3] Unit tests for merge_mounts() in crates/core/src/mount.rs (precedence, normalization)
-- [ ] T031 [P] [US3] Integration test for mount merging in crates/deacon/tests/integration_feature_mounts.rs (docker-shared group)
+- [x] T030 [P] [US3] Unit tests for merge_mounts() in crates/core/src/mount.rs (precedence, normalization)
+- [x] T031 [P] [US3] Integration test for mount merging in crates/deacon/tests/integration_feature_mounts.rs (docker-shared group)
 
 ### Implementation for User Story 3
 
-- [ ] T032 [US3] Implement merge_mounts() per contract in crates/core/src/mount.rs
-- [ ] T033 [US3] Normalize object mounts to string format using MountParser in crates/core/src/mount.rs
-- [ ] T034 [US3] Report mount parsing errors with feature attribution in crates/core/src/mount.rs
-- [ ] T035 [US3] Update container.rs to call merge_mounts() and pass to Docker in crates/deacon/src/commands/up/container.rs
-- [ ] T036 [US3] Add tracing for mount merging operations in crates/deacon/src/commands/up/container.rs
+- [x] T032 [US3] Implement merge_mounts() per contract in crates/core/src/mount.rs
+- [x] T033 [US3] Normalize object mounts to string format using MountParser in crates/core/src/mount.rs
+- [x] T034 [US3] Report mount parsing errors with feature attribution in crates/core/src/mount.rs
+- [x] T035 [US3] Update container.rs to call merge_mounts() and pass to Docker in crates/deacon/src/commands/up/container.rs
+- [x] T036 [US3] Add tracing for mount merging operations in crates/deacon/src/commands/up/container.rs
 
 **Checkpoint**: User Stories 1, 2, and 3 should all work independently
 

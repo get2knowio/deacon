@@ -583,6 +583,7 @@ pub trait DockerLifecycle: Docker + ContainerOps {
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
     ) -> Result<ContainerResult>;
 }
 
@@ -1596,7 +1597,7 @@ impl ContainerOps for CliRuntime {
         Ok(container_ids)
     }
 
-    #[instrument(skip(self, config, merged_security))]
+    #[instrument(skip(self, config, merged_security, merged_mounts))]
     async fn create_container(
         &self,
         identity: &ContainerIdentity,
@@ -1604,6 +1605,7 @@ impl ContainerOps for CliRuntime {
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
     ) -> Result<String> {
         debug!(
             "Creating container with identity: {:?}, gpu_mode: {:?}",
@@ -1659,10 +1661,11 @@ impl ContainerOps for CliRuntime {
             args.push(workspace_mount);
         }
 
-        // Add additional mounts from configuration
-        let mounts = crate::mount::MountParser::parse_mounts_from_json(&config.mounts);
-        for mount in mounts {
-            args.extend(mount.to_docker_args());
+        // Add merged mounts (from features and config)
+        // Mounts have already been merged and normalized to Docker CLI string format
+        for mount_str in &merged_mounts.mounts {
+            args.push("--mount".to_string());
+            args.push(mount_str.clone());
         }
 
         // Apply containerEnv variables from configuration
@@ -1904,7 +1907,7 @@ impl ContainerOps for CliRuntime {
 }
 
 impl DockerLifecycle for CliRuntime {
-    #[instrument(skip(self, config, merged_security))]
+    #[instrument(skip(self, config, merged_security, merged_mounts))]
     async fn up(
         &self,
         identity: &ContainerIdentity,
@@ -1913,6 +1916,7 @@ impl DockerLifecycle for CliRuntime {
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
     ) -> Result<ContainerResult> {
         debug!(
             "Starting up container workflow with gpu_mode: {:?}",
@@ -1950,7 +1954,14 @@ impl DockerLifecycle for CliRuntime {
 
         // Create new container
         let container_id = self
-            .create_container(identity, config, workspace_path, gpu_mode, merged_security)
+            .create_container(
+                identity,
+                config,
+                workspace_path,
+                gpu_mode,
+                merged_security,
+                merged_mounts,
+            )
             .await?;
         self.start_container(&container_id).await?;
 
@@ -2542,7 +2553,7 @@ pub mod mock {
             Ok(container_ids)
         }
 
-        #[instrument(skip(self, config, _workspace_path, _merged_security))]
+        #[instrument(skip(self, config, _workspace_path, _merged_security, _merged_mounts))]
         async fn create_container(
             &self,
             identity: &ContainerIdentity,
@@ -2550,6 +2561,7 @@ pub mod mock {
             _workspace_path: &Path,
             gpu_mode: crate::gpu::GpuMode,
             _merged_security: &crate::features::MergedSecurityOptions,
+            _merged_mounts: &crate::mount::MergedMounts,
         ) -> Result<String> {
             debug!(
                 "MockDocker create_container called with gpu_mode: {:?}",
@@ -2685,7 +2697,7 @@ pub mod mock {
 
     #[allow(async_fn_in_trait)]
     impl DockerLifecycle for MockDocker {
-        #[instrument(skip(self, config, merged_security))]
+        #[instrument(skip(self, config, merged_security, merged_mounts))]
         async fn up(
             &self,
             identity: &ContainerIdentity,
@@ -2694,6 +2706,7 @@ pub mod mock {
             remove_existing: bool,
             gpu_mode: crate::gpu::GpuMode,
             merged_security: &crate::features::MergedSecurityOptions,
+            merged_mounts: &crate::mount::MergedMounts,
         ) -> Result<ContainerResult> {
             debug!("MockDocker up called with gpu_mode: {:?}", gpu_mode);
 
@@ -2728,7 +2741,14 @@ pub mod mock {
 
             // Create new container
             let container_id = self
-                .create_container(identity, config, workspace_path, gpu_mode, merged_security)
+                .create_container(
+                    identity,
+                    config,
+                    workspace_path,
+                    gpu_mode,
+                    merged_security,
+                    merged_mounts,
+                )
                 .await?;
             self.start_container(&container_id).await?;
 
@@ -3163,6 +3183,7 @@ mod tests {
         };
 
         let merged_security = crate::features::MergedSecurityOptions::default();
+        let merged_mounts = crate::mount::MergedMounts::default();
         let container_id = mock_docker
             .create_container(
                 &identity,
@@ -3170,6 +3191,7 @@ mod tests {
                 Path::new("/workspace"),
                 crate::gpu::GpuMode::None,
                 &merged_security,
+                &merged_mounts,
             )
             .await
             .unwrap();

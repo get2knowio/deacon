@@ -342,6 +342,7 @@ pub struct MergedMounts {
 ///
 /// # Precedence
 /// Config mounts override feature mounts for same target path
+#[instrument(skip(config_mounts, features))]
 pub fn merge_mounts(
     config_mounts: &[serde_json::Value],
     features: &[crate::features::ResolvedFeature],
@@ -357,13 +358,20 @@ pub fn merge_mounts(
     for feature in features {
         for mount_str in &feature.metadata.mounts {
             // Parse the mount to get the target and validate it
-            let mount =
-                MountParser::parse_mount(mount_str).map_err(|e| ConfigError::Validation {
+            let mount = MountParser::parse_mount(mount_str).map_err(|e| {
+                warn!(
+                    feature_id = %feature.id,
+                    mount_spec = %mount_str,
+                    error = %e,
+                    "Failed to parse mount from feature"
+                );
+                ConfigError::Validation {
                     message: format!(
                         "Invalid mount in feature {}: {}: {}",
                         feature.id, mount_str, e
                     ),
-                })?;
+                }
+            })?;
 
             // Normalize the mount to Docker CLI string format
             let normalized_str = normalize_mount_to_string(&mount);
@@ -373,6 +381,13 @@ pub fn merge_mounts(
             match mount_map.get_mut(&mount.target) {
                 Some((s, _idx)) => {
                     // Target already exists, update the mount string but keep the index
+                    debug!(
+                        feature_id = %feature.id,
+                        target = %mount.target,
+                        previous_mount = %s,
+                        new_mount = %normalized_str,
+                        "Feature mount overriding previous mount for same target"
+                    );
                     *s = normalized_str;
                 }
                 None => {
@@ -390,11 +405,22 @@ pub fn merge_mounts(
             serde_json::Value::String(s) => s.clone(),
             serde_json::Value::Object(obj) => {
                 // Convert object format to string format for parsing
-                convert_object_mount_to_string(obj).map_err(|e| ConfigError::Validation {
-                    message: format!("Invalid mount in config: {}", e),
+                convert_object_mount_to_string(obj).map_err(|e| {
+                    warn!(
+                        mount_spec = ?obj,
+                        error = %e,
+                        "Failed to convert object mount from config to string format"
+                    );
+                    ConfigError::Validation {
+                        message: format!("Invalid mount in config: {}", e),
+                    }
                 })?
             }
             _ => {
+                warn!(
+                    mount_spec = ?mount_value,
+                    "Invalid mount specification type in config, expected string or object"
+                );
                 return Err(ConfigError::Validation {
                     message: "Invalid mount specification type, expected string or object"
                         .to_string(),
@@ -404,8 +430,15 @@ pub fn merge_mounts(
         };
 
         // Parse the mount to get the target and validate it
-        let mount = MountParser::parse_mount(&mount_str).map_err(|e| ConfigError::Validation {
-            message: format!("Invalid mount in config: {}: {}", mount_str, e),
+        let mount = MountParser::parse_mount(&mount_str).map_err(|e| {
+            warn!(
+                mount_spec = %mount_str,
+                error = %e,
+                "Failed to parse mount from config"
+            );
+            ConfigError::Validation {
+                message: format!("Invalid mount in config: {}: {}", mount_str, e),
+            }
         })?;
 
         // Normalize the mount to Docker CLI string format
@@ -416,6 +449,12 @@ pub fn merge_mounts(
         match mount_map.get_mut(&mount.target) {
             Some((s, _idx)) => {
                 // Target already exists, update the mount string but keep the index
+                debug!(
+                    target = %mount.target,
+                    previous_mount = %s,
+                    config_mount = %normalized_str,
+                    "Config mount overriding feature mount for same target (config takes precedence)"
+                );
                 *s = normalized_str;
             }
             None => {
@@ -437,6 +476,11 @@ pub fn merge_mounts(
         .into_iter()
         .map(|(mount_str, _)| mount_str)
         .collect();
+
+    debug!(
+        merged_count = mounts.len(),
+        "Mount merging completed successfully"
+    );
 
     Ok(MergedMounts { mounts })
 }

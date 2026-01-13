@@ -180,16 +180,31 @@ impl ContainerOps for ContainerRuntimeImpl {
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
     ) -> Result<String> {
         match self {
             Self::Docker(runtime) => {
                 runtime
-                    .create_container(identity, config, workspace_path, gpu_mode, merged_security)
+                    .create_container(
+                        identity,
+                        config,
+                        workspace_path,
+                        gpu_mode,
+                        merged_security,
+                        merged_mounts,
+                    )
                     .await
             }
             Self::Podman(runtime) => {
                 runtime
-                    .create_container(identity, config, workspace_path, gpu_mode, merged_security)
+                    .create_container(
+                        identity,
+                        config,
+                        workspace_path,
+                        gpu_mode,
+                        merged_security,
+                        merged_mounts,
+                    )
                     .await
             }
         }
@@ -234,6 +249,7 @@ impl DockerLifecycle for ContainerRuntimeImpl {
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
     ) -> Result<ContainerResult> {
         match self {
             Self::Docker(runtime) => {
@@ -245,6 +261,7 @@ impl DockerLifecycle for ContainerRuntimeImpl {
                         remove_existing,
                         gpu_mode,
                         merged_security,
+                        merged_mounts,
                     )
                     .await
             }
@@ -257,6 +274,7 @@ impl DockerLifecycle for ContainerRuntimeImpl {
                         remove_existing,
                         gpu_mode,
                         merged_security,
+                        merged_mounts,
                     )
                     .await
             }
@@ -337,9 +355,17 @@ impl ContainerOps for DockerRuntime {
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
     ) -> Result<String> {
         self.docker
-            .create_container(identity, config, workspace_path, gpu_mode, merged_security)
+            .create_container(
+                identity,
+                config,
+                workspace_path,
+                gpu_mode,
+                merged_security,
+                merged_mounts,
+            )
             .await
     }
 
@@ -370,6 +396,7 @@ impl DockerLifecycle for DockerRuntime {
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
     ) -> Result<ContainerResult> {
         self.docker
             .up(
@@ -379,6 +406,7 @@ impl DockerLifecycle for DockerRuntime {
                 remove_existing,
                 gpu_mode,
                 merged_security,
+                merged_mounts,
             )
             .await
     }
@@ -463,9 +491,17 @@ impl ContainerOps for PodmanRuntime {
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
     ) -> Result<String> {
         self.runtime
-            .create_container(identity, config, workspace_path, gpu_mode, merged_security)
+            .create_container(
+                identity,
+                config,
+                workspace_path,
+                gpu_mode,
+                merged_security,
+                merged_mounts,
+            )
             .await
     }
 
@@ -496,6 +532,7 @@ impl DockerLifecycle for PodmanRuntime {
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
     ) -> Result<ContainerResult> {
         self.runtime
             .up(
@@ -505,6 +542,7 @@ impl DockerLifecycle for PodmanRuntime {
                 remove_existing,
                 gpu_mode,
                 merged_security,
+                merged_mounts,
             )
             .await
     }

@@ -21,6 +21,7 @@ use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::{Docker, DockerLifecycle};
 use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::features::merge_security_options;
+use deacon_core::mount::merge_mounts;
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ContainerState, StateManager};
 use deacon_core::IndexMap;
@@ -248,6 +249,38 @@ pub(crate) async fn execute_container_up(
         );
     }
 
+    // Merge mounts from config and features
+    let feature_mount_count: usize = resolved_features
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|f| f.metadata.mounts.len())
+        .sum();
+    let config_mount_count = config.mounts.len();
+
+    debug!(
+        feature_mounts = feature_mount_count,
+        config_mounts = config_mount_count,
+        "Merging mounts from config and features"
+    );
+
+    let merged_mounts = merge_mounts(&config.mounts, resolved_features.as_deref().unwrap_or(&[]))
+        .with_context(|| "Failed to merge mounts from config and features")?;
+
+    info!(
+        feature_mounts = feature_mount_count,
+        config_mounts = config_mount_count,
+        merged_mount_count = merged_mounts.mounts.len(),
+        "Merged mounts from config and features"
+    );
+
+    if !merged_mounts.mounts.is_empty() {
+        debug!(
+            mounts = ?merged_mounts.mounts,
+            "Merged mount specifications"
+        );
+    }
+
     // Log GPU mode application
     if args.gpu_mode == deacon_core::gpu::GpuMode::All {
         info!("Applying GPU mode: all - requesting GPU access for container");
@@ -264,6 +297,7 @@ pub(crate) async fn execute_container_up(
             args.remove_existing_container,
             args.gpu_mode,
             &merged_security,
+            &merged_mounts,
         )
         .await;
 

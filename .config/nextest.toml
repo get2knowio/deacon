@@ -115,7 +115,7 @@ filter = 'binary(=test_features_cli)'
 test-group = 'docker-exclusive'
 
 [[profile.default.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle)'
+filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts)'
 test-group = 'docker-shared'
 
 [[profile.default.overrides]]
@@ -204,7 +204,7 @@ filter = 'binary(=test_features_cli)'
 test-group = 'docker-exclusive'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle)'
+filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts)'
 test-group = 'docker-shared'
 
 [[profile.dev-fast.overrides]]
@@ -312,7 +312,7 @@ filter = 'binary(=test_features_cli)'
 test-group = 'docker-exclusive'
 
 [[profile.docker.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle)'
+filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts)'
 test-group = 'docker-shared'
 
 [[profile.docker.overrides]]
@@ -380,7 +380,7 @@ filter = 'binary(=test_features_cli) & test(test_features_test_)'
 test-group = 'docker-exclusive'
 
 [[profile.full.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle)'
+filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts)'
 test-group = 'docker-shared'
 
 [[profile.full.overrides]]
@@ -460,7 +460,7 @@ filter = 'binary(=test_features_cli) & test(test_features_test_)'
 test-group = 'docker-exclusive'
 
 [[profile.ci.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle)'
+filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts)'
 test-group = 'docker-shared'
 threads-required = 1
 
