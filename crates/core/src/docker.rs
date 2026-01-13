@@ -2542,14 +2542,14 @@ pub mod mock {
             Ok(container_ids)
         }
 
-        #[instrument(skip(self, config, merged_security))]
+        #[instrument(skip(self, config, _workspace_path, _merged_security))]
         async fn create_container(
             &self,
             identity: &ContainerIdentity,
             config: &DevContainerConfig,
-            workspace_path: &Path,
+            _workspace_path: &Path,
             gpu_mode: crate::gpu::GpuMode,
-            merged_security: &crate::features::MergedSecurityOptions,
+            _merged_security: &crate::features::MergedSecurityOptions,
         ) -> Result<String> {
             debug!(
                 "MockDocker create_container called with gpu_mode: {:?}",
