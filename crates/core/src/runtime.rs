@@ -421,21 +421,21 @@ impl ContainerRuntime for DockerRuntime {
 /// Podman runtime implementation
 #[derive(Debug)]
 pub struct PodmanRuntime {
-    runtime: crate::docker::CliRuntime,
+    runtime: crate::docker::CliDocker,
 }
 
 impl PodmanRuntime {
     /// Create new Podman runtime
     pub fn new() -> Self {
         Self {
-            runtime: crate::docker::CliRuntime::podman(),
+            runtime: crate::docker::CliDocker::podman(),
         }
     }
 
     /// Create new Podman runtime with custom path
     pub fn with_path(podman_path: String) -> Self {
         Self {
-            runtime: crate::docker::CliRuntime::with_runtime_path(podman_path),
+            runtime: crate::docker::CliDocker::with_runtime_path(podman_path),
         }
     }
 }
