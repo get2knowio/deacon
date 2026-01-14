@@ -649,6 +649,21 @@ impl CliRuntime {
     pub fn with_runtime_path(runtime_path: String) -> Self {
         Self { runtime_path }
     }
+
+    /// Create a new CliRuntime instance (defaults to Docker)
+    ///
+    /// This is an alias for `CliRuntime::docker()` provided for backward compatibility.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a new CliRuntime with custom docker binary path
+    ///
+    /// This is an alias for `CliRuntime::with_runtime_path()` provided for backward compatibility.
+    pub fn with_path(runtime_path: String) -> Self {
+        Self::with_runtime_path(runtime_path)
+    }
 }
 
 impl Default for CliRuntime {
@@ -661,19 +676,6 @@ impl Default for CliRuntime {
 ///
 /// This is a type alias for CliRuntime configured for Docker.
 pub type CliDocker = CliRuntime;
-
-// Provide backward-compatible constructors for CliDocker
-impl CliDocker {
-    /// Create a new CliDocker instance
-    pub fn new() -> Self {
-        CliRuntime::docker()
-    }
-
-    /// Create a new CliDocker instance with custom docker binary path
-    pub fn with_path(docker_path: String) -> Self {
-        CliRuntime::with_runtime_path(docker_path)
-    }
-}
 
 impl CliRuntime {
     /// Parse exposed ports from container Config.ExposedPorts
