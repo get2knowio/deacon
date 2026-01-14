@@ -78,7 +78,9 @@
       "Bash(ruff check:*)",
       "Bash(/opt/maverick/.venv/bin/ruff check:*)",
       "Bash(kill:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(ruff format:*)",
+      "Bash(/opt/maverick/.venv/bin/ruff format:*)"
     ],
     "deny": [],
     "ask": []

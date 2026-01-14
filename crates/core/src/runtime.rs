@@ -5,7 +5,9 @@
 
 use crate::config::DevContainerConfig;
 use crate::container::{ContainerIdentity, ContainerOps, ContainerResult};
-use crate::docker::{ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult, ImageInfo};
+use crate::docker::{
+    CliRuntime, ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult, ImageInfo,
+};
 use crate::errors::{DeaconError, Result};
 use std::path::Path;
 
@@ -106,7 +108,7 @@ impl ContainerRuntimeImpl {
     }
 
     /// Get the underlying CliDocker/CliRuntime instance for feature installation
-    pub fn cli_docker(&self) -> crate::docker::CliRuntime {
+    pub fn cli_docker(&self) -> CliRuntime {
         match self {
             Self::Docker(runtime) => runtime.docker.clone(),
             Self::Podman(runtime) => runtime.runtime.clone(),
@@ -285,21 +287,21 @@ impl DockerLifecycle for ContainerRuntimeImpl {
 /// Docker runtime implementation wrapping CliRuntime
 #[derive(Debug)]
 pub struct DockerRuntime {
-    pub(crate) docker: crate::docker::CliRuntime,
+    pub(crate) docker: CliRuntime,
 }
 
 impl DockerRuntime {
     /// Create new Docker runtime
     pub fn new() -> Self {
         Self {
-            docker: crate::docker::CliRuntime::new(),
+            docker: CliRuntime::new(),
         }
     }
 
     /// Create new Docker runtime with custom path
     pub fn with_path(docker_path: String) -> Self {
         Self {
-            docker: crate::docker::CliRuntime::with_path(docker_path),
+            docker: CliRuntime::with_runtime_path(docker_path),
         }
     }
 }
@@ -421,21 +423,21 @@ impl ContainerRuntime for DockerRuntime {
 /// Podman runtime implementation
 #[derive(Debug)]
 pub struct PodmanRuntime {
-    pub(crate) runtime: crate::docker::CliRuntime,
+    pub(crate) runtime: CliRuntime,
 }
 
 impl PodmanRuntime {
     /// Create new Podman runtime
     pub fn new() -> Self {
         Self {
-            runtime: crate::docker::CliRuntime::podman(),
+            runtime: CliRuntime::podman(),
         }
     }
 
     /// Create new Podman runtime with custom path
     pub fn with_path(podman_path: String) -> Self {
         Self {
-            runtime: crate::docker::CliRuntime::with_runtime_path(podman_path),
+            runtime: CliRuntime::with_runtime_path(podman_path),
         }
     }
 }
