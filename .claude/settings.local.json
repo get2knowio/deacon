@@ -76,7 +76,9 @@
       "Bash(python -c:*)",
       "Bash(python -m py_compile:*)",
       "Bash(ruff check:*)",
-      "Bash(/opt/maverick/.venv/bin/ruff check:*)"
+      "Bash(/opt/maverick/.venv/bin/ruff check:*)",
+      "Bash(kill:*)",
+      "Bash(pkill:*)"
     ],
     "deny": [],
     "ask": []
