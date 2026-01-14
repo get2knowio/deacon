@@ -4,9 +4,7 @@
 //! with correct ordering and empty command filtering (T024 and T025).
 
 use deacon_core::config::DevContainerConfig;
-use deacon_core::container_lifecycle::{
-    aggregate_lifecycle_commands, LifecycleCommandSource,
-};
+use deacon_core::container_lifecycle::{aggregate_lifecycle_commands, LifecycleCommandSource};
 use deacon_core::features::{FeatureMetadata, ResolvedFeature};
 use deacon_core::lifecycle::LifecyclePhase;
 use serde_json::json;
@@ -94,7 +92,7 @@ fn test_aggregate_lifecycle_commands_ordering() {
     // Verify order: features first (in installation order), then config
     assert_eq!(result.commands[0].command, json!("npm install"));
     match &result.commands[0].source {
-        LifecycleCommandSource::Feature { id } => assert_eq!(id.as_str(), "node"),
+        LifecycleCommandSource::Feature { id } => assert_eq!(id, "node"),
         _ => panic!("Expected Feature source"),
     }
 
@@ -103,7 +101,7 @@ fn test_aggregate_lifecycle_commands_ordering() {
         json!("pip install -r requirements.txt")
     );
     match &result.commands[1].source {
-        LifecycleCommandSource::Feature { id } => assert_eq!(id.as_str(), "python"),
+        LifecycleCommandSource::Feature { id } => assert_eq!(id, "python"),
         _ => panic!("Expected Feature source"),
     }
 
@@ -195,7 +193,7 @@ fn test_aggregate_lifecycle_commands_filters_empty_null() {
     assert_eq!(result.commands.len(), 1);
     assert_eq!(result.commands[0].command, json!("docker --version"));
     match &result.commands[0].source {
-        LifecycleCommandSource::Feature { id } => assert_eq!(id.as_str(), "docker"),
+        LifecycleCommandSource::Feature { id } => assert_eq!(id, "docker"),
         _ => panic!("Expected Feature source"),
     }
 }
@@ -301,7 +299,7 @@ fn test_aggregate_lifecycle_commands_filters_empty_array() {
     assert_eq!(result.commands.len(), 1);
     assert_eq!(result.commands[0].command, json!("npm install"));
     match &result.commands[0].source {
-        LifecycleCommandSource::Feature { id } => assert_eq!(id.as_str(), "node"),
+        LifecycleCommandSource::Feature { id } => assert_eq!(id, "node"),
         _ => panic!("Expected Feature source"),
     }
 }
