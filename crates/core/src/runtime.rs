@@ -285,7 +285,7 @@ impl DockerLifecycle for ContainerRuntimeImpl {
 /// Docker runtime implementation wrapping CliRuntime
 #[derive(Debug)]
 pub struct DockerRuntime {
-    docker: crate::docker::CliRuntime,
+    pub(crate) docker: crate::docker::CliRuntime,
 }
 
 impl DockerRuntime {
@@ -421,7 +421,7 @@ impl ContainerRuntime for DockerRuntime {
 /// Podman runtime implementation
 #[derive(Debug)]
 pub struct PodmanRuntime {
-    runtime: crate::docker::CliRuntime,
+    pub(crate) runtime: crate::docker::CliRuntime,
 }
 
 impl PodmanRuntime {
