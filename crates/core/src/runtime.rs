@@ -106,7 +106,7 @@ impl ContainerRuntimeImpl {
     }
 
     /// Get the underlying CliDocker/CliRuntime instance for feature installation
-    pub fn cli_docker(&self) -> crate::docker::CliDocker {
+    pub fn cli_docker(&self) -> crate::docker::CliRuntime {
         match self {
             Self::Docker(runtime) => runtime.docker.clone(),
             Self::Podman(runtime) => runtime.runtime.clone(),
@@ -282,24 +282,24 @@ impl DockerLifecycle for ContainerRuntimeImpl {
     }
 }
 
-/// Docker runtime implementation wrapping CliDocker
+/// Docker runtime implementation wrapping CliRuntime
 #[derive(Debug)]
 pub struct DockerRuntime {
-    docker: crate::docker::CliDocker,
+    docker: crate::docker::CliRuntime,
 }
 
 impl DockerRuntime {
     /// Create new Docker runtime
     pub fn new() -> Self {
         Self {
-            docker: crate::docker::CliDocker::new(),
+            docker: crate::docker::CliRuntime::new(),
         }
     }
 
     /// Create new Docker runtime with custom path
     pub fn with_path(docker_path: String) -> Self {
         Self {
-            docker: crate::docker::CliDocker::with_path(docker_path),
+            docker: crate::docker::CliRuntime::with_path(docker_path),
         }
     }
 }
@@ -421,21 +421,21 @@ impl ContainerRuntime for DockerRuntime {
 /// Podman runtime implementation
 #[derive(Debug)]
 pub struct PodmanRuntime {
-    runtime: crate::docker::CliDocker,
+    runtime: crate::docker::CliRuntime,
 }
 
 impl PodmanRuntime {
     /// Create new Podman runtime
     pub fn new() -> Self {
         Self {
-            runtime: crate::docker::CliDocker::podman(),
+            runtime: crate::docker::CliRuntime::podman(),
         }
     }
 
     /// Create new Podman runtime with custom path
     pub fn with_path(podman_path: String) -> Self {
         Self {
-            runtime: crate::docker::CliDocker::with_runtime_path(podman_path),
+            runtime: crate::docker::CliRuntime::with_runtime_path(podman_path),
         }
     }
 }

@@ -71,7 +71,12 @@
       "Bash(/bin/bash -c 'cd /workspaces/deacon && pwd')",
       "Bash(/bin/ls:*)",
       "Bash(/opt/maverick/.venv/bin/maverick:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(source:*)",
+      "Bash(python -c:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(ruff check:*)",
+      "Bash(/opt/maverick/.venv/bin/ruff check:*)"
     ],
     "deny": [],
     "ask": []
