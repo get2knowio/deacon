@@ -70,7 +70,8 @@
       "Bash(tar:*)",
       "Bash(/bin/bash -c 'cd /workspaces/deacon && pwd')",
       "Bash(/bin/ls:*)",
-      "Bash(/opt/maverick/.venv/bin/maverick:*)"
+      "Bash(/opt/maverick/.venv/bin/maverick:*)",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []
