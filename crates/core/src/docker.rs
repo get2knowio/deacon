@@ -666,14 +666,12 @@ pub type CliDocker = CliRuntime;
 impl CliDocker {
     /// Create a new CliDocker instance
     pub fn new() -> Self {
-        Self::docker()
+        CliRuntime::docker()
     }
 
     /// Create a new CliDocker instance with custom docker binary path
     pub fn with_path(docker_path: String) -> Self {
-        Self {
-            runtime_path: docker_path,
-        }
+        CliRuntime::with_runtime_path(docker_path)
     }
 }
 

@@ -69,7 +69,8 @@
       "Bash(.specify/scripts/bash/update-agent-context.sh:*)",
       "Bash(tar:*)",
       "Bash(/bin/bash -c 'cd /workspaces/deacon && pwd')",
-      "Bash(/bin/ls:*)"
+      "Bash(/bin/ls:*)",
+      "Bash(/opt/maverick/.venv/bin/maverick:*)"
     ],
     "deny": [],
     "ask": []
