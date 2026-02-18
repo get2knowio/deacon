@@ -652,9 +652,17 @@ where
     if !updated_config.skip_non_blocking_commands {
         if let Some(post_start_commands) = &commands.post_start {
             // Add postStart phase to non-blocking specs for later execution
+            // Convert Vec<String> to Vec<AggregatedLifecycleCommand> with Config source
+            let aggregated_commands: Vec<AggregatedLifecycleCommand> = post_start_commands
+                .iter()
+                .map(|cmd| AggregatedLifecycleCommand {
+                    command: serde_json::Value::String(cmd.clone()),
+                    source: LifecycleCommandSource::Config,
+                })
+                .collect();
             result.non_blocking_phases.push(NonBlockingPhaseSpec {
                 phase: LifecyclePhase::PostStart,
-                commands: post_start_commands.clone(),
+                commands: aggregated_commands,
                 config: updated_config.clone(),
                 context: container_context.clone(),
                 timeout: updated_config.non_blocking_timeout,
@@ -672,9 +680,17 @@ where
     if !updated_config.skip_non_blocking_commands {
         if let Some(post_attach_commands) = &commands.post_attach {
             // Add postAttach phase to non-blocking specs for later execution
+            // Convert Vec<String> to Vec<AggregatedLifecycleCommand> with Config source
+            let aggregated_commands: Vec<AggregatedLifecycleCommand> = post_attach_commands
+                .iter()
+                .map(|cmd| AggregatedLifecycleCommand {
+                    command: serde_json::Value::String(cmd.clone()),
+                    source: LifecycleCommandSource::Config,
+                })
+                .collect();
             result.non_blocking_phases.push(NonBlockingPhaseSpec {
                 phase: LifecyclePhase::PostAttach,
-                commands: post_attach_commands.clone(),
+                commands: aggregated_commands,
                 config: updated_config.clone(),
                 context: container_context.clone(),
                 timeout: updated_config.non_blocking_timeout,
@@ -1009,7 +1025,7 @@ where
         // Apply variable substitution to the command
         let mut substitution_report = SubstitutionReport::new();
         let substituted_command = VariableSubstitution::substitute_string(
-            command_template,
+            &command_template,
             context,
             &mut substitution_report,
         );
@@ -1634,8 +1650,8 @@ pub struct ContainerLifecycleResult {
 pub struct NonBlockingPhaseSpec {
     /// Phase to execute
     pub phase: LifecyclePhase,
-    /// Commands to execute
-    pub commands: Vec<String>,
+    /// Commands to execute (aggregated with source attribution)
+    pub commands: Vec<AggregatedLifecycleCommand>,
     /// Configuration for execution
     pub config: ContainerLifecycleConfig,
     /// Substitution context
@@ -1837,10 +1853,20 @@ impl ContainerLifecycleResult {
                     self.phases.push(phase_result);
                 }
                 Ok(Err(e)) => {
+                    // Non-blocking phase failed - record as a failed phase result instead of
+                    // adding to background_errors. This allows callers to see phase outcomes.
                     let error_msg =
                         format!("Non-blocking phase {} failed: {}", spec.phase.as_str(), e);
                     error!("{}", error_msg);
-                    self.background_errors.push(error_msg);
+
+                    // Create a failed phase result to record the failure
+                    let failed_result = PhaseResult {
+                        phase: spec.phase,
+                        commands: Vec::new(),
+                        total_duration: std::time::Duration::default(),
+                        success: false,
+                    };
+                    self.phases.push(failed_result);
                     // Continue with other phases - non-blocking phases should not fail the main flow
                 }
                 Err(elapsed) => {
@@ -1864,6 +1890,16 @@ impl ContainerLifecycleResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Helper to convert string commands to AggregatedLifecycleCommand for tests
+    fn make_config_commands(cmds: &[&str]) -> Vec<AggregatedLifecycleCommand> {
+        cmds.iter()
+            .map(|cmd| AggregatedLifecycleCommand {
+                command: serde_json::Value::String(cmd.to_string()),
+                source: LifecycleCommandSource::Config,
+            })
+            .collect()
+    }
 
     #[test]
     fn test_container_lifecycle_config_creation() {
@@ -2017,7 +2053,7 @@ mod tests {
         let workspace_folder = temp_dir.path().to_path_buf();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
-            commands: vec!["echo 'test'".to_string()],
+            commands: make_config_commands(&["echo 'test'"]),
             config: ContainerLifecycleConfig {
                 container_id: "test".to_string(),
                 user: None,
@@ -2080,7 +2116,7 @@ mod tests {
         let workspace_folder = temp_dir.path().to_path_buf();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
-            commands: vec!["echo 'test'".to_string()],
+            commands: make_config_commands(&["echo 'test'"]),
             config: ContainerLifecycleConfig {
                 container_id: "test".to_string(),
                 user: None,
@@ -2157,7 +2193,7 @@ mod tests {
         let workspace_folder = temp_dir.path().to_path_buf();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
-            commands: vec!["echo 'test'".to_string()],
+            commands: make_config_commands(&["echo 'test'"]),
             config: ContainerLifecycleConfig {
                 container_id: "test".to_string(),
                 user: None,
@@ -2221,7 +2257,7 @@ mod tests {
         let workspace_folder = temp_dir.path().to_path_buf();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
-            commands: vec!["echo 'test'".to_string()],
+            commands: make_config_commands(&["echo 'test'"]),
             config: ContainerLifecycleConfig {
                 container_id: "test".to_string(),
                 user: None,
@@ -2307,7 +2343,7 @@ mod tests {
         let mut result = ContainerLifecycleResult::new();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
-            commands: vec!["echo 'postStart'".to_string()],
+            commands: make_config_commands(&["echo 'postStart'"]),
             config: ContainerLifecycleConfig {
                 container_id: "test".to_string(),
                 user: None,
@@ -2331,7 +2367,7 @@ mod tests {
         });
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostAttach,
-            commands: vec!["echo 'postAttach'".to_string()],
+            commands: make_config_commands(&["echo 'postAttach'"]),
             config: ContainerLifecycleConfig {
                 container_id: "test".to_string(),
                 user: None,
@@ -2407,7 +2443,7 @@ mod tests {
         let mut result = ContainerLifecycleResult::new();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
-            commands: vec!["exit 1".to_string()],
+            commands: make_config_commands(&["exit 1"]),
             config: ContainerLifecycleConfig {
                 container_id: "test".to_string(),
                 user: None,
@@ -2489,7 +2525,7 @@ mod tests {
         let mut result = ContainerLifecycleResult::new();
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostStart,
-            commands: vec!["echo 'postStart'".to_string()],
+            commands: make_config_commands(&["echo 'postStart'"]),
             config: ContainerLifecycleConfig {
                 container_id: "test".to_string(),
                 user: None,
@@ -2513,7 +2549,7 @@ mod tests {
         });
         result.non_blocking_phases.push(NonBlockingPhaseSpec {
             phase: LifecyclePhase::PostAttach,
-            commands: vec!["echo 'postAttach'".to_string()],
+            commands: make_config_commands(&["echo 'postAttach'"]),
             config: ContainerLifecycleConfig {
                 container_id: "test".to_string(),
                 user: None,
@@ -2826,8 +2862,10 @@ mod tests {
         };
 
         // Create config with onCreate command
-        let mut config = DevContainerConfig::default();
-        config.on_create_command = Some(json!("echo ready"));
+        let config = DevContainerConfig {
+            on_create_command: Some(json!("echo ready")),
+            ..Default::default()
+        };
 
         let features = vec![feature1, feature2];
 
@@ -2892,8 +2930,10 @@ mod tests {
         };
 
         // Config with empty string onCreate command
-        let mut config = DevContainerConfig::default();
-        config.on_create_command = Some(json!(""));
+        let config = DevContainerConfig {
+            on_create_command: Some(json!("")),
+            ..Default::default()
+        };
 
         let features = vec![feature1, feature2];
 
@@ -2946,8 +2986,10 @@ mod tests {
         };
 
         // Config with empty object onCreate command
-        let mut config = DevContainerConfig::default();
-        config.on_create_command = Some(json!({}));
+        let config = DevContainerConfig {
+            on_create_command: Some(json!({})),
+            ..Default::default()
+        };
 
         let features = vec![feature1, feature2];
 
@@ -2967,8 +3009,10 @@ mod tests {
         use serde_json::json;
 
         // Config with onCreate command
-        let mut config = DevContainerConfig::default();
-        config.on_create_command = Some(json!("echo hello"));
+        let config = DevContainerConfig {
+            on_create_command: Some(json!("echo hello")),
+            ..Default::default()
+        };
 
         let features = vec![];
 
@@ -3048,8 +3092,10 @@ mod tests {
         };
 
         // Config with array command
-        let mut config = DevContainerConfig::default();
-        config.on_create_command = Some(json!(["./setup.sh", "--verbose"]));
+        let config = DevContainerConfig {
+            on_create_command: Some(json!(["./setup.sh", "--verbose"])),
+            ..Default::default()
+        };
 
         let features = vec![feature];
 
@@ -3102,12 +3148,14 @@ mod tests {
         };
 
         // Config with commands for all phases
-        let mut config = DevContainerConfig::default();
-        config.on_create_command = Some(json!("onCreate-config"));
-        config.update_content_command = Some(json!("updateContent-config"));
-        config.post_create_command = Some(json!("postCreate-config"));
-        config.post_start_command = Some(json!("postStart-config"));
-        config.post_attach_command = Some(json!("postAttach-config"));
+        let config = DevContainerConfig {
+            on_create_command: Some(json!("onCreate-config")),
+            update_content_command: Some(json!("updateContent-config")),
+            post_create_command: Some(json!("postCreate-config")),
+            post_start_command: Some(json!("postStart-config")),
+            post_attach_command: Some(json!("postAttach-config")),
+            ..Default::default()
+        };
 
         let features = vec![feature];
 
@@ -3179,8 +3227,10 @@ mod tests {
         };
 
         // Config with initialize command
-        let mut config = DevContainerConfig::default();
-        config.initialize_command = Some(json!("initialize-config"));
+        let config = DevContainerConfig {
+            initialize_command: Some(json!("initialize-config")),
+            ..Default::default()
+        };
 
         let features = vec![feature];
 
@@ -3219,8 +3269,10 @@ mod tests {
         };
 
         // Config with onCreate command
-        let mut config = DevContainerConfig::default();
-        config.on_create_command = Some(json!("echo ready"));
+        let config = DevContainerConfig {
+            on_create_command: Some(json!("echo ready")),
+            ..Default::default()
+        };
 
         let features = vec![feature];
 
@@ -3275,8 +3327,10 @@ mod tests {
             },
         };
 
-        let mut config = DevContainerConfig::default();
-        config.on_create_command = Some(json!("config-command"));
+        let config = DevContainerConfig {
+            on_create_command: Some(json!("config-command")),
+            ..Default::default()
+        };
 
         let features = vec![feature1, feature2, feature3];
 
@@ -3380,8 +3434,10 @@ mod tests {
             },
         };
 
-        let mut config = DevContainerConfig::default();
-        config.on_create_command = Some(json!("config-command"));
+        let config = DevContainerConfig {
+            on_create_command: Some(json!("config-command")),
+            ..Default::default()
+        };
 
         let features = vec![feature1, feature2, feature3, feature4, feature5];
 

@@ -228,7 +228,6 @@ fn get_mount_details(container_id: &str, target: &str) -> Option<Value> {
 
 /// Test that a feature declaring a volume mount has the mount applied to the container
 #[test]
-#[nextest::group(docker-shared)]
 fn test_feature_volume_mount_applied_to_container() {
     if !is_docker_available() {
         eprintln!("Skipping test_feature_volume_mount_applied_to_container: Docker not available");
@@ -292,7 +291,6 @@ fn test_feature_volume_mount_applied_to_container() {
 
 /// Test that a feature declaring a bind mount has the mount applied to the container
 #[test]
-#[nextest::group(docker-shared)]
 fn test_feature_bind_mount_applied_to_container() {
     if !is_docker_available() {
         eprintln!("Skipping test_feature_bind_mount_applied_to_container: Docker not available");
@@ -359,7 +357,6 @@ fn test_feature_bind_mount_applied_to_container() {
 
 /// Test that config mount takes precedence over feature mount when both target the same path
 #[test]
-#[nextest::group(docker-shared)]
 fn test_config_mount_precedence_over_feature_mount() {
     if !is_docker_available() {
         eprintln!("Skipping test_config_mount_precedence_over_feature_mount: Docker not available");
@@ -427,7 +424,6 @@ fn test_config_mount_precedence_over_feature_mount() {
 
 /// Test that multiple features with different mounts all get applied
 #[test]
-#[nextest::group(docker-shared)]
 fn test_multiple_features_with_different_mounts() {
     if !is_docker_available() {
         eprintln!("Skipping test_multiple_features_with_different_mounts: Docker not available");
@@ -513,7 +509,6 @@ fn test_multiple_features_with_different_mounts() {
 
 /// Test that feature mounts using volume syntax (shorthand) are parsed correctly
 #[test]
-#[nextest::group(docker-shared)]
 fn test_feature_mount_volume_syntax() {
     if !is_docker_available() {
         eprintln!("Skipping test_feature_mount_volume_syntax: Docker not available");
@@ -577,7 +572,6 @@ fn test_feature_mount_volume_syntax() {
 
 /// Test that features and config mounts are both applied when targeting different paths
 #[test]
-#[nextest::group(docker-shared)]
 fn test_feature_and_config_mounts_merged() {
     if !is_docker_available() {
         eprintln!("Skipping test_feature_and_config_mounts_merged: Docker not available");
@@ -642,7 +636,6 @@ fn test_feature_and_config_mounts_merged() {
 
 /// Test that multiple mounts from a single feature are all applied
 #[test]
-#[nextest::group(docker-shared)]
 fn test_feature_with_multiple_mounts() {
     if !is_docker_available() {
         eprintln!("Skipping test_feature_with_multiple_mounts: Docker not available");
@@ -704,7 +697,6 @@ fn test_feature_with_multiple_mounts() {
 
 /// Test that mount read-only flag is respected from feature mounts
 #[test]
-#[nextest::group(docker-shared)]
 fn test_feature_mount_readonly_flag() {
     if !is_docker_available() {
         eprintln!("Skipping test_feature_mount_readonly_flag: Docker not available");
@@ -756,7 +748,6 @@ fn test_feature_mount_readonly_flag() {
 
 /// Test that an empty mounts array in a feature doesn't cause errors
 #[test]
-#[nextest::group(docker-shared)]
 fn test_feature_with_empty_mounts_array() {
     if !is_docker_available() {
         eprintln!("Skipping test_feature_with_empty_mounts_array: Docker not available");

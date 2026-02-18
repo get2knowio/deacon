@@ -15,9 +15,7 @@ use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::container_lifecycle::{aggregate_lifecycle_commands, DotfilesConfig};
 use deacon_core::errors::DeaconError;
 use deacon_core::features::ResolvedFeature;
-use deacon_core::lifecycle::{
-    InvocationContext, InvocationFlags, LifecyclePhase, LifecyclePhaseState,
-};
+use deacon_core::lifecycle::{InvocationContext, InvocationFlags, LifecyclePhaseState};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -266,7 +264,7 @@ pub(crate) async fn execute_lifecycle_commands(
         if !aggregated_commands.is_empty() {
             // Log aggregated commands with source attribution
             let _span = span!(Level::INFO, "onCreate_aggregation").entered();
-            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+            for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
                 info!(
                     command_index = idx,
                     source = %agg_cmd.source,
@@ -276,7 +274,7 @@ pub(crate) async fn execute_lifecycle_commands(
 
             // Convert aggregated commands to string vectors for execution
             let mut all_commands = Vec::new();
-            for agg_cmd in aggregated_commands {
+            for agg_cmd in &aggregated_commands.commands {
                 let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
                 all_commands.extend(cmd_strings);
             }
@@ -299,7 +297,7 @@ pub(crate) async fn execute_lifecycle_commands(
         if !aggregated_commands.is_empty() {
             // Log aggregated commands with source attribution
             let _span = span!(Level::INFO, "updateContent_aggregation").entered();
-            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+            for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
                 info!(
                     command_index = idx,
                     source = %agg_cmd.source,
@@ -309,7 +307,7 @@ pub(crate) async fn execute_lifecycle_commands(
 
             // Convert aggregated commands to string vectors for execution
             let mut all_commands = Vec::new();
-            for agg_cmd in aggregated_commands {
+            for agg_cmd in &aggregated_commands.commands {
                 let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
                 all_commands.extend(cmd_strings);
             }
@@ -341,7 +339,7 @@ pub(crate) async fn execute_lifecycle_commands(
         if !aggregated_commands.is_empty() {
             // Log aggregated commands with source attribution
             let _span = span!(Level::INFO, "postCreate_aggregation").entered();
-            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+            for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
                 info!(
                     command_index = idx,
                     source = %agg_cmd.source,
@@ -351,7 +349,7 @@ pub(crate) async fn execute_lifecycle_commands(
 
             // Convert aggregated commands to string vectors for execution
             let mut all_commands = Vec::new();
-            for agg_cmd in aggregated_commands {
+            for agg_cmd in &aggregated_commands.commands {
                 let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
                 all_commands.extend(cmd_strings);
             }
@@ -374,7 +372,7 @@ pub(crate) async fn execute_lifecycle_commands(
         if !aggregated_commands.is_empty() {
             // Log aggregated commands with source attribution
             let _span = span!(Level::INFO, "postStart_aggregation").entered();
-            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+            for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
                 info!(
                     command_index = idx,
                     source = %agg_cmd.source,
@@ -384,7 +382,7 @@ pub(crate) async fn execute_lifecycle_commands(
 
             // Convert aggregated commands to string vectors for execution
             let mut all_commands = Vec::new();
-            for agg_cmd in aggregated_commands {
+            for agg_cmd in &aggregated_commands.commands {
                 let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
                 all_commands.extend(cmd_strings);
             }
@@ -410,7 +408,7 @@ pub(crate) async fn execute_lifecycle_commands(
         if !aggregated_commands.is_empty() {
             // Log aggregated commands with source attribution
             let _span = span!(Level::INFO, "postAttach_aggregation").entered();
-            for (idx, agg_cmd) in aggregated_commands.iter().enumerate() {
+            for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
                 info!(
                     command_index = idx,
                     source = %agg_cmd.source,
@@ -420,7 +418,7 @@ pub(crate) async fn execute_lifecycle_commands(
 
             // Convert aggregated commands to string vectors for execution
             let mut all_commands = Vec::new();
-            for agg_cmd in aggregated_commands {
+            for agg_cmd in &aggregated_commands.commands {
                 let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
                 all_commands.extend(cmd_strings);
             }

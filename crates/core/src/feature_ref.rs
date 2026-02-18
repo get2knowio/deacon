@@ -607,11 +607,9 @@ mod tests {
         // The exact error depends on how parse_registry_reference handles this
         // It should either be InvalidOciReference or could potentially succeed with weird parsing
         // Let's just verify it doesn't become a LocalPath
-        match result {
-            Ok(FeatureRefType::LocalPath(_)) => {
-                panic!("Windows paths should not be recognized as local paths")
-            }
-            _ => {} // Any other result is acceptable (error or weird OCI parse)
+        // Any result other than LocalPath is acceptable (error or weird OCI parse)
+        if let Ok(FeatureRefType::LocalPath(_)) = result {
+            panic!("Windows paths should not be recognized as local paths")
         }
     }
 

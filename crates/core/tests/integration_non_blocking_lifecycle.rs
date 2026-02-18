@@ -83,7 +83,11 @@ async fn test_non_blocking_phases_are_deferred() {
         .iter()
         .find(|spec| spec.phase.as_str() == "postStart")
         .unwrap();
-    assert_eq!(post_start_spec.commands, vec!["echo 'postStart'"]);
+    assert_eq!(post_start_spec.commands.len(), 1);
+    assert_eq!(
+        post_start_spec.commands[0].command,
+        serde_json::json!("echo 'postStart'")
+    );
     assert_eq!(post_start_spec.timeout, Duration::from_secs(30));
 
     let post_attach_spec = result
@@ -91,7 +95,11 @@ async fn test_non_blocking_phases_are_deferred() {
         .iter()
         .find(|spec| spec.phase.as_str() == "postAttach")
         .unwrap();
-    assert_eq!(post_attach_spec.commands, vec!["echo 'postAttach'"]);
+    assert_eq!(post_attach_spec.commands.len(), 1);
+    assert_eq!(
+        post_attach_spec.commands[0].command,
+        serde_json::json!("echo 'postAttach'")
+    );
     assert_eq!(post_attach_spec.timeout, Duration::from_secs(30));
 
     // Verify that the MockDocker received exec calls for blocking phases only

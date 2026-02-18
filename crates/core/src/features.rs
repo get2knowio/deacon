@@ -280,10 +280,11 @@ impl FeatureOption {
 }
 
 /// Feature metadata structure representing devcontainer-feature.json
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct FeatureMetadata {
     /// Feature identifier (required)
+    #[serde(default)]
     pub id: String,
 
     /// Feature version
@@ -2606,7 +2607,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.privileged, false);
+        assert!(!result.privileged);
     }
 
     #[test]
@@ -2619,7 +2620,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.privileged, false);
+        assert!(!result.privileged);
     }
 
     #[test]
@@ -2632,7 +2633,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.privileged, true);
+        assert!(result.privileged);
     }
 
     #[test]
@@ -2645,7 +2646,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.privileged, true);
+        assert!(result.privileged);
     }
 
     #[test]
@@ -2658,7 +2659,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.privileged, true);
+        assert!(result.privileged);
     }
 
     #[test]
@@ -2671,7 +2672,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.privileged, false);
+        assert!(!result.privileged);
     }
 
     #[test]
@@ -2684,7 +2685,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.privileged, true);
+        assert!(result.privileged);
     }
 
     #[test]
@@ -2694,7 +2695,7 @@ mod security_merge_tests {
         let features = vec![];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.privileged, false);
+        assert!(!result.privileged);
     }
 
     #[test]
@@ -2704,7 +2705,7 @@ mod security_merge_tests {
         let features = vec![];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.privileged, true);
+        assert!(result.privileged);
     }
 
     // ==================== Rule 2: Init Mode (OR Logic) ====================
@@ -2719,7 +2720,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.init, false);
+        assert!(!result.init);
     }
 
     #[test]
@@ -2732,7 +2733,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.init, false);
+        assert!(!result.init);
     }
 
     #[test]
@@ -2745,7 +2746,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.init, true);
+        assert!(result.init);
     }
 
     #[test]
@@ -2758,7 +2759,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.init, true);
+        assert!(result.init);
     }
 
     #[test]
@@ -2771,7 +2772,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.init, true);
+        assert!(result.init);
     }
 
     #[test]
@@ -2784,7 +2785,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.init, false);
+        assert!(!result.init);
     }
 
     #[test]
@@ -2797,7 +2798,7 @@ mod security_merge_tests {
         ];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.init, true);
+        assert!(result.init);
     }
 
     #[test]
@@ -2807,7 +2808,7 @@ mod security_merge_tests {
         let features = vec![];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.init, false);
+        assert!(!result.init);
     }
 
     #[test]
@@ -2817,7 +2818,7 @@ mod security_merge_tests {
         let features = vec![];
 
         let result = merge_security_options(&config, &features);
-        assert_eq!(result.init, true);
+        assert!(result.init);
     }
 
     // ==================== Rule 3: Capabilities (Union + Deduplicate + Uppercase) ====================
@@ -3284,10 +3285,10 @@ mod security_merge_tests {
         let result = merge_security_options(&config, &features);
 
         // Privileged: OR logic - feature1 has Some(true)
-        assert_eq!(result.privileged, true);
+        assert!(result.privileged);
 
         // Init: OR logic - feature2 has Some(true)
-        assert_eq!(result.init, true);
+        assert!(result.init);
 
         // Cap_add: Union + deduplicate + uppercase
         assert_eq!(result.cap_add, vec!["NET_ADMIN", "SYS_PTRACE", "NET_RAW"]);
@@ -3307,8 +3308,8 @@ mod security_merge_tests {
 
         let result = merge_security_options(&config, &features);
 
-        assert_eq!(result.privileged, false);
-        assert_eq!(result.init, false);
+        assert!(!result.privileged);
+        assert!(!result.init);
         assert_eq!(result.cap_add, Vec::<String>::new());
         assert_eq!(result.security_opt, Vec::<String>::new());
     }
@@ -3329,8 +3330,8 @@ mod security_merge_tests {
 
         let result = merge_security_options(&config, &features);
 
-        assert_eq!(result.privileged, true);
-        assert_eq!(result.init, true);
+        assert!(result.privileged);
+        assert!(result.init);
         assert_eq!(result.cap_add, vec!["SYS_PTRACE", "NET_ADMIN"]);
         assert_eq!(
             result.security_opt,
@@ -3361,8 +3362,8 @@ mod security_merge_tests {
 
         let result = merge_security_options(&config, &features);
 
-        assert_eq!(result.privileged, true);
-        assert_eq!(result.init, true);
+        assert!(result.privileged);
+        assert!(result.init);
         assert_eq!(result.cap_add, vec!["SYS_PTRACE", "NET_ADMIN"]);
         assert_eq!(
             result.security_opt,

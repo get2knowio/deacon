@@ -579,6 +579,7 @@ mod tests {
             update_content_command: None,
             host_requirements: None,
             privileged: None,
+            init: None,
             cap_add: Vec::new(),
             security_opt: Vec::new(),
         };
@@ -653,6 +654,7 @@ mod tests {
             update_content_command: None,
             host_requirements: None,
             privileged: None,
+            init: None,
             cap_add: Vec::new(),
             security_opt: Vec::new(),
         };

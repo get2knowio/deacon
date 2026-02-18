@@ -575,6 +575,7 @@ pub trait Docker {
 #[allow(async_fn_in_trait)]
 pub trait DockerLifecycle: Docker + ContainerOps {
     /// Execute the complete `up` workflow: find existing containers, reuse or create new
+    #[allow(clippy::too_many_arguments)]
     async fn up(
         &self,
         identity: &ContainerIdentity,

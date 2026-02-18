@@ -1171,7 +1171,7 @@ fn test_feature_command_timeout_behavior() {
 
     // Run deacon up with a timeout
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
-    let up_output = up_cmd
+    let _up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
         .arg("--workspace-folder")
