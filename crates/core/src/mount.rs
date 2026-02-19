@@ -537,7 +537,7 @@ fn normalize_mount_to_string(mount: &Mount) -> String {
 /// ```
 ///
 /// to Docker CLI format:
-/// ```
+/// ```text
 /// type=bind,source=/host/path,target=/container/path,consistency=cached
 /// ```
 fn convert_object_mount_to_string(
