@@ -34,9 +34,11 @@ fn test_commands_from_json_value_string() {
 
 #[test]
 fn test_commands_from_json_value_array() {
-    let json_value = serde_json::json!(["echo hello", "echo world"]);
+    // Per devcontainer spec, array form is a single exec-style command
+    let json_value = serde_json::json!(["echo", "hello"]);
     let commands = commands_from_json_value(&json_value).unwrap();
-    assert_eq!(commands, vec!["echo hello", "echo world"]);
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0], "echo hello");
 }
 
 #[test]

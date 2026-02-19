@@ -613,6 +613,27 @@ fn summarize_sources(aggregated: &LifecycleCommandList) -> String {
 /// - **Object**: Named parallel commands (e.g., `{"install": "npm install", "build": "npm run build"}`).
 ///   Object values may be strings or arrays (joined as command + args).
 /// - **Null**: Treated as no commands (returns empty vec)
+///
+/// Shell-quote a string for safe interpolation into a `sh -c` command.
+///
+/// Returns the string unchanged if it contains only safe characters (alphanumeric,
+/// `-`, `_`, `.`, `/`, `:`, `=`, `+`, `,`). Otherwise wraps in single quotes with
+/// proper escaping of embedded single quotes.
+fn shell_quote_for_exec(s: &str) -> String {
+    if s.is_empty() {
+        "''".to_string()
+    } else if s.bytes().all(|b| {
+        matches!(b,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' |
+            b'-' | b'_' | b'.' | b'/' | b':' | b'=' | b'+' | b','
+        )
+    }) {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
 pub(crate) fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<String>> {
     match value {
         serde_json::Value::String(cmd) => {
@@ -623,10 +644,14 @@ pub(crate) fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<
             }
         }
         serde_json::Value::Array(cmds) => {
-            let mut commands = Vec::new();
+            // Per devcontainer spec, array form is a single exec-style command:
+            // ["executable", "arg1", "arg2"] = one command, not multiple.
+            // Since our execution pipeline wraps commands in `sh -c`, we shell-quote
+            // each element and join them to preserve argument boundaries.
+            let mut parts = Vec::new();
             for cmd_value in cmds {
-                if let serde_json::Value::String(cmd) = cmd_value {
-                    commands.push(cmd.clone());
+                if let serde_json::Value::String(s) = cmd_value {
+                    parts.push(s.clone());
                 } else {
                     return Err(DeaconError::Config(
                         deacon_core::errors::ConfigError::Validation {
@@ -639,7 +664,16 @@ pub(crate) fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<
                     .into());
                 }
             }
-            Ok(commands)
+            if parts.is_empty() {
+                Ok(vec![])
+            } else {
+                let joined = parts
+                    .iter()
+                    .map(|s| shell_quote_for_exec(s))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                Ok(vec![joined])
+            }
         }
         serde_json::Value::Object(map) => {
             // Object form: {"name": "command", ...}
@@ -654,10 +688,10 @@ pub(crate) fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<
                         // Empty string command value, skip
                     }
                     serde_json::Value::Array(arr) => {
-                        // Array value: join as command + args
+                        // Array value: exec-style command, shell-quote and join
                         let parts: Vec<String> = arr
                             .iter()
-                            .filter_map(|v| v.as_str().map(String::from))
+                            .filter_map(|v| v.as_str().map(shell_quote_for_exec))
                             .collect();
                         if !parts.is_empty() {
                             commands.push(parts.join(" "));
@@ -715,10 +749,37 @@ mod tests {
     }
 
     #[test]
-    fn test_commands_from_json_value_array() {
-        let value = serde_json::json!(["npm install", "npm run build"]);
+    fn test_commands_from_json_value_array_exec_form() {
+        // Per devcontainer spec, array form is a single exec-style command
+        let value = serde_json::json!(["npm", "install"]);
         let commands = commands_from_json_value(&value).unwrap();
-        assert_eq!(commands, vec!["npm install", "npm run build"]);
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0], "npm install");
+    }
+
+    #[test]
+    fn test_commands_from_json_value_array_exec_form_with_shell() {
+        // Common pattern: ["sh", "-c", "some command"] = single command
+        let value = serde_json::json!(["sh", "-c", "echo hello && echo world"]);
+        let commands = commands_from_json_value(&value).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0], "sh -c 'echo hello && echo world'");
+    }
+
+    #[test]
+    fn test_commands_from_json_value_array_with_spaces_in_args() {
+        // Elements with spaces get shell-quoted
+        let value = serde_json::json!(["echo", "hello world"]);
+        let commands = commands_from_json_value(&value).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0], "echo 'hello world'");
+    }
+
+    #[test]
+    fn test_commands_from_json_value_array_empty() {
+        let value = serde_json::json!([]);
+        let commands = commands_from_json_value(&value).unwrap();
+        assert!(commands.is_empty());
     }
 
     #[test]
@@ -816,13 +877,14 @@ mod tests {
                     },
                 },
                 AggregatedLifecycleCommand {
-                    command: serde_json::json!(["config-cmd1", "config-cmd2"]),
+                    command: serde_json::json!(["config-cmd", "--flag"]),
                     source: LifecycleCommandSource::Config,
                 },
             ],
         };
         let result = flatten_aggregated_commands(&aggregated).unwrap();
-        assert_eq!(result, vec!["feature-cmd", "config-cmd1", "config-cmd2"]);
+        // Array form is a single exec-style command
+        assert_eq!(result, vec!["feature-cmd", "config-cmd --flag"]);
     }
 
     #[test]
