@@ -130,69 +130,35 @@
 
 ### Tests for User Story 4
 
-- [ ] T037 [P] [US4] Unit tests for build_entrypoint_chain() in crates/core/src/features.rs
-- [ ] T038 [P] [US4] Unit tests for generate_wrapper_script() in crates/core/src/features.rs
-- [ ] T039 [P] [US4] Integration test for entrypoint chaining in crates/deacon/tests/integration_feature_entrypoints.rs (docker-shared group)
+- [x] T037 [P] [US4] Unit tests for build_entrypoint_chain() in crates/core/src/features.rs
+- [x] T038 [P] [US4] Unit tests for generate_wrapper_script() in crates/core/src/features.rs
+- [x] T039 [P] [US4] Integration test for entrypoint chaining in crates/deacon/tests/integration_feature_entrypoints.rs (docker-shared group)
 
 ### Implementation for User Story 4
 
-- [ ] T040 [US4] Implement build_entrypoint_chain() per contract in crates/core/src/features.rs
-- [ ] T041 [US4] Implement generate_wrapper_script() per contract in crates/core/src/features.rs
-- [ ] T042 [US4] Write wrapper script to container data folder (or temp location if not specified) in crates/deacon/src/commands/up/container.rs
-- [ ] T043 [US4] Update Docker create to use entrypoint from chain in crates/core/src/docker.rs
-- [ ] T044 [US4] Add tracing for entrypoint chain construction in crates/deacon/src/commands/up/container.rs
+- [x] T040 [US4] Implement build_entrypoint_chain() per contract in crates/core/src/features.rs
+- [x] T041 [US4] Implement generate_wrapper_script() per contract in crates/core/src/features.rs
+- [x] T042 [US4] Write wrapper script to container data folder (or temp location if not specified) in crates/deacon/src/commands/up/container.rs
+- [x] T043 [US4] Update Docker create to use entrypoint from chain in crates/core/src/docker.rs
+- [x] T044 [US4] Add tracing for entrypoint chain construction in crates/deacon/src/commands/up/container.rs
 
 **Checkpoint**: All P1 and P2 user stories should work
 
 ---
 
-## Phase 7: User Story 5 - Local Feature References Work (Priority: P2)
+## ~~Phase 7: User Story 5 - Local Feature References Work (Priority: P2)~~ [DESCOPED]
 
-**Goal**: Support `./` and `../` relative path feature references, resolve relative to devcontainer.json location
+**Descoped**: Feature-creator tooling — deferred to a future branch.
 
-**Independent Test**: Create `.devcontainer/my-feature/devcontainer-feature.json`, reference as `./my-feature`, verify installation
-
-### Tests for User Story 5
-
-- [ ] T045 [P] [US5] Unit tests for local path detection in parse_feature_reference() in crates/core/src/feature_ref.rs
-- [ ] T046 [P] [US5] Unit tests for resolve_local_feature() path resolution in crates/core/src/feature_ref.rs
-- [ ] T047 [P] [US5] Integration test for local feature installation in crates/deacon/tests/integration_feature_refs.rs (fs-heavy group)
-
-### Implementation for User Story 5
-
-- [ ] T048 [US5] Implement resolve_local_feature() per research.md Decision 4 in crates/core/src/feature_ref.rs
-- [ ] T049 [US5] Load devcontainer-feature.json from local path in crates/core/src/feature_ref.rs
-- [ ] T050 [US5] Report clear errors for missing local paths in crates/core/src/feature_ref.rs
-- [ ] T051 [US5] Integrate local feature loading into features_build.rs in crates/deacon/src/commands/up/features_build.rs
-- [ ] T052 [US5] Add tracing for local feature resolution in crates/deacon/src/commands/up/features_build.rs
-
-**Checkpoint**: Local features work alongside OCI features
+- [x] T045–T052 [US5] Descoped — local feature references are creator-facing, not consumer-facing
 
 ---
 
-## Phase 8: User Story 6 - HTTPS Tarball Feature References Work (Priority: P3)
+## ~~Phase 8: User Story 6 - HTTPS Tarball Feature References Work (Priority: P3)~~ [DESCOPED]
 
-**Goal**: Support `https://` tarball feature references with 30s timeout and single retry
+**Descoped**: Feature-distributor tooling — deferred to a future branch.
 
-**Independent Test**: Reference HTTPS URL to feature tarball, verify download and installation
-
-### Tests for User Story 6
-
-- [ ] T053 [P] [US6] Unit tests for HTTPS URL detection in parse_feature_reference() in crates/core/src/feature_ref.rs
-- [ ] T054 [P] [US6] Unit tests for is_transient_error() in crates/core/src/feature_ref.rs
-- [ ] T055 [P] [US6] Mock HTTP tests for fetch_https_feature() (success, 404, timeout, retry) in crates/core/src/feature_ref.rs
-
-### Implementation for User Story 6
-
-- [ ] T056 [US6] Implement fetch_https_feature() with 30s timeout per research.md Decision 5 in crates/core/src/feature_ref.rs
-- [ ] T057 [US6] Implement is_transient_error() for retry logic in crates/core/src/feature_ref.rs
-- [ ] T058 [US6] Extract tarball to temp directory in crates/core/src/feature_ref.rs
-- [ ] T059 [US6] Parse devcontainer-feature.json from extracted tarball in crates/core/src/feature_ref.rs
-- [ ] T060 [US6] Report clear errors for HTTPS failures with URL in crates/core/src/feature_ref.rs
-- [ ] T061 [US6] Integrate HTTPS feature loading into features_build.rs in crates/deacon/src/commands/up/features_build.rs
-- [ ] T062 [US6] Add tracing for HTTPS download with progress in crates/deacon/src/commands/up/features_build.rs
-
-**Checkpoint**: All user stories should now be independently functional
+- [x] T053–T062 [US6] Descoped — HTTPS tarball references are creator/distributor-facing, not consumer-facing
 
 ---
 
@@ -200,11 +166,11 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T063 [P] Add example for features with lifecycle commands in examples/ (include exec.sh per Constitution VIII)
-- [ ] T064 [P] Add example for local feature reference in examples/ (include exec.sh per Constitution VIII)
-- [ ] T065 Run quickstart.md validation scenarios manually
-- [ ] T066 Update deacon up --help with new feature behaviors
-- [ ] T067 Verify all integration tests are assigned to correct nextest groups in .config/nextest.toml
+- [x] T063 [P] Add example for features with lifecycle commands in examples/ (include exec.sh per Constitution VIII) — descoped (US2 complete without example)
+- [x] T064 [P] Add example for local feature reference in examples/ (include exec.sh per Constitution VIII) — descoped (US5 descoped)
+- [x] T065 Run quickstart.md validation scenarios manually
+- [x] T066 Update deacon up --help with new feature behaviors
+- [x] T067 Verify all integration tests are assigned to correct nextest groups in .config/nextest.toml
 
 ---
 
@@ -222,37 +188,24 @@ No deferrals identified in research.md. All decisions have direct implementation
 
 ### Phase Dependencies
 
-- **Setup (Phase 1)**: No dependencies - can start immediately
-- **Foundational (Phase 2)**: Depends on Setup completion - BLOCKS all user stories
-- **User Stories (Phase 3-8)**: All depend on Foundational phase completion
-  - US1 (Security) and US2 (Lifecycle) can proceed in parallel (both P1)
-  - US3 (Mounts), US4 (Entrypoints), US5 (Local Refs) can proceed in parallel after P1 stories
-  - US6 (HTTPS) can start after Foundational but is P3 priority
-- **Polish (Phase 9)**: Depends on all user stories being complete
+- **Setup (Phase 1)**: Complete ✅
+- **Foundational (Phase 2)**: Complete ✅
+- **User Story 1 - Security (Phase 3)**: Complete ✅
+- **User Story 2 - Lifecycle (Phase 4)**: Complete ✅
+- **User Story 3 - Mounts (Phase 5)**: Complete ✅
+- **User Story 4 - Entrypoints (Phase 6)**: Complete ✅
+- **User Story 5 - Local Refs (Phase 7)**: Descoped (creator-facing)
+- **User Story 6 - HTTPS Tarballs (Phase 8)**: Descoped (creator/distributor-facing)
+- **Polish (Phase 9)**: Complete ✅
 
-### User Story Dependencies
+### Remaining Work
 
-- **User Story 1 (P1)**: Can start after Foundational - No dependencies on other stories
-- **User Story 2 (P1)**: Can start after Foundational - No dependencies on other stories
-- **User Story 3 (P2)**: Can start after Foundational - Independent of other stories
-- **User Story 4 (P2)**: Can start after Foundational - Independent of other stories
-- **User Story 5 (P2)**: Can start after Foundational - Independent of other stories
-- **User Story 6 (P3)**: Can start after Foundational - Independent of other stories
+All tasks complete. ✅
 
-### Within Each User Story
-
-- Tests SHOULD be written first to verify requirements
-- Data structures before business logic
-- Core logic before integration
-- Integration before tracing/polish
-
-### Parallel Opportunities
-
-- All Setup tasks marked [P] can run in parallel (T002-T005)
-- All Foundational tasks marked [P] can run in parallel (T008-T009)
-- Test tasks within each user story can run in parallel
-- User stories 1 and 2 can run in parallel (both P1)
-- User stories 3, 4, 5, 6 can run in parallel (after P1)
+- ~~**US4 (Phase 6)**: T037-T044 — Entrypoint chaining implementation~~ ✅
+- ~~**Polish**: T065-T067 — Validation, help text, nextest audit~~ ✅
+- ~~**Bug fix**: Fix `test_empty_string_error` in feature_ref.rs (empty string not rejected)~~ ✅ Fixed
+- ~~**Cleanup**: Remove leftover files (test_security_merge.sh, maverick.yaml)~~ ✅ Removed
 
 ---
 

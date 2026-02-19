@@ -8,8 +8,10 @@ use anyhow::Result;
 /// Supports formats like:
 /// - ghcr.io/devcontainers/features/node:18
 /// - registry.com/namespace/subnamespace/name
+/// - localhost:5000/namespace/name (registry with port)
 /// - namespace/subnamespace/name (assumes default registry)
 /// - simple-name (assumes default registry and namespace)
+/// - ghcr.io/org/feature/name@sha256:digest (digest references)
 pub fn parse_registry_reference(
     registry_ref: &str,
 ) -> Result<(String, String, String, Option<String>)> {
@@ -33,8 +35,8 @@ pub fn parse_registry_reference(
         }
         2 => {
             // Format: registry/name or namespace/name[:tag]
-            // Check if the first part looks like a registry (contains a dot)
-            if parts[0].contains('.') {
+            // Check if the first part looks like a registry (contains a dot or port number)
+            if looks_like_registry(parts[0]) {
                 // First part is a registry, use default namespace
                 let (name, tag) = parse_name_and_tag(parts[1]);
                 Ok((
@@ -56,8 +58,8 @@ pub fn parse_registry_reference(
         }
         _ => {
             // Format: registry/namespace/.../name[:tag] or namespace/.../name[:tag]
-            // Check if the first part looks like a registry (contains a dot)
-            if parts[0].contains('.') {
+            // Check if the first part looks like a registry (contains a dot or port number)
+            if looks_like_registry(parts[0]) {
                 // First part is registry, rest is namespace + name
                 let registry = parts[0];
                 let remaining_parts = &parts[1..];
@@ -84,6 +86,20 @@ pub fn parse_registry_reference(
     }
 }
 
+/// Check if a string looks like a registry hostname.
+/// A registry has a dot (e.g. ghcr.io) or a colon followed by digits (e.g. localhost:5000).
+fn looks_like_registry(s: &str) -> bool {
+    if s.contains('.') {
+        return true;
+    }
+    // Check for host:port pattern (e.g. "localhost:5000")
+    if let Some(colon_pos) = s.find(':') {
+        let after_colon = &s[colon_pos + 1..];
+        return !after_colon.is_empty() && after_colon.chars().all(|c| c.is_ascii_digit());
+    }
+    false
+}
+
 /// Parse namespace and name from parts, where namespace can have multiple levels
 /// Returns (namespace, name_and_tag)
 fn parse_namespace_and_name<'a>(parts: &[&'a str]) -> (String, &'a str) {
@@ -94,8 +110,19 @@ fn parse_namespace_and_name<'a>(parts: &[&'a str]) -> (String, &'a str) {
     (namespace, name_and_tag)
 }
 
-/// Parse name and tag from a name[:tag] string
+/// Parse name and tag from a name[:tag] or name[@digest] string
+///
+/// Handles both tag and digest references:
+/// - `node:18` -> ("node", Some("18"))
+/// - `node@sha256:abc123` -> ("node", Some("sha256:abc123"))
+/// - `node` -> ("node", None)
 pub fn parse_name_and_tag(name_and_tag: &str) -> (&str, Option<&str>) {
+    // Check for digest reference first (name@sha256:...)
+    if let Some(at_pos) = name_and_tag.find('@') {
+        let name = &name_and_tag[..at_pos];
+        let digest = &name_and_tag[at_pos + 1..];
+        return (name, Some(digest));
+    }
     if let Some(colon_pos) = name_and_tag.rfind(':') {
         let name = &name_and_tag[..colon_pos];
         let tag = &name_and_tag[colon_pos + 1..];

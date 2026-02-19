@@ -1143,6 +1143,101 @@ pub enum EntrypointChain {
     },
 }
 
+/// Default wrapper script path inside the container.
+const DEFAULT_WRAPPER_PATH: &str = "/devcontainer/entrypoint-wrapper.sh";
+
+/// Build entrypoint chain from features and config.
+///
+/// Collects entrypoints from resolved features (in installation order) and an
+/// optional config entrypoint. Feature entrypoints come first, config entrypoint
+/// comes last.
+///
+/// # Arguments
+/// * `features` - Resolved features in installation order
+/// * `config_entrypoint` - Optional entrypoint from devcontainer config
+///
+/// # Returns
+/// An [`EntrypointChain`] describing how to set the container entrypoint.
+///
+/// # Rules
+/// 1. Feature entrypoints execute in installation order (features array order)
+/// 2. Features without entrypoints are skipped
+/// 3. Config entrypoint comes LAST (after all feature entrypoints)
+/// 4. Single total entrypoint → `EntrypointChain::Single`
+/// 5. Multiple → `EntrypointChain::Chained` with a default wrapper path
+/// 6. None → `EntrypointChain::None`
+#[instrument(level = "debug", skip(features))]
+pub fn build_entrypoint_chain(
+    features: &[ResolvedFeature],
+    config_entrypoint: Option<&str>,
+) -> EntrypointChain {
+    let mut entrypoints: Vec<String> = Vec::new();
+
+    // Collect feature entrypoints in installation order, skipping None
+    for feature in features {
+        if let Some(ref ep) = feature.metadata.entrypoint {
+            debug!(feature_id = %feature.id, entrypoint = %ep, "Feature has entrypoint");
+            entrypoints.push(ep.clone());
+        }
+    }
+
+    // Config entrypoint comes last
+    if let Some(ep) = config_entrypoint {
+        debug!(entrypoint = %ep, "Config has entrypoint");
+        entrypoints.push(ep.to_string());
+    }
+
+    match entrypoints.len() {
+        0 => {
+            debug!("No entrypoints found");
+            EntrypointChain::None
+        }
+        1 => {
+            // Safety: length is checked by match arm, but we avoid expect() per project conventions
+            if let Some(ep) = entrypoints.into_iter().next() {
+                debug!(entrypoint = %ep, "Single entrypoint, no wrapper needed");
+                EntrypointChain::Single(ep)
+            } else {
+                EntrypointChain::None
+            }
+        }
+        n => {
+            debug!(count = n, "Multiple entrypoints, wrapper required");
+            EntrypointChain::Chained {
+                wrapper_path: DEFAULT_WRAPPER_PATH.to_string(),
+                entrypoints,
+            }
+        }
+    }
+}
+
+/// Generate wrapper script content for chained entrypoints.
+///
+/// Produces a `/bin/sh` script that executes each entrypoint in order with
+/// fail-fast semantics (`|| exit $?`) and finishes with `exec "$@"` to pass
+/// through the user command.
+///
+/// # Arguments
+/// * `entrypoints` - List of entrypoint paths in execution order
+///
+/// # Returns
+/// Shell script content as a string.
+#[instrument(level = "debug", skip(entrypoints))]
+pub fn generate_wrapper_script(entrypoints: &[String]) -> String {
+    let mut script = String::from("#!/bin/sh\n");
+
+    for ep in entrypoints {
+        debug!(entrypoint = %ep, "Adding entrypoint to wrapper script");
+        script.push_str(ep);
+        script.push_str(" || exit $?\n");
+    }
+
+    script.push_str("exec \"$@\"\n");
+
+    debug!(lines = entrypoints.len() + 2, "Generated wrapper script");
+    script
+}
+
 /// Configuration for feature merging behavior
 #[derive(Debug, Clone)]
 pub struct FeatureMergeConfig {
@@ -3485,5 +3580,149 @@ mod security_merge_tests {
 
         // Should be empty
         assert!(args.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod entrypoint_tests {
+    use super::*;
+
+    /// Helper to create a ResolvedFeature with an optional entrypoint.
+    fn make_feature(id: &str, entrypoint: Option<&str>) -> ResolvedFeature {
+        ResolvedFeature {
+            id: id.to_string(),
+            source: format!("test://features/{}", id),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: id.to_string(),
+                entrypoint: entrypoint.map(|s| s.to_string()),
+                ..Default::default()
+            },
+        }
+    }
+
+    // ==================== T037: build_entrypoint_chain tests ====================
+
+    #[test]
+    fn test_build_entrypoint_chain_no_entrypoints() {
+        // No features, no config entrypoint -> None
+        let features: Vec<ResolvedFeature> = vec![];
+        let result = build_entrypoint_chain(&features, None);
+        assert_eq!(result, EntrypointChain::None);
+    }
+
+    #[test]
+    fn test_build_entrypoint_chain_single_feature_entrypoint() {
+        // One feature with entrypoint, no config -> Single
+        let features = vec![make_feature("node", Some("/usr/local/share/node-init.sh"))];
+        let result = build_entrypoint_chain(&features, None);
+        assert_eq!(
+            result,
+            EntrypointChain::Single("/usr/local/share/node-init.sh".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_entrypoint_chain_single_config_entrypoint() {
+        // No feature entrypoints, one config entrypoint -> Single
+        let features: Vec<ResolvedFeature> = vec![];
+        let result = build_entrypoint_chain(&features, Some("/docker-entrypoint.sh"));
+        assert_eq!(
+            result,
+            EntrypointChain::Single("/docker-entrypoint.sh".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_entrypoint_chain_multiple_feature_entrypoints() {
+        // Two features with entrypoints -> Chained, in order
+        let features = vec![
+            make_feature("feature-a", Some("/f-a/init.sh")),
+            make_feature("feature-b", Some("/f-b/init.sh")),
+        ];
+        let result = build_entrypoint_chain(&features, None);
+        assert_eq!(
+            result,
+            EntrypointChain::Chained {
+                wrapper_path: "/devcontainer/entrypoint-wrapper.sh".to_string(),
+                entrypoints: vec!["/f-a/init.sh".to_string(), "/f-b/init.sh".to_string(),],
+            }
+        );
+    }
+
+    #[test]
+    fn test_build_entrypoint_chain_features_and_config() {
+        // One feature + config entrypoint -> Chained, feature first, config last
+        let features = vec![make_feature("git", Some("/git/init.sh"))];
+        let result = build_entrypoint_chain(&features, Some("/config-entrypoint.sh"));
+        assert_eq!(
+            result,
+            EntrypointChain::Chained {
+                wrapper_path: "/devcontainer/entrypoint-wrapper.sh".to_string(),
+                entrypoints: vec![
+                    "/git/init.sh".to_string(),
+                    "/config-entrypoint.sh".to_string(),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_build_entrypoint_chain_skips_features_without_entrypoint() {
+        // Three features, middle one has no entrypoint -> only two in chain
+        let features = vec![
+            make_feature("first", Some("/first/init.sh")),
+            make_feature("middle", None),
+            make_feature("last", Some("/last/init.sh")),
+        ];
+        let result = build_entrypoint_chain(&features, None);
+        assert_eq!(
+            result,
+            EntrypointChain::Chained {
+                wrapper_path: "/devcontainer/entrypoint-wrapper.sh".to_string(),
+                entrypoints: vec!["/first/init.sh".to_string(), "/last/init.sh".to_string(),],
+            }
+        );
+    }
+
+    #[test]
+    fn test_build_entrypoint_chain_all_features_no_entrypoints_with_config() {
+        // Features without entrypoints + config entrypoint -> Single(config)
+        let features = vec![make_feature("no-ep-1", None), make_feature("no-ep-2", None)];
+        let result = build_entrypoint_chain(&features, Some("/config-ep.sh"));
+        assert_eq!(result, EntrypointChain::Single("/config-ep.sh".to_string()));
+    }
+
+    // ==================== T038: generate_wrapper_script tests ====================
+
+    #[test]
+    fn test_generate_wrapper_script_single_entrypoint() {
+        let eps = vec!["/init.sh".to_string()];
+        let script = generate_wrapper_script(&eps);
+        assert!(script.starts_with("#!/bin/sh\n"));
+        assert!(script.contains("/init.sh || exit $?"));
+        assert!(script.ends_with("exec \"$@\"\n"));
+    }
+
+    #[test]
+    fn test_generate_wrapper_script_multiple_entrypoints() {
+        let eps = vec!["/f1/init.sh".to_string(), "/f2/init.sh".to_string()];
+        let script = generate_wrapper_script(&eps);
+        assert!(script.starts_with("#!/bin/sh\n"));
+        assert!(script.contains("/f1/init.sh || exit $?"));
+        assert!(script.contains("/f2/init.sh || exit $?"));
+        // f1 must come before f2 in the script
+        let f1_pos = script.find("/f1/init.sh").expect("f1 entrypoint not found");
+        let f2_pos = script.find("/f2/init.sh").expect("f2 entrypoint not found");
+        assert!(f1_pos < f2_pos);
+        assert!(script.ends_with("exec \"$@\"\n"));
+    }
+
+    #[test]
+    fn test_generate_wrapper_script_empty() {
+        let eps: Vec<String> = vec![];
+        let script = generate_wrapper_script(&eps);
+        assert!(script.starts_with("#!/bin/sh\n"));
+        assert!(script.contains("exec \"$@\""));
     }
 }

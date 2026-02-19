@@ -20,7 +20,9 @@ use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::{Docker, DockerLifecycle};
 use deacon_core::errors::{DeaconError, DockerError};
-use deacon_core::features::merge_security_options;
+use deacon_core::features::{
+    build_entrypoint_chain, generate_wrapper_script, merge_security_options,
+};
 use deacon_core::mount::merge_mounts;
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ContainerState, StateManager};
@@ -281,6 +283,105 @@ pub(crate) async fn execute_container_up(
         );
     }
 
+    // Build entrypoint chain from features and config
+    // DevContainerConfig does not currently have an entrypoint field; pass None for config entrypoint.
+    let features_slice = resolved_features.as_deref().unwrap_or(&[]);
+    let entrypoint_chain = build_entrypoint_chain(features_slice, None);
+
+    // T044: Log entrypoint chain decision
+    match &entrypoint_chain {
+        deacon_core::features::EntrypointChain::None => {
+            debug!(
+                feature_count = features_slice.len(),
+                "No entrypoints found in features or config"
+            );
+        }
+        deacon_core::features::EntrypointChain::Single(ref path) => {
+            info!(
+                entrypoint = %path,
+                feature_count = features_slice.len(),
+                "Single entrypoint from features, no wrapper needed"
+            );
+        }
+        deacon_core::features::EntrypointChain::Chained {
+            ref wrapper_path,
+            ref entrypoints,
+        } => {
+            info!(
+                wrapper_path = %wrapper_path,
+                entrypoint_count = entrypoints.len(),
+                feature_count = features_slice.len(),
+                "Multiple entrypoints detected, wrapper script required"
+            );
+            for (i, ep) in entrypoints.iter().enumerate() {
+                debug!(index = i, entrypoint = %ep, "Chained entrypoint");
+            }
+        }
+    }
+
+    // For the Chained variant, generate the wrapper script and write it to a temp file
+    // on the host, then add a bind mount so it is available inside the container at start time.
+    let mut merged_mounts = merged_mounts;
+    let _wrapper_tempfile = if let deacon_core::features::EntrypointChain::Chained {
+        ref wrapper_path,
+        ref entrypoints,
+    } = entrypoint_chain
+    {
+        let script_content = generate_wrapper_script(entrypoints);
+        debug!(
+            wrapper_path = %wrapper_path,
+            script_length = script_content.len(),
+            "Generated entrypoint wrapper script"
+        );
+
+        // Write wrapper script to a named temp file on the host.
+        // The file must outlive the container create call, so we hold the handle.
+        let temp_file = tempfile::Builder::new()
+            .prefix("deacon-entrypoint-wrapper-")
+            .suffix(".sh")
+            .tempfile()
+            .with_context(|| "Failed to create temp file for entrypoint wrapper script")?;
+
+        tokio::fs::write(temp_file.path(), script_content.as_bytes())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to write entrypoint wrapper script to '{}'",
+                    temp_file.path().display()
+                )
+            })?;
+
+        // Make the script executable (owner rwx)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o755);
+            std::fs::set_permissions(temp_file.path(), perms).with_context(|| {
+                format!(
+                    "Failed to set executable permissions on wrapper script '{}'",
+                    temp_file.path().display()
+                )
+            })?;
+        }
+
+        // Add a bind mount from the host temp file to the wrapper path inside the container
+        let host_path = temp_file.path().display().to_string();
+        let mount_spec = format!(
+            "type=bind,source={},target={},readonly",
+            host_path, wrapper_path
+        );
+        debug!(
+            host_path = %host_path,
+            container_path = %wrapper_path,
+            "Adding bind mount for entrypoint wrapper script"
+        );
+        merged_mounts.mounts.push(mount_spec);
+
+        Some(temp_file)
+    } else {
+        None
+    };
+
     // Log GPU mode application
     if args.gpu_mode == deacon_core::gpu::GpuMode::All {
         info!("Applying GPU mode: all - requesting GPU access for container");
@@ -298,6 +399,7 @@ pub(crate) async fn execute_container_up(
             args.gpu_mode,
             &merged_security,
             &merged_mounts,
+            &entrypoint_chain,
         )
         .await;
 

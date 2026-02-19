@@ -152,6 +152,12 @@ pub struct CliContext {
 #[allow(clippy::large_enum_variant)]
 pub enum Commands {
     /// Create and run development container
+    #[command(long_about = "Create and run development container\n\n\
+        When dev container features are configured, the following behaviors apply during container creation:\n\n  \
+        - Security options (privileged, init, capAdd, securityOpt) from features are automatically merged into the container configuration\n  \
+        - Feature lifecycle commands (onCreateCommand, postCreateCommand, etc.) execute before the corresponding config-level commands\n  \
+        - Feature mounts are merged with config mounts; config mounts take precedence on target path conflicts\n  \
+        - When multiple features define entrypoints, they are chained via a wrapper script to ensure all run in sequence")]
     Up {
         // Container identity and discovery
         /// Container ID label(s) for identification (format: name=value, can be repeated)

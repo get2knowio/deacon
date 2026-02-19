@@ -178,6 +178,14 @@ pub struct OciFeatureRef {
 /// assert!(result.is_err());
 /// ```
 pub fn parse_feature_reference(reference: &str) -> Result<FeatureRefType> {
+    // Reject empty or whitespace-only references
+    let trimmed = reference.trim();
+    if trimmed.is_empty() {
+        return Err(FeatureRefError::InvalidOciReference(
+            "Feature reference cannot be empty".to_string(),
+        ));
+    }
+
     // Rule 1: Local path detection (starts with ./ or ../)
     if reference.starts_with("./") || reference.starts_with("../") {
         return Ok(FeatureRefType::LocalPath(PathBuf::from(reference)));

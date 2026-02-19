@@ -585,6 +585,7 @@ pub trait DockerLifecycle: Docker + ContainerOps {
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
         merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<ContainerResult>;
 }
 
@@ -1598,7 +1599,7 @@ impl ContainerOps for CliRuntime {
         Ok(container_ids)
     }
 
-    #[instrument(skip(self, config, merged_security, merged_mounts))]
+    #[instrument(skip(self, config, merged_security, merged_mounts, entrypoint_chain))]
     async fn create_container(
         &self,
         identity: &ContainerIdentity,
@@ -1607,10 +1608,11 @@ impl ContainerOps for CliRuntime {
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
         merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<String> {
         debug!(
-            "Creating container with identity: {:?}, gpu_mode: {:?}",
-            identity, gpu_mode
+            "Creating container with identity: {:?}, gpu_mode: {:?}, entrypoint_chain: {:?}",
+            identity, gpu_mode, entrypoint_chain
         );
 
         let container_name = identity.container_name();
@@ -1687,6 +1689,23 @@ impl ContainerOps for CliRuntime {
 
         // Add security options from merged security (config + features)
         args.extend(merged_security.to_docker_args());
+
+        // Apply entrypoint from chain (features + config)
+        match entrypoint_chain {
+            crate::features::EntrypointChain::None => {
+                // Use image default entrypoint
+            }
+            crate::features::EntrypointChain::Single(ref path) => {
+                args.push("--entrypoint".to_string());
+                args.push(path.clone());
+            }
+            crate::features::EntrypointChain::Chained {
+                ref wrapper_path, ..
+            } => {
+                args.push("--entrypoint".to_string());
+                args.push(wrapper_path.clone());
+            }
+        }
 
         // Add port forwarding from forwardPorts configuration
         for port_spec in &config.forward_ports {
@@ -1908,7 +1927,7 @@ impl ContainerOps for CliRuntime {
 }
 
 impl DockerLifecycle for CliRuntime {
-    #[instrument(skip(self, config, merged_security, merged_mounts))]
+    #[instrument(skip(self, config, merged_security, merged_mounts, entrypoint_chain))]
     async fn up(
         &self,
         identity: &ContainerIdentity,
@@ -1918,6 +1937,7 @@ impl DockerLifecycle for CliRuntime {
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
         merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<ContainerResult> {
         debug!(
             "Starting up container workflow with gpu_mode: {:?}",
@@ -1962,6 +1982,7 @@ impl DockerLifecycle for CliRuntime {
                 gpu_mode,
                 merged_security,
                 merged_mounts,
+                entrypoint_chain,
             )
             .await?;
         self.start_container(&container_id).await?;
@@ -2554,7 +2575,14 @@ pub mod mock {
             Ok(container_ids)
         }
 
-        #[instrument(skip(self, config, _workspace_path, _merged_security, _merged_mounts))]
+        #[instrument(skip(
+            self,
+            config,
+            _workspace_path,
+            _merged_security,
+            _merged_mounts,
+            _entrypoint_chain
+        ))]
         async fn create_container(
             &self,
             identity: &ContainerIdentity,
@@ -2563,6 +2591,7 @@ pub mod mock {
             gpu_mode: crate::gpu::GpuMode,
             _merged_security: &crate::features::MergedSecurityOptions,
             _merged_mounts: &crate::mount::MergedMounts,
+            _entrypoint_chain: &crate::features::EntrypointChain,
         ) -> Result<String> {
             debug!(
                 "MockDocker create_container called with gpu_mode: {:?}",
@@ -2698,7 +2727,7 @@ pub mod mock {
 
     #[allow(async_fn_in_trait)]
     impl DockerLifecycle for MockDocker {
-        #[instrument(skip(self, config, merged_security, merged_mounts))]
+        #[instrument(skip(self, config, merged_security, merged_mounts, entrypoint_chain))]
         async fn up(
             &self,
             identity: &ContainerIdentity,
@@ -2708,6 +2737,7 @@ pub mod mock {
             gpu_mode: crate::gpu::GpuMode,
             merged_security: &crate::features::MergedSecurityOptions,
             merged_mounts: &crate::mount::MergedMounts,
+            entrypoint_chain: &crate::features::EntrypointChain,
         ) -> Result<ContainerResult> {
             debug!("MockDocker up called with gpu_mode: {:?}", gpu_mode);
 
@@ -2749,6 +2779,7 @@ pub mod mock {
                     gpu_mode,
                     merged_security,
                     merged_mounts,
+                    entrypoint_chain,
                 )
                 .await?;
             self.start_container(&container_id).await?;
@@ -3185,6 +3216,7 @@ mod tests {
 
         let merged_security = crate::features::MergedSecurityOptions::default();
         let merged_mounts = crate::mount::MergedMounts::default();
+        let entrypoint_chain = crate::features::EntrypointChain::None;
         let container_id = mock_docker
             .create_container(
                 &identity,
@@ -3193,6 +3225,7 @@ mod tests {
                 crate::gpu::GpuMode::None,
                 &merged_security,
                 &merged_mounts,
+                &entrypoint_chain,
             )
             .await
             .unwrap();

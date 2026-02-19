@@ -183,6 +183,7 @@ impl ContainerOps for ContainerRuntimeImpl {
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
         merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<String> {
         match self {
             Self::Docker(runtime) => {
@@ -194,6 +195,7 @@ impl ContainerOps for ContainerRuntimeImpl {
                         gpu_mode,
                         merged_security,
                         merged_mounts,
+                        entrypoint_chain,
                     )
                     .await
             }
@@ -206,6 +208,7 @@ impl ContainerOps for ContainerRuntimeImpl {
                         gpu_mode,
                         merged_security,
                         merged_mounts,
+                        entrypoint_chain,
                     )
                     .await
             }
@@ -252,6 +255,7 @@ impl DockerLifecycle for ContainerRuntimeImpl {
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
         merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<ContainerResult> {
         match self {
             Self::Docker(runtime) => {
@@ -264,6 +268,7 @@ impl DockerLifecycle for ContainerRuntimeImpl {
                         gpu_mode,
                         merged_security,
                         merged_mounts,
+                        entrypoint_chain,
                     )
                     .await
             }
@@ -277,6 +282,7 @@ impl DockerLifecycle for ContainerRuntimeImpl {
                         gpu_mode,
                         merged_security,
                         merged_mounts,
+                        entrypoint_chain,
                     )
                     .await
             }
@@ -358,6 +364,7 @@ impl ContainerOps for DockerRuntime {
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
         merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<String> {
         self.docker
             .create_container(
@@ -367,6 +374,7 @@ impl ContainerOps for DockerRuntime {
                 gpu_mode,
                 merged_security,
                 merged_mounts,
+                entrypoint_chain,
             )
             .await
     }
@@ -399,6 +407,7 @@ impl DockerLifecycle for DockerRuntime {
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
         merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<ContainerResult> {
         self.docker
             .up(
@@ -409,6 +418,7 @@ impl DockerLifecycle for DockerRuntime {
                 gpu_mode,
                 merged_security,
                 merged_mounts,
+                entrypoint_chain,
             )
             .await
     }
@@ -494,6 +504,7 @@ impl ContainerOps for PodmanRuntime {
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
         merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<String> {
         self.runtime
             .create_container(
@@ -503,6 +514,7 @@ impl ContainerOps for PodmanRuntime {
                 gpu_mode,
                 merged_security,
                 merged_mounts,
+                entrypoint_chain,
             )
             .await
     }
@@ -535,6 +547,7 @@ impl DockerLifecycle for PodmanRuntime {
         gpu_mode: crate::gpu::GpuMode,
         merged_security: &crate::features::MergedSecurityOptions,
         merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<ContainerResult> {
         self.runtime
             .up(
@@ -545,6 +558,7 @@ impl DockerLifecycle for PodmanRuntime {
                 gpu_mode,
                 merged_security,
                 merged_mounts,
+                entrypoint_chain,
             )
             .await
     }
