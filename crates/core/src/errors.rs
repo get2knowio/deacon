@@ -207,23 +207,23 @@ pub enum InternalError {
 #[derive(Error, Debug)]
 pub enum DeaconError {
     /// Configuration-related errors
-    #[error("Configuration error")]
+    #[error("Configuration error: {0}")]
     Config(#[from] ConfigError),
 
     /// Docker/Runtime-related errors
-    #[error("Docker error")]
+    #[error("Docker error: {0}")]
     Docker(#[from] DockerError),
 
     /// Git-related errors
-    #[error("Git error")]
+    #[error("Git error: {0}")]
     Git(#[from] GitError),
 
     /// Feature-related errors
-    #[error("Feature error")]
+    #[error("Feature error: {0}")]
     Feature(#[from] FeatureError),
 
     /// Template-related errors
-    #[error("Template error")]
+    #[error("Template error: {0}")]
     Template(#[from] TemplateError),
 
     /// Network-related errors
@@ -247,7 +247,7 @@ pub enum DeaconError {
     NotImplemented { feature: String },
 
     /// Internal/generic errors
-    #[error("Internal error")]
+    #[error("Internal error: {0}")]
     Internal(#[from] InternalError),
 }
 

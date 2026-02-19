@@ -17,8 +17,11 @@ use tracing::{debug, info, instrument};
 /// Output from building an image with features
 #[derive(Debug, Clone)]
 pub(crate) struct FeatureBuildOutput {
+    /// Extended image tag with features installed
     pub image_tag: String,
+    /// Combined environment variables from all features
     pub combined_env: HashMap<String, String>,
+    /// Resolved features in installation order
     pub resolved_features: Vec<deacon_core::features::ResolvedFeature>,
 }
 

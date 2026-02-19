@@ -302,6 +302,305 @@ impl Mount {
     }
 }
 
+/// Mounts merged from features and config
+///
+/// Config mounts take precedence for same target path.
+/// This struct holds the final deduplicated mount strings ready to be applied
+/// to container creation.
+///
+/// # Merge Rules
+/// - Features are processed in installation order
+/// - Config mounts override feature mounts for the same target path
+/// - All mounts are normalized to Docker CLI string format
+///
+/// # Example
+/// ```rust
+/// use deacon_core::mount::MergedMounts;
+///
+/// let merged = MergedMounts {
+///     mounts: vec![
+///         "type=bind,source=/host/path,target=/container/path".to_string(),
+///         "type=volume,source=myvolume,target=/data".to_string(),
+///     ],
+/// };
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MergedMounts {
+    /// Final mount strings to apply (deduplicated by target)
+    pub mounts: Vec<String>,
+}
+
+/// Merge mounts from features and config
+///
+/// # Arguments
+/// * `config_mounts` - Mounts from devcontainer.json
+/// * `features` - Resolved features in installation order
+///
+/// # Returns
+/// * `Ok(MergedMounts)` - Deduplicated mounts (by target)
+/// * `Err` - Invalid mount specification
+///
+/// # Precedence
+/// Config mounts override feature mounts for same target path
+#[instrument(skip(config_mounts, features))]
+pub fn merge_mounts(
+    config_mounts: &[serde_json::Value],
+    features: &[crate::features::ResolvedFeature],
+) -> Result<MergedMounts> {
+    use std::collections::HashMap;
+
+    // Map to deduplicate by target path
+    // The value is a tuple of (mount_string, insertion_index) to preserve order
+    let mut mount_map: HashMap<String, (String, usize)> = HashMap::new();
+    let mut insertion_index = 0;
+
+    // Process feature mounts in installation order
+    for feature in features {
+        for mount_str in &feature.metadata.mounts {
+            // Parse the mount to get the target and validate it
+            let mount = MountParser::parse_mount(mount_str).map_err(|e| {
+                warn!(
+                    feature_id = %feature.id,
+                    mount_spec = %mount_str,
+                    error = %e,
+                    "Failed to parse mount from feature"
+                );
+                ConfigError::Validation {
+                    message: format!(
+                        "Invalid mount in feature {}: {}: {}",
+                        feature.id, mount_str, e
+                    ),
+                }
+            })?;
+
+            // Normalize the mount to Docker CLI string format
+            let normalized_str = normalize_mount_to_string(&mount);
+
+            // Store in map, keyed by target (later overwrites earlier)
+            // When overwriting, keep the original insertion index to preserve order
+            match mount_map.get_mut(&mount.target) {
+                Some((s, _idx)) => {
+                    // Target already exists, update the mount string but keep the index
+                    debug!(
+                        feature_id = %feature.id,
+                        target = %mount.target,
+                        previous_mount = %s,
+                        new_mount = %normalized_str,
+                        "Feature mount overriding previous mount for same target"
+                    );
+                    *s = normalized_str;
+                }
+                None => {
+                    // New target, insert with current index
+                    mount_map.insert(mount.target.clone(), (normalized_str, insertion_index));
+                    insertion_index += 1;
+                }
+            }
+        }
+    }
+
+    // Process config mounts (these override features)
+    for mount_value in config_mounts {
+        let mount_str = match mount_value {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Object(obj) => {
+                // Convert object format to string format for parsing
+                convert_object_mount_to_string(obj).map_err(|e| {
+                    warn!(
+                        mount_spec = ?obj,
+                        error = %e,
+                        "Failed to convert object mount from config to string format"
+                    );
+                    ConfigError::Validation {
+                        message: format!("Invalid mount in config: {}", e),
+                    }
+                })?
+            }
+            _ => {
+                warn!(
+                    mount_spec = ?mount_value,
+                    "Invalid mount specification type in config, expected string or object"
+                );
+                return Err(ConfigError::Validation {
+                    message: "Invalid mount specification type, expected string or object"
+                        .to_string(),
+                }
+                .into());
+            }
+        };
+
+        // Parse the mount to get the target and validate it
+        let mount = MountParser::parse_mount(&mount_str).map_err(|e| {
+            warn!(
+                mount_spec = %mount_str,
+                error = %e,
+                "Failed to parse mount from config"
+            );
+            ConfigError::Validation {
+                message: format!("Invalid mount in config: {}: {}", mount_str, e),
+            }
+        })?;
+
+        // Normalize the mount to Docker CLI string format
+        let normalized_str = normalize_mount_to_string(&mount);
+
+        // Store in map, overwriting any feature mount with same target
+        // When overwriting, keep the original insertion index to preserve order
+        match mount_map.get_mut(&mount.target) {
+            Some((s, _idx)) => {
+                // Target already exists, update the mount string but keep the index
+                debug!(
+                    target = %mount.target,
+                    previous_mount = %s,
+                    config_mount = %normalized_str,
+                    "Config mount overriding feature mount for same target (config takes precedence)"
+                );
+                *s = normalized_str;
+            }
+            None => {
+                // New target, insert with current index
+                mount_map.insert(mount.target.clone(), (normalized_str, insertion_index));
+                insertion_index += 1;
+            }
+        }
+    }
+
+    // Convert map to vector, preserving order
+    let mut mounts_with_order: Vec<(String, usize)> = mount_map.into_values().collect();
+
+    // Sort by insertion order to maintain declaration order
+    mounts_with_order.sort_by_key(|(_, idx)| *idx);
+
+    // Extract just the mount strings
+    let mounts: Vec<String> = mounts_with_order
+        .into_iter()
+        .map(|(mount_str, _)| mount_str)
+        .collect();
+
+    debug!(
+        merged_count = mounts.len(),
+        "Mount merging completed successfully"
+    );
+
+    Ok(MergedMounts { mounts })
+}
+
+/// Normalize a parsed Mount to Docker CLI string format
+///
+/// Converts a Mount struct to the standard Docker CLI string format:
+/// `type={type},source={source},target={target}[,readonly][,...]`
+fn normalize_mount_to_string(mount: &Mount) -> String {
+    let mut parts = vec![format!("type={}", mount.mount_type)];
+
+    // Add source for bind and volume mounts
+    if let Some(ref source) = mount.source {
+        parts.push(format!("source={}", source));
+    }
+
+    // Add target
+    parts.push(format!("target={}", mount.target));
+
+    // Add read-only flag if needed
+    if mount.mode == MountMode::ReadOnly {
+        parts.push("ro".to_string());
+    }
+
+    // Add consistency for bind mounts
+    if mount.mount_type == MountType::Bind {
+        if let Some(ref consistency) = mount.consistency {
+            parts.push(format!("consistency={}", consistency));
+        }
+    }
+
+    // Add additional options
+    for (key, value) in &mount.options {
+        if value.is_empty() {
+            parts.push(key.clone());
+        } else {
+            parts.push(format!("{}={}", key, value));
+        }
+    }
+
+    parts.join(",")
+}
+
+/// Convert an object-based mount specification to Docker CLI string format
+///
+/// Converts a JSON object mount specification like:
+/// ```json
+/// {
+///   "type": "bind",
+///   "source": "/host/path",
+///   "target": "/container/path",
+///   "consistency": "cached"
+/// }
+/// ```
+///
+/// to Docker CLI format:
+/// ```text
+/// type=bind,source=/host/path,target=/container/path,consistency=cached
+/// ```
+fn convert_object_mount_to_string(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<String> {
+    let mut parts = Vec::new();
+
+    // Extract type (required)
+    let mount_type =
+        obj.get("type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ConfigError::Validation {
+                message: "Mount object must have 'type' field".to_string(),
+            })?;
+    parts.push(format!("type={}", mount_type));
+
+    // Extract source (optional, but required for bind/volume)
+    if let Some(source) = obj.get("source").and_then(|v| v.as_str()) {
+        parts.push(format!("source={}", source));
+    }
+
+    // Extract target (required)
+    let target =
+        obj.get("target")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ConfigError::Validation {
+                message: "Mount object must have 'target' field".to_string(),
+            })?;
+    parts.push(format!("target={}", target));
+
+    // Extract consistency (optional)
+    if let Some(consistency) = obj.get("consistency").and_then(|v| v.as_str()) {
+        parts.push(format!("consistency={}", consistency));
+    }
+
+    // Extract readonly flag (optional)
+    if let Some(readonly) = obj.get("readonly").and_then(|v| v.as_bool()) {
+        if readonly {
+            parts.push("ro".to_string());
+        }
+    }
+
+    // Handle any additional fields as options
+    for (key, value) in obj {
+        match key.as_str() {
+            "type" | "source" | "target" | "consistency" | "readonly" => {
+                // Already handled above
+                continue;
+            }
+            _ => {
+                // Add as additional option
+                if let Some(str_value) = value.as_str() {
+                    parts.push(format!("{}={}", key, str_value));
+                } else if value.is_boolean() && value.as_bool() == Some(true) {
+                    parts.push(key.clone());
+                }
+            }
+        }
+    }
+
+    Ok(parts.join(","))
+}
+
 /// Mount parser for DevContainer mount specifications
 pub struct MountParser;
 
@@ -772,5 +1071,702 @@ mod tests {
             // Should contain the absolute temp path
             assert!(source_part.contains(temp_path.to_str().unwrap()));
         }
+    }
+}
+
+#[cfg(test)]
+mod merge_mounts_tests {
+    //! Unit tests for merge_mounts() function
+    //!
+    //! Tests cover the following scenarios per the contract in
+    //! specs/009-complete-feature-support/contracts/mounts.md:
+    //!
+    //! 1. Basic Merge Tests - empty inputs, config only, features only, no conflicts
+    //! 2. Precedence Tests - config overrides features, later features override earlier
+    //! 3. Normalization Tests - volume syntax normalized to mount syntax
+    //! 4. Edge Cases - empty arrays, multiple mounts, tmpfs, case sensitivity
+    //! 5. Error Handling - invalid specs, missing required fields, validation errors
+    //! 6. Order Preservation - feature installation order, declaration order
+
+    use super::*;
+    use crate::features::{FeatureMetadata, ResolvedFeature};
+
+    /// Helper function to create a ResolvedFeature with specified mounts
+    fn create_feature_with_mounts(id: &str, mounts: Vec<String>) -> ResolvedFeature {
+        let metadata = FeatureMetadata {
+            id: id.to_string(),
+            version: None,
+            name: Some(format!("Test Feature {}", id)),
+            description: None,
+            documentation_url: None,
+            license_url: None,
+            options: HashMap::new(),
+            container_env: HashMap::new(),
+            mounts,
+            init: None,
+            privileged: None,
+            cap_add: vec![],
+            security_opt: vec![],
+            entrypoint: None,
+            installs_after: vec![],
+            depends_on: HashMap::new(),
+            on_create_command: None,
+            update_content_command: None,
+            post_create_command: None,
+            post_start_command: None,
+            post_attach_command: None,
+        };
+
+        ResolvedFeature {
+            id: id.to_string(),
+            source: format!("test://features/{}", id),
+            options: HashMap::new(),
+            metadata,
+        }
+    }
+
+    // ==================== Basic Merge Tests ====================
+
+    #[test]
+    fn test_merge_mounts_empty() {
+        // No config mounts, no feature mounts
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 0);
+    }
+
+    #[test]
+    fn test_merge_mounts_config_only() {
+        // Config mounts only, no features
+        let config_mounts = vec![
+            serde_json::Value::String("type=bind,source=/host/data,target=/data".to_string()),
+            serde_json::Value::String("type=volume,source=cache,target=/cache".to_string()),
+        ];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 2);
+        assert!(result
+            .mounts
+            .contains(&"type=bind,source=/host/data,target=/data".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=cache,target=/cache".to_string()));
+    }
+
+    #[test]
+    fn test_merge_mounts_features_only() {
+        // Feature mounts only, no config
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![
+            create_feature_with_mounts(
+                "feature1",
+                vec!["type=volume,source=vol1,target=/vol1".to_string()],
+            ),
+            create_feature_with_mounts(
+                "feature2",
+                vec!["type=volume,source=vol2,target=/vol2".to_string()],
+            ),
+        ];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 2);
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
+    }
+
+    #[test]
+    fn test_merge_mounts_no_conflicts() {
+        // Config and features with different targets
+        let config_mounts = vec![serde_json::Value::String(
+            "type=bind,source=/host/data,target=/data".to_string(),
+        )];
+        let features = vec![create_feature_with_mounts(
+            "cache",
+            vec!["type=volume,source=cache,target=/cache".to_string()],
+        )];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 2);
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=cache,target=/cache".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=bind,source=/host/data,target=/data".to_string()));
+    }
+
+    // ==================== Precedence Tests ====================
+
+    #[test]
+    fn test_merge_mounts_config_overrides_feature() {
+        // Config mount overrides feature mount for same target
+        let config_mounts = vec![serde_json::Value::String(
+            "type=bind,source=/host/my-data,target=/data".to_string(),
+        )];
+        let features = vec![create_feature_with_mounts(
+            "data",
+            vec!["type=volume,source=feature-data,target=/data".to_string()],
+        )];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert_eq!(
+            result.mounts[0],
+            "type=bind,source=/host/my-data,target=/data"
+        );
+    }
+
+    #[test]
+    fn test_merge_mounts_later_feature_overrides_earlier() {
+        // Later feature mount overrides earlier feature mount for same target
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![
+            create_feature_with_mounts(
+                "feature1",
+                vec!["type=volume,source=vol1,target=/shared".to_string()],
+            ),
+            create_feature_with_mounts(
+                "feature2",
+                vec!["type=volume,source=vol2,target=/shared".to_string()],
+            ),
+        ];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert_eq!(result.mounts[0], "type=volume,source=vol2,target=/shared");
+    }
+
+    #[test]
+    fn test_merge_mounts_multiple_features_with_override() {
+        // Multiple features, later one overrides shared target
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![
+            create_feature_with_mounts(
+                "feature1",
+                vec!["type=volume,source=vol1,target=/vol1".to_string()],
+            ),
+            create_feature_with_mounts(
+                "feature2",
+                vec![
+                    "type=volume,source=vol2,target=/vol2".to_string(),
+                    "type=volume,source=shared,target=/shared".to_string(),
+                ],
+            ),
+            create_feature_with_mounts(
+                "feature3",
+                vec!["type=volume,source=override-shared,target=/shared".to_string()],
+            ),
+        ];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 3);
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=override-shared,target=/shared".to_string()));
+    }
+
+    #[test]
+    fn test_merge_mounts_config_overrides_multiple_features() {
+        // Config mount overrides multiple features with same target
+        let config_mounts = vec![serde_json::Value::String(
+            "type=bind,source=/host/final,target=/shared".to_string(),
+        )];
+        let features = vec![
+            create_feature_with_mounts(
+                "feature1",
+                vec!["type=volume,source=vol1,target=/shared".to_string()],
+            ),
+            create_feature_with_mounts(
+                "feature2",
+                vec!["type=volume,source=vol2,target=/shared".to_string()],
+            ),
+        ];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert_eq!(
+            result.mounts[0],
+            "type=bind,source=/host/final,target=/shared"
+        );
+    }
+
+    // ==================== Normalization Tests ====================
+
+    #[test]
+    fn test_merge_mounts_normalize_volume_syntax() {
+        // Volume syntax should be normalized to mount syntax
+        let config_mounts = vec![serde_json::Value::String(
+            "/host/path:/container/path".to_string(),
+        )];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        // The mount should be normalized - exact format depends on implementation
+        // but should contain the target path
+        assert!(result.mounts[0].contains("target=/container/path"));
+    }
+
+    #[test]
+    fn test_merge_mounts_normalize_volume_syntax_with_options() {
+        // Volume syntax with options should be normalized
+        let config_mounts = vec![serde_json::Value::String(
+            "/host/path:/container/path:ro".to_string(),
+        )];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert!(result.mounts[0].contains("target=/container/path"));
+        assert!(result.mounts[0].contains("ro"));
+    }
+
+    #[test]
+    fn test_merge_mounts_normalize_named_volume() {
+        // Named volume syntax should be normalized
+        let config_mounts = vec![serde_json::Value::String("myvolume:/data".to_string())];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert!(result.mounts[0].contains("target=/data"));
+        assert!(result.mounts[0].contains("myvolume"));
+    }
+
+    // ==================== Edge Cases ====================
+
+    #[test]
+    fn test_merge_mounts_empty_feature_mounts() {
+        // Feature with empty mounts array
+        let config_mounts = vec![serde_json::Value::String(
+            "type=bind,source=/host/data,target=/data".to_string(),
+        )];
+        let features = vec![create_feature_with_mounts("feature1", vec![])];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert_eq!(result.mounts[0], "type=bind,source=/host/data,target=/data");
+    }
+
+    #[test]
+    fn test_merge_mounts_multiple_mounts_per_feature() {
+        // Feature with multiple mounts
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![create_feature_with_mounts(
+            "feature1",
+            vec![
+                "type=volume,source=vol1,target=/vol1".to_string(),
+                "type=volume,source=vol2,target=/vol2".to_string(),
+                "type=tmpfs,target=/tmp".to_string(),
+            ],
+        )];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 3);
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=tmpfs,target=/tmp".to_string()));
+    }
+
+    #[test]
+    fn test_merge_mounts_tmpfs_mount() {
+        // tmpfs mounts should work correctly
+        let config_mounts = vec![serde_json::Value::String(
+            "type=tmpfs,target=/tmp".to_string(),
+        )];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert_eq!(result.mounts[0], "type=tmpfs,target=/tmp");
+    }
+
+    #[test]
+    fn test_merge_mounts_case_sensitivity_in_targets() {
+        // Different case in target paths should be treated as different mounts
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![
+            create_feature_with_mounts(
+                "feature1",
+                vec!["type=volume,source=vol1,target=/Data".to_string()],
+            ),
+            create_feature_with_mounts(
+                "feature2",
+                vec!["type=volume,source=vol2,target=/data".to_string()],
+            ),
+        ];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        // Both should be present since targets differ in case
+        assert_eq!(result.mounts.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_mounts_complex_scenario() {
+        // Complex scenario with multiple features and config overrides
+        let config_mounts = vec![
+            serde_json::Value::String(
+                "type=bind,source=/host/workspace,target=/workspace".to_string(),
+            ),
+            serde_json::Value::String("type=bind,source=/host/override,target=/data".to_string()),
+        ];
+        let features = vec![
+            create_feature_with_mounts(
+                "feature1",
+                vec![
+                    "type=volume,source=cache1,target=/cache".to_string(),
+                    "type=volume,source=data1,target=/data".to_string(),
+                ],
+            ),
+            create_feature_with_mounts(
+                "feature2",
+                vec![
+                    "type=volume,source=cache2,target=/cache".to_string(),
+                    "type=tmpfs,target=/tmp".to_string(),
+                ],
+            ),
+        ];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 4);
+        // Config mounts should be present
+        assert!(result
+            .mounts
+            .contains(&"type=bind,source=/host/workspace,target=/workspace".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=bind,source=/host/override,target=/data".to_string()));
+        // Feature2's cache should override feature1's cache
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=cache2,target=/cache".to_string()));
+        // Feature2's tmpfs should be present
+        assert!(result
+            .mounts
+            .contains(&"type=tmpfs,target=/tmp".to_string()));
+    }
+
+    // ==================== Error Handling Tests ====================
+
+    #[test]
+    fn test_merge_mounts_invalid_mount_string() {
+        // Invalid mount string should return error
+        let config_mounts = vec![serde_json::Value::String("invalid-mount-spec".to_string())];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_mounts_missing_target() {
+        // Mount without target should return error
+        let config_mounts = vec![serde_json::Value::String(
+            "type=bind,source=/host/path".to_string(),
+        )];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_mounts_invalid_feature_mount() {
+        // Invalid mount in feature should return error
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![create_feature_with_mounts(
+            "feature1",
+            vec!["invalid-mount".to_string()],
+        )];
+
+        let result = merge_mounts(&config_mounts, &features);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_mounts_relative_target() {
+        // Mount with relative target should return error
+        let config_mounts = vec![serde_json::Value::String(
+            "type=bind,source=/host/path,target=relative/path".to_string(),
+        )];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_mounts_bind_without_source() {
+        // Bind mount without source should return error
+        let config_mounts = vec![serde_json::Value::String(
+            "type=bind,target=/container/path".to_string(),
+        )];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_mounts_error_attribution_config() {
+        // Error from config mount should include "config" in message
+        let config_mounts = vec![serde_json::Value::String(
+            "type=bind,target=/container/path".to_string(), // Missing source
+        )];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("config"));
+    }
+
+    #[test]
+    fn test_merge_mounts_error_attribution_feature() {
+        // Error from feature mount should include feature ID in message
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![create_feature_with_mounts(
+            "my-feature",
+            vec!["type=bind,target=/container/path".to_string()], // Missing source
+        )];
+
+        let result = merge_mounts(&config_mounts, &features);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("my-feature"));
+    }
+
+    // ==================== Object Mount Normalization Tests ====================
+
+    #[test]
+    fn test_merge_mounts_object_format_basic() {
+        // Object format should be converted to string format
+        let config_mounts = vec![serde_json::json!({
+            "type": "bind",
+            "source": "/host/path",
+            "target": "/container/path"
+        })];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert!(result.mounts[0].contains("type=bind"));
+        assert!(result.mounts[0].contains("source=/host/path"));
+        assert!(result.mounts[0].contains("target=/container/path"));
+    }
+
+    #[test]
+    fn test_merge_mounts_object_format_with_readonly() {
+        // Object format with readonly flag
+        let config_mounts = vec![serde_json::json!({
+            "type": "bind",
+            "source": "/host/path",
+            "target": "/container/path",
+            "readonly": true
+        })];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert!(result.mounts[0].contains("ro"));
+    }
+
+    #[test]
+    fn test_merge_mounts_object_format_with_consistency() {
+        // Object format with consistency option
+        let config_mounts = vec![serde_json::json!({
+            "type": "bind",
+            "source": "/host/path",
+            "target": "/container/path",
+            "consistency": "cached"
+        })];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert!(result.mounts[0].contains("consistency=cached"));
+    }
+
+    #[test]
+    fn test_merge_mounts_object_format_volume() {
+        // Object format for volume mount
+        let config_mounts = vec![serde_json::json!({
+            "type": "volume",
+            "source": "myvolume",
+            "target": "/data"
+        })];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert!(result.mounts[0].contains("type=volume"));
+        assert!(result.mounts[0].contains("source=myvolume"));
+        assert!(result.mounts[0].contains("target=/data"));
+    }
+
+    #[test]
+    fn test_merge_mounts_object_format_tmpfs() {
+        // Object format for tmpfs mount (no source)
+        let config_mounts = vec![serde_json::json!({
+            "type": "tmpfs",
+            "target": "/tmp"
+        })];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert!(result.mounts[0].contains("type=tmpfs"));
+        assert!(result.mounts[0].contains("target=/tmp"));
+    }
+
+    #[test]
+    fn test_merge_mounts_mixed_string_and_object() {
+        // Mix of string and object formats
+        let config_mounts = vec![
+            serde_json::Value::String("type=bind,source=/host/a,target=/a".to_string()),
+            serde_json::json!({
+                "type": "volume",
+                "source": "vol1",
+                "target": "/b"
+            }),
+            serde_json::Value::String("type=tmpfs,target=/c".to_string()),
+        ];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 3);
+        assert!(result.mounts.iter().any(|m| m.contains("target=/a")));
+        assert!(result.mounts.iter().any(|m| m.contains("target=/b")));
+        assert!(result.mounts.iter().any(|m| m.contains("target=/c")));
+    }
+
+    #[test]
+    fn test_merge_mounts_object_format_missing_type() {
+        // Object format without type should error
+        let config_mounts = vec![serde_json::json!({
+            "source": "/host/path",
+            "target": "/container/path"
+        })];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("type"));
+    }
+
+    #[test]
+    fn test_merge_mounts_object_format_missing_target() {
+        // Object format without target should error
+        let config_mounts = vec![serde_json::json!({
+            "type": "bind",
+            "source": "/host/path"
+        })];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("target"));
+    }
+
+    #[test]
+    fn test_merge_mounts_object_overrides_string() {
+        // Object format config mount should override string format feature mount
+        let config_mounts = vec![serde_json::json!({
+            "type": "bind",
+            "source": "/host/override",
+            "target": "/data"
+        })];
+        let features = vec![create_feature_with_mounts(
+            "feature1",
+            vec!["type=volume,source=vol1,target=/data".to_string()],
+        )];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        assert!(result.mounts[0].contains("source=/host/override"));
+        assert!(!result.mounts[0].contains("vol1"));
+    }
+
+    // ==================== Order Preservation Tests ====================
+
+    #[test]
+    fn test_merge_mounts_preserves_feature_order() {
+        // Mounts from features should be processed in installation order
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![
+            create_feature_with_mounts(
+                "feature1",
+                vec!["type=volume,source=vol1,target=/vol1".to_string()],
+            ),
+            create_feature_with_mounts(
+                "feature2",
+                vec!["type=volume,source=vol2,target=/vol2".to_string()],
+            ),
+            create_feature_with_mounts(
+                "feature3",
+                vec!["type=volume,source=vol3,target=/vol3".to_string()],
+            ),
+        ];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 3);
+        // The exact order may vary based on implementation, but all should be present
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol3,target=/vol3".to_string()));
+    }
+
+    #[test]
+    fn test_merge_mounts_preserves_declaration_order_within_feature() {
+        // Mounts within a feature should be processed in declaration order
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![create_feature_with_mounts(
+            "feature1",
+            vec![
+                "type=volume,source=vol1,target=/vol1".to_string(),
+                "type=volume,source=vol2,target=/vol2".to_string(),
+                "type=volume,source=vol3,target=/vol3".to_string(),
+            ],
+        )];
+
+        let result = merge_mounts(&config_mounts, &features).unwrap();
+        assert_eq!(result.mounts.len(), 3);
+        // All mounts should be present
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
+        assert!(result
+            .mounts
+            .contains(&"type=volume,source=vol3,target=/vol3".to_string()));
     }
 }

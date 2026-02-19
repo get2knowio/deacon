@@ -20,6 +20,10 @@ use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::{Docker, DockerLifecycle};
 use deacon_core::errors::{DeaconError, DockerError};
+use deacon_core::features::{
+    build_entrypoint_chain, generate_wrapper_script, merge_security_options,
+};
+use deacon_core::mount::merge_mounts;
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ContainerState, StateManager};
 use deacon_core::IndexMap;
@@ -223,6 +227,161 @@ pub(crate) async fn execute_container_up(
         None
     };
 
+    // Merge security options from config and features
+    debug!("Merging security options from config and features");
+    let merged_security =
+        merge_security_options(&config, resolved_features.as_deref().unwrap_or(&[]));
+    debug!(
+        privileged = merged_security.privileged,
+        init = merged_security.init,
+        cap_add_count = merged_security.cap_add.len(),
+        security_opt_count = merged_security.security_opt.len(),
+        "Merged security options from config and features"
+    );
+    if !merged_security.cap_add.is_empty() {
+        debug!(
+            cap_add = ?merged_security.cap_add,
+            "Merged capabilities"
+        );
+    }
+    if !merged_security.security_opt.is_empty() {
+        debug!(
+            security_opt = ?merged_security.security_opt,
+            "Merged security options"
+        );
+    }
+
+    // Merge mounts from config and features
+    let feature_mount_count: usize = resolved_features
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|f| f.metadata.mounts.len())
+        .sum();
+    let config_mount_count = config.mounts.len();
+
+    debug!(
+        feature_mounts = feature_mount_count,
+        config_mounts = config_mount_count,
+        "Merging mounts from config and features"
+    );
+
+    let merged_mounts = merge_mounts(&config.mounts, resolved_features.as_deref().unwrap_or(&[]))
+        .with_context(|| "Failed to merge mounts from config and features")?;
+
+    info!(
+        feature_mounts = feature_mount_count,
+        config_mounts = config_mount_count,
+        merged_mount_count = merged_mounts.mounts.len(),
+        "Merged mounts from config and features"
+    );
+
+    if !merged_mounts.mounts.is_empty() {
+        debug!(
+            mounts = ?merged_mounts.mounts,
+            "Merged mount specifications"
+        );
+    }
+
+    // Build entrypoint chain from features and config
+    // DevContainerConfig does not currently have an entrypoint field; pass None for config entrypoint.
+    let features_slice = resolved_features.as_deref().unwrap_or(&[]);
+    let entrypoint_chain = build_entrypoint_chain(features_slice, None);
+
+    // T044: Log entrypoint chain decision
+    match &entrypoint_chain {
+        deacon_core::features::EntrypointChain::None => {
+            debug!(
+                feature_count = features_slice.len(),
+                "No entrypoints found in features or config"
+            );
+        }
+        deacon_core::features::EntrypointChain::Single(ref path) => {
+            info!(
+                entrypoint = %path,
+                feature_count = features_slice.len(),
+                "Single entrypoint from features, no wrapper needed"
+            );
+        }
+        deacon_core::features::EntrypointChain::Chained {
+            ref wrapper_path,
+            ref entrypoints,
+        } => {
+            info!(
+                wrapper_path = %wrapper_path,
+                entrypoint_count = entrypoints.len(),
+                feature_count = features_slice.len(),
+                "Multiple entrypoints detected, wrapper script required"
+            );
+            for (i, ep) in entrypoints.iter().enumerate() {
+                debug!(index = i, entrypoint = %ep, "Chained entrypoint");
+            }
+        }
+    }
+
+    // For the Chained variant, generate the wrapper script and write it to a persistent
+    // location on the host, then add a bind mount so it is available inside the container.
+    // We use `.devcontainer/.deacon/` under the workspace so the script survives container
+    // restarts (a temp file would be deleted on drop, breaking bind mounts on restart).
+    let mut merged_mounts = merged_mounts;
+    if let deacon_core::features::EntrypointChain::Chained {
+        ref wrapper_path,
+        ref entrypoints,
+    } = entrypoint_chain
+    {
+        let script_content = generate_wrapper_script(entrypoints);
+        debug!(
+            wrapper_path = %wrapper_path,
+            script_length = script_content.len(),
+            "Generated entrypoint wrapper script"
+        );
+
+        // Write wrapper script to a persistent location under the workspace so the
+        // bind-mounted path remains valid across container restarts.
+        let wrapper_dir = workspace_folder.join(".devcontainer").join(".deacon");
+        tokio::fs::create_dir_all(&wrapper_dir)
+            .await
+            .context("Failed to create .deacon directory for entrypoint wrapper")?;
+
+        let wrapper_host_path = wrapper_dir.join("entrypoint-wrapper.sh");
+        tokio::fs::write(&wrapper_host_path, script_content.as_bytes())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to write entrypoint wrapper script to '{}'",
+                    wrapper_host_path.display()
+                )
+            })?;
+
+        // Make the script executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o755);
+            tokio::fs::set_permissions(&wrapper_host_path, perms)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to set executable permissions on wrapper script '{}'",
+                        wrapper_host_path.display()
+                    )
+                })?;
+        }
+
+        // Add a bind mount from the host file to the wrapper path inside the container
+        let host_path = wrapper_host_path.display().to_string();
+        let mount_spec = format!(
+            "type=bind,source={},target={},readonly",
+            host_path, wrapper_path
+        );
+        debug!(
+            host_path = %host_path,
+            container_path = %wrapper_path,
+            "Adding bind mount for entrypoint wrapper script"
+        );
+        merged_mounts.mounts.push(mount_spec);
+    }
+
     // Log GPU mode application
     if args.gpu_mode == deacon_core::gpu::GpuMode::All {
         info!("Applying GPU mode: all - requesting GPU access for container");
@@ -238,6 +397,9 @@ pub(crate) async fn execute_container_up(
             workspace_folder,
             args.remove_existing_container,
             args.gpu_mode,
+            &merged_security,
+            &merged_mounts,
+            &entrypoint_chain,
         )
         .await;
 
@@ -310,17 +472,16 @@ pub(crate) async fn execute_container_up(
     // - UID update flow: update container user UID/GID to match host user
     // - Security options: privileged, capAdd, securityOpt, init
     //
-    // Current implementation: User mapping is partially implemented (has TODO at line 1804)
-    // Security options (privileged, capAdd, securityOpt) are defined in config but not yet
-    // applied to container creation.
+    // Current implementation:
+    // - User mapping is partially implemented (has TODO at line 1804)
+    // - Security options (privileged, capAdd, securityOpt, init) are merged from config and features
+    //   and applied to container creation (see lines 227-257)
     //
-    // Full implementation requires:
+    // Remaining work:
     // 1. UID update: Execute usermod/groupmod commands in container to update remote user UID/GID
-    // 2. Security options: Pass config.privileged, config.cap_add, config.security_opt to docker run/create
-    // 3. Init process: Apply config.init (if present) to enable proper signal handling
-    // 4. Entrypoint override: Handle config.override_command for security-related entrypoint changes
+    // 2. Entrypoint override: Handle config.override_command for security-related entrypoint changes
     //
-    // TODO T017: Complete UID update flow and security options application
+    // TODO T017: Complete UID update flow
     // Foundation is in place (config fields exist, user_mapping module available)
     if config.remote_user.is_some() || config.container_user.is_some() {
         apply_user_mapping(&container_result.container_id, &config, workspace_folder).await?;
@@ -358,6 +519,7 @@ pub(crate) async fn execute_container_up(
     );
 
     // Execute lifecycle commands if not skipped
+    // Pass resolved features for lifecycle command aggregation (feature commands execute before config)
     execute_lifecycle_commands(
         &container_result.container_id,
         &config,
@@ -366,6 +528,7 @@ pub(crate) async fn execute_container_up(
         env_user_resolution.effective_env.clone(),
         env_user_resolution.effective_user.clone(),
         cache_folder,
+        resolved_features.as_deref().unwrap_or(&[]),
         prior_markers,
     )
     .await?;

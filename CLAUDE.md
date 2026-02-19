@@ -411,3 +411,10 @@ make test-nextest-audit
 RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 # Check /tmp/cache/env_probe_* files
 ```
+
+## Active Technologies
+- Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing (009-complete-feature-support)
+- N/A (devcontainer.json configuration files) (009-complete-feature-support)
+
+## Recent Changes
+- 009-complete-feature-support: Added Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing

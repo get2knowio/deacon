@@ -54,12 +54,16 @@ pub trait ContainerOps {
     async fn find_matching_containers(&self, identity: &ContainerIdentity) -> Result<Vec<String>>;
 
     /// Create a new container with the specified identity and configuration
+    #[allow(clippy::too_many_arguments)]
     async fn create_container(
         &self,
         identity: &ContainerIdentity,
         config: &DevContainerConfig,
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<String>;
 
     /// Start a container by ID

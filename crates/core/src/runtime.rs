@@ -5,7 +5,9 @@
 
 use crate::config::DevContainerConfig;
 use crate::container::{ContainerIdentity, ContainerOps, ContainerResult};
-use crate::docker::{ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult, ImageInfo};
+use crate::docker::{
+    CliRuntime, ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult, ImageInfo,
+};
 use crate::errors::{DeaconError, Result};
 use std::path::Path;
 
@@ -106,7 +108,7 @@ impl ContainerRuntimeImpl {
     }
 
     /// Get the underlying CliDocker/CliRuntime instance for feature installation
-    pub fn cli_docker(&self) -> crate::docker::CliDocker {
+    pub fn cli_docker(&self) -> CliRuntime {
         match self {
             Self::Docker(runtime) => runtime.docker.clone(),
             Self::Podman(runtime) => runtime.runtime.clone(),
@@ -179,16 +181,35 @@ impl ContainerOps for ContainerRuntimeImpl {
         config: &DevContainerConfig,
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<String> {
         match self {
             Self::Docker(runtime) => {
                 runtime
-                    .create_container(identity, config, workspace_path, gpu_mode)
+                    .create_container(
+                        identity,
+                        config,
+                        workspace_path,
+                        gpu_mode,
+                        merged_security,
+                        merged_mounts,
+                        entrypoint_chain,
+                    )
                     .await
             }
             Self::Podman(runtime) => {
                 runtime
-                    .create_container(identity, config, workspace_path, gpu_mode)
+                    .create_container(
+                        identity,
+                        config,
+                        workspace_path,
+                        gpu_mode,
+                        merged_security,
+                        merged_mounts,
+                        entrypoint_chain,
+                    )
                     .await
             }
         }
@@ -232,40 +253,61 @@ impl DockerLifecycle for ContainerRuntimeImpl {
         workspace_path: &Path,
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<ContainerResult> {
         match self {
             Self::Docker(runtime) => {
                 runtime
-                    .up(identity, config, workspace_path, remove_existing, gpu_mode)
+                    .up(
+                        identity,
+                        config,
+                        workspace_path,
+                        remove_existing,
+                        gpu_mode,
+                        merged_security,
+                        merged_mounts,
+                        entrypoint_chain,
+                    )
                     .await
             }
             Self::Podman(runtime) => {
                 runtime
-                    .up(identity, config, workspace_path, remove_existing, gpu_mode)
+                    .up(
+                        identity,
+                        config,
+                        workspace_path,
+                        remove_existing,
+                        gpu_mode,
+                        merged_security,
+                        merged_mounts,
+                        entrypoint_chain,
+                    )
                     .await
             }
         }
     }
 }
 
-/// Docker runtime implementation wrapping CliDocker
+/// Docker runtime implementation wrapping CliRuntime
 #[derive(Debug)]
 pub struct DockerRuntime {
-    docker: crate::docker::CliDocker,
+    pub(crate) docker: CliRuntime,
 }
 
 impl DockerRuntime {
     /// Create new Docker runtime
     pub fn new() -> Self {
         Self {
-            docker: crate::docker::CliDocker::new(),
+            docker: CliRuntime::new(),
         }
     }
 
     /// Create new Docker runtime with custom path
     pub fn with_path(docker_path: String) -> Self {
         Self {
-            docker: crate::docker::CliDocker::with_path(docker_path),
+            docker: CliRuntime::with_runtime_path(docker_path),
         }
     }
 }
@@ -320,9 +362,20 @@ impl ContainerOps for DockerRuntime {
         config: &DevContainerConfig,
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<String> {
         self.docker
-            .create_container(identity, config, workspace_path, gpu_mode)
+            .create_container(
+                identity,
+                config,
+                workspace_path,
+                gpu_mode,
+                merged_security,
+                merged_mounts,
+                entrypoint_chain,
+            )
             .await
     }
 
@@ -352,9 +405,21 @@ impl DockerLifecycle for DockerRuntime {
         workspace_path: &Path,
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<ContainerResult> {
         self.docker
-            .up(identity, config, workspace_path, remove_existing, gpu_mode)
+            .up(
+                identity,
+                config,
+                workspace_path,
+                remove_existing,
+                gpu_mode,
+                merged_security,
+                merged_mounts,
+                entrypoint_chain,
+            )
             .await
     }
 }
@@ -368,21 +433,21 @@ impl ContainerRuntime for DockerRuntime {
 /// Podman runtime implementation
 #[derive(Debug)]
 pub struct PodmanRuntime {
-    runtime: crate::docker::CliRuntime,
+    pub(crate) runtime: CliRuntime,
 }
 
 impl PodmanRuntime {
     /// Create new Podman runtime
     pub fn new() -> Self {
         Self {
-            runtime: crate::docker::CliRuntime::podman(),
+            runtime: CliRuntime::podman(),
         }
     }
 
     /// Create new Podman runtime with custom path
     pub fn with_path(podman_path: String) -> Self {
         Self {
-            runtime: crate::docker::CliRuntime::with_runtime_path(podman_path),
+            runtime: CliRuntime::with_runtime_path(podman_path),
         }
     }
 }
@@ -437,9 +502,20 @@ impl ContainerOps for PodmanRuntime {
         config: &DevContainerConfig,
         workspace_path: &Path,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<String> {
         self.runtime
-            .create_container(identity, config, workspace_path, gpu_mode)
+            .create_container(
+                identity,
+                config,
+                workspace_path,
+                gpu_mode,
+                merged_security,
+                merged_mounts,
+                entrypoint_chain,
+            )
             .await
     }
 
@@ -469,9 +545,21 @@ impl DockerLifecycle for PodmanRuntime {
         workspace_path: &Path,
         remove_existing: bool,
         gpu_mode: crate::gpu::GpuMode,
+        merged_security: &crate::features::MergedSecurityOptions,
+        merged_mounts: &crate::mount::MergedMounts,
+        entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<ContainerResult> {
         self.runtime
-            .up(identity, config, workspace_path, remove_existing, gpu_mode)
+            .up(
+                identity,
+                config,
+                workspace_path,
+                remove_existing,
+                gpu_mode,
+                merged_security,
+                merged_mounts,
+                entrypoint_chain,
+            )
             .await
     }
 }
