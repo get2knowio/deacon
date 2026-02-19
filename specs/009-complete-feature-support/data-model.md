@@ -211,6 +211,10 @@ impl LifecycleCommandList {
 }
 ```
 
+> **Implementation Note**: The `filter_empty()` method is not implemented as a separate method.
+> Instead, empty command filtering is integrated into `aggregate_lifecycle_commands()` which
+> filters during aggregation, avoiding an extra pass over the command list.
+
 ---
 
 ### MergedMounts (NEW)
@@ -251,6 +255,10 @@ pub enum EntrypointChain {
 }
 ```
 
+> **Implementation Note**: The `config_entrypoint` parameter to `build_entrypoint_chain()` is
+> always `None` in the current implementation because the devcontainer.json specification does
+> not include a top-level `entrypoint` property. The parameter exists for future extensibility.
+
 ---
 
 ### FeatureBuildOutput (EXISTING - extend)
@@ -277,6 +285,12 @@ pub struct FeatureBuildOutput {
     pub entrypoint_chain: EntrypointChain,
 }
 ```
+
+> **Implementation Note**: In the current architecture, security options, mounts, and entrypoint
+> chain are merged at the container orchestration layer (`commands/up/container.rs`) rather than
+> inside `FeatureBuildOutput`. The `FeatureBuildOutput` provides `resolved_features` which
+> contains all the metadata needed for downstream merging. This design keeps feature building
+> focused on image construction while container-level concerns are handled at the orchestration layer.
 
 ---
 

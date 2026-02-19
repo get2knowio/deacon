@@ -572,13 +572,11 @@ impl MergedSecurityOptions {
         }
 
         for cap in &self.cap_add {
-            args.push("--cap-add".to_string());
-            args.push(cap.clone());
+            args.push(format!("--cap-add={}", cap));
         }
 
         for security_opt in &self.security_opt {
-            args.push("--security-opt".to_string());
-            args.push(security_opt.clone());
+            args.push(format!("--security-opt={}", security_opt));
         }
 
         args
@@ -838,7 +836,15 @@ impl FeatureDependencyResolver {
 
         // Add dependencies from metadata
         for feature in features {
-            let dependencies = &mut graph.get_mut(&feature.id).unwrap();
+            let dependencies =
+                graph
+                    .get_mut(&feature.id)
+                    .ok_or_else(|| FeatureError::DependencyResolution {
+                        message: format!(
+                            "Internal error: feature '{}' not found in dependency graph",
+                            feature.id
+                        ),
+                    })?;
 
             // Add installsAfter dependencies
             for after_id in &feature.metadata.installs_after {
@@ -886,8 +892,23 @@ impl FeatureDependencyResolver {
         // Build adjacency list and calculate in-degrees
         for (node, dependencies) in graph {
             for dep in dependencies {
-                adj_list.get_mut(dep).unwrap().insert(node.clone());
-                *in_degree.get_mut(node).unwrap() += 1;
+                adj_list
+                    .get_mut(dep)
+                    .ok_or_else(|| FeatureError::DependencyResolution {
+                        message: format!(
+                            "Internal error: dependency '{}' not found in adjacency list",
+                            dep
+                        ),
+                    })?
+                    .insert(node.clone());
+                *in_degree
+                    .get_mut(node)
+                    .ok_or_else(|| FeatureError::DependencyResolution {
+                        message: format!(
+                            "Internal error: node '{}' not found in in-degree map",
+                            node
+                        ),
+                    })? += 1;
             }
         }
 
@@ -914,7 +935,14 @@ impl FeatureDependencyResolver {
             let mut neighbors: Vec<String> = adj_list[&current].iter().cloned().collect();
             neighbors.sort(); // Lexicographic ordering for determinism
             for neighbor in neighbors {
-                let degree = in_degree.get_mut(&neighbor).unwrap();
+                let degree = in_degree.get_mut(&neighbor).ok_or_else(|| {
+                    FeatureError::DependencyResolution {
+                        message: format!(
+                            "Internal error: neighbor '{}' not found in in-degree map",
+                            neighbor
+                        ),
+                    }
+                })?;
                 *degree -= 1;
                 if *degree == 0 {
                     queue.push_back(neighbor);
@@ -956,8 +984,23 @@ impl FeatureDependencyResolver {
         // Build adjacency list and calculate in-degrees
         for (node, dependencies) in graph {
             for dep in dependencies {
-                adj_list.get_mut(dep).unwrap().insert(node.clone());
-                *in_degree.get_mut(node).unwrap() += 1;
+                adj_list
+                    .get_mut(dep)
+                    .ok_or_else(|| FeatureError::DependencyResolution {
+                        message: format!(
+                            "Internal error: dependency '{}' not found in adjacency list",
+                            dep
+                        ),
+                    })?
+                    .insert(node.clone());
+                *in_degree
+                    .get_mut(node)
+                    .ok_or_else(|| FeatureError::DependencyResolution {
+                        message: format!(
+                            "Internal error: node '{}' not found in in-degree map",
+                            node
+                        ),
+                    })? += 1;
             }
         }
 
@@ -1093,16 +1136,6 @@ impl FeatureDependencyResolver {
     }
 }
 
-/// Placeholder for feature system
-pub struct Feature;
-
-impl Feature {
-    /// Placeholder feature installer
-    pub fn install() -> anyhow::Result<()> {
-        Ok(())
-    }
-}
-
 /// Entrypoint configuration after chaining feature entrypoints
 ///
 /// When multiple features define entrypoints, they must be chained via a wrapper
@@ -1222,16 +1255,27 @@ pub fn build_entrypoint_chain(
 ///
 /// # Returns
 /// Shell script content as a string.
+/// Shell-quote a string for safe embedding in a /bin/sh script.
+///
+/// Uses single-quote escaping to prevent shell injection: any single quote
+/// in the input is replaced with `'\''` (end quote, escaped quote, start quote).
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 #[instrument(level = "debug", skip(entrypoints))]
 pub fn generate_wrapper_script(entrypoints: &[String]) -> String {
     let mut script = String::from("#!/bin/sh\n");
+    script.push_str("# Feature entrypoints\n");
 
     for ep in entrypoints {
         debug!(entrypoint = %ep, "Adding entrypoint to wrapper script");
-        script.push_str(ep);
+        let quoted = shell_quote(ep);
+        script.push_str(&quoted);
         script.push_str(" || exit $?\n");
     }
 
+    script.push_str("# Pass control to command\n");
     script.push_str("exec \"$@\"\n");
 
     debug!(lines = entrypoints.len() + 2, "Generated wrapper script");
@@ -1322,7 +1366,7 @@ impl FeatureMerger {
 
         debug!(
             "Successfully parsed {} additional features",
-            parsed.as_object().unwrap().len()
+            parsed.as_object().map(|o| o.len()).unwrap_or(0)
         );
         Ok(parsed)
     }
@@ -3536,14 +3580,12 @@ mod security_merge_tests {
         // Should contain --init
         assert!(args.contains(&"--init".to_string()));
 
-        // Should contain capabilities
-        assert!(args.contains(&"--cap-add".to_string()));
-        assert!(args.contains(&"SYS_PTRACE".to_string()));
-        assert!(args.contains(&"NET_ADMIN".to_string()));
+        // Should contain capabilities in single-arg format
+        assert!(args.contains(&"--cap-add=SYS_PTRACE".to_string()));
+        assert!(args.contains(&"--cap-add=NET_ADMIN".to_string()));
 
-        // Should contain security options
-        assert!(args.contains(&"--security-opt".to_string()));
-        assert!(args.contains(&"seccomp:unconfined".to_string()));
+        // Should contain security options in single-arg format
+        assert!(args.contains(&"--security-opt=seccomp:unconfined".to_string()));
     }
 
     #[test]
@@ -3564,11 +3606,8 @@ mod security_merge_tests {
         // Should NOT contain --privileged
         assert!(!args.contains(&"--privileged".to_string()));
 
-        // Should NOT contain capability flags
-        assert!(!args.contains(&"--cap-add".to_string()));
-
-        // Should NOT contain security option flags
-        assert!(!args.contains(&"--security-opt".to_string()));
+        // Should be only --init
+        assert_eq!(args, vec!["--init"]);
     }
 
     #[test]
@@ -3700,7 +3739,9 @@ mod entrypoint_tests {
         let eps = vec!["/init.sh".to_string()];
         let script = generate_wrapper_script(&eps);
         assert!(script.starts_with("#!/bin/sh\n"));
-        assert!(script.contains("/init.sh || exit $?"));
+        assert!(script.contains("# Feature entrypoints\n"));
+        assert!(script.contains("'/init.sh' || exit $?"));
+        assert!(script.contains("# Pass control to command\n"));
         assert!(script.ends_with("exec \"$@\"\n"));
     }
 
@@ -3709,12 +3750,14 @@ mod entrypoint_tests {
         let eps = vec!["/f1/init.sh".to_string(), "/f2/init.sh".to_string()];
         let script = generate_wrapper_script(&eps);
         assert!(script.starts_with("#!/bin/sh\n"));
-        assert!(script.contains("/f1/init.sh || exit $?"));
-        assert!(script.contains("/f2/init.sh || exit $?"));
+        assert!(script.contains("# Feature entrypoints\n"));
+        assert!(script.contains("'/f1/init.sh' || exit $?"));
+        assert!(script.contains("'/f2/init.sh' || exit $?"));
         // f1 must come before f2 in the script
         let f1_pos = script.find("/f1/init.sh").expect("f1 entrypoint not found");
         let f2_pos = script.find("/f2/init.sh").expect("f2 entrypoint not found");
         assert!(f1_pos < f2_pos);
+        assert!(script.contains("# Pass control to command\n"));
         assert!(script.ends_with("exec \"$@\"\n"));
     }
 
@@ -3723,6 +3766,8 @@ mod entrypoint_tests {
         let eps: Vec<String> = vec![];
         let script = generate_wrapper_script(&eps);
         assert!(script.starts_with("#!/bin/sh\n"));
+        assert!(script.contains("# Feature entrypoints\n"));
+        assert!(script.contains("# Pass control to command\n"));
         assert!(script.contains("exec \"$@\""));
     }
 }

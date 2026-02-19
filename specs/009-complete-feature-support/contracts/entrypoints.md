@@ -39,6 +39,9 @@ pub struct DevContainerConfig {
 }
 ```
 
+> **Note**: The devcontainer.json specification does not define a top-level `entrypoint` property.
+> The `config_entrypoint` parameter exists for extensibility but is currently always `None`.
+
 ---
 
 ## Output Contract

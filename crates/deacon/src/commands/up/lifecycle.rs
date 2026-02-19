@@ -6,13 +6,17 @@
 //! - `execute_lifecycle_commands` - Execute lifecycle phases in container
 //! - `execute_initialize_command` - Execute initializeCommand on host
 //! - `commands_from_json_value` - Parse command JSON to string vector
+//! - `flatten_aggregated_commands` - Flatten aggregated commands with source-attributed errors
+//! - `summarize_sources` - Build human-readable source summary for error context
 
 use super::args::UpArgs;
 use super::{ENV_FORCE_TTY_IF_JSON, ENV_LOG_FORMAT};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_env_probe::ContainerProbeMode;
-use deacon_core::container_lifecycle::{aggregate_lifecycle_commands, DotfilesConfig};
+use deacon_core::container_lifecycle::{
+    aggregate_lifecycle_commands, DotfilesConfig, LifecycleCommandList,
+};
 use deacon_core::errors::DeaconError;
 use deacon_core::features::ResolvedFeature;
 use deacon_core::lifecycle::{InvocationContext, InvocationFlags, LifecyclePhaseState};
@@ -125,10 +129,10 @@ pub(crate) fn build_invocation_context(
 /// - `prior_markers`: Previously executed phase markers for resume detection.
 ///
 /// Behavior notes:
-/// - Commands may be provided as a single string or an array in the config; non-string entries produce a configuration validation error.
+/// - Commands may be provided as a single string, array, object, or null in the config.
 /// - Emits LifecyclePhaseBegin for each phase before execution and LifecyclePhaseEnd for each phase after execution (end events contain an approximate per-phase duration).
 /// - Records the total lifecycle duration under the metric name "lifecycle" if a progress tracker is available.
-/// - Returns any error produced by the underlying lifecycle executor.
+/// - Returns any error produced by the underlying lifecycle executor, with source attribution context.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_lifecycle_commands(
     container_id: &str,
@@ -272,16 +276,14 @@ pub(crate) async fn execute_lifecycle_commands(
                 );
             }
 
-            // Convert aggregated commands to string vectors for execution
-            let mut all_commands = Vec::new();
-            for agg_cmd in &aggregated_commands.commands {
-                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
-                all_commands.extend(cmd_strings);
-            }
+            // Convert aggregated commands to string vectors with source-attributed errors
+            let all_commands = flatten_aggregated_commands(&aggregated_commands)
+                .context("Failed to parse onCreate lifecycle commands")?;
             commands = commands.with_on_create(all_commands);
             debug!(
-                "onCreate phase queued for execution with {} aggregated commands",
-                commands.on_create.as_ref().map(|c| c.len()).unwrap_or(0)
+                "onCreate phase queued for execution with {} aggregated commands (sources: {})",
+                commands.on_create.as_ref().map(|c| c.len()).unwrap_or(0),
+                summarize_sources(&aggregated_commands)
             );
         }
     }
@@ -305,20 +307,18 @@ pub(crate) async fn execute_lifecycle_commands(
                 );
             }
 
-            // Convert aggregated commands to string vectors for execution
-            let mut all_commands = Vec::new();
-            for agg_cmd in &aggregated_commands.commands {
-                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
-                all_commands.extend(cmd_strings);
-            }
+            // Convert aggregated commands to string vectors with source-attributed errors
+            let all_commands = flatten_aggregated_commands(&aggregated_commands)
+                .context("Failed to parse updateContent lifecycle commands")?;
             commands = commands.with_update_content(all_commands);
             debug!(
-                "updateContent phase queued for execution with {} aggregated commands",
+                "updateContent phase queued for execution with {} aggregated commands (sources: {})",
                 commands
                     .update_content
                     .as_ref()
                     .map(|c| c.len())
-                    .unwrap_or(0)
+                    .unwrap_or(0),
+                summarize_sources(&aggregated_commands)
             );
         }
     }
@@ -347,16 +347,14 @@ pub(crate) async fn execute_lifecycle_commands(
                 );
             }
 
-            // Convert aggregated commands to string vectors for execution
-            let mut all_commands = Vec::new();
-            for agg_cmd in &aggregated_commands.commands {
-                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
-                all_commands.extend(cmd_strings);
-            }
+            // Convert aggregated commands to string vectors with source-attributed errors
+            let all_commands = flatten_aggregated_commands(&aggregated_commands)
+                .context("Failed to parse postCreate lifecycle commands")?;
             commands = commands.with_post_create(all_commands);
             debug!(
-                "postCreate phase queued for execution with {} aggregated commands",
-                commands.post_create.as_ref().map(|c| c.len()).unwrap_or(0)
+                "postCreate phase queued for execution with {} aggregated commands (sources: {})",
+                commands.post_create.as_ref().map(|c| c.len()).unwrap_or(0),
+                summarize_sources(&aggregated_commands)
             );
         }
     }
@@ -380,16 +378,14 @@ pub(crate) async fn execute_lifecycle_commands(
                 );
             }
 
-            // Convert aggregated commands to string vectors for execution
-            let mut all_commands = Vec::new();
-            for agg_cmd in &aggregated_commands.commands {
-                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
-                all_commands.extend(cmd_strings);
-            }
+            // Convert aggregated commands to string vectors with source-attributed errors
+            let all_commands = flatten_aggregated_commands(&aggregated_commands)
+                .context("Failed to parse postStart lifecycle commands")?;
             commands = commands.with_post_start(all_commands);
             debug!(
-                "postStart phase queued for execution with {} aggregated commands",
-                commands.post_start.as_ref().map(|c| c.len()).unwrap_or(0)
+                "postStart phase queued for execution with {} aggregated commands (sources: {})",
+                commands.post_start.as_ref().map(|c| c.len()).unwrap_or(0),
+                summarize_sources(&aggregated_commands)
             );
         }
     }
@@ -416,16 +412,14 @@ pub(crate) async fn execute_lifecycle_commands(
                 );
             }
 
-            // Convert aggregated commands to string vectors for execution
-            let mut all_commands = Vec::new();
-            for agg_cmd in &aggregated_commands.commands {
-                let cmd_strings = commands_from_json_value(&agg_cmd.command)?;
-                all_commands.extend(cmd_strings);
-            }
+            // Convert aggregated commands to string vectors with source-attributed errors
+            let all_commands = flatten_aggregated_commands(&aggregated_commands)
+                .context("Failed to parse postAttach lifecycle commands")?;
             commands = commands.with_post_attach(all_commands);
             debug!(
-                "postAttach phase queued for execution with {} aggregated commands",
-                commands.post_attach.as_ref().map(|c| c.len()).unwrap_or(0)
+                "postAttach phase queued for execution with {} aggregated commands (sources: {})",
+                commands.post_attach.as_ref().map(|c| c.len()).unwrap_or(0),
+                summarize_sources(&aggregated_commands)
             );
         }
     }
@@ -460,7 +454,7 @@ pub(crate) async fn execute_lifecycle_commands(
         }
     }
 
-    let result = result?;
+    let result = result.context("Lifecycle command execution failed in container")?;
 
     debug!(
         "Lifecycle execution completed: {} blocking phases executed, {} non-blocking phases to execute",
@@ -496,7 +490,8 @@ pub(crate) async fn execute_lifecycle_commands(
 
         let _final_result = result
             .execute_non_blocking_phases_sync_with_callback(&docker, Some(emit_progress_event_fn))
-            .await?;
+            .await
+            .context("Non-blocking lifecycle phase execution failed")?;
 
         debug!("Non-blocking phases execution completed");
     }
@@ -572,10 +567,61 @@ pub(crate) async fn execute_initialize_command(
     Ok(())
 }
 
-/// Convert JSON value to vector of command strings
+/// Flatten aggregated lifecycle commands into a `Vec<String>`, preserving source attribution
+/// in error messages when command parsing fails.
+///
+/// For each `AggregatedLifecycleCommand`, this calls `commands_from_json_value` and wraps any
+/// error with context identifying the command source (feature ID or "config"). This ensures
+/// that if a lifecycle command has an invalid format, the error message tells the user which
+/// feature or config section produced the bad command.
+fn flatten_aggregated_commands(aggregated: &LifecycleCommandList) -> Result<Vec<String>> {
+    let mut all_commands = Vec::new();
+    for agg_cmd in &aggregated.commands {
+        let cmd_strings = commands_from_json_value(&agg_cmd.command).with_context(|| {
+            format!(
+                "Failed to parse lifecycle command from source '{}'",
+                agg_cmd.source
+            )
+        })?;
+        all_commands.extend(cmd_strings);
+    }
+    Ok(all_commands)
+}
+
+/// Build a human-readable summary of command sources for error context.
+///
+/// Returns a string like `"feature:node, feature:python, config"` that can be used
+/// in `.context()` calls to identify which sources contributed commands to a phase.
+fn summarize_sources(aggregated: &LifecycleCommandList) -> String {
+    let sources: Vec<String> = aggregated
+        .commands
+        .iter()
+        .map(|cmd| cmd.source.to_string())
+        .collect();
+    if sources.is_empty() {
+        "none".to_string()
+    } else {
+        sources.join(", ")
+    }
+}
+
+/// Convert JSON value to vector of command strings.
+///
+/// Supports all devcontainer lifecycle command formats:
+/// - **String**: A single command string (e.g., `"npm install"`)
+/// - **Array**: An array of command strings (e.g., `["npm install", "npm run build"]`)
+/// - **Object**: Named parallel commands (e.g., `{"install": "npm install", "build": "npm run build"}`).
+///   Object values may be strings or arrays (joined as command + args).
+/// - **Null**: Treated as no commands (returns empty vec)
 pub(crate) fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<String>> {
     match value {
-        serde_json::Value::String(cmd) => Ok(vec![cmd.clone()]),
+        serde_json::Value::String(cmd) => {
+            if cmd.is_empty() {
+                Ok(vec![])
+            } else {
+                Ok(vec![cmd.clone()])
+            }
+        }
         serde_json::Value::Array(cmds) => {
             let mut commands = Vec::new();
             for cmd_value in cmds {
@@ -595,10 +641,43 @@ pub(crate) fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<
             }
             Ok(commands)
         }
+        serde_json::Value::Object(map) => {
+            // Object form: {"name": "command", ...}
+            // Each value is a command string; execute all (order is per map iteration)
+            let mut commands = Vec::new();
+            for (key, val) in map {
+                match val {
+                    serde_json::Value::String(s) if !s.is_empty() => {
+                        commands.push(s.clone());
+                    }
+                    serde_json::Value::String(_) => {
+                        // Empty string command value, skip
+                    }
+                    serde_json::Value::Array(arr) => {
+                        // Array value: join as command + args
+                        let parts: Vec<String> = arr
+                            .iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect();
+                        if !parts.is_empty() {
+                            commands.push(parts.join(" "));
+                        }
+                    }
+                    _ => {
+                        debug!(
+                            key = %key,
+                            "Skipping non-string, non-array command in object lifecycle command"
+                        );
+                    }
+                }
+            }
+            Ok(commands)
+        }
+        serde_json::Value::Null => Ok(vec![]),
         _ => Err(
             DeaconError::Config(deacon_core::errors::ConfigError::Validation {
                 message: format!(
-                    "Invalid command format: expected string or array of strings, got {:?}",
+                    "Invalid command format: expected string, array, or object, got {:?}",
                     value
                 ),
             })
@@ -610,11 +689,230 @@ pub(crate) fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use deacon_core::container_lifecycle::{AggregatedLifecycleCommand, LifecycleCommandSource};
     use deacon_core::lifecycle::{InvocationMode, LifecyclePhase, PhaseStatus};
 
     fn default_args() -> UpArgs {
         UpArgs::default()
     }
+
+    // ========================================================================
+    // commands_from_json_value tests
+    // ========================================================================
+
+    #[test]
+    fn test_commands_from_json_value_string() {
+        let value = serde_json::json!("npm install");
+        let commands = commands_from_json_value(&value).unwrap();
+        assert_eq!(commands, vec!["npm install"]);
+    }
+
+    #[test]
+    fn test_commands_from_json_value_empty_string() {
+        let value = serde_json::json!("");
+        let commands = commands_from_json_value(&value).unwrap();
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn test_commands_from_json_value_array() {
+        let value = serde_json::json!(["npm install", "npm run build"]);
+        let commands = commands_from_json_value(&value).unwrap();
+        assert_eq!(commands, vec!["npm install", "npm run build"]);
+    }
+
+    #[test]
+    fn test_commands_from_json_value_array_with_non_string() {
+        let value = serde_json::json!(["npm install", 42]);
+        let result = commands_from_json_value(&value);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Invalid command in array"));
+    }
+
+    #[test]
+    fn test_commands_from_json_value_object() {
+        let value = serde_json::json!({"install": "npm install", "build": "npm run build"});
+        let commands = commands_from_json_value(&value).unwrap();
+        assert_eq!(commands.len(), 2);
+        assert!(commands.contains(&"npm install".to_string()));
+        assert!(commands.contains(&"npm run build".to_string()));
+    }
+
+    #[test]
+    fn test_commands_from_json_value_object_with_array_value() {
+        let value = serde_json::json!({"build": ["npm", "run", "build"]});
+        let commands = commands_from_json_value(&value).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0], "npm run build");
+    }
+
+    #[test]
+    fn test_commands_from_json_value_object_with_empty_string_value() {
+        let value = serde_json::json!({"install": "npm install", "noop": ""});
+        let commands = commands_from_json_value(&value).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(commands.contains(&"npm install".to_string()));
+    }
+
+    #[test]
+    fn test_commands_from_json_value_object_skips_non_string_non_array() {
+        let value = serde_json::json!({"install": "npm install", "bad": 42});
+        let commands = commands_from_json_value(&value).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(commands.contains(&"npm install".to_string()));
+    }
+
+    #[test]
+    fn test_commands_from_json_value_empty_object() {
+        let value = serde_json::json!({});
+        let commands = commands_from_json_value(&value).unwrap();
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn test_commands_from_json_value_null() {
+        let value = serde_json::json!(null);
+        let commands = commands_from_json_value(&value).unwrap();
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn test_commands_from_json_value_invalid_type() {
+        let value = serde_json::json!(42);
+        let result = commands_from_json_value(&value);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Invalid command format"));
+        assert!(err_msg.contains("object"));
+    }
+
+    #[test]
+    fn test_commands_from_json_value_boolean_invalid() {
+        let value = serde_json::json!(true);
+        let result = commands_from_json_value(&value);
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // flatten_aggregated_commands tests
+    // ========================================================================
+
+    #[test]
+    fn test_flatten_aggregated_commands_empty() {
+        let aggregated = LifecycleCommandList { commands: vec![] };
+        let result = flatten_aggregated_commands(&aggregated).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_flatten_aggregated_commands_mixed_sources() {
+        let aggregated = LifecycleCommandList {
+            commands: vec![
+                AggregatedLifecycleCommand {
+                    command: serde_json::json!("feature-cmd"),
+                    source: LifecycleCommandSource::Feature {
+                        id: "node".to_string(),
+                    },
+                },
+                AggregatedLifecycleCommand {
+                    command: serde_json::json!(["config-cmd1", "config-cmd2"]),
+                    source: LifecycleCommandSource::Config,
+                },
+            ],
+        };
+        let result = flatten_aggregated_commands(&aggregated).unwrap();
+        assert_eq!(result, vec!["feature-cmd", "config-cmd1", "config-cmd2"]);
+    }
+
+    #[test]
+    fn test_flatten_aggregated_commands_error_includes_source() {
+        let aggregated = LifecycleCommandList {
+            commands: vec![AggregatedLifecycleCommand {
+                command: serde_json::json!(42), // Invalid type
+                source: LifecycleCommandSource::Feature {
+                    id: "broken-feature".to_string(),
+                },
+            }],
+        };
+        let result = flatten_aggregated_commands(&aggregated);
+        assert!(result.is_err());
+        let err_msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            err_msg.contains("feature:broken-feature"),
+            "Error should contain source attribution, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_flatten_aggregated_commands_object_form() {
+        let aggregated = LifecycleCommandList {
+            commands: vec![AggregatedLifecycleCommand {
+                command: serde_json::json!({"install": "npm install", "build": "npm run build"}),
+                source: LifecycleCommandSource::Config,
+            }],
+        };
+        let result = flatten_aggregated_commands(&aggregated).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&"npm install".to_string()));
+        assert!(result.contains(&"npm run build".to_string()));
+    }
+
+    // ========================================================================
+    // summarize_sources tests
+    // ========================================================================
+
+    #[test]
+    fn test_summarize_sources_empty() {
+        let aggregated = LifecycleCommandList { commands: vec![] };
+        assert_eq!(summarize_sources(&aggregated), "none");
+    }
+
+    #[test]
+    fn test_summarize_sources_single_feature() {
+        let aggregated = LifecycleCommandList {
+            commands: vec![AggregatedLifecycleCommand {
+                command: serde_json::json!("cmd"),
+                source: LifecycleCommandSource::Feature {
+                    id: "node".to_string(),
+                },
+            }],
+        };
+        assert_eq!(summarize_sources(&aggregated), "feature:node");
+    }
+
+    #[test]
+    fn test_summarize_sources_mixed() {
+        let aggregated = LifecycleCommandList {
+            commands: vec![
+                AggregatedLifecycleCommand {
+                    command: serde_json::json!("cmd1"),
+                    source: LifecycleCommandSource::Feature {
+                        id: "node".to_string(),
+                    },
+                },
+                AggregatedLifecycleCommand {
+                    command: serde_json::json!("cmd2"),
+                    source: LifecycleCommandSource::Feature {
+                        id: "python".to_string(),
+                    },
+                },
+                AggregatedLifecycleCommand {
+                    command: serde_json::json!("cmd3"),
+                    source: LifecycleCommandSource::Config,
+                },
+            ],
+        };
+        assert_eq!(
+            summarize_sources(&aggregated),
+            "feature:node, feature:python, config"
+        );
+    }
+
+    // ========================================================================
+    // build_invocation_context tests
+    // ========================================================================
 
     #[test]
     fn test_build_invocation_context_fresh_mode() {

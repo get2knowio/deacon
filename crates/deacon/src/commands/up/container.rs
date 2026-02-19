@@ -319,10 +319,12 @@ pub(crate) async fn execute_container_up(
         }
     }
 
-    // For the Chained variant, generate the wrapper script and write it to a temp file
-    // on the host, then add a bind mount so it is available inside the container at start time.
+    // For the Chained variant, generate the wrapper script and write it to a persistent
+    // location on the host, then add a bind mount so it is available inside the container.
+    // We use `.devcontainer/.deacon/` under the workspace so the script survives container
+    // restarts (a temp file would be deleted on drop, breaking bind mounts on restart).
     let mut merged_mounts = merged_mounts;
-    let _wrapper_tempfile = if let deacon_core::features::EntrypointChain::Chained {
+    if let deacon_core::features::EntrypointChain::Chained {
         ref wrapper_path,
         ref entrypoints,
     } = entrypoint_chain
@@ -334,38 +336,40 @@ pub(crate) async fn execute_container_up(
             "Generated entrypoint wrapper script"
         );
 
-        // Write wrapper script to a named temp file on the host.
-        // The file must outlive the container create call, so we hold the handle.
-        let temp_file = tempfile::Builder::new()
-            .prefix("deacon-entrypoint-wrapper-")
-            .suffix(".sh")
-            .tempfile()
-            .with_context(|| "Failed to create temp file for entrypoint wrapper script")?;
+        // Write wrapper script to a persistent location under the workspace so the
+        // bind-mounted path remains valid across container restarts.
+        let wrapper_dir = workspace_folder.join(".devcontainer").join(".deacon");
+        tokio::fs::create_dir_all(&wrapper_dir)
+            .await
+            .context("Failed to create .deacon directory for entrypoint wrapper")?;
 
-        tokio::fs::write(temp_file.path(), script_content.as_bytes())
+        let wrapper_host_path = wrapper_dir.join("entrypoint-wrapper.sh");
+        tokio::fs::write(&wrapper_host_path, script_content.as_bytes())
             .await
             .with_context(|| {
                 format!(
                     "Failed to write entrypoint wrapper script to '{}'",
-                    temp_file.path().display()
+                    wrapper_host_path.display()
                 )
             })?;
 
-        // Make the script executable (owner rwx)
+        // Make the script executable
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let perms = std::fs::Permissions::from_mode(0o755);
-            std::fs::set_permissions(temp_file.path(), perms).with_context(|| {
-                format!(
-                    "Failed to set executable permissions on wrapper script '{}'",
-                    temp_file.path().display()
-                )
-            })?;
+            tokio::fs::set_permissions(&wrapper_host_path, perms)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to set executable permissions on wrapper script '{}'",
+                        wrapper_host_path.display()
+                    )
+                })?;
         }
 
-        // Add a bind mount from the host temp file to the wrapper path inside the container
-        let host_path = temp_file.path().display().to_string();
+        // Add a bind mount from the host file to the wrapper path inside the container
+        let host_path = wrapper_host_path.display().to_string();
         let mount_spec = format!(
             "type=bind,source={},target={},readonly",
             host_path, wrapper_path
@@ -376,11 +380,7 @@ pub(crate) async fn execute_container_up(
             "Adding bind mount for entrypoint wrapper script"
         );
         merged_mounts.mounts.push(mount_spec);
-
-        Some(temp_file)
-    } else {
-        None
-    };
+    }
 
     // Log GPU mode application
     if args.gpu_mode == deacon_core::gpu::GpuMode::All {

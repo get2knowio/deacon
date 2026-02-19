@@ -10,7 +10,6 @@ use crate::progress::{ProgressEvent, ProgressTracker};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
 use crate::state::record_phase_executed;
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
-use serde_json;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
