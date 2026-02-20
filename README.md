@@ -1,6 +1,8 @@
 # deacon
 
-A fast, Rust-based [Dev Containers](https://containers.dev) CLI.
+**The DevContainer CLI, minus the parts you don't use.**
+
+A fast, focused Rust CLI for developers who use [dev containers](https://containers.dev) and CI pipelines — not for feature authors.
 
 <!-- Badges -->
 <p>
@@ -80,6 +82,19 @@ Verify installation:
 ```bash
 deacon --version
 ```
+
+## Shipped Commands
+
+| Command | Description |
+|---------|-------------|
+| `up` | Create and start a dev container |
+| `down` | Stop and remove a dev container |
+| `exec` | Execute a command in a running container |
+| `build` | Build a dev container image |
+| `read-configuration` | Resolve and output devcontainer.json |
+| `run-user-commands` | Run lifecycle commands in a container |
+| `templates apply` | Scaffold a project from a template |
+| `doctor` | Check system prerequisites and configuration |
 
 ## In Progress
 
@@ -435,10 +450,10 @@ For comprehensive troubleshooting, classification workflows, and remediation ste
 
 ## Roadmap
 
-This CLI implements the DevContainer specification domains below and continues to expand coverage:
+Deacon focuses on consuming dev containers — building, running, and managing them — rather than authoring reusable features or publishing to registries. Coverage continues to expand across these specification domains:
 
 - Configuration resolution and parsing (`devcontainer.json`)
-- Feature system for reusable development environment components
+- Feature consumption: installing and resolving community features during container builds
 - Template system for scaffolding new projects
 - Container lifecycle management
 - Docker/OCI integration

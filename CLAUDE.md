@@ -415,6 +415,7 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 ## Active Technologies
 - Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing (009-complete-feature-support)
 - N/A (devcontainer.json configuration files) (009-complete-feature-support)
+- N/A (Markdown documentation only) (011-update-readme-scope)
 
 ## Recent Changes
 - 009-complete-feature-support: Added Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing
