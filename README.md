@@ -102,14 +102,8 @@ Self-contained categorized examples live under [`examples/`](examples/README.md)
 
 - Configuration: variable substitution, lifecycle commands basics (`examples/configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, and variables (`examples/container-lifecycle/`)
-- Feature Management: minimal & with-options feature manifests (`examples/feature-management/`)
-- Template Management: minimal & with-options templates including Dockerfile and assets (`examples/template-management/`)
-
-Try one:
-```bash
-cd examples/feature-management/minimal-feature
-deacon features test . --json
-```
+- Feature System: dependencies, parallelism, caching, and lockfile support (`examples/features/`)
+- Template Management: template application with options (`examples/template-management/`)
 
 See the full details and additional commands in `examples/README.md`.
 
@@ -216,12 +210,12 @@ Deacon follows a strict stdout/stderr separation contract to ensure reliable mac
 # JSON mode - stdout contains only JSON, logs go to stderr
 deacon read-configuration --output json > config.json 2> logs.txt
 
-# Text mode - stdout contains human-readable results, logs to stderr  
+# Text mode - stdout contains human-readable results, logs to stderr
 deacon doctor > diagnosis.txt 2> logs.txt
 
 # Parsing JSON output safely
-OUTPUT=$(deacon features plan --json 2>/dev/null)
-echo "$OUTPUT" | jq '.order'
+OUTPUT=$(deacon read-configuration 2>/dev/null)
+echo "$OUTPUT" | jq '.configFilePath'
 ```
 
 ### Integration Guidelines
@@ -451,13 +445,6 @@ This CLI implements the DevContainer specification domains below and continues t
 - Cross-platform support
 
 See the [CLI specification](docs/subcommand-specs/*/SPEC.md) for detailed architecture and planned features.
-
-For detailed, language-agnostic designs of specific subcommands, see:
-- Features Test: `docs/subcommand-specs/features-test/SPEC.md`
-- Features Package: `docs/subcommand-specs/features-package/SPEC.md`
-- Features Publish: `docs/subcommand-specs/features-publish/SPEC.md`
-- Features Info: `docs/subcommand-specs/features-info/SPEC.md`
-- Features Plan: `docs/subcommand-specs/features-plan/SPEC.md`
 
 ### Binary Authenticity & Code Signing
 

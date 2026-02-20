@@ -1,2 +1,0 @@
-{ "id": "invalid-feature", "version": "0.0.1", "name": "Invalid Feature",  // <-- trailing comma and comment make this JSON invalid
-}

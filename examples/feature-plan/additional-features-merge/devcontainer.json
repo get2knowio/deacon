@@ -1,7 +1,0 @@
-{
-  "name": "Features Plan — Additional Features Merge",
-  "image": "mcr.microsoft.com/devcontainers/base:alpine",
-  "features": {
-    "./feature-local": {}
-  }
-}

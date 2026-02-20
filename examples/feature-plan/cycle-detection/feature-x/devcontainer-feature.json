@@ -1,6 +1,0 @@
-{
-  "id": "feature-x",
-  "version": "1.0.0",
-  "name": "Feature X",
-  "dependsOn": { "feature-y": true }
-}

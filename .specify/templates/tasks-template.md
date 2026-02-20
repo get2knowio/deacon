@@ -159,32 +159,6 @@ Examples of foundational tasks (adjust based on your project):
 
 ---
 
-## Deferred Work
-
-**Purpose**: Track implementation work deferred from MVP per research.md decisions
-
-<!--
-  IMPORTANT: Per Constitution Principle I (Spec-Parity), any work deferred during phased
-  implementation MUST be tracked here. A specification is NOT considered complete while
-  deferred tasks remain.
-
-  Each deferred task MUST reference the research.md decision that created the deferral.
--->
-
-- [ ] TXXX [Deferral] Complete [feature] per research.md Decision N
-  - **Decision**: [Brief description of what was deferred]
-  - **Rationale**: [Why it was deferred - e.g., "Requires architectural threading beyond MVP scope"]
-  - **Acceptance**: [Specific criteria for completion]
-
-- [ ] TXXX [Deferral] Implement [capability] per research.md Decision M
-  - **Decision**: [Brief description]
-  - **Rationale**: [Why deferred]
-  - **Acceptance**: [Completion criteria]
-
-**Checkpoint**: Specification complete when all deferred tasks are resolved
-
----
-
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

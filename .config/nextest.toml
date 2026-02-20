@@ -111,11 +111,7 @@ test-group = 'docker-slow-shared'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(=test_features_cli)'
-test-group = 'docker-exclusive'
-
-[[profile.default.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
 test-group = 'docker-shared'
 
 [[profile.default.overrides]]
@@ -200,11 +196,7 @@ filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integ
 test-group = 'docker-slow-shared'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=test_features_cli)'
-test-group = 'docker-exclusive'
-
-[[profile.dev-fast.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
 test-group = 'docker-shared'
 
 [[profile.dev-fast.overrides]]
@@ -308,11 +300,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "5m", terminate-after = 1 }
 
 [[profile.docker.overrides]]
-filter = 'binary(=test_features_cli)'
-test-group = 'docker-exclusive'
-
-[[profile.docker.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
 test-group = 'docker-shared'
 
 [[profile.docker.overrides]]
@@ -376,11 +364,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.full.overrides]]
-filter = 'binary(=test_features_cli) & test(test_features_test_)'
-test-group = 'docker-exclusive'
-
-[[profile.full.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
 test-group = 'docker-shared'
 
 [[profile.full.overrides]]
@@ -456,11 +440,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.ci.overrides]]
-filter = 'binary(=test_features_cli) & test(test_features_test_)'
-test-group = 'docker-exclusive'
-
-[[profile.ci.overrides]]
-filter = 'binary(=integration_features_test_json) | binary(=integration_features_publish) | binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
 test-group = 'docker-shared'
 threads-required = 1
 

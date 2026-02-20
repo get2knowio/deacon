@@ -1,4 +1,0 @@
-[
-  {"name": "nginx", "image": "ubuntu:focal"},
-  {"name": "apache", "image": "ubuntu:focal"}
-]

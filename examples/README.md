@@ -11,12 +11,8 @@ Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into
 - Doctor: environment diagnostics including host requirements and storage checks (`doctor/`)
 - Docker Compose: multi-service orchestration and port events (`compose/`)
 - Exec: command execution semantics covering working directory, user, TTY, and environment (`exec/`)
-- Feature Management: minimal & with-options features (`feature-management/`)
 - Feature System: dependencies, parallelism, caching, and lockfile support (`features/`)
-- Feature Testing: automated test suites for features with scenarios, filtering, and JSON output (`features-test/`)
-- Features Info: inspect manifests, list tags, visualize dependencies, verbose output (`features-info/`)
 - Observability: JSON logs, standardized spans, and structured fields (`observability/`)
-- Registry: OCI registry operations including dry-run publish workflows (`registry/`)
 - Template Management: minimal & with-options templates (`template-management/`)
 
  - Read-Configuration: configuration reading examples (`read-configuration/`)
@@ -172,49 +168,6 @@ cd examples/cli/custom-container-name
 deacon up --container-name my-dev-container --skip-post-create
 ```
 
-Package a feature:
-```sh
-cd examples/feature-management/minimal-feature
-OUT=$(mktemp -d)
-deacon features package . --output "$OUT" --json
-```
-
-Feature with options (dry-run publish):
-```sh
-cd examples/feature-management/feature-with-options
-OUT=$(mktemp -d)
-deacon features package . --output "$OUT" --json
-deacon features publish . \
-  --registry ghcr.io/example/with-options-feature \
-  --dry-run --json
-```
-
-Test features with comprehensive test suite:
-```sh
-cd examples/features-test/basic-test-suite
-deacon features test .
-# Or with JSON output
-deacon features test . --json
-```
-
-Test specific features only:
-```sh
-cd examples/features-test/feature-selection
-deacon features test . --features git-tools
-```
-
-Filter scenarios by name:
-```sh
-cd examples/features-test/scenario-filtering
-deacon features test . --filter minimal
-```
-
-Test with custom base image:
-```sh
-cd examples/features-test/custom-environment
-deacon features test . --base-image alpine:latest
-```
-
 Explore template assets:
 ```sh
 cd examples/template-management/template-with-options
@@ -230,37 +183,6 @@ deacon templates apply ../template-with-options \
   --output /tmp/my-project \
   --option customName=my-app \
   --option debugMode=true
-```
-
-View template metadata:
-```sh
-cd examples/template-management/metadata-and-docs
-deacon templates metadata ../template-with-options | jq '.options | keys'
-```
-
-Generate template documentation:
-```sh
-cd examples/template-management/metadata-and-docs
-mkdir -p /tmp/docs
-deacon templates generate-docs ../template-with-options --output /tmp/docs
-cat /tmp/docs/README-template.md
-```
-
-Test dry-run publish workflows for features and templates:
-```sh
-cd examples/registry/dry-run-publish
-
-# Dry-run publish a feature
-cd feature
-deacon features publish . \
-  --registry ghcr.io/example/my-feature \
-  --dry-run --json 2>/dev/null | jq '.'
-
-# Dry-run publish a template
-cd ../template
-deacon templates publish . \
-  --registry ghcr.io/example/my-template \
-  --dry-run 2>/dev/null | jq '.'
 ```
 
 Run doctor command for system diagnostics:
@@ -351,72 +273,11 @@ deacon exec --env FOO=BAR sh -lc 'echo $FOO'  # Should output BAR
 deacon down
 ```
 
-View feature dependency resolution and installation plan:
-```sh
-cd examples/features/dependencies-and-ordering
-deacon features plan --config devcontainer.json --json
-```
-
-Demonstrate parallel feature installation:
-```sh
-cd examples/features/parallel-install-demo
-deacon features plan --config devcontainer.json --json | jq '.levels'
-```
-
-Explore feature caching:
-```sh
-cd examples/features/cache-reuse-hint
-RUST_LOG=debug deacon read-configuration --config devcontainer.json
-```
-
 Examine lockfile structure and path derivation:
 ```sh
 cd examples/features/lockfile-demo
 cat devcontainer-lock.json | jq '.features | keys'
 cat devcontainer-lock.json | jq '.features["ghcr.io/devcontainers/features/node:1"]'
-```
-
-Inspect feature manifest and canonical ID:
-```sh
-cd examples/features-info/manifest-public-registry
-# Requires: export DEACON_NETWORK_TESTS=1
-deacon features info manifest ghcr.io/devcontainers/features/node:1
-# For JSON output
-deacon features info manifest ghcr.io/devcontainers/features/node:1 --output-format json | jq '.canonicalId'
-```
-
-List published tags for a feature:
-```sh
-cd examples/features-info/tags-public-feature
-# Requires: export DEACON_NETWORK_TESTS=1
-deacon features info tags ghcr.io/devcontainers/features/node
-# For JSON output
-deacon features info tags ghcr.io/devcontainers/features/node --output-format json | jq '.publishedTags | length'
-```
-
-Visualize feature dependencies as Mermaid graph:
-```sh
-cd examples/features-info/dependencies-simple
-deacon features info dependencies ./my-feature
-# Copy output and paste into https://mermaid.live/
-```
-
-Get complete feature info in verbose mode:
-```sh
-cd examples/features-info/verbose-text-output
-# Requires: export DEACON_NETWORK_TESTS=1
-deacon features info verbose ghcr.io/devcontainers/features/node:1
-# For JSON (manifest + tags, no dependencies)
-deacon features info verbose ghcr.io/devcontainers/features/node:1 --output-format json | jq 'keys'
-```
-
-Inspect local feature manifest:
-```sh
-cd examples/features-info/manifest-local-feature
-deacon features info manifest ./sample-feature
-# For JSON output
-deacon features info manifest ./sample-feature --output-format json | jq '.canonicalId'
-# Output: null (local features have no OCI digest)
 ```
 
 Verify JSON logs with standardized spans:
@@ -459,12 +320,6 @@ Exec examples demonstrate command execution semantics including working director
 
 Feature system examples demonstrate dependency resolution, parallel execution levels, digest-based caching, and lockfile support for reproducible builds as specified in `docs/subcommand-specs/*/SPEC.md` Feature Installation Workflow, Distribution & Caching sections, and lockfile specifications.
 
-Feature testing examples demonstrate comprehensive test suites for features including autogenerated tests, scenarios with custom images, duplicate/idempotence checks, global scenarios, scenario filtering, JSON output, and custom test environments as specified in `docs/subcommand-specs/features-test/SPEC.md`.
-
-Features Info examples demonstrate the four info modes (manifest, tags, dependencies, verbose) with both text and JSON output formats, including local feature support, error handling, and edge cases as specified in `docs/subcommand-specs/features-info/SPEC.md`.
-
 Observability examples demonstrate JSON logging, standardized tracing spans, and structured fields as specified in `docs/subcommand-specs/*/SPEC.md` Monitoring and Observability section.
-
-Registry examples demonstrate OCI distribution workflows including offline-friendly dry-run publish operations for features and templates as specified in `docs/subcommand-specs/*/SPEC.md` Feature Distribution and Template Distribution sections.
 
 Registry authentication examples demonstrate multiple authentication methods (environment variables, Docker config, command-line options) for push/pull operations with proper error handling and retry logic as specified in `docs/subcommand-specs/*/SPEC.md` OCI Registry Integration section.

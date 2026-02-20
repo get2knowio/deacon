@@ -1,4 +1,0 @@
-[
-  {"name": "scenario-a", "image": "ubuntu:focal"},
-  {"name": "scenario-b", "image": "alpine:latest"}
-]
