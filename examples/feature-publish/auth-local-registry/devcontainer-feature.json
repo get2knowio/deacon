@@ -1,6 +1,0 @@
-{
-  "id": "local-auth-feature",
-  "version": "0.0.1",
-  "name": "Local Auth Feature",
-  "description": "Feature used to demonstrate registry auth via DEVCONTAINERS_OCI_AUTH"
-}

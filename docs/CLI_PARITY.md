@@ -50,16 +50,9 @@
     - positional: `command ...`
   - `read-configuration`
     - `--include-merged-configuration`
-  - `features`
-    - `test <path> [--json]`
-    - `package <path> --output <DIR> [--json]`
-    - `publish <path> --registry <URL> [--dry-run] [--json]`
-    - `info <mode> <feature>` (not yet implemented)
   - `templates`
     - `apply <template>` (not yet implemented)
-    - `publish <path> --registry <URL> [--dry-run]`
-    - `metadata <path>`
-    - `generate-docs <path> --output <DIR>`
+    - `pull <template>` (OCI template pull)
   - `run-user-commands <commands...>` (not yet implemented)
   - `down`
     - `--remove`
@@ -95,12 +88,8 @@
   - Working directory derivation parity — confirm.
 - `read-configuration`
   - Options for substitution-only, raw vs merged vs effective — verify.
-- `features`
-  - `info` modes and output shape — confirm.
-  - `publish` auth and registry flags (scope, token) — confirm.
 - `templates`
   - `apply` flags (target dir, options, force) — confirm.
-  - `publish` flags/auth — confirm.
 - `down`
   - Additional flags (e.g., compose-only, timeouts) — verify.
 - `doctor`
@@ -144,7 +133,6 @@ Immediate parity tasks (no behavioral risk):
 
 **Concrete Roadmap (prioritized)**
 1) Subcommands to implement
-  - Features: `info` (metadata resolution for local/registry features)
   - Templates: `apply` (project scaffolding with options)
   - Run-user-commands (executes configured commands; honor non-blocking semantics)
   - Set-up (convert existing container to dev container)
@@ -156,17 +144,14 @@ Immediate parity tasks (no behavioral risk):
   - Standardize output and exit codes where tests expect legacy messages (already partially done for NotFound).
   - Build: accept optional positional `[path]` mapped to workspace folder; preserve existing flags.
 
-3) OCI publishing (features/templates)
-  - Implement full push to OCI (auth, tags, digests) in `core::oci` with retries/backoff; wire `features publish` and `templates publish` (non-dry-run).
-
-4) Host requirements
+3) Host requirements
   - Implement real storage checks for workspace path with platform-aware logic; extend doctor output accordingly.
 
-5) Lifecycle and compose polish
+4) Lifecycle and compose polish
   - Honor non-blocking `postStart`/`postAttach` semantics more closely; improve logging/streaming and timeouts.
   - Compose: ensure multi-service port events and `exec` targeting across services are robust.
 
-6) Docker/Build options
+5) Docker/Build options
   - ✅ **COMPLETE**: Build subcommand parity fully closed (spec 006-build-subcommand)
     - All missing flags implemented: `--image-name` (repeatable), `--label` (repeatable), `--push`, `--output`
     - BuildKit gating logic enforces prerequisites for BuildKit-only flags
@@ -178,7 +163,7 @@ Immediate parity tasks (no behavioral risk):
     - All acceptance tests passing; examples and documentation updated
     - Delivered: Phases 1-5 complete (Setup, Foundational, US1-US3); Phase 6 (Polish) complete
 
-7) Security and redaction
+6) Security and redaction
   - Cryptographic hashing for secret registry; ensure redaction is applied to all outputs (progress, audit, PORT_EVENT) and respects `--no-redact`.
 
 **Release Notes: Build Subcommand Parity Closure (spec 006-build-subcommand)**
@@ -227,4 +212,4 @@ None required - new flags are optional and backward compatible.
 
 **Next Steps (actionable)**
 - Provide `devcontainer --help` output (global + each subcommand) to convert the checklist into a definitive parity matrix and exact patches.
-- If preferred, I can draft patches now for: features info, templates apply (scaffold), and real storage checks; then iterate on flags after we review TS help text.
+- If preferred, I can draft patches now for: templates apply (scaffold) and real storage checks; then iterate on flags after we review TS help text.

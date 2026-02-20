@@ -1,6 +1,0 @@
-{
-  "id": "bad-version-feature",
-  "version": "not-a-semver",
-  "name": "Bad Version Feature",
-  "description": "Feature intentionally using an invalid version to trigger validation error"
-}

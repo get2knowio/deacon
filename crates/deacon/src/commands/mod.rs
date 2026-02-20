@@ -9,12 +9,6 @@ pub mod config;
 pub mod down;
 pub mod exec;
 #[cfg(feature = "full")]
-pub mod features;
-#[cfg(feature = "full")]
-pub mod features_monolith;
-#[cfg(feature = "full")]
-pub mod features_publish_output;
-#[cfg(feature = "full")]
 pub mod outdated;
 pub mod read_configuration;
 #[cfg(feature = "full")]

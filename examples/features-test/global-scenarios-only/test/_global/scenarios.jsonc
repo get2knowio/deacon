@@ -1,4 +1,0 @@
-[
-  {"name": "environment-check", "image": "ubuntu:focal"},
-  {"name": "connectivity-test", "image": "alpine:latest"}
-]

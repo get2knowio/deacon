@@ -1,13 +1,33 @@
 {
-  "name": "get2know.io devcontainer",
-  "image": "ghcr.io/get2knowio/devcontainer:latest",
+  "name": "Rust Agentic Development",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "remoteUser": "vscode",
-  "features": {},
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "enableNonRootDocker": "true"
+    },
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/eitsupi/devcontainer-features/jq-likes:2": {},
+    "ghcr.io/devcontainers-extra/features/starship:1": {},
+    "ghcr.io/get2knowio/devcontainer-features/ai-clis:2": {},
+    "ghcr.io/get2knowio/devcontainer-features/modern-cli-tools:2": {},
+    "ghcr.io/get2knowio/devcontainer-features/rust-dev-tools:2": {},
+    "ghcr.io/get2knowio/devcontainer-features/github-actions-tools:2": {}
+  },
   "remoteEnv": {
     "GH_PAGER": ""
   },
   "customizations": {
     "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh"
+      },
       "extensions": [
         "rust-lang.rust-analyzer"
       ]
@@ -15,15 +35,9 @@
   },
   "workspaceFolder": "/workspaces/deacon",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/deacon,type=bind,consistency=cached",
-  "initializeCommand": "docker pull ghcr.io/get2knowio/devcontainer:latest",
+  "postCreateCommand": "rustc --version && node --version",
   "mounts": [
-    "source=${localEnv:HOME}/.codex,target=/home/vscode/.codex,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.config/opencode,target=/home/vscode/.config/opencode,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.coderabbit,target=/home/vscode/.coderabbit,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.local/bin,target=/home/vscode/.host-local/bin,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
-    // "source=${localEnv:HOME}/.claude.json,target=/home/vscode/.claude.json,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/projects/maverick,target=/opt/maverick,type=bind,consistency=cached"
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached"
   ]
 }

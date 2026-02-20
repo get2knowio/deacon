@@ -1,9 +1,0 @@
-{
-  "name": "Features Plan — Cycle Detection",
-  "image": "mcr.microsoft.com/devcontainers/base:alpine",
-  "features": {
-    "./feature-x": {},
-    "./feature-y": {},
-    "./feature-z": {}
-  }
-}

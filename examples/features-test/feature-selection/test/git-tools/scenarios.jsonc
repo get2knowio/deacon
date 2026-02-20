@@ -1,4 +1,0 @@
-[
-  {"name": "ubuntu", "image": "ubuntu:focal"},
-  {"name": "debian", "image": "debian:bullseye"}
-]

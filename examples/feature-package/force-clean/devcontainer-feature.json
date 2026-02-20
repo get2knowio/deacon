@@ -1,6 +1,0 @@
-{
-  "id": "force-clean-feature",
-  "version": "0.0.5",
-  "name": "Force Clean Feature",
-  "description": "Used to demonstrate `--force-clean-output-folder` clearing existing artifacts before packaging."
-}

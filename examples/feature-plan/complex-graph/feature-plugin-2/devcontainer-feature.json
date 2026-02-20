@@ -1,7 +1,0 @@
-{
-  "id": "feature-plugin-2",
-  "version": "1.0.0",
-  "name": "Plugin 2",
-  "description": "Depends on core",
-  "dependsOn": { "feature-core": true }
-}

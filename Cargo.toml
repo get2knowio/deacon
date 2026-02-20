@@ -7,7 +7,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-license = "Apache-2.0"
+license = "MIT"
 authors = ["get2knowio <dev@get2know.io>"]
 repository = "https://github.com/get2knowio/deacon"
 rust-version = "1.70"
