@@ -17,7 +17,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 
 **Key Abstractions:**
 - `ContainerRuntime` trait - Docker/Podman abstraction for container operations
-- `HttpClient` trait - OCI registry communication (reqwest-based with HEAD/GET/POST/PUT)
+- `HttpClient` trait - OCI registry communication (reqwest-based, consumer-side: HEAD/GET for pulls, POST for auth)
 - `ConfigLoader` - DevContainer configuration resolution with extends chains
 - `FeatureInstaller` - OCI feature installation and dependency resolution
 - `ContainerLifecycle` - Lifecycle command execution (onCreate, postCreate, postStart, etc.)
@@ -26,7 +26,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 ## Critical Development Principles
 
 **1. Spec-Parity as Source of Truth**
-- ALL behavior MUST align with `docs/subcommand-specs/*/SPEC.md`
+- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, October 2025) and `docs/subcommand-specs/*/SPEC.md`. When the two conflict, the upstream spec wins.
 - Data structures MUST match spec shapes exactly (map vs vec, field ordering, null handling)
 - Configuration resolution MUST use full extends chains via `ConfigLoader::load_with_extends`
 - Never implement shortcuts that deviate from spec-defined algorithms
@@ -50,22 +50,28 @@ If you encounter build or test failures during CI or local testing, fix them eve
 - Lint or format issues in files you didn't modify
 - Documentation or doctest compilation errors
 
-**3. No Silent Fallbacks - Fail Fast**
+**3. Consumer-Only Scope**
+- Deacon implements only the consumer surface of the DevContainer spec
+- In-scope commands: `up`, `down`, `exec`, `build`, `read-configuration`, `run-user-commands`, `templates apply`, `doctor`
+- Feature authoring (test, info, plan, package, publish) is permanently out of scope
+- The feature *installer* (fetching/installing OCI features during `up`) is consumer functionality and stays
+
+**4. No Silent Fallbacks - Fail Fast**
 - Production code MUST emit clear errors when capabilities are unavailable
 - Mocks/fakes are ONLY for tests, never in runtime code paths
 - Filter invalid inputs at ingress per spec (e.g., only OCI refs, only semver tags)
 - Never swallow errors with unwraps or sentinel values - always propagate with `Result` and `.context()`
 
-**4. Panic-Free, Async-Safe Implementations**
+**5. Panic-Free, Async-Safe Implementations**
 - Runtime code MUST NOT panic on expected failures: replace `unwrap`/unchecked `expect` with fallible paths and
   contextual errors.
 - Async code MUST avoid blocking calls (`std::process::Command::output`, blocking file IO). Use `tokio` async
   equivalents with streamed output or offload to bounded blocking tasks.
-- Prefer modular boundaries over monoliths: split large commands/clients into focused modules (e.g., `features`
-  `{plan,package,publish,test}`, `oci` `{auth,client,semver,install}`, `up` `{args,config,compose,runtime}`) and
-  reuse shared helpers.
+- Prefer modular boundaries over monoliths: split large commands/clients into focused modules (e.g.,
+  `up` `{args,compose,lifecycle,merged_config}`, `oci` `{auth,client,fetcher}`,
+  `shared` `{config_loader,env_user,remote_env,terminal}`) and reuse shared helpers.
 
-**4. Subcommand Consistency & Shared Abstractions**
+**6. Subcommand Consistency & Shared Abstractions**
 When multiple subcommands share behavior (terminal sizing, config resolution, container targeting, env probing), use shared helpers:
 - `resolve_env_and_user()` - Container environment probing with cache support
 - `ConfigLoader::load_with_extends()` - Full configuration resolution
@@ -197,18 +203,17 @@ sg --pattern 'old_fn($ARG)' --rewrite 'new_fn($ARG)' --lang rust --update-all
 - Prefer ast-grep over regex for any structural code transformation
 - For complex refactors, write YAML rules in `sgconfig.yml`
 
-## OCI Registry Implementation
+## OCI Registry Implementation (Consumer-Side)
 
 **HTTP Client Trait Pattern:**
-- Use HEAD requests to check blob existence (not GET - avoids downloading)
-- Extract and use Location headers from POST /blobs/uploads/ responses per OCI spec
+- Use HEAD requests to check blob/manifest existence (not GET - avoids downloading)
+- Use GET for downloading blobs and manifests during feature installation
 - When modifying `HttpClient` trait, update ALL implementations: `ReqwestClient`, `MockHttpClient`, `AuthMockHttpClient`, etc.
 
 **Common Pitfalls to Avoid:**
 - Don't use GET to check blob existence (wastes bandwidth)
-- Don't ignore Location headers from upload initiation
 - Don't forget to update test mocks when changing trait methods
-- Do test with realistic mock responses (202 for upload start, 201/204 for completion)
+- Do test with realistic mock responses matching OCI distribution spec
 
 ## Container Environment Probe Caching
 
@@ -309,8 +314,8 @@ deacon read-configuration --output json > config.json 2> logs.txt
 deacon doctor > diagnosis.txt 2> logs.txt
 
 # Parse JSON safely
-OUTPUT=$(deacon features plan --json 2>/dev/null)
-echo "$OUTPUT" | jq '.order'
+OUTPUT=$(deacon read-configuration --output json 2>/dev/null)
+echo "$OUTPUT" | jq '.configuration'
 ```
 
 ## Makefile Targets Reference

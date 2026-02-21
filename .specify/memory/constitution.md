@@ -1,33 +1,38 @@
 <!--
 Sync Impact Report
-- Version change: 1.11.0 → 1.12.0
+- Version change: 1.12.0 → 1.13.0
 - Modified principles:
-  - III. No Silent Fallbacks — Fail Fast: Added "CLI Argument Validation" subsection requiring
-    validation of CLI arguments at ingress with clear error messages for invalid values.
-  - IV. Idiomatic, Safe Rust: Added "Pattern Matching Over Unwrap" guideline for nested Options
-    and "Documentation-Code Sync" requirement for keeping docstrings accurate after refactoring.
-  - VII. Subcommand Consistency & Shared Abstractions: Added "Avoid Redundant Operations" guideline
-    to prevent duplicate filesystem/network calls across shared and subcommand-specific code.
-- Added sections: None
+  - I. Spec-Parity as Source of Truth: Added upstream devcontainers/spec repository (commit 113500f4,
+    October 2025) as authoritative source. Upstream spec wins when it conflicts with local CLI-SPEC.md.
+  - V. Idiomatic, Safe Rust (was IV): Updated "Modular Boundaries Over Monoliths" examples to reflect
+    current consumer-focused codebase — removed stale feature-authoring modules (plan, package, publish,
+    test), replaced with actual current modules.
+- Added sections:
+  - II. Consumer-Only Scope: New principle establishing that Deacon implements only the consumer surface
+    of the DevContainer specification. Feature authoring is permanently out of scope.
 - Removed sections: None
+- Renumbered principles: II→III, III→IV, IV→V, V→VI, VI→VII, VII→VIII, VIII→IX
 - Templates requiring updates/alignment:
-  - ✅ .specify/templates/plan-template.md (constitution check remains valid)
-  - ✅ .specify/templates/spec-template.md (no changes needed)
-  - ✅ .specify/templates/tasks-template.md (no changes needed)
-  - ✅ CLAUDE.md (no changes needed - existing guidance covers new additions)
+  - ✅ .specify/templates/plan-template.md (constitution check remains valid, project type already broadened)
+  - ✅ .specify/templates/spec-template.md (no changes needed — spec template is project-type agnostic)
+  - ✅ .specify/templates/tasks-template.md (no changes needed — task structure is project-type agnostic)
+  - ✅ CLAUDE.md (already reflects consumer-only scope from prior README update)
 - Follow-up TODOs: None
 -->
 
 # deacon Constitution
-<!-- A Rust DevContainer-like CLI aligned with containers.dev and the repo's CLI spec -->
+<!-- A Rust DevContainer CLI implementing the consumer surface of the containers.dev specification -->
 
 ## Core Principles
 
 ### I. Spec‑Parity as Source of Truth
-Deacon MUST implement behavior consistent with the authoritative CLI specification in `docs/CLI-SPEC.md` and the
-containers.dev ecosystem. Terminology (feature, template, lifecycle, workspace, container environment, variable
-substitution) MUST be preserved. Any requested change conflicting with the spec requires explicit clarification and
-spec updates before implementation; examples and fixtures MUST be kept in sync.
+Deacon MUST implement behavior consistent with the upstream [devcontainers/spec](https://github.com/devcontainers/spec)
+repository and the local CLI specification in `docs/subcommand-specs/*/SPEC.md`. The upstream spec (currently at commit
+`113500f4`, October 2025) defines canonical behavior for all DevContainer properties, lifecycle commands, variable
+substitution, and property merge rules. When the local CLI-SPEC.md and upstream spec conflict, the upstream spec wins.
+Terminology (feature, template, lifecycle, workspace, container environment, variable substitution) MUST be preserved.
+Any requested change conflicting with the spec requires explicit clarification and spec updates before implementation;
+examples and fixtures MUST be kept in sync.
 
 **Data Model and Algorithm Alignment**: Implementation data structures MUST match spec-defined shapes exactly (e.g.,
 `map<string, T>` cannot be substituted with `Vec<T>`); null handling, field presence, and ordering requirements are
@@ -61,7 +66,25 @@ answers to "why isn't X fully populated?" in research.md decisions.
 The "Deferred Work" section in tasks.md ensures visibility and prevents deferrals from being forgotten. Reviewers
 MUST verify that any research.md deferrals have corresponding tasks.md entries before approving PRs.
 
-### II. Keep the Build Green (Non‑Negotiable)
+### II. Consumer‑Only Scope
+Deacon implements only the **consumer surface** of the DevContainer specification—commands used by developers who
+have a `devcontainer.json` and want to create, use, and manage dev containers. Feature authoring (test, info, plan,
+package, publish) is **permanently out of scope**.
+
+**In-scope commands**: `up`, `down`, `exec`, `build`, `read-configuration`, `run-user-commands`,
+`templates apply`, `doctor`.
+
+**Consumer vs. authoring boundary**: The feature *installer* that fetches and installs OCI features during
+`deacon up` is consumer functionality and stays in scope. The distinction is: consuming published features (in scope)
+vs. creating and publishing features (out of scope). Similarly, `templates apply` (consuming a template) is in scope
+while template authoring tooling is not.
+
+**Rationale**: Narrowing to the consumer surface keeps the codebase focused, reduces maintenance burden, and aligns
+with actual developer workflows. Feature and template authoring has dedicated upstream tooling. New commands or
+capabilities MUST be evaluated against this boundary before implementation—if a command serves authors rather than
+consumers, it is out of scope regardless of whether the upstream spec defines it.
+
+### III. Keep the Build Green (Non‑Negotiable)
 All code changes MUST keep the build green with an explicit cadence for quick vs. full checks:
 - Fast Loop (default during spec‑phase, local only):
   - `cargo fmt --all && cargo fmt --all -- --check`
@@ -101,7 +124,7 @@ broken functionality. This is non-negotiable: a failing test indicates broken co
 
 This gate prevents "implement first, discover spec mismatch later" cycles that generate technical debt.
 
-### III. No Silent Fallbacks — Fail Fast
+### IV. No Silent Fallbacks — Fail Fast
 Production code MUST NOT silently downgrade, noop, or substitute mock/stub implementations when capabilities (OCI,
 registry resolution, container runtime, feature install backend) are unavailable or unimplemented. The program MUST
 emit a clear, user‑facing error and abort. Mocks/fakes are permitted ONLY in tests and MUST NOT leak into runtime
@@ -123,7 +146,7 @@ if !VALID_CONSISTENCY.contains(&value.as_str()) {
 }
 ```
 
-### IV. Idiomatic, Safe Rust
+### V. Idiomatic, Safe Rust
 Code MUST be modern, idiomatic Rust (Edition 2021) with clear module boundaries, no `unsafe` (unless absolutely
 required and fully justified with documented safety invariants). Error handling: prefer `thiserror` for domain
 errors in core; use `anyhow` only at the binary boundary with meaningful context. Abstractions SHOULD be expressed
@@ -135,16 +158,16 @@ and imports are enforced via rustfmt; imports order: std → external crates →
 **Error Propagation**: Use `Result` types consistently; do not swallow errors with unwraps or unchecked `expect`
 calls or by returning sentinel values when operations can fail. Provide error context with `anyhow::Context` or
 equivalent. Avoid direct `std::process::exit` calls; implement proper `Termination` or error wrappers so cleanup
-and testing work correctly. Runtime code MUST be panic-free for expected failure modes—propagate, don’t crash.
+and testing work correctly. Runtime code MUST be panic-free for expected failure modes—propagate, don't crash.
 
 **Async Discipline**: Do not block the async runtime with synchronous IO (e.g., `std::process::Command::output()`,
 `std::fs::read_to_end`) inside async functions. Use async equivalents (`tokio::process::Command` with streaming,
 `tokio::fs`, `tokio::io`). Long-running or CPU-heavy work should be offloaded to blocking tasks with clear bounds.
 
 **Modular Boundaries Over Monoliths**: Large commands and clients MUST be decomposed into focused modules with
-clear APIs (e.g., `plan`, `package`, `publish`, `test` for features; `auth`, `client`, `semver`, `install` for OCI;
-`args`, `config`, `compose`, `runtime` for `up`). Keep public surface area minimal and reuse shared helpers instead
-of duplicating logic in sprawling single files.
+clear APIs (e.g., `args`, `compose`, `lifecycle`, `merged_config` for `up`; `auth`, `client`, `fetcher` for OCI;
+`config_loader`, `env_user`, `remote_env`, `terminal` for shared command helpers). Keep public surface area minimal
+and reuse shared helpers instead of duplicating logic in sprawling single files.
 
 **Dependency Hygiene**: Keep dependencies current and avoid deprecated crates. When a dependency is deprecated or
 superseded (e.g., `atty` → `is-terminal`), migrate promptly. Prefer minimal, stable dependencies with active
@@ -175,7 +198,7 @@ NOT do—these often become incorrect after capability additions.
 This prevents typos, ensures consistency, and makes the codebase easier to search and refactor. Document the
 constant with its purpose and valid values.
 
-### V. Observability and Output Contracts
+### VI. Observability and Output Contracts
 Stdout/stderr separation is a contract:
 - JSON modes (`--json`, `--output json`): stdout contains only the single JSON document; all logs go to stderr.
 - Text modes: stdout contains human‑readable results; all logs/diagnostics go to stderr via `tracing`.
@@ -193,7 +216,7 @@ via `BTreeMap` or similar. Text output MUST honor the same ordering guarantees w
 in ALL output modes (text, JSON, interactive, non-interactive). Do not gate exit code behavior on output format
 unless explicitly specified.
 
-### VI. Testing Completeness
+### VII. Testing Completeness
 All spec-mandated tests MUST be implemented before a feature is considered complete. When a spec includes a "Testing"
 section or lists required test scenarios, treat them as acceptance criteria:
 - Unit tests for pure logic (version comparison, parsing, validation)
@@ -239,7 +262,7 @@ configuring them for maximum safe parallelism. When multiple tests share the sam
 
 Goal: Maximize test throughput while maintaining determinism and avoiding flaky tests.
 
-### VII. Subcommand Consistency & Shared Abstractions
+### VIII. Subcommand Consistency & Shared Abstractions
 All CLI subcommands (existing and new) MUST share canonical helpers for any behavior that appears in
 multiple commands. Terminal sizing, configuration/override/secrets resolution, container targeting,
 remote environment merging, compose option wiring, and environment probing/user selection MUST NOT be
@@ -278,7 +301,7 @@ that have optional enrichment (e.g., `EnrichedMergedConfiguration`), use builder
 `specs/{feature}/research.md` with numbered decisions. Reference these decisions in code comments to help
 reviewers understand intentional trade-offs versus oversights.
 
-### VIII. Executable & Self‑Verifying Examples
+### IX. Executable & Self‑Verifying Examples
 Examples are executable contracts, not documentation suggestions. Every example directory under `examples/`
 MUST contain an `exec.sh` that:
 - Executes every README-documented path in a single run (no hidden env toggles), with clear echo banners per
@@ -303,7 +326,7 @@ table and the aggregator to include the new `exec.sh`.
 - Prefer minimal, pinned dependencies; justify additions and keep the dependency set lean.
 - Maintain an authoritative cross-subcommand alignment log. When implementing CLI work that overlaps
   existing functionality, consult and update that log so engineering tasks track the shared-helper
-  obligations codified in Principle VII.
+  obligations codified in Principle VIII.
 - Examples under `examples/` and fixtures under `fixtures/` are living documentation; keep READMEs, `exec.sh`
   scripts, and aggregator scripts in sync with user-facing flags, schemas, and outputs. Each `exec.sh` must
   leave the workspace clean after completion.
@@ -364,14 +387,15 @@ sg --pattern 'old_fn($ARG)' --rewrite 'new_fn($ARG)' --lang rust --update-all
 Before implementing a new subcommand or major feature, complete this checklist and document answers in your plan or PR:
 
 1. **Spec Review**: Have you read the complete spec section (SPEC.md, data-model.md, contracts/)?
-2. **Data Model Alignment**: Do your structs match spec-defined shapes exactly (map vs vec, field names, null handling)?
-3. **Algorithm Alignment**: Have you identified all spec-defined algorithms (resolution, derivation, selection) and planned to implement them precisely?
-4. **Input Validation**: Have you identified which inputs are valid/supported and where filtering must occur?
-5. **Configuration Resolution**: Does your command use the full resolution path (extends, overrides, substitution) if it reads config?
-6. **Output Contracts**: Have you verified JSON schema, ordering requirements, and exit code contracts?
-7. **Testing Coverage**: Have you listed all spec-mandated tests and planned to implement them?
-8. **Infrastructure Reuse**: Have you identified which existing helpers/loaders/traits you must use (vs reimplementing)?
-9. **Nextest Configuration**: Have you planned which test group each new integration test will use and verified no conflicts?
+2. **Scope Check**: Does this command serve consumers (in scope per Principle II) or authors (out of scope)?
+3. **Data Model Alignment**: Do your structs match spec-defined shapes exactly (map vs vec, field names, null handling)?
+4. **Algorithm Alignment**: Have you identified all spec-defined algorithms (resolution, derivation, selection) and planned to implement them precisely?
+5. **Input Validation**: Have you identified which inputs are valid/supported and where filtering must occur?
+6. **Configuration Resolution**: Does your command use the full resolution path (extends, overrides, substitution) if it reads config?
+7. **Output Contracts**: Have you verified JSON schema, ordering requirements, and exit code contracts?
+8. **Testing Coverage**: Have you listed all spec-mandated tests and planned to implement them?
+9. **Infrastructure Reuse**: Have you identified which existing helpers/loaders/traits you must use (vs reimplementing)?
+10. **Nextest Configuration**: Have you planned which test group each new integration test will use and verified no conflicts?
 
 This checklist prevents spec drift and reduces rework. Document deviations with explicit justification.
 
@@ -397,13 +421,13 @@ This checklist prevents spec drift and reduces rework. Document deviations with 
 
 - This constitution supersedes other practice docs where conflicts arise for CLI behavior, quality gates, and
   engineering discipline.
-- Amendments require a PR with: change rationale, mapping to `docs/CLI-SPEC.md` sections, risk assessment, and a
-  version bump per rules below.
+- Amendments require a PR with: change rationale, mapping to upstream spec or `docs/subcommand-specs/*/SPEC.md`
+  sections, risk assessment, and a version bump per rules below.
 - Versioning of this document uses Semantic Versioning:
   - MAJOR: backward‑incompatible governance or principle removals/redefinitions
   - MINOR: new principles/sections or materially expanded guidance
   - PATCH: clarifications, wording, typo fixes, non‑semantic refinements
 - Compliance Review: All PRs MUST include a quick constitution compliance check (in PR body or checklist). Reviewers
-  SHALL block merges on violations of Principles I–VIII or on missing updates to tests/examples.
+  SHALL block merges on violations of Principles I–IX or on missing updates to tests/examples.
 
-**Version**: 1.12.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2025-11-28
+**Version**: 1.13.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2026-02-21
