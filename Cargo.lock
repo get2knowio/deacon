@@ -635,6 +635,7 @@ dependencies = [
  "chrono",
  "directories-next",
  "fastrand",
+ "futures",
  "indexmap 2.11.1",
  "json5",
  "libc",

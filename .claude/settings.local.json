@@ -80,7 +80,14 @@
       "Bash(kill:*)",
       "Bash(pkill:*)",
       "Bash(ruff format:*)",
-      "Bash(/opt/maverick/.venv/bin/ruff format:*)"
+      "Bash(/opt/maverick/.venv/bin/ruff format:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:code.visualstudio.com)",
+      "Bash(/Users/paul/GitHub/deacon/.specify/scripts/bash/update-agent-context.sh claude:*)",
+      "Bash(export:*)",
+      "Bash(head:*)",
+      "Bash(fish:*)",
+      "Bash(brew list rust)"
     ],
     "deny": [],
     "ask": []

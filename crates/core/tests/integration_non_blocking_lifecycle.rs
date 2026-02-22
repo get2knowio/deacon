@@ -1,13 +1,28 @@
 //! Test to demonstrate non-blocking lifecycle phases
 
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle_with_docker, ContainerLifecycleCommands, ContainerLifecycleConfig,
+    execute_container_lifecycle_with_docker, AggregatedLifecycleCommand,
+    ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
+    LifecycleCommandSource, LifecycleCommandValue,
 };
 use deacon_core::docker::mock::{MockDocker, MockDockerConfig, MockExecResponse};
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::TempDir;
+
+/// Helper to create a LifecycleCommandList from shell command strings
+fn make_shell_command_list(cmds: &[&str]) -> LifecycleCommandList {
+    LifecycleCommandList {
+        commands: cmds
+            .iter()
+            .map(|cmd| AggregatedLifecycleCommand {
+                command: LifecycleCommandValue::Shell(cmd.to_string()),
+                source: LifecycleCommandSource::Config,
+            })
+            .collect(),
+    }
+}
 
 #[tokio::test]
 async fn test_non_blocking_phases_are_deferred() {
@@ -47,10 +62,10 @@ async fn test_non_blocking_phases_are_deferred() {
 
     // Create lifecycle commands with all phases
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(vec!["echo 'onCreate'".to_string()])
-        .with_post_create(vec!["echo 'postCreate'".to_string()])
-        .with_post_start(vec!["echo 'postStart'".to_string()])
-        .with_post_attach(vec!["echo 'postAttach'".to_string()]);
+        .with_on_create(make_shell_command_list(&["echo 'onCreate'"]))
+        .with_post_create(make_shell_command_list(&["echo 'postCreate'"]))
+        .with_post_start(make_shell_command_list(&["echo 'postStart'"]))
+        .with_post_attach(make_shell_command_list(&["echo 'postAttach'"]));
 
     // Execute lifecycle commands
     let result = execute_container_lifecycle_with_docker(
@@ -86,7 +101,7 @@ async fn test_non_blocking_phases_are_deferred() {
     assert_eq!(post_start_spec.commands.len(), 1);
     assert_eq!(
         post_start_spec.commands[0].command,
-        serde_json::json!("echo 'postStart'")
+        LifecycleCommandValue::Shell("echo 'postStart'".to_string())
     );
     assert_eq!(post_start_spec.timeout, Duration::from_secs(30));
 
@@ -98,7 +113,7 @@ async fn test_non_blocking_phases_are_deferred() {
     assert_eq!(post_attach_spec.commands.len(), 1);
     assert_eq!(
         post_attach_spec.commands[0].command,
-        serde_json::json!("echo 'postAttach'")
+        LifecycleCommandValue::Shell("echo 'postAttach'".to_string())
     );
     assert_eq!(post_attach_spec.timeout, Duration::from_secs(30));
 
@@ -153,10 +168,10 @@ async fn test_skip_non_blocking_commands_behavior() {
 
     // Create lifecycle commands with all phases
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(vec!["echo 'onCreate'".to_string()])
-        .with_post_create(vec!["echo 'postCreate'".to_string()])
-        .with_post_start(vec!["echo 'postStart'".to_string()])
-        .with_post_attach(vec!["echo 'postAttach'".to_string()]);
+        .with_on_create(make_shell_command_list(&["echo 'onCreate'"]))
+        .with_post_create(make_shell_command_list(&["echo 'postCreate'"]))
+        .with_post_start(make_shell_command_list(&["echo 'postStart'"]))
+        .with_post_attach(make_shell_command_list(&["echo 'postAttach'"]));
 
     // Execute lifecycle commands
     let result = execute_container_lifecycle_with_docker(
@@ -226,10 +241,10 @@ async fn test_non_blocking_phases_sync_execution() {
 
     // Create lifecycle commands with all phases
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(vec!["echo 'onCreate'".to_string()])
-        .with_post_create(vec!["echo 'postCreate'".to_string()])
-        .with_post_start(vec!["echo 'postStart'".to_string()])
-        .with_post_attach(vec!["echo 'postAttach'".to_string()]);
+        .with_on_create(make_shell_command_list(&["echo 'onCreate'"]))
+        .with_post_create(make_shell_command_list(&["echo 'postCreate'"]))
+        .with_post_start(make_shell_command_list(&["echo 'postStart'"]))
+        .with_post_attach(make_shell_command_list(&["echo 'postAttach'"]));
 
     // Execute lifecycle commands
     let result = execute_container_lifecycle_with_docker(
@@ -349,10 +364,10 @@ async fn test_non_blocking_phase_command_failures_are_handled() {
 
     // Create lifecycle commands with all phases
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(vec!["echo 'onCreate'".to_string()])
-        .with_post_create(vec!["echo 'postCreate'".to_string()])
-        .with_post_start(vec!["echo 'postStart'".to_string()])
-        .with_post_attach(vec!["echo 'postAttach'".to_string()]);
+        .with_on_create(make_shell_command_list(&["echo 'onCreate'"]))
+        .with_post_create(make_shell_command_list(&["echo 'postCreate'"]))
+        .with_post_start(make_shell_command_list(&["echo 'postStart'"]))
+        .with_post_attach(make_shell_command_list(&["echo 'postAttach'"]));
 
     // Execute lifecycle commands
     let result = execute_container_lifecycle_with_docker(
@@ -467,9 +482,9 @@ async fn test_non_blocking_phase_timeout_handling() {
 
     // Create lifecycle commands
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(vec!["echo 'onCreate'".to_string()])
-        .with_post_create(vec!["echo 'postCreate'".to_string()])
-        .with_post_start(vec!["echo 'postStart'".to_string()]);
+        .with_on_create(make_shell_command_list(&["echo 'onCreate'"]))
+        .with_post_create(make_shell_command_list(&["echo 'postCreate'"]))
+        .with_post_start(make_shell_command_list(&["echo 'postStart'"]));
 
     // Execute lifecycle commands
     let result = execute_container_lifecycle_with_docker(
@@ -543,10 +558,10 @@ async fn test_non_blocking_phases_with_progress_streaming() {
 
     // Create lifecycle commands with non-blocking phases
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(vec!["echo 'onCreate'".to_string()])
-        .with_post_create(vec!["echo 'postCreate'".to_string()])
-        .with_post_start(vec!["echo 'postStart'".to_string()])
-        .with_post_attach(vec!["echo 'postAttach'".to_string()]);
+        .with_on_create(make_shell_command_list(&["echo 'onCreate'"]))
+        .with_post_create(make_shell_command_list(&["echo 'postCreate'"]))
+        .with_post_start(make_shell_command_list(&["echo 'postStart'"]))
+        .with_post_attach(make_shell_command_list(&["echo 'postAttach'"]));
 
     // Execute lifecycle commands
     let result = execute_container_lifecycle_with_docker(
