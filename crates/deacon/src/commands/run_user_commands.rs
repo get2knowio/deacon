@@ -4,17 +4,18 @@
 //! without going through the full `up` workflow.
 
 use crate::commands::shared::{load_config, ConfigLoadArgs, ConfigLoadResult};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
-    ContainerLifecycleConfig,
+    execute_container_lifecycle_with_progress_callback, AggregatedLifecycleCommand,
+    ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
+    LifecycleCommandSource, LifecycleCommandValue,
 };
 use deacon_core::variable::SubstitutionContext;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use crate::commands::exec::resolve_target_container;
 
@@ -109,15 +110,8 @@ async fn execute_lifecycle_commands(
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
 
     // Determine container workspace folder
-    let container_workspace_folder = if let Some(ref workspace_folder) = config.workspace_folder {
-        workspace_folder.clone()
-    } else {
-        let workspace_name = workspace_folder
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("workspace");
-        format!("/workspaces/{}", workspace_name)
-    };
+    let container_workspace_folder =
+        crate::commands::shared::derive_container_workspace_folder(config, workspace_folder);
 
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {
@@ -142,64 +136,85 @@ async fn execute_lifecycle_commands(
         is_prebuild: false,
     };
 
-    // Build lifecycle commands from configuration
+    // Build lifecycle commands from configuration using typed parser
     let mut commands = ContainerLifecycleCommands::new();
-    let mut phases_to_execute = Vec::new();
+
+    // Helper to parse a JSON value into a LifecycleCommandList
+    let parse_phase_command =
+        |json_val: &serde_json::Value, phase_name: &str| -> Result<Option<LifecycleCommandList>> {
+            let parsed = LifecycleCommandValue::from_json_value(json_val)
+                .with_context(|| format!("Failed to parse {} command", phase_name))?;
+            match parsed {
+                Some(cmd) if !cmd.is_empty() => Ok(Some(LifecycleCommandList {
+                    commands: vec![AggregatedLifecycleCommand {
+                        command: cmd,
+                        source: LifecycleCommandSource::Config,
+                    }],
+                })),
+                _ => Ok(None),
+            }
+        };
+
+    // TODO(012): This only collects lifecycle commands from the user's devcontainer.json config.
+    // Feature-defined lifecycle commands (onCreateCommand, etc.) are not aggregated here.
+    // The `up` command uses `aggregate_lifecycle_commands()` which includes features.
+    // To reach parity, we need resolved features from image metadata (container labels).
 
     // Handle different lifecycle phases based on configuration
-    // Phase 1: initialize (host-side)
-    if let Some(ref initialize) = config.initialize_command {
-        let phase_commands = commands_from_json_value(initialize)?;
-        commands = commands.with_initialize(phase_commands.clone());
-        phases_to_execute.push(("initialize".to_string(), phase_commands));
-    }
+    // Note: initializeCommand is intentionally omitted here. It is a host-side command
+    // that runs before container creation and belongs only in the `up` workflow.
 
-    // Phase 2: onCreate (container)
+    // Phase 1: onCreate (container)
     if let Some(ref on_create) = config.on_create_command {
-        let phase_commands = commands_from_json_value(on_create)?;
-        commands = commands.with_on_create(phase_commands.clone());
-        phases_to_execute.push(("onCreate".to_string(), phase_commands));
+        if let Some(cmd_list) = parse_phase_command(on_create, "onCreateCommand")? {
+            commands = commands.with_on_create(cmd_list);
+        }
     }
 
-    // Phase 3: updateContent (container)
+    // Phase 2: updateContent (container)
     if let Some(ref update_content) = config.update_content_command {
-        let phase_commands = commands_from_json_value(update_content)?;
-        commands = commands.with_update_content(phase_commands.clone());
-        phases_to_execute.push(("updateContent".to_string(), phase_commands));
+        if let Some(cmd_list) = parse_phase_command(update_content, "updateContentCommand")? {
+            commands = commands.with_update_content(cmd_list);
+        }
     }
 
-    // Phase 4: postCreate (container, can be skipped)
+    // Phase 3: postCreate (container, can be skipped)
     if !args.skip_post_create {
         if let Some(ref post_create) = config.post_create_command {
-            let phase_commands = commands_from_json_value(post_create)?;
-            commands = commands.with_post_create(phase_commands.clone());
-            phases_to_execute.push(("postCreate".to_string(), phase_commands));
+            if let Some(cmd_list) = parse_phase_command(post_create, "postCreateCommand")? {
+                commands = commands.with_post_create(cmd_list);
+            }
         }
     }
 
-    // Phase 5: postStart (container, non-blocking, can be skipped)
+    // Phase 4: postStart (container, non-blocking, can be skipped)
     if !args.skip_non_blocking_commands {
         if let Some(ref post_start) = config.post_start_command {
-            let phase_commands = commands_from_json_value(post_start)?;
-            commands = commands.with_post_start(phase_commands.clone());
-            phases_to_execute.push(("postStart".to_string(), phase_commands));
+            if let Some(cmd_list) = parse_phase_command(post_start, "postStartCommand")? {
+                commands = commands.with_post_start(cmd_list);
+            }
         }
 
-        // Phase 6: postAttach (container, non-blocking, can be skipped)
+        // Phase 5: postAttach (container, non-blocking, can be skipped)
         if !args.skip_post_attach {
             if let Some(ref post_attach) = config.post_attach_command {
-                let phase_commands = commands_from_json_value(post_attach)?;
-                commands = commands.with_post_attach(phase_commands.clone());
-                phases_to_execute.push(("postAttach".to_string(), phase_commands));
+                if let Some(cmd_list) = parse_phase_command(post_attach, "postAttachCommand")? {
+                    commands = commands.with_post_attach(cmd_list);
+                }
             }
         }
     }
 
     // Create a progress event callback
     let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
-            if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                tracker.emit_event(event)?;
+        match args.progress_tracker.lock() {
+            Ok(mut tracker_guard) => {
+                if let Some(ref mut tracker) = tracker_guard.as_mut() {
+                    tracker.emit_event(event)?;
+                }
+            }
+            Err(e) => {
+                warn!("Progress tracker mutex poisoned: {}", e);
             }
         }
         Ok(())
@@ -230,63 +245,9 @@ async fn execute_lifecycle_commands(
     Ok(())
 }
 
-/// Convert JSON value to vector of command strings
-fn commands_from_json_value(value: &serde_json::Value) -> Result<Vec<String>> {
-    use deacon_core::errors::{ConfigError, DeaconError};
-
-    match value {
-        serde_json::Value::String(cmd) => Ok(vec![cmd.clone()]),
-        serde_json::Value::Array(cmds) => {
-            let mut commands = Vec::new();
-            for cmd_value in cmds {
-                if let serde_json::Value::String(cmd) = cmd_value {
-                    commands.push(cmd.clone());
-                } else {
-                    return Err(DeaconError::Config(ConfigError::Validation {
-                        message: format!(
-                            "Invalid command in array: expected string, got {:?}",
-                            cmd_value
-                        ),
-                    })
-                    .into());
-                }
-            }
-            Ok(commands)
-        }
-        _ => Err(DeaconError::Config(ConfigError::Validation {
-            message: format!(
-                "Invalid command format: expected string or array of strings, got {:?}",
-                value
-            ),
-        })
-        .into()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_commands_from_json_value_string() {
-        let json_value = serde_json::Value::String("echo hello".to_string());
-        let commands = commands_from_json_value(&json_value).unwrap();
-        assert_eq!(commands, vec!["echo hello"]);
-    }
-
-    #[test]
-    fn test_commands_from_json_value_array() {
-        let json_value = serde_json::json!(["echo hello", "echo world"]);
-        let commands = commands_from_json_value(&json_value).unwrap();
-        assert_eq!(commands, vec!["echo hello", "echo world"]);
-    }
-
-    #[test]
-    fn test_commands_from_json_value_invalid() {
-        let json_value = serde_json::Value::Number(serde_json::Number::from(42));
-        let result = commands_from_json_value(&json_value);
-        assert!(result.is_err());
-    }
 
     #[test]
     fn test_run_user_commands_args_defaults() {

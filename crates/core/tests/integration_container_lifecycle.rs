@@ -1,12 +1,26 @@
 //! Integration test for container lifecycle execution with variable substitution
 
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle, ContainerLifecycleCommands, ContainerLifecycleConfig,
+    execute_container_lifecycle, AggregatedLifecycleCommand, ContainerLifecycleCommands,
+    ContainerLifecycleConfig, LifecycleCommandList, LifecycleCommandSource, LifecycleCommandValue,
 };
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::TempDir;
+
+/// Helper to create a LifecycleCommandList from shell command strings
+fn make_shell_command_list(cmds: &[&str]) -> LifecycleCommandList {
+    LifecycleCommandList {
+        commands: cmds
+            .iter()
+            .map(|cmd| AggregatedLifecycleCommand {
+                command: LifecycleCommandValue::Shell(cmd.to_string()),
+                source: LifecycleCommandSource::Config,
+            })
+            .collect(),
+    }
+}
 
 #[tokio::test]
 async fn test_container_lifecycle_with_variable_substitution() {
@@ -43,20 +57,20 @@ async fn test_container_lifecycle_with_variable_substitution() {
 
     // Define lifecycle commands with variable substitution
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(vec![
-            "echo 'onCreate in ${containerWorkspaceFolder}'".to_string(),
-            "mkdir -p ${containerWorkspaceFolder}/.devcontainer".to_string(),
-        ])
-        .with_post_create(vec![
-            "echo 'postCreate: NODE_ENV=${containerEnv:NODE_ENV}'".to_string(),
-            "touch ${containerWorkspaceFolder}/.post-create-marker".to_string(),
-        ])
-        .with_post_start(vec![
-            "echo 'postStart: Debug mode=${containerEnv:DEBUG}'".to_string()
-        ])
-        .with_post_attach(vec![
-            "echo 'postAttach: Ready in ${containerWorkspaceFolder}'".to_string(),
-        ]);
+        .with_on_create(make_shell_command_list(&[
+            "echo 'onCreate in ${containerWorkspaceFolder}'",
+            "mkdir -p ${containerWorkspaceFolder}/.devcontainer",
+        ]))
+        .with_post_create(make_shell_command_list(&[
+            "echo 'postCreate: NODE_ENV=${containerEnv:NODE_ENV}'",
+            "touch ${containerWorkspaceFolder}/.post-create-marker",
+        ]))
+        .with_post_start(make_shell_command_list(&[
+            "echo 'postStart: Debug mode=${containerEnv:DEBUG}'",
+        ]))
+        .with_post_attach(make_shell_command_list(&[
+            "echo 'postAttach: Ready in ${containerWorkspaceFolder}'",
+        ]));
 
     let result = execute_container_lifecycle(&config, &commands, &substitution_context).await;
 
@@ -114,10 +128,16 @@ async fn test_container_lifecycle_with_skip_flags() {
     };
 
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(vec!["echo 'onCreate'".to_string()])
-        .with_post_create(vec!["echo 'postCreate (should be skipped)'".to_string()])
-        .with_post_start(vec!["echo 'postStart (should be skipped)'".to_string()])
-        .with_post_attach(vec!["echo 'postAttach (should be skipped)'".to_string()]);
+        .with_on_create(make_shell_command_list(&["echo 'onCreate'"]))
+        .with_post_create(make_shell_command_list(&[
+            "echo 'postCreate (should be skipped)'",
+        ]))
+        .with_post_start(make_shell_command_list(&[
+            "echo 'postStart (should be skipped)'",
+        ]))
+        .with_post_attach(make_shell_command_list(&[
+            "echo 'postAttach (should be skipped)'",
+        ]));
 
     let result = execute_container_lifecycle(&config, &commands, &substitution_context).await;
 
@@ -178,13 +198,13 @@ fn test_container_lifecycle_config_validation() {
 #[test]
 fn test_lifecycle_commands_structure() {
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(vec![
-            "echo 'Setting up project'".to_string(),
-            "npm install".to_string(),
-        ])
-        .with_post_create(vec!["echo 'Project initialized'".to_string()])
-        .with_post_start(vec!["echo 'Starting services'".to_string()])
-        .with_post_attach(vec!["echo 'Ready for development'".to_string()]);
+        .with_on_create(make_shell_command_list(&[
+            "echo 'Setting up project'",
+            "npm install",
+        ]))
+        .with_post_create(make_shell_command_list(&["echo 'Project initialized'"]))
+        .with_post_start(make_shell_command_list(&["echo 'Starting services'"]))
+        .with_post_attach(make_shell_command_list(&["echo 'Ready for development'"]));
 
     assert!(commands.on_create.is_some());
     assert_eq!(commands.on_create.unwrap().len(), 2);
@@ -224,12 +244,14 @@ async fn test_all_lifecycle_phases_ordering() {
 
     // Define all 6 lifecycle phases
     let commands = ContainerLifecycleCommands::new()
-        .with_initialize(vec!["echo 'Phase 1: initialize (host-side)'".to_string()])
-        .with_on_create(vec!["echo 'Phase 2: onCreate'".to_string()])
-        .with_update_content(vec!["echo 'Phase 3: updateContent'".to_string()])
-        .with_post_create(vec!["echo 'Phase 4: postCreate'".to_string()])
-        .with_post_start(vec!["echo 'Phase 5: postStart'".to_string()])
-        .with_post_attach(vec!["echo 'Phase 6: postAttach'".to_string()]);
+        .with_initialize(make_shell_command_list(&[
+            "echo 'Phase 1: initialize (host-side)'",
+        ]))
+        .with_on_create(make_shell_command_list(&["echo 'Phase 2: onCreate'"]))
+        .with_update_content(make_shell_command_list(&["echo 'Phase 3: updateContent'"]))
+        .with_post_create(make_shell_command_list(&["echo 'Phase 4: postCreate'"]))
+        .with_post_start(make_shell_command_list(&["echo 'Phase 5: postStart'"]))
+        .with_post_attach(make_shell_command_list(&["echo 'Phase 6: postAttach'"]));
 
     // Execute lifecycle - this will attempt to run in a container
     // Without Docker, it will fail, but we can verify the structure

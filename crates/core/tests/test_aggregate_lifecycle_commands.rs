@@ -4,9 +4,12 @@
 //! with correct ordering and empty command filtering (T024 and T025).
 
 use deacon_core::config::DevContainerConfig;
-use deacon_core::container_lifecycle::{aggregate_lifecycle_commands, LifecycleCommandSource};
+use deacon_core::container_lifecycle::{
+    aggregate_lifecycle_commands, LifecycleCommandSource, LifecycleCommandValue,
+};
 use deacon_core::features::{FeatureMetadata, ResolvedFeature};
 use deacon_core::lifecycle::LifecyclePhase;
+use indexmap::IndexMap;
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -42,13 +45,17 @@ fn test_aggregate_lifecycle_commands_ordering() {
     };
 
     let features = vec![feature1, feature2];
-    let result = aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config);
+    let result =
+        aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config).unwrap();
 
     // Should have 3 commands: feature1, feature2, config
     assert_eq!(result.commands.len(), 3);
 
     // Verify order: features first (in installation order), then config
-    assert_eq!(result.commands[0].command, json!("npm install"));
+    assert_eq!(
+        result.commands[0].command,
+        LifecycleCommandValue::Shell("npm install".to_string())
+    );
     match &result.commands[0].source {
         LifecycleCommandSource::Feature { id } => assert_eq!(id, "node"),
         _ => panic!("Expected Feature source"),
@@ -56,14 +63,17 @@ fn test_aggregate_lifecycle_commands_ordering() {
 
     assert_eq!(
         result.commands[1].command,
-        json!("pip install -r requirements.txt")
+        LifecycleCommandValue::Shell("pip install -r requirements.txt".to_string())
     );
     match &result.commands[1].source {
         LifecycleCommandSource::Feature { id } => assert_eq!(id, "python"),
         _ => panic!("Expected Feature source"),
     }
 
-    assert_eq!(result.commands[2].command, json!("echo ready"));
+    assert_eq!(
+        result.commands[2].command,
+        LifecycleCommandValue::Shell("echo ready".to_string())
+    );
     match &result.commands[2].source {
         LifecycleCommandSource::Config => {}
         _ => panic!("Expected Config source"),
@@ -103,11 +113,15 @@ fn test_aggregate_lifecycle_commands_filters_empty_null() {
     };
 
     let features = vec![feature1, feature2];
-    let result = aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config);
+    let result =
+        aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config).unwrap();
 
     // Should only have 1 command (feature2's valid command) - null commands filtered
     assert_eq!(result.commands.len(), 1);
-    assert_eq!(result.commands[0].command, json!("docker --version"));
+    assert_eq!(
+        result.commands[0].command,
+        LifecycleCommandValue::Shell("docker --version".to_string())
+    );
     match &result.commands[0].source {
         LifecycleCommandSource::Feature { id } => assert_eq!(id, "docker"),
         _ => panic!("Expected Feature source"),
@@ -135,11 +149,15 @@ fn test_aggregate_lifecycle_commands_filters_empty_string() {
     };
 
     let features = vec![feature1];
-    let result = aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config);
+    let result =
+        aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config).unwrap();
 
     // Should only have config command - empty string filtered
     assert_eq!(result.commands.len(), 1);
-    assert_eq!(result.commands[0].command, json!("echo ready"));
+    assert_eq!(
+        result.commands[0].command,
+        LifecycleCommandValue::Shell("echo ready".to_string())
+    );
     match &result.commands[0].source {
         LifecycleCommandSource::Config => {}
         _ => panic!("Expected Config source"),
@@ -167,11 +185,15 @@ fn test_aggregate_lifecycle_commands_filters_empty_array() {
     };
 
     let features = vec![feature1];
-    let result = aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config);
+    let result =
+        aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config).unwrap();
 
     // Should only have feature command - empty array filtered
     assert_eq!(result.commands.len(), 1);
-    assert_eq!(result.commands[0].command, json!("npm install"));
+    assert_eq!(
+        result.commands[0].command,
+        LifecycleCommandValue::Shell("npm install".to_string())
+    );
     match &result.commands[0].source {
         LifecycleCommandSource::Feature { id } => assert_eq!(id, "node"),
         _ => panic!("Expected Feature source"),
@@ -199,11 +221,15 @@ fn test_aggregate_lifecycle_commands_filters_empty_object() {
     };
 
     let features = vec![feature1];
-    let result = aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config);
+    let result =
+        aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config).unwrap();
 
     // Should only have config command - empty object filtered
     assert_eq!(result.commands.len(), 1);
-    assert_eq!(result.commands[0].command, json!("echo hello"));
+    assert_eq!(
+        result.commands[0].command,
+        LifecycleCommandValue::Shell("echo hello".to_string())
+    );
     match &result.commands[0].source {
         LifecycleCommandSource::Config => {}
         _ => panic!("Expected Config source"),
@@ -231,7 +257,8 @@ fn test_aggregate_lifecycle_commands_all_empty() {
     };
 
     let features = vec![feature1];
-    let result = aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config);
+    let result =
+        aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config).unwrap();
 
     // Should have no commands - all empty
     assert_eq!(result.commands.len(), 0);
@@ -246,11 +273,15 @@ fn test_aggregate_lifecycle_commands_no_features() {
     };
 
     let features = vec![];
-    let result = aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config);
+    let result =
+        aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config).unwrap();
 
     // Should only have config command
     assert_eq!(result.commands.len(), 1);
-    assert_eq!(result.commands[0].command, json!("echo ready"));
+    assert_eq!(
+        result.commands[0].command,
+        LifecycleCommandValue::Shell("echo ready".to_string())
+    );
     match &result.commands[0].source {
         LifecycleCommandSource::Config => {}
         _ => panic!("Expected Config source"),
@@ -293,26 +324,41 @@ fn test_aggregate_lifecycle_commands_complex_command_formats() {
     };
 
     let features = vec![feature1, feature2];
-    let result = aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config);
+    let result =
+        aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config).unwrap();
 
     // Should have 3 commands with different formats preserved
     assert_eq!(result.commands.len(), 3);
 
-    // Object command
+    // Object command -> Parallel with Shell entries
+    let mut expected_parallel = IndexMap::new();
+    expected_parallel.insert(
+        "npm".to_string(),
+        LifecycleCommandValue::Shell("npm install".to_string()),
+    );
+    expected_parallel.insert(
+        "build".to_string(),
+        LifecycleCommandValue::Shell("npm run build".to_string()),
+    );
     assert_eq!(
         result.commands[0].command,
-        json!({
-            "npm": "npm install",
-            "build": "npm run build"
-        })
+        LifecycleCommandValue::Parallel(expected_parallel)
     );
 
-    // Array command
+    // Array command -> Exec
     assert_eq!(
         result.commands[1].command,
-        json!(["pip", "install", "-r", "requirements.txt"])
+        LifecycleCommandValue::Exec(vec![
+            "pip".to_string(),
+            "install".to_string(),
+            "-r".to_string(),
+            "requirements.txt".to_string(),
+        ])
     );
 
-    // String command
-    assert_eq!(result.commands[2].command, json!("echo ready"));
+    // String command -> Shell
+    assert_eq!(
+        result.commands[2].command,
+        LifecycleCommandValue::Shell("echo ready".to_string())
+    );
 }

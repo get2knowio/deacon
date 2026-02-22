@@ -1,7 +1,6 @@
 //! Unit tests for the up command.
 
 use super::args::{normalize_and_validate_args, MountType, NormalizedMount, UpArgs};
-use super::lifecycle::commands_from_json_value;
 use super::result::UpResult;
 use crate::commands::shared::NormalizedRemoteEnv;
 use deacon_core::config::DevContainerConfig;
@@ -23,29 +22,6 @@ fn test_up_args_creation() {
     assert!(!args.shutdown);
     assert_eq!(args.workspace_folder, Some(PathBuf::from("/test")));
     assert!(args.config_path.is_none());
-}
-
-#[test]
-fn test_commands_from_json_value_string() {
-    let json_value = serde_json::Value::String("echo hello".to_string());
-    let commands = commands_from_json_value(&json_value).unwrap();
-    assert_eq!(commands, vec!["echo hello"]);
-}
-
-#[test]
-fn test_commands_from_json_value_array() {
-    // Per devcontainer spec, array form is a single exec-style command
-    let json_value = serde_json::json!(["echo", "hello"]);
-    let commands = commands_from_json_value(&json_value).unwrap();
-    assert_eq!(commands.len(), 1);
-    assert_eq!(commands[0], "echo hello");
-}
-
-#[test]
-fn test_commands_from_json_value_invalid() {
-    let json_value = serde_json::Value::Number(serde_json::Number::from(42));
-    let result = commands_from_json_value(&json_value);
-    assert!(result.is_err());
 }
 
 #[test]

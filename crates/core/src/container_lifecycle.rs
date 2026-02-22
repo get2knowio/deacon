@@ -4,12 +4,13 @@
 //! variable substitution including containerEnv & containerWorkspaceFolder.
 
 use crate::docker::{CliDocker, Docker, ExecConfig};
-use crate::errors::{DeaconError, Result};
-use crate::lifecycle::{ExecutionContext, ExecutionMode, LifecycleCommands, LifecyclePhase};
+use crate::errors::{ConfigError, DeaconError, Result};
+use crate::lifecycle::LifecyclePhase;
 use crate::progress::{ProgressEvent, ProgressTracker};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
 use crate::state::record_phase_executed;
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
@@ -96,6 +97,217 @@ pub fn is_empty_command(cmd: &serde_json::Value) -> bool {
     }
 }
 
+/// A parsed lifecycle command value that preserves format semantics.
+///
+/// The DevContainer spec defines three formats for lifecycle commands:
+/// - String: executed through a shell (`/bin/sh -c` in container, platform shell on host)
+/// - Array: exec-style, passed directly to OS without shell interpretation
+/// - Object: named parallel commands, each value is itself a Shell or Exec command
+#[derive(Debug, Clone, PartialEq)]
+pub enum LifecycleCommandValue {
+    /// Shell-interpreted command string (e.g., "npm install && npm build")
+    Shell(String),
+    /// Exec-style command as program + arguments (e.g., ["npm", "install"])
+    Exec(Vec<String>),
+    /// Named parallel commands (e.g., {"install": "npm install", "build": ["npm", "run", "build"]})
+    Parallel(IndexMap<String, LifecycleCommandValue>),
+}
+
+impl LifecycleCommandValue {
+    /// Parse a JSON value into a typed lifecycle command.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(None)` for `null` values
+    /// - `Ok(Some(Shell(s)))` for string values (even empty strings - caller filters)
+    /// - `Ok(Some(Exec(args)))` for arrays where all elements are strings
+    /// - `Ok(Some(Parallel(map)))` for objects (preserves insertion order)
+    /// - `Err` for invalid types (number, boolean) or arrays with non-string elements
+    ///
+    /// NOTE: Object key ordering relies on `serde_json`'s `preserve_order` feature
+    /// being enabled in Cargo.toml. Without it, parallel command execution order
+    /// would be non-deterministic.
+    pub fn from_json_value(value: &serde_json::Value) -> Result<Option<Self>> {
+        match value {
+            serde_json::Value::Null => Ok(None),
+            serde_json::Value::String(s) => Ok(Some(LifecycleCommandValue::Shell(s.clone()))),
+            serde_json::Value::Array(arr) => {
+                let mut strings = Vec::with_capacity(arr.len());
+                for (i, elem) in arr.iter().enumerate() {
+                    match elem {
+                        serde_json::Value::String(s) => strings.push(s.clone()),
+                        other => {
+                            return Err(DeaconError::Config(ConfigError::Validation {
+                                message: format!(
+                                    "lifecycle command array element at index {} must be a string, got {}",
+                                    i,
+                                    json_type_name(other)
+                                ),
+                            }));
+                        }
+                    }
+                }
+                Ok(Some(LifecycleCommandValue::Exec(strings)))
+            }
+            serde_json::Value::Object(map) => {
+                let mut parsed_map = IndexMap::with_capacity(map.len());
+                for (key, val) in map {
+                    match val {
+                        serde_json::Value::Null => {
+                            warn!(
+                                key = %key,
+                                "Skipping null value in lifecycle command object"
+                            );
+                        }
+                        serde_json::Value::String(s) => {
+                            if s.is_empty() {
+                                continue;
+                            }
+                            parsed_map.insert(key.clone(), LifecycleCommandValue::Shell(s.clone()));
+                        }
+                        serde_json::Value::Array(arr) => {
+                            let mut strings = Vec::with_capacity(arr.len());
+                            for (idx, elem) in arr.iter().enumerate() {
+                                match elem {
+                                    serde_json::Value::String(s) => strings.push(s.clone()),
+                                    _ => {
+                                        return Err(DeaconError::Config(
+                                            ConfigError::Validation {
+                                                message: format!(
+                                                    "Lifecycle command object entry '{}' contains array with non-string element at index {}",
+                                                    key, idx
+                                                ),
+                                            },
+                                        ));
+                                    }
+                                }
+                            }
+                            if !strings.is_empty() {
+                                parsed_map
+                                    .insert(key.clone(), LifecycleCommandValue::Exec(strings));
+                            }
+                        }
+                        other => {
+                            warn!(
+                                key = %key,
+                                value_type = %json_type_name(other),
+                                "Skipping lifecycle command object entry with invalid value type"
+                            );
+                        }
+                    }
+                }
+                Ok(Some(LifecycleCommandValue::Parallel(parsed_map)))
+            }
+            other => Err(DeaconError::Config(ConfigError::Validation {
+                message: format!(
+                    "lifecycle command must be a string, array, or object, got {}",
+                    json_type_name(other)
+                ),
+            })),
+        }
+    }
+
+    /// Check if this command value is empty.
+    ///
+    /// - `Shell(s)` is empty if the string is empty
+    /// - `Exec(args)` is empty if the argument list is empty
+    /// - `Parallel(map)` is empty if the map has no entries
+    pub fn is_empty(&self) -> bool {
+        match self {
+            LifecycleCommandValue::Shell(s) => s.is_empty(),
+            LifecycleCommandValue::Exec(args) => args.is_empty(),
+            LifecycleCommandValue::Parallel(map) => map.is_empty(),
+        }
+    }
+
+    /// Apply variable substitution to this command value, returning a new value.
+    ///
+    /// - `Shell(s)`: substitutes the whole string
+    /// - `Exec(args)`: substitutes each element independently
+    /// - `Parallel(map)`: substitutes each value recursively
+    pub fn substitute_variables(&self, context: &SubstitutionContext) -> Self {
+        match self {
+            LifecycleCommandValue::Shell(s) => {
+                let mut report = SubstitutionReport::new();
+                let substituted = VariableSubstitution::substitute_string(s, context, &mut report);
+                LifecycleCommandValue::Shell(substituted)
+            }
+            LifecycleCommandValue::Exec(args) => {
+                // Reuse a single report across all args to avoid per-element allocation
+                let mut report = SubstitutionReport::new();
+                let substituted_args = args
+                    .iter()
+                    .map(|arg| VariableSubstitution::substitute_string(arg, context, &mut report))
+                    .collect();
+                LifecycleCommandValue::Exec(substituted_args)
+            }
+            LifecycleCommandValue::Parallel(map) => {
+                let substituted_map = map
+                    .iter()
+                    .map(|(key, val)| (key.clone(), val.substitute_variables(context)))
+                    .collect();
+                LifecycleCommandValue::Parallel(substituted_map)
+            }
+        }
+    }
+}
+
+/// Allow comparing `LifecycleCommandValue` with `serde_json::Value` in tests.
+///
+/// This implementation converts the JSON value to a `LifecycleCommandValue` and
+/// compares structurally. Useful for test assertions where the expected value is
+/// expressed as `json!(...)`.
+impl PartialEq<serde_json::Value> for LifecycleCommandValue {
+    fn eq(&self, other: &serde_json::Value) -> bool {
+        match (self, other) {
+            (LifecycleCommandValue::Shell(s), serde_json::Value::String(os)) => s == os,
+            (LifecycleCommandValue::Exec(args), serde_json::Value::Array(arr)) => {
+                args.len() == arr.len()
+                    && args.iter().zip(arr.iter()).all(|(a, b)| match b {
+                        serde_json::Value::String(bs) => a == bs,
+                        _ => false,
+                    })
+            }
+            (LifecycleCommandValue::Parallel(map), serde_json::Value::Object(obj)) => {
+                map.len() == obj.len()
+                    && map
+                        .iter()
+                        .all(|(k, v)| obj.get(k).is_some_and(|ov| v == ov))
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Return a human-readable name for a JSON value type.
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Result of executing one named command within a parallel set.
+#[derive(Debug, Clone)]
+pub struct ParallelCommandResult {
+    /// The named key from the object (e.g., "install", "build")
+    pub key: String,
+    /// Exit code from the command
+    pub exit_code: i32,
+    /// Duration of execution
+    pub duration: std::time::Duration,
+    /// Whether the command succeeded
+    pub success: bool,
+    /// Captured stdout from the command
+    pub stdout: String,
+    /// Captured stderr from the command
+    pub stderr: String,
+}
+
 /// Aggregate lifecycle commands for a specific phase from features and config.
 ///
 /// This function collects lifecycle commands from all resolved features (in installation order)
@@ -118,8 +330,9 @@ pub fn is_empty_command(cmd: &serde_json::Value) -> bool {
 ///
 /// # Returns
 ///
-/// LifecycleCommandList with feature commands first, then config.
-/// Empty/null commands are filtered out.
+/// `Result<LifecycleCommandList>` with feature commands first, then config.
+/// Empty/null commands are filtered out. Returns an error if any command
+/// value has an invalid type (e.g., number or boolean).
 ///
 /// # Examples
 ///
@@ -138,7 +351,7 @@ pub fn is_empty_command(cmd: &serde_json::Value) -> bool {
 ///     LifecyclePhase::OnCreate,
 ///     &features,
 ///     &config,
-/// );
+/// ).unwrap();
 ///
 /// // Commands are ordered: feature1, feature2, ..., config
 /// ```
@@ -146,7 +359,7 @@ pub fn aggregate_lifecycle_commands(
     phase: LifecyclePhase,
     features: &[crate::features::ResolvedFeature],
     config: &crate::config::DevContainerConfig,
-) -> LifecycleCommandList {
+) -> Result<LifecycleCommandList> {
     let mut commands = Vec::new();
 
     // Feature commands first, in installation order
@@ -162,13 +375,15 @@ pub fn aggregate_lifecycle_commands(
         };
 
         if let Some(cmd) = cmd_opt {
-            if !is_empty_command(cmd) {
-                commands.push(AggregatedLifecycleCommand {
-                    command: cmd.clone(),
-                    source: LifecycleCommandSource::Feature {
-                        id: feature.id.clone(),
-                    },
-                });
+            if let Some(parsed) = LifecycleCommandValue::from_json_value(cmd)? {
+                if !parsed.is_empty() {
+                    commands.push(AggregatedLifecycleCommand {
+                        command: parsed,
+                        source: LifecycleCommandSource::Feature {
+                            id: feature.id.clone(),
+                        },
+                    });
+                }
             }
         }
     }
@@ -185,15 +400,17 @@ pub fn aggregate_lifecycle_commands(
     };
 
     if let Some(cmd) = config_cmd_opt {
-        if !is_empty_command(cmd) {
-            commands.push(AggregatedLifecycleCommand {
-                command: cmd.clone(),
-                source: LifecycleCommandSource::Config,
-            });
+        if let Some(parsed) = LifecycleCommandValue::from_json_value(cmd)? {
+            if !parsed.is_empty() {
+                commands.push(AggregatedLifecycleCommand {
+                    command: parsed,
+                    source: LifecycleCommandSource::Config,
+                });
+            }
         }
     }
 
-    LifecycleCommandList { commands }
+    Ok(LifecycleCommandList { commands })
 }
 
 /// A lifecycle command ready for execution with source tracking.
@@ -202,8 +419,8 @@ pub fn aggregate_lifecycle_commands(
 /// devcontainer spec) with its source attribution for error reporting and debugging.
 #[derive(Debug, Clone)]
 pub struct AggregatedLifecycleCommand {
-    /// The command to execute (can be string, array, or object)
-    pub command: serde_json::Value,
+    /// The typed command to execute (Shell, Exec, or Parallel)
+    pub command: LifecycleCommandValue,
     /// Where this command came from
     pub source: LifecycleCommandSource,
 }
@@ -483,12 +700,12 @@ where
     };
 
     // Execute initialize phase (host-side) if provided
-    if let Some(initialize_commands) = &commands.initialize {
+    if let Some(ref initialize_commands) = commands.initialize {
         info!("Executing initialize phase on host");
         result.phases.push(
             execute_host_lifecycle_phase(
                 LifecyclePhase::Initialize,
-                initialize_commands,
+                &initialize_commands.commands,
                 substitution_context,
                 progress_callback.as_ref(),
             )
@@ -500,10 +717,10 @@ where
     let workspace_folder = std::path::PathBuf::from(&container_context.local_workspace_folder);
 
     // Execute onCreate phase
-    if let Some(on_create_commands) = &commands.on_create {
-        let phase_result = execute_lifecycle_phase(
+    if let Some(ref on_create_commands) = commands.on_create {
+        let phase_result = execute_lifecycle_phase_impl(
             LifecyclePhase::OnCreate,
-            on_create_commands,
+            &on_create_commands.commands,
             &updated_config,
             docker,
             &container_context,
@@ -533,10 +750,10 @@ where
     }
 
     // Execute updateContent phase if provided
-    if let Some(update_content_commands) = &commands.update_content {
-        let phase_result = execute_lifecycle_phase(
+    if let Some(ref update_content_commands) = commands.update_content {
+        let phase_result = execute_lifecycle_phase_impl(
             LifecyclePhase::UpdateContent,
-            update_content_commands,
+            &update_content_commands.commands,
             &updated_config,
             docker,
             &container_context,
@@ -567,10 +784,10 @@ where
 
     // Execute postCreate phase (if not skipped)
     if !updated_config.skip_post_create {
-        if let Some(post_create_commands) = &commands.post_create {
-            let phase_result = execute_lifecycle_phase(
+        if let Some(ref post_create_commands) = commands.post_create {
+            let phase_result = execute_lifecycle_phase_impl(
                 LifecyclePhase::PostCreate,
-                post_create_commands,
+                &post_create_commands.commands,
                 &updated_config,
                 docker,
                 &container_context,
@@ -649,19 +866,10 @@ where
 
     // Execute postStart phase (if not skipped by non-blocking commands flag)
     if !updated_config.skip_non_blocking_commands {
-        if let Some(post_start_commands) = &commands.post_start {
-            // Add postStart phase to non-blocking specs for later execution
-            // Convert Vec<String> to Vec<AggregatedLifecycleCommand> with Config source
-            let aggregated_commands: Vec<AggregatedLifecycleCommand> = post_start_commands
-                .iter()
-                .map(|cmd| AggregatedLifecycleCommand {
-                    command: serde_json::Value::String(cmd.clone()),
-                    source: LifecycleCommandSource::Config,
-                })
-                .collect();
+        if let Some(ref post_start_commands) = commands.post_start {
             result.non_blocking_phases.push(NonBlockingPhaseSpec {
                 phase: LifecyclePhase::PostStart,
-                commands: aggregated_commands,
+                commands: post_start_commands.commands.clone(),
                 config: updated_config.clone(),
                 context: container_context.clone(),
                 timeout: updated_config.non_blocking_timeout,
@@ -677,19 +885,10 @@ where
 
     // Execute postAttach phase (if not skipped by non-blocking commands flag)
     if !updated_config.skip_non_blocking_commands {
-        if let Some(post_attach_commands) = &commands.post_attach {
-            // Add postAttach phase to non-blocking specs for later execution
-            // Convert Vec<String> to Vec<AggregatedLifecycleCommand> with Config source
-            let aggregated_commands: Vec<AggregatedLifecycleCommand> = post_attach_commands
-                .iter()
-                .map(|cmd| AggregatedLifecycleCommand {
-                    command: serde_json::Value::String(cmd.clone()),
-                    source: LifecycleCommandSource::Config,
-                })
-                .collect();
+        if let Some(ref post_attach_commands) = commands.post_attach {
             result.non_blocking_phases.push(NonBlockingPhaseSpec {
                 phase: LifecyclePhase::PostAttach,
-                commands: aggregated_commands,
+                commands: post_attach_commands.commands.clone(),
                 config: updated_config.clone(),
                 context: container_context.clone(),
                 timeout: updated_config.non_blocking_timeout,
@@ -711,7 +910,7 @@ where
 #[instrument(skip(commands, context, progress_callback))]
 async fn execute_host_lifecycle_phase<F>(
     phase: LifecyclePhase,
-    commands: &[String],
+    commands: &[AggregatedLifecycleCommand],
     context: &SubstitutionContext,
     progress_callback: Option<&F>,
 ) -> Result<PhaseResult>
@@ -721,13 +920,26 @@ where
     info!("Executing host lifecycle phase: {}", phase.as_str());
     let phase_start = Instant::now();
 
+    // Convert aggregated commands to string vec for progress event
+    let command_strings: Vec<String> = commands
+        .iter()
+        .map(|agg| match &agg.command {
+            LifecycleCommandValue::Shell(s) => s.clone(),
+            LifecycleCommandValue::Exec(args) => args.join(" "),
+            LifecycleCommandValue::Parallel(map) => {
+                let keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
+                format!("parallel: {}", keys.join(", "))
+            }
+        })
+        .collect();
+
     // Emit phase begin event
     if let Some(callback) = progress_callback {
         let event = ProgressEvent::LifecyclePhaseBegin {
             id: ProgressTracker::next_event_id(),
             timestamp: ProgressTracker::current_timestamp(),
             phase: phase.as_str().to_string(),
-            commands: commands.to_vec(),
+            commands: command_strings,
         };
         if let Err(e) = callback(event) {
             debug!("Failed to emit phase begin event: {}", e);
@@ -741,111 +953,310 @@ where
         success: true,
     };
 
-    // Convert commands to LifecycleCommands format with variable substitution
-    let mut lifecycle_commands_vec = Vec::new();
-    let mut substituted_commands = Vec::new();
+    // Execute each command individually, handling all format variants inline
+    for agg_cmd in commands {
+        match &agg_cmd.command {
+            LifecycleCommandValue::Shell(command_template) => {
+                // Apply variable substitution to the command
+                let mut substitution_report = SubstitutionReport::new();
+                let substituted_command = VariableSubstitution::substitute_string(
+                    command_template,
+                    context,
+                    &mut substitution_report,
+                );
 
-    for command_template in commands {
-        // Apply variable substitution to the command (same as container phases)
-        let mut substitution_report = SubstitutionReport::new();
-        let substituted_command = VariableSubstitution::substitute_string(
-            command_template,
-            context,
-            &mut substitution_report,
-        );
-
-        debug!(
-            "Host command after variable substitution: {} -> {}",
-            command_template, substituted_command
-        );
-
-        if substitution_report.has_substitutions() {
-            debug!(
-                "Variable substitutions applied: {:?}",
-                substitution_report.replacements
-            );
-            if !substitution_report.unknown_variables.is_empty() {
                 debug!(
-                    "Unknown variables left unchanged: {:?}",
-                    substitution_report.unknown_variables
+                    "Host command after variable substitution: {} -> {}",
+                    command_template, substituted_command
                 );
-            }
-        }
 
-        // Store the substituted command for later use in CommandResult
-        substituted_commands.push(substituted_command.clone());
-
-        lifecycle_commands_vec.push(crate::lifecycle::CommandTemplate {
-            command: substituted_command,
-            env_vars: context.local_env.clone(),
-        });
-    }
-    let lifecycle_commands = LifecycleCommands {
-        commands: lifecycle_commands_vec,
-    };
-
-    // Create execution context for host
-    let exec_ctx = ExecutionContext {
-        environment: context.local_env.clone(),
-        working_directory: Some(std::path::PathBuf::from(&context.local_workspace_folder)),
-        timeout: None,
-        redaction_config: RedactionConfig::default(),
-        execution_mode: ExecutionMode::Host,
-    };
-
-    // Execute the phase using the lifecycle module's host execution
-    let result = tokio::task::spawn_blocking(move || {
-        crate::lifecycle::run_phase(phase, &lifecycle_commands, &exec_ctx)
-    })
-    .await;
-
-    match result {
-        Ok(Ok(lifecycle_result)) => {
-            // Convert lifecycle result to phase result
-            for (i, exit_code) in lifecycle_result.exit_codes.iter().enumerate() {
-                let command_result = CommandResult {
-                    command: substituted_commands.get(i).cloned().unwrap_or_default(),
-                    exit_code: *exit_code,
-                    duration: lifecycle_result
-                        .durations
-                        .get(i)
-                        .copied()
-                        .unwrap_or_default(),
-                    success: *exit_code == 0,
-                    stdout: String::new(), // Not captured in detail per-command
-                    stderr: String::new(),
-                };
-                if !command_result.success {
-                    phase_result.success = false;
+                if substitution_report.has_substitutions() {
+                    debug!(
+                        "Variable substitutions applied: {:?}",
+                        substitution_report.replacements
+                    );
+                    if !substitution_report.unknown_variables.is_empty() {
+                        debug!(
+                            "Unknown variables left unchanged: {:?}",
+                            substitution_report.unknown_variables
+                        );
+                    }
                 }
-                phase_result.commands.push(command_result);
-            }
 
-            if !lifecycle_result.success {
-                error!(
-                    "Host lifecycle phase {} failed with output:\nstdout: {}\nstderr: {}",
-                    phase.as_str(),
-                    lifecycle_result.stdout,
-                    lifecycle_result.stderr
-                );
+                let display_cmd = substituted_command.clone();
+                let working_dir = context.local_workspace_folder.clone();
+                let env_vars = context.local_env.clone();
+
+                let start_time = Instant::now();
+
+                let output = tokio::task::spawn_blocking(move || {
+                    std::process::Command::new("sh")
+                        .args(["-c", &substituted_command])
+                        .current_dir(&working_dir)
+                        .envs(&env_vars)
+                        .output()
+                })
+                .await;
+
+                let duration = start_time.elapsed();
+
+                match output {
+                    Ok(Ok(output)) => {
+                        let exit_code = output.status.code().unwrap_or(-1);
+                        let command_result = CommandResult {
+                            command: display_cmd.clone(),
+                            exit_code,
+                            duration,
+                            success: output.status.success(),
+                            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                        };
+                        if !command_result.success {
+                            phase_result.success = false;
+                            error!(
+                                "Host lifecycle command failed in phase {} with exit code {}: {}",
+                                phase.as_str(),
+                                exit_code,
+                                display_cmd
+                            );
+                        }
+                        phase_result.commands.push(command_result);
+                    }
+                    Ok(Err(e)) => {
+                        error!("Failed to execute host shell command: {}", e);
+                        phase_result.success = false;
+                        phase_result.commands.push(CommandResult {
+                            command: display_cmd,
+                            exit_code: -1,
+                            duration,
+                            success: false,
+                            stdout: String::new(),
+                            stderr: e.to_string(),
+                        });
+                    }
+                    Err(e) => {
+                        error!("Failed to spawn host shell command: {}", e);
+                        phase_result.success = false;
+                        return Err(DeaconError::Lifecycle(format!(
+                            "Failed to spawn host shell command: {}",
+                            e
+                        )));
+                    }
+                }
             }
-        }
-        Ok(Err(e)) => {
-            error!(
-                "Failed to execute host lifecycle phase {}: {}",
-                phase.as_str(),
-                e
-            );
-            phase_result.success = false;
-            return Err(e);
-        }
-        Err(e) => {
-            error!("Failed to spawn host lifecycle phase execution: {}", e);
-            phase_result.success = false;
-            return Err(DeaconError::Lifecycle(format!(
-                "Failed to spawn host lifecycle phase execution: {}",
-                e
-            )));
+            LifecycleCommandValue::Exec(_) => {
+                // Apply variable substitution element-wise
+                let substituted = agg_cmd.command.substitute_variables(context);
+                let substituted_args = match &substituted {
+                    LifecycleCommandValue::Exec(a) => a.clone(),
+                    _ => {
+                        return Err(DeaconError::Lifecycle(format!(
+                            "Internal error: variable substitution changed command variant for phase '{}'",
+                            phase.as_str()
+                        )));
+                    }
+                };
+
+                if substituted_args.is_empty() {
+                    debug!("Skipping empty exec-style host command");
+                    continue;
+                }
+
+                let display_cmd = substituted_args.join(" ");
+                debug!("Host exec-style command: {:?}", substituted_args);
+
+                let start_time = Instant::now();
+                let program = substituted_args[0].clone();
+                let cmd_args: Vec<String> = substituted_args[1..].to_vec();
+                let working_dir = context.local_workspace_folder.clone();
+                let env_vars = context.local_env.clone();
+
+                let output = tokio::task::spawn_blocking(move || {
+                    std::process::Command::new(&program)
+                        .args(&cmd_args)
+                        .current_dir(&working_dir)
+                        .envs(&env_vars)
+                        .output()
+                })
+                .await;
+
+                let duration = start_time.elapsed();
+
+                match output {
+                    Ok(Ok(output)) => {
+                        let exit_code = output.status.code().unwrap_or(-1);
+                        let command_result = CommandResult {
+                            command: display_cmd.clone(),
+                            exit_code,
+                            duration,
+                            success: output.status.success(),
+                            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                        };
+                        if !command_result.success {
+                            phase_result.success = false;
+                            error!(
+                                "Host exec-style command failed in phase {} with exit code {}: {}",
+                                phase.as_str(),
+                                exit_code,
+                                display_cmd
+                            );
+                        }
+                        phase_result.commands.push(command_result);
+                    }
+                    Ok(Err(e)) => {
+                        error!("Failed to execute host exec-style command: {}", e);
+                        phase_result.success = false;
+                        phase_result.commands.push(CommandResult {
+                            command: display_cmd,
+                            exit_code: -1,
+                            duration,
+                            success: false,
+                            stdout: String::new(),
+                            stderr: e.to_string(),
+                        });
+                    }
+                    Err(e) => {
+                        error!("Failed to spawn host exec-style command: {}", e);
+                        phase_result.success = false;
+                        return Err(DeaconError::Lifecycle(format!(
+                            "Failed to spawn host exec-style command: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+            LifecycleCommandValue::Parallel(_) => {
+                // Apply variable substitution to all entries
+                let substituted = agg_cmd.command.substitute_variables(context);
+                let substituted_entries = match &substituted {
+                    LifecycleCommandValue::Parallel(m) => m.clone(),
+                    _ => {
+                        return Err(DeaconError::Lifecycle(format!(
+                            "Internal error: variable substitution changed command variant for phase '{}'",
+                            phase.as_str()
+                        )));
+                    }
+                };
+
+                if substituted_entries.is_empty() {
+                    debug!("Skipping empty parallel host command set");
+                    continue;
+                }
+
+                debug!(
+                    "Executing {} parallel host commands for phase {}",
+                    substituted_entries.len(),
+                    phase.as_str()
+                );
+
+                // Spawn all entries concurrently using JoinSet with spawn_blocking
+                let mut join_set = tokio::task::JoinSet::new();
+                for (key, value) in substituted_entries.clone() {
+                    let working_dir = context.local_workspace_folder.clone();
+                    let env_vars = context.local_env.clone();
+                    join_set.spawn_blocking(move || {
+                        let start = Instant::now();
+                        let output = match &value {
+                            LifecycleCommandValue::Shell(cmd) => std::process::Command::new("sh")
+                                .args(["-c", cmd])
+                                .current_dir(&working_dir)
+                                .envs(&env_vars)
+                                .output(),
+                            LifecycleCommandValue::Exec(args) if !args.is_empty() => {
+                                std::process::Command::new(&args[0])
+                                    .args(&args[1..])
+                                    .current_dir(&working_dir)
+                                    .envs(&env_vars)
+                                    .output()
+                            }
+                            _ => {
+                                debug!("Skipping empty parallel exec-style host command '{}'", key);
+                                return ParallelCommandResult {
+                                    key,
+                                    exit_code: 0,
+                                    duration: start.elapsed(),
+                                    success: true,
+                                    stdout: String::new(),
+                                    stderr: String::new(),
+                                };
+                            }
+                        };
+                        match output {
+                            Ok(output) => ParallelCommandResult {
+                                key,
+                                exit_code: output.status.code().unwrap_or(-1),
+                                duration: start.elapsed(),
+                                success: output.status.success(),
+                                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                            },
+                            Err(e) => ParallelCommandResult {
+                                key,
+                                exit_code: -1,
+                                duration: start.elapsed(),
+                                success: false,
+                                stdout: String::new(),
+                                stderr: e.to_string(),
+                            },
+                        }
+                    });
+                }
+
+                // Collect all results (wait for ALL - no early cancellation)
+                let mut parallel_results = Vec::new();
+                while let Some(join_result) = join_set.join_next().await {
+                    match join_result {
+                        Ok(result) => {
+                            let display_cmd = match substituted_entries.get(&result.key) {
+                                Some(LifecycleCommandValue::Shell(s)) => s.clone(),
+                                Some(LifecycleCommandValue::Exec(a)) => a.join(" "),
+                                _ => result.key.clone(),
+                            };
+                            let cmd_result = CommandResult {
+                                command: format!("[{}] {}", result.key, display_cmd),
+                                exit_code: result.exit_code,
+                                duration: result.duration,
+                                success: result.success,
+                                stdout: result.stdout.clone(),
+                                stderr: result.stderr.clone(),
+                            };
+                            if !cmd_result.success {
+                                phase_result.success = false;
+                            }
+                            phase_result.commands.push(cmd_result);
+                            parallel_results.push(result);
+                        }
+                        Err(e) => {
+                            error!("Parallel host task panicked: {}", e);
+                            phase_result.success = false;
+                            phase_result.commands.push(CommandResult {
+                                command: "parallel task panicked".to_string(),
+                                exit_code: -1,
+                                duration: Duration::default(),
+                                success: false,
+                                stdout: String::new(),
+                                stderr: e.to_string(),
+                            });
+                        }
+                    }
+                }
+
+                // Report all failures
+                let failed: Vec<&ParallelCommandResult> =
+                    parallel_results.iter().filter(|r| !r.success).collect();
+                if !failed.is_empty() {
+                    let failed_info: Vec<String> = failed
+                        .iter()
+                        .map(|r| format!("{} (exit {})", r.key, r.exit_code))
+                        .collect();
+                    error!(
+                        "Parallel host commands failed in phase {}: {}",
+                        phase.as_str(),
+                        failed_info.join(", ")
+                    );
+                }
+            }
         }
     }
 
@@ -871,43 +1282,6 @@ where
         phase_result.total_duration
     );
     Ok(phase_result)
-}
-
-/// Execute a single lifecycle phase in the container
-#[instrument(skip(commands, config, docker, context, progress_callback))]
-async fn execute_lifecycle_phase<D, F>(
-    phase: LifecyclePhase,
-    commands: &[String],
-    config: &ContainerLifecycleConfig,
-    docker: &D,
-    context: &SubstitutionContext,
-    detected_shell: Option<&str>,
-    progress_callback: Option<&F>,
-) -> Result<PhaseResult>
-where
-    D: Docker,
-    F: Fn(ProgressEvent) -> anyhow::Result<()>,
-{
-    // Convert Vec<String> to Vec<AggregatedLifecycleCommand> without source attribution
-    // This is for backward compatibility with existing code that doesn't use feature aggregation
-    let aggregated_commands: Vec<AggregatedLifecycleCommand> = commands
-        .iter()
-        .map(|cmd| AggregatedLifecycleCommand {
-            command: serde_json::Value::String(cmd.clone()),
-            source: LifecycleCommandSource::Config,
-        })
-        .collect();
-
-    execute_lifecycle_phase_impl(
-        phase,
-        &aggregated_commands,
-        config,
-        docker,
-        context,
-        detected_shell,
-        progress_callback,
-    )
-    .await
 }
 
 /// Execute a single lifecycle phase with source-attributed commands.
@@ -975,8 +1349,12 @@ where
     let command_strings: Vec<String> = commands
         .iter()
         .map(|agg| match &agg.command {
-            serde_json::Value::String(s) => s.clone(),
-            other => serde_json::to_string(other).unwrap_or_else(|_| "".to_string()),
+            LifecycleCommandValue::Shell(s) => s.clone(),
+            LifecycleCommandValue::Exec(args) => args.join(" "),
+            LifecycleCommandValue::Parallel(map) => {
+                let keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
+                format!("parallel: {}", keys.join(", "))
+            }
         })
         .collect();
 
@@ -1001,219 +1379,559 @@ where
     };
 
     for (i, agg_cmd) in commands.iter().enumerate() {
-        // Extract command string from the aggregated command
-        let command_template = match &agg_cmd.command {
-            serde_json::Value::String(s) => s.clone(),
-            other => serde_json::to_string(other).unwrap_or_else(|_| "".to_string()),
-        };
-
-        debug!(
-            "Executing command {} of {} for phase {} (source: {}): {}",
-            i + 1,
-            commands.len(),
-            phase.as_str(),
-            agg_cmd.source,
-            command_template
-        );
-
-        // Generate unique command ID
-        let command_id = format!("{}-{}", phase.as_str(), i + 1);
-
-        let start_time = Instant::now();
-
-        // Apply variable substitution to the command
-        let mut substitution_report = SubstitutionReport::new();
-        let substituted_command = VariableSubstitution::substitute_string(
-            &command_template,
-            context,
-            &mut substitution_report,
-        );
-
-        debug!(
-            "Command after variable substitution: {}",
-            substituted_command
-        );
-
-        if substitution_report.has_substitutions() {
-            debug!(
-                "Variable substitutions applied: {:?}",
-                substitution_report.replacements
-            );
-            if !substitution_report.unknown_variables.is_empty() {
+        // Dispatch based on command format
+        match &agg_cmd.command {
+            LifecycleCommandValue::Shell(command_template) => {
                 debug!(
-                    "Unknown variables left unchanged: {:?}",
-                    substitution_report.unknown_variables
-                );
-            }
-        }
-
-        // Apply redaction to command string for event emission
-        let redaction_config = RedactionConfig::default(); // Use default for now
-        let redacted_command = redact_if_enabled(&substituted_command, &redaction_config);
-
-        // Emit command begin event
-        if let Some(callback) = progress_callback {
-            let event = ProgressEvent::LifecycleCommandBegin {
-                id: ProgressTracker::next_event_id(),
-                timestamp: ProgressTracker::current_timestamp(),
-                phase: phase.as_str().to_string(),
-                command_id: command_id.clone(),
-                command: redacted_command.clone(),
-            };
-            if let Err(e) = callback(event) {
-                debug!("Failed to emit command begin event: {}", e);
-            }
-        }
-
-        // Create exec configuration
-        let exec_config = ExecConfig {
-            user: config.user.clone(),
-            working_dir: Some(config.container_workspace_folder.clone()),
-            env: config.container_env.clone(),
-            tty: config.force_pty,
-            interactive: false,
-            detach: false,
-            silent: false,
-            terminal_size: None,
-        };
-
-        // Detect shell and create appropriate command args
-        let command_args = if config.use_login_shell {
-            // Use detected shell or fallback to sh
-            let shell = detected_shell.unwrap_or("sh");
-            debug!("Using login shell for lifecycle command: {}", shell);
-            crate::container_env_probe::get_shell_command_for_lifecycle(
-                shell,
-                &substituted_command,
-                true,
-            )
-        } else {
-            // Legacy mode: plain sh -c
-            debug!("Using plain sh -c for lifecycle command (legacy mode)");
-            vec![
-                "sh".to_string(),
-                "-c".to_string(),
-                substituted_command.clone(),
-            ]
-        };
-
-        let exec_result = docker
-            .exec(&config.container_id, &command_args, exec_config)
-            .await;
-
-        let duration = start_time.elapsed();
-
-        match exec_result {
-            Ok(exec_result) => {
-                debug!(
-                    "Container command completed with exit code: {} in {:?}",
-                    exec_result.exit_code, duration
+                    "Executing command {} of {} for phase {} (source: {}): {}",
+                    i + 1,
+                    commands.len(),
+                    phase.as_str(),
+                    agg_cmd.source,
+                    command_template
                 );
 
-                // Emit command end event (success)
+                // Generate unique command ID
+                let command_id = format!("{}-{}", phase.as_str(), i + 1);
+
+                let start_time = Instant::now();
+
+                // Apply variable substitution to the command
+                let mut substitution_report = SubstitutionReport::new();
+                let substituted_command = VariableSubstitution::substitute_string(
+                    command_template,
+                    context,
+                    &mut substitution_report,
+                );
+
+                debug!(
+                    "Command after variable substitution: {}",
+                    substituted_command
+                );
+
+                if substitution_report.has_substitutions() {
+                    debug!(
+                        "Variable substitutions applied: {:?}",
+                        substitution_report.replacements
+                    );
+                    if !substitution_report.unknown_variables.is_empty() {
+                        debug!(
+                            "Unknown variables left unchanged: {:?}",
+                            substitution_report.unknown_variables
+                        );
+                    }
+                }
+
+                // Apply redaction to command string for event emission
+                let redaction_config = RedactionConfig::default();
+                let redacted_command = redact_if_enabled(&substituted_command, &redaction_config);
+
+                // Emit command begin event
                 if let Some(callback) = progress_callback {
-                    let event = ProgressEvent::LifecycleCommandEnd {
+                    let event = ProgressEvent::LifecycleCommandBegin {
                         id: ProgressTracker::next_event_id(),
                         timestamp: ProgressTracker::current_timestamp(),
                         phase: phase.as_str().to_string(),
                         command_id: command_id.clone(),
-                        duration_ms: duration.as_millis() as u64,
-                        success: exec_result.success,
-                        exit_code: Some(exec_result.exit_code),
+                        command: redacted_command.clone(),
                     };
                     if let Err(e) = callback(event) {
-                        debug!("Failed to emit command end event: {}", e);
+                        debug!("Failed to emit command begin event: {}", e);
                     }
                 }
 
-                let command_result = CommandResult {
-                    command: substituted_command.clone(),
-                    exit_code: exec_result.exit_code,
-                    duration,
-                    success: exec_result.success,
-                    stdout: String::new(), // TODO: Capture output when docker exec supports it
-                    stderr: String::new(), // TODO: Capture output when docker exec supports it
+                // Create exec configuration
+                let exec_config = ExecConfig {
+                    user: config.user.clone(),
+                    working_dir: Some(config.container_workspace_folder.clone()),
+                    env: config.container_env.clone(),
+                    tty: config.force_pty,
+                    interactive: false,
+                    detach: false,
+                    silent: false,
+                    terminal_size: None,
                 };
 
-                phase_result.commands.push(command_result);
+                // Detect shell and create appropriate command args
+                let command_args = if config.use_login_shell {
+                    // Use detected shell or fallback to sh
+                    let shell = detected_shell.unwrap_or("sh");
+                    debug!("Using login shell for lifecycle command: {}", shell);
+                    crate::container_env_probe::get_shell_command_for_lifecycle(
+                        shell,
+                        &substituted_command,
+                        true,
+                    )
+                } else {
+                    // Legacy mode: plain sh -c
+                    debug!("Using plain sh -c for lifecycle command (legacy mode)");
+                    vec![
+                        "sh".to_string(),
+                        "-c".to_string(),
+                        substituted_command.clone(),
+                    ]
+                };
 
-                // T027: Fail-fast behavior - stop immediately on command failure with source attribution
-                if exec_result.exit_code != 0 {
-                    phase_result.success = false;
-                    let error_msg = format!(
-                        "Lifecycle command failed (source: {}) in phase {} with exit code {}: {}",
-                        agg_cmd.source,
-                        phase.as_str(),
-                        exec_result.exit_code,
-                        substituted_command
-                    );
-                    error!("{}", error_msg);
+                let exec_result = docker
+                    .exec(&config.container_id, &command_args, exec_config)
+                    .await;
 
-                    phase_result.total_duration = phase_start.elapsed();
+                let duration = start_time.elapsed();
 
-                    // Emit phase end event before returning error
+                match exec_result {
+                    Ok(exec_result) => {
+                        debug!(
+                            "Container command completed with exit code: {} in {:?}",
+                            exec_result.exit_code, duration
+                        );
+
+                        // Emit command end event (success)
+                        if let Some(callback) = progress_callback {
+                            let event = ProgressEvent::LifecycleCommandEnd {
+                                id: ProgressTracker::next_event_id(),
+                                timestamp: ProgressTracker::current_timestamp(),
+                                phase: phase.as_str().to_string(),
+                                command_id: command_id.clone(),
+                                duration_ms: duration.as_millis() as u64,
+                                success: exec_result.success,
+                                exit_code: Some(exec_result.exit_code),
+                            };
+                            if let Err(e) = callback(event) {
+                                debug!("Failed to emit command end event: {}", e);
+                            }
+                        }
+
+                        let command_result = CommandResult {
+                            command: substituted_command.clone(),
+                            exit_code: exec_result.exit_code,
+                            duration,
+                            success: exec_result.success,
+                            stdout: String::new(),
+                            stderr: String::new(),
+                        };
+
+                        phase_result.commands.push(command_result);
+
+                        // T027: Fail-fast behavior - stop immediately on command failure with source attribution
+                        if exec_result.exit_code != 0 {
+                            phase_result.success = false;
+                            let error_msg = format!(
+                                "Lifecycle command failed (source: {}) in phase {} with exit code {}: {}",
+                                agg_cmd.source,
+                                phase.as_str(),
+                                exec_result.exit_code,
+                                substituted_command
+                            );
+                            error!("{}", error_msg);
+
+                            phase_result.total_duration = phase_start.elapsed();
+
+                            // Emit phase end event before returning error
+                            if let Some(callback) = progress_callback {
+                                let event = ProgressEvent::LifecyclePhaseEnd {
+                                    id: ProgressTracker::next_event_id(),
+                                    timestamp: ProgressTracker::current_timestamp(),
+                                    phase: phase.as_str().to_string(),
+                                    duration_ms: phase_result.total_duration.as_millis() as u64,
+                                    success: false,
+                                };
+                                if let Err(emit_err) = callback(event) {
+                                    debug!("Failed to emit phase end event: {}", emit_err);
+                                }
+                            }
+
+                            return Err(DeaconError::Lifecycle(error_msg));
+                        }
+                    }
+                    Err(e) => {
+                        // Emit command end event (failure)
+                        if let Some(callback) = progress_callback {
+                            let event = ProgressEvent::LifecycleCommandEnd {
+                                id: ProgressTracker::next_event_id(),
+                                timestamp: ProgressTracker::current_timestamp(),
+                                phase: phase.as_str().to_string(),
+                                command_id: command_id.clone(),
+                                duration_ms: duration.as_millis() as u64,
+                                success: false,
+                                exit_code: None,
+                            };
+                            if let Err(emit_err) = callback(event) {
+                                debug!("Failed to emit command end event: {}", emit_err);
+                            }
+                        }
+
+                        phase_result.success = false;
+                        phase_result.total_duration = phase_start.elapsed();
+
+                        // Emit phase end event before returning error
+                        if let Some(callback) = progress_callback {
+                            let event = ProgressEvent::LifecyclePhaseEnd {
+                                id: ProgressTracker::next_event_id(),
+                                timestamp: ProgressTracker::current_timestamp(),
+                                phase: phase.as_str().to_string(),
+                                duration_ms: phase_result.total_duration.as_millis() as u64,
+                                success: false,
+                            };
+                            if let Err(emit_err) = callback(event) {
+                                debug!("Failed to emit phase end event: {}", emit_err);
+                            }
+                        }
+
+                        error!(
+                            "Failed to execute container command (source: {}) in phase {}: {}",
+                            agg_cmd.source,
+                            phase.as_str(),
+                            e
+                        );
+                        return Err(DeaconError::Lifecycle(format!(
+                            "Failed to execute container command (source: {}) in phase {}: {}",
+                            agg_cmd.source,
+                            phase.as_str(),
+                            e
+                        )));
+                    }
+                }
+            }
+            LifecycleCommandValue::Exec(args) => {
+                debug!(
+                    "Executing exec-style command {} of {} for phase {} (source: {}): {:?}",
+                    i + 1,
+                    commands.len(),
+                    phase.as_str(),
+                    agg_cmd.source,
+                    args
+                );
+
+                let command_id = format!("{}-{}", phase.as_str(), i + 1);
+                let start_time = Instant::now();
+
+                // Apply variable substitution element-wise
+                let substituted = agg_cmd.command.substitute_variables(context);
+                let substituted_args = match &substituted {
+                    LifecycleCommandValue::Exec(a) => a.clone(),
+                    _ => {
+                        return Err(DeaconError::Lifecycle(format!(
+                            "Internal error: variable substitution changed command variant for phase '{}'",
+                            phase.as_str()
+                        )));
+                    }
+                };
+
+                if substituted_args.is_empty() {
+                    debug!("Skipping empty exec-style command");
+                    continue;
+                }
+
+                let display_cmd = substituted_args.join(" ");
+
+                // Apply redaction
+                let redaction_config = RedactionConfig::default();
+                let redacted_command = redact_if_enabled(&display_cmd, &redaction_config);
+
+                // Emit command begin event
+                if let Some(callback) = progress_callback {
+                    let event = ProgressEvent::LifecycleCommandBegin {
+                        id: ProgressTracker::next_event_id(),
+                        timestamp: ProgressTracker::current_timestamp(),
+                        phase: phase.as_str().to_string(),
+                        command_id: command_id.clone(),
+                        command: redacted_command.clone(),
+                    };
+                    if let Err(e) = callback(event) {
+                        debug!("Failed to emit command begin event: {}", e);
+                    }
+                }
+
+                // Create exec configuration
+                let exec_config = ExecConfig {
+                    user: config.user.clone(),
+                    working_dir: Some(config.container_workspace_folder.clone()),
+                    env: config.container_env.clone(),
+                    tty: config.force_pty,
+                    interactive: false,
+                    detach: false,
+                    silent: false,
+                    terminal_size: None,
+                };
+
+                // Pass args directly to docker exec - NO shell wrapping
+                let exec_result = docker
+                    .exec(&config.container_id, &substituted_args, exec_config)
+                    .await;
+
+                let duration = start_time.elapsed();
+
+                match exec_result {
+                    Ok(exec_result) => {
+                        debug!(
+                            "Exec-style command completed with exit code: {} in {:?}",
+                            exec_result.exit_code, duration
+                        );
+
+                        // Emit command end event
+                        if let Some(callback) = progress_callback {
+                            let event = ProgressEvent::LifecycleCommandEnd {
+                                id: ProgressTracker::next_event_id(),
+                                timestamp: ProgressTracker::current_timestamp(),
+                                phase: phase.as_str().to_string(),
+                                command_id: command_id.clone(),
+                                duration_ms: duration.as_millis() as u64,
+                                success: exec_result.success,
+                                exit_code: Some(exec_result.exit_code),
+                            };
+                            if let Err(e) = callback(event) {
+                                debug!("Failed to emit command end event: {}", e);
+                            }
+                        }
+
+                        let command_result = CommandResult {
+                            command: display_cmd,
+                            exit_code: exec_result.exit_code,
+                            duration,
+                            success: exec_result.success,
+                            stdout: String::new(),
+                            stderr: String::new(),
+                        };
+
+                        phase_result.commands.push(command_result);
+
+                        // Fail-fast: stop on non-zero exit code
+                        if exec_result.exit_code != 0 {
+                            phase_result.success = false;
+                            let error_msg = format!(
+                                "Exec-style lifecycle command failed (source: {}) in phase {} with exit code {}: {:?}",
+                                agg_cmd.source,
+                                phase.as_str(),
+                                exec_result.exit_code,
+                                substituted_args
+                            );
+                            error!("{}", error_msg);
+
+                            phase_result.total_duration = phase_start.elapsed();
+                            emit_phase_end_event(progress_callback, &phase_result);
+                            return Err(DeaconError::Lifecycle(error_msg));
+                        }
+                    }
+                    Err(e) => {
+                        // Emit command end event (failure)
+                        if let Some(callback) = progress_callback {
+                            let event = ProgressEvent::LifecycleCommandEnd {
+                                id: ProgressTracker::next_event_id(),
+                                timestamp: ProgressTracker::current_timestamp(),
+                                phase: phase.as_str().to_string(),
+                                command_id: command_id.clone(),
+                                duration_ms: duration.as_millis() as u64,
+                                success: false,
+                                exit_code: None,
+                            };
+                            if let Err(emit_err) = callback(event) {
+                                debug!("Failed to emit command end event: {}", emit_err);
+                            }
+                        }
+
+                        phase_result.success = false;
+                        phase_result.total_duration = phase_start.elapsed();
+                        emit_phase_end_event(progress_callback, &phase_result);
+
+                        error!(
+                            "Failed to execute exec-style command (source: {}) in phase {}: {}",
+                            agg_cmd.source,
+                            phase.as_str(),
+                            e
+                        );
+                        return Err(DeaconError::Lifecycle(format!(
+                            "Failed to execute exec-style command (source: {}) in phase {}: {}",
+                            agg_cmd.source,
+                            phase.as_str(),
+                            e
+                        )));
+                    }
+                }
+            }
+            LifecycleCommandValue::Parallel(entries) => {
+                debug!(
+                    "Executing parallel command set for phase {} (source: {}) with {} entries",
+                    phase.as_str(),
+                    agg_cmd.source,
+                    entries.len()
+                );
+
+                if entries.is_empty() {
+                    debug!("Skipping empty parallel command set");
+                    continue;
+                }
+
+                // Apply variable substitution to all entries
+                let substituted = agg_cmd.command.substitute_variables(context);
+                let substituted_entries = match &substituted {
+                    LifecycleCommandValue::Parallel(m) => m.clone(),
+                    _ => {
+                        return Err(DeaconError::Lifecycle(format!(
+                            "Internal error: variable substitution changed command variant for phase '{}'",
+                            phase.as_str()
+                        )));
+                    }
+                };
+
+                // Emit per-entry begin events
+                for key in substituted_entries.keys() {
+                    let command_id = format!("{}-{}", phase.as_str(), key);
                     if let Some(callback) = progress_callback {
-                        let event = ProgressEvent::LifecyclePhaseEnd {
+                        let display = match substituted_entries.get(key) {
+                            Some(LifecycleCommandValue::Shell(s)) => s.clone(),
+                            Some(LifecycleCommandValue::Exec(a)) => a.join(" "),
+                            _ => String::new(),
+                        };
+                        let redaction_config = RedactionConfig::default();
+                        let redacted = redact_if_enabled(&display, &redaction_config);
+                        let event = ProgressEvent::LifecycleCommandBegin {
                             id: ProgressTracker::next_event_id(),
                             timestamp: ProgressTracker::current_timestamp(),
                             phase: phase.as_str().to_string(),
-                            duration_ms: phase_result.total_duration.as_millis() as u64,
-                            success: false,
+                            command_id,
+                            command: redacted,
                         };
-                        if let Err(emit_err) = callback(event) {
-                            debug!("Failed to emit phase end event: {}", emit_err);
+                        if let Err(e) = callback(event) {
+                            debug!("Failed to emit command begin event: {}", e);
+                        }
+                    }
+                }
+
+                // Build futures for all entries - they all borrow docker concurrently
+                let futures: Vec<_> = substituted_entries
+                    .iter()
+                    .map(|(key, value)| {
+                        let key = key.clone();
+                        let command_args = match value {
+                            LifecycleCommandValue::Shell(cmd) => {
+                                if config.use_login_shell {
+                                    let shell = detected_shell.unwrap_or("sh");
+                                    crate::container_env_probe::get_shell_command_for_lifecycle(
+                                        shell, cmd, true,
+                                    )
+                                } else {
+                                    vec!["sh".to_string(), "-c".to_string(), cmd.clone()]
+                                }
+                            }
+                            LifecycleCommandValue::Exec(args) => args.clone(),
+                            LifecycleCommandValue::Parallel(_) => {
+                                // Nested parallel not supported
+                                vec![]
+                            }
+                        };
+                        let exec_config = ExecConfig {
+                            user: config.user.clone(),
+                            working_dir: Some(config.container_workspace_folder.clone()),
+                            env: config.container_env.clone(),
+                            tty: config.force_pty,
+                            interactive: false,
+                            detach: false,
+                            silent: false,
+                            terminal_size: None,
+                        };
+                        let container_id = &config.container_id;
+                        async move {
+                            let start_time = Instant::now();
+                            if command_args.is_empty() {
+                                debug!(
+                                    "Skipping empty parallel exec-style container command '{}'",
+                                    key
+                                );
+                                return ParallelCommandResult {
+                                    key,
+                                    exit_code: 0,
+                                    duration: start_time.elapsed(),
+                                    success: true,
+                                    stdout: String::new(),
+                                    stderr: String::new(),
+                                };
+                            }
+                            match docker.exec(container_id, &command_args, exec_config).await {
+                                Ok(result) => ParallelCommandResult {
+                                    key,
+                                    exit_code: result.exit_code,
+                                    duration: start_time.elapsed(),
+                                    success: result.success,
+                                    stdout: result.stdout,
+                                    stderr: result.stderr,
+                                },
+                                Err(e) => {
+                                    error!(
+                                        "[{}] Parallel command failed in phase {}: {}",
+                                        key,
+                                        phase.as_str(),
+                                        e
+                                    );
+                                    ParallelCommandResult {
+                                        key,
+                                        exit_code: -1,
+                                        duration: start_time.elapsed(),
+                                        success: false,
+                                        stdout: String::new(),
+                                        stderr: e.to_string(),
+                                    }
+                                }
+                            }
+                        }
+                    })
+                    .collect();
+
+                // Execute all concurrently and wait for ALL (no cancellation per Decision 8)
+                let results = futures::future::join_all(futures).await;
+
+                // Emit per-entry end events and collect results
+                for result in &results {
+                    let command_id = format!("{}-{}", phase.as_str(), result.key);
+                    if let Some(callback) = progress_callback {
+                        let event = ProgressEvent::LifecycleCommandEnd {
+                            id: ProgressTracker::next_event_id(),
+                            timestamp: ProgressTracker::current_timestamp(),
+                            phase: phase.as_str().to_string(),
+                            command_id,
+                            duration_ms: result.duration.as_millis() as u64,
+                            success: result.success,
+                            exit_code: Some(result.exit_code),
+                        };
+                        if let Err(e) = callback(event) {
+                            debug!("Failed to emit command end event: {}", e);
                         }
                     }
 
+                    let display_cmd = match substituted_entries.get(&result.key) {
+                        Some(LifecycleCommandValue::Shell(s)) => s.clone(),
+                        Some(LifecycleCommandValue::Exec(a)) => a.join(" "),
+                        _ => result.key.clone(),
+                    };
+                    phase_result.commands.push(CommandResult {
+                        command: format!("[{}] {}", result.key, display_cmd),
+                        exit_code: result.exit_code,
+                        duration: result.duration,
+                        success: result.success,
+                        stdout: result.stdout.clone(),
+                        stderr: result.stderr.clone(),
+                    });
+                }
+
+                // Check for failures - aggregate all failed keys
+                let failed: Vec<&ParallelCommandResult> =
+                    results.iter().filter(|r| !r.success).collect();
+                if !failed.is_empty() {
+                    phase_result.success = false;
+                    let failed_info: Vec<String> = failed
+                        .iter()
+                        .map(|r| format!("{} (exit {})", r.key, r.exit_code))
+                        .collect();
+                    let error_msg = format!(
+                        "Parallel lifecycle commands failed (source: {}) in phase {}: {}",
+                        agg_cmd.source,
+                        phase.as_str(),
+                        failed_info.join(", ")
+                    );
+                    error!("{}", error_msg);
+                    phase_result.total_duration = phase_start.elapsed();
+                    emit_phase_end_event(progress_callback, &phase_result);
                     return Err(DeaconError::Lifecycle(error_msg));
                 }
-            }
-            Err(e) => {
-                // Emit command end event (failure)
-                if let Some(callback) = progress_callback {
-                    let event = ProgressEvent::LifecycleCommandEnd {
-                        id: ProgressTracker::next_event_id(),
-                        timestamp: ProgressTracker::current_timestamp(),
-                        phase: phase.as_str().to_string(),
-                        command_id: command_id.clone(),
-                        duration_ms: duration.as_millis() as u64,
-                        success: false,
-                        exit_code: None, // No exit code when exec itself fails
-                    };
-                    if let Err(emit_err) = callback(event) {
-                        debug!("Failed to emit command end event: {}", emit_err);
-                    }
-                }
-
-                phase_result.success = false;
-                phase_result.total_duration = phase_start.elapsed();
-
-                // Emit phase end event before returning error
-                if let Some(callback) = progress_callback {
-                    let event = ProgressEvent::LifecyclePhaseEnd {
-                        id: ProgressTracker::next_event_id(),
-                        timestamp: ProgressTracker::current_timestamp(),
-                        phase: phase.as_str().to_string(),
-                        duration_ms: phase_result.total_duration.as_millis() as u64,
-                        success: false,
-                    };
-                    if let Err(emit_err) = callback(event) {
-                        debug!("Failed to emit phase end event: {}", emit_err);
-                    }
-                }
-
-                error!(
-                    "Failed to execute container command (source: {}) in phase {}: {}",
-                    agg_cmd.source,
-                    phase.as_str(),
-                    e
-                );
-                return Err(DeaconError::Lifecycle(format!(
-                    "Failed to execute container command (source: {}) in phase {}: {}",
-                    agg_cmd.source,
-                    phase.as_str(),
-                    e
-                )));
             }
         }
     }
@@ -1547,17 +2265,17 @@ where
 #[derive(Debug, Clone, Default)]
 pub struct ContainerLifecycleCommands {
     /// Commands to run during initialize phase (host-side)
-    pub initialize: Option<Vec<String>>,
+    pub initialize: Option<LifecycleCommandList>,
     /// Commands to run during onCreate phase
-    pub on_create: Option<Vec<String>>,
+    pub on_create: Option<LifecycleCommandList>,
     /// Commands to run during updateContent phase
-    pub update_content: Option<Vec<String>>,
+    pub update_content: Option<LifecycleCommandList>,
     /// Commands to run during postCreate phase
-    pub post_create: Option<Vec<String>>,
+    pub post_create: Option<LifecycleCommandList>,
     /// Commands to run during postStart phase
-    pub post_start: Option<Vec<String>>,
+    pub post_start: Option<LifecycleCommandList>,
     /// Commands to run during postAttach phase
-    pub post_attach: Option<Vec<String>>,
+    pub post_attach: Option<LifecycleCommandList>,
 }
 
 impl ContainerLifecycleCommands {
@@ -1567,37 +2285,37 @@ impl ContainerLifecycleCommands {
     }
 
     /// Set initialize commands (host-side)
-    pub fn with_initialize(mut self, commands: Vec<String>) -> Self {
+    pub fn with_initialize(mut self, commands: LifecycleCommandList) -> Self {
         self.initialize = Some(commands);
         self
     }
 
     /// Set onCreate commands
-    pub fn with_on_create(mut self, commands: Vec<String>) -> Self {
+    pub fn with_on_create(mut self, commands: LifecycleCommandList) -> Self {
         self.on_create = Some(commands);
         self
     }
 
     /// Set updateContent commands
-    pub fn with_update_content(mut self, commands: Vec<String>) -> Self {
+    pub fn with_update_content(mut self, commands: LifecycleCommandList) -> Self {
         self.update_content = Some(commands);
         self
     }
 
     /// Set postCreate commands
-    pub fn with_post_create(mut self, commands: Vec<String>) -> Self {
+    pub fn with_post_create(mut self, commands: LifecycleCommandList) -> Self {
         self.post_create = Some(commands);
         self
     }
 
     /// Set postStart commands
-    pub fn with_post_start(mut self, commands: Vec<String>) -> Self {
+    pub fn with_post_start(mut self, commands: LifecycleCommandList) -> Self {
         self.post_start = Some(commands);
         self
     }
 
     /// Set postAttach commands
-    pub fn with_post_attach(mut self, commands: Vec<String>) -> Self {
+    pub fn with_post_attach(mut self, commands: LifecycleCommandList) -> Self {
         self.post_attach = Some(commands);
         self
     }
@@ -1894,10 +2612,17 @@ mod tests {
     fn make_config_commands(cmds: &[&str]) -> Vec<AggregatedLifecycleCommand> {
         cmds.iter()
             .map(|cmd| AggregatedLifecycleCommand {
-                command: serde_json::Value::String(cmd.to_string()),
+                command: LifecycleCommandValue::Shell(cmd.to_string()),
                 source: LifecycleCommandSource::Config,
             })
             .collect()
+    }
+
+    /// Helper to create a LifecycleCommandList from string commands for tests
+    fn make_shell_command_list(cmds: &[&str]) -> LifecycleCommandList {
+        LifecycleCommandList {
+            commands: make_config_commands(cmds),
+        }
     }
 
     #[test]
@@ -1956,12 +2681,12 @@ mod tests {
     #[test]
     fn test_container_lifecycle_commands_builder() {
         let commands = ContainerLifecycleCommands::new()
-            .with_initialize(vec!["echo 'initialize'".to_string()])
-            .with_on_create(vec!["echo 'onCreate'".to_string()])
-            .with_update_content(vec!["echo 'updateContent'".to_string()])
-            .with_post_create(vec!["echo 'postCreate'".to_string()])
-            .with_post_start(vec!["echo 'postStart'".to_string()])
-            .with_post_attach(vec!["echo 'postAttach'".to_string()]);
+            .with_initialize(make_shell_command_list(&["echo 'initialize'"]))
+            .with_on_create(make_shell_command_list(&["echo 'onCreate'"]))
+            .with_update_content(make_shell_command_list(&["echo 'updateContent'"]))
+            .with_post_create(make_shell_command_list(&["echo 'postCreate'"]))
+            .with_post_start(make_shell_command_list(&["echo 'postStart'"]))
+            .with_post_attach(make_shell_command_list(&["echo 'postAttach'"]));
 
         assert!(commands.initialize.is_some());
         assert!(commands.on_create.is_some());
@@ -1975,12 +2700,12 @@ mod tests {
     fn test_lifecycle_commands_all_phases() {
         // Test that all 6 lifecycle phases can be configured
         let commands = ContainerLifecycleCommands::new()
-            .with_initialize(vec!["echo 'Phase 1: initialize'".to_string()])
-            .with_on_create(vec!["echo 'Phase 2: onCreate'".to_string()])
-            .with_update_content(vec!["echo 'Phase 3: updateContent'".to_string()])
-            .with_post_create(vec!["echo 'Phase 4: postCreate'".to_string()])
-            .with_post_start(vec!["echo 'Phase 5: postStart'".to_string()])
-            .with_post_attach(vec!["echo 'Phase 6: postAttach'".to_string()]);
+            .with_initialize(make_shell_command_list(&["echo 'Phase 1: initialize'"]))
+            .with_on_create(make_shell_command_list(&["echo 'Phase 2: onCreate'"]))
+            .with_update_content(make_shell_command_list(&["echo 'Phase 3: updateContent'"]))
+            .with_post_create(make_shell_command_list(&["echo 'Phase 4: postCreate'"]))
+            .with_post_start(make_shell_command_list(&["echo 'Phase 5: postStart'"]))
+            .with_post_attach(make_shell_command_list(&["echo 'Phase 6: postAttach'"]));
 
         // Verify all phases are present
         assert_eq!(commands.initialize.as_ref().unwrap().len(), 1);
@@ -1989,32 +2714,6 @@ mod tests {
         assert_eq!(commands.post_create.as_ref().unwrap().len(), 1);
         assert_eq!(commands.post_start.as_ref().unwrap().len(), 1);
         assert_eq!(commands.post_attach.as_ref().unwrap().len(), 1);
-
-        // Verify phase content
-        assert_eq!(
-            commands.initialize.as_ref().unwrap()[0],
-            "echo 'Phase 1: initialize'"
-        );
-        assert_eq!(
-            commands.on_create.as_ref().unwrap()[0],
-            "echo 'Phase 2: onCreate'"
-        );
-        assert_eq!(
-            commands.update_content.as_ref().unwrap()[0],
-            "echo 'Phase 3: updateContent'"
-        );
-        assert_eq!(
-            commands.post_create.as_ref().unwrap()[0],
-            "echo 'Phase 4: postCreate'"
-        );
-        assert_eq!(
-            commands.post_start.as_ref().unwrap()[0],
-            "echo 'Phase 5: postStart'"
-        );
-        assert_eq!(
-            commands.post_attach.as_ref().unwrap()[0],
-            "echo 'Phase 6: postAttach'"
-        );
     }
 
     #[test]
@@ -2654,7 +3353,7 @@ mod tests {
         let source = LifecycleCommandSource::Feature {
             id: "node".to_string(),
         };
-        let command = serde_json::json!("npm install");
+        let command = LifecycleCommandValue::Shell("npm install".to_string());
 
         let aggregated = AggregatedLifecycleCommand {
             command: command.clone(),
@@ -2670,46 +3369,69 @@ mod tests {
     fn test_aggregated_lifecycle_command_with_different_command_types() {
         // Test with string command
         let string_cmd = AggregatedLifecycleCommand {
-            command: serde_json::json!("echo hello"),
+            command: LifecycleCommandValue::Shell("echo hello".to_string()),
             source: LifecycleCommandSource::Config,
         };
-        assert_eq!(string_cmd.command, serde_json::json!("echo hello"));
+        assert_eq!(
+            string_cmd.command,
+            LifecycleCommandValue::Shell("echo hello".to_string())
+        );
 
         // Test with array command
         let array_cmd = AggregatedLifecycleCommand {
-            command: serde_json::json!(["npm", "install", "--verbose"]),
+            command: LifecycleCommandValue::Exec(vec![
+                "npm".to_string(),
+                "install".to_string(),
+                "--verbose".to_string(),
+            ]),
             source: LifecycleCommandSource::Feature {
                 id: "node".to_string(),
             },
         };
         assert_eq!(
             array_cmd.command,
-            serde_json::json!(["npm", "install", "--verbose"])
+            LifecycleCommandValue::Exec(vec![
+                "npm".to_string(),
+                "install".to_string(),
+                "--verbose".to_string(),
+            ])
         );
 
         // Test with object command (parallel commands)
         let object_cmd = AggregatedLifecycleCommand {
-            command: serde_json::json!({
-                "npm": "npm install",
-                "build": "npm run build"
-            }),
+            command: LifecycleCommandValue::Parallel(IndexMap::from([
+                (
+                    "npm".to_string(),
+                    LifecycleCommandValue::Shell("npm install".to_string()),
+                ),
+                (
+                    "build".to_string(),
+                    LifecycleCommandValue::Shell("npm run build".to_string()),
+                ),
+            ])),
             source: LifecycleCommandSource::Feature {
                 id: "node".to_string(),
             },
         };
         assert_eq!(
             object_cmd.command,
-            serde_json::json!({
-                "npm": "npm install",
-                "build": "npm run build"
-            })
+            LifecycleCommandValue::Parallel(IndexMap::from([
+                (
+                    "npm".to_string(),
+                    LifecycleCommandValue::Shell("npm install".to_string()),
+                ),
+                (
+                    "build".to_string(),
+                    LifecycleCommandValue::Shell("npm run build".to_string()),
+                ),
+            ]))
         );
     }
 
     #[test]
     fn test_aggregated_lifecycle_command_clone() {
         let original = AggregatedLifecycleCommand {
-            command: serde_json::json!(["test", "command"]),
+            command: LifecycleCommandValue::Exec(vec!["test".to_string(), "command".to_string()]),
             source: LifecycleCommandSource::Feature {
                 id: "python".to_string(),
             },
@@ -2725,7 +3447,7 @@ mod tests {
     #[test]
     fn test_aggregated_lifecycle_command_debug() {
         let cmd = AggregatedLifecycleCommand {
-            command: serde_json::json!("test"),
+            command: LifecycleCommandValue::Shell("test".to_string()),
             source: LifecycleCommandSource::Config,
         };
 
@@ -2826,6 +3548,132 @@ mod tests {
     }
 
     // ============================================================================
+    // Tests for LifecycleCommandValue::from_json_value()
+
+    #[test]
+    fn test_lifecycle_command_value_from_string() {
+        let val = serde_json::json!("npm install");
+        let result = LifecycleCommandValue::from_json_value(&val).unwrap();
+        assert_eq!(
+            result,
+            Some(LifecycleCommandValue::Shell("npm install".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_from_empty_string() {
+        let val = serde_json::json!("");
+        let result = LifecycleCommandValue::from_json_value(&val).unwrap();
+        assert_eq!(result, Some(LifecycleCommandValue::Shell(String::new())));
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_from_array() {
+        let val = serde_json::json!(["npm", "install"]);
+        let result = LifecycleCommandValue::from_json_value(&val).unwrap();
+        assert_eq!(
+            result,
+            Some(LifecycleCommandValue::Exec(vec![
+                "npm".to_string(),
+                "install".to_string()
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_from_empty_array() {
+        let val = serde_json::json!([]);
+        let result = LifecycleCommandValue::from_json_value(&val).unwrap();
+        assert_eq!(result, Some(LifecycleCommandValue::Exec(vec![])));
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_from_array_non_string_error() {
+        let val = serde_json::json!(["npm", 42]);
+        let result = LifecycleCommandValue::from_json_value(&val);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_from_object() {
+        let val = serde_json::json!({"install": "npm install", "build": ["npm", "run", "build"]});
+        let result = LifecycleCommandValue::from_json_value(&val)
+            .unwrap()
+            .unwrap();
+        match result {
+            LifecycleCommandValue::Parallel(map) => {
+                assert_eq!(map.len(), 2);
+                assert_eq!(
+                    map.get("install"),
+                    Some(&LifecycleCommandValue::Shell("npm install".to_string()))
+                );
+                assert_eq!(
+                    map.get("build"),
+                    Some(&LifecycleCommandValue::Exec(vec![
+                        "npm".to_string(),
+                        "run".to_string(),
+                        "build".to_string()
+                    ]))
+                );
+            }
+            _ => panic!("Expected Parallel variant"),
+        }
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_from_empty_object() {
+        let val = serde_json::json!({});
+        let result = LifecycleCommandValue::from_json_value(&val).unwrap();
+        assert_eq!(
+            result,
+            Some(LifecycleCommandValue::Parallel(IndexMap::new()))
+        );
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_from_null() {
+        let val = serde_json::json!(null);
+        let result = LifecycleCommandValue::from_json_value(&val).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_from_number_error() {
+        let val = serde_json::json!(42);
+        assert!(LifecycleCommandValue::from_json_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_from_boolean_error() {
+        let val = serde_json::json!(true);
+        assert!(LifecycleCommandValue::from_json_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_is_empty() {
+        assert!(LifecycleCommandValue::Shell(String::new()).is_empty());
+        assert!(!LifecycleCommandValue::Shell("cmd".to_string()).is_empty());
+        assert!(LifecycleCommandValue::Exec(vec![]).is_empty());
+        assert!(!LifecycleCommandValue::Exec(vec!["cmd".to_string()]).is_empty());
+        assert!(LifecycleCommandValue::Parallel(IndexMap::new()).is_empty());
+    }
+
+    #[test]
+    fn test_lifecycle_command_value_object_skips_invalid_values() {
+        // Object with a number value should skip that entry with a log, not error
+        let val = serde_json::json!({"install": "npm install", "bad": 42});
+        let result = LifecycleCommandValue::from_json_value(&val)
+            .unwrap()
+            .unwrap();
+        match result {
+            LifecycleCommandValue::Parallel(map) => {
+                assert_eq!(map.len(), 1);
+                assert!(map.contains_key("install"));
+            }
+            _ => panic!("Expected Parallel variant"),
+        }
+    }
+
     // Tests for aggregate_lifecycle_commands()
     // ============================================================================
 
@@ -2871,6 +3719,7 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // Verify ordering: feature1, feature2, config
@@ -2939,6 +3788,7 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // Only python feature command should be included
@@ -2995,6 +3845,7 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // No commands should be included
@@ -3018,6 +3869,7 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // Only config command should be included
@@ -3054,6 +3906,7 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // Only feature command should be included
@@ -3101,6 +3954,7 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // Both commands should be included with their complex formats
@@ -3161,6 +4015,7 @@ mod tests {
         // Test OnCreate phase
         let on_create_commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
         assert_eq!(on_create_commands.len(), 2);
         assert_eq!(on_create_commands[0].command, json!("onCreate-feature"));
@@ -3169,6 +4024,7 @@ mod tests {
         // Test UpdateContent phase
         let update_content_commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::UpdateContent, &features, &config)
+                .unwrap()
                 .commands;
         assert_eq!(update_content_commands.len(), 2);
         assert_eq!(
@@ -3183,6 +4039,7 @@ mod tests {
         // Test PostCreate phase
         let post_create_commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::PostCreate, &features, &config)
+                .unwrap()
                 .commands;
         assert_eq!(post_create_commands.len(), 2);
         assert_eq!(post_create_commands[0].command, json!("postCreate-feature"));
@@ -3191,6 +4048,7 @@ mod tests {
         // Test PostStart phase
         let post_start_commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::PostStart, &features, &config)
+                .unwrap()
                 .commands;
         assert_eq!(post_start_commands.len(), 2);
         assert_eq!(post_start_commands[0].command, json!("postStart-feature"));
@@ -3199,6 +4057,7 @@ mod tests {
         // Test PostAttach phase
         let post_attach_commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::PostAttach, &features, &config)
+                .unwrap()
                 .commands;
         assert_eq!(post_attach_commands.len(), 2);
         assert_eq!(post_attach_commands[0].command, json!("postAttach-feature"));
@@ -3236,6 +4095,7 @@ mod tests {
         // Test Initialize phase
         let initialize_commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::Initialize, &features, &config)
+                .unwrap()
                 .commands;
 
         // Only config command should be included (features don't support initialize)
@@ -3278,6 +4138,7 @@ mod tests {
         // Test Dotfiles phase (no corresponding command field)
         let dotfiles_commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::Dotfiles, &features, &config)
+                .unwrap()
                 .commands;
 
         // No commands should be returned for Dotfiles phase
@@ -3336,6 +4197,7 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // Verify strict ordering: first, second, third, config
@@ -3443,6 +4305,7 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // Only feature1, feature4, and config should be included
@@ -3504,6 +4367,7 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // Only feature commands should be included
@@ -3551,10 +4415,265 @@ mod tests {
         // Aggregate onCreate commands
         let commands =
             super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
                 .commands;
 
         // Whitespace is not considered empty per the contract
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].command, json!(" "));
+    }
+
+    // ===================================================================
+    // T018: Unit tests for exec-style execution
+    // ===================================================================
+
+    #[test]
+    fn test_exec_style_variable_substitution() {
+        // Verify that substitute_variables preserves the Exec variant
+        // and applies substitution element-wise
+        let cmd = LifecycleCommandValue::Exec(vec![
+            "echo".to_string(),
+            "${localWorkspaceFolder}".to_string(),
+        ]);
+        assert!(matches!(cmd, LifecycleCommandValue::Exec(_)));
+        assert!(!cmd.is_empty());
+
+        // Apply substitution with a context
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let substituted = cmd.substitute_variables(&context);
+
+        // Verify the variant is preserved
+        match &substituted {
+            LifecycleCommandValue::Exec(args) => {
+                assert_eq!(args.len(), 2);
+                assert_eq!(args[0], "echo");
+                // The second element should have been substituted
+                // (localWorkspaceFolder maps to the temp dir path)
+                assert_ne!(args[1], "${localWorkspaceFolder}");
+            }
+            _ => panic!("Expected Exec variant after substitution"),
+        }
+    }
+
+    #[test]
+    fn test_exec_empty_args_is_noop() {
+        let cmd = LifecycleCommandValue::Exec(vec![]);
+        assert!(cmd.is_empty());
+    }
+
+    #[test]
+    fn test_exec_single_element() {
+        let cmd = LifecycleCommandValue::Exec(vec!["ls".to_string()]);
+        assert!(!cmd.is_empty());
+    }
+
+    #[test]
+    fn test_exec_args_with_spaces_preserved() {
+        // Verify that args with spaces and metacharacters are preserved literally
+        let cmd = LifecycleCommandValue::Exec(vec![
+            "echo".to_string(),
+            "hello world".to_string(),
+            "foo && bar".to_string(),
+            "$(whoami)".to_string(),
+        ]);
+        match &cmd {
+            LifecycleCommandValue::Exec(args) => {
+                assert_eq!(args.len(), 4);
+                assert_eq!(args[0], "echo");
+                assert_eq!(args[1], "hello world");
+                assert_eq!(args[2], "foo && bar");
+                assert_eq!(args[3], "$(whoami)");
+            }
+            _ => panic!("Expected Exec variant"),
+        }
+    }
+
+    #[test]
+    fn test_exec_no_shell_wrapping_in_args() {
+        // Verify the Exec variant does not contain shell wrapper elements
+        let cmd = LifecycleCommandValue::Exec(vec![
+            "npm".to_string(),
+            "install".to_string(),
+            "--save-dev".to_string(),
+        ]);
+        match &cmd {
+            LifecycleCommandValue::Exec(args) => {
+                // Should NOT have "sh" or "-c" anywhere
+                assert!(!args.contains(&"sh".to_string()));
+                assert!(!args.contains(&"-c".to_string()));
+                // First element is the executable
+                assert_eq!(args[0], "npm");
+            }
+            _ => panic!("Expected Exec variant"),
+        }
+    }
+
+    // ===================================================================
+    // T023: Unit tests for parallel execution
+    // ===================================================================
+
+    #[test]
+    fn test_parallel_command_result() {
+        let result = ParallelCommandResult {
+            key: "install".to_string(),
+            exit_code: 0,
+            duration: Duration::from_millis(100),
+            success: true,
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        assert!(result.success);
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.key, "install");
+        assert_eq!(result.duration, Duration::from_millis(100));
+    }
+
+    #[test]
+    fn test_parallel_command_result_failure() {
+        let result = ParallelCommandResult {
+            key: "build".to_string(),
+            exit_code: 1,
+            duration: Duration::from_millis(500),
+            success: false,
+            stdout: String::new(),
+            stderr: "build failed".to_string(),
+        };
+        assert!(!result.success);
+        assert_eq!(result.exit_code, 1);
+        assert_eq!(result.key, "build");
+        assert_eq!(result.stderr, "build failed");
+    }
+
+    #[test]
+    fn test_parallel_empty_object_is_noop() {
+        let cmd = LifecycleCommandValue::Parallel(IndexMap::new());
+        assert!(cmd.is_empty());
+    }
+
+    #[test]
+    fn test_parallel_mixed_format_values() {
+        let mut map = IndexMap::new();
+        map.insert(
+            "shell".to_string(),
+            LifecycleCommandValue::Shell("echo hello".to_string()),
+        );
+        map.insert(
+            "exec".to_string(),
+            LifecycleCommandValue::Exec(vec!["echo".to_string(), "world".to_string()]),
+        );
+        let cmd = LifecycleCommandValue::Parallel(map);
+        assert!(!cmd.is_empty());
+        match &cmd {
+            LifecycleCommandValue::Parallel(m) => {
+                assert_eq!(m.len(), 2);
+                assert!(matches!(
+                    m.get("shell"),
+                    Some(LifecycleCommandValue::Shell(_))
+                ));
+                assert!(matches!(
+                    m.get("exec"),
+                    Some(LifecycleCommandValue::Exec(_))
+                ));
+            }
+            _ => panic!("Expected Parallel"),
+        }
+    }
+
+    #[test]
+    fn test_parallel_variable_substitution() {
+        // Verify that substitute_variables applies to all entries recursively
+        let mut map = IndexMap::new();
+        map.insert(
+            "shell".to_string(),
+            LifecycleCommandValue::Shell("echo ${localWorkspaceFolder}".to_string()),
+        );
+        map.insert(
+            "exec".to_string(),
+            LifecycleCommandValue::Exec(vec![
+                "echo".to_string(),
+                "${localWorkspaceFolder}".to_string(),
+            ]),
+        );
+        let cmd = LifecycleCommandValue::Parallel(map);
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let substituted = cmd.substitute_variables(&context);
+
+        match &substituted {
+            LifecycleCommandValue::Parallel(m) => {
+                assert_eq!(m.len(), 2);
+                // Shell entry should have substitution applied
+                if let Some(LifecycleCommandValue::Shell(s)) = m.get("shell") {
+                    assert!(!s.contains("${localWorkspaceFolder}"));
+                } else {
+                    panic!("Expected Shell variant for 'shell' key");
+                }
+                // Exec entry should have substitution applied element-wise
+                if let Some(LifecycleCommandValue::Exec(args)) = m.get("exec") {
+                    assert_eq!(args.len(), 2);
+                    assert_eq!(args[0], "echo");
+                    assert!(!args[1].contains("${localWorkspaceFolder}"));
+                } else {
+                    panic!("Expected Exec variant for 'exec' key");
+                }
+            }
+            _ => panic!("Expected Parallel variant after substitution"),
+        }
+    }
+
+    #[test]
+    fn test_parallel_preserves_key_order() {
+        // Verify that IndexMap preserves insertion order
+        let mut map = IndexMap::new();
+        map.insert(
+            "install".to_string(),
+            LifecycleCommandValue::Shell("npm install".to_string()),
+        );
+        map.insert(
+            "build".to_string(),
+            LifecycleCommandValue::Shell("npm run build".to_string()),
+        );
+        map.insert(
+            "test".to_string(),
+            LifecycleCommandValue::Shell("npm test".to_string()),
+        );
+        let cmd = LifecycleCommandValue::Parallel(map);
+
+        match &cmd {
+            LifecycleCommandValue::Parallel(m) => {
+                let keys: Vec<&String> = m.keys().collect();
+                assert_eq!(keys, vec!["install", "build", "test"]);
+            }
+            _ => panic!("Expected Parallel"),
+        }
+    }
+
+    #[test]
+    fn test_parallel_from_json_mixed_formats() {
+        use serde_json::json;
+        // Parse a JSON object with mixed Shell and Exec values
+        let json_val = json!({
+            "install": "npm install",
+            "build": ["npm", "run", "build"]
+        });
+        let parsed = LifecycleCommandValue::from_json_value(&json_val)
+            .unwrap()
+            .unwrap();
+        match &parsed {
+            LifecycleCommandValue::Parallel(m) => {
+                assert_eq!(m.len(), 2);
+                assert!(matches!(
+                    m.get("install"),
+                    Some(LifecycleCommandValue::Shell(_))
+                ));
+                assert!(matches!(
+                    m.get("build"),
+                    Some(LifecycleCommandValue::Exec(_))
+                ));
+            }
+            _ => panic!("Expected Parallel variant from JSON object"),
+        }
     }
 }
