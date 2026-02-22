@@ -37,7 +37,7 @@ fn default_empty_object() -> serde_json::Value {
 ///
 /// Supports port numbers (e.g., 3000) and port mappings (e.g., "3000:3000").
 /// For now, stores the original value for future parsing.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum PortSpec {
     /// Port number
@@ -1086,6 +1086,7 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.docker_compose_file.clone()),
             service: overlay.service.clone().or_else(|| base.service.clone()),
+            // runServices: replace-if-non-empty (Compose-specific, not in upstream merge spec)
             run_services: if overlay.run_services.is_empty() {
                 base.run_services.clone()
             } else {
@@ -1103,17 +1104,9 @@ impl ConfigMerger {
             // Customizations: deep merge as objects
             customizations: Self::merge_json_objects(&base.customizations, &overlay.customizations),
 
-            // Arrays that override (no concat) - lifecycle commands
-            mounts: if overlay.mounts.is_empty() {
-                base.mounts.clone()
-            } else {
-                overlay.mounts.clone()
-            },
-            forward_ports: if overlay.forward_ports.is_empty() {
-                base.forward_ports.clone()
-            } else {
-                overlay.forward_ports.clone()
-            },
+            // Arrays: union with deduplication — entries from all sources preserved
+            mounts: Self::union_arrays(&base.mounts, &overlay.mounts),
+            forward_ports: Self::union_arrays(&base.forward_ports, &overlay.forward_ports),
             on_create_command: overlay
                 .on_create_command
                 .clone()
@@ -1175,9 +1168,9 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.host_requirements.clone()),
 
-            // Security options: last writer wins for privileged and init, concatenate arrays for capabilities and security opts
-            privileged: overlay.privileged.or(base.privileged),
-            init: overlay.init.or(base.init),
+            // Security options: OR semantics for privileged and init, concatenate arrays for capabilities and security opts
+            privileged: Self::merge_bool_or(base.privileged, overlay.privileged),
+            init: Self::merge_bool_or(base.init, overlay.init),
             cap_add: Self::concat_string_arrays(&base.cap_add, &overlay.cap_add),
             security_opt: Self::concat_string_arrays(&base.security_opt, &overlay.security_opt),
         }
@@ -1231,6 +1224,29 @@ impl ConfigMerger {
     fn concat_string_arrays(base: &[String], overlay: &[String]) -> Vec<String> {
         let mut result = base.to_vec();
         result.extend_from_slice(overlay);
+        result
+    }
+
+    /// Merge two optional booleans with OR semantics.
+    /// Returns `Some(true)` if either is `Some(true)`, `Some(false)` if both are `Some(false)`,
+    /// the `Some` value if only one is `Some`, and `None` if both are `None`.
+    fn merge_bool_or(base: Option<bool>, overlay: Option<bool>) -> Option<bool> {
+        match (base, overlay) {
+            (Some(b), Some(o)) => Some(b || o),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// Union two slices with deduplication, preserving base ordering.
+    /// Appends overlay entries not already present using `PartialEq`.
+    /// O(n*m) contains check is acceptable — mount/port arrays are typically < 20 entries.
+    fn union_arrays<T: Clone + PartialEq>(base: &[T], overlay: &[T]) -> Vec<T> {
+        let mut result = base.to_vec();
+        for entry in overlay {
+            if !result.contains(entry) {
+                result.push(entry.clone());
+            }
+        }
         result
     }
 
@@ -2893,6 +2909,364 @@ mod tests {
             _ => panic!("Expected Config(Validation) error"),
         }
         Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for merge_bool_or helper (T005–T012)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_merge_bool_or_both_none() {
+        assert_eq!(ConfigMerger::merge_bool_or(None, None), None);
+    }
+
+    #[test]
+    fn test_merge_bool_or_true_false() {
+        assert_eq!(
+            ConfigMerger::merge_bool_or(Some(true), Some(false)),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_merge_bool_or_false_true() {
+        assert_eq!(
+            ConfigMerger::merge_bool_or(Some(false), Some(true)),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_merge_bool_or_true_none() {
+        assert_eq!(ConfigMerger::merge_bool_or(Some(true), None), Some(true));
+    }
+
+    #[test]
+    fn test_merge_bool_or_none_true() {
+        assert_eq!(ConfigMerger::merge_bool_or(None, Some(true)), Some(true));
+    }
+
+    #[test]
+    fn test_merge_bool_or_false_false() {
+        assert_eq!(
+            ConfigMerger::merge_bool_or(Some(false), Some(false)),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_merge_bool_or_none_false() {
+        assert_eq!(ConfigMerger::merge_bool_or(None, Some(false)), Some(false));
+    }
+
+    #[test]
+    fn test_merge_bool_or_false_none() {
+        assert_eq!(ConfigMerger::merge_bool_or(Some(false), None), Some(false));
+    }
+
+    #[test]
+    fn test_merge_bool_or_true_true() {
+        assert_eq!(
+            ConfigMerger::merge_bool_or(Some(true), Some(true)),
+            Some(true)
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Integration tests for privileged OR semantics via merge_two_configs (T013–T014)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_merge_privileged_or_semantics() {
+        let base = DevContainerConfig {
+            privileged: Some(true),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            privileged: Some(false),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        assert_eq!(merged.privileged, Some(true));
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for mounts union (T015–T019)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_merge_mounts_union_disjoint() {
+        use serde_json::json;
+        let a = json!({"source": "/a", "target": "/mnt/a", "type": "bind"});
+        let b = json!({"source": "/b", "target": "/mnt/b", "type": "bind"});
+        let c = json!({"source": "/c", "target": "/mnt/c", "type": "bind"});
+        let d = json!({"source": "/d", "target": "/mnt/d", "type": "bind"});
+        let base = vec![a.clone(), b.clone()];
+        let overlay = vec![c.clone(), d.clone()];
+        let result = ConfigMerger::union_arrays(&base, &overlay);
+        assert_eq!(result, vec![a, b, c, d]);
+    }
+
+    #[test]
+    fn test_merge_mounts_union_with_duplicates() {
+        use serde_json::json;
+        let a = json!({"source": "/a", "target": "/mnt/a", "type": "bind"});
+        let b = json!({"source": "/b", "target": "/mnt/b", "type": "bind"});
+        let c = json!({"source": "/c", "target": "/mnt/c", "type": "bind"});
+        let base = vec![a.clone(), b.clone()];
+        let overlay = vec![b.clone(), c.clone()];
+        let result = ConfigMerger::union_arrays(&base, &overlay);
+        assert_eq!(result, vec![a, b, c]);
+    }
+
+    #[test]
+    fn test_merge_mounts_union_base_empty() {
+        use serde_json::json;
+        let a = json!({"source": "/a", "target": "/mnt/a", "type": "bind"});
+        let result = ConfigMerger::union_arrays::<serde_json::Value>(&[], std::slice::from_ref(&a));
+        assert_eq!(result, vec![a]);
+    }
+
+    #[test]
+    fn test_merge_mounts_union_overlay_empty() {
+        use serde_json::json;
+        let a = json!({"source": "/a", "target": "/mnt/a", "type": "bind"});
+        let result = ConfigMerger::union_arrays(std::slice::from_ref(&a), &[]);
+        assert_eq!(result, vec![a]);
+    }
+
+    #[test]
+    fn test_merge_mounts_union_both_empty() {
+        let result = ConfigMerger::union_arrays::<serde_json::Value>(&[], &[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_merge_mounts_union_string_vs_object_form() {
+        use serde_json::json;
+        // String-form and object-form of the same mount are treated as distinct entries
+        // per spec edge case — they serialize differently
+        let string_form = json!("source=/src,target=/dst,type=bind");
+        let object_form = json!({"source": "/src", "target": "/dst", "type": "bind"});
+        let base = vec![string_form.clone()];
+        let overlay = vec![object_form.clone()];
+        let result = ConfigMerger::union_arrays(&base, &overlay);
+        assert_eq!(result, vec![string_form, object_form]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for forwardPorts union (T021–T023)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_merge_forward_ports_union_disjoint() {
+        let base = vec![PortSpec::Number(3000), PortSpec::Number(8080)];
+        let overlay = vec![PortSpec::Number(5432), PortSpec::Number(6379)];
+        let result = ConfigMerger::union_arrays(&base, &overlay);
+        assert_eq!(
+            result,
+            vec![
+                PortSpec::Number(3000),
+                PortSpec::Number(8080),
+                PortSpec::Number(5432),
+                PortSpec::Number(6379),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_forward_ports_union_with_duplicates() {
+        let base = vec![PortSpec::Number(3000), PortSpec::Number(8080)];
+        let overlay = vec![PortSpec::Number(8080), PortSpec::Number(5432)];
+        let result = ConfigMerger::union_arrays(&base, &overlay);
+        assert_eq!(
+            result,
+            vec![
+                PortSpec::Number(3000),
+                PortSpec::Number(8080),
+                PortSpec::Number(5432),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_forward_ports_union_mixed_types() {
+        // Number(3000) and String("3000:3000") are distinct PortSpec variants
+        let base = vec![PortSpec::Number(3000)];
+        let overlay = vec![PortSpec::String("3000:3000".to_string())];
+        let result = ConfigMerger::union_arrays(&base, &overlay);
+        assert_eq!(
+            result,
+            vec![
+                PortSpec::Number(3000),
+                PortSpec::String("3000:3000".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_forward_ports_union_overlay_empty() {
+        let base = vec![PortSpec::Number(3000)];
+        let result = ConfigMerger::union_arrays(&base, &[]);
+        assert_eq!(result, vec![PortSpec::Number(3000)]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Integration test for init OR semantics (T025)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_merge_init_or_semantics() {
+        let base = DevContainerConfig {
+            init: Some(true),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            init: Some(false),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        assert_eq!(merged.init, Some(true));
+    }
+
+    #[test]
+    fn test_merge_init_both_none() {
+        let base = DevContainerConfig::default();
+        let overlay = DevContainerConfig::default();
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        assert_eq!(merged.init, None);
+    }
+
+    // -------------------------------------------------------------------------
+    // Chain merge tests (T027–T028)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_merge_chain_bool_or() {
+        // Three-config chain: false → true → false; result must be Some(true)
+        let c1 = DevContainerConfig {
+            privileged: Some(false),
+            ..Default::default()
+        };
+        let c2 = DevContainerConfig {
+            privileged: Some(true),
+            ..Default::default()
+        };
+        let c3 = DevContainerConfig {
+            privileged: Some(false),
+            ..Default::default()
+        };
+        let step1 = ConfigMerger::merge_two_configs(&c1, &c2);
+        let step2 = ConfigMerger::merge_two_configs(&step1, &c3);
+        assert_eq!(step2.privileged, Some(true));
+    }
+
+    #[test]
+    fn test_merge_chain_array_union() {
+        use serde_json::json;
+        let a = json!({"source": "/a", "target": "/mnt/a", "type": "bind"});
+        let b = json!({"source": "/b", "target": "/mnt/b", "type": "bind"});
+        let c = json!({"source": "/c", "target": "/mnt/c", "type": "bind"});
+        let c1 = DevContainerConfig {
+            mounts: vec![a.clone()],
+            ..Default::default()
+        };
+        let c2 = DevContainerConfig {
+            mounts: vec![b.clone()],
+            ..Default::default()
+        };
+        let c3 = DevContainerConfig {
+            mounts: vec![c.clone()],
+            ..Default::default()
+        };
+        let step1 = ConfigMerger::merge_two_configs(&c1, &c2);
+        let step2 = ConfigMerger::merge_two_configs(&step1, &c3);
+        assert_eq!(step2.mounts, vec![a, b, c]);
+    }
+
+    #[test]
+    fn test_merge_chain_forward_ports_union() {
+        let c1 = DevContainerConfig {
+            forward_ports: vec![PortSpec::Number(3000)],
+            ..Default::default()
+        };
+        let c2 = DevContainerConfig {
+            forward_ports: vec![PortSpec::Number(8080)],
+            ..Default::default()
+        };
+        let c3 = DevContainerConfig {
+            forward_ports: vec![PortSpec::Number(5432)],
+            ..Default::default()
+        };
+        let step1 = ConfigMerger::merge_two_configs(&c1, &c2);
+        let step2 = ConfigMerger::merge_two_configs(&step1, &c3);
+        assert_eq!(
+            step2.forward_ports,
+            vec![
+                PortSpec::Number(3000),
+                PortSpec::Number(8080),
+                PortSpec::Number(5432),
+            ]
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Regression test: unchanged merge categories (T029)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_merge_other_categories_unchanged() {
+        // Scalars: last-wins
+        let base = DevContainerConfig {
+            name: Some("base-name".to_string()),
+            image: Some("base-image".to_string()),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            name: Some("overlay-name".to_string()),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        assert_eq!(merged.name, Some("overlay-name".to_string()));
+        assert_eq!(merged.image, Some("base-image".to_string())); // base wins when overlay is None
+
+        // Maps: key-merge (overlay wins per key)
+        let mut base_env = std::collections::HashMap::new();
+        base_env.insert("A".to_string(), "1".to_string());
+        base_env.insert("B".to_string(), "2".to_string());
+        let mut overlay_env = std::collections::HashMap::new();
+        overlay_env.insert("B".to_string(), "override".to_string());
+        overlay_env.insert("C".to_string(), "3".to_string());
+        let base2 = DevContainerConfig {
+            container_env: base_env,
+            ..Default::default()
+        };
+        let overlay2 = DevContainerConfig {
+            container_env: overlay_env,
+            ..Default::default()
+        };
+        let merged2 = ConfigMerger::merge_two_configs(&base2, &overlay2);
+        assert_eq!(merged2.container_env.get("A"), Some(&"1".to_string()));
+        assert_eq!(
+            merged2.container_env.get("B"),
+            Some(&"override".to_string())
+        );
+        assert_eq!(merged2.container_env.get("C"), Some(&"3".to_string()));
+
+        // Concat arrays: run_args concatenates
+        let base3 = DevContainerConfig {
+            run_args: vec!["--network=host".to_string()],
+            ..Default::default()
+        };
+        let overlay3 = DevContainerConfig {
+            run_args: vec!["--privileged".to_string()],
+            ..Default::default()
+        };
+        let merged3 = ConfigMerger::merge_two_configs(&base3, &overlay3);
+        assert_eq!(
+            merged3.run_args,
+            vec!["--network=host".to_string(), "--privileged".to_string()]
+        );
     }
 }
 
