@@ -228,6 +228,36 @@ impl ConfigLocation {
     }
 }
 
+/// Result of devcontainer configuration discovery.
+///
+/// Represents the three possible outcomes when searching for
+/// devcontainer.json across the three priority locations:
+/// 1. `.devcontainer/devcontainer.json` or `.devcontainer/devcontainer.jsonc`
+/// 2. `.devcontainer.json` or `.devcontainer.jsonc`
+/// 3. Named config folders: `.devcontainer/<name>/devcontainer.json(c)`
+///
+/// # Invariants
+///
+/// - `Multiple` always contains 2+ paths, sorted alphabetically by subdirectory name
+/// - `Single` path always exists on disk at time of construction
+/// - `None` default path does NOT exist on disk
+#[derive(Debug, Clone, PartialEq)]
+pub enum DiscoveryResult {
+    /// Exactly one configuration file was found.
+    /// Contains the absolute path to the discovered config file.
+    Single(PathBuf),
+
+    /// Multiple configuration files were found at the named config level.
+    /// Contains all discovered paths, sorted alphabetically by subdirectory name.
+    /// The caller should present these to the user and require explicit selection.
+    Multiple(Vec<PathBuf>),
+
+    /// No configuration file was found at any search location.
+    /// Contains the default/preferred path for error messaging
+    /// (`.devcontainer/devcontainer.json`). The file does NOT exist.
+    None(PathBuf),
+}
+
 /// System resource specification with support for units.
 ///
 /// Supports numeric values with optional unit suffixes:
@@ -1325,6 +1355,65 @@ impl ConfigMerger {
         result
     }
 }
+
+/// Check a directory for devcontainer.json or devcontainer.jsonc.
+///
+/// Returns the path to the first found config file, preferring `.json` over `.jsonc`.
+/// Returns `None` if neither file exists in `dir`.
+fn check_config_file(dir: &Path) -> Option<PathBuf> {
+    let json_path = dir.join("devcontainer.json");
+    if json_path.exists() {
+        return Some(json_path);
+    }
+    let jsonc_path = dir.join("devcontainer.jsonc");
+    if jsonc_path.exists() {
+        return Some(jsonc_path);
+    }
+    None
+}
+
+/// Enumerate named config folders inside `.devcontainer/`.
+///
+/// Reads direct child directories of `devcontainer_dir`, checks each for a
+/// `devcontainer.json` or `devcontainer.jsonc` file (via `check_config_file`),
+/// and returns all found paths sorted alphabetically by subdirectory name.
+///
+/// Only one level deep — nested subdirectories are not searched.
+/// Subdirectories without a config file are silently skipped.
+///
+/// # Errors
+///
+/// Returns `ConfigError::Io` if `read_dir` or `file_type` fails.
+fn enumerate_named_configs(devcontainer_dir: &Path) -> Result<Vec<PathBuf>> {
+    if !devcontainer_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let entries =
+        std::fs::read_dir(devcontainer_dir).map_err(|e| DeaconError::Config(ConfigError::Io(e)))?;
+
+    let mut subdirs: Vec<(String, PathBuf)> = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| DeaconError::Config(ConfigError::Io(e)))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| DeaconError::Config(ConfigError::Io(e)))?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let subdir_path = entry.path();
+        if let Some(config_path) = check_config_file(&subdir_path) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            subdirs.push((name, config_path));
+        }
+    }
+
+    // Sort alphabetically by subdirectory name for deterministic behavior
+    subdirs.sort_by(|a, b| a.0.cmp(&b.0));
+
+    Ok(subdirs.into_iter().map(|(_, path)| path).collect())
+}
+
 /// Configuration loader for DevContainer configurations.
 ///
 /// Provides methods to load and parse devcontainer.json/devcontainer.jsonc files
@@ -1345,22 +1434,33 @@ impl ConfigMerger {
 pub struct ConfigLoader;
 
 impl ConfigLoader {
-    /// Discover DevContainer configuration file in workspace
+    /// Discover DevContainer configuration file in workspace.
     ///
-    /// This method implements the configuration discovery rules:
-    /// 1. Search for `.devcontainer/devcontainer.json` first
-    /// 2. Then search for `.devcontainer.json` in workspace root
-    /// 3. Return the first file found (may not exist)
+    /// Implements the three-tier config discovery algorithm per the containers.dev spec:
+    ///
+    /// 1. **Priority 1**: `.devcontainer/devcontainer.json` or `.devcontainer/devcontainer.jsonc`
+    /// 2. **Priority 2**: `.devcontainer.json` or `.devcontainer.jsonc` (workspace root)
+    /// 3. **Priority 3**: Named config folders — direct subdirectories of `.devcontainer/`
+    ///    that contain a `devcontainer.json` or `devcontainer.jsonc`
+    ///
+    /// Priority 1 and 2 short-circuit: if found, no subdirectory enumeration occurs.
+    /// At priority 3, if exactly one named config is found it is returned as `Single`;
+    /// if multiple are found they are returned as `Multiple` (sorted alphabetically).
     ///
     /// ## Arguments
     ///
-    /// * `workspace` - Path to the workspace folder
+    /// * `workspace` - Path to the workspace folder (must exist)
     ///
     /// ## Returns
     ///
-    /// Returns `Ok(ConfigLocation)` with the discovered configuration path.
-    /// The returned location may indicate a non-existent file if no configuration
-    /// is found, allowing callers to decide how to handle missing configurations.
+    /// - `DiscoveryResult::Single(path)` — exactly one config found; file exists
+    /// - `DiscoveryResult::Multiple(paths)` — multiple named configs found; requires explicit selection
+    /// - `DiscoveryResult::None(default)` — no config found; default path does not exist
+    ///
+    /// ## Errors
+    ///
+    /// - `ConfigError::NotFound` if `workspace` does not exist
+    /// - `ConfigError::Io` if filesystem enumeration fails
     ///
     /// ## Example
     ///
@@ -1369,17 +1469,17 @@ impl ConfigLoader {
     /// use std::path::Path;
     ///
     /// # fn example() -> anyhow::Result<()> {
-    /// let location = ConfigLoader::discover_config(Path::new("/workspace"))?;
-    /// if location.exists() {
-    ///     println!("Found config at: {}", location.path().display());
-    /// } else {
-    ///     println!("No config found, would use: {}", location.path().display());
+    /// use deacon_core::config::DiscoveryResult;
+    /// match ConfigLoader::discover_config(Path::new("/workspace"))? {
+    ///     DiscoveryResult::Single(path) => println!("Found config at: {}", path.display()),
+    ///     DiscoveryResult::Multiple(paths) => println!("Multiple configs found: {}", paths.len()),
+    ///     DiscoveryResult::None(default) => println!("No config found, default: {}", default.display()),
     /// }
     /// # Ok(())
     /// # }
     /// ```
     #[instrument(skip_all, fields(workspace = %workspace.display()))]
-    pub fn discover_config(workspace: &Path) -> Result<ConfigLocation> {
+    pub fn discover_config(workspace: &Path) -> Result<DiscoveryResult> {
         debug!(
             "Discovering DevContainer configuration in workspace: {}",
             workspace.display()
@@ -1392,27 +1492,62 @@ impl ConfigLoader {
             }));
         }
 
-        // Search order: .devcontainer/devcontainer.json then .devcontainer.json
-        let search_paths = [
-            workspace.join(".devcontainer").join("devcontainer.json"),
-            workspace.join(".devcontainer.json"),
-        ];
-
-        for path in &search_paths {
-            debug!("Checking for configuration file: {}", path.display());
-            if path.exists() {
-                debug!("Found configuration file: {}", path.display());
-                return Ok(ConfigLocation::new(path.clone()));
-            }
+        // Priority 1: .devcontainer/devcontainer.json or .devcontainer/devcontainer.jsonc
+        let devcontainer_dir = workspace.join(".devcontainer");
+        debug!("Checking priority 1: {}", devcontainer_dir.display());
+        if let Some(path) = check_config_file(&devcontainer_dir) {
+            debug!("Found priority 1 config: {}", path.display());
+            return Ok(DiscoveryResult::Single(path));
         }
 
-        // Return the first preference even if it doesn't exist
-        let default_path = search_paths[0].clone();
+        // Priority 2: .devcontainer.json or .devcontainer.jsonc in workspace root
+        let root_json = workspace.join(".devcontainer.json");
+        let root_jsonc = workspace.join(".devcontainer.jsonc");
+        debug!("Checking priority 2: {}", root_json.display());
+        if root_json.exists() {
+            debug!("Found priority 2 config: {}", root_json.display());
+            return Ok(DiscoveryResult::Single(root_json));
+        }
+        if root_jsonc.exists() {
+            debug!("Found priority 2 config: {}", root_jsonc.display());
+            return Ok(DiscoveryResult::Single(root_jsonc));
+        }
+
+        // Priority 3: named config folders inside .devcontainer/
         debug!(
-            "No configuration file found, defaulting to: {}",
-            default_path.display()
+            "Checking priority 3: named configs in {}",
+            devcontainer_dir.display()
         );
-        Ok(ConfigLocation::new(default_path))
+        let named_configs = enumerate_named_configs(&devcontainer_dir)?;
+        match named_configs.len() {
+            0 => {
+                let default_path = devcontainer_dir.join("devcontainer.json");
+                debug!(
+                    "No configuration file found, defaulting to: {}",
+                    default_path.display()
+                );
+                Ok(DiscoveryResult::None(default_path))
+            }
+            1 => {
+                let path = named_configs
+                    .into_iter()
+                    .next()
+                    .expect("named_configs confirmed to have exactly 1 element by match arm");
+                debug!("Found single named config: {}", path.display());
+                Ok(DiscoveryResult::Single(path))
+            }
+            n => {
+                tracing::info!(
+                    "Found {} named configurations in {}",
+                    n,
+                    devcontainer_dir.display()
+                );
+                for p in &named_configs {
+                    debug!("  Named config: {}", p.display());
+                }
+                Ok(DiscoveryResult::Multiple(named_configs))
+            }
+        }
     }
     /// Load DevContainer configuration from a file path.
     ///
@@ -2409,9 +2544,8 @@ mod tests {
         let config_path = devcontainer_dir.join("devcontainer.json");
         std::fs::write(&config_path, r#"{"name": "Test"}"#)?;
 
-        let location = ConfigLoader::discover_config(workspace)?;
-        assert!(location.exists());
-        assert_eq!(location.path(), &config_path);
+        let result = ConfigLoader::discover_config(workspace)?;
+        assert_eq!(result, DiscoveryResult::Single(config_path));
 
         Ok(())
     }
@@ -2423,9 +2557,8 @@ mod tests {
         let config_path = workspace.join(".devcontainer.json");
         std::fs::write(&config_path, r#"{"name": "Test"}"#)?;
 
-        let location = ConfigLoader::discover_config(workspace)?;
-        assert!(location.exists());
-        assert_eq!(location.path(), &config_path);
+        let result = ConfigLoader::discover_config(workspace)?;
+        assert_eq!(result, DiscoveryResult::Single(config_path));
 
         Ok(())
     }
@@ -2443,10 +2576,9 @@ mod tests {
         std::fs::write(&dir_config_path, r#"{"name": "Dir Config"}"#)?;
         std::fs::write(&root_config_path, r#"{"name": "Root Config"}"#)?;
 
-        let location = ConfigLoader::discover_config(workspace)?;
-        assert!(location.exists());
+        let result = ConfigLoader::discover_config(workspace)?;
         // Should prefer .devcontainer/devcontainer.json
-        assert_eq!(location.path(), &dir_config_path);
+        assert_eq!(result, DiscoveryResult::Single(dir_config_path));
 
         Ok(())
     }
@@ -2456,13 +2588,10 @@ mod tests {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
 
-        let location = ConfigLoader::discover_config(workspace)?;
-        assert!(!location.exists());
-        // Should return preferred path even if it doesn't exist
-        assert_eq!(
-            location.path(),
-            &workspace.join(".devcontainer").join("devcontainer.json")
-        );
+        let result = ConfigLoader::discover_config(workspace)?;
+        // Should return None with the preferred default path
+        let expected_default = workspace.join(".devcontainer").join("devcontainer.json");
+        assert_eq!(result, DiscoveryResult::None(expected_default));
 
         Ok(())
     }
@@ -2477,6 +2606,276 @@ mod tests {
             }
             _ => panic!("Expected Config(NotFound) error"),
         }
+    }
+
+    // --- T007: Single named config ---
+
+    #[test]
+    fn test_discover_config_single_named_config() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let python_dir = workspace.join(".devcontainer").join("python");
+        std::fs::create_dir_all(&python_dir)?;
+        let config_path = python_dir.join("devcontainer.json");
+        std::fs::write(&config_path, r#"{"name": "Python"}"#)?;
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        assert_eq!(result, DiscoveryResult::Single(config_path));
+
+        Ok(())
+    }
+
+    // --- T008: JSONC support tests ---
+
+    #[test]
+    fn test_discover_config_jsonc_priority1() -> anyhow::Result<()> {
+        // .devcontainer/devcontainer.jsonc found at priority 1
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let devcontainer_dir = workspace.join(".devcontainer");
+        std::fs::create_dir_all(&devcontainer_dir)?;
+        let config_path = devcontainer_dir.join("devcontainer.jsonc");
+        std::fs::write(&config_path, r#"{"name": "JSONC Test"}"#)?;
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        assert_eq!(result, DiscoveryResult::Single(config_path));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_json_preferred_over_jsonc() -> anyhow::Result<()> {
+        // When both .json and .jsonc exist in same dir, .json wins
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let devcontainer_dir = workspace.join(".devcontainer");
+        std::fs::create_dir_all(&devcontainer_dir)?;
+        let json_path = devcontainer_dir.join("devcontainer.json");
+        let jsonc_path = devcontainer_dir.join("devcontainer.jsonc");
+        std::fs::write(&json_path, r#"{"name": "JSON"}"#)?;
+        std::fs::write(&jsonc_path, r#"{"name": "JSONC"}"#)?;
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        // .json should be preferred over .jsonc
+        assert_eq!(result, DiscoveryResult::Single(json_path));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_jsonc_named() -> anyhow::Result<()> {
+        // Named config with only .jsonc is discovered
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let rust_dir = workspace.join(".devcontainer").join("rust");
+        std::fs::create_dir_all(&rust_dir)?;
+        let config_path = rust_dir.join("devcontainer.jsonc");
+        std::fs::write(&config_path, r#"{"name": "Rust JSONC"}"#)?;
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        assert_eq!(result, DiscoveryResult::Single(config_path));
+
+        Ok(())
+    }
+
+    // --- T009: Short-circuit behavior tests ---
+
+    #[test]
+    fn test_discover_config_priority1_overrides_named() -> anyhow::Result<()> {
+        // .devcontainer/devcontainer.json exists alongside .devcontainer/python/devcontainer.json
+        // → returns priority 1 path (short-circuit)
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let devcontainer_dir = workspace.join(".devcontainer");
+        let python_dir = devcontainer_dir.join("python");
+        std::fs::create_dir_all(&devcontainer_dir)?;
+        std::fs::create_dir_all(&python_dir)?;
+
+        let priority1_path = devcontainer_dir.join("devcontainer.json");
+        let named_path = python_dir.join("devcontainer.json");
+        std::fs::write(&priority1_path, r#"{"name": "Priority 1"}"#)?;
+        std::fs::write(&named_path, r#"{"name": "Named"}"#)?;
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        assert_eq!(result, DiscoveryResult::Single(priority1_path));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_priority2_overrides_named() -> anyhow::Result<()> {
+        // .devcontainer.json exists alongside named configs → returns priority 2 path
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let python_dir = workspace.join(".devcontainer").join("python");
+        std::fs::create_dir_all(&python_dir)?;
+
+        let priority2_path = workspace.join(".devcontainer.json");
+        let named_path = python_dir.join("devcontainer.json");
+        std::fs::write(&priority2_path, r#"{"name": "Priority 2"}"#)?;
+        std::fs::write(&named_path, r#"{"name": "Named"}"#)?;
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        assert_eq!(result, DiscoveryResult::Single(priority2_path));
+
+        Ok(())
+    }
+
+    // --- T010: Edge case tests ---
+
+    #[test]
+    fn test_discover_config_skip_non_dir_entries() -> anyhow::Result<()> {
+        // Files in .devcontainer/ alongside named subdirs are ignored
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let devcontainer_dir = workspace.join(".devcontainer");
+        let python_dir = devcontainer_dir.join("python");
+        std::fs::create_dir_all(&python_dir)?;
+
+        // A file (not directory) in .devcontainer/ — should be ignored
+        std::fs::write(devcontainer_dir.join("README.md"), "readme")?;
+        // Named subdir with config
+        let config_path = python_dir.join("devcontainer.json");
+        std::fs::write(&config_path, r#"{"name": "Python"}"#)?;
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        assert_eq!(result, DiscoveryResult::Single(config_path));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_deep_nesting_ignored() -> anyhow::Result<()> {
+        // .devcontainer/a/b/devcontainer.json NOT found (one level only)
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let deep_dir = workspace.join(".devcontainer").join("a").join("b");
+        std::fs::create_dir_all(&deep_dir)?;
+        std::fs::write(deep_dir.join("devcontainer.json"), r#"{"name": "Deep"}"#)?;
+        // Also create the parent subdir 'a' but without a config file
+        // → .devcontainer/a/ exists but has no devcontainer.json directly
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        // .devcontainer/a/ has no devcontainer.json, so it's skipped
+        // Nested .devcontainer/a/b/devcontainer.json is NOT found
+        let expected_default = workspace.join(".devcontainer").join("devcontainer.json");
+        assert_eq!(result, DiscoveryResult::None(expected_default));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_empty_devcontainer_dir() -> anyhow::Result<()> {
+        // .devcontainer/ exists but has no subdirs with configs → returns None
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let devcontainer_dir = workspace.join(".devcontainer");
+        std::fs::create_dir_all(&devcontainer_dir)?;
+        // Empty directory — no subdirs, no files
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        let expected_default = devcontainer_dir.join("devcontainer.json");
+        assert_eq!(result, DiscoveryResult::None(expected_default));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_subdir_without_config_skipped() -> anyhow::Result<()> {
+        // Subdir exists but has no devcontainer.json → skipped
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let empty_subdir = workspace.join(".devcontainer").join("empty");
+        std::fs::create_dir_all(&empty_subdir)?;
+        // No devcontainer.json in empty_subdir
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        let expected_default = workspace.join(".devcontainer").join("devcontainer.json");
+        assert_eq!(result, DiscoveryResult::None(expected_default));
+
+        Ok(())
+    }
+
+    // --- T015: Multiple configs tests ---
+
+    #[test]
+    fn test_discover_config_multiple_named_configs() -> anyhow::Result<()> {
+        // Two+ named subdirs with configs → returns DiscoveryResult::Multiple
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let node_dir = workspace.join(".devcontainer").join("node");
+        let python_dir = workspace.join(".devcontainer").join("python");
+        std::fs::create_dir_all(&node_dir)?;
+        std::fs::create_dir_all(&python_dir)?;
+
+        let node_config = node_dir.join("devcontainer.json");
+        let python_config = python_dir.join("devcontainer.json");
+        std::fs::write(&node_config, r#"{"name": "Node"}"#)?;
+        std::fs::write(&python_config, r#"{"name": "Python"}"#)?;
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        // Should be Multiple with both paths
+        assert!(
+            matches!(&result, DiscoveryResult::Multiple(paths) if paths.len() == 2),
+            "Expected Multiple with 2 paths, got: {:?}",
+            result
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_discover_config_multiple_sorted_alphabetically() -> anyhow::Result<()> {
+        // Verify paths in Multiple are sorted by subdirectory name
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+
+        for name in ["rust", "node", "python"] {
+            let subdir = workspace.join(".devcontainer").join(name);
+            std::fs::create_dir_all(&subdir)?;
+            std::fs::write(
+                subdir.join("devcontainer.json"),
+                format!(r#"{{"name": "{}"}}"#, name),
+            )?;
+        }
+
+        let result = ConfigLoader::discover_config(workspace)?;
+        if let DiscoveryResult::Multiple(paths) = result {
+            assert_eq!(paths.len(), 3);
+            // Sorted alphabetically: node, python, rust
+            let names: Vec<&str> = paths
+                .iter()
+                .filter_map(|p| p.parent()?.file_name()?.to_str())
+                .collect();
+            assert_eq!(names, vec!["node", "python", "rust"]);
+        } else {
+            panic!("Expected DiscoveryResult::Multiple, got something else");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_configs_error_display() {
+        // Verify ConfigError::MultipleConfigs error message format
+        use crate::errors::ConfigError;
+
+        let error = ConfigError::MultipleConfigs {
+            paths: vec![
+                ".devcontainer/node/devcontainer.json".to_string(),
+                ".devcontainer/python/devcontainer.json".to_string(),
+                ".devcontainer/rust/devcontainer.json".to_string(),
+            ],
+        };
+        let msg = format!("{}", error);
+        assert!(msg.contains("Multiple devcontainer configurations found"));
+        assert!(msg.contains("--config"));
+        assert!(msg.contains("  .devcontainer/node/devcontainer.json"));
+        assert!(msg.contains("  .devcontainer/python/devcontainer.json"));
+        assert!(msg.contains("  .devcontainer/rust/devcontainer.json"));
+        // Each path on its own line, indented with two spaces
+        let lines: Vec<&str> = msg.lines().collect();
+        assert!(lines.len() >= 4); // header + 3 paths
     }
 
     #[test]

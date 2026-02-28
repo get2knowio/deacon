@@ -3,13 +3,13 @@
 //! These tests use the MockDocker runtime to validate exec and lifecycle command execution
 //! without requiring a real Docker daemon, enabling comprehensive testing in CI environments.
 
+mod common;
+
 use anyhow::Result;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle_with_docker, AggregatedLifecycleCommand,
-    ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
-    LifecycleCommandSource, LifecycleCommandValue,
+    execute_container_lifecycle_with_docker, ContainerLifecycleCommands, ContainerLifecycleConfig,
 };
 use deacon_core::docker::mock::{MockContainer, MockDocker, MockDockerConfig, MockExecResponse};
 use deacon_core::docker::{Docker, ExecConfig};
@@ -17,19 +17,6 @@ use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::TempDir;
-
-/// Helper to create a LifecycleCommandList from shell command strings
-fn make_shell_command_list(cmds: &[&str]) -> LifecycleCommandList {
-    LifecycleCommandList {
-        commands: cmds
-            .iter()
-            .map(|cmd| AggregatedLifecycleCommand {
-                command: LifecycleCommandValue::Shell(cmd.to_string()),
-                source: LifecycleCommandSource::Config,
-            })
-            .collect(),
-    }
-}
 
 /// Test helper to create a basic dev container config
 fn create_test_config() -> DevContainerConfig {
@@ -361,10 +348,14 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
 
     // Create lifecycle commands
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(make_shell_command_list(&["npm install"]))
-        .with_post_create(make_shell_command_list(&["npm run build"]))
-        .with_post_start(make_shell_command_list(&["echo 'container started'"]))
-        .with_post_attach(make_shell_command_list(&["echo 'container attached'"]));
+        .with_on_create(common::make_shell_command_list(&["npm install"]))
+        .with_post_create(common::make_shell_command_list(&["npm run build"]))
+        .with_post_start(common::make_shell_command_list(&[
+            "echo 'container started'",
+        ]))
+        .with_post_attach(common::make_shell_command_list(&[
+            "echo 'container attached'",
+        ]));
 
     // Create substitution context
     let temp_dir = TempDir::new()?;
@@ -455,10 +446,10 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
 
     // Create lifecycle commands
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(make_shell_command_list(&["echo 'on create'"]))
-        .with_post_create(make_shell_command_list(&["echo 'post create'"]))
-        .with_post_start(make_shell_command_list(&["echo 'post start'"]))
-        .with_post_attach(make_shell_command_list(&["echo 'post attach'"]));
+        .with_on_create(common::make_shell_command_list(&["echo 'on create'"]))
+        .with_post_create(common::make_shell_command_list(&["echo 'post create'"]))
+        .with_post_start(common::make_shell_command_list(&["echo 'post start'"]))
+        .with_post_attach(common::make_shell_command_list(&["echo 'post attach'"]));
 
     // Create substitution context
     let temp_dir = TempDir::new()?;
@@ -522,8 +513,8 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
 
     // Create lifecycle commands with a failing command
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(make_shell_command_list(&["echo 'success'"]))
-        .with_post_create(make_shell_command_list(&["failing-command"]));
+        .with_on_create(common::make_shell_command_list(&["echo 'success'"]))
+        .with_post_create(common::make_shell_command_list(&["failing-command"]));
 
     // Create substitution context
     let temp_dir = TempDir::new()?;
@@ -628,10 +619,10 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
 
     // Create lifecycle commands
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(make_shell_command_list(&["echo 'onCreate'"]))
-        .with_post_create(make_shell_command_list(&["echo 'postCreate'"]))
-        .with_post_start(make_shell_command_list(&["echo 'postStart'"]))
-        .with_post_attach(make_shell_command_list(&["echo 'postAttach'"]));
+        .with_on_create(common::make_shell_command_list(&["echo 'onCreate'"]))
+        .with_post_create(common::make_shell_command_list(&["echo 'postCreate'"]))
+        .with_post_start(common::make_shell_command_list(&["echo 'postStart'"]))
+        .with_post_attach(common::make_shell_command_list(&["echo 'postAttach'"]));
 
     // Create substitution context
     let temp_dir = TempDir::new()?;

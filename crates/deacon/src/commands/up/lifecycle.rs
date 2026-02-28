@@ -245,179 +245,65 @@ pub(crate) async fn execute_lifecycle_commands(
     // T014/T020: Use invocation context to determine which phases should be skipped
     // The should_skip_phase method returns the reason for skipping (e.g., "--skip-post-create flag",
     // "prior completion marker", "prebuild mode") which we use in debug logs.
+    //
+    // T020: --skip-post-create and prebuild mode both skip postCreate/dotfiles/postStart/postAttach.
+    // The InvocationContext handles these via should_skip_phase().
+    // PostAttach also respects the separate --skip-post-attach flag.
     let mut commands = ContainerLifecycleCommands::new();
+    let phases = [
+        LifecyclePhase::OnCreate,
+        LifecyclePhase::UpdateContent,
+        LifecyclePhase::PostCreate,
+        LifecyclePhase::PostStart,
+        LifecyclePhase::PostAttach,
+    ];
 
-    // onCreate - skip if flagged or marked complete (not skipped by --skip-post-create per FR-005)
-    if let Some(skip_reason) = invocation_context.should_skip_phase(LifecyclePhase::OnCreate) {
-        debug!("Skipping onCreate: {}", skip_reason);
-    } else {
-        // Aggregate commands from features (in installation order) and config
-        let aggregated_commands =
-            aggregate_lifecycle_commands(LifecyclePhase::OnCreate, resolved_features, config)
-                .context("Failed to parse onCreate lifecycle commands")?;
-
-        if !aggregated_commands.is_empty() {
-            // Log aggregated commands with source attribution
-            let _span = span!(Level::INFO, "onCreate_aggregation").entered();
-            for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
-                info!(
-                    command_index = idx,
-                    source = %agg_cmd.source,
-                    "onCreate command queued for execution"
-                );
-            }
-
-            debug!(
-                "onCreate phase queued for execution with {} aggregated commands",
-                aggregated_commands.len(),
-            );
-            commands = commands.with_on_create(aggregated_commands);
+    for &phase in &phases {
+        if let Some(skip_reason) = invocation_context.should_skip_phase(phase) {
+            debug!("Skipping {}: {}", phase.as_str(), skip_reason);
+            continue;
         }
-    }
 
-    // updateContent - skip if flagged or marked complete (not skipped by --skip-post-create per FR-005)
-    if let Some(skip_reason) = invocation_context.should_skip_phase(LifecyclePhase::UpdateContent) {
-        debug!("Skipping updateContent: {}", skip_reason);
-    } else {
-        // Aggregate commands from features (in installation order) and config
-        let aggregated_commands =
-            aggregate_lifecycle_commands(LifecyclePhase::UpdateContent, resolved_features, config)
-                .context("Failed to parse updateContent lifecycle commands")?;
-
-        if !aggregated_commands.is_empty() {
-            // Log aggregated commands with source attribution
-            let _span = span!(Level::INFO, "updateContent_aggregation").entered();
-            for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
-                info!(
-                    command_index = idx,
-                    source = %agg_cmd.source,
-                    "updateContent command queued for execution"
-                );
-            }
-
-            debug!(
-                "updateContent phase queued for execution with {} aggregated commands",
-                aggregated_commands.len(),
-            );
-            commands = commands.with_update_content(aggregated_commands);
+        // PostAttach has an additional skip flag
+        if phase == LifecyclePhase::PostAttach && args.skip_post_attach {
+            debug!("Skipping postAttach: --skip-post-attach flag");
+            continue;
         }
-    }
 
-    // T020: --skip-post-create and prebuild mode both skip postCreate/dotfiles/postStart/postAttach
-    // The InvocationContext already handles these cases through should_skip_phase():
-    // - SkipPostCreate mode: skips postCreate, dotfiles, postStart, postAttach with reason "--skip-post-create flag"
-    // - Prebuild mode: skips postCreate, dotfiles, postStart, postAttach with reason "prebuild mode"
-
-    // postCreate - skip if flagged, in prebuild/skip-post-create mode, or marked complete
-    if let Some(skip_reason) = invocation_context.should_skip_phase(LifecyclePhase::PostCreate) {
-        debug!("Skipping postCreate: {}", skip_reason);
-    } else {
-        // Aggregate commands from features (in installation order) and config
-        let aggregated_commands =
-            aggregate_lifecycle_commands(LifecyclePhase::PostCreate, resolved_features, config)
-                .context("Failed to parse postCreate lifecycle commands")?;
+        let aggregated_commands = aggregate_lifecycle_commands(phase, resolved_features, config)
+            .with_context(|| format!("Failed to parse {} lifecycle commands", phase.as_str()))?;
 
         if !aggregated_commands.is_empty() {
-            // Log aggregated commands with source attribution
-            let _span = span!(Level::INFO, "postCreate_aggregation").entered();
+            let _span =
+                span!(Level::INFO, "lifecycle_aggregation", phase = phase.as_str()).entered();
             for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
                 info!(
                     command_index = idx,
                     source = %agg_cmd.source,
-                    "postCreate command queued for execution"
+                    "{} command queued for execution",
+                    phase.as_str()
                 );
             }
 
             debug!(
-                "postCreate phase queued for execution with {} aggregated commands",
+                "{} phase queued for execution with {} aggregated commands",
+                phase.as_str(),
                 aggregated_commands.len(),
             );
-            commands = commands.with_post_create(aggregated_commands);
-        }
-    }
-
-    // T020: postStart - skip if in skip-post-create or prebuild mode, otherwise always runs (runtime hook)
-    if let Some(skip_reason) = invocation_context.should_skip_phase(LifecyclePhase::PostStart) {
-        debug!("Skipping postStart: {}", skip_reason);
-    } else {
-        // Aggregate commands from features (in installation order) and config
-        let aggregated_commands =
-            aggregate_lifecycle_commands(LifecyclePhase::PostStart, resolved_features, config)
-                .context("Failed to parse postStart lifecycle commands")?;
-
-        if !aggregated_commands.is_empty() {
-            // Log aggregated commands with source attribution
-            let _span = span!(Level::INFO, "postStart_aggregation").entered();
-            for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
-                info!(
-                    command_index = idx,
-                    source = %agg_cmd.source,
-                    "postStart command queued for execution (runtime hook)"
-                );
-            }
-
-            debug!(
-                "postStart phase queued for execution with {} aggregated commands",
-                aggregated_commands.len(),
-            );
-            commands = commands.with_post_start(aggregated_commands);
-        }
-    }
-
-    // T020: postAttach - skip if in skip-post-create or prebuild mode, or --skip-post-attach flag
-    // Note: --skip-post-attach is a separate flag that also skips postAttach
-    if let Some(skip_reason) = invocation_context.should_skip_phase(LifecyclePhase::PostAttach) {
-        debug!("Skipping postAttach: {}", skip_reason);
-    } else if args.skip_post_attach {
-        debug!("Skipping postAttach: --skip-post-attach flag");
-    } else {
-        // Aggregate commands from features (in installation order) and config
-        let aggregated_commands =
-            aggregate_lifecycle_commands(LifecyclePhase::PostAttach, resolved_features, config)
-                .context("Failed to parse postAttach lifecycle commands")?;
-
-        if !aggregated_commands.is_empty() {
-            // Log aggregated commands with source attribution
-            let _span = span!(Level::INFO, "postAttach_aggregation").entered();
-            for (idx, agg_cmd) in aggregated_commands.commands.iter().enumerate() {
-                info!(
-                    command_index = idx,
-                    source = %agg_cmd.source,
-                    "postAttach command queued for execution (runtime hook)"
-                );
-            }
-
-            debug!(
-                "postAttach phase queued for execution with {} aggregated commands",
-                aggregated_commands.len(),
-            );
-            commands = commands.with_post_attach(aggregated_commands);
+            commands = commands.set_phase(phase, aggregated_commands);
         }
     }
 
     let lifecycle_start_time = std::time::Instant::now();
-
-    // Create a progress event callback
-    let emit_progress_event_fn = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-        match args.progress_tracker.lock() {
-            Ok(mut tracker_guard) => {
-                if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                    tracker.emit_event(event)?;
-                }
-            }
-            Err(e) => {
-                warn!("Progress tracker mutex poisoned: {}", e);
-            }
-        }
-        Ok(())
-    };
 
     // Execute lifecycle commands with progress callback
     let result = execute_container_lifecycle_with_progress_callback(
         &lifecycle_config,
         &commands,
         &substitution_context,
-        Some(emit_progress_event_fn),
+        Some(crate::commands::shared::progress::make_progress_callback(
+            &args.progress_tracker,
+        )),
     )
     .await;
 
@@ -459,23 +345,13 @@ pub(crate) async fn execute_lifecycle_commands(
 
         let docker = CliDocker::new();
 
-        // Create progress callback for non-blocking phases
-        let emit_progress_event_fn = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-            match args.progress_tracker.lock() {
-                Ok(mut tracker_guard) => {
-                    if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                        tracker.emit_event(event)?;
-                    }
-                }
-                Err(e) => {
-                    warn!("Progress tracker mutex poisoned: {}", e);
-                }
-            }
-            Ok(())
-        };
-
         let _final_result = result
-            .execute_non_blocking_phases_sync_with_callback(&docker, Some(emit_progress_event_fn))
+            .execute_non_blocking_phases_sync_with_callback(
+                &docker,
+                Some(crate::commands::shared::progress::make_progress_callback(
+                    &args.progress_tracker,
+                )),
+            )
             .await
             .context("Non-blocking lifecycle phase execution failed")?;
 
@@ -543,28 +419,15 @@ pub(crate) async fn execute_initialize_command(
         is_prebuild: false,
     };
 
-    // Create a progress event callback
-    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-        match progress_tracker.lock() {
-            Ok(mut tracker_guard) => {
-                if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                    tracker.emit_event(event)?;
-                }
-            }
-            Err(e) => {
-                warn!("Progress tracker mutex poisoned: {}", e);
-            }
-        }
-        Ok(())
-    };
-
     // Execute only the initialize phase (host-side)
     use deacon_core::container_lifecycle::execute_container_lifecycle_with_progress_callback;
     let result = execute_container_lifecycle_with_progress_callback(
         &lifecycle_config,
         &commands,
         &substitution_context,
-        Some(emit_progress_event),
+        Some(crate::commands::shared::progress::make_progress_callback(
+            progress_tracker,
+        )),
     )
     .await?;
 

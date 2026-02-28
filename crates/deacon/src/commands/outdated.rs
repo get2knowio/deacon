@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use atty::Stream;
-use deacon_core::config::ConfigLoader;
+use deacon_core::config::{ConfigLoader, DiscoveryResult};
 use deacon_core::errors::{ConfigError, DeaconError};
 use deacon_core::lockfile as core_lockfile;
 use deacon_core::outdated as core_outdated;
@@ -412,7 +412,29 @@ fn resolve_config_path(
         workspace_folder.display()
     );
     match ConfigLoader::discover_config(workspace_folder) {
-        Ok(loc) => Ok(loc),
+        Ok(DiscoveryResult::Single(path)) => Ok(deacon_core::config::ConfigLocation::new(path)),
+        Ok(DiscoveryResult::Multiple(paths)) => {
+            let display_paths: Vec<String> = paths
+                .iter()
+                .map(|p| {
+                    p.strip_prefix(workspace_folder)
+                        .unwrap_or(p)
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .collect();
+            Err(DeaconError::Config(ConfigError::MultipleConfigs {
+                paths: display_paths,
+            })
+            .into())
+        }
+        Ok(DiscoveryResult::None(_)) => {
+            warn!(
+                error = "no config found",
+                "Configuration not found for workspace"
+            );
+            anyhow::bail!("Dev container config (...) not found.")
+        }
         Err(e) => {
             warn!(error = ?e, "Configuration not found for workspace");
             anyhow::bail!("Dev container config (...) not found.")

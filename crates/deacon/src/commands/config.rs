@@ -8,7 +8,7 @@ use serde_json;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
-use deacon_core::config::ConfigLoader;
+use deacon_core::config::{ConfigLoader, DiscoveryResult};
 use deacon_core::errors::{ConfigError, DeaconError};
 use deacon_core::observability::{config_resolve_span, TimedSpan};
 use deacon_core::redaction::{redact_if_enabled, RedactionConfig};
@@ -141,16 +141,33 @@ async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
         (substituted_config, report)
     } else {
         // Discover configuration
-        let config_location = ConfigLoader::discover_config(workspace_folder)?;
-        if !config_location.exists() {
-            return Err(DeaconError::Config(ConfigError::NotFound {
-                path: config_location.path().to_string_lossy().to_string(),
-            })
-            .into());
-        }
+        let config_path = match ConfigLoader::discover_config(workspace_folder)? {
+            DiscoveryResult::Single(path) => path,
+            DiscoveryResult::Multiple(paths) => {
+                let display_paths: Vec<String> = paths
+                    .iter()
+                    .map(|p| {
+                        p.strip_prefix(workspace_folder)
+                            .unwrap_or(p)
+                            .to_string_lossy()
+                            .to_string()
+                    })
+                    .collect();
+                return Err(DeaconError::Config(ConfigError::MultipleConfigs {
+                    paths: display_paths,
+                })
+                .into());
+            }
+            DiscoveryResult::None(default) => {
+                return Err(DeaconError::Config(ConfigError::NotFound {
+                    path: default.to_string_lossy().to_string(),
+                })
+                .into());
+            }
+        };
 
         // For discovered config, still apply overrides and substitution
-        let base_config = ConfigLoader::load_from_path(config_location.path())?;
+        let base_config = ConfigLoader::load_from_path(&config_path)?;
         let mut configs = vec![base_config];
 
         // Add override config if provided

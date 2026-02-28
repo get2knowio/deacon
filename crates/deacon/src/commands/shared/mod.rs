@@ -2,6 +2,7 @@
 
 pub mod config_loader;
 pub mod env_user;
+pub mod progress;
 pub mod remote_env;
 pub mod terminal;
 pub mod workspace;

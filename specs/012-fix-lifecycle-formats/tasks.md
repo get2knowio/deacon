@@ -128,6 +128,18 @@
 
 ---
 
+## Deferred Work
+
+- [ ] T031 [Deferral] Aggregate feature lifecycle commands in run-user-commands per research.md
+  - **Rationale**: Requires resolved features from image metadata (container labels); only user config commands are collected currently
+  - **Acceptance**: `run-user-commands` includes feature-contributed lifecycle commands matching `up` behavior
+
+- [ ] T032 [Deferral] Line-prefix parallel command output to terminal in real-time
+  - **Rationale**: Current implementation captures stdout/stderr in CommandResult but does not prefix [key] to terminal output stream during execution
+  - **Acceptance**: Parallel commands show `[key]` prefix on each output line in real-time terminal output
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

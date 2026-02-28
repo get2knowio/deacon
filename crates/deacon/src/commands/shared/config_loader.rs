@@ -3,7 +3,7 @@
 //! Centralizes workspace/config/override resolution and secrets handling so
 //! all subcommands share the same error mapping and substitution behavior.
 
-use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::config::{ConfigLoader, DevContainerConfig, DiscoveryResult};
 use deacon_core::errors::{ConfigError, DeaconError, Result};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::variable::SubstitutionReport;
@@ -67,9 +67,24 @@ pub fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
         }
         path.to_path_buf()
     } else {
-        ConfigLoader::discover_config(&workspace_folder)?
-            .path()
-            .to_path_buf()
+        match ConfigLoader::discover_config(&workspace_folder)? {
+            DiscoveryResult::Single(path) => path,
+            DiscoveryResult::Multiple(paths) => {
+                let display_paths: Vec<String> = paths
+                    .iter()
+                    .map(|p| {
+                        p.strip_prefix(&workspace_folder)
+                            .unwrap_or(p)
+                            .to_string_lossy()
+                            .to_string()
+                    })
+                    .collect();
+                return Err(DeaconError::Config(ConfigError::MultipleConfigs {
+                    paths: display_paths,
+                }));
+            }
+            DiscoveryResult::None(default) => default,
+        }
     };
 
     let mut override_config_path = args.override_config_path.map(|p| p.to_path_buf());
@@ -153,6 +168,89 @@ mod tests {
                 );
             }
             other => panic!("unexpected error variant: {other}"),
+        }
+    }
+
+    #[test]
+    fn config_path_bypasses_discovery() {
+        // When --config is provided, discover_config() is skipped
+        // and the specific path is used directly
+        let temp = TempDir::new().unwrap();
+        let config_path = temp.path().join("devcontainer.json");
+        std::fs::write(
+            &config_path,
+            r#"{"name":"explicit","image":"ubuntu:latest"}"#,
+        )
+        .unwrap();
+
+        let result = load_config(ConfigLoadArgs {
+            workspace_folder: Some(temp.path()),
+            config_path: Some(config_path.as_path()),
+            override_config_path: None,
+            secrets_files: &[],
+        })
+        .unwrap();
+
+        // The explicitly provided config should be used
+        assert_eq!(result.config.name.as_deref(), Some("explicit"));
+        assert_eq!(result.config_path, config_path);
+    }
+
+    #[test]
+    fn config_path_to_named_config_works_with_multiple_named_configs() {
+        // --config to a specific named config works even when multiple named configs exist
+        let temp = TempDir::new().unwrap();
+        let workspace = temp.path();
+
+        // Create multiple named configs
+        for name in ["node", "python", "rust"] {
+            let subdir = workspace.join(".devcontainer").join(name);
+            std::fs::create_dir_all(&subdir).unwrap();
+            std::fs::write(
+                subdir.join("devcontainer.json"),
+                format!(r#"{{"name":"{}","image":"ubuntu:latest"}}"#, name),
+            )
+            .unwrap();
+        }
+
+        // Use --config to explicitly select rust config
+        let explicit_config = workspace
+            .join(".devcontainer")
+            .join("rust")
+            .join("devcontainer.json");
+
+        let result = load_config(ConfigLoadArgs {
+            workspace_folder: Some(workspace),
+            config_path: Some(explicit_config.as_path()),
+            override_config_path: None,
+            secrets_files: &[],
+        })
+        .unwrap();
+
+        // Should use the explicitly specified rust config without error
+        assert_eq!(result.config.name.as_deref(), Some("rust"));
+        assert_eq!(result.config_path, explicit_config);
+    }
+
+    #[test]
+    fn config_path_nonexistent_returns_error() {
+        // --config to non-existent file returns appropriate error
+        let temp = TempDir::new().unwrap();
+        let nonexistent_path = temp.path().join("devcontainer.json");
+        // Do NOT create the file
+
+        let err = load_config(ConfigLoadArgs {
+            workspace_folder: Some(temp.path()),
+            config_path: Some(nonexistent_path.as_path()),
+            override_config_path: None,
+            secrets_files: &[],
+        })
+        .unwrap_err();
+
+        // Should return a not-found or io error, not panic
+        match err {
+            DeaconError::Config(_) => {} // Expected: some config error
+            other => panic!("Expected config error, got: {:?}", other),
         }
     }
 }

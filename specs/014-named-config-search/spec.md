@@ -88,11 +88,19 @@ A developer explicitly specifies a config path with `--config` to select a parti
 - **FR-002**: When exactly one config file is found across all three search locations, the tool MUST use it automatically without requiring `--config`.
 - **FR-003**: When multiple named config files are found at priority level 3 (and no higher-priority config exists), the tool MUST return an error listing all discovered configs and instructing the user to specify `--config`.
 - **FR-004**: When `--config` is specified, the tool MUST use that exact path, bypassing all automatic discovery logic.
-- **FR-005**: Subdirectory enumeration MUST be limited to one level deep under `.devcontainer/` — only direct child directories are checked.
-- **FR-006**: Subdirectories that do not contain a `devcontainer.json` file MUST be silently skipped during enumeration.
-- **FR-007**: The expanded search MUST apply to all commands that consume config: `up`, `exec`, `build`, `read-configuration`, and `run-user-commands`.
+- **FR-005**: Subdirectory enumeration MUST be limited to one level deep under `.devcontainer/` — only direct child directories are checked. Results MUST be sorted alphabetically by directory name for deterministic behavior across platforms.
+- **FR-006**: Subdirectories that do not contain a `devcontainer.json` or `devcontainer.jsonc` file MUST be silently skipped during enumeration. Both filename variants are valid config files, consistent with the existing search locations.
+- **FR-007**: The expanded search MUST apply to all commands that consume config: `up`, `down`, `exec`, `build`, `read-configuration`, and `run-user-commands`.
 - **FR-008**: The error message for multiple named configs MUST list all discovered config file paths so the user can choose.
 - **FR-009**: Priority levels 1 and 2 (`.devcontainer/devcontainer.json` and `.devcontainer.json`) MUST short-circuit the search — if found, no subdirectory enumeration occurs.
+
+## Clarifications
+
+### Session 2026-02-22
+
+- Q: Should `down` be included in FR-007 scope alongside the other config-consuming commands? → A: Yes, add `down` to FR-007 (6 commands total)
+- Q: Should named config subfolder enumeration be sorted alphabetically for determinism? → A: Yes, sort alphabetically
+- Q: Should named subfolder search check for `devcontainer.jsonc` in addition to `devcontainer.json`? → A: Yes, check both for consistency with existing discovery
 
 ## Success Criteria *(mandatory)*
 
@@ -101,5 +109,5 @@ A developer explicitly specifies a config path with `--config` to select a parti
 - **SC-001**: Developers with a single named config folder can run all supported commands without specifying `--config`, with zero additional steps compared to the standard `.devcontainer/devcontainer.json` layout.
 - **SC-002**: Existing projects using `.devcontainer/devcontainer.json` or `.devcontainer.json` experience no change in behavior (full backward compatibility).
 - **SC-003**: Developers with multiple named configs receive a clear, actionable error message that lists all available configs within one command invocation.
-- **SC-004**: All five config-consuming commands (`up`, `exec`, `build`, `read-configuration`, `run-user-commands`) correctly resolve named configs through the shared discovery logic.
+- **SC-004**: All six config-consuming commands (`up`, `down`, `exec`, `build`, `read-configuration`, `run-user-commands`) correctly resolve named configs through the shared discovery logic.
 - **SC-005**: The tool passes all existing tests with no regressions and includes new tests covering named config discovery, multi-config error handling, and `--config` override scenarios.

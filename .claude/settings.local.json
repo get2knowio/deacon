@@ -87,7 +87,9 @@
       "Bash(export:*)",
       "Bash(head:*)",
       "Bash(fish:*)",
-      "Bash(brew list rust)"
+      "Bash(brew list rust)",
+      "Bash(mdfind:*)",
+      "WebFetch(domain:rust-lang.github.io)"
     ],
     "deny": [],
     "ask": []
