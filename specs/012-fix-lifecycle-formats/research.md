@@ -31,13 +31,14 @@
 
 **Question**: How should object-format commands execute concurrently?
 
-**Decision**: Use `tokio::JoinSet` to spawn one task per object entry. Each task executes its command (string via shell, array via exec). Wait for all tasks to complete. If any task fails, the phase reports failure. Output is prefixed with the command's named key for attribution.
+**Decision**: Use two different concurrency strategies depending on the execution context. The host-side path (`execute_host_lifecycle_phase`) uses `tokio::JoinSet` with `spawn_blocking` to run one blocking `std::process::Command` per object entry concurrently. The container-side path (`execute_lifecycle_phase_impl`) uses `futures::future::join_all` to await all Docker exec futures concurrently. In both paths, all tasks run to completion, output is prefixed with the command's named key for attribution, and failure of any entry fails the phase.
 
-**Rationale**: The DevContainer spec defines object format for parallel execution. `tokio::JoinSet` is idiomatic for concurrent async task management, supports cancellation, and integrates with the existing async execution pipeline. The spec requires all entries to complete before the phase is done and failure of any entry fails the phase.
+**Rationale**: The DevContainer spec defines object format for parallel execution. The two paths require different concurrency primitives because of their execution models. The host-side path spawns OS processes via `std::process::Command`, which is blocking -- `tokio::JoinSet` with `spawn_blocking` offloads each blocking call to a thread while keeping the async runtime responsive. The container-side path calls Docker exec through an async API, so the futures are already non-blocking -- `futures::future::join_all` is sufficient and simpler since cancellation semantics are not needed (all entries must complete per the spec). The spec requires all entries to complete before the phase is done and failure of any entry fails the phase.
 
 **Alternatives considered**:
 - `tokio::join!` macro — rejected because the number of entries is dynamic
-- `futures::join_all` — works but `JoinSet` provides better cancellation semantics
+- `tokio::JoinSet` for both paths — rejected for container-side; Docker exec calls are already async, so `join_all` is simpler and avoids unnecessary task spawning overhead
+- `futures::join_all` for both paths — rejected for host-side; `std::process::Command` is blocking and would block the async runtime without `spawn_blocking`
 - Sequential execution with labels — rejected; violates spec requirement for concurrent execution
 
 ## Decision 4: Host-Side Object Format Support

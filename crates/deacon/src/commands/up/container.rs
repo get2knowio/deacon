@@ -143,14 +143,8 @@ pub(crate) async fn execute_container_up(
     }
 
     // Initialize progress tracking
-    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
-            if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                tracker.emit_event(event)?;
-            }
-        }
-        Ok(())
-    };
+    let emit_progress_event =
+        crate::commands::shared::progress::make_progress_callback(&args.progress_tracker);
 
     // Create container identity for deterministic naming and labels
     let identity = ContainerIdentity::new_with_custom_name(

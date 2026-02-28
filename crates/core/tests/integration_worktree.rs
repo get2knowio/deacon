@@ -1,6 +1,6 @@
 //! Integration tests for Git worktree support in workspace resolution
 
-use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::config::{ConfigLoader, DevContainerConfig, DiscoveryResult};
 use deacon_core::container::ContainerIdentity;
 use deacon_core::observability::workspace_id;
 use deacon_core::workspace::resolve_workspace_root;
@@ -219,8 +219,7 @@ fn test_config_discovery_in_worktree() {
 
     // Discover config should find it in the worktree
     let discovered = ConfigLoader::discover_config(&worktree_path).unwrap();
-    assert!(discovered.exists());
-    assert_eq!(discovered.path(), &config_path);
+    assert_eq!(discovered, DiscoveryResult::Single(config_path));
 }
 
 #[test]

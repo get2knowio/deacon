@@ -322,6 +322,17 @@ impl UpResult {
                         "Feature not implemented".to_string(),
                         format!("Feature '{}' is not yet implemented", feature),
                     ),
+                    ConfigError::MultipleConfigs { paths } => UpResult::error(
+                        "Multiple devcontainer configurations found".to_string(),
+                        format!(
+                            "Use --config to specify one:\n{}",
+                            paths
+                                .iter()
+                                .map(|p| format!("  {}", p))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        ),
+                    ),
                     ConfigError::Io(io_err) => UpResult::error(
                         "Failed to read configuration file".to_string(),
                         format!("{}", io_err),

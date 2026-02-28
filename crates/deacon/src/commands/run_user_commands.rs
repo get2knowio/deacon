@@ -15,7 +15,7 @@ use deacon_core::variable::SubstitutionContext;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument};
 
 use crate::commands::exec::resolve_target_container;
 
@@ -205,27 +205,14 @@ async fn execute_lifecycle_commands(
         }
     }
 
-    // Create a progress event callback
-    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-        match args.progress_tracker.lock() {
-            Ok(mut tracker_guard) => {
-                if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                    tracker.emit_event(event)?;
-                }
-            }
-            Err(e) => {
-                warn!("Progress tracker mutex poisoned: {}", e);
-            }
-        }
-        Ok(())
-    };
-
     // Execute lifecycle commands with progress callback
     let result = execute_container_lifecycle_with_progress_callback(
         &lifecycle_config,
         &commands,
         &substitution_context,
-        Some(emit_progress_event),
+        Some(crate::commands::shared::progress::make_progress_callback(
+            &args.progress_tracker,
+        )),
     )
     .await;
 

@@ -103,7 +103,7 @@ pub fn is_empty_command(cmd: &serde_json::Value) -> bool {
 /// - String: executed through a shell (`/bin/sh -c` in container, platform shell on host)
 /// - Array: exec-style, passed directly to OS without shell interpretation
 /// - Object: named parallel commands, each value is itself a Shell or Exec command
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LifecycleCommandValue {
     /// Shell-interpreted command string (e.g., "npm install && npm build")
     Shell(String),
@@ -127,6 +127,8 @@ impl LifecycleCommandValue {
     /// NOTE: Object key ordering relies on `serde_json`'s `preserve_order` feature
     /// being enabled in Cargo.toml. Without it, parallel command execution order
     /// would be non-deterministic.
+    /// # Errors
+    /// Returns an error for invalid value types (number, boolean) or arrays with non-string elements.
     pub fn from_json_value(value: &serde_json::Value) -> Result<Option<Self>> {
         match value {
             serde_json::Value::Null => Ok(None),
@@ -920,68 +922,16 @@ where
     info!("Executing host lifecycle phase: {}", phase.as_str());
     let phase_start = Instant::now();
 
-    // Convert aggregated commands to string vec for progress event
-    let command_strings: Vec<String> = commands
-        .iter()
-        .map(|agg| match &agg.command {
-            LifecycleCommandValue::Shell(s) => s.clone(),
-            LifecycleCommandValue::Exec(args) => args.join(" "),
-            LifecycleCommandValue::Parallel(map) => {
-                let keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
-                format!("parallel: {}", keys.join(", "))
-            }
-        })
-        .collect();
+    let command_strings = build_phase_command_strings(commands);
+    emit_phase_begin_event(progress_callback, phase, command_strings);
 
-    // Emit phase begin event
-    if let Some(callback) = progress_callback {
-        let event = ProgressEvent::LifecyclePhaseBegin {
-            id: ProgressTracker::next_event_id(),
-            timestamp: ProgressTracker::current_timestamp(),
-            phase: phase.as_str().to_string(),
-            commands: command_strings,
-        };
-        if let Err(e) = callback(event) {
-            debug!("Failed to emit phase begin event: {}", e);
-        }
-    }
-
-    let mut phase_result = PhaseResult {
-        phase,
-        commands: Vec::new(),
-        total_duration: Duration::default(),
-        success: true,
-    };
+    let mut phase_result = PhaseResult::new(phase);
 
     // Execute each command individually, handling all format variants inline
     for agg_cmd in commands {
         match &agg_cmd.command {
             LifecycleCommandValue::Shell(command_template) => {
-                // Apply variable substitution to the command
-                let mut substitution_report = SubstitutionReport::new();
-                let substituted_command = VariableSubstitution::substitute_string(
-                    command_template,
-                    context,
-                    &mut substitution_report,
-                );
-
-                debug!(
-                    "Host command after variable substitution: {} -> {}",
-                    command_template, substituted_command
-                );
-
-                if substitution_report.has_substitutions() {
-                    debug!(
-                        "Variable substitutions applied: {:?}",
-                        substitution_report.replacements
-                    );
-                    if !substitution_report.unknown_variables.is_empty() {
-                        debug!(
-                            "Unknown variables left unchanged: {:?}",
-                            substitution_report.unknown_variables
-                        );
-                    }
-                }
+                let substituted_command = substitute_shell_and_log(command_template, context);
 
                 let display_cmd = substituted_command.clone();
                 let working_dir = context.local_workspace_folder.clone();
@@ -1013,17 +963,27 @@ where
                         };
                         if !command_result.success {
                             phase_result.success = false;
-                            error!(
+                            let error_msg = format!(
                                 "Host lifecycle command failed in phase {} with exit code {}: {}",
                                 phase.as_str(),
                                 exit_code,
                                 display_cmd
                             );
+                            error!("{}", error_msg);
+                            phase_result.commands.push(command_result);
+                            phase_result.total_duration = phase_start.elapsed();
+                            emit_phase_end_event(progress_callback, &phase_result);
+                            return Err(DeaconError::Lifecycle(error_msg));
                         }
                         phase_result.commands.push(command_result);
                     }
                     Ok(Err(e)) => {
-                        error!("Failed to execute host shell command: {}", e);
+                        let error_msg = format!(
+                            "Failed to execute host shell command in phase {}: {}",
+                            phase.as_str(),
+                            e
+                        );
+                        error!("{}", error_msg);
                         phase_result.success = false;
                         phase_result.commands.push(CommandResult {
                             command: display_cmd,
@@ -1033,10 +993,15 @@ where
                             stdout: String::new(),
                             stderr: e.to_string(),
                         });
+                        phase_result.total_duration = phase_start.elapsed();
+                        emit_phase_end_event(progress_callback, &phase_result);
+                        return Err(DeaconError::Lifecycle(error_msg));
                     }
                     Err(e) => {
                         error!("Failed to spawn host shell command: {}", e);
                         phase_result.success = false;
+                        phase_result.total_duration = phase_start.elapsed();
+                        emit_phase_end_event(progress_callback, &phase_result);
                         return Err(DeaconError::Lifecycle(format!(
                             "Failed to spawn host shell command: {}",
                             e
@@ -1095,17 +1060,27 @@ where
                         };
                         if !command_result.success {
                             phase_result.success = false;
-                            error!(
+                            let error_msg = format!(
                                 "Host exec-style command failed in phase {} with exit code {}: {}",
                                 phase.as_str(),
                                 exit_code,
                                 display_cmd
                             );
+                            error!("{}", error_msg);
+                            phase_result.commands.push(command_result);
+                            phase_result.total_duration = phase_start.elapsed();
+                            emit_phase_end_event(progress_callback, &phase_result);
+                            return Err(DeaconError::Lifecycle(error_msg));
                         }
                         phase_result.commands.push(command_result);
                     }
                     Ok(Err(e)) => {
-                        error!("Failed to execute host exec-style command: {}", e);
+                        let error_msg = format!(
+                            "Failed to execute host exec-style command in phase {}: {}",
+                            phase.as_str(),
+                            e
+                        );
+                        error!("{}", error_msg);
                         phase_result.success = false;
                         phase_result.commands.push(CommandResult {
                             command: display_cmd,
@@ -1115,10 +1090,15 @@ where
                             stdout: String::new(),
                             stderr: e.to_string(),
                         });
+                        phase_result.total_duration = phase_start.elapsed();
+                        emit_phase_end_event(progress_callback, &phase_result);
+                        return Err(DeaconError::Lifecycle(error_msg));
                     }
                     Err(e) => {
                         error!("Failed to spawn host exec-style command: {}", e);
                         phase_result.success = false;
+                        phase_result.total_duration = phase_start.elapsed();
+                        emit_phase_end_event(progress_callback, &phase_result);
                         return Err(DeaconError::Lifecycle(format!(
                             "Failed to spawn host exec-style command: {}",
                             e
@@ -1150,9 +1130,39 @@ where
                     phase.as_str()
                 );
 
+                // Build display map for result collection and emit per-entry begin events
+                let mut display_map: HashMap<String, String> =
+                    HashMap::with_capacity(substituted_entries.len());
+                for (key, value) in &substituted_entries {
+                    let display = match value {
+                        LifecycleCommandValue::Shell(s) => s.clone(),
+                        LifecycleCommandValue::Exec(a) => a.join(" "),
+                        _ => String::new(),
+                    };
+
+                    // Emit begin event for this entry
+                    if let Some(callback) = progress_callback {
+                        let command_id = format!("{}-{}", phase.as_str(), key);
+                        let redaction_config = RedactionConfig::default();
+                        let redacted = redact_if_enabled(&display, &redaction_config);
+                        let event = ProgressEvent::LifecycleCommandBegin {
+                            id: ProgressTracker::next_event_id(),
+                            timestamp: ProgressTracker::current_timestamp(),
+                            phase: phase.as_str().to_string(),
+                            command_id,
+                            command: redacted,
+                        };
+                        if let Err(e) = callback(event) {
+                            debug!("Failed to emit command begin event: {}", e);
+                        }
+                    }
+
+                    display_map.insert(key.clone(), display);
+                }
+
                 // Spawn all entries concurrently using JoinSet with spawn_blocking
                 let mut join_set = tokio::task::JoinSet::new();
-                for (key, value) in substituted_entries.clone() {
+                for (key, value) in substituted_entries.into_iter() {
                     let working_dir = context.local_workspace_folder.clone();
                     let env_vars = context.local_env.clone();
                     join_set.spawn_blocking(move || {
@@ -1170,8 +1180,19 @@ where
                                     .envs(&env_vars)
                                     .output()
                             }
-                            _ => {
+                            LifecycleCommandValue::Exec(_) => {
                                 debug!("Skipping empty parallel exec-style host command '{}'", key);
+                                return ParallelCommandResult {
+                                    key,
+                                    exit_code: 0,
+                                    duration: start.elapsed(),
+                                    success: true,
+                                    stdout: String::new(),
+                                    stderr: String::new(),
+                                };
+                            }
+                            LifecycleCommandValue::Parallel(_) => {
+                                warn!("Nested parallel commands are not supported; skipping entry '{}'", key);
                                 return ParallelCommandResult {
                                     key,
                                     exit_code: 0,
@@ -1208,11 +1229,28 @@ where
                 while let Some(join_result) = join_set.join_next().await {
                     match join_result {
                         Ok(result) => {
-                            let display_cmd = match substituted_entries.get(&result.key) {
-                                Some(LifecycleCommandValue::Shell(s)) => s.clone(),
-                                Some(LifecycleCommandValue::Exec(a)) => a.join(" "),
-                                _ => result.key.clone(),
-                            };
+                            // Emit per-entry end event
+                            let command_id = format!("{}-{}", phase.as_str(), result.key);
+                            if let Some(callback) = progress_callback {
+                                let event = ProgressEvent::LifecycleCommandEnd {
+                                    id: ProgressTracker::next_event_id(),
+                                    timestamp: ProgressTracker::current_timestamp(),
+                                    phase: phase.as_str().to_string(),
+                                    command_id,
+                                    duration_ms: result.duration.as_millis() as u64,
+                                    success: result.success,
+                                    exit_code: Some(result.exit_code),
+                                };
+                                if let Err(e) = callback(event) {
+                                    debug!("Failed to emit command end event: {}", e);
+                                }
+                            }
+
+                            let display_cmd = display_map
+                                .get(&result.key)
+                                .filter(|s| !s.is_empty())
+                                .cloned()
+                                .unwrap_or_else(|| result.key.clone());
                             let cmd_result = CommandResult {
                                 command: format!("[{}] {}", result.key, display_cmd),
                                 exit_code: result.exit_code,
@@ -1242,39 +1280,21 @@ where
                     }
                 }
 
-                // Report all failures
-                let failed: Vec<&ParallelCommandResult> =
-                    parallel_results.iter().filter(|r| !r.success).collect();
-                if !failed.is_empty() {
-                    let failed_info: Vec<String> = failed
-                        .iter()
-                        .map(|r| format!("{} (exit {})", r.key, r.exit_code))
-                        .collect();
-                    error!(
-                        "Parallel host commands failed in phase {}: {}",
-                        phase.as_str(),
-                        failed_info.join(", ")
-                    );
+                // Report all failures and return error if any failed
+                if let Some(error_msg) =
+                    aggregate_parallel_failures(&parallel_results, phase, "Parallel host commands")
+                {
+                    error!("{}", error_msg);
+                    phase_result.total_duration = phase_start.elapsed();
+                    emit_phase_end_event(progress_callback, &phase_result);
+                    return Err(DeaconError::Lifecycle(error_msg));
                 }
             }
         }
     }
 
     phase_result.total_duration = phase_start.elapsed();
-
-    // Emit phase end event
-    if let Some(callback) = progress_callback {
-        let event = ProgressEvent::LifecyclePhaseEnd {
-            id: ProgressTracker::next_event_id(),
-            timestamp: ProgressTracker::current_timestamp(),
-            phase: phase.as_str().to_string(),
-            duration_ms: phase_result.total_duration.as_millis() as u64,
-            success: phase_result.success,
-        };
-        if let Err(e) = callback(event) {
-            debug!("Failed to emit phase end event: {}", e);
-        }
-    }
+    emit_phase_end_event(progress_callback, &phase_result);
 
     info!(
         "Completed host lifecycle phase: {} in {:?}",
@@ -1345,38 +1365,10 @@ where
     debug!("Executing lifecycle phase: {}", phase.as_str());
     let phase_start = Instant::now();
 
-    // Convert aggregated commands to string vec for progress event
-    let command_strings: Vec<String> = commands
-        .iter()
-        .map(|agg| match &agg.command {
-            LifecycleCommandValue::Shell(s) => s.clone(),
-            LifecycleCommandValue::Exec(args) => args.join(" "),
-            LifecycleCommandValue::Parallel(map) => {
-                let keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
-                format!("parallel: {}", keys.join(", "))
-            }
-        })
-        .collect();
+    let command_strings = build_phase_command_strings(commands);
+    emit_phase_begin_event(progress_callback, phase, command_strings);
 
-    // Emit phase begin event
-    if let Some(callback) = progress_callback {
-        let event = ProgressEvent::LifecyclePhaseBegin {
-            id: ProgressTracker::next_event_id(),
-            timestamp: ProgressTracker::current_timestamp(),
-            phase: phase.as_str().to_string(),
-            commands: command_strings.clone(),
-        };
-        if let Err(e) = callback(event) {
-            debug!("Failed to emit phase begin event: {}", e);
-        }
-    }
-
-    let mut phase_result = PhaseResult {
-        phase,
-        commands: Vec::new(),
-        total_duration: std::time::Duration::default(),
-        success: true,
-    };
+    let mut phase_result = PhaseResult::new(phase);
 
     for (i, agg_cmd) in commands.iter().enumerate() {
         // Dispatch based on command format
@@ -1396,31 +1388,7 @@ where
 
                 let start_time = Instant::now();
 
-                // Apply variable substitution to the command
-                let mut substitution_report = SubstitutionReport::new();
-                let substituted_command = VariableSubstitution::substitute_string(
-                    command_template,
-                    context,
-                    &mut substitution_report,
-                );
-
-                debug!(
-                    "Command after variable substitution: {}",
-                    substituted_command
-                );
-
-                if substitution_report.has_substitutions() {
-                    debug!(
-                        "Variable substitutions applied: {:?}",
-                        substitution_report.replacements
-                    );
-                    if !substitution_report.unknown_variables.is_empty() {
-                        debug!(
-                            "Unknown variables left unchanged: {:?}",
-                            substitution_report.unknown_variables
-                        );
-                    }
-                }
+                let substituted_command = substitute_shell_and_log(command_template, context);
 
                 // Apply redaction to command string for event emission
                 let redaction_config = RedactionConfig::default();
@@ -1525,20 +1493,7 @@ where
                             error!("{}", error_msg);
 
                             phase_result.total_duration = phase_start.elapsed();
-
-                            // Emit phase end event before returning error
-                            if let Some(callback) = progress_callback {
-                                let event = ProgressEvent::LifecyclePhaseEnd {
-                                    id: ProgressTracker::next_event_id(),
-                                    timestamp: ProgressTracker::current_timestamp(),
-                                    phase: phase.as_str().to_string(),
-                                    duration_ms: phase_result.total_duration.as_millis() as u64,
-                                    success: false,
-                                };
-                                if let Err(emit_err) = callback(event) {
-                                    debug!("Failed to emit phase end event: {}", emit_err);
-                                }
-                            }
+                            emit_phase_end_event(progress_callback, &phase_result);
 
                             return Err(DeaconError::Lifecycle(error_msg));
                         }
@@ -1562,20 +1517,7 @@ where
 
                         phase_result.success = false;
                         phase_result.total_duration = phase_start.elapsed();
-
-                        // Emit phase end event before returning error
-                        if let Some(callback) = progress_callback {
-                            let event = ProgressEvent::LifecyclePhaseEnd {
-                                id: ProgressTracker::next_event_id(),
-                                timestamp: ProgressTracker::current_timestamp(),
-                                phase: phase.as_str().to_string(),
-                                duration_ms: phase_result.total_duration.as_millis() as u64,
-                                success: false,
-                            };
-                            if let Err(emit_err) = callback(event) {
-                                debug!("Failed to emit phase end event: {}", emit_err);
-                            }
-                        }
+                        emit_phase_end_event(progress_callback, &phase_result);
 
                         error!(
                             "Failed to execute container command (source: {}) in phase {}: {}",
@@ -1815,7 +1757,7 @@ where
                             }
                             LifecycleCommandValue::Exec(args) => args.clone(),
                             LifecycleCommandValue::Parallel(_) => {
-                                // Nested parallel not supported
+                                warn!(key = %key, "Nested parallel commands are not supported; skipping entry");
                                 vec![]
                             }
                         };
@@ -1913,20 +1855,12 @@ where
                 }
 
                 // Check for failures - aggregate all failed keys
-                let failed: Vec<&ParallelCommandResult> =
-                    results.iter().filter(|r| !r.success).collect();
-                if !failed.is_empty() {
+                if let Some(error_msg) = aggregate_parallel_failures(
+                    &results,
+                    phase,
+                    &format!("Parallel lifecycle commands (source: {})", agg_cmd.source),
+                ) {
                     phase_result.success = false;
-                    let failed_info: Vec<String> = failed
-                        .iter()
-                        .map(|r| format!("{} (exit {})", r.key, r.exit_code))
-                        .collect();
-                    let error_msg = format!(
-                        "Parallel lifecycle commands failed (source: {}) in phase {}: {}",
-                        agg_cmd.source,
-                        phase.as_str(),
-                        failed_info.join(", ")
-                    );
                     error!("{}", error_msg);
                     phase_result.total_duration = phase_start.elapsed();
                     emit_phase_end_event(progress_callback, &phase_result);
@@ -1937,20 +1871,7 @@ where
     }
 
     phase_result.total_duration = phase_start.elapsed();
-
-    // Emit phase end event
-    if let Some(callback) = progress_callback {
-        let event = ProgressEvent::LifecyclePhaseEnd {
-            id: ProgressTracker::next_event_id(),
-            timestamp: ProgressTracker::current_timestamp(),
-            phase: phase.as_str().to_string(),
-            duration_ms: phase_result.total_duration.as_millis() as u64,
-            success: phase_result.success,
-        };
-        if let Err(e) = callback(event) {
-            debug!("Failed to emit phase end event: {}", e);
-        }
-    }
+    emit_phase_end_event(progress_callback, &phase_result);
 
     debug!(
         "Completed lifecycle phase: {} in {:?}",
@@ -2242,6 +2163,42 @@ where
     Ok(phase_result)
 }
 
+/// Convert aggregated commands to display strings for progress events.
+fn build_phase_command_strings(commands: &[AggregatedLifecycleCommand]) -> Vec<String> {
+    commands
+        .iter()
+        .map(|agg| match &agg.command {
+            LifecycleCommandValue::Shell(s) => s.clone(),
+            LifecycleCommandValue::Exec(args) => args.join(" "),
+            LifecycleCommandValue::Parallel(map) => {
+                let keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
+                format!("parallel: {}", keys.join(", "))
+            }
+        })
+        .collect()
+}
+
+/// Emit a phase-begin progress event.
+fn emit_phase_begin_event<F>(
+    progress_callback: Option<&F>,
+    phase: LifecyclePhase,
+    command_strings: Vec<String>,
+) where
+    F: Fn(ProgressEvent) -> anyhow::Result<()>,
+{
+    if let Some(callback) = progress_callback {
+        let event = ProgressEvent::LifecyclePhaseBegin {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: phase.as_str().to_string(),
+            commands: command_strings,
+        };
+        if let Err(e) = callback(event) {
+            debug!("Failed to emit phase begin event: {}", e);
+        }
+    }
+}
+
 /// Helper to emit phase end event
 fn emit_phase_end_event<F>(progress_callback: Option<&F>, phase_result: &PhaseResult)
 where
@@ -2259,6 +2216,48 @@ where
             debug!("Failed to emit phase end event: {}", e);
         }
     }
+}
+
+/// Apply variable substitution to a shell command template and log the result.
+fn substitute_shell_and_log(template: &str, context: &SubstitutionContext) -> String {
+    let mut report = SubstitutionReport::new();
+    let substituted = VariableSubstitution::substitute_string(template, context, &mut report);
+    debug!(
+        "Command after variable substitution: {} -> {}",
+        template, substituted
+    );
+    if report.has_substitutions() {
+        debug!("Variable substitutions applied: {:?}", report.replacements);
+        if !report.unknown_variables.is_empty() {
+            debug!(
+                "Unknown variables left unchanged: {:?}",
+                report.unknown_variables
+            );
+        }
+    }
+    substituted
+}
+
+/// Check parallel results for failures and return a formatted error message if any failed.
+fn aggregate_parallel_failures(
+    results: &[ParallelCommandResult],
+    phase: LifecyclePhase,
+    label: &str,
+) -> Option<String> {
+    let failed: Vec<&ParallelCommandResult> = results.iter().filter(|r| !r.success).collect();
+    if failed.is_empty() {
+        return None;
+    }
+    let failed_info: Vec<String> = failed
+        .iter()
+        .map(|r| format!("{} (exit {})", r.key, r.exit_code))
+        .collect();
+    Some(format!(
+        "{} failed in phase {}: {}",
+        label,
+        phase.as_str(),
+        failed_info.join(", ")
+    ))
 }
 
 /// Commands for each lifecycle phase
@@ -2319,6 +2318,27 @@ impl ContainerLifecycleCommands {
         self.post_attach = Some(commands);
         self
     }
+
+    /// Set commands for the given phase dynamically.
+    ///
+    /// Dispatches to the correct field based on the phase variant.
+    /// `Initialize` and `Dotfiles` are not settable via this path and will log a warning.
+    pub fn set_phase(mut self, phase: LifecyclePhase, commands: LifecycleCommandList) -> Self {
+        match phase {
+            LifecyclePhase::OnCreate => self.on_create = Some(commands),
+            LifecyclePhase::UpdateContent => self.update_content = Some(commands),
+            LifecyclePhase::PostCreate => self.post_create = Some(commands),
+            LifecyclePhase::PostStart => self.post_start = Some(commands),
+            LifecyclePhase::PostAttach => self.post_attach = Some(commands),
+            LifecyclePhase::Initialize | LifecyclePhase::Dotfiles => {
+                tracing::warn!(
+                    "set_phase called with {:?} which is not settable via this path",
+                    phase
+                );
+            }
+        }
+        self
+    }
 }
 
 /// Result of executing a single command
@@ -2349,6 +2369,18 @@ pub struct PhaseResult {
     pub total_duration: std::time::Duration,
     /// Whether all commands in the phase succeeded
     pub success: bool,
+}
+
+impl PhaseResult {
+    /// Create a new successful empty phase result
+    fn new(phase: LifecyclePhase) -> Self {
+        Self {
+            phase,
+            commands: Vec::new(),
+            total_duration: Duration::default(),
+            success: true,
+        }
+    }
 }
 
 /// Result of executing container lifecycle

@@ -99,6 +99,10 @@ pub struct ParallelCommandResult {
     pub duration: std::time::Duration,
     /// Whether the command succeeded
     pub success: bool,
+    /// Captured standard output from the command
+    pub stdout: String,
+    /// Captured standard error from the command
+    pub stderr: String,
 }
 ```
 

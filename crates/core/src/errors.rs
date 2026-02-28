@@ -30,6 +30,11 @@ pub enum ConfigError {
     #[error("Failed to read configuration file")]
     Io(#[from] std::io::Error),
 
+    /// Multiple configuration files found — user must select one
+    #[error("Multiple devcontainer configurations found. Use --config to specify one:\n{}",
+        paths.iter().map(|p| format!("  {}", p)).collect::<Vec<_>>().join("\n"))]
+    MultipleConfigs { paths: Vec<String> },
+
     /// Configuration file not found
     #[error("Configuration file not found: {path}")]
     NotFound { path: String },
@@ -288,6 +293,17 @@ mod tests {
         assert_eq!(
             format!("{}", error),
             "Configuration file not found: /path/to/file"
+        );
+
+        let error = ConfigError::MultipleConfigs {
+            paths: vec![
+                ".devcontainer/node/devcontainer.json".to_string(),
+                ".devcontainer/python/devcontainer.json".to_string(),
+            ],
+        };
+        assert_eq!(
+            format!("{}", error),
+            "Multiple devcontainer configurations found. Use --config to specify one:\n  .devcontainer/node/devcontainer.json\n  .devcontainer/python/devcontainer.json"
         );
     }
 

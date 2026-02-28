@@ -422,6 +422,8 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - N/A (devcontainer.json configuration files) (009-complete-feature-support)
 - N/A (Markdown documentation only) (011-update-readme-scope)
 - Rust 1.70+ (Edition 2021) + okio (async runtime, JoinSet for parallel), serde/serde_json (JSON parsing), indexmap (ordered maps for object format), clap (CLI), tracing (logging) (012-fix-lifecycle-formats)
+- Rust 1.70+ (Edition 2021) + serde, tracing, thiserror, clap (existing — no new dependencies) (014-named-config-search)
+- N/A (filesystem-only config discovery) (014-named-config-search)
 
 ## Recent Changes
 - 009-complete-feature-support: Added Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing

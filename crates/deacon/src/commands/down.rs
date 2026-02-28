@@ -5,9 +5,10 @@
 
 use anyhow::Result;
 use deacon_core::compose::{ComposeManager, ComposeProject};
-use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::config::{ConfigLoader, DevContainerConfig, DiscoveryResult};
 use deacon_core::container::{ContainerIdentity, ContainerOps};
 use deacon_core::docker::{CliDocker, Docker};
+use deacon_core::errors::{ConfigError, DeaconError};
 use deacon_core::state::{StateManager, WorkspaceState};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
@@ -59,13 +60,27 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
     let config_result = if let Some(config_path) = args.config_path.as_ref() {
         ConfigLoader::load_from_path(config_path)
     } else {
-        let config_location = ConfigLoader::discover_config(workspace_folder)?;
-        if config_location.exists() {
-            ConfigLoader::load_from_path(config_location.path())
-        } else {
-            // Config not found - we'll try to use saved state for auto-discovery
-            debug!("No configuration found, attempting auto-discovery from state");
-            return execute_down_with_auto_discovery(workspace_folder, &args).await;
+        match ConfigLoader::discover_config(workspace_folder)? {
+            DiscoveryResult::Single(path) => ConfigLoader::load_from_path(&path),
+            DiscoveryResult::Multiple(paths) => {
+                let display_paths: Vec<String> = paths
+                    .iter()
+                    .map(|p| {
+                        p.strip_prefix(workspace_folder)
+                            .unwrap_or(p)
+                            .to_string_lossy()
+                            .to_string()
+                    })
+                    .collect();
+                return Err(DeaconError::Config(ConfigError::MultipleConfigs {
+                    paths: display_paths,
+                })
+                .into());
+            }
+            DiscoveryResult::None(_) => {
+                debug!("No configuration found, attempting auto-discovery from state");
+                return execute_down_with_auto_discovery(workspace_folder, &args).await;
+            }
         }
     };
 

@@ -3,10 +3,11 @@
 //! This test verifies that when lifecycle commands are executed, both phase-level
 //! and per-command progress events are emitted in the correct order.
 
+mod common;
+
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle_with_progress_callback, AggregatedLifecycleCommand,
-    ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
-    LifecycleCommandSource, LifecycleCommandValue,
+    execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
+    ContainerLifecycleConfig,
 };
 use deacon_core::progress::{ProgressEvent, ProgressTracker};
 use deacon_core::variable::SubstitutionContext;
@@ -14,19 +15,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::TempDir;
-
-/// Helper to create a LifecycleCommandList from shell command strings
-fn make_shell_command_list(cmds: &[&str]) -> LifecycleCommandList {
-    LifecycleCommandList {
-        commands: cmds
-            .iter()
-            .map(|cmd| AggregatedLifecycleCommand {
-                command: LifecycleCommandValue::Shell(cmd.to_string()),
-                source: LifecycleCommandSource::Config,
-            })
-            .collect(),
-    }
-}
 
 /// Mock progress event collector that stores events for verification
 #[derive(Debug, Default)]
@@ -93,11 +81,13 @@ async fn test_per_command_events_emitted() {
 
     // Create lifecycle commands with multiple commands in a phase
     let commands = ContainerLifecycleCommands::new()
-        .with_on_create(make_shell_command_list(&[
+        .with_on_create(common::make_shell_command_list(&[
             "echo 'First onCreate command'",
             "echo 'Second onCreate command'",
         ]))
-        .with_post_create(make_shell_command_list(&["echo 'PostCreate command'"]));
+        .with_post_create(common::make_shell_command_list(&[
+            "echo 'PostCreate command'",
+        ]));
 
     // Execute lifecycle commands (this will fail due to no docker, but should emit events)
     let _result = execute_container_lifecycle_with_progress_callback(

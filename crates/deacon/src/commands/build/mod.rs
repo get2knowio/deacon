@@ -454,14 +454,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     debug!("Build args: {:?}", args);
 
     // Initialize progress tracking
-    let emit_progress_event = |event: deacon_core::progress::ProgressEvent| -> Result<()> {
-        if let Ok(mut tracker_guard) = args.progress_tracker.lock() {
-            if let Some(ref mut tracker) = tracker_guard.as_mut() {
-                tracker.emit_event(event)?;
-            }
-        }
-        Ok(())
-    };
+    let emit_progress_event =
+        crate::commands::shared::progress::make_progress_callback(&args.progress_tracker);
 
     // Parse and validate labels from key=value format
     let parsed_labels: Result<Vec<(String, String)>> = args
