@@ -45,3 +45,8 @@ artifacts/nextest/full-timing.json
 .claude/settings.local.json
 /.devcontainer-state
 /.deacon
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

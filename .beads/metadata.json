@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "deacon",
+  "project_id": "38898179-06f3-49fe-b103-52c72c5b44aa"
+}
