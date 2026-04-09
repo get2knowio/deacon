@@ -109,12 +109,26 @@ pub(crate) async fn execute_compose_up(
     // which uses ComposeProject::generate_injection_override() to pipe YAML via stdin.
     // No temporary override files are created.
 
+    // Populate profiles from compose config.
+    // Per spec §7: detect profiles for services in runServices and pass them
+    // via --profile flags to all compose commands.
+    // Uses `docker compose config --format json` (same pattern as external volumes).
+    if let Err(e) = compose_manager.populate_profiles(&mut project).await {
+        debug!(
+            "Could not detect compose profiles (Docker may be unavailable): {}",
+            e
+        );
+    }
+
     // Populate external volumes from compose config.
     // This enables tracking which volumes are external for validation and preservation.
     // Per spec: external volumes must not be replaced or mutated by injection.
     // Note: This operation requires Docker - if unavailable, we continue without
     // external volume information as this is non-blocking for the core up workflow.
-    if let Err(e) = compose_manager.populate_external_volumes(&mut project) {
+    if let Err(e) = compose_manager
+        .populate_external_volumes(&mut project)
+        .await
+    {
         debug!(
             "Could not populate external volumes (Docker may be unavailable): {}",
             e
@@ -125,7 +139,7 @@ pub(crate) async fn execute_compose_up(
 
     // If we expect an existing project, fail fast when it's not running.
     if args.expect_existing_container {
-        match compose_manager.is_project_running(&project) {
+        match compose_manager.is_project_running(&project).await {
             Ok(true) => { /* ok */ }
             Ok(false) => {
                 return Err(DeaconError::Docker(DockerError::ContainerNotFound {
@@ -139,12 +153,13 @@ pub(crate) async fn execute_compose_up(
 
     // Check if project is already running
     if !args.remove_existing_container {
-        match compose_manager.is_project_running(&project) {
+        match compose_manager.is_project_running(&project).await {
             Ok(true) => {
                 debug!("Compose project {} is already running", project.name);
                 // Get the primary container ID for potential exec operations
                 let container_id = compose_manager
-                    .get_primary_container_id(&project)?
+                    .get_primary_container_id(&project)
+                    .await?
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "Failed to get primary container ID for running compose project"
@@ -225,7 +240,7 @@ pub(crate) async fn execute_compose_up(
     // Stop existing containers if requested
     if args.remove_existing_container {
         debug!("Stopping existing compose project");
-        if let Err(e) = compose_manager.stop_project(&project) {
+        if let Err(e) = compose_manager.stop_project(&project).await {
             warn!("Failed to stop existing project: {}", e);
         }
     }
@@ -241,7 +256,9 @@ pub(crate) async fn execute_compose_up(
         debug!("GPU mode for compose: {:?}", args.gpu_mode);
     }
 
-    compose_manager.start_project(&project, args.gpu_mode)?;
+    compose_manager
+        .start_project(&project, args.gpu_mode)
+        .await?;
 
     info!("Compose project {} started successfully", project.name);
 
@@ -303,7 +320,7 @@ pub(crate) async fn execute_compose_up(
         const INITIAL_DELAY_MS: u64 = 100;
 
         loop {
-            match compose_manager.get_primary_container_id(&project)? {
+            match compose_manager.get_primary_container_id(&project).await? {
                 Some(id) => break id,
                 None if attempts < MAX_ATTEMPTS => {
                     attempts += 1;
@@ -440,7 +457,7 @@ pub(crate) async fn execute_compose_post_create(
 
     // Get the primary container ID
     let compose_manager = ComposeManager::with_docker_path(docker_path.to_string());
-    let container_id = match compose_manager.get_primary_container_id(project)? {
+    let container_id = match compose_manager.get_primary_container_id(project).await? {
         Some(id) => id,
         None => {
             warn!("Primary service container not found, skipping post-create");
@@ -506,7 +523,7 @@ pub(crate) async fn handle_compose_shutdown(
         "stopCompose" => {
             debug!("Stopping compose project due to shutdown action");
             let compose_manager = ComposeManager::with_docker_path(docker_path.to_string());
-            compose_manager.stop_project(project)?;
+            compose_manager.stop_project(project).await?;
             state_manager.remove_workspace_state(workspace_hash);
             info!("Compose project stopped and removed from state");
         }

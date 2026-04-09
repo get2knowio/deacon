@@ -28,7 +28,7 @@ pub(crate) async fn handle_port_events(
 
     // Get all services in the project
     let command = compose_manager.get_command(project);
-    let services = match command.ps() {
+    let services = match command.ps().await {
         Ok(services) => services,
         Err(e) => {
             warn!("Failed to list compose services: {}", e);

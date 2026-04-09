@@ -168,6 +168,7 @@ fn test_compose_command_building() {
     let command = command_builder.build_command(&["ps", "--format", "json"]);
 
     let args: Vec<String> = command
+        .as_std()
         .get_args()
         .map(|s| s.to_string_lossy().to_string())
         .collect();

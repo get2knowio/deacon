@@ -205,8 +205,8 @@ fn test_port_attributes_for_multiservice() {
     assert!(config.ports_attributes.contains_key("6379"));
 }
 
-#[test]
-fn test_compose_get_all_container_ids() {
+#[tokio::test]
+async fn test_compose_get_all_container_ids() {
     // Test that get_all_container_ids method exists and can be called
     let project = ComposeProject {
         name: "test-project".to_string(),
@@ -225,7 +225,7 @@ fn test_compose_get_all_container_ids() {
 
     // This will fail in practice because no containers are running,
     // but we're testing that the API exists and is callable
-    let result = compose_manager.get_all_container_ids(&project);
+    let result = compose_manager.get_all_container_ids(&project).await;
 
     // We expect this to succeed with empty result or fail with Docker error
     // but not panic or have a compilation error

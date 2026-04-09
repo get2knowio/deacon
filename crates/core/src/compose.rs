@@ -9,7 +9,6 @@ use crate::security::SecurityOptions;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tracing::{debug, instrument, warn};
 
 /// Docker Compose project information
@@ -130,9 +129,12 @@ impl ComposeCommand {
         self
     }
 
-    /// Build docker compose command with given arguments
-    pub fn build_command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(&self.docker_path);
+    /// Build docker compose command with given arguments.
+    ///
+    /// Returns a `tokio::process::Command` for async-safe process spawning.
+    /// For test inspection (e.g., `get_args()`), use `.as_std().get_args()`.
+    pub fn build_command(&self, args: &[&str]) -> tokio::process::Command {
+        let mut command = tokio::process::Command::new(&self.docker_path);
         command.arg("compose");
 
         // Add compose files
@@ -166,8 +168,8 @@ impl ComposeCommand {
 
     /// Execute compose command and return output
     #[instrument(skip(self))]
-    pub fn execute(&self, args: &[&str]) -> Result<String> {
-        self.execute_with_stdin(args, None)
+    pub async fn execute(&self, args: &[&str]) -> Result<String> {
+        self.execute_with_stdin(args, None).await
     }
 
     /// Execute compose command with optional stdin input (e.g., for inline override YAML)
@@ -177,10 +179,17 @@ impl ComposeCommand {
     /// 2. Pipe the stdin_input content to the command
     ///
     /// This allows injecting mounts/env without creating temporary override files.
+    ///
+    /// Uses `tokio::process::Command` for async-safe process spawning per CLAUDE.md:
+    /// "Async code MUST avoid blocking calls (std::process::Command::output, blocking file IO)."
     #[instrument(skip(self, stdin_input))]
-    pub fn execute_with_stdin(&self, args: &[&str], stdin_input: Option<&str>) -> Result<String> {
-        use std::io::Write;
+    pub async fn execute_with_stdin(
+        &self,
+        args: &[&str],
+        stdin_input: Option<&str>,
+    ) -> Result<String> {
         use std::process::Stdio;
+        use tokio::io::AsyncWriteExt;
 
         let mut command = self.build_command(args);
 
@@ -188,7 +197,7 @@ impl ComposeCommand {
         if stdin_input.is_some() {
             // Insert -f - before the subcommand args to read from stdin
             // Note: We need to rebuild command to insert at the right position
-            let mut new_command = Command::new(&self.docker_path);
+            let mut new_command = tokio::process::Command::new(&self.docker_path);
             new_command.arg("compose");
 
             // Add compose files
@@ -253,14 +262,14 @@ impl ComposeCommand {
         // Write stdin input if provided
         if let Some(input) = stdin_input {
             if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(input.as_bytes()).map_err(|e| {
+                stdin.write_all(input.as_bytes()).await.map_err(|e| {
                     DockerError::CLIError(format!("Failed to write stdin to docker compose: {}", e))
                 })?;
                 // Drop stdin to signal EOF
             }
         }
 
-        let output = child.wait_with_output().map_err(|e| {
+        let output = child.wait_with_output().await.map_err(|e| {
             DockerError::CLIError(format!("Failed to wait for docker compose command: {}", e))
         })?;
 
@@ -282,13 +291,14 @@ impl ComposeCommand {
 
     /// Start services
     #[instrument(skip(self))]
-    pub fn up(
+    pub async fn up(
         &self,
         services: &[String],
         detached: bool,
         gpu_mode: crate::gpu::GpuMode,
     ) -> Result<String> {
         self.up_with_injection(services, detached, gpu_mode, None)
+            .await
     }
 
     /// Start services with optional inline injection override.
@@ -298,7 +308,7 @@ impl ComposeCommand {
     ///
     /// The injection_override YAML is piped to docker compose via stdin using `-f -`.
     #[instrument(skip(self, injection_override))]
-    pub fn up_with_injection(
+    pub async fn up_with_injection(
         &self,
         services: &[String],
         detached: bool,
@@ -328,7 +338,7 @@ impl ComposeCommand {
         }
 
         args.extend(services.iter().map(|s| s.as_str()));
-        self.execute_with_stdin(&args, injection_override)
+        self.execute_with_stdin(&args, injection_override).await
     }
 
     /// Warn about security options that cannot be applied dynamically in Docker Compose
@@ -371,22 +381,22 @@ impl ComposeCommand {
 
     /// Stop and remove containers
     #[instrument(skip(self))]
-    pub fn down(&self) -> Result<String> {
-        self.execute(&["down"])
+    pub async fn down(&self) -> Result<String> {
+        self.execute(&["down"]).await
     }
 
     /// Stop and remove containers with additional flags
     #[instrument(skip(self))]
-    pub fn down_with_flags(&self, flags: &[&str]) -> Result<String> {
+    pub async fn down_with_flags(&self, flags: &[&str]) -> Result<String> {
         let mut args = vec!["down"];
         args.extend(flags);
-        self.execute(&args)
+        self.execute(&args).await
     }
 
     /// List services with their status
     #[instrument(skip(self))]
-    pub fn ps(&self) -> Result<Vec<ComposeService>> {
-        let output = self.execute(&["ps", "--format", "json"])?;
+    pub async fn ps(&self) -> Result<Vec<ComposeService>> {
+        let output = self.execute(&["ps", "--format", "json"]).await?;
         self.parse_ps_output(&output)
     }
 
@@ -457,9 +467,25 @@ impl ComposeCommand {
     /// Returns an error if the docker compose config command fails to execute or
     /// produces invalid JSON output.
     #[instrument(skip(self))]
-    pub fn extract_external_volumes(&self) -> Result<Vec<String>> {
-        let output = self.execute(&["config", "--format", "json"])?;
+    pub async fn extract_external_volumes(&self) -> Result<Vec<String>> {
+        let output = self.execute(&["config", "--format", "json"]).await?;
         parse_external_volumes_from_config(&output)
+    }
+
+    /// Extract profiles for target services from compose configuration.
+    ///
+    /// Uses `docker compose config --format json` to get the merged configuration
+    /// and extracts the `profiles` arrays for the specified target services.
+    ///
+    /// Per spec §7: `docker compose config` returns the full resolved config
+    /// including all services regardless of active profiles.
+    #[instrument(skip(self))]
+    pub async fn extract_service_profiles(
+        &self,
+        target_services: &[String],
+    ) -> Result<Vec<String>> {
+        let output = self.execute(&["config", "--format", "json"]).await?;
+        parse_service_profiles_from_config(&output, target_services)
     }
 }
 
@@ -525,6 +551,62 @@ fn parse_external_volumes_from_config(json_output: &str) -> Result<Vec<String>> 
         external_volumes.len()
     );
     Ok(external_volumes)
+}
+
+/// Parse service profiles from docker compose config JSON output.
+///
+/// Extracts the `profiles` arrays from services that match the target
+/// service names. Returns a deduplicated list of profile names preserving
+/// first-seen order.
+///
+/// Uses the same `docker compose config --format json` output pattern as
+/// `parse_external_volumes_from_config`, avoiding a separate YAML parsing
+/// dependency.
+///
+/// # Arguments
+///
+/// * `json_output` - The JSON output from `docker compose config --format json`
+/// * `target_services` - Service names to collect profiles for (primary + runServices)
+fn parse_service_profiles_from_config(
+    json_output: &str,
+    target_services: &[String],
+) -> Result<Vec<String>> {
+    if json_output.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let config: serde_json::Value = serde_json::from_str(json_output).map_err(|e| {
+        DockerError::CLIError(format!("Failed to parse compose config JSON: {}", e))
+    })?;
+
+    let mut seen = std::collections::HashSet::new();
+    let mut profiles = Vec::new();
+
+    if let Some(services) = config.get("services").and_then(|s| s.as_object()) {
+        for target in target_services {
+            if let Some(service_def) = services.get(target) {
+                if let Some(service_profiles) =
+                    service_def.get("profiles").and_then(|p| p.as_array())
+                {
+                    for profile_val in service_profiles {
+                        if let Some(profile_name) = profile_val.as_str() {
+                            if seen.insert(profile_name.to_string()) {
+                                profiles.push(profile_name.to_string());
+                                debug!("Found profile '{}' for service '{}'", profile_name, target);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    debug!(
+        "Extracted {} profiles from compose config for services {:?}",
+        profiles.len(),
+        target_services
+    );
+    Ok(profiles)
 }
 
 /// Docker Compose manager
@@ -643,14 +725,43 @@ impl ComposeManager {
     /// and potentially continue without external volume information if
     /// Docker is unavailable.
     #[instrument(skip(self))]
-    pub fn populate_external_volumes(&self, project: &mut ComposeProject) -> Result<()> {
+    pub async fn populate_external_volumes(&self, project: &mut ComposeProject) -> Result<()> {
         let command = self.get_command(project);
-        let external_volumes = command.extract_external_volumes()?;
+        let external_volumes = command.extract_external_volumes().await?;
         project.external_volumes = external_volumes;
         debug!(
             "Populated {} external volumes for project {}",
             project.external_volumes.len(),
             project.name
+        );
+        Ok(())
+    }
+
+    /// Populate profiles for a compose project from compose configuration.
+    ///
+    /// Uses `docker compose config --format json` to find which profiles are
+    /// associated with the services that need to run (primary service + runServices).
+    /// The collected profiles are then set on the project so that all
+    /// subsequent compose commands include the appropriate `--profile` flags.
+    ///
+    /// Per spec §7: The up workflow must resolve compose config including profiles,
+    /// and pass `--profile *` for each required profile to `docker compose up -d`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the docker compose config command fails.
+    /// This requires Docker to be available.
+    #[instrument(skip(self))]
+    pub async fn populate_profiles(&self, project: &mut ComposeProject) -> Result<()> {
+        let target_services = project.get_all_services();
+        let command = self.get_command(project);
+        let profiles = command.extract_service_profiles(&target_services).await?;
+        project.profiles = profiles;
+        debug!(
+            "Populated {} profiles for project {}: {:?}",
+            project.profiles.len(),
+            project.name,
+            project.profiles
         );
         Ok(())
     }
@@ -668,9 +779,9 @@ impl ComposeManager {
 
     /// Check if project containers are running
     #[instrument(skip(self))]
-    pub fn is_project_running(&self, project: &ComposeProject) -> Result<bool> {
+    pub async fn is_project_running(&self, project: &ComposeProject) -> Result<bool> {
         let command = self.get_command(project);
-        let services = command.ps()?;
+        let services = command.ps().await?;
 
         // Get all services that should be running (primary + run_services)
         let all_services = project.get_all_services();
@@ -699,7 +810,7 @@ impl ComposeManager {
     /// Per FR-001/FR-002: Injects mounts and env into the primary service
     /// using inline YAML via stdin (no temp files).
     #[instrument(skip(self))]
-    pub fn start_project(
+    pub async fn start_project(
         &self,
         project: &ComposeProject,
         gpu_mode: crate::gpu::GpuMode,
@@ -715,7 +826,9 @@ impl ComposeManager {
         // Generate injection override if we have mounts or env to inject
         let injection_override = project.generate_injection_override();
 
-        command.up_with_injection(&services, true, gpu_mode, injection_override.as_deref())?;
+        command
+            .up_with_injection(&services, true, gpu_mode, injection_override.as_deref())
+            .await?;
 
         debug!("Compose project {} started successfully", project.name);
         Ok(())
@@ -723,12 +836,12 @@ impl ComposeManager {
 
     /// Stop compose project
     #[instrument(skip(self))]
-    pub fn stop_project(&self, project: &ComposeProject) -> Result<()> {
+    pub async fn stop_project(&self, project: &ComposeProject) -> Result<()> {
         let command = self.get_command(project);
 
         debug!("Stopping compose project {}", project.name);
 
-        command.down()?;
+        command.down().await?;
 
         debug!("Compose project {} stopped successfully", project.name);
         Ok(())
@@ -736,13 +849,13 @@ impl ComposeManager {
 
     /// Stop and remove compose project containers
     #[instrument(skip(self))]
-    pub fn down_project(&self, project: &ComposeProject) -> Result<()> {
+    pub async fn down_project(&self, project: &ComposeProject) -> Result<()> {
         let command = self.get_command(project);
 
         debug!("Stopping and removing compose project {}", project.name);
 
         // Use down without --volumes to preserve volumes
-        command.down_with_flags(&[])?;
+        command.down_with_flags(&[]).await?;
 
         debug!(
             "Compose project {} stopped and removed successfully",
@@ -753,7 +866,7 @@ impl ComposeManager {
 
     /// Stop and remove compose project containers including volumes
     #[instrument(skip(self))]
-    pub fn down_project_with_volumes(&self, project: &ComposeProject) -> Result<()> {
+    pub async fn down_project_with_volumes(&self, project: &ComposeProject) -> Result<()> {
         let command = self.get_command(project);
 
         debug!(
@@ -762,7 +875,7 @@ impl ComposeManager {
         );
 
         // Use down with --volumes to remove named volumes as well
-        command.down_with_flags(&["--volumes"])?;
+        command.down_with_flags(&["--volumes"]).await?;
 
         debug!(
             "Compose project {} stopped and removed with volumes successfully",
@@ -819,7 +932,7 @@ impl ComposeManager {
     /// # }
     /// ```
     #[instrument(skip(self))]
-    pub fn build_service(&self, project: &ComposeProject, service: &str) -> Result<String> {
+    pub async fn build_service(&self, project: &ComposeProject, service: &str) -> Result<String> {
         let command = self.get_command(project);
 
         debug!(
@@ -827,7 +940,7 @@ impl ComposeManager {
             project.name, service
         );
 
-        let output = command.execute(&["build", service])?;
+        let output = command.execute(&["build", service]).await?;
 
         debug!(
             "Compose project {} service {} built successfully",
@@ -882,11 +995,15 @@ impl ComposeManager {
     /// # }
     /// ```
     #[instrument(skip(self))]
-    pub fn validate_service_exists(&self, project: &ComposeProject, service: &str) -> Result<bool> {
+    pub async fn validate_service_exists(
+        &self,
+        project: &ComposeProject,
+        service: &str,
+    ) -> Result<bool> {
         let command = self.get_command(project);
 
         // Use docker compose config --services to list all available services
-        let output = command.execute(&["config", "--services"])?;
+        let output = command.execute(&["config", "--services"]).await?;
 
         let services: Vec<String> = output
             .lines()
@@ -904,9 +1021,12 @@ impl ComposeManager {
 
     /// Get primary service container ID
     #[instrument(skip(self))]
-    pub fn get_primary_container_id(&self, project: &ComposeProject) -> Result<Option<String>> {
+    pub async fn get_primary_container_id(
+        &self,
+        project: &ComposeProject,
+    ) -> Result<Option<String>> {
         let command = self.get_command(project);
-        let services = command.ps()?;
+        let services = command.ps().await?;
 
         let primary_service = services.iter().find(|s| s.name == project.service);
 
@@ -930,12 +1050,12 @@ impl ComposeManager {
 
     /// Get container IDs for all services in the project
     #[instrument(skip(self))]
-    pub fn get_all_container_ids(
+    pub async fn get_all_container_ids(
         &self,
         project: &ComposeProject,
     ) -> Result<std::collections::HashMap<String, String>> {
         let command = self.get_command(project);
-        let services = command.ps()?;
+        let services = command.ps().await?;
 
         let mut container_ids = std::collections::HashMap::new();
 
@@ -1264,6 +1384,7 @@ mod tests {
         let command = cmd.build_command(&["up", "-d"]);
 
         let args: Vec<String> = command
+            .as_std()
             .get_args()
             .map(|s| s.to_string_lossy().to_string())
             .collect();
@@ -1290,6 +1411,7 @@ mod tests {
         let command = cmd.build_command(&["up", "-d"]);
 
         let args: Vec<String> = command
+            .as_std()
             .get_args()
             .map(|s| s.to_string_lossy().to_string())
             .collect();
@@ -1316,6 +1438,7 @@ mod tests {
         let command = cmd.build_command(&["up", "-d"]);
 
         let args: Vec<String> = command
+            .as_std()
             .get_args()
             .map(|s| s.to_string_lossy().to_string())
             .collect();
@@ -1892,5 +2015,112 @@ mod tests {
         }"#;
         let result = parse_external_volumes_from_config(config).unwrap();
         assert_eq!(result, vec!["shared_cache"]);
+    }
+
+    #[test]
+    fn test_parse_service_profiles_single_service() {
+        let config = r#"{
+            "services": {
+                "app": {
+                    "image": "ubuntu",
+                    "profiles": ["dev"]
+                },
+                "db": {
+                    "image": "postgres",
+                    "profiles": ["dev", "test"]
+                },
+                "cache": {
+                    "image": "redis",
+                    "profiles": ["full"]
+                }
+            }
+        }"#;
+        let target_services = vec!["app".to_string(), "db".to_string()];
+        let profiles = parse_service_profiles_from_config(config, &target_services).unwrap();
+        assert_eq!(profiles, vec!["dev", "test"]);
+    }
+
+    #[test]
+    fn test_parse_service_profiles_no_profiles() {
+        let config = r#"{
+            "services": {
+                "app": {
+                    "image": "ubuntu"
+                },
+                "db": {
+                    "image": "postgres"
+                }
+            }
+        }"#;
+        let target_services = vec!["app".to_string(), "db".to_string()];
+        let profiles = parse_service_profiles_from_config(config, &target_services).unwrap();
+        assert!(profiles.is_empty());
+    }
+
+    #[test]
+    fn test_parse_service_profiles_deduplicates() {
+        let config = r#"{
+            "services": {
+                "app": {
+                    "image": "ubuntu",
+                    "profiles": ["dev"]
+                },
+                "db": {
+                    "image": "postgres",
+                    "profiles": ["dev"]
+                }
+            }
+        }"#;
+        let target_services = vec!["app".to_string(), "db".to_string()];
+        let profiles = parse_service_profiles_from_config(config, &target_services).unwrap();
+        assert_eq!(profiles, vec!["dev"]);
+    }
+
+    #[test]
+    fn test_parse_service_profiles_empty_input() {
+        let profiles = parse_service_profiles_from_config("", &["app".to_string()]).unwrap();
+        assert!(profiles.is_empty());
+    }
+
+    #[test]
+    fn test_parse_service_profiles_service_not_found() {
+        let config = r#"{
+            "services": {
+                "web": {
+                    "image": "nginx",
+                    "profiles": ["prod"]
+                }
+            }
+        }"#;
+        let target_services = vec!["app".to_string()];
+        let profiles = parse_service_profiles_from_config(config, &target_services).unwrap();
+        assert!(profiles.is_empty());
+    }
+
+    #[test]
+    fn test_parse_service_profiles_no_services_section() {
+        let config = r#"{ "volumes": {} }"#;
+        let target_services = vec!["app".to_string()];
+        let profiles = parse_service_profiles_from_config(config, &target_services).unwrap();
+        assert!(profiles.is_empty());
+    }
+
+    #[test]
+    fn test_parse_service_profiles_preserves_order() {
+        // Profiles should appear in first-seen order across services
+        let config = r#"{
+            "services": {
+                "app": {
+                    "profiles": ["beta", "alpha"]
+                },
+                "db": {
+                    "profiles": ["gamma", "alpha"]
+                }
+            }
+        }"#;
+        let target_services = vec!["app".to_string(), "db".to_string()];
+        let profiles = parse_service_profiles_from_config(config, &target_services).unwrap();
+        // "beta" and "alpha" from app, then "gamma" from db ("alpha" deduplicated)
+        assert_eq!(profiles, vec!["beta", "alpha", "gamma"]);
     }
 }

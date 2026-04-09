@@ -340,7 +340,7 @@ async fn resolve_compose_target_container(
     debug!("Targeting service: {}", service_name);
 
     // Get all container IDs for the project
-    let container_ids = compose_manager.get_all_container_ids(&project)?;
+    let container_ids = compose_manager.get_all_container_ids(&project).await?;
 
     // Find the container for the target service
     match container_ids.get(&service_name) {
@@ -1084,6 +1084,7 @@ services:
 
         let command = compose_manager.get_command(&project).build_command(&["ps"]);
         let args: Vec<String> = command
+            .as_std()
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();

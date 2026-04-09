@@ -1197,7 +1197,10 @@ async fn execute_compose_build(
     let project = compose_manager.create_project(config, workspace_folder)?;
 
     // Validate service exists
-    if !compose_manager.validate_service_exists(&project, service)? {
+    if !compose_manager
+        .validate_service_exists(&project, service)
+        .await?
+    {
         return Err(anyhow!(
             "Service '{}' not found in Docker Compose configuration",
             service
@@ -1205,7 +1208,7 @@ async fn execute_compose_build(
     }
 
     // Build the service
-    let _build_output = compose_manager.build_service(&project, service)?;
+    let _build_output = compose_manager.build_service(&project, service).await?;
 
     let build_duration = build_start.elapsed().as_secs_f64();
 

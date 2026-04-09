@@ -363,7 +363,7 @@ async fn execute_compose_down(
     };
 
     // Check if project is still running
-    if !compose_manager.is_project_running(&project)? {
+    if !compose_manager.is_project_running(&project).await? {
         debug!(
             "Compose project {} is not running, removing from state",
             project.name
@@ -396,13 +396,13 @@ async fn execute_compose_down(
                 debug!("Stopping and removing compose project");
                 if args.volumes {
                     debug!("Removing compose project with volumes");
-                    compose_manager.down_project_with_volumes(&project)?;
+                    compose_manager.down_project_with_volumes(&project).await?;
                 } else {
-                    compose_manager.down_project(&project)?;
+                    compose_manager.down_project(&project).await?;
                 }
             } else {
                 debug!("Stopping compose project");
-                compose_manager.stop_project(&project)?;
+                compose_manager.stop_project(&project).await?;
             }
 
             // Remove from state since project is stopped
@@ -414,7 +414,7 @@ async fn execute_compose_down(
                 "Invalid shutdown action '{}' for compose project, defaulting to stopCompose",
                 shutdown_action
             );
-            compose_manager.stop_project(&project)?;
+            compose_manager.stop_project(&project).await?;
             state_manager.remove_workspace_state(workspace_hash);
         }
     }
