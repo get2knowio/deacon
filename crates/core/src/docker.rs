@@ -9,7 +9,7 @@ use crate::errors::{DockerError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
+use tokio::process::Command;
 use tracing::{debug, instrument, warn};
 
 /// Detects if an error message indicates a PTY allocation failure.
@@ -469,7 +469,7 @@ impl TerminalResizeGuard {
     }
 
     fn capture_state() -> std::io::Result<String> {
-        let output = Command::new("stty")
+        let output = std::process::Command::new("stty")
             .args(["-F", "/dev/tty", "-g"])
             .output()?;
         if !output.status.success() {
@@ -486,7 +486,7 @@ impl TerminalResizeGuard {
     fn apply_size(size: TerminalSize) -> std::io::Result<()> {
         let rows = size.rows.to_string();
         let cols = size.columns.to_string();
-        let status = Command::new("stty")
+        let status = std::process::Command::new("stty")
             .args([
                 "-F",
                 "/dev/tty",
@@ -511,7 +511,7 @@ impl TerminalResizeGuard {
 impl Drop for TerminalResizeGuard {
     fn drop(&mut self) {
         if let Some(modes) = self.previous_modes.take() {
-            match Command::new("stty")
+            match std::process::Command::new("stty")
                 .args(["-F", "/dev/tty", modes.as_str()])
                 .status()
             {
@@ -749,7 +749,9 @@ impl CliRuntime {
             self.runtime_path
         );
 
-        let output = Command::new(&self.runtime_path).arg("--version").output();
+        let output = std::process::Command::new(&self.runtime_path)
+            .arg("--version")
+            .output();
 
         match output {
             Ok(output) => {
@@ -794,7 +796,7 @@ impl CliRuntime {
             args.join(" ")
         );
 
-        let output = Command::new(&self.runtime_path)
+        let output = std::process::Command::new(&self.runtime_path)
             .args(args)
             .output()
             .map_err(|e| {
@@ -1027,36 +1029,26 @@ impl Docker for CliRuntime {
     async fn ping(&self) -> Result<()> {
         debug!("Pinging container runtime daemon");
 
-        // Use blocking call as sync is acceptable per issue requirements
-        tokio::task::spawn_blocking({
-            let runtime_path = self.runtime_path.clone();
-            move || {
-                let output = Command::new(&runtime_path)
-                    .args(["version", "--format", "json"])
-                    .output();
+        let output = Command::new(&self.runtime_path)
+            .args(["version", "--format", "json"])
+            .output()
+            .await;
 
-                match output {
-                    Ok(output) => {
-                        if output.status.success() {
-                            debug!("Container runtime daemon is available");
-                            Ok(())
-                        } else {
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            Err(
-                                DockerError::CLIError(format!("Runtime ping failed: {}", stderr))
-                                    .into(),
-                            )
-                        }
-                    }
-                    Err(e) => {
-                        debug!("Runtime ping failed: {}", e);
-                        Err(DockerError::NotInstalled.into())
-                    }
+        match output {
+            Ok(output) => {
+                if output.status.success() {
+                    debug!("Container runtime daemon is available");
+                    Ok(())
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    Err(DockerError::CLIError(format!("Runtime ping failed: {}", stderr)).into())
                 }
             }
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+            Err(e) => {
+                debug!("Runtime ping failed: {}", e);
+                Err(DockerError::NotInstalled.into())
+            }
+        }
     }
 
     #[instrument(skip(self))]
@@ -1066,133 +1058,119 @@ impl Docker for CliRuntime {
             label_selector
         );
 
-        let runtime_path = self.runtime_path.clone();
-        let label_selector = label_selector.map(|s| s.to_string());
+        let mut args: Vec<String> = vec!["ps", "--all", "--format", "{{json .}}"]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
 
-        tokio::task::spawn_blocking(move || {
-            let mut args: Vec<String> = vec!["ps", "--all", "--format", "{{json .}}"]
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect();
-
-            // Support multiple label filters; Docker expects one --filter per label
-            if let Some(label) = &label_selector {
-                for part in label.split(',') {
-                    let trimmed = part.trim();
-                    if !trimmed.is_empty() {
-                        args.push("--filter".to_string());
-                        // Each part is expected to be key or key=value
-                        args.push(format!("label={}", trimmed));
-                    }
+        // Support multiple label filters; Docker expects one --filter per label
+        if let Some(label) = label_selector {
+            for part in label.split(',') {
+                let trimmed = part.trim();
+                if !trimmed.is_empty() {
+                    args.push("--filter".to_string());
+                    // Each part is expected to be key or key=value
+                    args.push(format!("label={}", trimmed));
                 }
             }
+        }
 
-            let output = Command::new(&runtime_path)
-                .args(&args)
-                .output()
-                .map_err(|e| DockerError::CLIError(format!("Failed to list containers: {}", e)))?;
+        let output = Command::new(&self.runtime_path)
+            .args(&args)
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to list containers: {}", e)))?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(
-                    DockerError::CLIError(format!("Container list failed: {}", stderr)).into(),
-                );
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(DockerError::CLIError(format!("Container list failed: {}", stderr)).into());
+        }
+
+        let stdout = String::from_utf8(output.stdout).map_err(|e| {
+            DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
+        })?;
+
+        // Parse the JSON output
+        let mut containers = Vec::new();
+        for line in stdout.trim().lines() {
+            if line.trim().is_empty() {
+                continue;
             }
 
-            let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
+            let container: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+                DockerError::CLIError(format!("Failed to parse container JSON: {}", e))
             })?;
 
-            // Parse the JSON output
-            let mut containers = Vec::new();
-            for line in stdout.trim().lines() {
-                if line.trim().is_empty() {
-                    continue;
-                }
+            let container_info = ContainerInfo {
+                id: container
+                    .get("ID")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                names: container
+                    .get("Names")
+                    .and_then(|v| v.as_str())
+                    .map(|s| vec![s.to_string()])
+                    .unwrap_or_default(),
+                image: container
+                    .get("Image")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                status: container
+                    .get("Status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                state: container
+                    .get("State")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                exposed_ports: vec![],  // Not available in list format
+                port_mappings: vec![],  // Not available in list format
+                env: HashMap::new(),    // Not available in list format (requires inspect)
+                labels: HashMap::new(), // Not available in list format (requires inspect)
+                mounts: vec![],         // Not available in list format (requires inspect)
+            };
+            containers.push(container_info);
+        }
 
-                let container: serde_json::Value = serde_json::from_str(line).map_err(|e| {
-                    DockerError::CLIError(format!("Failed to parse container JSON: {}", e))
-                })?;
-
-                let container_info = ContainerInfo {
-                    id: container
-                        .get("ID")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string(),
-                    names: container
-                        .get("Names")
-                        .and_then(|v| v.as_str())
-                        .map(|s| vec![s.to_string()])
-                        .unwrap_or_default(),
-                    image: container
-                        .get("Image")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string(),
-                    status: container
-                        .get("Status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string(),
-                    state: container
-                        .get("State")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string(),
-                    exposed_ports: vec![],  // Not available in list format
-                    port_mappings: vec![],  // Not available in list format
-                    env: HashMap::new(),    // Not available in list format (requires inspect)
-                    labels: HashMap::new(), // Not available in list format (requires inspect)
-                    mounts: vec![],         // Not available in list format (requires inspect)
-                };
-                containers.push(container_info);
-            }
-
-            Ok(containers)
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        Ok(containers)
     }
 
     #[instrument(skip(self))]
     async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>> {
         debug!("Inspecting container: {}", id);
 
-        let runtime_path = self.runtime_path.clone();
-        let container_id = id.to_string();
+        let output = Command::new(&self.runtime_path)
+            .args(["inspect", id])
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to inspect container: {}", e)))?;
 
-        tokio::task::spawn_blocking(move || {
-            let output = Command::new(&runtime_path)
-                .args(["inspect", &container_id])
-                .output()
-                .map_err(|e| {
-                    DockerError::CLIError(format!("Failed to inspect container: {}", e))
-                })?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if stderr.contains("No such object") || stderr.contains("No such container") {
-                    return Ok(None);
-                }
-                return Err(
-                    DockerError::CLIError(format!("Inspect command failed: {}", stderr)).into(),
-                );
-            }
-
-            let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
-            })?;
-
-            let containers: Vec<serde_json::Value> =
-                serde_json::from_str(&stdout).map_err(|e| {
-                    DockerError::CLIError(format!("Failed to parse inspect JSON: {}", e))
-                })?;
-
-            if containers.is_empty() {
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("No such object") || stderr.contains("No such container") {
                 return Ok(None);
             }
+            return Err(
+                DockerError::CLIError(format!("Inspect command failed: {}", stderr)).into(),
+            );
+        }
 
+        let stdout = String::from_utf8(output.stdout).map_err(|e| {
+            DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
+        })?;
+
+        let containers: Vec<serde_json::Value> = serde_json::from_str(&stdout)
+            .map_err(|e| DockerError::CLIError(format!("Failed to parse inspect JSON: {}", e)))?;
+
+        if containers.is_empty() {
+            return Ok(None);
+        }
+
+        {
             let container = &containers[0];
             let exposed_ports = Self::parse_exposed_ports(container);
             let port_mappings = Self::parse_port_mappings(container);
@@ -1303,73 +1281,63 @@ impl Docker for CliRuntime {
             };
 
             Ok(Some(container_info))
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        }
     }
 
     #[instrument(skip(self))]
     async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
         debug!("Inspecting image: {}", image_ref);
 
-        let runtime_path = self.runtime_path.clone();
-        let image_ref = image_ref.to_string();
+        let output = Command::new(&self.runtime_path)
+            .args(["image", "inspect", "--format", "{{json .}}", image_ref])
+            .output()
+            .await
+            .map_err(|e| {
+                DockerError::CLIError(format!("Failed to run docker image inspect: {}", e))
+            })?;
 
-        tokio::task::spawn_blocking(move || {
-            let output = Command::new(&runtime_path)
-                .args(["image", "inspect", "--format", "{{json .}}", &image_ref])
-                .output()
-                .map_err(|e| {
-                    DockerError::CLIError(format!("Failed to run docker image inspect: {}", e))
-                })?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if stderr.contains("No such image") {
-                    return Ok(None);
-                }
-                return Err(DockerError::CLIError(format!(
-                    "docker image inspect failed: {}",
-                    stderr
-                ))
-                .into());
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("No such image") {
+                return Ok(None);
             }
+            return Err(
+                DockerError::CLIError(format!("docker image inspect failed: {}", stderr)).into(),
+            );
+        }
 
-            // Parse JSON output - it's an array with one element
-            let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
-            })?;
+        // Parse JSON output - it's an array with one element
+        let stdout = String::from_utf8(output.stdout).map_err(|e| {
+            DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
+        })?;
 
-            let images: Vec<serde_json::Value> = serde_json::from_str(&stdout).map_err(|e| {
-                DockerError::CLIError(format!("Failed to parse image inspect output: {}", e))
-            })?;
+        let images: Vec<serde_json::Value> = serde_json::from_str(&stdout).map_err(|e| {
+            DockerError::CLIError(format!("Failed to parse image inspect output: {}", e))
+        })?;
 
-            let image = images
-                .into_iter()
-                .next()
-                .ok_or_else(|| DockerError::CLIError("Empty image inspect output".to_string()))?;
+        let image = images
+            .into_iter()
+            .next()
+            .ok_or_else(|| DockerError::CLIError("Empty image inspect output".to_string()))?;
 
-            let id = image
-                .get("Id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+        let id = image
+            .get("Id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
-            let labels = image
-                .get("Config")
-                .and_then(|c| c.get("Labels"))
-                .and_then(|l| l.as_object())
-                .map(|obj| {
-                    obj.iter()
-                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                        .collect()
-                })
-                .unwrap_or_default();
+        let labels = image
+            .get("Config")
+            .and_then(|c| c.get("Labels"))
+            .and_then(|l| l.as_object())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
 
-            Ok(Some(ImageInfo { id, labels }))
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+        Ok(Some(ImageInfo { id, labels }))
     }
 
     #[instrument(skip(self))]
@@ -1381,207 +1349,185 @@ impl Docker for CliRuntime {
     ) -> Result<ExecResult> {
         debug!("Executing command in container: {}", container_id);
 
-        let runtime_path = self.runtime_path.clone();
-        let container_id = container_id.to_string();
-        let command = command.to_vec();
+        let mut args = vec!["exec".to_string()];
 
-        tokio::task::spawn_blocking(move || {
-            let mut args = vec!["exec"];
+        // Add TTY and interactive flags
+        if config.tty {
+            args.push("-t".to_string());
+        }
+        if config.interactive {
+            args.push("-i".to_string());
+        }
 
-            // Add TTY and interactive flags
-            if config.tty {
-                args.push("-t");
-            }
-            if config.interactive {
-                args.push("-i");
-            }
+        // Add detach flag
+        if config.detach {
+            args.push("-d".to_string());
+        }
 
-            // Add detach flag
-            if config.detach {
-                args.push("-d");
-            }
+        // Add user if specified
+        if let Some(ref user) = config.user {
+            args.push("-u".to_string());
+            args.push(user.clone());
+        }
 
-            // Add user if specified
-            if let Some(ref user) = config.user {
-                args.push("-u");
-                args.push(user);
-            }
+        // Add working directory if specified
+        if let Some(ref workdir) = config.working_dir {
+            args.push("-w".to_string());
+            args.push(workdir.clone());
+        }
 
-            // Add working directory if specified
-            if let Some(ref workdir) = config.working_dir {
-                args.push("-w");
-                args.push(workdir);
-            }
+        // Add environment variables
+        for (k, v) in &config.env {
+            args.push("-e".to_string());
+            args.push(format!("{}={}", k, v));
+        }
 
-            // Add environment variables
-            let env_args: Vec<String> = config
-                .env
-                .iter()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect();
-            for env_arg in &env_args {
-                args.push("-e");
-                args.push(env_arg);
-            }
+        // Note: '--sig-proxy' is not supported by 'docker exec' (only 'docker run').
+        // Do not add it here to avoid 'unknown flag: --sig-proxy' errors.
 
-            // Note: '--sig-proxy' is not supported by 'docker exec' (only 'docker run').
-            // Do not add it here to avoid 'unknown flag: --sig-proxy' errors.
+        // Add container ID
+        args.push(container_id.to_string());
 
-            // Add container ID
-            args.push(&container_id);
+        // Add the command and arguments
+        for cmd_part in command {
+            args.push(cmd_part.clone());
+        }
 
-            // Add the command and arguments
-            for cmd_part in &command {
-                args.push(cmd_part);
-            }
+        debug!("Runtime exec args: {:?}", args);
 
-            debug!("Runtime exec args: {:?}", args);
+        let mut cmd = tokio::process::Command::new(&self.runtime_path);
+        cmd.args(&args);
 
-            let mut command = std::process::Command::new(&runtime_path);
-            command.args(&args);
+        #[cfg(unix)]
+        let _terminal_resize_guard = if config.tty {
+            config.terminal_size.and_then(TerminalResizeGuard::apply)
+        } else {
+            None
+        };
 
-            #[cfg(unix)]
-            let _terminal_resize_guard = if config.tty {
-                config.terminal_size.and_then(TerminalResizeGuard::apply)
-            } else {
-                None
-            };
+        // Handle stdio based on silent mode:
+        // - silent=true: Capture output for return value (used by probes)
+        // - silent=false: Inherit stdio for real-time display (used by user commands)
+        if config.silent {
+            // Capture stdout/stderr for probes and internal commands
+            cmd.stdout(std::process::Stdio::piped());
+            cmd.stderr(std::process::Stdio::piped());
 
-            // Handle stdio based on silent mode:
-            // - silent=true: Capture output for return value (used by probes)
-            // - silent=false: Inherit stdio for real-time display (used by user commands)
-            if config.silent {
-                // Capture stdout/stderr for probes and internal commands
-                command.stdout(std::process::Stdio::piped());
-                command.stderr(std::process::Stdio::piped());
-
-                let output = command.output().map_err(|e| {
-                    // Detect PTY-specific errors when PTY was requested
-                    if config.tty {
-                        let error_msg = format!("{}", e);
-                        if is_pty_allocation_error(&error_msg) {
-                            return DockerError::TTYFailed {
-                                reason: format!(
-                                    "PTY allocation failed: {}. Ensure your environment supports PTY allocation.",
-                                    error_msg
-                                ),
-                            };
-                        }
+            let output = cmd.output().await.map_err(|e| {
+                // Detect PTY-specific errors when PTY was requested
+                if config.tty {
+                    let error_msg = format!("{}", e);
+                    if is_pty_allocation_error(&error_msg) {
+                        return DockerError::TTYFailed {
+                            reason: format!(
+                                "PTY allocation failed: {}. Ensure your environment supports PTY allocation.",
+                                error_msg
+                            ),
+                        };
                     }
-                    DockerError::CLIError(format!("Failed to execute runtime exec: {}", e))
-                })?;
-
-                let exit_code = output.status.code().unwrap_or(-1);
-                let success = output.status.success();
-
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-                // Check for PTY allocation errors in stderr when PTY was requested
-                if config.tty && !success && is_pty_allocation_error(&stderr) {
-                    return Err(DockerError::TTYFailed {
-                        reason: format!(
-                            "PTY allocation failed: {}. The --force-tty-if-json flag requires PTY support. Either ensure your terminal supports PTY allocation or remove the flag.",
-                            stderr.trim()
-                        ),
-                    }
-                    .into());
                 }
+                DockerError::CLIError(format!("Failed to execute runtime exec: {}", e))
+            })?;
 
-                Ok(ExecResult {
-                    exit_code,
-                    success,
-                    stdout,
-                    stderr,
-                })
-            } else {
-                // Inherit stdio for real-time display (user-facing commands)
-                // Output cannot be captured in this mode, but user sees it immediately
-                let mut child = command.spawn().map_err(|e| {
-                    // Detect PTY-specific errors when PTY was requested
-                    if config.tty {
-                        let error_msg = format!("{}", e);
-                        if is_pty_allocation_error(&error_msg) {
-                            return DockerError::TTYFailed {
-                                reason: format!(
-                                    "PTY allocation failed: {}. The --force-tty-if-json flag requires PTY support. Either ensure your terminal supports PTY allocation or remove the flag.",
-                                    error_msg
-                                ),
-                            };
-                        }
-                    }
-                    DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e))
-                })?;
+            let exit_code = output.status.code().unwrap_or(-1);
+            let success = output.status.success();
 
-                let exit_status = child.wait().map_err(|e| {
-                    // Detect PTY-specific errors when PTY was requested
-                    if config.tty {
-                        let error_msg = format!("{}", e);
-                        if is_pty_allocation_error(&error_msg) {
-                            return DockerError::TTYFailed {
-                                reason: format!(
-                                    "PTY allocation failed: {}. The --force-tty-if-json flag requires PTY support. Either ensure your terminal supports PTY allocation or remove the flag.",
-                                    error_msg
-                                ),
-                            };
-                        }
-                    }
-                    DockerError::CLIError(format!("Failed to wait for runtime exec: {}", e))
-                })?;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-                let exit_code = exit_status.code().unwrap_or(-1);
-                let success = exit_status.success();
-
-                // Output was displayed in real-time, return empty strings
-                Ok(ExecResult {
-                    exit_code,
-                    success,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                })
+            // Check for PTY allocation errors in stderr when PTY was requested
+            if config.tty && !success && is_pty_allocation_error(&stderr) {
+                return Err(DockerError::TTYFailed {
+                    reason: format!(
+                        "PTY allocation failed: {}. The --force-tty-if-json flag requires PTY support. Either ensure your terminal supports PTY allocation or remove the flag.",
+                        stderr.trim()
+                    ),
+                }
+                .into());
             }
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
+
+            Ok(ExecResult {
+                exit_code,
+                success,
+                stdout,
+                stderr,
+            })
+        } else {
+            // Inherit stdio for real-time display (user-facing commands)
+            // Output cannot be captured in this mode, but user sees it immediately
+            let mut child = cmd.spawn().map_err(|e| {
+                // Detect PTY-specific errors when PTY was requested
+                if config.tty {
+                    let error_msg = format!("{}", e);
+                    if is_pty_allocation_error(&error_msg) {
+                        return DockerError::TTYFailed {
+                            reason: format!(
+                                "PTY allocation failed: {}. The --force-tty-if-json flag requires PTY support. Either ensure your terminal supports PTY allocation or remove the flag.",
+                                error_msg
+                            ),
+                        };
+                    }
+                }
+                DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e))
+            })?;
+
+            let exit_status = child.wait().await.map_err(|e| {
+                // Detect PTY-specific errors when PTY was requested
+                if config.tty {
+                    let error_msg = format!("{}", e);
+                    if is_pty_allocation_error(&error_msg) {
+                        return DockerError::TTYFailed {
+                            reason: format!(
+                                "PTY allocation failed: {}. The --force-tty-if-json flag requires PTY support. Either ensure your terminal supports PTY allocation or remove the flag.",
+                                error_msg
+                            ),
+                        };
+                    }
+                }
+                DockerError::CLIError(format!("Failed to wait for runtime exec: {}", e))
+            })?;
+
+            let exit_code = exit_status.code().unwrap_or(-1);
+            let success = exit_status.success();
+
+            // Output was displayed in real-time, return empty strings
+            Ok(ExecResult {
+                exit_code,
+                success,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        }
     }
 
     #[instrument(skip(self))]
     async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()> {
         debug!("Stopping container: {}", container_id);
 
-        let runtime_path = self.runtime_path.clone();
-        let container_id = container_id.to_string();
+        let mut args = vec!["stop".to_string()];
 
-        tokio::task::spawn_blocking(move || {
-            let mut args = vec!["stop"];
+        if let Some(t) = timeout {
+            args.push("-t".to_string());
+            args.push(t.to_string());
+        }
 
-            let timeout_str = timeout.map(|t| t.to_string());
-            if let Some(ref timeout_str) = timeout_str {
-                args.push("-t");
-                args.push(timeout_str);
-            }
+        args.push(container_id.to_string());
 
-            args.push(&container_id);
+        let output = tokio::process::Command::new(&self.runtime_path)
+            .args(&args)
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to run stop command: {}", e)))?;
 
-            let output = std::process::Command::new(&runtime_path)
-                .args(&args)
-                .output()
-                .map_err(|e| DockerError::CLIError(format!("Failed to run stop command: {}", e)))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(
+                DockerError::CLIError(format!("Runtime stop command failed: {}", stderr)).into(),
+            );
+        }
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(DockerError::CLIError(format!(
-                    "Runtime stop command failed: {}",
-                    stderr
-                )));
-            }
-
-            debug!("Container {} stopped successfully", container_id);
-            Ok(())
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
-        .map_err(Into::into)
+        debug!("Container {} stopped successfully", container_id);
+        Ok(())
     }
 }
 
@@ -1775,29 +1721,23 @@ impl ContainerOps for CliRuntime {
         }
 
         // Execute container create command
-        let runtime_path = self.runtime_path.clone();
-        let container_id = tokio::task::spawn_blocking(move || {
-            let output = Command::new(&runtime_path)
-                .args(&args)
-                .output()
-                .map_err(|e| DockerError::CLIError(format!("Failed to create container: {}", e)))?;
+        let output = tokio::process::Command::new(&self.runtime_path)
+            .args(&args)
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to create container: {}", e)))?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(DockerError::CLIError(format!(
-                    "Container create failed: {}",
-                    stderr
-                )));
-            }
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(
+                DockerError::CLIError(format!("Container create failed: {}", stderr)).into(),
+            );
+        }
 
-            let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
-            })?;
-
-            Ok(stdout.trim().to_string())
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))??;
+        let container_id = String::from_utf8(output.stdout)
+            .map_err(|e| DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e)))?
+            .trim()
+            .to_string();
 
         debug!("Created container with ID: {}", container_id);
         Ok(container_id)
@@ -1807,90 +1747,60 @@ impl ContainerOps for CliRuntime {
     async fn start_container(&self, container_id: &str) -> Result<()> {
         debug!("Starting container: {}", container_id);
 
-        let runtime_path = self.runtime_path.clone();
-        let container_id = container_id.to_string();
+        let output = Command::new(&self.runtime_path)
+            .args(["start", container_id])
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to start container: {}", e)))?;
 
-        tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
-            let output = Command::new(&runtime_path)
-                .args(["start", &container_id])
-                .output()
-                .map_err(|e| DockerError::CLIError(format!("Failed to start container: {}", e)))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(DockerError::CLIError(format!("Start command failed: {}", stderr)).into());
+        }
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(DockerError::CLIError(format!(
-                    "Start command failed: {}",
-                    stderr
-                )));
-            }
-
-            Ok(())
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
-        .map_err(Into::into)
+        Ok(())
     }
 
     #[instrument(skip(self))]
     async fn remove_container(&self, container_id: &str) -> Result<()> {
         debug!("Removing container: {}", container_id);
 
-        let runtime_path = self.runtime_path.clone();
-        let container_id = container_id.to_string();
+        let output = Command::new(&self.runtime_path)
+            .args(["rm", "-f", container_id])
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
 
-        tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
-            let output = Command::new(&runtime_path)
-                .args(["rm", "-f", &container_id])
-                .output()
-                .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(DockerError::CLIError(format!("Remove command failed: {}", stderr)).into());
+        }
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(DockerError::CLIError(format!(
-                    "Remove command failed: {}",
-                    stderr
-                )));
-            }
-
-            Ok(())
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
-        .map_err(Into::into)
+        Ok(())
     }
 
     #[instrument(skip(self))]
     async fn get_container_image(&self, container_id: &str) -> Result<String> {
         debug!("Getting image for container: {}", container_id);
 
-        let runtime_path = self.runtime_path.clone();
-        let container_id = container_id.to_string();
+        let output = Command::new(&self.runtime_path)
+            .args(["inspect", "--format", "{{.Image}}", container_id])
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to inspect container: {}", e)))?;
 
-        tokio::task::spawn_blocking(move || -> std::result::Result<String, DockerError> {
-            let output = Command::new(&runtime_path)
-                .args(["inspect", "--format", "{{.Image}}", &container_id])
-                .output()
-                .map_err(|e| {
-                    DockerError::CLIError(format!("Failed to inspect container: {}", e))
-                })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(
+                DockerError::CLIError(format!("Inspect command failed: {}", stderr)).into(),
+            );
+        }
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(DockerError::CLIError(format!(
-                    "Inspect command failed: {}",
-                    stderr
-                )));
-            }
+        let stdout = String::from_utf8(output.stdout).map_err(|e| {
+            DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
+        })?;
 
-            let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
-            })?;
-
-            Ok(stdout.trim().to_string())
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
-        .map_err(Into::into)
+        Ok(stdout.trim().to_string())
     }
 
     #[instrument(skip(self))]
@@ -1900,29 +1810,18 @@ impl ContainerOps for CliRuntime {
             container_id, image_tag
         );
 
-        let runtime_path = self.runtime_path.clone();
-        let container_id = container_id.to_string();
-        let image_tag = image_tag.to_string();
+        let output = Command::new(&self.runtime_path)
+            .args(["commit", container_id, image_tag])
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to commit container: {}", e)))?;
 
-        tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
-            let output = Command::new(&runtime_path)
-                .args(["commit", &container_id, &image_tag])
-                .output()
-                .map_err(|e| DockerError::CLIError(format!("Failed to commit container: {}", e)))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(DockerError::CLIError(format!("Commit command failed: {}", stderr)).into());
+        }
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(DockerError::CLIError(format!(
-                    "Commit command failed: {}",
-                    stderr
-                )));
-            }
-
-            Ok(())
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
-        .map_err(Into::into)
+        Ok(())
     }
 }
 
@@ -2009,28 +1908,18 @@ impl CliRuntime {
     pub async fn remove_container_with_volumes(&self, container_id: &str) -> Result<()> {
         debug!("Removing container with volumes: {}", container_id);
 
-        let runtime_path = self.runtime_path.clone();
-        let container_id = container_id.to_string();
+        let output = Command::new(&self.runtime_path)
+            .args(["rm", "-f", "-v", container_id])
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
 
-        tokio::task::spawn_blocking(move || -> std::result::Result<(), DockerError> {
-            let output = Command::new(&runtime_path)
-                .args(["rm", "-f", "-v", &container_id])
-                .output()
-                .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(DockerError::CLIError(format!("Remove command failed: {}", stderr)).into());
+        }
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(DockerError::CLIError(format!(
-                    "Remove command failed: {}",
-                    stderr
-                )));
-            }
-
-            Ok(())
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
-        .map_err(Into::into)
+        Ok(())
     }
 
     /// Build an image using docker buildx (BuildKit)
@@ -2049,85 +1938,79 @@ impl CliRuntime {
     pub async fn build_image(&self, args: &[String]) -> Result<String> {
         debug!("Building image with BuildKit: {:?}", args);
 
-        let runtime_path = self.runtime_path.clone();
-        let args = args.to_vec();
+        let output = Command::new(&self.runtime_path)
+            .args(args)
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to build image: {}", e)))?;
 
-        tokio::task::spawn_blocking(move || -> std::result::Result<String, DockerError> {
-            let output = Command::new(&runtime_path)
-                .args(&args)
-                .output()
-                .map_err(|e| DockerError::CLIError(format!("Failed to build image: {}", e)))?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(DockerError::CLIError(format!(
-                    "Image build failed: {}",
-                    stderr
-                )));
-            }
-
-            // Parse the image ID from the output
-            // BuildKit output format varies by version:
-            // - Older: "writing image sha256:<id>"
-            // - Newer: "exporting manifest sha256:<id> done" or "naming to moby-dangling@sha256:<id>"
-            let stdout = String::from_utf8_lossy(&output.stdout);
+        if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let combined = format!("{}\n{}", stdout, stderr);
+            return Err(DockerError::CLIError(format!("Image build failed: {}", stderr)).into());
+        }
 
-            // Extract sha256 hash from a line, handling various formats
-            let extract_sha256 = |line: &str| -> Option<String> {
-                if let Some(sha_start) = line.find("sha256:") {
-                    let after_sha = &line[sha_start + 7..];
-                    // Extract the 64-character hex hash (or until whitespace/non-hex)
-                    let hash: String = after_sha
-                        .chars()
-                        .take_while(|c| c.is_ascii_hexdigit())
-                        .collect();
-                    if hash.len() == 64 {
-                        return Some(hash);
-                    }
-                }
-                None
-            };
+        // Parse the image ID from the output
+        // BuildKit output format varies by version:
+        // - Older: "writing image sha256:<id>"
+        // - Newer: "exporting manifest sha256:<id> done" or "naming to moby-dangling@sha256:<id>"
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let combined = format!("{}\n{}", stdout, stderr);
 
-            // Look for the image ID in the output, trying multiple patterns
-            for line in combined.lines() {
-                // Pattern 1: Older BuildKit format
-                if line.contains("writing image sha256:") {
-                    if let Some(image_id) = extract_sha256(line) {
-                        debug!("Built image ID (writing image): {}", image_id);
-                        return Ok(image_id);
-                    }
-                }
-                // Pattern 2: Newer BuildKit format - exporting manifest
-                if line.contains("exporting manifest sha256:") && line.contains("done") {
-                    if let Some(image_id) = extract_sha256(line) {
-                        debug!("Built image ID (exporting manifest): {}", image_id);
-                        return Ok(image_id);
-                    }
+        // Extract sha256 hash from a line, handling various formats
+        let extract_sha256 = |line: &str| -> Option<String> {
+            if let Some(sha_start) = line.find("sha256:") {
+                let after_sha = &line[sha_start + 7..];
+                // Extract the 64-character hex hash (or until whitespace/non-hex)
+                let hash: String = after_sha
+                    .chars()
+                    .take_while(|c| c.is_ascii_hexdigit())
+                    .collect();
+                if hash.len() == 64 {
+                    return Some(hash);
                 }
             }
+            None
+        };
 
-            // Pattern 3: Fallback - naming to moby-dangling@sha256:
-            for line in combined.lines() {
-                if line.contains("naming to") && line.contains("@sha256:") {
-                    if let Some(image_id) = extract_sha256(line) {
-                        debug!("Built image ID (naming): {}", image_id);
-                        return Ok(image_id);
-                    }
+        // Look for the image ID in the output, trying multiple patterns
+        for line in combined.lines() {
+            // Pattern 1: Older BuildKit format
+            if line.contains("writing image sha256:") {
+                if let Some(image_id) = extract_sha256(line) {
+                    debug!("Built image ID (writing image): {}", image_id);
+                    return Ok(image_id);
                 }
             }
+            // Pattern 2: Newer BuildKit format - exporting manifest
+            if line.contains("exporting manifest sha256:") && line.contains("done") {
+                if let Some(image_id) = extract_sha256(line) {
+                    debug!("Built image ID (exporting manifest): {}", image_id);
+                    return Ok(image_id);
+                }
+            }
+        }
 
-            // If we can't find the image ID in the output, return an error
-            // The image was likely built but we couldn't parse its ID from the output
-            debug!("Could not parse image ID from build output. Output was:\n{}", combined);
-            Err(DockerError::CLIError(
-                "Could not determine image ID from build output. Image may have been built successfully.".to_string(),
-            ))
-        })
-        .await
-        .map_err(|e| DockerError::CLIError(format!("Task join error: {}", e)))?
-        .map_err(Into::into)
+        // Pattern 3: Fallback - naming to moby-dangling@sha256:
+        for line in combined.lines() {
+            if line.contains("naming to") && line.contains("@sha256:") {
+                if let Some(image_id) = extract_sha256(line) {
+                    debug!("Built image ID (naming): {}", image_id);
+                    return Ok(image_id);
+                }
+            }
+        }
+
+        // If we can't find the image ID in the output, return an error
+        // The image was likely built but we couldn't parse its ID from the output
+        debug!(
+            "Could not parse image ID from build output. Output was:\n{}",
+            combined
+        );
+        Err(DockerError::CLIError(
+            "Could not determine image ID from build output. Image may have been built successfully.".to_string(),
+        )
+        .into())
     }
 }
 
@@ -3600,5 +3483,74 @@ mod tests {
         // Partial matches that should still detect
         assert!(is_pty_allocation_error("Docker: not a tty available"));
         assert!(is_pty_allocation_error("cannot use tty in this mode"));
+    }
+
+    /// Build a subset of docker create args mirroring the ordering in
+    /// `CliDocker::create_container` to allow unit-testing runArgs placement.
+    /// This must be kept in sync with the real method.
+    fn build_create_args(config: &DevContainerConfig) -> Vec<String> {
+        let mut args = vec!["create".to_string()];
+
+        // Labels, mounts, env, security, entrypoint, ports, GPU... (simplified)
+        args.push("--name".to_string());
+        args.push("test-container".to_string());
+
+        // containerEnv
+        for (key, value) in &config.container_env {
+            args.push("--env".to_string());
+            args.push(format!("{}={}", key, value));
+        }
+
+        // runArgs — must appear after Deacon flags and before image
+        args.extend(config.run_args.iter().cloned());
+
+        // Image
+        if let Some(ref image) = config.image {
+            args.push(image.clone());
+        }
+
+        args
+    }
+
+    #[test]
+    fn test_run_args_forwarded_to_docker_create() {
+        let config = DevContainerConfig {
+            image: Some("ubuntu:22.04".to_string()),
+            run_args: vec!["--memory=2g".to_string(), "--cpus=2".to_string()],
+            ..Default::default()
+        };
+        let args = build_create_args(&config);
+        let image_pos = args.iter().position(|a| a == "ubuntu:22.04").unwrap();
+        let mem_pos = args.iter().position(|a| a == "--memory=2g").unwrap();
+        let cpu_pos = args.iter().position(|a| a == "--cpus=2").unwrap();
+        assert!(
+            mem_pos < image_pos,
+            "runArgs --memory must appear before image"
+        );
+        assert!(
+            cpu_pos < image_pos,
+            "runArgs --cpus must appear before image"
+        );
+        // runArgs should be the last flags before image
+        assert_eq!(
+            cpu_pos,
+            image_pos - 1,
+            "runArgs should be immediately before image"
+        );
+    }
+
+    #[test]
+    fn test_empty_run_args_no_extra_args() {
+        let config = DevContainerConfig {
+            image: Some("ubuntu:22.04".to_string()),
+            ..Default::default()
+        };
+        let args = build_create_args(&config);
+        let image_pos = args.iter().position(|a| a == "ubuntu:22.04").unwrap();
+        assert!(image_pos > 0, "Image should not be the first argument");
+        // No runArgs-related strings should be present
+        assert!(!args
+            .iter()
+            .any(|a| a.starts_with("--memory") || a.starts_with("--cpus")));
     }
 }

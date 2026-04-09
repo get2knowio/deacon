@@ -377,6 +377,13 @@ impl ComposeCommand {
             warn!("Security options from devcontainer.json cannot be applied dynamically to Docker Compose services.");
             warn!("Please add these options to your docker-compose.yml service definition.");
         }
+
+        if !config.run_args.is_empty() {
+            warn!(
+                "runArgs ({:?}) are ignored in Docker Compose mode. These flags only apply to single-container (docker run) workflows.",
+                config.run_args
+            );
+        }
     }
 
     /// Stop and remove containers
