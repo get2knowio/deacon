@@ -351,7 +351,6 @@ echo "$OUTPUT" | jq '.configuration'
 **Key Implementation Files:**
 - `crates/core/src/config.rs` - Configuration resolution with extends chains
 - `crates/core/src/container_env_probe.rs` - Environment probing with caching
-- `crates/core/src/feature_installer.rs` - OCI feature installation
 - `crates/core/src/container_lifecycle.rs` - Lifecycle command execution
 - `crates/deacon/src/commands/shared/` - Shared command helpers
 
