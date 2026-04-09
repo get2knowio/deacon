@@ -1,0 +1,82 @@
+project_type: rust
+github:
+  owner: get2knowio
+  repo: deacon
+  default_branch: main
+validation:
+  sync_cmd:
+  - cargo
+  - build
+  format_cmd:
+  - cargo
+  - fmt
+  lint_cmd:
+  - cargo
+  - clippy
+  - --fix
+  - --allow-dirty
+  test_cmd:
+  - make
+  - test-nextest-fast
+  timeout_seconds: 600
+  max_errors: 50
+  typecheck_cmd:
+  - 'true'
+model:
+  model_id: claude-sonnet-4-5-20250929
+  max_tokens: 64000
+  temperature: 0.0
+notifications:
+  enabled: false
+parallel:
+  max_agents: 1
+  max_tasks: 1
+agent_providers:
+  claude:
+    default: true
+  copilot:
+    default: false
+  gemini:
+    default: false
+verbosity: warning
+actors:
+  plan:
+    scopist:
+      provider: copilot
+      model_id: gpt-5.4
+      timeout: 600
+    codebase_analyst:
+      provider: gemini
+      model_id: gemini-3.1-pro-preview
+      timeout: 600
+    criteria_writer:
+      provider: claude
+      model_id: sonnet
+      timeout: 600
+    contrarian:
+      provider: claude
+      model_id: sonnet
+      timeout: 600
+    generator:
+      provider: claude
+      model_id: sonnet
+      timeout: 1200
+  refuel:
+    decomposer:
+      provider: claude
+      model_id: sonnet
+      timeout: 1800
+  fly:
+    implementer:
+      provider: copilot
+      model_id: gpt-5.3-codex
+      timeout: 1800
+    reviewer:
+      provider: claude
+      model_id: sonnet
+      timeout: 600
+  land:
+    curator:
+      provider: copilot
+      model_id: gpt-5-mini
+      timeout: 300
