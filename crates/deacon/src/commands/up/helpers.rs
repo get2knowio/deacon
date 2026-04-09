@@ -118,14 +118,24 @@ pub(crate) fn discover_id_labels_from_config(
     labels
 }
 
-/// Apply user mapping configuration to the container
-#[instrument(skip(config))]
-pub(crate) async fn apply_user_mapping(
+/// Apply user mapping configuration to the container.
+///
+/// When `updateRemoteUserUID` is enabled and a `remoteUser` is configured, this function
+/// executes the full user mapping workflow inside the running container:
+/// 1. Creates the remote user if it doesn't exist
+/// 2. Updates UID/GID to match the host user
+/// 3. Sets up the home directory
+/// 4. Adjusts workspace ownership
+#[instrument(skip(runtime, config))]
+pub(crate) async fn apply_user_mapping<R: deacon_core::docker::Docker + Send + Sync>(
+    runtime: &R,
     container_id: &str,
     config: &DevContainerConfig,
     workspace_folder: &Path,
 ) -> Result<()> {
-    use deacon_core::user_mapping::{get_host_user_info, UserMappingConfig};
+    use deacon_core::user_mapping::{
+        get_host_user_info, DockerUserMapper, UserMappingConfig, UserMappingService,
+    };
 
     debug!("Applying user mapping configuration");
 
@@ -138,10 +148,15 @@ pub(crate) async fn apply_user_mapping(
 
     // Add host user information if updateRemoteUserUID is enabled
     if user_config.update_remote_user_uid {
-        match get_host_user_info() {
+        match get_host_user_info().await {
             Ok((uid, gid)) => {
-                user_config = user_config.with_host_user(uid, gid);
-                debug!("Host user: UID={}, GID={}", uid, gid);
+                if uid == 0 {
+                    debug!("Host user is root (UID 0), skipping UID mapping");
+                    user_config.update_remote_user_uid = false;
+                } else {
+                    user_config = user_config.with_host_user(uid, gid);
+                    debug!("Host user: UID={}, GID={}", uid, gid);
+                }
             }
             Err(e) => {
                 warn!("Failed to get host user info, skipping UID mapping: {}", e);
@@ -161,35 +176,42 @@ pub(crate) async fn apply_user_mapping(
         user_config = user_config.with_workspace_path(format!("/workspaces/{}", workspace_name));
     }
 
-    // T017: Apply user mapping if needed
+    // Execute user mapping via UserMappingService
     if user_config.needs_user_mapping() {
-        debug!("User mapping required, applying configuration");
-
-        // User mapping is applied via the user_mapping module
-        // The actual UID/GID updates happen during container creation via DockerLifecycle::up()
-        // which internally calls the UserMappingService when update_remote_user_uid is enabled.
-        //
-        // This ensures the remote user's UID/GID match the host user for proper file permissions.
-        // The UserMappingService handles:
-        // 1. Executing usermod/groupmod inside the container
-        // 2. Updating file ownership in workspace folders
-        // 3. Preserving shell and home directory settings
-
         debug!(
-            "User mapping configured: remote_user={:?}, container_user={:?}, update_uid={}, workspace={}",
+            "User mapping required: remote_user={:?}, update_uid={}, workspace={}",
             user_config.remote_user,
-            user_config.container_user,
             user_config.update_remote_user_uid,
-            user_config.workspace_path.as_ref().unwrap_or(&"<none>".to_string())
+            user_config
+                .workspace_path
+                .as_ref()
+                .unwrap_or(&"<none>".to_string())
         );
 
-        // Note: The DockerLifecycle::up() implementation in container.rs handles the actual
-        // user mapping execution. This function validates and prepares the configuration.
+        let mapper = DockerUserMapper::new(runtime);
+        let service = UserMappingService::new(mapper);
+        let result = service.apply_user_mapping(container_id, &user_config).await;
+
+        match result {
+            Ok(mapping_result) => {
+                debug!(
+                    "User mapping applied: user={}, uid={}, gid={}, created={}, uid_updated={}, home_created={}, workspace_adjusted={}",
+                    mapping_result.user_info.username,
+                    mapping_result.user_info.uid,
+                    mapping_result.user_info.gid,
+                    mapping_result.user_created,
+                    mapping_result.uid_updated,
+                    mapping_result.home_created,
+                    mapping_result.workspace_ownership_adjusted,
+                );
+            }
+            Err(e) => {
+                warn!("User mapping failed (non-fatal): {}", e);
+            }
+        }
     }
 
-    // T017: Log security options if configured
-    // Security options (privileged, capAdd, securityOpt) are applied during container
-    // creation by the Docker runtime. They are part of the config and passed to docker run/create.
+    // Log security options (applied during container creation, not here)
     if config.privileged.unwrap_or(false) {
         debug!("Container will run in privileged mode");
     }

@@ -105,10 +105,10 @@ fn test_config_with_minimal_user_mapping() -> anyhow::Result<()> {
 }
 
 #[cfg(unix)]
-#[test]
-fn test_get_host_user_info() {
+#[tokio::test]
+async fn test_get_host_user_info() {
     // This should work on Unix systems
-    let result = deacon_core::user_mapping::get_host_user_info();
+    let result = deacon_core::user_mapping::get_host_user_info().await;
 
     match result {
         Ok((uid, gid)) => {
@@ -125,10 +125,10 @@ fn test_get_host_user_info() {
 }
 
 #[cfg(not(unix))]
-#[test]
-fn test_get_host_user_info_not_supported() {
+#[tokio::test]
+async fn test_get_host_user_info_not_supported() {
     // On non-Unix systems, this should return a NotImplemented error
-    let result = deacon_core::user_mapping::get_host_user_info();
+    let result = deacon_core::user_mapping::get_host_user_info().await;
     assert!(result.is_err());
 
     let error = result.unwrap_err();

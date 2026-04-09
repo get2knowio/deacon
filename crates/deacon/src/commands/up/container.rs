@@ -461,24 +461,17 @@ pub(crate) async fn execute_container_up(
         workspace_hash
     );
 
-    // T017: Apply user mapping and security options if configured
-    // Per specs/001-up-gap-spec/ User Story 2:
-    // - UID update flow: update container user UID/GID to match host user
-    // - Security options: privileged, capAdd, securityOpt, init
-    //
-    // Current implementation:
-    // - User mapping is partially implemented (has TODO at line 1804)
-    // - Security options (privileged, capAdd, securityOpt, init) are merged from config and features
-    //   and applied to container creation (see lines 227-257)
-    //
-    // Remaining work:
-    // 1. UID update: Execute usermod/groupmod commands in container to update remote user UID/GID
-    // 2. Entrypoint override: Handle config.override_command for security-related entrypoint changes
-    //
-    // TODO T017: Complete UID update flow
-    // Foundation is in place (config fields exist, user_mapping module available)
+    // Apply user mapping: create remote user, update UID/GID to match host, set ownership
+    // Security options (privileged, capAdd, securityOpt, init) are already applied during
+    // container creation via merged_security (see above).
     if config.remote_user.is_some() || config.container_user.is_some() {
-        apply_user_mapping(&container_result.container_id, &config, workspace_folder).await?;
+        apply_user_mapping(
+            runtime,
+            &container_result.container_id,
+            &config,
+            workspace_folder,
+        )
+        .await?;
     }
 
     let config_user = config

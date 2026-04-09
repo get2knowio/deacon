@@ -20,11 +20,11 @@
 //! 5. Adjust workspace mount permissions
 //! 6. Configure execution context for lifecycle commands
 
+use crate::docker::{Docker, ExecConfig, ExecResult};
 use crate::errors::{DeaconError, Result};
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 /// User information structure for container operations
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,7 +175,7 @@ pub enum UserMappingError {
 }
 
 /// Trait for user mapping operations in containers
-#[async_trait]
+#[allow(async_fn_in_trait)]
 pub trait UserMapper {
     /// Get information about the current user inside the container
     async fn get_current_user(&self, container_id: &str) -> Result<UserInfo>;
@@ -447,32 +447,28 @@ impl<T: UserMapper> UserMappingService<T> {
 /// This function detects the current user's UID and GID on the host system.
 /// It's used to determine the target UID/GID when `updateRemoteUserUID` is enabled.
 #[cfg(unix)]
-pub fn get_host_user_info() -> Result<(u32, u32)> {
-    // Use environment variables or process information to get UID/GID
-    // This is a safer approach than using libc calls directly
-
-    // Try to get UID from environment first
+pub async fn get_host_user_info() -> Result<(u32, u32)> {
+    // Try environment variables first (fast path, no process spawn)
     if let Ok(uid_str) = std::env::var("UID") {
         if let Ok(uid) = uid_str.parse::<u32>() {
-            // Try to get GID as well
             let gid = std::env::var("GID")
                 .ok()
                 .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(uid); // Default to UID if GID not available
+                .unwrap_or(uid);
 
             debug!("Host user info from environment: UID={}, GID={}", uid, gid);
             return Ok((uid, gid));
         }
     }
 
-    // Fallback: use a command to get the current user's UID/GID
-    // This is safer than using unsafe libc calls
-    use std::process::Command;
+    // Fallback: use async tokio::process::Command to get UID/GID
+    use tokio::process::Command;
 
     let output =
         Command::new("id")
             .arg("-u")
             .output()
+            .await
             .map_err(|e| DeaconError::NotImplemented {
                 feature: format!("Failed to get host UID: {}", e),
             })?;
@@ -488,6 +484,7 @@ pub fn get_host_user_info() -> Result<(u32, u32)> {
         Command::new("id")
             .arg("-g")
             .output()
+            .await
             .map_err(|e| DeaconError::NotImplemented {
                 feature: format!("Failed to get host GID: {}", e),
             })?;
@@ -508,10 +505,428 @@ pub fn get_host_user_info() -> Result<(u32, u32)> {
 /// On Windows, this always returns an error since UID/GID mapping
 /// is not applicable.
 #[cfg(not(unix))]
-pub fn get_host_user_info() -> Result<(u32, u32)> {
+pub async fn get_host_user_info() -> Result<(u32, u32)> {
     Err(DeaconError::NotImplemented {
         feature: "Host user UID/GID detection on non-Unix systems".to_string(),
     })
+}
+
+/// Docker-based implementation of [`UserMapper`] that executes commands via `docker exec`.
+///
+/// This bridges the `UserMapper` trait to the `Docker` trait, using container exec
+/// calls to query and modify users inside running containers.
+pub struct DockerUserMapper<T: Docker> {
+    docker: T,
+}
+
+impl<T: Docker> DockerUserMapper<T> {
+    /// Create a new `DockerUserMapper` wrapping the given Docker runtime.
+    pub fn new(docker: T) -> Self {
+        Self { docker }
+    }
+
+    /// Execute a command as root (silent, non-interactive) and return the `ExecResult`.
+    async fn exec_silent(
+        &self,
+        container_id: &str,
+        command: &[String],
+        user: Option<&str>,
+    ) -> Result<ExecResult> {
+        let config = ExecConfig {
+            user: user.map(|u| u.to_string()),
+            working_dir: None,
+            env: HashMap::new(),
+            tty: false,
+            interactive: false,
+            detach: false,
+            silent: true,
+            terminal_size: None,
+        };
+        self.docker.exec(container_id, command, config).await
+    }
+
+    /// Parse `id -u -n` / `id` output into a `UserInfo`.
+    fn parse_user_info_from_passwd(line: &str, username: &str) -> Result<UserInfo> {
+        // Expected format from getent passwd: username:x:uid:gid:gecos:home:shell
+        let parts: Vec<&str> = line.trim().split(':').collect();
+        if parts.len() < 7 {
+            return Err(UserMappingError::UserInfoParsingFailed {
+                reason: format!(
+                    "Expected passwd format (7+ colon-separated fields), got: {}",
+                    line.trim()
+                ),
+            }
+            .into());
+        }
+        let uid = parts[2]
+            .parse::<u32>()
+            .map_err(|e| UserMappingError::UserInfoParsingFailed {
+                reason: format!("Cannot parse UID '{}': {}", parts[2], e),
+            })?;
+        let gid = parts[3]
+            .parse::<u32>()
+            .map_err(|e| UserMappingError::UserInfoParsingFailed {
+                reason: format!("Cannot parse GID '{}': {}", parts[3], e),
+            })?;
+        let home_dir = parts[5].to_string();
+        let shell = parts[6].to_string();
+
+        Ok(UserInfo {
+            username: username.to_string(),
+            uid,
+            gid,
+            home_dir,
+            shell,
+        })
+    }
+}
+
+// Convert UserMappingError into DeaconError for the Result type
+impl From<UserMappingError> for DeaconError {
+    fn from(err: UserMappingError) -> Self {
+        DeaconError::Runtime(err.to_string())
+    }
+}
+
+impl<T: Docker + Send + Sync> UserMapper for DockerUserMapper<T> {
+    async fn get_current_user(&self, container_id: &str) -> Result<UserInfo> {
+        // Get current user via `id -u -n` then fetch full info from passwd
+        let cmd = vec!["id".to_string(), "-u".to_string(), "-n".to_string()];
+        let result = self.exec_silent(container_id, &cmd, None).await?;
+        if !result.success {
+            return Err(UserMappingError::CommandExecutionFailed {
+                command: "id -u -n".to_string(),
+                error: result.stderr.trim().to_string(),
+            }
+            .into());
+        }
+        let username = result.stdout.trim().to_string();
+        // Now get full info
+        match self.get_user_info(container_id, &username).await? {
+            Some(info) => Ok(info),
+            None => {
+                // Fallback: construct minimal info from `id`
+                let uid_cmd = vec!["id".to_string(), "-u".to_string()];
+                let gid_cmd = vec!["id".to_string(), "-g".to_string()];
+                let uid_res = self.exec_silent(container_id, &uid_cmd, None).await?;
+                let gid_res = self.exec_silent(container_id, &gid_cmd, None).await?;
+                let uid = uid_res.stdout.trim().parse::<u32>().unwrap_or(0);
+                let gid = gid_res.stdout.trim().parse::<u32>().unwrap_or(0);
+                Ok(UserInfo::new(
+                    username.clone(),
+                    uid,
+                    gid,
+                    UserInfo::default_home_dir(&username),
+                    UserInfo::default_shell(),
+                ))
+            }
+        }
+    }
+
+    async fn get_user_info(&self, container_id: &str, username: &str) -> Result<Option<UserInfo>> {
+        let cmd = vec![
+            "getent".to_string(),
+            "passwd".to_string(),
+            username.to_string(),
+        ];
+        let result = self.exec_silent(container_id, &cmd, Some("root")).await?;
+        if !result.success {
+            // User does not exist (getent returns non-zero)
+            return Ok(None);
+        }
+        let line = result.stdout.trim();
+        if line.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Self::parse_user_info_from_passwd(line, username)?))
+    }
+
+    async fn user_exists(&self, container_id: &str, username: &str) -> Result<bool> {
+        let cmd = vec!["id".to_string(), "-u".to_string(), username.to_string()];
+        let result = self.exec_silent(container_id, &cmd, Some("root")).await?;
+        Ok(result.success)
+    }
+
+    async fn create_user(
+        &self,
+        container_id: &str,
+        username: &str,
+        uid: Option<u32>,
+        gid: Option<u32>,
+        home_dir: Option<String>,
+        shell: Option<String>,
+    ) -> Result<UserInfo> {
+        let home = home_dir.unwrap_or_else(|| UserInfo::default_home_dir(username));
+        let shell_path = shell.unwrap_or_else(UserInfo::default_shell);
+
+        // Create group first if gid is specified
+        if let Some(gid_val) = gid {
+            // Check if group with this GID already exists
+            let check_cmd = vec![
+                "getent".to_string(),
+                "group".to_string(),
+                gid_val.to_string(),
+            ];
+            let check_result = self
+                .exec_silent(container_id, &check_cmd, Some("root"))
+                .await?;
+            if !check_result.success {
+                // Group doesn't exist, create it
+                let groupadd_cmd = vec![
+                    "groupadd".to_string(),
+                    "-g".to_string(),
+                    gid_val.to_string(),
+                    username.to_string(),
+                ];
+                let group_result = self
+                    .exec_silent(container_id, &groupadd_cmd, Some("root"))
+                    .await?;
+                if !group_result.success {
+                    warn!(
+                        "groupadd failed (may be expected in minimal images): {}",
+                        group_result.stderr.trim()
+                    );
+                    // Try addgroup (Alpine/BusyBox)
+                    let addgroup_cmd = vec![
+                        "addgroup".to_string(),
+                        "-g".to_string(),
+                        gid_val.to_string(),
+                        username.to_string(),
+                    ];
+                    let alt_result = self
+                        .exec_silent(container_id, &addgroup_cmd, Some("root"))
+                        .await?;
+                    if !alt_result.success {
+                        debug!("addgroup also failed: {}", alt_result.stderr.trim());
+                    }
+                }
+            }
+        }
+
+        // Create user with useradd (GNU) first, fall back to adduser (BusyBox/Alpine)
+        let mut useradd_cmd = vec!["useradd".to_string()];
+        if let Some(uid_val) = uid {
+            useradd_cmd.extend(["--uid".to_string(), uid_val.to_string()]);
+        }
+        if let Some(gid_val) = gid {
+            useradd_cmd.extend(["--gid".to_string(), gid_val.to_string()]);
+        }
+        useradd_cmd.extend([
+            "--home-dir".to_string(),
+            home.clone(),
+            "--shell".to_string(),
+            shell_path.clone(),
+            "--create-home".to_string(),
+            username.to_string(),
+        ]);
+
+        let result = self
+            .exec_silent(container_id, &useradd_cmd, Some("root"))
+            .await?;
+
+        if !result.success {
+            debug!(
+                "useradd failed, trying adduser (BusyBox): {}",
+                result.stderr.trim()
+            );
+            // BusyBox adduser fallback
+            let mut adduser_cmd = vec![
+                "adduser".to_string(),
+                "-D".to_string(), // don't set password
+                "-h".to_string(),
+                home.clone(),
+                "-s".to_string(),
+                shell_path.clone(),
+            ];
+            if let Some(uid_val) = uid {
+                adduser_cmd.extend(["-u".to_string(), uid_val.to_string()]);
+            }
+            if let Some(gid_val) = gid {
+                adduser_cmd.extend(["-G".to_string(), username.to_string()]);
+                // Ensure group exists for BusyBox too
+                let _ = gid_val; // already handled above
+            }
+            adduser_cmd.push(username.to_string());
+
+            let alt_result = self
+                .exec_silent(container_id, &adduser_cmd, Some("root"))
+                .await?;
+            if !alt_result.success {
+                return Err(UserMappingError::CommandExecutionFailed {
+                    command: format!("useradd/adduser {}", username),
+                    error: format!(
+                        "useradd: {}; adduser: {}",
+                        result.stderr.trim(),
+                        alt_result.stderr.trim()
+                    ),
+                }
+                .into());
+            }
+        }
+
+        let final_uid = uid.unwrap_or(1000);
+        let final_gid = gid.unwrap_or(final_uid);
+
+        // Re-read actual user info from the container to get accurate values
+        if let Some(info) = self.get_user_info(container_id, username).await? {
+            Ok(info)
+        } else {
+            Ok(UserInfo::new(
+                username.to_string(),
+                final_uid,
+                final_gid,
+                home,
+                shell_path,
+            ))
+        }
+    }
+
+    async fn update_user_uid(
+        &self,
+        container_id: &str,
+        username: &str,
+        new_uid: u32,
+        new_gid: u32,
+    ) -> Result<()> {
+        debug!(
+            "Updating UID/GID for user {} to {}:{}",
+            username, new_uid, new_gid
+        );
+
+        // Update GID first with groupmod
+        let groupmod_cmd = vec![
+            "groupmod".to_string(),
+            "-g".to_string(),
+            new_gid.to_string(),
+            username.to_string(),
+        ];
+        let gid_result = self
+            .exec_silent(container_id, &groupmod_cmd, Some("root"))
+            .await?;
+        if !gid_result.success {
+            // Non-fatal: group may not have same name as user, or groupmod unavailable
+            debug!("groupmod failed (non-fatal): {}", gid_result.stderr.trim());
+        }
+
+        // Update UID with usermod
+        let usermod_cmd = vec![
+            "usermod".to_string(),
+            "-u".to_string(),
+            new_uid.to_string(),
+            "-g".to_string(),
+            new_gid.to_string(),
+            username.to_string(),
+        ];
+        let uid_result = self
+            .exec_silent(container_id, &usermod_cmd, Some("root"))
+            .await?;
+        if !uid_result.success {
+            return Err(UserMappingError::CommandExecutionFailed {
+                command: format!("usermod -u {} -g {} {}", new_uid, new_gid, username),
+                error: uid_result.stderr.trim().to_string(),
+            }
+            .into());
+        }
+
+        Ok(())
+    }
+
+    async fn create_home_directory(&self, container_id: &str, user_info: &UserInfo) -> Result<()> {
+        let mkdir_cmd = vec![
+            "mkdir".to_string(),
+            "-p".to_string(),
+            user_info.home_dir.clone(),
+        ];
+        let result = self
+            .exec_silent(container_id, &mkdir_cmd, Some("root"))
+            .await?;
+        if !result.success {
+            return Err(UserMappingError::HomeDirectoryCreationFailed {
+                home_dir: user_info.home_dir.clone(),
+                reason: result.stderr.trim().to_string(),
+            }
+            .into());
+        }
+
+        // Set ownership
+        let chown_cmd = vec![
+            "chown".to_string(),
+            format!("{}:{}", user_info.uid, user_info.gid),
+            user_info.home_dir.clone(),
+        ];
+        let chown_result = self
+            .exec_silent(container_id, &chown_cmd, Some("root"))
+            .await?;
+        if !chown_result.success {
+            warn!(
+                "Failed to chown home directory: {}",
+                chown_result.stderr.trim()
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn set_workspace_ownership(
+        &self,
+        container_id: &str,
+        workspace_path: &str,
+        uid: u32,
+        gid: u32,
+    ) -> Result<()> {
+        // Use chown on the workspace directory (non-recursive to avoid long operations)
+        let chown_cmd = vec![
+            "chown".to_string(),
+            format!("{}:{}", uid, gid),
+            workspace_path.to_string(),
+        ];
+        let result = self
+            .exec_silent(container_id, &chown_cmd, Some("root"))
+            .await?;
+        if !result.success {
+            return Err(UserMappingError::WorkspaceOwnershipFailed {
+                reason: format!(
+                    "chown {}:{} {} failed: {}",
+                    uid,
+                    gid,
+                    workspace_path,
+                    result.stderr.trim()
+                ),
+            }
+            .into());
+        }
+
+        Ok(())
+    }
+
+    async fn execute_as_user(
+        &self,
+        container_id: &str,
+        username: &str,
+        command: &[String],
+        env: Option<HashMap<String, String>>,
+        working_dir: Option<String>,
+    ) -> Result<String> {
+        let config = ExecConfig {
+            user: Some(username.to_string()),
+            working_dir,
+            env: env.unwrap_or_default(),
+            tty: false,
+            interactive: false,
+            detach: false,
+            silent: true,
+            terminal_size: None,
+        };
+        let result = self.docker.exec(container_id, command, config).await?;
+        if !result.success {
+            return Err(UserMappingError::CommandExecutionFailed {
+                command: command.join(" "),
+                error: result.stderr.trim().to_string(),
+            }
+            .into());
+        }
+        Ok(result.stdout)
+    }
 }
 
 #[cfg(test)]
@@ -545,7 +960,6 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl UserMapper for MockUserMapper {
         async fn get_current_user(&self, _container_id: &str) -> Result<UserInfo> {
             Ok(self.current_user.clone())
@@ -772,5 +1186,70 @@ mod tests {
         assert_eq!(UserInfo::default_shell(), "/bin/bash");
         assert_eq!(UserInfo::default_home_dir("testuser"), "/home/testuser");
         assert_eq!(UserInfo::default_home_dir("root"), "/root");
+    }
+
+    /// SC-003: Root user (UID 0) is never modified when host UID matches
+    #[tokio::test]
+    async fn test_uid_update_skipped_for_root() {
+        let root_user = UserInfo::new(
+            "root".to_string(),
+            0,
+            0,
+            "/root".to_string(),
+            "/bin/sh".to_string(),
+        );
+        let mapper = MockUserMapper::new().with_user(root_user);
+        let service = UserMappingService::new(mapper);
+        let config =
+            UserMappingConfig::new(Some("root".to_string()), None, true).with_host_user(0, 0);
+        let result = service.apply_user_mapping("c1", &config).await.unwrap();
+        assert!(!result.uid_updated);
+        assert_eq!(result.user_info.username, "root");
+        assert_eq!(result.user_info.uid, 0);
+    }
+
+    /// SC-005: UID already matching skips the update
+    #[tokio::test]
+    async fn test_uid_update_skipped_when_matching() {
+        let vscode_user = UserInfo::new(
+            "vscode".to_string(),
+            1000,
+            1000,
+            "/home/vscode".to_string(),
+            "/bin/bash".to_string(),
+        );
+        let mapper = MockUserMapper::new().with_user(vscode_user);
+        let service = UserMappingService::new(mapper);
+        let config = UserMappingConfig::new(Some("vscode".to_string()), None, true)
+            .with_host_user(1000, 1000);
+        let result = service.apply_user_mapping("c1", &config).await.unwrap();
+        assert!(!result.uid_updated);
+        assert_eq!(result.user_info.uid, 1000);
+    }
+
+    /// SC-002: updateRemoteUserUID=false skips the update entirely
+    #[tokio::test]
+    async fn test_uid_update_skipped_when_disabled() {
+        let mapper = MockUserMapper::new();
+        let service = UserMappingService::new(mapper);
+        let config = UserMappingConfig::new(Some("vscode".to_string()), None, false);
+        let result = service.apply_user_mapping("c1", &config).await.unwrap();
+        assert!(!result.uid_updated);
+        assert!(result.user_created); // user is created but UID not updated
+    }
+
+    /// SC-002: needs_uid_mapping returns false when update_remote_user_uid is false
+    #[test]
+    fn test_needs_uid_mapping_false_when_disabled() {
+        let config = UserMappingConfig::new(Some("user".to_string()), None, false)
+            .with_host_user(1000, 1000);
+        assert!(!config.needs_uid_mapping());
+    }
+
+    /// SC-004: needs_uid_mapping returns false when no host UID is available
+    #[test]
+    fn test_needs_uid_mapping_false_without_host_uid() {
+        let config = UserMappingConfig::new(Some("user".to_string()), None, true);
+        assert!(!config.needs_uid_mapping());
     }
 }
