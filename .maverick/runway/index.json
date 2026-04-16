@@ -1,7 +1,11 @@
 {
   "version": 1,
-  "last_consolidated": "",
+  "last_consolidated": "2026-04-09T10:18:56.660375",
   "entities": [],
-  "episodic_counts": {},
+  "episodic_counts": {
+    "bead-outcomes": 5,
+    "review-findings": 0,
+    "fix-attempts": 0
+  },
   "suppressed_patterns": []
 }
