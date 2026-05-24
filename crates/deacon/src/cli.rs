@@ -775,9 +775,7 @@ impl Cli {
         Ok(())
     }
 
-    /// Extract global options into CliContext
-    #[allow(dead_code)] // For future command implementations
-    /// Build a CliContext from the parsed CLI options.
+    /// Extract global options into CliContext.
     ///
     /// Returns a new `CliContext` populated with the values from this `Cli` instance
     /// (log and progress settings, workspace/config paths, secrets, and plugin list when enabled).
@@ -792,6 +790,20 @@ impl Cli {
     /// // Context should be constructed; workspace_folder is optional by default
     /// assert!(ctx.workspace_folder.is_none());
     /// ```
+    /// Returns true when the effective log format is JSON.
+    /// `--log-format json` wins; if unset, `DEACON_LOG_FORMAT=json` counts too
+    /// (matches the fallback in deacon_core::logging::init).
+    pub fn is_json_log_format(&self) -> bool {
+        match self.log_format {
+            Some(LogFormat::Json) => true,
+            Some(LogFormat::Text) => false,
+            None => std::env::var("DEACON_LOG_FORMAT")
+                .map(|v| v == "json")
+                .unwrap_or(false),
+        }
+    }
+
+    #[allow(dead_code)] // Reserved for future command implementations; see runtime_utils
     pub fn context(&self) -> CliContext {
         CliContext {
             log_format: self.log_format.clone().unwrap_or(LogFormat::Text), // Default to Text if not specified
@@ -849,9 +861,9 @@ impl Cli {
             LogLevel::Trace => "trace",
         };
 
-        // Determine if spinner-friendly session: progress auto, no progress_file, stderr is TTY, non-JSON format
+        // Determine if spinner-friendly session: progress auto, no progress_file, stderr is TTY, non-JSON format.
         let stderr_is_tty = std::io::stderr().is_terminal();
-        let json_format = matches!(log_format, Some("json"));
+        let json_format = self.is_json_log_format();
         let spinner_eligible = self.progress == ProgressFormat::Auto
             && self.progress_file.is_none()
             && stderr_is_tty
@@ -1013,7 +1025,9 @@ impl Cli {
                     user_data_folder: self.user_data_folder.clone(),
                     container_session_data_folder: self.container_session_data_folder.clone(),
                     terminal_dimensions,
-                    force_tty_if_json: self.force_tty_if_json,
+                    // JSON log format auto-forces PTY allocation so lifecycle exec output
+                    // stays usable; the explicit flag remains as a manual override.
+                    force_tty_if_json: self.force_tty_if_json || json_format,
                 };
 
                 // Execute up and emit JSON output per contract (specs/001-up-gap-spec/contracts/up.md)
@@ -1203,8 +1217,9 @@ impl Cli {
                     secrets_files: self.secrets_file.clone(),
                     docker_path: self.docker_path.clone(),
                     docker_compose_path: self.docker_compose_path.clone(),
-                    // Thread global options
-                    force_tty_if_json: self.force_tty_if_json,
+                    // Thread global options. JSON log format auto-forces PTY allocation
+                    // (BEAD-11) so streamed exec output remains coherent for JSON consumers.
+                    force_tty_if_json: self.force_tty_if_json || json_format,
                     default_user_env_probe: Some(default_user_env_probe.into()),
                     container_data_folder: self.container_data_folder.clone(),
                     container_system_data_folder: self.container_system_data_folder.clone(),
@@ -1421,6 +1436,37 @@ mod tests {
         assert_eq!(cli.docker_compose_path, "docker-compose");
         assert!(cli.terminal_columns.is_none());
         assert!(cli.terminal_rows.is_none());
+    }
+
+    /// BEAD-11-T03: --log-format json must auto-force PTY allocation so the
+    /// downstream ExecArgs.force_tty_if_json is true even without the explicit flag.
+    #[test]
+    fn test_json_log_format_implies_force_tty() {
+        let cli = Cli::parse_from(["deacon", "--log-format", "json"]);
+        assert!(cli.is_json_log_format());
+        assert!(!cli.force_tty_if_json); // user didn't pass the explicit flag
+                                         // The dispatch site ORs these two together; the test of that wiring
+                                         // is here at the source of truth (cli.is_json_log_format()) since
+                                         // dispatch is async and harder to unit-test in isolation.
+        let effective_force_tty = cli.force_tty_if_json || cli.is_json_log_format();
+        assert!(effective_force_tty);
+    }
+
+    /// Inverse: explicit --log-format text leaves the auto-derive off.
+    #[test]
+    fn test_text_log_format_does_not_imply_force_tty() {
+        let cli = Cli::parse_from(["deacon", "--log-format", "text"]);
+        assert!(!cli.is_json_log_format());
+        let effective_force_tty = cli.force_tty_if_json || cli.is_json_log_format();
+        assert!(!effective_force_tty);
+    }
+
+    /// Explicit --force-tty-if-json still works without --log-format json.
+    #[test]
+    fn test_explicit_force_tty_without_json_log_format() {
+        let cli = Cli::parse_from(["deacon", "--force-tty-if-json"]);
+        assert!(cli.force_tty_if_json);
+        assert!(!cli.is_json_log_format());
     }
 
     #[test]
