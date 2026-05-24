@@ -146,7 +146,7 @@ where
         // Serialize and write the TTL entry
         let ttl_entry = TtlEntry::new(value, ttl);
         let serialized =
-            bincode::serialize(&ttl_entry).with_context(|| "Failed to serialize cache entry")?;
+            postcard::to_allocvec(&ttl_entry).with_context(|| "Failed to serialize cache entry")?;
 
         fs::write(&data_file, &serialized)
             .with_context(|| format!("Failed to write cache file: {:?}", data_file))?;
@@ -185,7 +185,7 @@ where
         let serialized = fs::read(&metadata.data_file)
             .with_context(|| format!("Failed to read cache file: {:?}", metadata.data_file))?;
 
-        let entry: TtlEntry<V> = bincode::deserialize(&serialized)
+        let entry: TtlEntry<V> = postcard::from_bytes(&serialized)
             .with_context(|| "Failed to deserialize cache entry")?;
 
         if entry.is_expired() {
