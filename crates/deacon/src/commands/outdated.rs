@@ -3,11 +3,11 @@
 // computing wanted/current/latest using core helpers, and rendering a text table.
 
 use anyhow::Result;
-use atty::Stream;
 use deacon_core::config::{ConfigLoader, DiscoveryResult};
 use deacon_core::errors::{ConfigError, DeaconError};
 use deacon_core::lockfile as core_lockfile;
 use deacon_core::outdated as core_outdated;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -129,7 +129,7 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
                 features: BTreeMap::new(),
             };
 
-            if atty::is(Stream::Stdout) {
+            if std::io::stdout().is_terminal() {
                 serde_json::to_writer_pretty(std::io::stdout(), &empty)?;
             } else {
                 serde_json::to_writer(std::io::stdout(), &empty)?;
@@ -308,7 +308,7 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
         }
         let jr = JsonResultMap { features: map };
 
-        if atty::is(Stream::Stdout) {
+        if std::io::stdout().is_terminal() {
             serde_json::to_writer_pretty(std::io::stdout(), &jr)?;
         } else {
             serde_json::to_writer(std::io::stdout(), &jr)?;
