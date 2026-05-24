@@ -32,6 +32,27 @@ fn is_pty_allocation_error(error_msg: &str) -> bool {
         || (lower.contains("tty") && (lower.contains("not a") || lower.contains("cannot")))
 }
 
+/// Resolve the exit code from a finished docker child process.
+///
+/// Containerd encodes signal-killed inner processes into ExitCode as 128+N
+/// (e.g. SIGKILL -> 137, SIGTERM -> 143), so the normal case is just a verbatim
+/// passthrough of `.code()`. Only when the host-side docker CLI itself is
+/// killed by a signal do we fall back to 128+signal, mirroring the reference
+/// CLI at devContainersSpecCLI.ts:1300-1310.
+fn resolve_exit_code(status: std::process::ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            return 128 + sig;
+        }
+    }
+    -1
+}
+
 /// Validates a Docker label name according to Docker label naming rules.
 ///
 /// Docker label names must:
@@ -1429,7 +1450,7 @@ impl Docker for CliRuntime {
                 DockerError::CLIError(format!("Failed to execute runtime exec: {}", e))
             })?;
 
-            let exit_code = output.status.code().unwrap_or(-1);
+            let exit_code = resolve_exit_code(output.status);
             let success = output.status.success();
 
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -1487,7 +1508,7 @@ impl Docker for CliRuntime {
                 DockerError::CLIError(format!("Failed to wait for runtime exec: {}", e))
             })?;
 
-            let exit_code = exit_status.code().unwrap_or(-1);
+            let exit_code = resolve_exit_code(exit_status);
             let success = exit_status.success();
 
             // Output was displayed in real-time, return empty strings
@@ -3552,5 +3573,49 @@ mod tests {
         assert!(!args
             .iter()
             .any(|a| a.starts_with("--memory") || a.starts_with("--cpus")));
+    }
+
+    /// BEAD-6-T01: a normal exit code is passed through verbatim.
+    /// Containerd already encodes signal-killed inner processes as 128+N
+    /// inside ExitCode, so the common "process was SIGKILLed inside the container"
+    /// case shows up here as `Some(137)` and must NOT be remapped.
+    #[cfg(unix)]
+    #[test]
+    fn resolve_exit_code_passes_through_normal_code() {
+        use std::os::unix::process::ExitStatusExt;
+        // raw = (code << 8) → wait status shape for normal exit
+        let status = std::process::ExitStatus::from_raw(0 << 8);
+        assert_eq!(resolve_exit_code(status), 0);
+
+        let status = std::process::ExitStatus::from_raw(137 << 8);
+        assert_eq!(
+            resolve_exit_code(status),
+            137,
+            "containerd-encoded signal exit must pass through verbatim"
+        );
+
+        let status = std::process::ExitStatus::from_raw(143 << 8);
+        assert_eq!(resolve_exit_code(status), 143);
+    }
+
+    /// BEAD-6-T02: when the host-side docker child itself is killed by signal
+    /// (`.code()` is None), fall back to 128+signal — mirroring the reference
+    /// CLI's `processSignals[signal]` branch in devContainersSpecCLI.ts:1300-1310.
+    #[cfg(unix)]
+    #[test]
+    fn resolve_exit_code_synthesizes_128_plus_signal_when_code_missing() {
+        use std::os::unix::process::ExitStatusExt;
+        // Low 7 bits = signal; bit 7 set = core dump flag (irrelevant here).
+        // SIGINT = 2
+        let status = std::process::ExitStatus::from_raw(2);
+        assert_eq!(resolve_exit_code(status), 130);
+
+        // SIGTERM = 15
+        let status = std::process::ExitStatus::from_raw(15);
+        assert_eq!(resolve_exit_code(status), 143);
+
+        // SIGKILL = 9
+        let status = std::process::ExitStatus::from_raw(9);
+        assert_eq!(resolve_exit_code(status), 137);
     }
 }
