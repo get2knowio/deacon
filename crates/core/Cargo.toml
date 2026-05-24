@@ -29,7 +29,7 @@ postcard = { version = "1", default-features = false, features = ["alloc"] }
 zip = "2.1"
 fastrand = "2.3.0"
 base64 = "0.22"
-sysinfo = "0.37.0"
+sysinfo = "0.39"
 num_cpus = "1.0"
 directories-next = "2.0"
 bytesize = "2.0.1"
