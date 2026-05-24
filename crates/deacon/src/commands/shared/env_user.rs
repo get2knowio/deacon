@@ -9,6 +9,10 @@ use tracing::warn;
 pub struct EnvUserResolution {
     pub effective_env: HashMap<String, String>,
     pub effective_user: Option<String>,
+    /// Raw probed container environment (before merging with config remoteEnv / CLI overrides).
+    /// Callers use this as the `container_env` source for pass-3 (`containerSubstitute`)
+    /// substitution of `${containerEnv:VAR}` tokens left behind by pass 1.
+    pub probed_env: HashMap<String, String>,
 }
 
 /// Resolve the effective environment and user by probing the container (when enabled) and
@@ -57,5 +61,6 @@ pub async fn resolve_env_and_user<D: Docker>(
     EnvUserResolution {
         effective_env,
         effective_user,
+        probed_env,
     }
 }

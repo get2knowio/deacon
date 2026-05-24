@@ -460,11 +460,17 @@ impl VariableSubstitution {
             }
             expr if expr.starts_with("containerEnv:") => {
                 let env_var = &expr[13..]; // Remove "containerEnv:" prefix
+                                           // Three-pass model per upstream (variableSubstitution.ts: `replaceWithContext`
+                                           // has NO case for containerEnv in pass 1; tokens fall through to the
+                                           // `default: return match` branch). When `container_env` is None we are in
+                                           // pass 1 (config load, pre-probe): leave the token literal so a later
+                                           // `containerSubstitute` pass can resolve it. Only when `container_env` is
+                                           // Some — pass 3, after the container env probe — do we resolve, returning
+                                           // empty string for missing vars (matching upstream `containerEnv[name] || ''`).
                 context
                     .container_env
                     .as_ref()
-                    .and_then(|env| env.get(env_var).cloned())
-                    .or_else(|| Some(String::new())) // Return empty string if container env not available or var not found
+                    .map(|env| env.get(env_var).cloned().unwrap_or_default())
             }
             expr if expr.starts_with("feature:") => {
                 let feature_var = &expr[8..]; // Remove "feature:" prefix
@@ -873,8 +879,12 @@ mod tests {
         Ok(())
     }
 
+    /// BEAD-8-T01: when container_env is None (pass 1, pre-probe), `${containerEnv:VAR}`
+    /// must be preserved verbatim so a later containerSubstitute pass can resolve it.
+    /// The upstream `replaceWithContext` (variableSubstitution.ts) has no case for
+    /// containerEnv in pass 1 and falls through to `default: return match`.
     #[test]
-    fn test_container_env_not_available() -> anyhow::Result<()> {
+    fn test_container_env_preserved_when_no_container_env_context() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let context = SubstitutionContext::new(temp_dir.path())?;
         let mut report = SubstitutionReport::new();
@@ -882,10 +892,45 @@ mod tests {
         let input = "Environment: ${containerEnv:NODE_ENV}";
         let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
-        // Should return empty string when container env is not available
-        assert_eq!(result, "Environment: ");
-        assert!(report.replacements.contains_key("containerEnv:NODE_ENV"));
+        // Token must round-trip unchanged so a later pass can resolve it.
+        assert_eq!(result, "Environment: ${containerEnv:NODE_ENV}");
+        assert!(
+            report
+                .unknown_variables
+                .contains(&"containerEnv:NODE_ENV".to_string()),
+            "deferred containerEnv tokens should be reported as unknown (not resolved)"
+        );
+        assert!(!report.replacements.contains_key("containerEnv:NODE_ENV"));
 
+        Ok(())
+    }
+
+    /// BEAD-8-T02: end-to-end three-pass composition — pass 1 preserves containerEnv tokens,
+    /// pass 3 (with container_env populated) resolves them. Mixed with localEnv to confirm
+    /// pass 1 still resolves the local-side tokens.
+    #[test]
+    fn test_container_env_three_pass_composition() -> anyhow::Result<()> {
+        env::set_var("BEAD8_LOCAL", "from-local");
+        let temp_dir = TempDir::new()?;
+
+        // Pass 1: container_env is None
+        let pass1_ctx = SubstitutionContext::new(temp_dir.path())?;
+        let mut report1 = SubstitutionReport::new();
+        let input = "${localEnv:BEAD8_LOCAL}/${containerEnv:NODE_ENV}";
+        let after_pass1 = VariableSubstitution::substitute_string(input, &pass1_ctx, &mut report1);
+        assert_eq!(after_pass1, "from-local/${containerEnv:NODE_ENV}");
+
+        // Pass 3: container_env populated
+        let mut container_env = HashMap::new();
+        container_env.insert("NODE_ENV".to_string(), "production".to_string());
+        let pass3_ctx =
+            SubstitutionContext::new(temp_dir.path())?.with_container_env(container_env);
+        let mut report3 = SubstitutionReport::new();
+        let after_pass3 =
+            VariableSubstitution::substitute_string(&after_pass1, &pass3_ctx, &mut report3);
+        assert_eq!(after_pass3, "from-local/production");
+
+        env::remove_var("BEAD8_LOCAL");
         Ok(())
     }
 

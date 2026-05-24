@@ -400,6 +400,44 @@ pub fn determine_container_working_dir(
     }
 }
 
+/// Apply pass-3 (`containerSubstitute`) to working_dir and effective_env values.
+///
+/// Tokens like `${containerEnv:HOME}` are deliberately preserved by pass 1 (config
+/// load) so the probed container env can resolve them here. Mirrors
+/// `containerSubstitute` in the reference CLI (variableSubstitution.ts:41-44).
+///
+/// `workspace_path` is best-effort: when None we fall back to "." for the
+/// SubstitutionContext (which is enough since pass 3 only touches containerEnv).
+fn apply_container_substitution(
+    working_dir: String,
+    effective_env: HashMap<String, String>,
+    probed_env: HashMap<String, String>,
+    workspace_path: Option<&Path>,
+) -> (String, HashMap<String, String>) {
+    use deacon_core::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
+
+    let ctx_path = workspace_path.unwrap_or_else(|| Path::new("."));
+    let mut ctx = match SubstitutionContext::new(ctx_path) {
+        Ok(c) => c,
+        Err(e) => {
+            debug!(error = %e, "Skipping containerSubstitute: failed to build context");
+            return (working_dir, effective_env);
+        }
+    };
+    ctx.container_env = Some(probed_env);
+
+    let mut report = SubstitutionReport::new();
+    let new_working_dir = VariableSubstitution::substitute_string(&working_dir, &ctx, &mut report);
+    let new_env = effective_env
+        .into_iter()
+        .map(|(k, v)| {
+            let nv = VariableSubstitution::substitute_string(&v, &ctx, &mut report);
+            (k, nv)
+        })
+        .collect();
+    (new_working_dir, new_env)
+}
+
 /// Execute the exec command
 #[instrument]
 pub async fn execute_exec(args: ExecArgs) -> Result<()> {
@@ -621,6 +659,25 @@ where
             }
         };
 
+        // Pass 3 (`containerSubstitute`): resolve `${containerEnv:VAR}` tokens that
+        // pass 1 deliberately preserved in config-derived values. The probed env from
+        // resolve_env_and_user is the authoritative container env. Apply to working_dir
+        // and to every effective_env value, since either may carry tokens from
+        // `workspaceFolder` / `remoteEnv` in the merged config.
+        // See variableSubstitution.ts:41-44 in the reference CLI and BEAD-8.
+        let (working_dir, effective_env) = if env_user_resolution.probed_env.is_empty() {
+            (working_dir, env_user_resolution.effective_env)
+        } else {
+            apply_container_substitution(
+                working_dir,
+                env_user_resolution.effective_env,
+                env_user_resolution.probed_env,
+                resolved_config
+                    .as_ref()
+                    .map(|c| c.workspace_folder.as_path()),
+            )
+        };
+
         // Add workdir to the current tracing span
         tracing::Span::current().record("workdir", &working_dir);
 
@@ -628,7 +685,7 @@ where
         let exec_config = build_exec_config(
             &args,
             working_dir.clone(),
-            env_user_resolution.effective_env,
+            effective_env,
             stdin_is_tty,
             stdout_is_tty,
         );
@@ -1341,5 +1398,54 @@ services:
         let requires_workspace_resolution = args.container_id.is_none() && args.id_label.is_empty();
         let needs_workspace_context = config_inputs_present || requires_workspace_resolution;
         assert!(!needs_workspace_context);
+    }
+
+    /// BEAD-8-T03: pass-3 substitution resolves containerEnv tokens in both working_dir
+    /// and effective_env values, using the probed env as the source.
+    #[test]
+    fn test_apply_container_substitution_resolves_container_env_tokens() {
+        let mut probed = HashMap::new();
+        probed.insert("HOME".to_string(), "/home/node".to_string());
+        probed.insert("PATH".to_string(), "/usr/local/bin:/usr/bin".to_string());
+
+        let mut env = HashMap::new();
+        env.insert(
+            "EXTENDED_PATH".to_string(),
+            "${containerEnv:PATH}:/extra".to_string(),
+        );
+        env.insert("STATIC".to_string(), "no-tokens-here".to_string());
+
+        let temp_dir = TempDir::new().unwrap();
+        let (wd, new_env) = apply_container_substitution(
+            "${containerEnv:HOME}/project".to_string(),
+            env,
+            probed,
+            Some(temp_dir.path()),
+        );
+
+        assert_eq!(wd, "/home/node/project");
+        assert_eq!(
+            new_env.get("EXTENDED_PATH").unwrap(),
+            "/usr/local/bin:/usr/bin:/extra"
+        );
+        assert_eq!(new_env.get("STATIC").unwrap(), "no-tokens-here");
+    }
+
+    /// BEAD-8-T04: missing containerEnv vars resolve to empty string (matches upstream
+    /// `containerEnv[name] || ''`), but only when probed_env is non-empty — otherwise
+    /// `apply_container_substitution` isn't called at all (caller short-circuits).
+    #[test]
+    fn test_apply_container_substitution_missing_var_is_empty_string() {
+        let mut probed = HashMap::new();
+        probed.insert("PATH".to_string(), "/bin".to_string());
+
+        let mut env = HashMap::new();
+        env.insert("X".to_string(), "[${containerEnv:NOPE}]".to_string());
+
+        let temp_dir = TempDir::new().unwrap();
+        let (_wd, new_env) =
+            apply_container_substitution("/work".to_string(), env, probed, Some(temp_dir.path()));
+
+        assert_eq!(new_env.get("X").unwrap(), "[]");
     }
 }
