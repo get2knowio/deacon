@@ -110,6 +110,7 @@ fn test_compose_project_all_services_inclusion() {
         additional_env: deacon_core::IndexMap::new(),
         external_volumes: Vec::new(),
         override_command: Some(false),
+        service_image_override: None,
     };
 
     let all_services = project.get_all_services();
@@ -221,6 +222,7 @@ async fn test_compose_get_all_container_ids() {
         additional_env: deacon_core::IndexMap::new(),
         external_volumes: Vec::new(),
         override_command: Some(false),
+        service_image_override: None,
     };
 
     let compose_manager = ComposeManager::new();
@@ -275,6 +277,7 @@ fn test_compose_service_targeting() {
         additional_env: deacon_core::IndexMap::new(),
         external_volumes: Vec::new(),
         override_command: Some(false),
+        service_image_override: None,
     };
 
     // Verify all services are accessible

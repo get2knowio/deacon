@@ -42,6 +42,11 @@ pub struct ComposeProject {
     /// `None` follows the spec default (treated as true). `Some(false)` runs the
     /// service's natural command.
     pub override_command: Option<bool>,
+    /// When `Some`, replaces the primary service's `image:` in the injection override.
+    /// Set by the compose-features pipeline (bead 14a) after building a feature-extended
+    /// image, so the subsequent `docker compose up` runs the extended image instead of
+    /// the original `image:` declared in the compose file.
+    pub service_image_override: Option<String>,
 }
 
 /// Mount specification for Docker Compose volumes
@@ -499,6 +504,38 @@ impl ComposeCommand {
         let output = self.execute(&["config", "--format", "json"]).await?;
         parse_service_profiles_from_config(&output, target_services)
     }
+
+    /// Inspect a compose service's "shape" — whether it provides an `image:`,
+    /// a `build:` block, or neither — to decide how features should be installed.
+    ///
+    /// Per bead 14a, only the `image:` shape is supported today; `build:` returns
+    /// `ServiceShape::Build` so callers can emit a clear "deferred to bead 14b"
+    /// error without crashing.
+    #[instrument(skip(self))]
+    pub async fn extract_service_shape(&self, service_name: &str) -> Result<ServiceShape> {
+        let output = self.execute(&["config", "--format", "json"]).await?;
+        parse_service_shape_from_config(&output, service_name)
+    }
+}
+
+/// Shape of a compose service relevant to the features-install pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceShape {
+    /// Service declares an `image:` to pull. The String is the resolved image
+    /// reference from `docker compose config`.
+    Image(String),
+    /// Service declares a `build:` block. Field values are best-effort; future
+    /// bead 14b will parse the referenced Dockerfile.
+    Build {
+        context: Option<String>,
+        dockerfile: Option<String>,
+        target: Option<String>,
+    },
+    /// Service exists but has neither `image:` nor `build:` — this is invalid for
+    /// our purposes (compose itself would also reject it for `up`).
+    Neither,
+    /// The named service was not found in the resolved compose config.
+    NotFound,
 }
 
 /// Parse external volumes from docker compose config JSON output.
@@ -621,6 +658,67 @@ fn parse_service_profiles_from_config(
     Ok(profiles)
 }
 
+/// Parse a single service's shape (image: vs build:) from the resolved compose config JSON.
+///
+/// Decision rule:
+/// - `image:` present (string) → `ServiceShape::Image`. Per compose semantics, even when both
+///   `image:` and `build:` are set, `image:` is what `compose pull` would use as the published
+///   tag; for feature installation we always extend the image side.
+/// - `build:` present (object or string) → `ServiceShape::Build` with best-effort field extraction.
+///   `build:` may be a shorthand string (the build context) per compose schema, in which case
+///   we capture it as context and leave dockerfile/target unset.
+/// - Neither → `ServiceShape::Neither`.
+/// - Service key missing → `ServiceShape::NotFound`.
+fn parse_service_shape_from_config(json_output: &str, service_name: &str) -> Result<ServiceShape> {
+    if json_output.trim().is_empty() {
+        return Ok(ServiceShape::NotFound);
+    }
+
+    let config: serde_json::Value = serde_json::from_str(json_output).map_err(|e| {
+        DockerError::CLIError(format!("Failed to parse compose config JSON: {}", e))
+    })?;
+
+    let Some(service) = config
+        .get("services")
+        .and_then(|s| s.as_object())
+        .and_then(|s| s.get(service_name))
+    else {
+        return Ok(ServiceShape::NotFound);
+    };
+
+    if let Some(image) = service.get("image").and_then(|v| v.as_str()) {
+        return Ok(ServiceShape::Image(image.to_string()));
+    }
+
+    if let Some(build) = service.get("build") {
+        match build {
+            serde_json::Value::String(context) => {
+                return Ok(ServiceShape::Build {
+                    context: Some(context.clone()),
+                    dockerfile: None,
+                    target: None,
+                });
+            }
+            serde_json::Value::Object(obj) => {
+                return Ok(ServiceShape::Build {
+                    context: obj
+                        .get("context")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    dockerfile: obj
+                        .get("dockerfile")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    target: obj.get("target").and_then(|v| v.as_str()).map(String::from),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ServiceShape::Neither)
+}
+
 /// Docker Compose manager
 pub struct ComposeManager {
     /// Docker binary path
@@ -701,6 +799,7 @@ impl ComposeManager {
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(), // Will be populated via populate_external_volumes()
             override_command: config.override_command,
+            service_image_override: None,
         })
     }
 
@@ -1121,12 +1220,22 @@ impl ComposeProject {
         // through the lifecycle so exec and post-create hooks can attach.
         let override_cmd = self.override_command.unwrap_or(true);
 
-        if self.additional_mounts.is_empty() && self.additional_env.is_empty() && !override_cmd {
+        if self.additional_mounts.is_empty()
+            && self.additional_env.is_empty()
+            && !override_cmd
+            && self.service_image_override.is_none()
+        {
             return None;
         }
 
         let mut yaml = String::from("services:\n");
         yaml.push_str(&format!("  {}:\n", self.service));
+
+        if let Some(ref image) = self.service_image_override {
+            // Quote the image tag so reserved characters (':' is the separator
+            // for tags) don't confuse the YAML parser.
+            yaml.push_str(&format!("    image: \"{}\"\n", image.replace('"', "\\\"")));
+        }
 
         if override_cmd {
             // Mirror the single-container keep-alive used in docker.rs:
@@ -1498,6 +1607,7 @@ mod tests {
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         let services = project.get_all_services();
@@ -1574,6 +1684,7 @@ mod tests {
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         let all_services = project.get_all_services();
@@ -1599,6 +1710,7 @@ mod tests {
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         let all_services = project.get_all_services();
@@ -1712,6 +1824,7 @@ mod tests {
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         // No mounts or env, should return None
@@ -1736,6 +1849,7 @@ mod tests {
             additional_env,
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1775,6 +1889,7 @@ mod tests {
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1808,6 +1923,7 @@ mod tests {
             additional_env,
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1839,6 +1955,7 @@ mod tests {
             additional_env,
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1870,6 +1987,7 @@ mod tests {
             additional_env,
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1904,6 +2022,7 @@ mod tests {
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
             override_command: None,
+            service_image_override: None,
         };
 
         let override_yaml = project
@@ -1931,6 +2050,7 @@ mod tests {
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
             override_command: Some(false),
+            service_image_override: None,
         };
 
         assert!(project.generate_injection_override().is_none());
@@ -1954,6 +2074,7 @@ mod tests {
             additional_env,
             external_volumes: Vec::new(),
             override_command: Some(true),
+            service_image_override: None,
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -2242,5 +2363,182 @@ mod tests {
         let profiles = parse_service_profiles_from_config(config, &target_services).unwrap();
         // "beta" and "alpha" from app, then "gamma" from db ("alpha" deduplicated)
         assert_eq!(profiles, vec!["beta", "alpha", "gamma"]);
+    }
+
+    /// BEAD-14a-T01: parser extracts `image:` shape from compose config.
+    #[test]
+    fn parse_service_shape_image_only() {
+        let cfg = r#"{ "services": { "dev": { "image": "ubuntu:22.04" } } }"#;
+        assert_eq!(
+            parse_service_shape_from_config(cfg, "dev").unwrap(),
+            ServiceShape::Image("ubuntu:22.04".to_string())
+        );
+    }
+
+    /// BEAD-14a-T02: parser extracts `build:` object with context/dockerfile/target.
+    #[test]
+    fn parse_service_shape_build_object() {
+        let cfg = r#"{
+            "services": {
+                "dev": {
+                    "build": {
+                        "context": "./svc",
+                        "dockerfile": "Dockerfile",
+                        "target": "runtime"
+                    }
+                }
+            }
+        }"#;
+        assert_eq!(
+            parse_service_shape_from_config(cfg, "dev").unwrap(),
+            ServiceShape::Build {
+                context: Some("./svc".into()),
+                dockerfile: Some("Dockerfile".into()),
+                target: Some("runtime".into()),
+            }
+        );
+    }
+
+    /// BEAD-14a-T03: parser handles `build:` as a bare string (shorthand context).
+    #[test]
+    fn parse_service_shape_build_shorthand_string() {
+        let cfg = r#"{ "services": { "dev": { "build": "./ctx" } } }"#;
+        assert_eq!(
+            parse_service_shape_from_config(cfg, "dev").unwrap(),
+            ServiceShape::Build {
+                context: Some("./ctx".into()),
+                dockerfile: None,
+                target: None,
+            }
+        );
+    }
+
+    /// BEAD-14a-T04: `image:` wins when both `image:` and `build:` are present
+    /// — compose semantics use `image:` as the published tag, which is what we
+    /// extend with feature layers.
+    #[test]
+    fn parse_service_shape_image_wins_over_build() {
+        let cfg = r#"{
+            "services": {
+                "dev": {
+                    "image": "node:20-alpine",
+                    "build": { "context": "." }
+                }
+            }
+        }"#;
+        assert_eq!(
+            parse_service_shape_from_config(cfg, "dev").unwrap(),
+            ServiceShape::Image("node:20-alpine".to_string())
+        );
+    }
+
+    /// BEAD-14a-T05: missing service → NotFound (not an error).
+    #[test]
+    fn parse_service_shape_missing_service() {
+        let cfg = r#"{ "services": { "db": { "image": "postgres" } } }"#;
+        assert_eq!(
+            parse_service_shape_from_config(cfg, "dev").unwrap(),
+            ServiceShape::NotFound
+        );
+    }
+
+    /// BEAD-14a-T06: service exists but neither image nor build → Neither.
+    #[test]
+    fn parse_service_shape_neither_image_nor_build() {
+        let cfg = r#"{ "services": { "dev": { "command": "sleep infinity" } } }"#;
+        assert_eq!(
+            parse_service_shape_from_config(cfg, "dev").unwrap(),
+            ServiceShape::Neither
+        );
+    }
+
+    /// BEAD-14a-T07: empty / whitespace-only JSON → NotFound rather than parse error,
+    /// matching how the other parsers treat empty `docker compose config` output.
+    #[test]
+    fn parse_service_shape_empty_input() {
+        assert_eq!(
+            parse_service_shape_from_config("", "dev").unwrap(),
+            ServiceShape::NotFound
+        );
+        assert_eq!(
+            parse_service_shape_from_config("   \n  ", "dev").unwrap(),
+            ServiceShape::NotFound
+        );
+    }
+
+    /// BEAD-14a-T08: the injection override emits `image: <override>` when
+    /// `service_image_override` is set, so `docker compose up` runs the feature-
+    /// extended image instead of the original `image:` in the compose file.
+    #[test]
+    fn injection_override_includes_image_override_when_set() {
+        let project = ComposeProject {
+            name: "test".into(),
+            base_path: PathBuf::from("/tmp"),
+            compose_files: vec![PathBuf::from("compose.yml")],
+            service: "dev".into(),
+            run_services: vec![],
+            env_files: vec![],
+            additional_mounts: vec![],
+            profiles: vec![],
+            additional_env: IndexMap::new(),
+            external_volumes: vec![],
+            override_command: Some(false),
+            service_image_override: Some("deacon-features:abc123".into()),
+        };
+        let yaml = project
+            .generate_injection_override()
+            .expect("override emitted");
+        assert!(
+            yaml.contains("image: \"deacon-features:abc123\""),
+            "override YAML should set image; got:\n{}",
+            yaml
+        );
+        assert!(yaml.contains("services:"));
+        assert!(yaml.contains("  dev:"));
+        // overrideCommand was false → no command line.
+        assert!(!yaml.contains("command:"));
+    }
+
+    /// BEAD-14a-T09: setting `service_image_override` is sufficient to emit an
+    /// override even when there are no mounts/env and overrideCommand=false.
+    #[test]
+    fn injection_override_emitted_for_image_only() {
+        let project = ComposeProject {
+            name: "test".into(),
+            base_path: PathBuf::from("/tmp"),
+            compose_files: vec![PathBuf::from("compose.yml")],
+            service: "dev".into(),
+            run_services: vec![],
+            env_files: vec![],
+            additional_mounts: vec![],
+            profiles: vec![],
+            additional_env: IndexMap::new(),
+            external_volumes: vec![],
+            override_command: Some(false),
+            service_image_override: Some("img:tag".into()),
+        };
+        assert!(project.generate_injection_override().is_some());
+    }
+
+    /// BEAD-14a-T10: image tags with embedded double-quotes are escaped so they
+    /// don't break the YAML.
+    #[test]
+    fn injection_override_escapes_quotes_in_image_tag() {
+        let project = ComposeProject {
+            name: "test".into(),
+            base_path: PathBuf::from("/tmp"),
+            compose_files: vec![PathBuf::from("compose.yml")],
+            service: "dev".into(),
+            run_services: vec![],
+            env_files: vec![],
+            additional_mounts: vec![],
+            profiles: vec![],
+            additional_env: IndexMap::new(),
+            external_volumes: vec![],
+            override_command: Some(false),
+            service_image_override: Some(r#"weird"tag"#.into()),
+        };
+        let yaml = project.generate_injection_override().unwrap();
+        assert!(yaml.contains(r#"image: "weird\"tag""#));
     }
 }

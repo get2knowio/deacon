@@ -6,6 +6,7 @@
 //! - `handle_compose_shutdown` - Shutdown handling for compose
 
 use super::args::{MountType, NormalizedMount, UpArgs};
+use super::features_build::{build_image_with_features, FeatureBuildOutput};
 use super::lifecycle::{execute_initialize_command, resolve_force_pty};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
@@ -14,8 +15,9 @@ use super::ports::handle_port_events;
 use super::result::{EffectiveMount, UpContainerInfo};
 use super::ENV_LOG_FORMAT;
 use anyhow::{Context, Result};
-use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject};
+use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject, ServiceShape};
 use deacon_core::config::DevContainerConfig;
+use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::Docker;
 use deacon_core::docker::ExecConfig;
 use deacon_core::errors::{DeaconError, DockerError};
@@ -244,6 +246,22 @@ pub(crate) async fn execute_compose_up(
             warn!("Failed to stop existing project: {}", e);
         }
     }
+
+    // Bead 14a: when features are declared, install them by building a feature-
+    // extended image and rewriting the target service's `image:` via the existing
+    // injection override. Only the `image:` shape is supported today; `build:`
+    // services are explicitly deferred to bead 14b (Dockerfile parser).
+    // The returned FeatureBuildOutput is currently unused — combined feature env
+    // is already pulled into the compose flow via the existing additional_env path.
+    // Future work (per spec): thread resolved_features into merged_configuration.
+    let _feature_build = install_features_for_compose(
+        config,
+        &compose_manager,
+        &mut project,
+        workspace_folder,
+        workspace_hash,
+    )
+    .await?;
 
     // Start the compose project
     // First, warn about security options that cannot be applied dynamically
@@ -501,6 +519,121 @@ pub(crate) async fn execute_compose_post_create(
     }
 
     Ok(())
+}
+
+/// Bead 14a: install features into a compose-based devcontainer.
+///
+/// Workflow when `config.features` is non-empty:
+/// 1. Inspect the target service's shape via `docker compose config --format json`.
+/// 2. For `image:` services, synthesize a single-container config whose `image` is
+///    the resolved compose image and whose `features` is the original config's
+///    features; reuse `build_image_with_features` to produce a feature-extended
+///    image.
+/// 3. Set `project.service_image_override` so the existing injection override
+///    rewrites the target service's `image:` line to point at the extended tag.
+///
+/// `build:` services are intentionally NOT supported here — they require a
+/// Dockerfile parser to compute the final stage name (`ensureDockerfileHasFinalStageName`
+/// in the reference CLI). This is deferred to bead 14b. We fail fast with a clear
+/// message rather than silently ignoring features.
+#[instrument(skip(config, compose_manager, project, workspace_folder))]
+async fn install_features_for_compose(
+    config: &DevContainerConfig,
+    compose_manager: &ComposeManager,
+    project: &mut ComposeProject,
+    workspace_folder: &Path,
+    workspace_hash: &str,
+) -> Result<Option<FeatureBuildOutput>> {
+    // Nothing to install when features is missing or an empty object.
+    let features_obj = match config.features.as_object() {
+        Some(o) if !o.is_empty() => o,
+        _ => {
+            debug!("No features declared on compose config; skipping feature build");
+            return Ok(None);
+        }
+    };
+    debug!(
+        feature_count = features_obj.len(),
+        service = %project.service,
+        "Resolving compose service shape for feature install"
+    );
+
+    let shape = compose_manager
+        .get_command(project)
+        .extract_service_shape(&project.service)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to resolve compose service '{}' shape via `docker compose config`",
+                project.service
+            )
+        })?;
+
+    let base_image = match shape {
+        ServiceShape::Image(image) => image,
+        ServiceShape::Build {
+            dockerfile, target, ..
+        } => {
+            return Err(DeaconError::Runtime(format!(
+                "Features on compose `build:` services are not yet supported \
+                 (service='{}', dockerfile={:?}, target={:?}). Use a service with \
+                 `image:` instead, or pre-build the image and reference it. \
+                 (Tracking: bead 14b — Dockerfile stage-name parser)",
+                project.service, dockerfile, target
+            ))
+            .into());
+        }
+        ServiceShape::Neither => {
+            return Err(DeaconError::Runtime(format!(
+                "Compose service '{}' has neither `image:` nor `build:`; cannot \
+                 install features against an undefined base",
+                project.service
+            ))
+            .into());
+        }
+        ServiceShape::NotFound => {
+            return Err(DeaconError::Runtime(format!(
+                "Compose service '{}' not found in resolved compose config",
+                project.service
+            ))
+            .into());
+        }
+    };
+
+    info!(
+        service = %project.service,
+        base_image = %base_image,
+        "Building feature-extended image for compose service"
+    );
+
+    // Synthesize a single-container config that `build_image_with_features` can
+    // consume: it only reads `image`, `features`, and `override_feature_install_order`.
+    let mut synth_config = config.clone();
+    synth_config.image = Some(base_image.clone());
+
+    // Use a compose-flavored identity so the produced image tag is namespaced by
+    // workspace+service (avoids collisions with the single-container path).
+    let mut identity = ContainerIdentity::new(workspace_folder, &synth_config);
+    identity.workspace_hash = format!("{}-compose-{}", workspace_hash, project.service);
+
+    let output = build_image_with_features(&synth_config, &identity, workspace_folder, None)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to build feature-extended image for compose service '{}'",
+                project.service
+            )
+        })?;
+
+    info!(
+        service = %project.service,
+        extended_image = %output.image_tag,
+        feature_count = output.resolved_features.len(),
+        "Feature-extended image ready; rewriting compose service image"
+    );
+
+    project.service_image_override = Some(output.image_tag.clone());
+    Ok(Some(output))
 }
 
 /// Handle shutdown for compose configurations

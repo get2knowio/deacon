@@ -361,6 +361,7 @@ async fn execute_compose_down(
         additional_env: deacon_core::IndexMap::new(),
         external_volumes: Vec::new(), // Not needed for down operation
         override_command: None,       // Not needed for down operation
+        service_image_override: None, // Not needed for down operation
     };
 
     // Check if project is still running
