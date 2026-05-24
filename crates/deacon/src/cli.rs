@@ -407,12 +407,13 @@ pub enum Commands {
         /// Use this when piping output or in CI where a PTY is not desired.
         #[arg(long)]
         no_tty: bool,
-        /// Environment variables to set inside the container (KEY=VALUE format).
+        /// Remote environment variables to set inside the container (KEY=VALUE).
         ///
-        /// Alias: `--remote-env` (visible). Accepts empty values (e.g. `FOO=`) which will be
-        /// injected as present with an empty string value.
-        #[arg(long, action = clap::ArgAction::Append, alias = "remote-env")]
-        env: Vec<String>,
+        /// The legacy `--env` flag is kept as a hidden alias for backward compatibility.
+        /// Accepts empty values (e.g. `FOO=`) which will be injected as present with an
+        /// empty string value.
+        #[arg(long = "remote-env", action = clap::ArgAction::Append, alias = "env")]
+        remote_env: Vec<String>,
         /// Working directory inside the container for command execution (overrides default).
         #[arg(short = 'w', long)]
         workdir: Option<String>,
@@ -1187,7 +1188,7 @@ impl Cli {
             Some(Commands::Exec {
                 user,
                 no_tty,
-                env,
+                remote_env,
                 workdir,
                 container_id,
                 id_label,
@@ -1211,7 +1212,7 @@ impl Cli {
                 let args = ExecArgs {
                     user,
                     no_tty,
-                    env,
+                    remote_env,
                     workdir,
                     container_id,
                     id_label,
@@ -1475,6 +1476,117 @@ mod tests {
         let cli = Cli::parse_from(["deacon", "--force-tty-if-json"]);
         assert!(cli.force_tty_if_json);
         assert!(!cli.is_json_log_format());
+    }
+
+    /// Helper for the BEAD-07 tests: parse an exec invocation and pull out the
+    /// remote_env vector so each assertion can be a one-liner.
+    fn parse_exec_remote_env(args: &[&str]) -> Vec<String> {
+        let cli = Cli::parse_from(args);
+        match cli.command {
+            Some(Commands::Exec { remote_env, .. }) => remote_env,
+            other => panic!("expected Exec, got {:?}", other.is_some()),
+        }
+    }
+
+    /// BEAD-07-T01: --remote-env populates the remote_env field.
+    #[test]
+    fn test_remote_env_primary_flag_populates_field() {
+        let env = parse_exec_remote_env(&[
+            "deacon",
+            "exec",
+            "--container-id",
+            "abc",
+            "--remote-env",
+            "FOO=BAR",
+            "--",
+            "true",
+        ]);
+        assert_eq!(env, vec!["FOO=BAR".to_string()]);
+    }
+
+    /// BEAD-07-T02: --remote-env accepts empty values (KEY=).
+    #[test]
+    fn test_remote_env_accepts_empty_value() {
+        let env = parse_exec_remote_env(&[
+            "deacon",
+            "exec",
+            "--container-id",
+            "abc",
+            "--remote-env",
+            "FOO=",
+            "--",
+            "true",
+        ]);
+        assert_eq!(env, vec!["FOO=".to_string()]);
+        // Downstream parsing must also accept the empty value.
+        let parsed = crate::commands::shared::NormalizedRemoteEnv::parse("FOO=").unwrap();
+        assert_eq!(parsed.name, "FOO");
+        assert_eq!(parsed.value, "");
+    }
+
+    /// BEAD-07-T03: the legacy --env hidden alias maps to the same field.
+    #[test]
+    fn test_remote_env_legacy_env_alias_still_works() {
+        let env = parse_exec_remote_env(&[
+            "deacon",
+            "exec",
+            "--container-id",
+            "abc",
+            "--env",
+            "FOO=BAR",
+            "--",
+            "true",
+        ]);
+        assert_eq!(env, vec!["FOO=BAR".to_string()]);
+    }
+
+    /// BEAD-07-T04: --id-label rejects empty values (KEY= is invalid).
+    /// Selector validation lives in ContainerSelector::parse_labels; surfaced here
+    /// so the failure mode is documented at the CLI surface.
+    #[test]
+    fn test_id_label_rejects_empty_value() {
+        use deacon_core::container::ContainerSelector;
+        let result = ContainerSelector::new(None, vec!["key=".to_string()], None, None);
+        assert!(
+            result.is_err(),
+            "id-label with empty value should be rejected; got: {:?}",
+            result.ok()
+        );
+    }
+
+    /// BEAD-07-T05: --id-label accepts non-empty key=value.
+    #[test]
+    fn test_id_label_accepts_non_empty_value() {
+        use deacon_core::container::ContainerSelector;
+        let result = ContainerSelector::new(None, vec!["key=val".to_string()], None, None);
+        assert!(
+            result.is_ok(),
+            "id-label key=val should be accepted: {:?}",
+            result.err()
+        );
+    }
+
+    /// BEAD-07-T06: --remote-env appears in --help, --env does not.
+    /// Render the help text and assert the visibility split.
+    #[test]
+    fn test_remote_env_help_visibility() {
+        use clap::CommandFactory;
+        let mut cmd = Cli::command();
+        let exec_cmd = cmd
+            .find_subcommand_mut("exec")
+            .expect("exec subcommand should exist");
+        let help = exec_cmd.render_long_help().to_string();
+        assert!(
+            help.contains("--remote-env"),
+            "exec --help should advertise --remote-env: {}",
+            help
+        );
+        // --env is a hidden alias; clap derive's `alias = ...` suppresses it from help.
+        assert!(
+            !help.contains("--env "),
+            "exec --help should NOT show --env: {}",
+            help
+        );
     }
 
     #[test]

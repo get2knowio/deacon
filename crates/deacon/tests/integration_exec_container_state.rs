@@ -11,7 +11,7 @@ fn make_args(container_id: Option<String>, id_label: Vec<String>) -> ExecArgs {
     ExecArgs {
         user: None,
         no_tty: true,
-        env: vec![],
+        remote_env: vec![],
         workdir: Some("/".to_string()),
         container_id,
         id_label,

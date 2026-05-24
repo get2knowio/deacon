@@ -17,7 +17,7 @@ async fn exec_honors_default_user_env_probe_login_shell() {
     let args = ExecArgs {
         user: None,
         no_tty: true,
-        env: Vec::new(),
+        remote_env: Vec::new(),
         workdir: Some("/".to_string()),
         container_id: Some("probe-exec-1".to_string()),
         id_label: Vec::new(),

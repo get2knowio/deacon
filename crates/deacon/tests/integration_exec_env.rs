@@ -29,7 +29,7 @@ async fn integration_exec_applies_merged_env() {
     let args = ExecArgs {
         user: None,
         no_tty: true,
-        env: vec!["CLI_B=cli_b".to_string(), "A=cli_override".to_string()],
+        remote_env: vec!["CLI_B=cli_b".to_string(), "A=cli_override".to_string()],
         workdir: Some("/".to_string()),
         container_id: Some("test-merge-1".to_string()),
         id_label: vec![],
@@ -93,7 +93,7 @@ async fn integration_exec_preserves_empty_cli_env_values() {
     let args_non_empty = ExecArgs {
         user: None,
         no_tty: true,
-        env: vec!["FOO=bar".to_string()],
+        remote_env: vec!["FOO=bar".to_string()],
         workdir: Some("/".to_string()),
         container_id: Some("test-empty-1".to_string()),
         id_label: vec![],
@@ -129,7 +129,7 @@ async fn integration_exec_preserves_empty_cli_env_values() {
     let args_empty = ExecArgs {
         user: None,
         no_tty: true,
-        env: vec!["FOO=".to_string()],
+        remote_env: vec!["FOO=".to_string()],
         workdir: Some("/".to_string()),
         container_id: Some("test-empty-1".to_string()),
         id_label: vec![],
@@ -175,7 +175,7 @@ async fn integration_exec_sets_terminal_size_for_stty() {
     let args = ExecArgs {
         user: None,
         no_tty: false,
-        env: vec![],
+        remote_env: vec![],
         workdir: Some("/".to_string()),
         container_id: Some("terminal-size-1".to_string()),
         id_label: vec![],

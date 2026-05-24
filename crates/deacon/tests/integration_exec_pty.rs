@@ -29,7 +29,7 @@ async fn integration_exec_non_tty_preserves_streams_and_tty_flag() {
     let args = ExecArgs {
         user: None,
         no_tty: true, // non-TTY
-        env: vec![],
+        remote_env: vec![],
         workdir: Some("/".to_string()),
         container_id: Some("test-pty-1".to_string()),
         id_label: vec![],
@@ -90,7 +90,7 @@ fn integration_exec_pty_behavior_unaffected_by_force_tty_if_json() {
     let args_without_force = ExecArgs {
         user: None,
         no_tty: false,
-        env: vec![],
+        remote_env: vec![],
         workdir: Some("/".to_string()),
         container_id: Some("test-pty-regression".to_string()),
         id_label: vec![],
@@ -129,7 +129,7 @@ fn integration_exec_pty_behavior_unaffected_by_force_tty_if_json() {
     let args_with_force = ExecArgs {
         user: None,
         no_tty: false,
-        env: vec![],
+        remote_env: vec![],
         workdir: Some("/".to_string()),
         container_id: Some("test-pty-regression".to_string()),
         id_label: vec![],
@@ -169,7 +169,7 @@ fn integration_exec_pty_behavior_unaffected_by_force_tty_if_json() {
     let args_no_tty_override = ExecArgs {
         user: None,
         no_tty: true, // Explicit no-TTY
-        env: vec![],
+        remote_env: vec![],
         workdir: Some("/".to_string()),
         container_id: Some("test-pty-regression".to_string()),
         id_label: vec![],
@@ -208,7 +208,7 @@ fn integration_exec_pty_behavior_unaffected_by_force_tty_if_json() {
     let args_no_tty = ExecArgs {
         user: None,
         no_tty: true,
-        env: vec![],
+        remote_env: vec![],
         workdir: Some("/".to_string()),
         container_id: Some("test-pty-regression".to_string()),
         id_label: vec![],

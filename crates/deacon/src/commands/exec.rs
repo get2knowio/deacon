@@ -27,8 +27,10 @@ pub struct ExecArgs {
     pub user: Option<String>,
     /// Disable TTY allocation
     pub no_tty: bool,
-    /// Environment variables to set (KEY=VALUE format)
-    pub env: Vec<String>,
+    /// Remote environment variables to set inside the container (KEY=VALUE).
+    /// Accepts empty values (e.g. `FOO=`). Surfaced as `--remote-env` on the CLI
+    /// (with `--env` preserved as a hidden alias for backward compatibility).
+    pub remote_env: Vec<String>,
     /// Working directory for command execution
     pub workdir: Option<String>,
     /// Target container ID directly
@@ -421,7 +423,7 @@ where
         // Parse environment variables early to catch format errors
         // Using IndexMap to preserve CLI argument order
         let mut env_map: IndexMap<String, String> = IndexMap::new();
-        for env_var in &args.env {
+        for env_var in &args.remote_env {
             let parsed_env = NormalizedRemoteEnv::parse(env_var)?;
             env_map.insert(parsed_env.name, parsed_env.value);
         }
@@ -736,7 +738,7 @@ mod tests {
         let args = ExecArgs {
             user: Some("testuser".to_string()),
             no_tty: false,
-            env: vec!["KEY=value".to_string()],
+            remote_env: vec!["KEY=value".to_string()],
             workdir: Some("/custom/path".to_string()),
             container_id: None,
             id_label: vec![],
@@ -767,7 +769,7 @@ mod tests {
         let args = ExecArgs {
             user: None,
             no_tty: true,
-            env: vec![],
+            remote_env: vec![],
             workdir: None,
             container_id: None,
             id_label: vec![],
@@ -799,7 +801,7 @@ mod tests {
         let args = ExecArgs {
             user: None,
             no_tty: true,
-            env: vec![],
+            remote_env: vec![],
             workdir: None,
             container_id: None,
             id_label: vec!["foo".to_string()],
@@ -953,7 +955,7 @@ mod tests {
         let args = ExecArgs {
             user: None,
             no_tty: false,
-            env: vec![],
+            remote_env: vec![],
             workdir: None,
             container_id: None,
             id_label: vec![],
@@ -997,7 +999,7 @@ mod tests {
         let args = ExecArgs {
             user: Some("me".to_string()),
             no_tty: false,
-            env: vec![],
+            remote_env: vec![],
             workdir: Some("/path".to_string()),
             container_id: None,
             id_label: vec![],
@@ -1038,7 +1040,7 @@ mod tests {
         let args = ExecArgs {
             user: None,
             no_tty: true,
-            env: vec![],
+            remote_env: vec![],
             workdir: Some("/path".to_string()),
             container_id: None,
             id_label: vec![],
@@ -1155,7 +1157,7 @@ services:
         let args = ExecArgs {
             user: None,
             no_tty: false,
-            env: vec![],
+            remote_env: vec![],
             workdir: None,
             container_id: Some("abc123".to_string()),
             id_label: vec![],
@@ -1187,7 +1189,7 @@ services:
         let args = ExecArgs {
             user: None,
             no_tty: false,
-            env: vec![],
+            remote_env: vec![],
             workdir: None,
             container_id: None,
             id_label: vec!["app=web".to_string()],
@@ -1233,7 +1235,7 @@ services:
         let args = ExecArgs {
             user: None,
             no_tty: true,
-            env: vec![],
+            remote_env: vec![],
             workdir: None,
             container_id: Some("nonexistent".to_string()),
             id_label: vec![],
@@ -1298,7 +1300,7 @@ services:
         let args = ExecArgs {
             user: None,
             no_tty: false,
-            env: vec![],
+            remote_env: vec![],
             workdir: None,
             container_id: Some("abc123".to_string()),
             id_label: vec![],
