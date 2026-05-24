@@ -37,6 +37,11 @@ pub struct ComposeProject {
     /// External volume names that must remain referenced (not replaced by injection)
     /// Per spec: these volumes should surface compose errors if missing, not bind fallback
     pub external_volumes: Vec<String>,
+    /// Whether the primary service's command should be overridden with a keep-alive
+    /// command so the container stays running through the full lifecycle.
+    /// `None` follows the spec default (treated as true). `Some(false)` runs the
+    /// service's natural command.
+    pub override_command: Option<bool>,
 }
 
 /// Mount specification for Docker Compose volumes
@@ -695,6 +700,7 @@ impl ComposeManager {
             profiles: Vec::new(),          // Will be populated from service profiles
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(), // Will be populated via populate_external_volumes()
+            override_command: config.override_command,
         })
     }
 
@@ -931,6 +937,7 @@ impl ComposeManager {
     ///     profiles: Vec::new(),
     ///     additional_env: IndexMap::new(),
     ///     external_volumes: Vec::new(),
+    ///     override_command: Some(false),
     /// };
     ///
     /// let output = manager.build_service(&project, "web")?;
@@ -993,6 +1000,7 @@ impl ComposeManager {
     ///     profiles: Vec::new(),
     ///     additional_env: IndexMap::new(),
     ///     external_volumes: Vec::new(),
+    ///     override_command: Some(false),
     /// };
     ///
     /// if manager.validate_service_exists(&project, "web")? {
@@ -1106,15 +1114,30 @@ impl ComposeProject {
     /// in the original compose files remain intact, and missing external volumes
     /// will surface as compose errors (not silently replaced with bind mounts).
     ///
-    /// Returns None if no mounts or env need to be injected.
+    /// Returns None if no mounts, env, or command override are needed.
     #[must_use = "injection override should be passed to compose up"]
     pub fn generate_injection_override(&self) -> Option<String> {
-        if self.additional_mounts.is_empty() && self.additional_env.is_empty() {
+        // Spec default for overrideCommand is true: keep the container alive
+        // through the lifecycle so exec and post-create hooks can attach.
+        let override_cmd = self.override_command.unwrap_or(true);
+
+        if self.additional_mounts.is_empty() && self.additional_env.is_empty() && !override_cmd {
             return None;
         }
 
         let mut yaml = String::from("services:\n");
         yaml.push_str(&format!("  {}:\n", self.service));
+
+        if override_cmd {
+            // Mirror the single-container keep-alive used in docker.rs:
+            // sleep infinity (GNU coreutils), fall back to tail -f /dev/null
+            // for BusyBox/Alpine. Only command is overridden; the image's
+            // entrypoint is preserved so multi-stage entrypoints (e.g. tini)
+            // still receive our command as args.
+            yaml.push_str(
+                "    command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]\n",
+            );
+        }
 
         if !self.additional_env.is_empty() {
             yaml.push_str("    environment:\n");
@@ -1148,10 +1171,11 @@ impl ComposeProject {
         }
 
         debug!(
-            "Generated compose injection override for service '{}': {} env vars, {} mounts",
+            "Generated compose injection override for service '{}': {} env vars, {} mounts, override_command={}",
             self.service,
             self.additional_env.len(),
-            self.additional_mounts.len()
+            self.additional_mounts.len(),
+            override_cmd,
         );
 
         Some(yaml)
@@ -1473,6 +1497,7 @@ mod tests {
             profiles: Vec::new(),
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let services = project.get_all_services();
@@ -1548,6 +1573,7 @@ mod tests {
             profiles: Vec::new(),
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let all_services = project.get_all_services();
@@ -1572,6 +1598,7 @@ mod tests {
             profiles: Vec::new(),
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let all_services = project.get_all_services();
@@ -1684,6 +1711,7 @@ mod tests {
             profiles: Vec::new(),
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         // No mounts or env, should return None
@@ -1707,6 +1735,7 @@ mod tests {
             profiles: Vec::new(),
             additional_env,
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1745,6 +1774,7 @@ mod tests {
             profiles: Vec::new(),
             additional_env: IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1777,6 +1807,7 @@ mod tests {
             profiles: Vec::new(),
             additional_env,
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1807,6 +1838,7 @@ mod tests {
             profiles: Vec::new(),
             additional_env,
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1837,6 +1869,7 @@ mod tests {
             profiles: Vec::new(),
             additional_env,
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1853,6 +1886,86 @@ mod tests {
             aaa_pos,
             mmm_pos
         );
+    }
+
+    #[test]
+    fn test_generate_injection_override_command_default_on() {
+        // Spec default: override_command unset (None) is treated as true,
+        // so an otherwise-empty override still injects the keep-alive command.
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env: IndexMap::new(),
+            external_volumes: Vec::new(),
+            override_command: None,
+        };
+
+        let override_yaml = project
+            .generate_injection_override()
+            .expect("override command should produce override yaml even with no env/mounts");
+
+        assert!(override_yaml.contains("services:\n  app:\n"));
+        assert!(override_yaml
+            .contains("command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]"));
+    }
+
+    #[test]
+    fn test_generate_injection_override_command_explicit_false() {
+        // overrideCommand=false must run the service's natural command;
+        // with no env/mounts the override yaml is None.
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env: IndexMap::new(),
+            external_volumes: Vec::new(),
+            override_command: Some(false),
+        };
+
+        assert!(project.generate_injection_override().is_none());
+    }
+
+    #[test]
+    fn test_generate_injection_override_command_with_env() {
+        // override_command=true alongside env: both should appear in the yaml.
+        let mut additional_env: IndexMap<String, String> = IndexMap::new();
+        additional_env.insert("FOO".to_string(), "bar".to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env,
+            external_volumes: Vec::new(),
+            override_command: Some(true),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+
+        assert!(override_yaml
+            .contains("command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]"));
+        assert!(override_yaml.contains("environment:"));
+        assert!(override_yaml.contains("FOO: \"bar\""));
+        // command must appear before environment (matches struct field order in yaml)
+        let cmd_pos = override_yaml.find("command:").unwrap();
+        let env_pos = override_yaml.find("environment:").unwrap();
+        assert!(cmd_pos < env_pos);
     }
 
     #[test]

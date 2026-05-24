@@ -233,6 +233,7 @@ mod compose_consistency_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project
@@ -274,6 +275,7 @@ mod compose_consistency_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         // Generate override multiple times and verify determinism
@@ -306,6 +308,7 @@ mod compose_consistency_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -345,6 +348,7 @@ mod compose_consistency_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -881,6 +885,7 @@ mod default_workspace_discovery_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project
@@ -1023,6 +1028,7 @@ mod compose_git_root_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project
@@ -1068,6 +1074,7 @@ mod compose_git_root_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project
@@ -1116,6 +1123,7 @@ mod compose_git_root_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         // Verify all services are present
@@ -1167,6 +1175,7 @@ mod compose_git_root_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1210,6 +1219,7 @@ mod compose_git_root_consistency_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1245,6 +1255,7 @@ mod compose_git_root_consistency_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1280,6 +1291,7 @@ mod compose_git_root_consistency_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1316,6 +1328,7 @@ mod compose_git_root_consistency_tests {
                 profiles: Vec::new(),
                 additional_env: deacon_core::IndexMap::new(),
                 external_volumes: Vec::new(),
+                override_command: Some(false),
             };
 
             let override_yaml = project.generate_injection_override().unwrap();
@@ -1352,6 +1365,7 @@ mod compose_git_root_consistency_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1387,6 +1401,7 @@ mod compose_git_root_consistency_tests {
             profiles: Vec::new(),
             additional_env: deacon_core::IndexMap::new(),
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1549,6 +1564,7 @@ mod performance_tests {
             profiles: Vec::new(),
             additional_env,
             external_volumes: Vec::new(),
+            override_command: Some(false),
         };
 
         // Warm-up call
@@ -1627,6 +1643,7 @@ mod performance_tests {
                 profiles: Vec::new(),
                 additional_env: deacon_core::IndexMap::new(),
                 external_volumes: Vec::new(),
+                override_command: Some(false),
             };
 
             // Step 5: Generate Compose override
