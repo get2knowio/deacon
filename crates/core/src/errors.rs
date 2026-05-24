@@ -22,6 +22,10 @@ pub enum ConfigError {
     #[error("Cycle detected in extends chain: {chain}")]
     ExtendsCycle { chain: String },
 
+    /// Extends chain exceeded maximum allowed depth
+    #[error("Extends chain too deep (max {max}): {chain}")]
+    ExtendsTooDeep { max: usize, chain: String },
+
     /// Feature not implemented
     #[error("Feature not implemented: {feature}")]
     NotImplemented { feature: String },

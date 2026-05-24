@@ -28,6 +28,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, warn};
 
+/// Maximum allowed depth of the extends chain. Matches the reference
+/// devcontainer CLI; deeper chains almost certainly indicate a config bug.
+const MAX_EXTENDS_DEPTH: usize = 32;
+
 /// Default function to return an empty JSON object for serde defaults.
 fn default_empty_object() -> serde_json::Value {
     serde_json::Value::Object(Default::default())
@@ -1719,6 +1723,21 @@ impl ConfigLoader {
             })
         })?;
 
+        // Guard against pathologically deep chains (independent of cycle detection,
+        // which can't catch a long but acyclic chain).
+        if visited.len() >= MAX_EXTENDS_DEPTH {
+            let chain = visited
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            let depth_chain = format!("{} -> {}", chain, canonical_path.display());
+            return Err(DeaconError::Config(ConfigError::ExtendsTooDeep {
+                max: MAX_EXTENDS_DEPTH,
+                chain: depth_chain,
+            }));
+        }
+
         // Check for cycles
         if visited.contains(&canonical_path) {
             let chain = visited
@@ -1863,6 +1882,21 @@ impl ConfigLoader {
                 path: config_path.display().to_string(),
             })
         })?;
+
+        // Guard against pathologically deep chains (independent of cycle detection,
+        // which can't catch a long but acyclic chain).
+        if visited.len() >= MAX_EXTENDS_DEPTH {
+            let chain = visited
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            let depth_chain = format!("{} -> {}", chain, canonical_path.display());
+            return Err(DeaconError::Config(ConfigError::ExtendsTooDeep {
+                max: MAX_EXTENDS_DEPTH,
+                chain: depth_chain,
+            }));
+        }
 
         // Check for cycles
         if visited.contains(&canonical_path) {
@@ -2483,6 +2517,131 @@ mod tests {
             ])
         );
 
+        Ok(())
+    }
+
+    /// BEAD-15-T01: circular extends (A -> B -> A) returns an error including
+    /// the cycle path, without hanging.
+    #[test]
+    fn test_extends_chain_cycle_two_files() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let a = dir.path().join("a.json");
+        let b = dir.path().join("b.json");
+        std::fs::write(&a, r#"{ "name": "A", "extends": "b.json" }"#)?;
+        std::fs::write(&b, r#"{ "name": "B", "extends": "a.json" }"#)?;
+
+        let err = ConfigLoader::load_with_extends(&a).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Cycle detected"),
+            "expected cycle error, got: {}",
+            msg
+        );
+        assert!(
+            msg.contains("a.json"),
+            "cycle msg should name a.json: {}",
+            msg
+        );
+        assert!(
+            msg.contains("b.json"),
+            "cycle msg should name b.json: {}",
+            msg
+        );
+
+        Ok(())
+    }
+
+    /// BEAD-15-T02: self-referencing extends (A -> A) returns a cycle error.
+    #[test]
+    fn test_extends_chain_self_cycle() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let a = dir.path().join("a.json");
+        std::fs::write(&a, r#"{ "name": "A", "extends": "a.json" }"#)?;
+
+        let err = ConfigLoader::load_with_extends(&a).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Cycle detected"),
+            "expected cycle error, got: {}",
+            msg
+        );
+
+        Ok(())
+    }
+
+    /// BEAD-15-T03: deep non-circular chain under the limit loads successfully.
+    #[test]
+    fn test_extends_chain_deep_under_limit_succeeds() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let depth = 20usize;
+        for i in 0..depth {
+            let name = format!("c{}.json", i);
+            let body = if i + 1 == depth {
+                format!(r#"{{ "name": "c{}" }}"#, i)
+            } else {
+                format!(r#"{{ "name": "c{}", "extends": "c{}.json" }}"#, i, i + 1)
+            };
+            std::fs::write(dir.path().join(name), body)?;
+        }
+
+        let top = dir.path().join("c0.json");
+        let config = ConfigLoader::load_with_extends(&top)?;
+        // Innermost extends has highest precedence, so the leaf (c19) wins for "name".
+        assert_eq!(config.name, Some("c0".to_string()));
+        Ok(())
+    }
+
+    /// BEAD-15-T04: chain exceeding the max-depth limit returns ExtendsTooDeep.
+    #[test]
+    fn test_extends_chain_too_deep_errors() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let depth = MAX_EXTENDS_DEPTH + 1;
+        for i in 0..depth {
+            let name = format!("c{}.json", i);
+            let body = if i + 1 == depth {
+                format!(r#"{{ "name": "c{}" }}"#, i)
+            } else {
+                format!(r#"{{ "name": "c{}", "extends": "c{}.json" }}"#, i, i + 1)
+            };
+            std::fs::write(dir.path().join(name), body)?;
+        }
+
+        let top = dir.path().join("c0.json");
+        let err = ConfigLoader::load_with_extends(&top).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("too deep"),
+            "expected too-deep error, got: {}",
+            msg
+        );
+        assert!(
+            msg.contains(&MAX_EXTENDS_DEPTH.to_string()),
+            "error should mention the limit ({}): {}",
+            MAX_EXTENDS_DEPTH,
+            msg
+        );
+        Ok(())
+    }
+
+    /// BEAD-15-T05: cycle error message includes the file that caused the cycle.
+    #[test]
+    fn test_extends_chain_cycle_message_names_offender() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let a = dir.path().join("a.json");
+        let b = dir.path().join("b.json");
+        let c = dir.path().join("c.json");
+        std::fs::write(&a, r#"{ "name": "A", "extends": "b.json" }"#)?;
+        std::fs::write(&b, r#"{ "name": "B", "extends": "c.json" }"#)?;
+        // c re-extends b to close the cycle
+        std::fs::write(&c, r#"{ "name": "C", "extends": "b.json" }"#)?;
+
+        let err = ConfigLoader::load_with_extends(&a).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("b.json"),
+            "cycle msg should name the offending file b.json: {}",
+            msg
+        );
         Ok(())
     }
 

@@ -318,6 +318,10 @@ impl UpResult {
                         "Configuration extends cycle detected".to_string(),
                         format!("Cycle in extends chain: {}", chain),
                     ),
+                    ConfigError::ExtendsTooDeep { max, chain } => UpResult::error(
+                        "Configuration extends chain too deep".to_string(),
+                        format!("Maximum depth {} exceeded: {}", max, chain),
+                    ),
                     ConfigError::NotImplemented { feature } => UpResult::error(
                         "Feature not implemented".to_string(),
                         format!("Feature '{}' is not yet implemented", feature),
