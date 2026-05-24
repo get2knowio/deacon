@@ -39,7 +39,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
         Self {
             client,
             cache_dir,
-            retry_config: RetryConfig::default(),
+            retry_config: RetryConfig::network(),
             progress_tracker: Arc::new(Mutex::new(None)),
         }
     }
@@ -49,7 +49,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
         Self {
             client,
             cache_dir,
-            retry_config: RetryConfig::default(),
+            retry_config: RetryConfig::network(),
             progress_tracker: Arc::new(Mutex::new(None)),
         }
     }

@@ -58,6 +58,19 @@ impl RetryConfig {
         }
     }
 
+    /// Retry profile for transient network operations (BEAD-16). Spec calls for
+    /// up to 3 retries with 1s / 2s / 4s exponential backoff, capped at 30s.
+    /// `Default` keeps a tight 100ms base for fast in-process polling (e.g. the
+    /// compose container-id wait); network IO needs more headroom.
+    pub fn network() -> Self {
+        Self {
+            max_attempts: 3,
+            base_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(30),
+            jitter: JitterStrategy::FullJitter,
+        }
+    }
+
     /// Calculate delay for a given attempt number (0-based)
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
         // Exponential backoff: base_delay * 2^attempt
@@ -171,13 +184,20 @@ where
                     return Err(error);
                 }
 
-                last_error = Some(error);
-
                 // Don't sleep after the last attempt
                 if attempt < config.max_attempts {
                     let delay = config.calculate_delay(attempt);
-                    debug!("Sleeping for {:?} before next attempt", delay);
+                    warn!(
+                        "Retrying after transient error (attempt {}/{}): {:?}; next delay {:?}",
+                        attempt + 1,
+                        config.max_attempts,
+                        error,
+                        delay
+                    );
+                    last_error = Some(error);
                     tokio::time::sleep(delay).await;
+                } else {
+                    last_error = Some(error);
                 }
             }
         }
@@ -206,6 +226,23 @@ mod tests {
         assert_eq!(config.base_delay, Duration::from_millis(100));
         assert_eq!(config.max_delay, Duration::from_secs(30));
         assert_eq!(config.jitter, JitterStrategy::FullJitter);
+    }
+
+    /// BEAD-16-T06: network profile uses 1s base / 30s cap / 3 retries so the
+    /// expected delays (pre-jitter) are 1s, 2s, 4s per the PRD.
+    #[test]
+    fn test_retry_config_network_profile() {
+        let config = RetryConfig::network();
+        assert_eq!(config.max_attempts, 3);
+        assert_eq!(config.base_delay, Duration::from_secs(1));
+        assert_eq!(config.max_delay, Duration::from_secs(30));
+
+        // Pre-jitter expected delays follow the spec'd backoff curve.
+        // With FullJitter, actual delays are <= these upper bounds.
+        let seed = 12345;
+        assert!(config.calculate_delay_seeded(0, seed).as_millis() <= 1000);
+        assert!(config.calculate_delay_seeded(1, seed).as_millis() <= 2000);
+        assert!(config.calculate_delay_seeded(2, seed).as_millis() <= 4000);
     }
 
     #[test]

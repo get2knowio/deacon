@@ -95,3 +95,151 @@ pub fn canonical_id(manifest: &Manifest) -> Result<String> {
     hasher.update(&manifest_json);
     Ok(format!("sha256:{:x}", hasher.finalize()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::retry::{retry_async, JitterStrategy, RetryConfig, RetryDecision};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// Tight test profile: same classifier behavior, but with millisecond delays
+    /// so tests don't actually wait seconds.
+    fn fast_network_config() -> RetryConfig {
+        RetryConfig {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(10),
+            jitter: JitterStrategy::FullJitter,
+        }
+    }
+
+    /// BEAD-16-T01: transient network errors are retried up to max_attempts times.
+    #[tokio::test]
+    async fn classify_transient_download_error_retries() {
+        let config = fast_network_config();
+        let attempts = Arc::new(AtomicU32::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+
+        let op = move || {
+            let counter = Arc::clone(&attempts_clone);
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Err::<(), FeatureError>(FeatureError::Download {
+                    message: "connection refused".to_string(),
+                })
+            }
+        };
+
+        let result = retry_async(&config, op, classify_network_error).await;
+        assert!(result.is_err());
+        // Initial attempt + max_attempts retries = 4 total
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+    }
+
+    /// BEAD-16-T02: 401 auth failure stops immediately (no retries).
+    #[tokio::test]
+    async fn classify_unauthorized_stops_immediately() {
+        let config = fast_network_config();
+        let attempts = Arc::new(AtomicU32::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+
+        let op = move || {
+            let counter = Arc::clone(&attempts_clone);
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Err::<(), FeatureError>(FeatureError::Unauthorized {
+                    message: "401 from registry".to_string(),
+                })
+            }
+        };
+
+        let result = retry_async(&config, op, classify_network_error).await;
+        assert!(result.is_err());
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            1,
+            "401 must not be retried"
+        );
+    }
+
+    /// BEAD-16-T03: NotFound (404) stops immediately (no retries).
+    #[tokio::test]
+    async fn classify_not_found_stops_immediately() {
+        let config = fast_network_config();
+        let attempts = Arc::new(AtomicU32::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+
+        let op = move || {
+            let counter = Arc::clone(&attempts_clone);
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Err::<(), FeatureError>(FeatureError::NotFound {
+                    path: "missing-feature".to_string(),
+                })
+            }
+        };
+
+        let result = retry_async(&config, op, classify_network_error).await;
+        assert!(result.is_err());
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            1,
+            "404 must not be retried"
+        );
+    }
+
+    /// BEAD-16-T04: transient failures followed by success returns Ok on the
+    /// successful attempt without further retries.
+    #[tokio::test]
+    async fn classify_transient_then_success() {
+        let config = fast_network_config();
+        let attempts = Arc::new(AtomicU32::new(0));
+        let attempts_clone = Arc::clone(&attempts);
+
+        let op = move || {
+            let counter = Arc::clone(&attempts_clone);
+            async move {
+                let n = counter.fetch_add(1, Ordering::SeqCst);
+                if n < 2 {
+                    Err(FeatureError::Download {
+                        message: "transient".to_string(),
+                    })
+                } else {
+                    Ok(42)
+                }
+            }
+        };
+
+        let result = retry_async(&config, op, classify_network_error).await;
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    /// Sanity: classifier returns the expected decisions for boundary cases.
+    /// Documents the contract that 401/403/404/parse all stop without retry.
+    #[test]
+    fn classify_decisions_at_boundaries() {
+        use FeatureError::*;
+        assert_eq!(
+            classify_network_error(&Forbidden {
+                message: "403".into()
+            }),
+            RetryDecision::Stop
+        );
+        assert_eq!(
+            classify_network_error(&Parsing {
+                message: "bad json".into()
+            }),
+            RetryDecision::Stop
+        );
+        // Network errors retry
+        assert_eq!(
+            classify_network_error(&Oci {
+                message: "registry timeout".into()
+            }),
+            RetryDecision::Retry
+        );
+    }
+}
