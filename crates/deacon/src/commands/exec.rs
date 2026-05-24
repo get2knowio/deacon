@@ -505,7 +505,16 @@ where
             }
 
             match resolve_container(docker_client, &selector).await? {
-                Some(info) => info.id,
+                Some(info) => {
+                    // BEAD-12: both --container-id and --id-label paths reach a
+                    // container via inspect, which returns containers regardless
+                    // of state. Bail before any exec attempt so the user sees a
+                    // clear message instead of an opaque Docker error.
+                    if info.state != "running" {
+                        return Err(anyhow::anyhow!("Dev container is not running."));
+                    }
+                    info.id
+                }
                 None => {
                     return Err(anyhow::anyhow!("Dev container not found."));
                 }
