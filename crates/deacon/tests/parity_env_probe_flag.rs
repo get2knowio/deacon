@@ -24,6 +24,7 @@ async fn exec_honors_default_user_env_probe_login_shell() {
         service: None,
         command: vec!["echo".to_string(), "hello".to_string()],
         workspace_folder: None,
+        mount_workspace_git_root: true,
         config_path: None,
         override_config_path: None,
         secrets_files: Vec::new(),

@@ -423,6 +423,12 @@ pub enum Commands {
         /// Validated as `<name>=<value>`; multiple labels are combined as AND selectors.
         #[arg(long, action = clap::ArgAction::Append)]
         id_label: Vec<String>,
+        /// Mount workspace git root (default: true). When true and the workspace
+        /// folder lives inside a git repo, config discovery and mounts walk up to
+        /// the repo root. Set to false to use the workspace folder as-is. Has no
+        /// effect when `--container-id` or `--id-label` is supplied.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        mount_workspace_git_root: bool,
         /// Target specific service in Docker Compose projects (defaults to the primary service).
         #[arg(long)]
         service: Option<String>,
@@ -1185,6 +1191,7 @@ impl Cli {
                 workdir,
                 container_id,
                 id_label,
+                mount_workspace_git_root,
                 service,
                 env_file,
                 default_user_env_probe,
@@ -1208,6 +1215,7 @@ impl Cli {
                     workdir,
                     container_id,
                     id_label,
+                    mount_workspace_git_root,
                     service,
                     env_file,
                     command,
