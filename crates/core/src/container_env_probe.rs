@@ -657,6 +657,115 @@ pub fn get_shell_command_for_lifecycle(
     }
 }
 
+/// Resolve the container user's home directory.
+///
+/// Mirrors the reference CLI's `getHomeFolder` in injectHeadless.ts:281-294 —
+/// trust `$HOME` from the probed environment if set, otherwise shell-out to
+/// `getent passwd <user>` (field 6, 1-indexed), and finally fall back to `/root`.
+///
+/// The writability / passwd-match guards from the reference algorithm are
+/// intentionally omitted: the probed env was captured *as* the target user,
+/// so HOME is already what they would see at login.
+pub async fn resolve_home_folder<D>(
+    docker: &D,
+    container_id: &str,
+    user: Option<&str>,
+    container_env: &HashMap<String, String>,
+) -> String
+where
+    D: Docker,
+{
+    if let Some(home) = container_env.get("HOME").filter(|h| !h.is_empty()) {
+        debug!(home = %home, "Using HOME from probed container env");
+        return home.clone();
+    }
+
+    if let Some(u) = user {
+        match getent_passwd_home(docker, container_id, u).await {
+            Ok(Some(home)) => {
+                debug!(user = u, home = %home, "Resolved home folder via getent passwd");
+                return home;
+            }
+            Ok(None) => {
+                debug!(user = u, "User not present in /etc/passwd");
+            }
+            Err(e) => {
+                warn!(user = u, error = %e, "getent passwd lookup failed");
+            }
+        }
+    }
+
+    debug!("Falling back to /root for home folder");
+    "/root".to_string()
+}
+
+/// Look up the home directory for `user` by running `getent passwd` inside the
+/// container, with a `grep` fallback for images lacking glibc's `getent`.
+async fn getent_passwd_home<D>(docker: &D, container_id: &str, user: &str) -> Result<Option<String>>
+where
+    D: Docker,
+{
+    use crate::docker::ExecConfig;
+
+    if !is_safe_username(user) {
+        debug!(
+            user,
+            "Username contains unsafe characters; skipping passwd lookup"
+        );
+        return Ok(None);
+    }
+
+    let cmd = format!(
+        "getent passwd '{0}' 2>/dev/null || grep '^{0}:' /etc/passwd 2>/dev/null",
+        user
+    );
+    let result = docker
+        .exec(
+            container_id,
+            &["sh".to_string(), "-c".to_string(), cmd],
+            ExecConfig {
+                user: None,
+                working_dir: None,
+                env: HashMap::new(),
+                tty: false,
+                interactive: false,
+                detach: false,
+                silent: true,
+                terminal_size: None,
+            },
+        )
+        .await?;
+
+    if !result.success {
+        return Ok(None);
+    }
+    Ok(parse_passwd_home(&result.stdout))
+}
+
+/// Parse the HOME field (index 5, 0-based) from the first `:`-separated record
+/// in a /etc/passwd-style payload. Returns None when the input is empty,
+/// malformed, or has an empty home field.
+fn parse_passwd_home(passwd_output: &str) -> Option<String> {
+    let line = passwd_output.lines().next()?;
+    let parts: Vec<&str> = line.split(':').collect();
+    let home = parts.get(5)?;
+    if home.is_empty() {
+        None
+    } else {
+        Some((*home).to_string())
+    }
+}
+
+/// Restrict usernames to the POSIX-portable charset that's safe to interpolate
+/// directly into a single-quoted shell argument. Linux normally limits usernames
+/// to `[a-z_][a-z0-9_-]*[$]?` but we are lenient for digits/upper-case.
+fn is_safe_username(user: &str) -> bool {
+    !user.is_empty()
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -870,5 +979,129 @@ mod tests {
     fn test_parse_container_probe_mode_invalid_input() {
         let res = "i-should-fail".parse::<ContainerProbeMode>();
         assert!(res.is_err());
+    }
+
+    /// BEAD-9-T01: HOME from probed env wins when present and non-empty.
+    #[tokio::test]
+    async fn resolve_home_folder_uses_probed_home() {
+        use crate::docker::mock::MockDocker;
+        let docker = MockDocker::new();
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), "/home/vscode".to_string());
+        let home = resolve_home_folder(&docker, "cid", Some("vscode"), &env).await;
+        assert_eq!(home, "/home/vscode");
+        // Must not have shelled out for passwd lookup.
+        let history = docker.get_exec_history();
+        assert!(history.is_empty(), "no exec should have occurred");
+    }
+
+    /// BEAD-9-T02: when HOME is absent, fall back to `getent passwd <user>` and parse field 6.
+    #[tokio::test]
+    async fn resolve_home_folder_uses_getent_when_home_missing() {
+        use crate::docker::mock::{MockDocker, MockExecResponse};
+        let docker = MockDocker::new();
+        let cmd = "sh -c getent passwd 'node' 2>/dev/null || grep '^node:' /etc/passwd 2>/dev/null";
+        docker.set_exec_response(
+            cmd.to_string(),
+            MockExecResponse {
+                exit_code: 0,
+                success: true,
+                stdout: Some("node:x:1000:1000:Node user:/home/node:/bin/bash\n".to_string()),
+                ..Default::default()
+            },
+        );
+        let env = HashMap::new();
+        let home = resolve_home_folder(&docker, "cid", Some("node"), &env).await;
+        assert_eq!(home, "/home/node");
+    }
+
+    /// BEAD-9-T03: empty HOME is treated as absent (falls through to getent / /root).
+    #[tokio::test]
+    async fn resolve_home_folder_treats_empty_home_as_absent() {
+        use crate::docker::mock::MockDocker;
+        let docker = MockDocker::new();
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), String::new());
+        // No user → no getent lookup → /root fallback.
+        let home = resolve_home_folder(&docker, "cid", None, &env).await;
+        assert_eq!(home, "/root");
+    }
+
+    /// BEAD-9-T04: when getent fails (no user known), fall back to `/root` — never
+    /// guess `/home/{user}`, because container images frequently put homes elsewhere.
+    #[tokio::test]
+    async fn resolve_home_folder_falls_back_to_root_when_getent_fails() {
+        use crate::docker::mock::{MockDocker, MockExecResponse};
+        let docker = MockDocker::new();
+        let cmd = "sh -c getent passwd 'nosuchuser' 2>/dev/null || grep '^nosuchuser:' /etc/passwd 2>/dev/null";
+        docker.set_exec_response(
+            cmd.to_string(),
+            MockExecResponse {
+                exit_code: 2,
+                success: false,
+                stdout: Some(String::new()),
+                ..Default::default()
+            },
+        );
+        let env = HashMap::new();
+        let home = resolve_home_folder(&docker, "cid", Some("nosuchuser"), &env).await;
+        assert_eq!(home, "/root");
+    }
+
+    /// BEAD-9-T05: usernames with shell metacharacters are rejected before injection.
+    /// Falls back to /root rather than shell-out with quoting holes.
+    #[tokio::test]
+    async fn resolve_home_folder_rejects_unsafe_usernames() {
+        use crate::docker::mock::MockDocker;
+        let docker = MockDocker::new();
+        let env = HashMap::new();
+        let home = resolve_home_folder(&docker, "cid", Some("evil'; rm -rf /;'"), &env).await;
+        assert_eq!(home, "/root");
+        assert!(
+            docker.get_exec_history().is_empty(),
+            "unsafe username must not reach docker exec"
+        );
+    }
+
+    #[test]
+    fn parse_passwd_home_extracts_field_six() {
+        let line = "vscode:x:1000:1000::/home/vscode:/bin/bash";
+        assert_eq!(parse_passwd_home(line).as_deref(), Some("/home/vscode"));
+    }
+
+    #[test]
+    fn parse_passwd_home_returns_none_for_empty_home() {
+        let line = "vscode:x:1000:1000::/:/bin/bash";
+        // Field 5 (0-indexed) is "/", which is non-empty, so this returns Some("/")
+        assert_eq!(parse_passwd_home(line).as_deref(), Some("/"));
+
+        let line = "vscode:x:1000:1000:::/bin/bash";
+        // Empty home field → None
+        assert!(parse_passwd_home(line).is_none());
+    }
+
+    #[test]
+    fn parse_passwd_home_handles_malformed_input() {
+        assert!(parse_passwd_home("").is_none());
+        assert!(parse_passwd_home("not-a-passwd-line").is_none());
+        assert!(parse_passwd_home("a:b:c").is_none());
+    }
+
+    #[test]
+    fn is_safe_username_accepts_typical_devcontainer_users() {
+        assert!(is_safe_username("vscode"));
+        assert!(is_safe_username("node"));
+        assert!(is_safe_username("user_1"));
+        assert!(is_safe_username("dev-user.alt"));
+        assert!(is_safe_username("root"));
+    }
+
+    #[test]
+    fn is_safe_username_rejects_shell_metacharacters() {
+        assert!(!is_safe_username(""));
+        assert!(!is_safe_username("a'b"));
+        assert!(!is_safe_username("a;rm -rf /"));
+        assert!(!is_safe_username("$(whoami)"));
+        assert!(!is_safe_username("a b"));
     }
 }

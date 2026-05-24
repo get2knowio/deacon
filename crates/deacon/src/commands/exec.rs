@@ -543,27 +543,6 @@ where
         let stdin_is_tty = CliDocker::is_tty();
         let stdout_is_tty = std::io::stdout().is_terminal();
 
-        // Determine working directory - prioritize CLI argument over config
-        let working_dir = if let Some(ref cli_workdir) = args.workdir {
-            debug!("Using working directory from CLI: {}", cli_workdir);
-            cli_workdir.clone()
-        } else {
-            match resolved_config.as_ref() {
-                Some(config_ctx) => determine_container_working_dir(
-                    &config_ctx.config,
-                    config_ctx.workspace_folder.as_path(),
-                ),
-                None => {
-                    // For direct container ID or label-based exec without config context, default to root
-                    debug!("Using default working directory for direct/label-based exec");
-                    String::from("/")
-                }
-            }
-        };
-
-        // Add workdir to the current tracing span
-        tracing::Span::current().record("workdir", &working_dir);
-
         // Load config.remote_env when we have configuration context; prefer resolved config
         // Track effective user: CLI --user overrides any config remoteUser; if absent, fall back to config
         let mut config_remote_env: Option<HashMap<String, Option<String>>> = None;
@@ -614,6 +593,36 @@ where
         if let Some(ref user) = args.user {
             tracing::Span::current().record("user", user.as_str());
         }
+
+        // Determine working directory — prioritize CLI argument over config, and
+        // fall back to the container user's home folder when neither workspace
+        // context nor a config-defined workspaceFolder is available. This mirrors
+        // `remoteCwd = remoteWorkspaceFolder || homeFolder` in the reference CLI
+        // (devContainersSpecCLI.ts:1415 / injectHeadless.ts:281-294).
+        let working_dir = if let Some(ref cli_workdir) = args.workdir {
+            debug!("Using working directory from CLI: {}", cli_workdir);
+            cli_workdir.clone()
+        } else {
+            match resolved_config.as_ref() {
+                Some(config_ctx) => determine_container_working_dir(
+                    &config_ctx.config,
+                    config_ctx.workspace_folder.as_path(),
+                ),
+                None => {
+                    debug!("No config context; resolving home folder as cwd");
+                    deacon_core::container_env_probe::resolve_home_folder(
+                        docker_client,
+                        &container_id,
+                        args.user.as_deref(),
+                        &env_user_resolution.effective_env,
+                    )
+                    .await
+                }
+            }
+        };
+
+        // Add workdir to the current tracing span
+        tracing::Span::current().record("workdir", &working_dir);
 
         // Create exec config
         let exec_config = build_exec_config(
