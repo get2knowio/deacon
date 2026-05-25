@@ -1,0 +1,46 @@
+# cargo-deny configuration for Deacon.
+#
+# Run locally: `cargo deny check`
+# CI gate: `.github/workflows/ci.yml` job `security`
+#
+# Schema: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# Per-advisory exceptions go here with rationale. None currently in effect —
+# the json5 RUSTSEC-2025-0120 advisory does not apply to the 1.x line (we use
+# json5 1.3 at crates/core/src/config.rs).
+
+[licenses]
+version = 2
+# Allowlist intentionally narrow — additions require review.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    # Community Data License Agreement (Mozilla-classified permissive).
+    # Pulled in by webpki-roots; bundle of trust anchors with permissive terms.
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+# TODO(post-1.0): tighten to "deny" once duplicate-version count is reduced.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
