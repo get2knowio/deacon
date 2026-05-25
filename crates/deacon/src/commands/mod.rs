@@ -17,6 +17,8 @@ pub mod shared;
 #[cfg(feature = "full")]
 pub mod templates;
 pub mod up;
+#[cfg(feature = "full")]
+pub mod upgrade;
 
 /// Re-export the UpResult type to preserve the stdout JSON contract for the up command.
 pub use up::UpResult;

@@ -510,6 +510,34 @@ pub enum Commands {
         command: TemplateCommands,
     },
 
+    /// Regenerate (or refresh) the devcontainer lockfile from the currently
+    /// resolved Feature set. Use `--dry-run` to print the lockfile JSON to
+    /// stdout instead of writing to disk.
+    ///
+    /// See `docs/subcommand-specs/upgrade/SPEC.md` for the authoritative behavior.
+    #[cfg(feature = "full")]
+    Upgrade {
+        /// Print the generated lockfile JSON to stdout instead of writing it
+        /// to disk. Spec §2.
+        #[arg(long)]
+        dry_run: bool,
+        /// Docker CLI path. Default `docker`. Spec §2 surface parity only.
+        #[arg(long, default_value = "docker")]
+        docker_path: String,
+        /// Docker Compose CLI path. Default `docker-compose`. Spec §2 surface parity only.
+        #[arg(long, default_value = "docker-compose")]
+        docker_compose_path: String,
+        /// HIDDEN: pin the version of a specific Feature in `devcontainer.json`
+        /// before regenerating the lockfile. Used by Dependabot.
+        /// Must be used with `--target-version`. **Pinning is deferred to PR-5b.**
+        #[arg(long, short = 'f', hide = true)]
+        feature: Option<String>,
+        /// HIDDEN: target version for `--feature`. Must match
+        /// `^\d+(\.\d+(\.\d+)?)?$`. **Pinning is deferred to PR-5b.**
+        #[arg(long, short = 'v', hide = true)]
+        target_version: Option<String>,
+    },
+
     /// Run user-defined lifecycle commands
     #[cfg(feature = "full")]
     #[allow(clippy::enum_variant_names)]
@@ -1368,6 +1396,28 @@ impl Cli {
                 };
 
                 execute_templates(args).await
+            }
+            #[cfg(feature = "full")]
+            Some(Commands::Upgrade {
+                dry_run,
+                docker_path,
+                docker_compose_path,
+                feature,
+                target_version,
+            }) => {
+                use crate::commands::upgrade::{execute_upgrade, UpgradeArgs};
+
+                let args = UpgradeArgs {
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                    docker_path,
+                    docker_compose_path,
+                    dry_run,
+                    feature,
+                    target_version,
+                };
+
+                execute_upgrade(args).await
             }
             #[cfg(feature = "full")]
             Some(Commands::RunUserCommands {
