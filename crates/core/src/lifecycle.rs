@@ -1292,8 +1292,6 @@ fn run_phase_host_sync(
             ))
         })?;
 
-        let stdout_phase = phase;
-        let stderr_phase = phase;
         let stdout_redaction_config = ctx.redaction_config.clone();
         let stderr_redaction_config = ctx.redaction_config.clone();
 
@@ -1303,7 +1301,7 @@ fn run_phase_host_sync(
             for line in stdout_reader.lines() {
                 let line = line.map_err(|e| format!("Failed to read stdout: {}", e))?;
                 let redacted_line = redact_if_enabled(&line, &stdout_redaction_config);
-                info!("[{}] stdout: {}", stdout_phase.as_str(), redacted_line);
+                info!("[{}] stdout: {}", phase.as_str(), redacted_line);
                 stdout_lines.push(line);
             }
             Ok(stdout_lines)
@@ -1315,7 +1313,7 @@ fn run_phase_host_sync(
             for line in stderr_reader.lines() {
                 let line = line.map_err(|e| format!("Failed to read stderr: {}", e))?;
                 let redacted_line = redact_if_enabled(&line, &stderr_redaction_config);
-                info!("[{}] stderr: {}", stderr_phase.as_str(), redacted_line);
+                info!("[{}] stderr: {}", phase.as_str(), redacted_line);
                 stderr_lines.push(line);
             }
             Ok(stderr_lines)
