@@ -9,6 +9,7 @@ use super::args::{MountType, NormalizedMount, UpArgs};
 use super::features_build::{
     build_image_with_features, build_image_with_features_from_dockerfile, FeatureBuildOutput,
 };
+use super::helpers::handle_lockfile_post_build;
 use super::lifecycle::{execute_initialize_command, resolve_force_pty};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
@@ -253,10 +254,8 @@ pub(crate) async fn execute_compose_up(
     // feature-extended image and rewriting the target service's `image:` via
     // the existing injection override. Both the `image:` shape (14a) and the
     // `build:` shape (14b — user-authored Dockerfile + context) are supported.
-    // The returned FeatureBuildOutput is currently unused — combined feature env
-    // is already pulled into the compose flow via the existing additional_env path.
     // Future work (per spec): thread resolved_features into merged_configuration.
-    let _feature_build = install_features_for_compose(
+    let feature_build = install_features_for_compose(
         config,
         &compose_manager,
         &mut project,
@@ -264,6 +263,14 @@ pub(crate) async fn execute_compose_up(
         workspace_hash,
     )
     .await?;
+
+    // Lockfile graduation (PR-4b): mirror the single-container flow — write
+    // the lockfile to disk, or byte-compare it in `--frozen-lockfile` mode.
+    // Only runs when features were actually built (the compose path returns
+    // `None` when no features are declared).
+    if let Some(ref fb) = feature_build {
+        handle_lockfile_post_build(args, config_path, &fb.lockfile)?;
+    }
 
     // Start the compose project
     // First, warn about security options that cannot be applied dynamically

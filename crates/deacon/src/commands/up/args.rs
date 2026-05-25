@@ -365,10 +365,22 @@ pub struct UpArgs {
     pub dotfiles_install_command: Option<String>,
     pub dotfiles_target_path: Option<String>,
 
-    // Lockfile control (experimental)
-    /// Path to feature lockfile for validation (experimental)
+    // Lockfile control (graduated in 1.0; default behavior is read + write)
+    /// Skip lockfile generation and verification.
+    pub no_lockfile: bool,
+    /// Require an up-to-date lockfile; fail if resolution would change it.
+    /// This is the effective value (already OR'd with the deprecated
+    /// `experimental_frozen_lockfile` alias in the CLI layer).
+    pub frozen_lockfile: bool,
+    /// DEPRECATED hidden alias for the legacy `--experimental-lockfile <PATH>`
+    /// form. Kept through the 1.x line so existing CI scripts keep working;
+    /// the CLI layer emits a WARN when set. The custom-path semantics have
+    /// no replacement in the graduated flag surface.
     pub experimental_lockfile: Option<PathBuf>,
-    /// Require lockfile to exist and match config features exactly (experimental)
+    /// DEPRECATED hidden alias for `--frozen-lockfile`. The CLI layer ORs
+    /// this into `frozen_lockfile` and emits a WARN; downstream code should
+    /// read `frozen_lockfile` only.
+    #[allow(dead_code)] // Plumbed for shape parity; CLI layer ORs into frozen_lockfile.
     pub experimental_frozen_lockfile: bool,
 
     // Metadata and output control
@@ -448,6 +460,8 @@ impl Default for UpArgs {
             dotfiles_repository: None,
             dotfiles_install_command: None,
             dotfiles_target_path: None,
+            no_lockfile: false,
+            frozen_lockfile: false,
             experimental_lockfile: None,
             experimental_frozen_lockfile: false,
             omit_config_remote_env_from_metadata: false,
