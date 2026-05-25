@@ -22,7 +22,7 @@ mod args;
 mod compose;
 mod container;
 mod dotfiles;
-mod features_build;
+pub(crate) mod features_build;
 mod helpers;
 mod image_build;
 mod lifecycle;
@@ -203,18 +203,19 @@ pub(crate) async fn execute_up_with_runtime(
     check_for_disallowed_features(&config.features)?;
     debug!("Validated features - no disallowed features found");
 
-    // T012: Enforce lockfile/frozen validation pre-build
-    // T013: User-facing error handling for lockfile/frozen enforcement
-    // If frozen mode is enabled, or lockfile path is explicitly provided, validate before build
-    if args.experimental_frozen_lockfile || args.experimental_lockfile.is_some() {
-        // Determine lockfile path: use explicit path if provided, otherwise derive from config
+    // Frozen-lockfile pre-build validation (graduated in 1.0).
+    // `args.frozen_lockfile` is the effective value (CLI layer ORs the
+    // deprecated --experimental-frozen-lockfile alias into it).
+    // Skip lockfile interaction entirely when --no-lockfile is set.
+    if !args.no_lockfile && (args.frozen_lockfile || args.experimental_lockfile.is_some()) {
+        // Determine lockfile path: use explicit path if provided (deprecated),
+        // otherwise derive from config.
         let lockfile_path = args
             .experimental_lockfile
             .clone()
             .unwrap_or_else(|| get_lockfile_path(&config_path));
 
-        // Use info-level log so users can see lockfile validation is active
-        if args.experimental_frozen_lockfile {
+        if args.frozen_lockfile {
             info!(
                 "Frozen lockfile mode enabled: validating features against '{}'",
                 lockfile_path.display()
@@ -231,7 +232,7 @@ pub(crate) async fn execute_up_with_runtime(
             format!(
                 "Failed to read lockfile at '{}'. \
                  The file may be corrupted or contain invalid JSON. \
-                 To regenerate, remove the file and run without --experimental-frozen-lockfile.",
+                 To regenerate, remove the file and run without --frozen-lockfile.",
                 lockfile_path.display()
             )
         })?;
@@ -242,7 +243,7 @@ pub(crate) async fn execute_up_with_runtime(
 
         match &validation_result {
             LockfileValidationResult::Matched => {
-                if args.experimental_frozen_lockfile {
+                if args.frozen_lockfile {
                     info!(
                         "Lockfile validation passed: all features match '{}'",
                         lockfile_path.display()
@@ -254,7 +255,7 @@ pub(crate) async fn execute_up_with_runtime(
             _ => {
                 let error_message = validation_result.format_error();
 
-                if args.experimental_frozen_lockfile {
+                if args.frozen_lockfile {
                     // Frozen mode: fail immediately on any mismatch (exit code 1)
                     return Err(DeaconError::Config(
                         deacon_core::errors::ConfigError::Validation {

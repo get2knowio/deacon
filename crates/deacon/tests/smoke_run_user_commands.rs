@@ -148,6 +148,86 @@ fn test_run_user_commands_explicit_config() {
     assert!(stderr.contains("No running container found"));
 }
 
+/// Test that `--container-id` short-circuits workspace discovery and surfaces
+/// a clear "not found" error for a non-existent container ID.
+#[test]
+fn test_run_user_commands_explicit_container_id_not_found() {
+    let temp_dir = TempDir::new().unwrap();
+
+    let devcontainer_config = r#"{
+    "name": "Test Container ID",
+    "image": "alpine:3.19",
+    "postCreateCommand": "echo 'noop'"
+}"#;
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let output = cmd
+        .current_dir(&temp_dir)
+        .arg("run-user-commands")
+        .arg("--container-id")
+        .arg("deacon-test-nonexistent-cid-2026")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    // With --container-id, we MUST NOT fall through to the workspace-based path
+    // that emits "Run 'deacon up' first". The exact downstream error string
+    // (mapped from Docker's "no such object" / "Dev container not found")
+    // varies; assert only that the new selection path took effect.
+    assert!(
+        !stderr.contains("Run 'deacon up' first"),
+        "should bypass workspace-based error path; stderr was: {}",
+        stderr
+    );
+}
+
+/// Test that `--id-label` short-circuits workspace discovery and surfaces
+/// a clear "not found" error when no container matches the labels.
+#[test]
+fn test_run_user_commands_explicit_id_label_not_found() {
+    let temp_dir = TempDir::new().unwrap();
+
+    let devcontainer_config = r#"{
+    "name": "Test ID Label",
+    "image": "alpine:3.19",
+    "postCreateCommand": "echo 'noop'"
+}"#;
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let output = cmd
+        .current_dir(&temp_dir)
+        .arg("run-user-commands")
+        .arg("--id-label")
+        .arg("deacon.test=nonexistent-label-marker-2026")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    // See note on container-id test above: assert only that the new selection
+    // path took effect (we did NOT fall through to workspace-based discovery).
+    assert!(
+        !stderr.contains("Run 'deacon up' first"),
+        "should bypass workspace-based error path; stderr was: {}",
+        stderr
+    );
+}
+
 /// Test that run-user-commands fails appropriately with missing config
 #[test]
 fn test_run_user_commands_missing_config() {
