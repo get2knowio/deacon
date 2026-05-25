@@ -31,7 +31,7 @@ use std::path::PathBuf;
 pub enum RuntimeOption {
     /// Docker runtime
     Docker,
-    /// Podman runtime
+    /// Podman runtime (experimental in 1.0)
     Podman,
 }
 
@@ -228,11 +228,18 @@ pub enum Commands {
         /// Skip feature auto-mapping (hidden testing flag)
         #[arg(long, hide = true)]
         skip_feature_auto_mapping: bool,
-        /// Path to feature lockfile for validation (experimental, hidden)
+        /// Disable lockfile generation and verification. Mutually exclusive with --frozen-lockfile.
+        #[arg(long)]
+        no_lockfile: bool,
+        /// Require an up-to-date lockfile; fail if resolution would change it.
+        /// Mutually exclusive with --no-lockfile.
+        #[arg(long)]
+        frozen_lockfile: bool,
+        /// DEPRECATED: use --frozen-lockfile (and pass a path via --config if needed).
+        /// Kept as a hidden alias through the 1.x line; emits a WARN when used.
         #[arg(long, hide = true)]
         experimental_lockfile: Option<PathBuf>,
-        /// Require lockfile to exist and match config features exactly (experimental, hidden)
-        /// Implies --experimental-lockfile if not specified; uses default lockfile location.
+        /// DEPRECATED alias for --frozen-lockfile (graduated in 1.0). Hidden; emits a WARN.
         #[arg(long, hide = true)]
         experimental_frozen_lockfile: bool,
         /// Dotfiles repository URL
@@ -380,10 +387,17 @@ pub enum Commands {
         /// Do not persist customizations from features into image metadata
         #[arg(long, hide = true)]
         skip_persisting_customizations_from_features: bool,
-        /// Write feature lockfile (experimental)
+        /// Disable lockfile generation and verification. Mutually exclusive with --frozen-lockfile.
+        #[arg(long)]
+        no_lockfile: bool,
+        /// Require an up-to-date lockfile; fail if resolution would change it.
+        /// Mutually exclusive with --no-lockfile.
+        #[arg(long)]
+        frozen_lockfile: bool,
+        /// DEPRECATED: lockfile is now written by default. Hidden alias kept through 1.x; emits a WARN.
         #[arg(long, hide = true)]
         experimental_lockfile: bool,
-        /// Fail if lockfile changes would occur (experimental)
+        /// DEPRECATED alias for --frozen-lockfile (graduated in 1.0). Hidden; emits a WARN.
         #[arg(long, hide = true)]
         experimental_frozen_lockfile: bool,
         /// Omit Dockerfile syntax directive workaround
@@ -496,6 +510,84 @@ pub enum Commands {
         command: TemplateCommands,
     },
 
+    /// Regenerate (or refresh) the devcontainer lockfile from the currently
+    /// resolved Feature set. Use `--dry-run` to print the lockfile JSON to
+    /// stdout instead of writing to disk.
+    ///
+    /// See `docs/subcommand-specs/upgrade/SPEC.md` for the authoritative behavior.
+    #[cfg(feature = "full")]
+    Upgrade {
+        /// Print the generated lockfile JSON to stdout instead of writing it
+        /// to disk. Spec §2.
+        #[arg(long)]
+        dry_run: bool,
+        /// Docker CLI path. Default `docker`. Spec §2 surface parity only.
+        #[arg(long, default_value = "docker")]
+        docker_path: String,
+        /// Docker Compose CLI path. Default `docker-compose`. Spec §2 surface parity only.
+        #[arg(long, default_value = "docker-compose")]
+        docker_compose_path: String,
+        /// HIDDEN: pin the version of a specific Feature in `devcontainer.json`
+        /// before regenerating the lockfile. Used by Dependabot.
+        /// Must be used with `--target-version`.
+        #[arg(long, short = 'f', hide = true)]
+        feature: Option<String>,
+        /// HIDDEN: target version for `--feature`. Must match
+        /// `^\d+(\.\d+(\.\d+)?)?$`.
+        #[arg(long, short = 'v', hide = true)]
+        target_version: Option<String>,
+    },
+
+    /// Convert an already-running container into a DevContainer by applying
+    /// configuration + image metadata, executing lifecycle hooks, and emitting
+    /// a JSON snapshot of the resulting configuration.
+    ///
+    /// See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
+    #[cfg(feature = "full")]
+    SetUp {
+        /// Target container ID (required). The container must already exist.
+        #[arg(long)]
+        container_id: String,
+        /// Optional path to a devcontainer.json to layer on top of the
+        /// container's embedded image metadata.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Skip all lifecycle hooks (onCreate, updateContent, postCreate,
+        /// postStart, postAttach) and dotfiles installation.
+        #[arg(long)]
+        skip_post_create: bool,
+        /// Stop after the configured `waitFor` hook (default `updateContent`).
+        #[arg(long)]
+        skip_non_blocking_commands: bool,
+        /// Extra remote env to inject when running hooks (repeatable).
+        #[arg(long = "remote-env", action = clap::ArgAction::Append)]
+        remote_env: Vec<String>,
+        /// Dotfiles git repository URL or `owner/repo` shorthand.
+        #[arg(long)]
+        dotfiles_repository: Option<String>,
+        /// Custom dotfiles install command. When omitted, the installer
+        /// auto-detects `install.sh` / `bootstrap` / `setup` / `script/*`.
+        #[arg(long)]
+        dotfiles_install_command: Option<String>,
+        /// Target path inside the container for the dotfiles clone. Defaults
+        /// to `~/dotfiles` (`/root/dotfiles` when running as root).
+        #[arg(long)]
+        dotfiles_target_path: Option<String>,
+        /// Include the (substituted) configuration in the JSON result.
+        #[arg(long)]
+        include_configuration: bool,
+        /// Include the (substituted) merged configuration in the JSON result.
+        #[arg(long)]
+        include_merged_configuration: bool,
+        /// Inside-container user data root (default `~/.devcontainer`).
+        #[arg(long)]
+        container_data_folder: Option<PathBuf>,
+        /// Inside-container system data root for root-owned marker files
+        /// (default `/var/devcontainer`). Spec §6.
+        #[arg(long)]
+        container_system_data_folder: Option<PathBuf>,
+    },
+
     /// Run user-defined lifecycle commands
     #[cfg(feature = "full")]
     #[allow(clippy::enum_variant_names)]
@@ -503,7 +595,7 @@ pub enum Commands {
         /// Skip postCreate lifecycle phase
         #[arg(long)]
         skip_post_create: bool,
-        /// Skip postAttach lifecycle phase  
+        /// Skip postAttach lifecycle phase
         #[arg(long)]
         skip_post_attach: bool,
         /// Skip non-blocking commands (postStart & postAttach phases)
@@ -523,6 +615,7 @@ pub enum Commands {
         id_label: Vec<String>,
     },
 
+    // PR-6a SetUp variant moved earlier in this file with PR-6b dotfiles flags.
     /// Stop and optionally remove development container or compose project
     Down {
         /// Remove containers after stopping them
@@ -688,7 +781,7 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     pub plugin: Vec<String>,
 
-    /// Container runtime to use (docker or podman, can be set via DEACON_RUNTIME env var)
+    /// Container runtime to use (docker or podman [experimental]; can be set via DEACON_RUNTIME env var)
     #[arg(long, global = true, value_enum)]
     pub runtime: Option<RuntimeOption>,
 
@@ -959,6 +1052,8 @@ impl Cli {
                 prefer_cli_features,
                 feature_install_order,
                 skip_feature_auto_mapping,
+                no_lockfile,
+                frozen_lockfile,
                 experimental_lockfile,
                 experimental_frozen_lockfile,
                 dotfiles_repository,
@@ -979,6 +1074,29 @@ impl Cli {
             }) => {
                 use crate::commands::up::{execute_up, UpArgs};
 
+                // Mutual exclusivity check (mirrors devcontainers/cli).
+                if no_lockfile && (frozen_lockfile || experimental_frozen_lockfile) {
+                    anyhow::bail!("--no-lockfile and --frozen-lockfile are mutually exclusive.");
+                }
+                // Emit deprecation WARN for the hidden experimental aliases.
+                if experimental_lockfile.is_some() {
+                    tracing::warn!(
+                        target: "deacon::lockfile",
+                        "--experimental-lockfile is deprecated and will be removed in 2.0. \
+                         Lockfile generation is now the default; pass --no-lockfile to disable. \
+                         The custom-path form has no replacement (the lockfile lives next to the config)."
+                    );
+                }
+                if experimental_frozen_lockfile {
+                    tracing::warn!(
+                        target: "deacon::lockfile",
+                        "--experimental-frozen-lockfile is deprecated and will be removed in 2.0; \
+                         use --frozen-lockfile."
+                    );
+                }
+                // effective_frozen = either flag (matches upstream's effectiveFrozenLockfile)
+                let effective_frozen_lockfile = frozen_lockfile || experimental_frozen_lockfile;
+
                 let args = UpArgs {
                     id_label,
                     remove_existing_container,
@@ -997,6 +1115,8 @@ impl Cli {
                     cache_to,
                     buildkit,
                     skip_feature_auto_mapping,
+                    no_lockfile,
+                    frozen_lockfile: effective_frozen_lockfile,
                     experimental_lockfile,
                     experimental_frozen_lockfile,
                     dotfiles_repository,
@@ -1137,11 +1257,33 @@ impl Cli {
                 output,
                 skip_feature_auto_mapping,
                 skip_persisting_customizations_from_features,
+                no_lockfile,
+                frozen_lockfile,
                 experimental_lockfile,
                 experimental_frozen_lockfile,
                 omit_syntax_directive,
             }) => {
                 use crate::commands::build::{execute_build, BuildArgs};
+
+                // Mutual exclusivity check (mirrors devcontainers/cli).
+                if no_lockfile && (frozen_lockfile || experimental_frozen_lockfile) {
+                    anyhow::bail!("--no-lockfile and --frozen-lockfile are mutually exclusive.");
+                }
+                if experimental_lockfile {
+                    tracing::warn!(
+                        target: "deacon::lockfile",
+                        "--experimental-lockfile is deprecated and will be removed in 2.0; \
+                         lockfile generation is now the default. Pass --no-lockfile to disable."
+                    );
+                }
+                if experimental_frozen_lockfile {
+                    tracing::warn!(
+                        target: "deacon::lockfile",
+                        "--experimental-frozen-lockfile is deprecated and will be removed in 2.0; \
+                         use --frozen-lockfile."
+                    );
+                }
+                let effective_frozen_lockfile = frozen_lockfile || experimental_frozen_lockfile;
 
                 let args = BuildArgs {
                     no_cache,
@@ -1177,6 +1319,8 @@ impl Cli {
                     output,
                     skip_feature_auto_mapping,
                     skip_persisting_customizations_from_features,
+                    no_lockfile,
+                    frozen_lockfile: effective_frozen_lockfile,
                     experimental_lockfile,
                     experimental_frozen_lockfile,
                     omit_syntax_directive,
@@ -1305,6 +1449,28 @@ impl Cli {
                 execute_templates(args).await
             }
             #[cfg(feature = "full")]
+            Some(Commands::Upgrade {
+                dry_run,
+                docker_path,
+                docker_compose_path,
+                feature,
+                target_version,
+            }) => {
+                use crate::commands::upgrade::{execute_upgrade, UpgradeArgs};
+
+                let args = UpgradeArgs {
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                    docker_path,
+                    docker_compose_path,
+                    dry_run,
+                    feature,
+                    target_version,
+                };
+
+                execute_upgrade(args).await
+            }
+            #[cfg(feature = "full")]
             Some(Commands::RunUserCommands {
                 skip_post_create,
                 skip_post_attach,
@@ -1336,6 +1502,45 @@ impl Cli {
                 };
 
                 execute_run_user_commands(args).await
+            }
+            #[cfg(feature = "full")]
+            Some(Commands::SetUp {
+                container_id,
+                config,
+                skip_post_create,
+                skip_non_blocking_commands,
+                remote_env,
+                dotfiles_repository,
+                dotfiles_install_command,
+                dotfiles_target_path,
+                include_configuration,
+                include_merged_configuration,
+                container_data_folder,
+                container_system_data_folder,
+            }) => {
+                use crate::commands::set_up::{execute_set_up, SetUpArgs};
+
+                let args = SetUpArgs {
+                    container_id,
+                    // Per spec §2: --config is local to set-up and overrides
+                    // the global --config when both are present.
+                    config_path: config.or(self.config.clone()),
+                    skip_post_create,
+                    skip_non_blocking_commands,
+                    remote_env,
+                    dotfiles_repository,
+                    dotfiles_install_command,
+                    dotfiles_target_path,
+                    include_configuration,
+                    include_merged_configuration,
+                    container_data_folder: container_data_folder
+                        .or_else(|| self.container_data_folder.clone()),
+                    container_system_data_folder,
+                    docker_path: self.docker_path.clone(),
+                    progress_tracker: progress_tracker.clone(),
+                };
+
+                execute_set_up(args).await
             }
             Some(Commands::Down {
                 remove,
