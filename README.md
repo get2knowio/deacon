@@ -107,7 +107,7 @@ The following features are planned but not yet ready for use:
 | Dotfiles (container-side) | Planned | Host-side dotfiles work, container clone/install coming |
 | `--expect-existing-container` | Planned | Flag exists but validation not implemented |
 | Port forwarding | Planned | Flags exist, functionality deferred |
-| Podman runtime | Planned | Docker is fully supported; Podman coming later |
+| Podman runtime | Experimental (1.0) | Trait-level support is complete; lacks test coverage and rootless-Podman parity items (`label=disable`, `--userns=keep-id`, `--uidmap`/`--gidmap`). Targeted for full support in 1.1 ([#30](https://github.com/get2knowio/deacon/issues/30)). |
 
 For the full roadmap, see [docs/MVP-ROADMAP.md](docs/MVP-ROADMAP.md).
 
@@ -124,11 +124,19 @@ See the full details and additional commands in `examples/README.md`.
 
 ## Runtime Selection
 
-Deacon uses Docker as its container runtime. Podman support is planned for a future release.
+Deacon uses Docker as its container runtime. Podman support ships in **1.0 as
+experimental**: the trait-level integration is complete, but rootless-Podman
+parity items (`label=disable`, `--userns=keep-id`, `--uidmap`/`--gidmap`) and
+dedicated test coverage are still required for full support, targeted for 1.1
+(tracked in [#30](https://github.com/get2knowio/deacon/issues/30)). Using
+`--runtime podman` emits a one-time WARN.
 
 ```bash
 # Explicitly select Docker (optional, it's the default)
 deacon --runtime docker up
+
+# Experimental: select Podman
+deacon --runtime podman up
 
 # Or via environment variable
 DEACON_RUNTIME=docker deacon up

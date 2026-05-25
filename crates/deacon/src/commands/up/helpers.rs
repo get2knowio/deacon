@@ -4,12 +4,23 @@
 //! - `check_for_disallowed_features` - Check for disallowed features
 //! - `discover_id_labels_from_config` - Discover id-labels from configuration
 //! - `apply_user_mapping` - Apply user mapping configuration
+//! - `handle_lockfile_post_build` - Write/compare lockfile after a feature build
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::DeaconError;
+use deacon_core::lockfile::{get_lockfile_path, write_lockfile, Lockfile};
+use std::io;
 use std::path::Path;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, info, instrument, warn};
+
+use super::args::UpArgs;
+
+/// Linux `EROFS` errno value — "Read-only file system". Used in the
+/// best-effort lockfile write path because `io::ErrorKind::ReadOnlyFilesystem`
+/// is unavailable on MSRV 1.82 (stabilized in 1.83).
+#[cfg(unix)]
+const EROFS: i32 = 30;
 
 /// Check if any features are disallowed and return an error if found.
 ///
@@ -223,4 +234,380 @@ pub(crate) async fn apply_user_mapping<R: deacon_core::docker::Docker + Send + S
     }
 
     Ok(())
+}
+
+/// Apply the lockfile policy after a feature build completes.
+///
+/// Dispatches on the CLI flags (`--no-lockfile`, `--frozen-lockfile`,
+/// deprecated `--experimental-lockfile <PATH>`):
+///
+/// - `--no-lockfile`: skip entirely.
+/// - `--frozen-lockfile` (or `--experimental-lockfile` set): serialize the
+///   freshly-built lockfile, byte-compare it to the on-disk file, and fail
+///   with the upstream-aligned `"Lockfile does not match."` /
+///   `"Lockfile does not exist."` strings if they differ.
+/// - Default: write the freshly-built lockfile to disk.
+///
+/// On read-only workspaces (EROFS/EACCES on write), emit a WARN and continue
+/// so a read-only mount doesn't break `up`. Frozen mode never reaches this
+/// branch — it only reads — so this fallback is write-side only.
+///
+/// Mirrors upstream `writeLockfile` in `devcontainers/cli`
+/// `src/spec-configuration/lockfile.ts` (`PR #1212`).
+pub(crate) fn handle_lockfile_post_build(
+    args: &UpArgs,
+    config_path: &Path,
+    lockfile: &Lockfile,
+) -> Result<()> {
+    if args.no_lockfile {
+        debug!("--no-lockfile set; skipping lockfile write/compare");
+        return Ok(());
+    }
+
+    let lockfile_path = args
+        .experimental_lockfile
+        .clone()
+        .unwrap_or_else(|| get_lockfile_path(config_path));
+
+    if args.frozen_lockfile {
+        compare_lockfile_frozen(&lockfile_path, lockfile)
+    } else {
+        write_lockfile_best_effort(&lockfile_path, lockfile)
+    }
+}
+
+/// Frozen-mode comparison: serialize the in-memory lockfile to the same
+/// canonical byte form `write_lockfile` would emit, then compare byte-for-byte
+/// with the on-disk file. Any deviation (missing file, mismatched bytes)
+/// fails the build with the upstream-aligned summary string.
+fn compare_lockfile_frozen(lockfile_path: &Path, lockfile: &Lockfile) -> Result<()> {
+    if !lockfile_path.exists() {
+        return Err(
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: format!(
+                    "Lockfile does not exist.\nExpected at '{}'.\n\
+                     Run without --frozen-lockfile to generate a lockfile, or \
+                     generate one with `deacon upgrade`.",
+                    lockfile_path.display()
+                ),
+            })
+            .into(),
+        );
+    }
+
+    let expected_bytes = canonical_lockfile_bytes(lockfile)?;
+    let actual_bytes = std::fs::read(lockfile_path).with_context(|| {
+        format!(
+            "Failed to read existing lockfile at '{}'",
+            lockfile_path.display()
+        )
+    })?;
+
+    if expected_bytes != actual_bytes {
+        return Err(
+            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                message: format!(
+                    "Lockfile does not match.\n\
+                     The on-disk lockfile at '{}' differs from the freshly-resolved feature set.\n\
+                     Run without --frozen-lockfile to update the lockfile, or run `deacon upgrade`.",
+                    lockfile_path.display()
+                ),
+            })
+            .into(),
+        );
+    }
+
+    info!(
+        "Lockfile up-to-date: '{}' matches the resolved feature set",
+        lockfile_path.display()
+    );
+    Ok(())
+}
+
+/// Best-effort write: succeeds normally, but downgrades EROFS/EACCES to WARN
+/// so a read-only workspace (e.g. CI mount, container with a read-only volume)
+/// doesn't break `up`. All other write errors propagate.
+fn write_lockfile_best_effort(lockfile_path: &Path, lockfile: &Lockfile) -> Result<()> {
+    match write_lockfile(lockfile_path, lockfile, true) {
+        Ok(()) => {
+            debug!("Wrote lockfile to '{}'", lockfile_path.display());
+            Ok(())
+        }
+        Err(e) => {
+            if is_readonly_fs_error(&e) {
+                warn!(
+                    path = %lockfile_path.display(),
+                    error = %e,
+                    "Lockfile write skipped (read-only workspace); continuing without persisting lockfile"
+                );
+                Ok(())
+            } else {
+                Err(e).with_context(|| {
+                    format!("Failed to write lockfile to '{}'", lockfile_path.display())
+                })
+            }
+        }
+    }
+}
+
+/// Inspect an anyhow error chain for an `io::Error` whose kind indicates a
+/// read-only / permission-denied filesystem.
+///
+/// `EACCES` surfaces as `io::ErrorKind::PermissionDenied`. `EROFS` is checked
+/// via `raw_os_error()` because the dedicated `ErrorKind::ReadOnlyFilesystem`
+/// variant was stabilized in Rust 1.83 and our MSRV is 1.82.
+fn is_readonly_fs_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let Some(io_err) = cause.downcast_ref::<io::Error>() else {
+            return false;
+        };
+        if io_err.kind() == io::ErrorKind::PermissionDenied {
+            return true;
+        }
+        #[cfg(unix)]
+        {
+            if io_err.raw_os_error() == Some(EROFS) {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+/// Canonical lockfile bytes — exactly what `write_lockfile` would put on disk.
+///
+/// We can't ask `write_lockfile` for the bytes directly (it writes through to
+/// the filesystem), so we replay the same shape: `serde_json::to_value`,
+/// recursively sort object keys, pretty-print with 2-space indent, append a
+/// trailing newline. Any change to the on-disk format must update both this
+/// helper and `deacon_core::lockfile::write_lockfile` in lockstep, otherwise
+/// `--frozen-lockfile` will report spurious mismatches.
+fn canonical_lockfile_bytes(lockfile: &Lockfile) -> Result<Vec<u8>> {
+    let mut value =
+        serde_json::to_value(lockfile).context("Failed to serialize lockfile to JSON value")?;
+    sort_json_object(&mut value);
+    let mut json =
+        serde_json::to_string_pretty(&value).context("Failed to serialize lockfile to JSON")?;
+    json.push('\n');
+    Ok(json.into_bytes())
+}
+
+/// Recursively sort all keys in a JSON object for deterministic output.
+///
+/// Kept private to this module to mirror the private helper inside
+/// `deacon_core::lockfile`; both produce identical orderings.
+fn sort_json_object(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            let sorted: std::collections::BTreeMap<_, _> = map.iter().collect();
+            *map = sorted
+                .into_iter()
+                .map(|(k, v)| {
+                    let mut v = v.clone();
+                    sort_json_object(&mut v);
+                    (k.clone(), v)
+                })
+                .collect();
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                sort_json_object(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod lockfile_post_build_tests {
+    use super::*;
+    use deacon_core::lockfile::{read_lockfile, LockfileFeature};
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    /// Build a lockfile with a single deterministic entry for assertions.
+    fn one_feature_lockfile(version: &str, digest_hex: &str) -> Lockfile {
+        let mut features = HashMap::new();
+        features.insert(
+            "ghcr.io/devcontainers/features/node:1".to_string(),
+            LockfileFeature {
+                version: version.to_string(),
+                resolved: format!("ghcr.io/devcontainers/features/node@sha256:{}", digest_hex),
+                integrity: format!("sha256:{}", digest_hex),
+                depends_on: None,
+            },
+        );
+        Lockfile { features }
+    }
+
+    fn make_args(no_lockfile: bool, frozen_lockfile: bool) -> UpArgs {
+        UpArgs {
+            no_lockfile,
+            frozen_lockfile,
+            ..UpArgs::default()
+        }
+    }
+
+    /// `canonical_lockfile_bytes` MUST match what `write_lockfile` actually
+    /// puts on disk — otherwise `--frozen-lockfile` would report spurious
+    /// mismatches because the two paths produce different bytes.
+    #[test]
+    fn canonical_bytes_match_write_lockfile_output() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("devcontainer-lock.json");
+
+        let lockfile = one_feature_lockfile("1.6.1", &"a".repeat(64));
+
+        write_lockfile(&path, &lockfile, true).expect("write_lockfile");
+        let on_disk = std::fs::read(&path).unwrap();
+        let in_memory = canonical_lockfile_bytes(&lockfile).expect("canonicalize");
+
+        assert_eq!(
+            in_memory, on_disk,
+            "canonical_lockfile_bytes diverged from write_lockfile output; \
+             --frozen-lockfile would report spurious mismatches"
+        );
+    }
+
+    /// `--no-lockfile` short-circuits the helper entirely: no read, no write,
+    /// no comparison, even in `--frozen-lockfile` (the two are mutually
+    /// exclusive at the CLI layer, but the helper is defensive).
+    #[test]
+    fn no_lockfile_flag_skips_all_io() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join(".devcontainer/devcontainer.json");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        let lockfile = one_feature_lockfile("1.0.0", &"b".repeat(64));
+
+        let args = make_args(true, false);
+        handle_lockfile_post_build(&args, &config_path, &lockfile).expect("no-lockfile path");
+
+        let derived = get_lockfile_path(&config_path);
+        assert!(
+            !derived.exists(),
+            "--no-lockfile must not write the lockfile to disk"
+        );
+    }
+
+    /// Default mode writes the lockfile next to the config file, sorted by
+    /// key with a trailing newline (validated downstream by parity tests in
+    /// `deacon_core::lockfile`).
+    #[test]
+    fn default_mode_writes_lockfile_next_to_config() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join(".devcontainer/devcontainer.json");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        let lockfile = one_feature_lockfile("1.0.0", &"c".repeat(64));
+
+        let args = make_args(false, false);
+        handle_lockfile_post_build(&args, &config_path, &lockfile).expect("default-write path");
+
+        let derived = get_lockfile_path(&config_path);
+        let on_disk = read_lockfile(&derived).expect("read_lockfile").unwrap();
+        assert_eq!(on_disk, lockfile);
+    }
+
+    /// Frozen mode against a missing lockfile fails with the upstream string
+    /// `"Lockfile does not exist."` so CI scripts that match on the message
+    /// keep working.
+    #[test]
+    fn frozen_mode_missing_lockfile_fails_with_upstream_string() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join(".devcontainer/devcontainer.json");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        let lockfile = one_feature_lockfile("1.0.0", &"d".repeat(64));
+
+        let args = make_args(false, true);
+        let err = handle_lockfile_post_build(&args, &config_path, &lockfile)
+            .expect_err("frozen + missing must fail");
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("Lockfile does not exist."),
+            "expected upstream-aligned summary, got: {msg}"
+        );
+    }
+
+    /// Frozen mode with a byte-identical existing lockfile succeeds.
+    #[test]
+    fn frozen_mode_matches_existing_lockfile() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join(".devcontainer/devcontainer.json");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        let lockfile = one_feature_lockfile("1.0.0", &"e".repeat(64));
+
+        // Seed the on-disk file with the canonical form.
+        let derived = get_lockfile_path(&config_path);
+        write_lockfile(&derived, &lockfile, true).unwrap();
+
+        let args = make_args(false, true);
+        handle_lockfile_post_build(&args, &config_path, &lockfile)
+            .expect("frozen + matching must succeed");
+    }
+
+    /// Frozen mode with a mismatched on-disk lockfile fails with the upstream
+    /// string `"Lockfile does not match."`.
+    #[test]
+    fn frozen_mode_mismatch_fails_with_upstream_string() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join(".devcontainer/devcontainer.json");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+        // On disk: version 1.0.0
+        let stale = one_feature_lockfile("1.0.0", &"f".repeat(64));
+        let derived = get_lockfile_path(&config_path);
+        write_lockfile(&derived, &stale, true).unwrap();
+
+        // Freshly resolved: version 2.0.0 — should NOT match.
+        let fresh = one_feature_lockfile("2.0.0", &"f".repeat(64));
+
+        let args = make_args(false, true);
+        let err = handle_lockfile_post_build(&args, &config_path, &fresh)
+            .expect_err("frozen + mismatch must fail");
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("Lockfile does not match."),
+            "expected upstream-aligned summary, got: {msg}"
+        );
+    }
+
+    /// When the deprecated `--experimental-lockfile <PATH>` is set, the helper
+    /// uses that explicit path instead of deriving from the config file.
+    #[test]
+    fn experimental_lockfile_path_overrides_derivation() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join(".devcontainer/devcontainer.json");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+        let explicit = tmp.path().join("custom-lockfile.json");
+        let lockfile = one_feature_lockfile("1.0.0", &"9".repeat(64));
+
+        let mut args = make_args(false, false);
+        args.experimental_lockfile = Some(explicit.clone());
+
+        handle_lockfile_post_build(&args, &config_path, &lockfile)
+            .expect("explicit path must write");
+
+        assert!(
+            explicit.exists(),
+            "experimental_lockfile path must be honored over derived path"
+        );
+        assert!(
+            !get_lockfile_path(&config_path).exists(),
+            "derived path must NOT be written when explicit path is set"
+        );
+    }
+
+    #[test]
+    fn is_readonly_fs_error_detects_permission_denied() {
+        let inner = io::Error::from(io::ErrorKind::PermissionDenied);
+        let err: anyhow::Error = anyhow::anyhow!(inner).context("write failed");
+        assert!(is_readonly_fs_error(&err));
+    }
+
+    #[test]
+    fn is_readonly_fs_error_ignores_other_io_errors() {
+        let inner = io::Error::from(io::ErrorKind::NotFound);
+        let err: anyhow::Error = anyhow::anyhow!(inner).context("read failed");
+        assert!(!is_readonly_fs_error(&err));
+    }
 }

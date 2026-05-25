@@ -29,13 +29,10 @@ pub struct RunUserCommandsArgs {
     pub prebuild: bool,
     #[allow(dead_code)] // Future feature: stop for personalization
     pub stop_for_personalization: bool,
-    /// TODO(#269): Implement container selection for run-user-commands
-    /// When container_id is provided, run lifecycle commands in specific container
-    #[allow(dead_code)]
+    /// When set, target this container directly; skips workspace-based discovery.
     pub container_id: Option<String>,
-    /// TODO(#269): Implement container selection for run-user-commands
-    /// When id_label is provided, resolve container and run lifecycle commands in it
-    #[allow(dead_code)]
+    /// When non-empty, resolve target container by matching these `key=value` labels;
+    /// takes precedence over workspace-based discovery but yields to `container_id`.
     pub id_label: Vec<String>,
     pub workspace_folder: Option<std::path::PathBuf>,
     pub config_path: Option<std::path::PathBuf>,
@@ -67,22 +64,51 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
 
     let container_id = {
         let docker_client = deacon_core::docker::CliDocker::new();
-        match resolve_target_container(
-            &docker_client,
-            workspace_folder.as_path(),
-            &config,
-            None,
-            &args.docker_path,
-            &[],
-        )
-        .await
-        {
-            Ok(id) => id,
-            Err(e) => {
-                debug!(error = ?e, "Failed to resolve target container for workspace");
-                return Err(anyhow::anyhow!(
-                    "No running container found. Run 'deacon up' first"
-                ));
+
+        // Container selection precedence (matches `exec`):
+        // 1. --container-id (direct lookup)
+        // 2. --id-label (label-based lookup)
+        // 3. workspace-based discovery
+        if args.container_id.is_some() || !args.id_label.is_empty() {
+            use deacon_core::container::{resolve_container, ContainerSelector};
+
+            let selector = ContainerSelector::new(
+                args.container_id.clone(),
+                args.id_label.clone(),
+                args.workspace_folder.clone(),
+                args.override_config_path.clone(),
+            )?;
+            selector.validate()?;
+
+            match resolve_container(&docker_client, &selector).await? {
+                Some(info) => {
+                    if info.state != "running" {
+                        return Err(anyhow::anyhow!("Dev container is not running."));
+                    }
+                    info.id
+                }
+                None => {
+                    return Err(anyhow::anyhow!("Dev container not found."));
+                }
+            }
+        } else {
+            match resolve_target_container(
+                &docker_client,
+                workspace_folder.as_path(),
+                &config,
+                None,
+                &args.docker_path,
+                &[],
+            )
+            .await
+            {
+                Ok(id) => id,
+                Err(e) => {
+                    debug!(error = ?e, "Failed to resolve target container for workspace");
+                    return Err(anyhow::anyhow!(
+                        "No running container found. Run 'deacon up' first"
+                    ));
+                }
             }
         }
     };
@@ -263,5 +289,34 @@ mod tests {
         assert!(!args.skip_post_create);
         assert!(!args.skip_non_blocking_commands);
         assert!(!args.prebuild);
+    }
+
+    /// Confirms the new container-selection fields round-trip through the args
+    /// struct. The functional precedence (container_id > id_label > workspace)
+    /// is exercised end-to-end by the smoke_run_user_commands suite.
+    #[test]
+    fn test_run_user_commands_args_container_selection_fields() {
+        let progress_tracker: Option<deacon_core::progress::ProgressTracker> = None;
+        let progress_tracker = std::sync::Arc::new(std::sync::Mutex::new(progress_tracker));
+
+        let args = RunUserCommandsArgs {
+            skip_post_create: false,
+            skip_post_attach: false,
+            skip_non_blocking_commands: false,
+            prebuild: false,
+            stop_for_personalization: false,
+            container_id: Some("deadbeef".to_string()),
+            id_label: vec!["devcontainer.local_folder=/x".to_string()],
+            workspace_folder: None,
+            config_path: None,
+            override_config_path: None,
+            secrets_files: vec![],
+            progress_tracker,
+            docker_path: "docker".to_string(),
+            container_data_folder: None,
+        };
+
+        assert_eq!(args.container_id.as_deref(), Some("deadbeef"));
+        assert_eq!(args.id_label.len(), 1);
     }
 }
