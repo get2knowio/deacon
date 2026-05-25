@@ -547,6 +547,17 @@ pub enum Commands {
         /// Extra remote env to inject when running hooks (repeatable).
         #[arg(long = "remote-env", action = clap::ArgAction::Append)]
         remote_env: Vec<String>,
+        /// Dotfiles git repository URL or `owner/repo` shorthand.
+        #[arg(long)]
+        dotfiles_repository: Option<String>,
+        /// Custom dotfiles install command. When omitted, the installer
+        /// auto-detects `install.sh` / `bootstrap` / `setup` / `script/*`.
+        #[arg(long)]
+        dotfiles_install_command: Option<String>,
+        /// Target path inside the container for the dotfiles clone. Defaults
+        /// to `~/dotfiles` (`/root/dotfiles` when running as root).
+        #[arg(long)]
+        dotfiles_target_path: Option<String>,
         /// Include the (substituted) configuration in the JSON result.
         #[arg(long)]
         include_configuration: bool,
@@ -1379,6 +1390,9 @@ impl Cli {
                 skip_post_create,
                 skip_non_blocking_commands,
                 remote_env,
+                dotfiles_repository,
+                dotfiles_install_command,
+                dotfiles_target_path,
                 include_configuration,
                 include_merged_configuration,
                 container_data_folder,
@@ -1393,6 +1407,9 @@ impl Cli {
                     skip_post_create,
                     skip_non_blocking_commands,
                     remote_env,
+                    dotfiles_repository,
+                    dotfiles_install_command,
+                    dotfiles_target_path,
                     include_configuration,
                     include_merged_configuration,
                     container_data_folder: container_data_folder

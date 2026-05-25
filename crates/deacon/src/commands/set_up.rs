@@ -6,9 +6,7 @@
 //!
 //! See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
 //!
-//! ## PR-6a scope (MVP)
-//!
-//! This module implements the **core value** of set-up:
+//! ## Scope (PR-6a + PR-6b)
 //!
 //! - `--container-id` resolution + inspect validation
 //! - Optional `--config` load via the shared `ConfigLoader` (extends-aware)
@@ -18,13 +16,15 @@
 //! - Lifecycle hook execution (`onCreate` → `updateContent` → `postCreate` →
 //!   `postStart` → `postAttach`) via the shared `ContainerLifecycle` helper,
 //!   gated by `--skip-post-create` and `--skip-non-blocking-commands`
+//! - **Dotfiles installer** (`--dotfiles-repository` / `--dotfiles-install-command`
+//!   / `--dotfiles-target-path`) via `ContainerLifecycle`'s built-in clone +
+//!   auto-detect installer + target-path marker (PR-6b)
 //! - JSON output on stdout: `{outcome, configuration?, mergedConfiguration?}`
 //!
-//! ## Deferred to PR-6b
+//! ## Deferred to PR-6c
 //!
 //! - `/etc/environment` + `/etc/profile` root-side patches with system markers
 //!   under `/var/devcontainer/`
-//! - Dotfiles installer with target-path marker
 //! - A second substitution pass against the live container environment
 //!   (`${containerEnv:VAR}`) — current pass uses only the configured
 //!   `container_env`, not the live `docker exec` env probe
@@ -33,7 +33,7 @@ use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
     execute_container_lifecycle_with_progress_callback, AggregatedLifecycleCommand,
-    ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
+    ContainerLifecycleCommands, ContainerLifecycleConfig, DotfilesConfig, LifecycleCommandList,
     LifecycleCommandSource, LifecycleCommandValue,
 };
 use deacon_core::docker::{CliDocker, ContainerInfo, Docker};
@@ -46,9 +46,8 @@ use tracing::{debug, info, instrument, warn};
 /// Arguments for the `set-up` command.
 ///
 /// Mirrors the spec's CLI surface (`docs/subcommand-specs/set-up/SPEC.md` §2)
-/// minus a handful of flags deferred to PR-6b:
-/// - `--dotfiles-*` (dotfiles installer)
-/// - `--container-system-data-folder` (only the `/etc` patch path consumes it)
+/// minus the `--container-system-data-folder` flag, which is only consumed
+/// by the `/etc` root-patch path (deferred to PR-6c).
 #[derive(Debug, Clone)]
 pub struct SetUpArgs {
     /// Required: container id of the already-running container to set up.
@@ -65,6 +64,17 @@ pub struct SetUpArgs {
     /// Extra remote-env entries to inject when running hooks
     /// (CLI `--remote-env name=value`, repeatable).
     pub remote_env: Vec<String>,
+    /// Dotfiles git repository URL or `owner/repo` shorthand.
+    /// Spec §2 (`--dotfiles-repository`).
+    pub dotfiles_repository: Option<String>,
+    /// Custom dotfiles install command. When `None`, the lifecycle helper
+    /// auto-detects `install.sh` / `bootstrap` / `setup` / `script/*`.
+    /// Spec §2 (`--dotfiles-install-command`).
+    pub dotfiles_install_command: Option<String>,
+    /// Override for the dotfiles clone target. Defaults are computed by the
+    /// lifecycle helper based on the remote user (`~/dotfiles`).
+    /// Spec §2 (`--dotfiles-target-path`).
+    pub dotfiles_target_path: Option<String>,
     /// Include the (substituted) configuration in the JSON result.
     pub include_configuration: bool,
     /// Include the (substituted) merged configuration in the JSON result.
@@ -355,8 +365,7 @@ async fn execute_lifecycle_hooks(
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::LoginShell,
         cache_folder: args.container_data_folder.clone(),
         force_pty: false,
-        // PR-6b will wire dotfiles here.
-        dotfiles: None,
+        dotfiles: build_dotfiles_config(args),
         is_prebuild: false,
     };
 
@@ -436,6 +445,26 @@ async fn execute_lifecycle_hooks(
     Ok(())
 }
 
+/// Build a `DotfilesConfig` from set-up CLI args.
+///
+/// Returns `None` (which short-circuits the lifecycle helper's dotfiles step)
+/// when no repository is supplied — set-up should never clone without an
+/// explicit user opt-in. `target_path` and `install_command` are forwarded
+/// as-is; the lifecycle helper computes sensible defaults when they're `None`.
+///
+/// Per spec §6, idempotency is enforced by a marker file at the target path
+/// (handled inside `container_lifecycle::execute_dotfiles_in_container`); we
+/// do not need to track that here.
+fn build_dotfiles_config(args: &SetUpArgs) -> Option<DotfilesConfig> {
+    args.dotfiles_repository
+        .as_ref()
+        .map(|repo| DotfilesConfig {
+            repository: Some(repo.clone()),
+            target_path: args.dotfiles_target_path.clone(),
+            install_command: args.dotfiles_install_command.clone(),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,6 +499,9 @@ mod tests {
             skip_post_create: false,
             skip_non_blocking_commands: false,
             remote_env: vec![],
+            dotfiles_repository: None,
+            dotfiles_install_command: None,
+            dotfiles_target_path: None,
             include_configuration: false,
             include_merged_configuration: false,
             container_data_folder: None,
@@ -632,6 +664,43 @@ mod tests {
         // Optional fields are omitted when None.
         assert!(!json.contains("\"configuration\""));
         assert!(!json.contains("\"mergedConfiguration\""));
+    }
+
+    #[test]
+    fn build_dotfiles_config_returns_none_when_no_repository() {
+        // No --dotfiles-repository means no opt-in: the lifecycle helper
+        // must NOT clone anything, even if the other dotfiles flags are set.
+        let mut args = make_args("abc");
+        args.dotfiles_install_command = Some("./install.sh".to_string());
+        args.dotfiles_target_path = Some("/tmp/dotfiles".to_string());
+        assert!(build_dotfiles_config(&args).is_none());
+    }
+
+    #[test]
+    fn build_dotfiles_config_forwards_all_three_fields() {
+        let mut args = make_args("abc");
+        args.dotfiles_repository = Some("octocat/dotfiles".to_string());
+        args.dotfiles_install_command = Some("./bootstrap.sh".to_string());
+        args.dotfiles_target_path = Some("/workspaces/dotfiles".to_string());
+
+        let cfg = build_dotfiles_config(&args).expect("repository set; config must be Some");
+        assert_eq!(cfg.repository.as_deref(), Some("octocat/dotfiles"));
+        assert_eq!(cfg.install_command.as_deref(), Some("./bootstrap.sh"));
+        assert_eq!(cfg.target_path.as_deref(), Some("/workspaces/dotfiles"));
+    }
+
+    #[test]
+    fn build_dotfiles_config_leaves_defaults_to_lifecycle_helper() {
+        // When only --dotfiles-repository is set, target_path and
+        // install_command must stay None so the lifecycle helper computes
+        // its standard defaults (target = ~/dotfiles, install auto-detected).
+        let mut args = make_args("abc");
+        args.dotfiles_repository = Some("https://github.com/octocat/dotfiles.git".to_string());
+
+        let cfg = build_dotfiles_config(&args).unwrap();
+        assert!(cfg.target_path.is_none());
+        assert!(cfg.install_command.is_none());
+        assert!(cfg.is_configured());
     }
 
     #[test]
