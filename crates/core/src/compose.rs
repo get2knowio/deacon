@@ -1023,7 +1023,7 @@ impl ComposeManager {
     /// # use deacon_core::compose::{ComposeManager, ComposeProject};
     /// # use indexmap::IndexMap;
     /// # use std::path::PathBuf;
-    /// # fn example() -> anyhow::Result<()> {
+    /// # async fn example() -> anyhow::Result<()> {
     /// let manager = ComposeManager::new();
     /// let project = ComposeProject {
     ///     name: "my-project".to_string(),
@@ -1037,9 +1037,10 @@ impl ComposeManager {
     ///     additional_env: IndexMap::new(),
     ///     external_volumes: Vec::new(),
     ///     override_command: Some(false),
+    ///     service_image_override: None,
     /// };
     ///
-    /// let output = manager.build_service(&project, "web")?;
+    /// let output = manager.build_service(&project, "web").await?;
     /// println!("Build output: {}", output);
     /// # Ok(())
     /// # }
@@ -1086,7 +1087,7 @@ impl ComposeManager {
     /// # use deacon_core::compose::{ComposeManager, ComposeProject};
     /// # use indexmap::IndexMap;
     /// # use std::path::PathBuf;
-    /// # fn example() -> anyhow::Result<()> {
+    /// # async fn example() -> anyhow::Result<()> {
     /// let manager = ComposeManager::new();
     /// let project = ComposeProject {
     ///     name: "my-project".to_string(),
@@ -1100,9 +1101,10 @@ impl ComposeManager {
     ///     additional_env: IndexMap::new(),
     ///     external_volumes: Vec::new(),
     ///     override_command: Some(false),
+    ///     service_image_override: None,
     /// };
     ///
-    /// if manager.validate_service_exists(&project, "web")? {
+    /// if manager.validate_service_exists(&project, "web").await? {
     ///     println!("Service 'web' exists in the project");
     /// }
     /// # Ok(())
