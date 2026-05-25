@@ -275,7 +275,7 @@ jobs:
           $archive = "deacon-$env:VERSION-${{ matrix.target }}.zip"
           gh release upload "$env:VERSION" "$archive" "${archive}.sha256" "sbom-$env:VERSION-${{ matrix.target }}.spdx.json" --clobber
       - name: Upload checksum artifact (for aggregation)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: checksum-${{ matrix.target }}
           path: |
