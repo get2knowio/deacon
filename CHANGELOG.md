@@ -47,6 +47,30 @@ The 1.0 release is being assembled across a series of PRs tracked in
   files at `{container_system_data_folder}/.patchEtcEnvironmentMarker` and
   `.patchEtcProfileMarker` (default `/var/devcontainer/`). Best-effort:
   failures emit a WARN and proceed (spec §9).
+- **`upgrade` subcommand** (`deacon upgrade`): regenerates
+  `devcontainer-lock.json` from the currently resolved Feature set per
+  [`docs/subcommand-specs/upgrade/SPEC.md`](docs/subcommand-specs/upgrade/SPEC.md).
+  Resolves every Feature against the OCI registry, builds a fresh
+  `Lockfile`, and either writes it via `write_lockfile(force_init = true)`
+  or prints the canonical JSON to stdout with `--dry-run`. Flags:
+  `--dry-run`, `--docker-path`, `--docker-compose-path`. Hidden Dependabot
+  flags `-f/--feature` + `-v/--target-version` rewrite the matching feature
+  key in `devcontainer.json` in place (text-level surgical edit preserving
+  comments/whitespace) before the regenerate phase. Argument validation
+  mirrors upstream exactly (`"The '--target-version' and '--feature' flag
+  must be used together."`, `"Invalid version 'X'.  Must be in the form
+  of 'x', 'x.y', or 'x.y.z'"`).
+- **Features-during-`build`** for Dockerfile-based configs: `deacon build`
+  no longer fails fast when features are declared. After the user's
+  `docker build`, a second BuildKit pass layers features on top of the
+  resulting image (reuses `up`'s `build_image_with_features` helper) and
+  writes the lockfile next to `devcontainer.json` via
+  `write_lockfile(force_init = true)`. Read-only workspaces (EROFS/EACCES)
+  downgrade to a WARN. Compose and image-reference builds still fail fast
+  with features — their integration patterns differ enough to warrant
+  separate follow-ups. Cache invalidation: when features are present the
+  cache check is skipped (the current `config_hash` does not yet fold in
+  feature digests).
 
 ### Changed
 - **Spec parity:** `devcontainer.metadata` image label is now always emitted as
