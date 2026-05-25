@@ -510,6 +510,84 @@ pub enum Commands {
         command: TemplateCommands,
     },
 
+    /// Regenerate (or refresh) the devcontainer lockfile from the currently
+    /// resolved Feature set. Use `--dry-run` to print the lockfile JSON to
+    /// stdout instead of writing to disk.
+    ///
+    /// See `docs/subcommand-specs/upgrade/SPEC.md` for the authoritative behavior.
+    #[cfg(feature = "full")]
+    Upgrade {
+        /// Print the generated lockfile JSON to stdout instead of writing it
+        /// to disk. Spec §2.
+        #[arg(long)]
+        dry_run: bool,
+        /// Docker CLI path. Default `docker`. Spec §2 surface parity only.
+        #[arg(long, default_value = "docker")]
+        docker_path: String,
+        /// Docker Compose CLI path. Default `docker-compose`. Spec §2 surface parity only.
+        #[arg(long, default_value = "docker-compose")]
+        docker_compose_path: String,
+        /// HIDDEN: pin the version of a specific Feature in `devcontainer.json`
+        /// before regenerating the lockfile. Used by Dependabot.
+        /// Must be used with `--target-version`.
+        #[arg(long, short = 'f', hide = true)]
+        feature: Option<String>,
+        /// HIDDEN: target version for `--feature`. Must match
+        /// `^\d+(\.\d+(\.\d+)?)?$`.
+        #[arg(long, short = 'v', hide = true)]
+        target_version: Option<String>,
+    },
+
+    /// Convert an already-running container into a DevContainer by applying
+    /// configuration + image metadata, executing lifecycle hooks, and emitting
+    /// a JSON snapshot of the resulting configuration.
+    ///
+    /// See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
+    #[cfg(feature = "full")]
+    SetUp {
+        /// Target container ID (required). The container must already exist.
+        #[arg(long)]
+        container_id: String,
+        /// Optional path to a devcontainer.json to layer on top of the
+        /// container's embedded image metadata.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Skip all lifecycle hooks (onCreate, updateContent, postCreate,
+        /// postStart, postAttach) and dotfiles installation.
+        #[arg(long)]
+        skip_post_create: bool,
+        /// Stop after the configured `waitFor` hook (default `updateContent`).
+        #[arg(long)]
+        skip_non_blocking_commands: bool,
+        /// Extra remote env to inject when running hooks (repeatable).
+        #[arg(long = "remote-env", action = clap::ArgAction::Append)]
+        remote_env: Vec<String>,
+        /// Dotfiles git repository URL or `owner/repo` shorthand.
+        #[arg(long)]
+        dotfiles_repository: Option<String>,
+        /// Custom dotfiles install command. When omitted, the installer
+        /// auto-detects `install.sh` / `bootstrap` / `setup` / `script/*`.
+        #[arg(long)]
+        dotfiles_install_command: Option<String>,
+        /// Target path inside the container for the dotfiles clone. Defaults
+        /// to `~/dotfiles` (`/root/dotfiles` when running as root).
+        #[arg(long)]
+        dotfiles_target_path: Option<String>,
+        /// Include the (substituted) configuration in the JSON result.
+        #[arg(long)]
+        include_configuration: bool,
+        /// Include the (substituted) merged configuration in the JSON result.
+        #[arg(long)]
+        include_merged_configuration: bool,
+        /// Inside-container user data root (default `~/.devcontainer`).
+        #[arg(long)]
+        container_data_folder: Option<PathBuf>,
+        /// Inside-container system data root for root-owned marker files
+        /// (default `/var/devcontainer`). Spec §6.
+        #[arg(long)]
+        container_system_data_folder: Option<PathBuf>,
+    },
+
     /// Run user-defined lifecycle commands
     #[cfg(feature = "full")]
     #[allow(clippy::enum_variant_names)]
@@ -537,41 +615,7 @@ pub enum Commands {
         id_label: Vec<String>,
     },
 
-    /// Convert an already-running container into a DevContainer by applying
-    /// configuration + image metadata, executing lifecycle hooks, and emitting
-    /// a JSON snapshot of the resulting configuration.
-    ///
-    /// See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
-    #[cfg(feature = "full")]
-    SetUp {
-        /// Target container ID (required). The container must already exist.
-        #[arg(long)]
-        container_id: String,
-        /// Optional path to a devcontainer.json to layer on top of the
-        /// container's embedded image metadata.
-        #[arg(long)]
-        config: Option<PathBuf>,
-        /// Skip all lifecycle hooks (onCreate, updateContent, postCreate,
-        /// postStart, postAttach) and dotfiles installation.
-        #[arg(long)]
-        skip_post_create: bool,
-        /// Stop after the configured `waitFor` hook (default `updateContent`).
-        #[arg(long)]
-        skip_non_blocking_commands: bool,
-        /// Extra remote env to inject when running hooks (repeatable).
-        #[arg(long = "remote-env", action = clap::ArgAction::Append)]
-        remote_env: Vec<String>,
-        /// Include the (substituted) configuration in the JSON result.
-        #[arg(long)]
-        include_configuration: bool,
-        /// Include the (substituted) merged configuration in the JSON result.
-        #[arg(long)]
-        include_merged_configuration: bool,
-        /// Inside-container user data root (default `~/.devcontainer`).
-        #[arg(long)]
-        container_data_folder: Option<PathBuf>,
-    },
-
+    // PR-6a SetUp variant moved earlier in this file with PR-6b dotfiles flags.
     /// Stop and optionally remove development container or compose project
     Down {
         /// Remove containers after stopping them
@@ -1405,6 +1449,28 @@ impl Cli {
                 execute_templates(args).await
             }
             #[cfg(feature = "full")]
+            Some(Commands::Upgrade {
+                dry_run,
+                docker_path,
+                docker_compose_path,
+                feature,
+                target_version,
+            }) => {
+                use crate::commands::upgrade::{execute_upgrade, UpgradeArgs};
+
+                let args = UpgradeArgs {
+                    workspace_folder: self.workspace_folder,
+                    config_path: self.config,
+                    docker_path,
+                    docker_compose_path,
+                    dry_run,
+                    feature,
+                    target_version,
+                };
+
+                execute_upgrade(args).await
+            }
+            #[cfg(feature = "full")]
             Some(Commands::RunUserCommands {
                 skip_post_create,
                 skip_post_attach,
@@ -1444,9 +1510,13 @@ impl Cli {
                 skip_post_create,
                 skip_non_blocking_commands,
                 remote_env,
+                dotfiles_repository,
+                dotfiles_install_command,
+                dotfiles_target_path,
                 include_configuration,
                 include_merged_configuration,
                 container_data_folder,
+                container_system_data_folder,
             }) => {
                 use crate::commands::set_up::{execute_set_up, SetUpArgs};
 
@@ -1458,10 +1528,14 @@ impl Cli {
                     skip_post_create,
                     skip_non_blocking_commands,
                     remote_env,
+                    dotfiles_repository,
+                    dotfiles_install_command,
+                    dotfiles_target_path,
                     include_configuration,
                     include_merged_configuration,
                     container_data_folder: container_data_folder
                         .or_else(|| self.container_data_folder.clone()),
+                    container_system_data_folder,
                     docker_path: self.docker_path.clone(),
                     progress_tracker: progress_tracker.clone(),
                 };

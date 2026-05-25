@@ -6,25 +6,28 @@
 //!
 //! See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
 //!
-//! ## PR-6a scope (MVP)
-//!
-//! This module implements the **core value** of set-up:
+//! ## Scope (PR-6a + PR-6b + PR-6c)
 //!
 //! - `--container-id` resolution + inspect validation
 //! - Optional `--config` load via the shared `ConfigLoader` (extends-aware)
 //! - Image-metadata extraction from the container's `devcontainer.metadata`
 //!   label and merge with the parsed config
 //! - Variable substitution (config + merged config)
+//! - **`/etc/environment` + `/etc/profile` root patches** (PR-6c) — guarded
+//!   by markers under `--container-system-data-folder` (default
+//!   `/var/devcontainer/`). Best-effort: a non-zero exit from the
+//!   patch shell emits a WARN and proceeds (spec §9 — system-level patches
+//!   "do not abort set-up unless critical")
 //! - Lifecycle hook execution (`onCreate` → `updateContent` → `postCreate` →
 //!   `postStart` → `postAttach`) via the shared `ContainerLifecycle` helper,
 //!   gated by `--skip-post-create` and `--skip-non-blocking-commands`
+//! - **Dotfiles installer** (`--dotfiles-repository` / `--dotfiles-install-command`
+//!   / `--dotfiles-target-path`) via `ContainerLifecycle`'s built-in clone +
+//!   auto-detect installer + target-path marker (PR-6b)
 //! - JSON output on stdout: `{outcome, configuration?, mergedConfiguration?}`
 //!
-//! ## Deferred to PR-6b
+//! ## Deferred (post-PR-6c)
 //!
-//! - `/etc/environment` + `/etc/profile` root-side patches with system markers
-//!   under `/var/devcontainer/`
-//! - Dotfiles installer with target-path marker
 //! - A second substitution pass against the live container environment
 //!   (`${containerEnv:VAR}`) — current pass uses only the configured
 //!   `container_env`, not the live `docker exec` env probe
@@ -33,22 +36,19 @@ use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
     execute_container_lifecycle_with_progress_callback, AggregatedLifecycleCommand,
-    ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
+    ContainerLifecycleCommands, ContainerLifecycleConfig, DotfilesConfig, LifecycleCommandList,
     LifecycleCommandSource, LifecycleCommandValue,
 };
-use deacon_core::docker::{CliDocker, ContainerInfo, Docker};
+use deacon_core::docker::{CliDocker, ContainerInfo, Docker, ExecConfig};
 use deacon_core::variable::SubstitutionContext;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
 
-/// Arguments for the `set-up` command.
-///
-/// Mirrors the spec's CLI surface (`docs/subcommand-specs/set-up/SPEC.md` §2)
-/// minus a handful of flags deferred to PR-6b:
-/// - `--dotfiles-*` (dotfiles installer)
-/// - `--container-system-data-folder` (only the `/etc` patch path consumes it)
+/// Arguments for the `set-up` command. Mirrors the spec's CLI surface
+/// (`docs/subcommand-specs/set-up/SPEC.md` §2).
 #[derive(Debug, Clone)]
 pub struct SetUpArgs {
     /// Required: container id of the already-running container to set up.
@@ -65,6 +65,17 @@ pub struct SetUpArgs {
     /// Extra remote-env entries to inject when running hooks
     /// (CLI `--remote-env name=value`, repeatable).
     pub remote_env: Vec<String>,
+    /// Dotfiles git repository URL or `owner/repo` shorthand.
+    /// Spec §2 (`--dotfiles-repository`).
+    pub dotfiles_repository: Option<String>,
+    /// Custom dotfiles install command. When `None`, the lifecycle helper
+    /// auto-detects `install.sh` / `bootstrap` / `setup` / `script/*`.
+    /// Spec §2 (`--dotfiles-install-command`).
+    pub dotfiles_install_command: Option<String>,
+    /// Override for the dotfiles clone target. Defaults are computed by the
+    /// lifecycle helper based on the remote user (`~/dotfiles`).
+    /// Spec §2 (`--dotfiles-target-path`).
+    pub dotfiles_target_path: Option<String>,
     /// Include the (substituted) configuration in the JSON result.
     pub include_configuration: bool,
     /// Include the (substituted) merged configuration in the JSON result.
@@ -73,6 +84,10 @@ pub struct SetUpArgs {
     /// for marker-file storage, currently only forwarded to the lifecycle
     /// helper as `cache_folder`.
     pub container_data_folder: Option<PathBuf>,
+    /// Inside-container system data root for root-owned marker files; default
+    /// `/var/devcontainer`. Spec §6 — `.patchEtcEnvironmentMarker` and
+    /// `.patchEtcProfileMarker` live here.
+    pub container_system_data_folder: Option<PathBuf>,
     /// Docker CLI path; defaults to `"docker"`. Currently plumbed for shape
     /// parity with `run-user-commands`; `CliDocker::new()` uses the binary
     /// resolution baked into the runtime layer.
@@ -159,7 +174,20 @@ pub async fn execute_set_up(args: SetUpArgs) -> Result<()> {
         effective_config.apply_variable_substitution(&substitution_context);
     let (substituted_merged, _) = merged_config.apply_variable_substitution(&substitution_context);
 
-    // Phase 7: Lifecycle hook execution. Skipped entirely when
+    // Phase 7: System patches (spec §5 phase 3a). Best-effort per spec §9
+    // — failure to write either /etc patch logs a WARN but does NOT abort
+    // set-up. The shell scripts are guarded by per-file markers under
+    // `--container-system-data-folder` (default `/var/devcontainer`) so
+    // repeated set-up runs against the same container are no-ops.
+    //
+    // Skipped when --skip-post-create is set, mirroring upstream: post-create
+    // is the conceptual umbrella for "user-customization work", which
+    // includes the env patches.
+    if !args.skip_post_create {
+        apply_etc_patches(&args, &docker, &container, &substituted_merged).await;
+    }
+
+    // Phase 8: Lifecycle hook execution. Skipped entirely when
     // `--skip-post-create` is set (spec §2: "Skip all lifecycle hooks").
     if !args.skip_post_create {
         execute_lifecycle_hooks(
@@ -170,7 +198,7 @@ pub async fn execute_set_up(args: SetUpArgs) -> Result<()> {
         )
         .await?;
     } else {
-        info!("--skip-post-create set; skipping all lifecycle hooks and dotfiles");
+        info!("--skip-post-create set; skipping /etc patches, all lifecycle hooks, and dotfiles");
     }
 
     // Phase 8: Emit JSON result on stdout (spec §10).
@@ -355,8 +383,7 @@ async fn execute_lifecycle_hooks(
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::LoginShell,
         cache_folder: args.container_data_folder.clone(),
         force_pty: false,
-        // PR-6b will wire dotfiles here.
-        dotfiles: None,
+        dotfiles: build_dotfiles_config(args),
         is_prebuild: false,
     };
 
@@ -436,6 +463,218 @@ async fn execute_lifecycle_hooks(
     Ok(())
 }
 
+/// Default location for root-owned marker files inside the container.
+/// Matches the upstream `devcontainers/cli` convention and the spec's §6
+/// default for `--container-system-data-folder`.
+const DEFAULT_CONTAINER_SYSTEM_DATA_FOLDER: &str = "/var/devcontainer";
+
+/// Delimiter marking the start of deacon's appended block in `/etc/*` files.
+/// MUST appear on its own line so re-running set-up can detect it cheaply.
+const ETC_BLOCK_BEGIN: &str = "# >>> deacon set-up >>>";
+/// Delimiter marking the end of deacon's appended block.
+const ETC_BLOCK_END: &str = "# <<< deacon set-up <<<";
+
+/// Apply the spec-§5 phase 3a system patches against the live container.
+///
+/// Both patches are guarded by marker files under
+/// `--container-system-data-folder` (default `/var/devcontainer`); a second
+/// invocation against the same container is a no-op. Per spec §9 the patches
+/// are best-effort — any failure (no root, read-only `/etc`, etc.) emits a
+/// WARN and proceeds so that set-up still runs lifecycle hooks against
+/// containers we can't fully personalize.
+async fn apply_etc_patches<D: Docker>(
+    args: &SetUpArgs,
+    docker: &D,
+    container: &ContainerInfo,
+    merged_config: &DevContainerConfig,
+) {
+    let env_pairs = collect_env_pairs(args, merged_config);
+    let system_data_folder = args
+        .container_system_data_folder
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CONTAINER_SYSTEM_DATA_FOLDER));
+    let system_data_folder_str = system_data_folder.to_string_lossy().to_string();
+
+    let environment_script = build_etc_environment_patch_script(
+        &env_pairs,
+        &format!("{}/.patchEtcEnvironmentMarker", system_data_folder_str),
+        &system_data_folder_str,
+    );
+    if let Err(err) = run_root_shell(docker, &container.id, &environment_script).await {
+        warn!(
+            container_id = %container.id,
+            error = %err,
+            "Best-effort patch of /etc/environment failed; continuing without it"
+        );
+    }
+
+    let profile_script = build_etc_profile_patch_script(
+        &format!("{}/.patchEtcProfileMarker", system_data_folder_str),
+        &system_data_folder_str,
+    );
+    if let Err(err) = run_root_shell(docker, &container.id, &profile_script).await {
+        warn!(
+            container_id = %container.id,
+            error = %err,
+            "Best-effort patch of /etc/profile failed; continuing without it"
+        );
+    }
+}
+
+/// Collect the env pairs that should be appended to `/etc/environment`.
+///
+/// Merges (in this order):
+/// 1. The merged config's `containerEnv` map.
+/// 2. The merged config's `remoteEnv` map (where the value is `Some`).
+/// 3. The CLI `--remote-env` overlays (CLI wins).
+///
+/// Returned as a vector sorted by key so the appended block is deterministic
+/// across runs — important for the marker-driven idempotency check.
+fn collect_env_pairs(
+    args: &SetUpArgs,
+    merged_config: &DevContainerConfig,
+) -> Vec<(String, String)> {
+    let mut env: HashMap<String, String> = HashMap::new();
+    for (k, v) in &merged_config.container_env {
+        env.insert(k.clone(), v.clone());
+    }
+    for (k, v) in &merged_config.remote_env {
+        if let Some(value) = v {
+            env.insert(k.clone(), value.clone());
+        }
+    }
+    if let Ok(cli_pairs) = parse_remote_env(&args.remote_env) {
+        for (k, v) in cli_pairs {
+            env.insert(k, v);
+        }
+    }
+    let mut pairs: Vec<(String, String)> = env.into_iter().collect();
+    pairs.sort();
+    pairs
+}
+
+/// Build the shell script that patches `/etc/environment`.
+///
+/// The script is idempotent: it short-circuits when the marker file already
+/// exists. When it runs it writes a delimited block of `KEY="VALUE"` lines,
+/// preceded by the literal lines `ETC_BLOCK_BEGIN` and followed by
+/// `ETC_BLOCK_END`, then touches the marker file. Empty env-pair lists
+/// result in a no-op (no block written, no marker touched).
+fn build_etc_environment_patch_script(
+    env_pairs: &[(String, String)],
+    marker_path: &str,
+    system_data_folder: &str,
+) -> String {
+    if env_pairs.is_empty() {
+        // Nothing to patch — skip cleanly so an empty config doesn't even
+        // touch the marker. Re-running with a populated config will still
+        // perform the patch on the next invocation.
+        return "exit 0".to_string();
+    }
+
+    let mut lines = String::new();
+    lines.push_str(ETC_BLOCK_BEGIN);
+    lines.push('\n');
+    for (k, v) in env_pairs {
+        // Escape backslash and double-quote so the value parses as a
+        // standard `KEY="VALUE"` line that `/etc/environment` consumers
+        // (PAM, systemd-environd) understand.
+        let escaped = v.replace('\\', r"\\").replace('"', r#"\""#);
+        lines.push_str(&format!("{}=\"{}\"\n", k, escaped));
+    }
+    lines.push_str(ETC_BLOCK_END);
+    lines.push('\n');
+
+    // The outer shell wrapper:
+    // - Bails out if the marker is present (idempotency).
+    // - Creates the system data folder so the touch on the marker succeeds
+    //   on fresh containers that don't ship with it.
+    // - Uses a heredoc to append the block atomically — no intermediate
+    //   temp file required.
+    format!(
+        "#!/bin/sh\nset -e\nif [ -f '{marker}' ]; then exit 0; fi\nmkdir -p '{sysdir}'\ncat >> /etc/environment <<'DEACON_ETC_ENV_EOF'\n{lines}DEACON_ETC_ENV_EOF\ntouch '{marker}'\n",
+        marker = marker_path,
+        sysdir = system_data_folder,
+        lines = lines,
+    )
+}
+
+/// Build the shell script that patches `/etc/profile`.
+///
+/// Appends a one-time block that re-exports the PATH from
+/// `/etc/environment` so login shells inherit any PATH segments that
+/// `/etc/environment` adds. The marker guards against repeated execution.
+fn build_etc_profile_patch_script(marker_path: &str, system_data_folder: &str) -> String {
+    let block = format!(
+        "{begin}\n# Re-export PATH from /etc/environment so login shells inherit deacon-managed PATH segments.\nif [ -f /etc/environment ]; then\n  while IFS='=' read -r key value; do\n    case \"$key\" in\n      PATH) export PATH=\"$(printf '%s' \"$value\" | sed -e 's/^\"//' -e 's/\"$//')\" ;;\n    esac\n  done < /etc/environment\nfi\n{end}\n",
+        begin = ETC_BLOCK_BEGIN,
+        end = ETC_BLOCK_END,
+    );
+
+    format!(
+        "#!/bin/sh\nset -e\nif [ -f '{marker}' ]; then exit 0; fi\nmkdir -p '{sysdir}'\ncat >> /etc/profile <<'DEACON_ETC_PROFILE_EOF'\n{block}DEACON_ETC_PROFILE_EOF\ntouch '{marker}'\n",
+        marker = marker_path,
+        sysdir = system_data_folder,
+        block = block,
+    )
+}
+
+/// Run a script in the container as root via `sh -c`. Returns an error when
+/// the exec command itself fails OR when the script exits non-zero — the
+/// caller decides whether that's fatal or best-effort.
+async fn run_root_shell<D: Docker>(docker: &D, container_id: &str, script: &str) -> Result<()> {
+    let exec_config = ExecConfig {
+        user: Some("root".to_string()),
+        working_dir: None,
+        env: HashMap::new(),
+        tty: false,
+        interactive: false,
+        detach: false,
+        // Patches are noisy on first run (mkdir, touch, cat); suppress stdout
+        // so set-up's JSON output stays clean. The lifecycle helper handles
+        // its own streaming separately.
+        silent: true,
+        terminal_size: None,
+    };
+    let result = docker
+        .exec(
+            container_id,
+            &["sh".to_string(), "-c".to_string(), script.to_string()],
+            exec_config,
+        )
+        .await
+        .with_context(|| format!("docker exec failed against container '{}'", container_id))?;
+
+    if !result.success {
+        return Err(anyhow::anyhow!(
+            "Patch script exited {} (stderr: {})",
+            result.exit_code,
+            result.stderr.trim()
+        ));
+    }
+    Ok(())
+}
+
+/// Build a `DotfilesConfig` from set-up CLI args.
+///
+/// Returns `None` (which short-circuits the lifecycle helper's dotfiles step)
+/// when no repository is supplied — set-up should never clone without an
+/// explicit user opt-in. `target_path` and `install_command` are forwarded
+/// as-is; the lifecycle helper computes sensible defaults when they're `None`.
+///
+/// Per spec §6, idempotency is enforced by a marker file at the target path
+/// (handled inside `container_lifecycle::execute_dotfiles_in_container`); we
+/// do not need to track that here.
+fn build_dotfiles_config(args: &SetUpArgs) -> Option<DotfilesConfig> {
+    args.dotfiles_repository
+        .as_ref()
+        .map(|repo| DotfilesConfig {
+            repository: Some(repo.clone()),
+            target_path: args.dotfiles_target_path.clone(),
+            install_command: args.dotfiles_install_command.clone(),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,9 +709,13 @@ mod tests {
             skip_post_create: false,
             skip_non_blocking_commands: false,
             remote_env: vec![],
+            dotfiles_repository: None,
+            dotfiles_install_command: None,
+            dotfiles_target_path: None,
             include_configuration: false,
             include_merged_configuration: false,
             container_data_folder: None,
+            container_system_data_folder: None,
             docker_path: "docker".to_string(),
             progress_tracker: empty_progress_tracker(),
         }
@@ -618,6 +861,196 @@ mod tests {
         assert!(args.remote_env.is_empty());
     }
 
+    // =========================================================================
+    // /etc patch builders (PR-6c)
+    // =========================================================================
+
+    #[test]
+    fn build_etc_environment_patch_returns_noop_when_env_empty() {
+        // Empty env → no block to write. Returning `exit 0` keeps the
+        // exec a no-op without touching the marker, so a later run with a
+        // populated env still performs the patch.
+        let script = build_etc_environment_patch_script(
+            &[],
+            "/var/devcontainer/.patchEtcEnvironmentMarker",
+            "/var/devcontainer",
+        );
+        assert_eq!(script, "exit 0");
+    }
+
+    #[test]
+    fn build_etc_environment_patch_short_circuits_when_marker_present() {
+        // The script's outer `if -f marker` guard is the idempotency anchor
+        // — without it, re-running set-up would duplicate the env block.
+        let env = vec![("FOO".to_string(), "bar".to_string())];
+        let script = build_etc_environment_patch_script(
+            &env,
+            "/var/devcontainer/.patchEtcEnvironmentMarker",
+            "/var/devcontainer",
+        );
+        assert!(
+            script
+                .contains("if [ -f '/var/devcontainer/.patchEtcEnvironmentMarker' ]; then exit 0"),
+            "expected marker guard in script, got: {}",
+            script
+        );
+    }
+
+    #[test]
+    fn build_etc_environment_patch_writes_sorted_env_block() {
+        // Sorted-by-key output is what makes the block byte-stable across
+        // runs — a prerequisite for any future "did we already patch this?"
+        // content check. The caller passes a pre-sorted slice; we just
+        // verify the script preserves order.
+        let env = vec![
+            ("ALPHA".to_string(), "1".to_string()),
+            ("BETA".to_string(), "2".to_string()),
+        ];
+        let script = build_etc_environment_patch_script(
+            &env,
+            "/var/devcontainer/.patchEtcEnvironmentMarker",
+            "/var/devcontainer",
+        );
+        let alpha_pos = script.find("ALPHA=\"1\"").expect("ALPHA missing");
+        let beta_pos = script.find("BETA=\"2\"").expect("BETA missing");
+        assert!(alpha_pos < beta_pos, "env entries must appear in order");
+    }
+
+    #[test]
+    fn build_etc_environment_patch_wraps_block_in_delimiters() {
+        // Future tooling needs to find/replace deacon's block without
+        // touching user-managed lines; the delimiters are the seam.
+        let env = vec![("X".to_string(), "y".to_string())];
+        let script = build_etc_environment_patch_script(
+            &env,
+            "/var/devcontainer/.patchEtcEnvironmentMarker",
+            "/var/devcontainer",
+        );
+        assert!(script.contains(ETC_BLOCK_BEGIN));
+        assert!(script.contains(ETC_BLOCK_END));
+    }
+
+    #[test]
+    fn build_etc_environment_patch_escapes_special_chars_in_values() {
+        // `/etc/environment` is a PAM-style `KEY="VALUE"` file; embedded
+        // double-quotes and backslashes break the parser when not escaped.
+        let env = vec![(
+            "MIX".to_string(),
+            r#"quoted "literal" with \backslash"#.to_string(),
+        )];
+        let script = build_etc_environment_patch_script(
+            &env,
+            "/var/devcontainer/.patchEtcEnvironmentMarker",
+            "/var/devcontainer",
+        );
+        // The literal `\` and `"` characters should be escaped in the
+        // emitted line. We check for the escaped form rather than asserting
+        // the exact post-substitution string so the test stays robust to
+        // formatter changes.
+        assert!(
+            script.contains(r#"MIX="quoted \"literal\" with \\backslash""#),
+            "expected escaped value in script, got: {}",
+            script
+        );
+    }
+
+    #[test]
+    fn build_etc_profile_patch_short_circuits_on_marker() {
+        let script = build_etc_profile_patch_script(
+            "/var/devcontainer/.patchEtcProfileMarker",
+            "/var/devcontainer",
+        );
+        assert!(
+            script.contains("if [ -f '/var/devcontainer/.patchEtcProfileMarker' ]; then exit 0")
+        );
+    }
+
+    #[test]
+    fn build_etc_profile_patch_reexports_path_from_environment() {
+        // The whole point of patching /etc/profile is to make login shells
+        // inherit `/etc/environment`'s PATH; if we don't re-export PATH, the
+        // patch is useless.
+        let script = build_etc_profile_patch_script(
+            "/var/devcontainer/.patchEtcProfileMarker",
+            "/var/devcontainer",
+        );
+        assert!(script.contains("export PATH="));
+        assert!(script.contains("/etc/environment"));
+    }
+
+    #[test]
+    fn build_etc_profile_patch_wraps_in_delimiters() {
+        let script = build_etc_profile_patch_script(
+            "/var/devcontainer/.patchEtcProfileMarker",
+            "/var/devcontainer",
+        );
+        assert!(script.contains(ETC_BLOCK_BEGIN));
+        assert!(script.contains(ETC_BLOCK_END));
+    }
+
+    #[test]
+    fn collect_env_pairs_merges_config_remote_and_cli() {
+        // Spec §3 + §5 expect set-up to overlay container_env, remote_env,
+        // and CLI --remote-env (CLI last so it wins). Verify all three
+        // sources surface, with CLI overriding any conflicting key.
+        let merged = DevContainerConfig {
+            container_env: {
+                let mut m = std::collections::HashMap::new();
+                m.insert("FROM_CONTAINER".to_string(), "c".to_string());
+                m.insert("OVERRIDDEN".to_string(), "from-config".to_string());
+                m
+            },
+            remote_env: {
+                let mut m = std::collections::HashMap::new();
+                m.insert("FROM_REMOTE".to_string(), Some("r".to_string()));
+                m.insert("DROPPED".to_string(), None); // None-valued keys are skipped
+                m
+            },
+            ..DevContainerConfig::default()
+        };
+        let mut args = make_args("abc");
+        args.remote_env = vec![
+            "FROM_CLI=cli".to_string(),
+            "OVERRIDDEN=from-cli".to_string(),
+        ];
+        let pairs = collect_env_pairs(&args, &merged);
+        let map: std::collections::HashMap<_, _> = pairs.iter().cloned().collect();
+
+        assert_eq!(map.get("FROM_CONTAINER").map(|s| s.as_str()), Some("c"));
+        assert_eq!(map.get("FROM_REMOTE").map(|s| s.as_str()), Some("r"));
+        assert_eq!(map.get("FROM_CLI").map(|s| s.as_str()), Some("cli"));
+        assert_eq!(
+            map.get("OVERRIDDEN").map(|s| s.as_str()),
+            Some("from-cli"),
+            "CLI --remote-env must win over config containerEnv on key conflicts"
+        );
+        assert!(
+            !map.contains_key("DROPPED"),
+            "remote_env entries with None values must be excluded"
+        );
+    }
+
+    #[test]
+    fn collect_env_pairs_returns_sorted_output() {
+        // Sorted output is what gives the appended block its byte-stable
+        // form; the order matters for any future "did we already patch this
+        // exact env?" check.
+        let merged = DevContainerConfig {
+            container_env: {
+                let mut m = std::collections::HashMap::new();
+                m.insert("ZED".to_string(), "z".to_string());
+                m.insert("ALPHA".to_string(), "a".to_string());
+                m.insert("MID".to_string(), "m".to_string());
+                m
+            },
+            ..DevContainerConfig::default()
+        };
+        let args = make_args("abc");
+        let pairs = collect_env_pairs(&args, &merged);
+        let keys: Vec<&str> = pairs.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, vec!["ALPHA", "MID", "ZED"]);
+    }
+
     #[test]
     fn success_result_serializes_outcome_field() {
         // Spec §10: stdout JSON must carry an `outcome` field.
@@ -632,6 +1065,43 @@ mod tests {
         // Optional fields are omitted when None.
         assert!(!json.contains("\"configuration\""));
         assert!(!json.contains("\"mergedConfiguration\""));
+    }
+
+    #[test]
+    fn build_dotfiles_config_returns_none_when_no_repository() {
+        // No --dotfiles-repository means no opt-in: the lifecycle helper
+        // must NOT clone anything, even if the other dotfiles flags are set.
+        let mut args = make_args("abc");
+        args.dotfiles_install_command = Some("./install.sh".to_string());
+        args.dotfiles_target_path = Some("/tmp/dotfiles".to_string());
+        assert!(build_dotfiles_config(&args).is_none());
+    }
+
+    #[test]
+    fn build_dotfiles_config_forwards_all_three_fields() {
+        let mut args = make_args("abc");
+        args.dotfiles_repository = Some("octocat/dotfiles".to_string());
+        args.dotfiles_install_command = Some("./bootstrap.sh".to_string());
+        args.dotfiles_target_path = Some("/workspaces/dotfiles".to_string());
+
+        let cfg = build_dotfiles_config(&args).expect("repository set; config must be Some");
+        assert_eq!(cfg.repository.as_deref(), Some("octocat/dotfiles"));
+        assert_eq!(cfg.install_command.as_deref(), Some("./bootstrap.sh"));
+        assert_eq!(cfg.target_path.as_deref(), Some("/workspaces/dotfiles"));
+    }
+
+    #[test]
+    fn build_dotfiles_config_leaves_defaults_to_lifecycle_helper() {
+        // When only --dotfiles-repository is set, target_path and
+        // install_command must stay None so the lifecycle helper computes
+        // its standard defaults (target = ~/dotfiles, install auto-detected).
+        let mut args = make_args("abc");
+        args.dotfiles_repository = Some("https://github.com/octocat/dotfiles.git".to_string());
+
+        let cfg = build_dotfiles_config(&args).unwrap();
+        assert!(cfg.target_path.is_none());
+        assert!(cfg.install_command.is_none());
+        assert!(cfg.is_configured());
     }
 
     #[test]
