@@ -25,7 +25,7 @@ tar = "0.4"
 flate2 = "1"
 shell-words.workspace = true
 indicatif = "0.18"
-console = "0.15"
+console = "0.16"
 futures = "0.3"
 regex = "1.10"
 
