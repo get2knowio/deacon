@@ -408,7 +408,7 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
     );
 
     if let Some(container_info) = container_info {
-        // Container-based merge: extract devcontainer.metadata label
+        // Container-based merge: extract devcontainer.metadata label.
         let metadata_label = container_info.labels.get("devcontainer.metadata");
         let metadata_str = metadata_label.ok_or_else(|| {
             anyhow::anyhow!(
@@ -420,7 +420,10 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
 
         debug!("Found devcontainer.metadata label: {}", metadata_str);
 
-        // Parse the metadata JSON
+        // The label MAY be either:
+        // - A JSON array of partial config entries (spec form, devcontainers/cli#1199, v0.86.0)
+        // - A single JSON object (legacy form from older Deacon builds)
+        // Tolerate both.
         let metadata_value: serde_json::Value =
             serde_json::from_str(metadata_str).with_context(|| {
                 format!(
@@ -429,28 +432,34 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                 )
             })?;
 
-        // Convert to DevContainerConfig
-        let metadata_config: deacon_core::config::DevContainerConfig =
-            serde_json::from_value(metadata_value)
-                .with_context(|| {
-                    format!(
-                        "Failed to deserialize devcontainer.metadata into DevContainerConfig from container '{}'",
-                        container_info.id
-                    )
-                })?;
+        let entries: Vec<serde_json::Value> = match metadata_value {
+            serde_json::Value::Array(arr) => arr,
+            other => vec![other],
+        };
 
-        // Apply container substitution to the metadata
         let container_context = container_context.ok_or_else(|| {
             anyhow::anyhow!("Container context required for container-based merged configuration")
         })?;
-        let (substituted_metadata, _) =
-            metadata_config.apply_variable_substitution(container_context);
 
-        // Merge base config with substituted metadata
-        let merged = deacon_core::config::ConfigMerger::merge_configs(&[
-            base_config.clone(),
-            substituted_metadata,
-        ]);
+        // Deserialize each array entry as a partial DevContainerConfig, apply
+        // variable substitution, then merge in declaration order with the base
+        // config (later entries override earlier per spec merge semantics).
+        let mut chain: Vec<deacon_core::config::DevContainerConfig> =
+            Vec::with_capacity(1 + entries.len());
+        chain.push(base_config.clone());
+        for (idx, entry) in entries.into_iter().enumerate() {
+            let cfg: deacon_core::config::DevContainerConfig = serde_json::from_value(entry)
+                .with_context(|| {
+                    format!(
+                        "Failed to deserialize devcontainer.metadata entry [{}] from container '{}'",
+                        idx, container_info.id
+                    )
+                })?;
+            let (substituted, _) = cfg.apply_variable_substitution(container_context);
+            chain.push(substituted);
+        }
+
+        let merged = deacon_core::config::ConfigMerger::merge_configs(&chain);
 
         debug!("Container-based merged configuration computed successfully");
         Ok(serde_json::to_value(&merged)?)
