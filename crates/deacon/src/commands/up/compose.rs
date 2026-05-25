@@ -6,7 +6,9 @@
 //! - `handle_compose_shutdown` - Shutdown handling for compose
 
 use super::args::{MountType, NormalizedMount, UpArgs};
-use super::features_build::{build_image_with_features, FeatureBuildOutput};
+use super::features_build::{
+    build_image_with_features, build_image_with_features_from_dockerfile, FeatureBuildOutput,
+};
 use super::lifecycle::{execute_initialize_command, resolve_force_pty};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
@@ -247,10 +249,10 @@ pub(crate) async fn execute_compose_up(
         }
     }
 
-    // Bead 14a: when features are declared, install them by building a feature-
-    // extended image and rewriting the target service's `image:` via the existing
-    // injection override. Only the `image:` shape is supported today; `build:`
-    // services are explicitly deferred to bead 14b (Dockerfile parser).
+    // Bead 14a + 14b: when features are declared, install them by building a
+    // feature-extended image and rewriting the target service's `image:` via
+    // the existing injection override. Both the `image:` shape (14a) and the
+    // `build:` shape (14b — user-authored Dockerfile + context) are supported.
     // The returned FeatureBuildOutput is currently unused — combined feature env
     // is already pulled into the compose flow via the existing additional_env path.
     // Future work (per spec): thread resolved_features into merged_configuration.
@@ -521,21 +523,22 @@ pub(crate) async fn execute_compose_post_create(
     Ok(())
 }
 
-/// Bead 14a: install features into a compose-based devcontainer.
+/// Bead 14a + 14b: install features into a compose-based devcontainer.
 ///
 /// Workflow when `config.features` is non-empty:
 /// 1. Inspect the target service's shape via `docker compose config --format json`.
-/// 2. For `image:` services, synthesize a single-container config whose `image` is
-///    the resolved compose image and whose `features` is the original config's
-///    features; reuse `build_image_with_features` to produce a feature-extended
-///    image.
-/// 3. Set `project.service_image_override` so the existing injection override
-///    rewrites the target service's `image:` line to point at the extended tag.
-///
-/// `build:` services are intentionally NOT supported here — they require a
-/// Dockerfile parser to compute the final stage name (`ensureDockerfileHasFinalStageName`
-/// in the reference CLI). This is deferred to bead 14b. We fail fast with a clear
-/// message rather than silently ignoring features.
+/// 2. For `image:` services (bead 14a), synthesize a single-container config whose
+///    `image` is the resolved compose image and whose `features` is the original
+///    config's features; reuse `build_image_with_features` to produce a
+///    feature-extended image.
+/// 3. For `build:` services (bead 14b), resolve `dockerfile` and `context` paths
+///    relative to the compose file's directory (NOT the workspace), read the
+///    user's Dockerfile, rewrite its final `FROM` to carry a stable alias via
+///    `ensure_dockerfile_has_final_stage_name`, then build with that as the
+///    base via `build_image_with_features_from_dockerfile`.
+/// 4. In both cases, set `project.service_image_override` so the existing
+///    injection override rewrites the target service's `image:` line to point
+///    at the extended tag.
 #[instrument(skip(config, compose_manager, project, workspace_folder))]
 async fn install_features_for_compose(
     config: &DevContainerConfig,
@@ -569,19 +572,109 @@ async fn install_features_for_compose(
             )
         })?;
 
-    let base_image = match shape {
-        ServiceShape::Image(image) => image,
+    // Compose-flavored identity: produced image tag is namespaced by
+    // workspace+service so it does not collide with the single-container path.
+    let mut identity = ContainerIdentity::new(workspace_folder, config);
+    identity.workspace_hash = format!("{}-compose-{}", workspace_hash, project.service);
+
+    let output = match shape {
+        ServiceShape::Image(base_image) => {
+            info!(
+                service = %project.service,
+                base_image = %base_image,
+                "Building feature-extended image for compose service (image: shape)"
+            );
+
+            // Synthesize a single-container config so `build_image_with_features`
+            // can consume it: only `image`, `features`, and
+            // `override_feature_install_order` are read.
+            let mut synth_config = config.clone();
+            synth_config.image = Some(base_image.clone());
+
+            build_image_with_features(&synth_config, &identity, workspace_folder, None)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to build feature-extended image for compose service '{}'",
+                        project.service
+                    )
+                })?
+        }
         ServiceShape::Build {
-            dockerfile, target, ..
+            context,
+            dockerfile,
+            target,
         } => {
-            return Err(DeaconError::Runtime(format!(
-                "Features on compose `build:` services are not yet supported \
-                 (service='{}', dockerfile={:?}, target={:?}). Use a service with \
-                 `image:` instead, or pre-build the image and reference it. \
-                 (Tracking: bead 14b — Dockerfile stage-name parser)",
-                project.service, dockerfile, target
-            ))
-            .into());
+            // Compose semantics: `build.context` and `build.dockerfile` are
+            // resolved relative to the directory containing the compose file —
+            // NOT the workspace folder. When multiple compose files are stacked,
+            // we use the first one's directory (`docker compose` itself returns
+            // paths as if they were declared in the primary compose file).
+            let compose_dir = project
+                .compose_files
+                .first()
+                .and_then(|p| p.parent())
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| project.base_path.clone());
+
+            // Default context to `.` per compose schema.
+            let context_rel = context.as_deref().unwrap_or(".");
+            let context_path = resolve_compose_path(&compose_dir, context_rel);
+
+            // Default dockerfile to `Dockerfile` relative to the *context*, per
+            // compose semantics (NOT relative to the compose file directory).
+            let dockerfile_rel = dockerfile.as_deref().unwrap_or("Dockerfile");
+            let dockerfile_path = resolve_compose_path(&context_path, dockerfile_rel);
+
+            info!(
+                service = %project.service,
+                context = %context_path.display(),
+                dockerfile = %dockerfile_path.display(),
+                target = ?target,
+                "Building feature-extended image for compose service (build: shape)"
+            );
+
+            let dockerfile_content = tokio::fs::read_to_string(&dockerfile_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to read Dockerfile for compose service '{}' at {}",
+                        project.service,
+                        dockerfile_path.display()
+                    )
+                })?;
+
+            let (modified_dockerfile, final_stage) =
+                deacon_core::dockerfile_utils::ensure_dockerfile_has_final_stage_name(
+                    &dockerfile_content,
+                    "dev_containers_user_image",
+                )
+                .with_context(|| {
+                    format!(
+                        "Failed to parse Dockerfile for compose service '{}' at {}",
+                        project.service,
+                        dockerfile_path.display()
+                    )
+                })?;
+
+            build_image_with_features_from_dockerfile(
+                config,
+                &identity,
+                &modified_dockerfile,
+                &final_stage,
+                &context_path,
+                target.as_deref(),
+                None,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to build feature-extended image for compose service '{}' \
+                     using Dockerfile {}",
+                    project.service,
+                    dockerfile_path.display()
+                )
+            })?
         }
         ServiceShape::Neither => {
             return Err(DeaconError::Runtime(format!(
@@ -602,31 +695,6 @@ async fn install_features_for_compose(
 
     info!(
         service = %project.service,
-        base_image = %base_image,
-        "Building feature-extended image for compose service"
-    );
-
-    // Synthesize a single-container config that `build_image_with_features` can
-    // consume: it only reads `image`, `features`, and `override_feature_install_order`.
-    let mut synth_config = config.clone();
-    synth_config.image = Some(base_image.clone());
-
-    // Use a compose-flavored identity so the produced image tag is namespaced by
-    // workspace+service (avoids collisions with the single-container path).
-    let mut identity = ContainerIdentity::new(workspace_folder, &synth_config);
-    identity.workspace_hash = format!("{}-compose-{}", workspace_hash, project.service);
-
-    let output = build_image_with_features(&synth_config, &identity, workspace_folder, None)
-        .await
-        .with_context(|| {
-            format!(
-                "Failed to build feature-extended image for compose service '{}'",
-                project.service
-            )
-        })?;
-
-    info!(
-        service = %project.service,
         extended_image = %output.image_tag,
         feature_count = output.resolved_features.len(),
         "Feature-extended image ready; rewriting compose service image"
@@ -634,6 +702,19 @@ async fn install_features_for_compose(
 
     project.service_image_override = Some(output.image_tag.clone());
     Ok(Some(output))
+}
+
+/// Resolve a path expressed in a compose file relative to the compose file's
+/// directory (or its `context` for Dockerfile resolution). Absolute inputs are
+/// returned unchanged. Centralized here so the `build:` arm and any unit tests
+/// share the same compose-semantic resolution.
+fn resolve_compose_path(base: &Path, candidate: &str) -> std::path::PathBuf {
+    let p = std::path::Path::new(candidate);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        base.join(p)
+    }
 }
 
 /// Handle shutdown for compose configurations
@@ -669,4 +750,61 @@ pub(crate) async fn handle_compose_shutdown(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Bead 14b: confirms compose `build.context` and `build.dockerfile` paths
+    /// resolve relative to the compose file's directory, not the workspace.
+    /// This is the subtle compose semantic the issue called out for a focused
+    /// test: a workspace-relative resolution would have produced the wrong
+    /// path on stacked compose files in a subdirectory.
+    #[test]
+    fn resolve_compose_path_relative_joins_base() {
+        let base = std::path::Path::new("/repo/compose-dir");
+        let p = resolve_compose_path(base, "Dockerfile.dev");
+        assert_eq!(
+            p,
+            std::path::PathBuf::from("/repo/compose-dir/Dockerfile.dev")
+        );
+    }
+
+    #[test]
+    fn resolve_compose_path_dot_returns_base_itself() {
+        let base = std::path::Path::new("/repo/compose-dir");
+        let p = resolve_compose_path(base, ".");
+        // PathBuf::join with "." appends a dot component but compose treats it
+        // semantically as the base; this is fine for downstream `-f` and
+        // context arguments which accept either form. We assert the literal
+        // join result so any change to that contract is observable.
+        assert_eq!(p, std::path::PathBuf::from("/repo/compose-dir/."));
+    }
+
+    #[test]
+    fn resolve_compose_path_subdir_is_joined() {
+        let base = std::path::Path::new("/repo/compose-dir");
+        let p = resolve_compose_path(base, "build/Dockerfile");
+        assert_eq!(
+            p,
+            std::path::PathBuf::from("/repo/compose-dir/build/Dockerfile")
+        );
+    }
+
+    #[test]
+    fn resolve_compose_path_absolute_unchanged() {
+        let base = std::path::Path::new("/repo/compose-dir");
+        let p = resolve_compose_path(base, "/absolute/Dockerfile");
+        assert_eq!(p, std::path::PathBuf::from("/absolute/Dockerfile"));
+    }
+
+    #[test]
+    fn resolve_compose_path_parent_traversal_kept_relative() {
+        // Compose allows `../sibling` as a context; we preserve it verbatim and
+        // let the OS resolve it during `docker buildx build`.
+        let base = std::path::Path::new("/repo/compose-dir");
+        let p = resolve_compose_path(base, "../sibling");
+        assert_eq!(p, std::path::PathBuf::from("/repo/compose-dir/../sibling"));
+    }
 }

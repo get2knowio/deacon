@@ -111,7 +111,7 @@ test-group = 'docker-slow-shared'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 
 [[profile.default.overrides]]
@@ -120,6 +120,13 @@ test-group = 'docker-shared'
 
 [[profile.default.overrides]]
 filter = 'binary(=integration_up_force_tty_if_json)'
+test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+# Compose features (bead 14a/14b): pull an OCI feature, run BuildKit, and
+# bring up a compose project. Slow due to feature download + image build.
+[[profile.default.overrides]]
+filter = 'binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
@@ -137,7 +144,7 @@ priority = 100
 retries = 0
 slow-timeout = "30s"
 # Exclude: smoke, parity, Docker-dependent tests, testcontainers-based tests
-default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts))'
+default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build))'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -196,7 +203,7 @@ filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integ
 test-group = 'docker-slow-shared'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 
 [[profile.dev-fast.overrides]]
@@ -205,6 +212,11 @@ test-group = 'docker-shared'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=integration_up_force_tty_if_json)'
+test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
@@ -300,7 +312,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "5m", terminate-after = 1 }
 
 [[profile.docker.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 
 [[profile.docker.overrides]]
@@ -309,6 +321,11 @@ test-group = 'docker-shared'
 
 [[profile.docker.overrides]]
 filter = 'binary(=integration_up_force_tty_if_json)'
+test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.docker.overrides]]
+filter = 'binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
@@ -364,7 +381,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.full.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 
 [[profile.full.overrides]]
@@ -373,6 +390,11 @@ test-group = 'docker-shared'
 
 [[profile.full.overrides]]
 filter = 'binary(=integration_up_force_tty_if_json)'
+test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.full.overrides]]
+filter = 'binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
@@ -440,7 +462,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.ci.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 threads-required = 1
 
@@ -450,6 +472,11 @@ test-group = 'docker-shared'
 
 [[profile.ci.overrides]]
 filter = 'binary(=integration_up_force_tty_if_json)'
+test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+[[profile.ci.overrides]]
+filter = 'binary(=integration_compose_features_build)'
 test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
