@@ -22,7 +22,7 @@ mod args;
 mod compose;
 mod container;
 mod dotfiles;
-mod features_build;
+pub(crate) mod features_build;
 mod helpers;
 mod image_build;
 mod lifecycle;
