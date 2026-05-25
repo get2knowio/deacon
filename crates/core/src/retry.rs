@@ -163,8 +163,11 @@ where
     Fut: std::future::Future<Output = std::result::Result<T, E>>,
     E: std::fmt::Debug,
 {
-    let mut last_error = None;
-
+    // Iterate attempts 0..=max_attempts inclusive. On the LAST iteration's
+    // Err branch we return the error directly instead of stashing it for a
+    // post-loop unwrap — that removes the historical `expect("Should have at
+    // least one error")` panic site without changing externally observable
+    // behavior.
     for attempt in 0..=config.max_attempts {
         debug!("Retry attempt {} of {}", attempt, config.max_attempts);
 
@@ -184,8 +187,8 @@ where
                     return Err(error);
                 }
 
-                // Don't sleep after the last attempt
                 if attempt < config.max_attempts {
+                    // More attempts remaining — sleep with backoff then loop.
                     let delay = config.calculate_delay(attempt);
                     warn!(
                         "Retrying after transient error (attempt {}/{}): {:?}; next delay {:?}",
@@ -194,23 +197,32 @@ where
                         error,
                         delay
                     );
-                    last_error = Some(error);
                     tokio::time::sleep(delay).await;
                 } else {
-                    last_error = Some(error);
+                    // Last attempt — return the captured error directly.
+                    warn!(
+                        "All {} retry attempts exhausted, final error: {:?}",
+                        config.max_attempts + 1,
+                        error
+                    );
+                    return Err(error);
                 }
             }
         }
     }
 
-    // All attempts exhausted
-    let final_error = last_error.expect("Should have at least one error");
-    warn!(
-        "All {} retry attempts exhausted, final error: {:?}",
-        config.max_attempts + 1,
-        final_error
+    // Unreachable: `config.max_attempts: u32` so the range `0..=max_attempts`
+    // has at least one iteration (when max_attempts == 0). That iteration
+    // must return either via `Ok(result)` or the last-attempt `Err` branch
+    // above. The empty fallback below is defense-in-depth — it should be
+    // statically impossible to reach.
+    debug_assert!(
+        false,
+        "retry_async reached the loop fallthrough — should be unreachable"
     );
-    Err(final_error)
+    unreachable!(
+        "retry_async: 0..=max_attempts always runs at least once and either returns Ok or Err"
+    );
 }
 
 #[cfg(test)]

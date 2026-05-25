@@ -1533,10 +1533,21 @@ impl ConfigLoader {
                 Ok(DiscoveryResult::None(default_path))
             }
             1 => {
-                let path = named_configs
-                    .into_iter()
-                    .next()
-                    .expect("named_configs confirmed to have exactly 1 element by match arm");
+                // The match arm gate (`named_configs.len() == 1`) makes the
+                // `next()` a guaranteed `Some`, but we still pull it via a
+                // pattern match rather than `.expect(...)` so a future caller
+                // that builds the vec differently can't accidentally panic.
+                let mut iter = named_configs.into_iter();
+                let path = match iter.next() {
+                    Some(p) => p,
+                    None => {
+                        return Err(ConfigError::Validation {
+                            message: "internal: named_configs.len() was 1 but iterator was empty"
+                                .to_string(),
+                        }
+                        .into());
+                    }
+                };
                 debug!("Found single named config: {}", path.display());
                 Ok(DiscoveryResult::Single(path))
             }
