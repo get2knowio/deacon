@@ -13,6 +13,7 @@ pub mod container_lifecycle;
 pub mod docker;
 pub mod docker_retry;
 pub mod dockerfile_generator;
+pub mod dockerfile_utils;
 pub mod doctor;
 pub mod dotfiles;
 pub mod entrypoint;

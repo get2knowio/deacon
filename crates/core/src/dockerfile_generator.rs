@@ -94,6 +94,59 @@ impl DockerfileGenerator {
         Ok(dockerfile)
     }
 
+    /// Generate just the feature-install body (no `FROM` line, no `ARG` line)
+    /// targeting `target_stage`. Used by the compose `build:` flow where the
+    /// caller has already produced the upstream stages from a user-authored
+    /// Dockerfile and only needs the install layers appended.
+    ///
+    /// Emits a self-contained stage:
+    /// ```dockerfile
+    /// FROM <base_stage_name> AS <self.config.target_stage>
+    /// RUN mkdir -p /tmp/dev-container-features
+    /// # Level 0: ...
+    /// RUN --mount=type=bind,from=dev_containers_feature_content_source,... ./install.sh
+    /// ```
+    ///
+    /// Unlike [`generate`], this does NOT use an ARG-driven base image — the
+    /// stage name is written literally so BuildKit can resolve it against an
+    /// earlier stage in the same Dockerfile (ARG/build-arg substitution in
+    /// FROM only works when the ARG is declared in the global preamble, which
+    /// is not possible when we append to a user Dockerfile that has its own
+    /// FROM stages first).
+    #[instrument(skip(self, plan))]
+    pub fn generate_install_stage_from(
+        &self,
+        plan: &InstallationPlan,
+        base_stage_name: &str,
+    ) -> Result<String> {
+        let mut dockerfile = String::new();
+
+        dockerfile.push_str(&format!(
+            "FROM {} AS {}\n\n",
+            base_stage_name, self.config.target_stage
+        ));
+
+        dockerfile.push_str("RUN mkdir -p /tmp/dev-container-features\n\n");
+
+        for (level_idx, level) in plan.levels.iter().enumerate() {
+            dockerfile.push_str(&format!("# Level {}: Installing features\n", level_idx));
+
+            for feature_id in level {
+                let feature =
+                    plan.get_feature(feature_id)
+                        .ok_or_else(|| FeatureError::NotFound {
+                            path: format!("Feature {} in installation plan", feature_id),
+                        })?;
+
+                dockerfile.push_str(&self.generate_feature_install_command(feature, level_idx)?);
+            }
+
+            dockerfile.push('\n');
+        }
+
+        Ok(dockerfile)
+    }
+
     /// Generate the RUN command for installing a single feature
     fn generate_feature_install_command(
         &self,
@@ -333,6 +386,50 @@ mod tests {
         assert!(dockerfile.contains("RUN --mount=type=bind"));
         assert!(dockerfile.contains("VERSION=\"20\""));
         assert!(dockerfile.contains("./install.sh"));
+    }
+
+    /// Bead 14b: when extending a user-authored Dockerfile (compose `build:`
+    /// shape) the install stage must use a literal `FROM <stage>` — never the
+    /// ARG-driven `FROM ${...}` form — because global-ARG substitution in
+    /// FROM only works when the ARG is declared before any FROM, which is
+    /// impossible when we append after user stages.
+    #[test]
+    fn test_generate_install_stage_from_uses_literal_from_stage() {
+        let mut options = HashMap::new();
+        options.insert(
+            "version".to_string(),
+            OptionValue::String("latest".to_string()),
+        );
+        let feature = create_test_feature("hello", options);
+        let plan = InstallationPlan::new(vec![feature]);
+
+        let config = DockerfileConfig {
+            base_image: "unused-for-this-path".to_string(),
+            target_stage: "dev_containers_target_stage".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+        };
+        let generator = DockerfileGenerator::new(config);
+        let stage = generator
+            .generate_install_stage_from(&plan, "user_image")
+            .expect("generation should succeed");
+
+        // Literal FROM with the user's stage name, no ARG indirection.
+        assert!(
+            stage.contains("FROM user_image AS dev_containers_target_stage\n"),
+            "expected literal FROM line; got:\n{}",
+            stage
+        );
+        assert!(
+            !stage.contains("ARG _DEV_CONTAINERS_BASE_IMAGE"),
+            "install-stage variant must NOT emit the ARG indirection; got:\n{}",
+            stage
+        );
+        assert!(!stage.contains("${_DEV_CONTAINERS_BASE_IMAGE}"));
+
+        // The RUN-mount install line is still emitted.
+        assert!(stage.contains("RUN --mount=type=bind"));
+        assert!(stage.contains("./install.sh"));
+        assert!(stage.contains("VERSION=\"latest\""));
     }
 
     #[test]
