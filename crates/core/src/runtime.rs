@@ -10,6 +10,23 @@ use crate::docker::{
 };
 use crate::errors::{DeaconError, Result};
 use std::path::Path;
+use std::sync::Once;
+
+/// Emits the Podman experimental-status WARN at most once per process.
+static PODMAN_EXPERIMENTAL_WARN: Once = Once::new();
+
+/// Emit a one-time WARN when Podman is selected so users see the experimental
+/// status banner without spamming on every operation. Idempotent across calls.
+fn warn_podman_experimental_once() {
+    PODMAN_EXPERIMENTAL_WARN.call_once(|| {
+        tracing::warn!(
+            target: "deacon::runtime",
+            "Podman runtime is experimental in this release. Rootless-Podman parity \
+             items (label=disable, --userns=keep-id, --uidmap/--gidmap) and Podman \
+             test coverage are still required for full support, targeted for 1.1."
+        );
+    });
+}
 
 /// Container runtime abstraction that combines Docker and ContainerOps traits
 #[allow(async_fn_in_trait)]
@@ -64,20 +81,25 @@ pub struct RuntimeFactory;
 impl RuntimeFactory {
     /// Detect runtime from CLI flag, environment variable, or default
     ///
-    /// Precedence: CLI flag > DEACON_RUNTIME env var > default (docker)
+    /// Precedence: CLI flag > DEACON_RUNTIME env var > default (docker).
+    /// Selecting Podman emits a one-time experimental-status WARN.
     pub fn detect_runtime(cli_runtime: Option<RuntimeKind>) -> RuntimeKind {
-        if let Some(runtime) = cli_runtime {
-            return runtime;
+        let selected = if let Some(runtime) = cli_runtime {
+            runtime
+        } else if let Some(env_runtime) = std::env::var("DEACON_RUNTIME")
+            .ok()
+            .and_then(|v| v.parse().ok())
+        {
+            env_runtime
+        } else {
+            RuntimeKind::Docker
+        };
+
+        if selected == RuntimeKind::Podman {
+            warn_podman_experimental_once();
         }
 
-        if let Ok(env_runtime) = std::env::var("DEACON_RUNTIME") {
-            if let Ok(runtime) = env_runtime.parse() {
-                return runtime;
-            }
-        }
-
-        // Default to Docker
-        RuntimeKind::Docker
+        selected
     }
 
     /// Create runtime instance based on RuntimeKind

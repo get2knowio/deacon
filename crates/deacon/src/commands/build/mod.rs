@@ -1281,12 +1281,14 @@ async fn execute_image_reference_build(
         dockerfile_content.push('\n');
     }
 
-    // Add devcontainer metadata label
-    // Serialize basic configuration metadata
-    let metadata = serde_json::json!({
+    // Add devcontainer metadata label.
+    // Per spec (devcontainers/cli#1199, v0.86.0), the label value is always a
+    // JSON array of partial-config entries, even when only a single entry is
+    // present. Consumers (VS Code, Zed, envbuilder) iterate and merge.
+    let metadata = serde_json::json!([{
         "name": config.name.as_ref().unwrap_or(&"devcontainer".to_string()),
         "image": image,
-    });
+    }]);
     let metadata_str = serde_json::to_string(&metadata)?;
     let escaped_metadata = metadata_str.replace('"', "\\\"");
     dockerfile_content.push_str(&format!(
@@ -1555,11 +1557,13 @@ async fn execute_docker_build(
         build_args.push("--label".to_string());
         build_args.push(label);
 
-        // Add devcontainer metadata label (simplified for T011)
-        // This stores basic config info in the image for downstream tooling
-        let metadata_json = serde_json::json!({
+        // Add devcontainer metadata label (simplified for T011).
+        // Per spec (devcontainers/cli#1199, v0.86.0), the label value is always a
+        // JSON array of partial-config entries, even when only a single entry is
+        // present. Consumers (VS Code, Zed, envbuilder) iterate and merge.
+        let metadata_json = serde_json::json!([{
             "configHash": config_hash,
-        });
+        }]);
         let metadata_str = serde_json::to_string(&metadata_json)
             .map_err(|e| anyhow!("Failed to serialize metadata: {}", e))?;
         build_args.push("--label".to_string());
