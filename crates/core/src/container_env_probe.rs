@@ -36,10 +36,14 @@ use tracing::{debug, info, instrument, warn};
 pub enum ContainerProbeMode {
     /// No environment probing
     None,
-    /// Login shell only (-l)
+    /// Login shell only (`shell -lc 'env'`)
     #[default]
     LoginShell,
-    /// Login + Interactive shell (-l -i)
+    /// Interactive shell only (`shell -ic 'env'`) — sources interactive
+    /// startup files like `~/.bashrc` without sourcing login profiles.
+    /// Matches the spec's `interactiveShell` mode.
+    InteractiveShell,
+    /// Login + Interactive shell (`shell -lic 'env'`)
     LoginInteractiveShell,
 }
 
@@ -58,8 +62,7 @@ impl std::str::FromStr for ContainerProbeMode {
             | "login_interactive"
             | "logininteractive" => Ok(ContainerProbeMode::LoginInteractiveShell),
             "interactive" | "interactiveshell" | "interactive-shell" | "interactive_shell" => {
-                // Map legacy/ambiguous 'interactiveShell' to LoginShell for compatibility
-                Ok(ContainerProbeMode::LoginShell)
+                Ok(ContainerProbeMode::InteractiveShell)
             }
             other => Err(format!("Unknown container probe mode: {}", other)),
         }
@@ -447,6 +450,7 @@ impl ContainerEnvironmentProber {
                 ))
             }
             ContainerProbeMode::LoginShell => "-lc",
+            ContainerProbeMode::InteractiveShell => "-ic",
             ContainerProbeMode::LoginInteractiveShell => "-lic",
         };
 
@@ -969,9 +973,12 @@ mod tests {
                 .unwrap(),
             ContainerProbeMode::LoginInteractiveShell
         );
+        // `interactiveShell` is its own distinct mode per spec (`shell -ic 'env'`).
+        // Previously aliased to `LoginShell` "for compatibility" — that was
+        // spec-incorrect and lost user-intended behavior.
         assert_eq!(
             "interactiveShell".parse::<ContainerProbeMode>().unwrap(),
-            ContainerProbeMode::LoginShell
+            ContainerProbeMode::InteractiveShell
         );
     }
 
