@@ -19,6 +19,34 @@ The 1.0 release is being assembled across a series of PRs tracked in
   selected, surfacing Podman's experimental status without spamming.
 - Smoke tests covering `run-user-commands --container-id` and
   `run-user-commands --id-label` paths.
+- **Lockfile graduation (PR-4):** `--no-lockfile`, `--frozen-lockfile`, and
+  legacy `--experimental-lockfile <PATH>` / `--experimental-frozen-lockfile`
+  (hidden aliases, WARN-on-use). After `up` resolves features the writer
+  emits a sorted, trailing-newline-terminated `devcontainer-lock.json`
+  byte-identical to upstream `devcontainers/cli`'s `writeLockfile`.
+  `--frozen-lockfile` byte-compares the freshly-built lockfile against the
+  on-disk file and fails with the upstream-aligned messages
+  `"Lockfile does not exist."` / `"Lockfile does not match."`. Read-only
+  workspaces (EROFS/EACCES) downgrade to a WARN. Schema parity fix: the
+  `dependsOn` field now serializes as camelCase.
+- **`set-up` subcommand** (`deacon set-up --container-id <id>`): convert an
+  already-running container into a DevContainer by applying configuration +
+  image metadata, executing lifecycle hooks (`onCreate` → `updateContent` →
+  `postCreate` → `postStart` → `postAttach`), optionally installing
+  dotfiles, and emitting a single-line JSON result on stdout per
+  [`docs/subcommand-specs/set-up/SPEC.md`](docs/subcommand-specs/set-up/SPEC.md).
+  Flags: `--config`, `--skip-post-create`, `--skip-non-blocking-commands`,
+  `--remote-env`, `--dotfiles-repository` / `--dotfiles-install-command` /
+  `--dotfiles-target-path`, `--include-configuration`,
+  `--include-merged-configuration`, `--container-data-folder`,
+  `--container-system-data-folder`.
+- **`set-up` /etc patches:** marker-guarded, append-only patches to
+  `/etc/environment` (PAM-escaped `KEY="VALUE"` block) and `/etc/profile`
+  (re-exports PATH from `/etc/environment` for login shells), wrapped in
+  `# >>> deacon set-up >>>` ... `# <<< deacon set-up <<<` delimiters. Marker
+  files at `{container_system_data_folder}/.patchEtcEnvironmentMarker` and
+  `.patchEtcProfileMarker` (default `/var/devcontainer/`). Best-effort:
+  failures emit a WARN and proceed (spec §9).
 
 ### Changed
 - **Spec parity:** `devcontainer.metadata` image label is now always emitted as
