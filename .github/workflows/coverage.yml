@@ -62,7 +62,7 @@ jobs:
         cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info --text --fail-under-lines ${{ env.MIN_COVERAGE }} -- --test-threads=1 | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Upload lcov artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: coverage-lcov
         path: coverage/lcov.info

@@ -160,7 +160,7 @@ jobs:
 
     - name: Upload timing artifacts
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: nextest-mvp-integration-timing
         path: artifacts/nextest/mvp-integration-timing.json
