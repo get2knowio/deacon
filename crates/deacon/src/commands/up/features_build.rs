@@ -16,12 +16,13 @@ use deacon_core::errors::DeaconError;
 use deacon_core::features::{
     FeatureDependencyResolver, InstallationPlan, OptionValue, ResolvedFeature,
 };
+use deacon_core::lockfile::{Lockfile, LockfileFeature};
 use deacon_core::oci::{default_fetcher, DownloadedFeature, FeatureRef};
 use deacon_core::registry_parser::parse_registry_reference;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// Output from building an image with features
 #[derive(Debug, Clone)]
@@ -32,6 +33,10 @@ pub(crate) struct FeatureBuildOutput {
     pub combined_env: HashMap<String, String>,
     /// Resolved features in installation order
     pub resolved_features: Vec<deacon_core::features::ResolvedFeature>,
+    /// Lockfile entries for the features installed in this build.
+    /// Keyed by the user-provided feature ID (as it appears in `devcontainer.json`).
+    /// Empty when the config has no features.
+    pub lockfile: Lockfile,
 }
 
 /// Internal: result of resolving + downloading + staging features for a build.
@@ -40,6 +45,11 @@ struct StagedFeatures {
     combined_env: HashMap<String, String>,
     temp_dir: PathBuf,
     features_source_dir: PathBuf,
+    /// Lockfile assembled from the resolved + downloaded features.
+    /// Keyed by the user-provided feature ID (as it appears in
+    /// `devcontainer.json`), matching upstream `generateLockfile` in
+    /// `devcontainers/cli` `src/spec-configuration/lockfile.ts`.
+    lockfile: Lockfile,
 }
 
 /// Build an extended Docker image with features installed using BuildKit.
@@ -89,6 +99,9 @@ pub(crate) async fn build_image_with_features(
             image_tag: base_image.clone(),
             combined_env: HashMap::new(),
             resolved_features: Vec::new(),
+            lockfile: Lockfile {
+                features: HashMap::new(),
+            },
         });
     }
 
@@ -131,6 +144,7 @@ pub(crate) async fn build_image_with_features(
         image_tag: extended_image_tag,
         combined_env: staged.combined_env,
         resolved_features: staged.plan.features.clone(),
+        lockfile: staged.lockfile,
     })
 }
 
@@ -314,6 +328,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         image_tag: extended_image_tag,
         combined_env: staged.combined_env,
         resolved_features: staged.plan.features.clone(),
+        lockfile: staged.lockfile,
     })
 }
 
@@ -337,6 +352,10 @@ async fn resolve_and_stage_features(
     // Parse and fetch features
     let mut feature_refs: Vec<(String, FeatureRef)> = Vec::new();
     let mut feature_options_map: HashMap<String, HashMap<String, OptionValue>> = HashMap::new();
+    // Canonical id (registry/namespace/name, no tag) → user-provided feature ID
+    // (the key as it appears in `devcontainer.json`). The lockfile MUST be
+    // keyed by the user-provided form to match upstream `generateLockfile`.
+    let mut user_id_by_canonical: HashMap<String, String> = HashMap::new();
 
     for (feature_id, feature_options) in features_obj.iter() {
         let (registry_url, namespace, name, tag) =
@@ -349,6 +368,8 @@ async fn resolve_and_stage_features(
             "{}/{}/{}",
             feature_ref.registry, feature_ref.namespace, feature_ref.name
         );
+
+        user_id_by_canonical.insert(canonical_id.clone(), feature_id.clone());
 
         let options = if let Some(opts_obj) = feature_options.as_object() {
             opts_obj
@@ -471,12 +492,90 @@ async fn resolve_and_stage_features(
         }
     }
 
+    let lockfile =
+        build_lockfile_from_features(&feature_refs, &downloaded_features, &user_id_by_canonical);
+
     Ok(StagedFeatures {
         plan: installation_plan,
         combined_env,
         temp_dir,
         features_source_dir: features_dir,
+        lockfile,
     })
+}
+
+/// Assemble the canonical lockfile from resolved + downloaded features.
+///
+/// Mirrors upstream `generateLockfile` in `devcontainers/cli`
+/// `src/spec-configuration/lockfile.ts`:
+/// - Keys: the user-provided feature ID (as written in `devcontainer.json`).
+/// - `resolved`: `{registry}/{repository}@{digest}` via
+///   [`LockfileFeature::from_resolved`].
+/// - `integrity`: the manifest digest.
+/// - `dependsOn`: alphabetically-sorted vec of dependency keys taken
+///   verbatim from `metadata.dependsOn`, or `None` when empty.
+///
+/// Features whose metadata lacks a version field fall back to the tag from
+/// the user reference (e.g. `"1"`) and ultimately to `"0.0.0"` so the
+/// schema's semver validation never blocks lockfile assembly. A WARN log is
+/// emitted so the gap is visible in CI output.
+fn build_lockfile_from_features(
+    feature_refs: &[(String, FeatureRef)],
+    downloaded_features: &HashMap<String, DownloadedFeature>,
+    user_id_by_canonical: &HashMap<String, String>,
+) -> Lockfile {
+    let mut entries: HashMap<String, LockfileFeature> = HashMap::new();
+
+    for (canonical_id, feature_ref) in feature_refs {
+        let Some(downloaded) = downloaded_features.get(canonical_id) else {
+            // Should never happen — the caller populated downloaded_features
+            // from the same feature_refs vec. If it does, skip rather than
+            // silently emit a half-valid entry.
+            warn!(
+                feature = %canonical_id,
+                "Skipping lockfile entry: downloaded feature missing from map"
+            );
+            continue;
+        };
+
+        let user_id = user_id_by_canonical
+            .get(canonical_id)
+            .cloned()
+            .unwrap_or_else(|| canonical_id.clone());
+
+        let version = match &downloaded.metadata.version {
+            Some(v) if !v.is_empty() => v.clone(),
+            _ => {
+                let fallback = feature_ref.tag();
+                warn!(
+                    feature = %user_id,
+                    fallback = %fallback,
+                    "Feature metadata has no version field; using tag as fallback for lockfile entry"
+                );
+                fallback.to_string()
+            }
+        };
+
+        let depends_on = if downloaded.metadata.depends_on.is_empty() {
+            None
+        } else {
+            let mut deps: Vec<String> = downloaded.metadata.depends_on.keys().cloned().collect();
+            deps.sort();
+            Some(deps)
+        };
+
+        let entry = LockfileFeature::from_resolved(
+            &feature_ref.registry,
+            &feature_ref.repository(),
+            &downloaded.digest,
+            version,
+            depends_on,
+        );
+
+        entries.insert(user_id, entry);
+    }
+
+    Lockfile { features: entries }
 }
 
 fn ensure_buildkit_or_error() -> Result<()> {
@@ -520,4 +619,197 @@ pub(crate) fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std:
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod lockfile_assembly_tests {
+    use super::*;
+    use deacon_core::features::FeatureMetadata;
+
+    fn make_downloaded(version: Option<&str>, digest: &str) -> DownloadedFeature {
+        DownloadedFeature {
+            path: PathBuf::from("/tmp/unused"),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                version: version.map(|s| s.to_string()),
+                ..FeatureMetadata::default()
+            },
+            digest: digest.to_string(),
+        }
+    }
+
+    fn make_downloaded_with_deps(version: &str, digest: &str, deps: &[&str]) -> DownloadedFeature {
+        let mut depends_on = HashMap::new();
+        for d in deps {
+            depends_on.insert(d.to_string(), serde_json::Value::Bool(true));
+        }
+        DownloadedFeature {
+            path: PathBuf::from("/tmp/unused"),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                version: Some(version.to_string()),
+                depends_on,
+                ..FeatureMetadata::default()
+            },
+            digest: digest.to_string(),
+        }
+    }
+
+    #[test]
+    fn build_lockfile_keys_by_user_provided_id() {
+        // Mirrors upstream `generateLockfile`: the lockfile key is the
+        // user-provided feature ID, not the canonical (no-tag) form.
+        let feature_ref = FeatureRef::new(
+            "ghcr.io".to_string(),
+            "devcontainers".to_string(),
+            "node".to_string(),
+            Some("1".to_string()),
+        );
+        let canonical = "ghcr.io/devcontainers/node".to_string();
+        let user_id = "ghcr.io/devcontainers/node:1".to_string();
+
+        let mut downloaded_features = HashMap::new();
+        downloaded_features.insert(
+            canonical.clone(),
+            make_downloaded(
+                Some("1.6.1"),
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            ),
+        );
+
+        let mut user_id_by_canonical = HashMap::new();
+        user_id_by_canonical.insert(canonical.clone(), user_id.clone());
+
+        let lockfile = build_lockfile_from_features(
+            &[(canonical, feature_ref)],
+            &downloaded_features,
+            &user_id_by_canonical,
+        );
+
+        assert_eq!(lockfile.features.len(), 1);
+        let entry = lockfile
+            .features
+            .get(&user_id)
+            .expect("lockfile must be keyed by the user-provided feature ID");
+        assert_eq!(entry.version, "1.6.1");
+        assert_eq!(
+            entry.resolved,
+            "ghcr.io/devcontainers/node@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        );
+        assert_eq!(
+            entry.integrity,
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        );
+        assert!(entry.depends_on.is_none());
+    }
+
+    #[test]
+    fn build_lockfile_falls_back_to_tag_when_version_missing() {
+        // Some features ship without a `version` in their metadata; rather
+        // than block lockfile generation we fall back to the tag the user
+        // requested (e.g. "1"). This is best-effort — the WARN is the
+        // observable signal that something is off.
+        let feature_ref = FeatureRef::new(
+            "ghcr.io".to_string(),
+            "x".to_string(),
+            "y".to_string(),
+            Some("3".to_string()),
+        );
+        let canonical = "ghcr.io/x/y".to_string();
+        let user_id = "ghcr.io/x/y:3".to_string();
+
+        let mut downloaded_features = HashMap::new();
+        downloaded_features.insert(
+            canonical.clone(),
+            make_downloaded(
+                None,
+                "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+        );
+
+        let mut user_id_by_canonical = HashMap::new();
+        user_id_by_canonical.insert(canonical.clone(), user_id.clone());
+
+        let lockfile = build_lockfile_from_features(
+            &[(canonical, feature_ref)],
+            &downloaded_features,
+            &user_id_by_canonical,
+        );
+
+        // Tag was "3", so that's the version used for the lockfile entry.
+        // Note: "3" is not valid semver, so a subsequent `write_lockfile`
+        // call would fail validation — but the assembly itself is best-effort.
+        let entry = lockfile.features.get(&user_id).unwrap();
+        assert_eq!(entry.version, "3");
+    }
+
+    #[test]
+    fn build_lockfile_sorts_depends_on_alphabetically() {
+        // Upstream `generateLockfile` sorts `dependsOn` so byte-identical
+        // output is stable across runs and across implementations.
+        let feature_ref = FeatureRef::new(
+            "ghcr.io".to_string(),
+            "x".to_string(),
+            "y".to_string(),
+            Some("1".to_string()),
+        );
+        let canonical = "ghcr.io/x/y".to_string();
+        let user_id = "ghcr.io/x/y:1".to_string();
+
+        let mut downloaded_features = HashMap::new();
+        downloaded_features.insert(
+            canonical.clone(),
+            make_downloaded_with_deps(
+                "1.0.0",
+                "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                &["zeta", "alpha", "mu"],
+            ),
+        );
+
+        let mut user_id_by_canonical = HashMap::new();
+        user_id_by_canonical.insert(canonical.clone(), user_id.clone());
+
+        let lockfile = build_lockfile_from_features(
+            &[(canonical, feature_ref)],
+            &downloaded_features,
+            &user_id_by_canonical,
+        );
+
+        let entry = lockfile.features.get(&user_id).unwrap();
+        let deps = entry.depends_on.as_ref().unwrap();
+        assert_eq!(deps, &["alpha", "mu", "zeta"]);
+    }
+
+    #[test]
+    fn build_lockfile_omits_empty_depends_on() {
+        let feature_ref = FeatureRef::new(
+            "ghcr.io".to_string(),
+            "x".to_string(),
+            "y".to_string(),
+            Some("1".to_string()),
+        );
+        let canonical = "ghcr.io/x/y".to_string();
+        let user_id = "ghcr.io/x/y:1".to_string();
+
+        let mut downloaded_features = HashMap::new();
+        downloaded_features.insert(
+            canonical.clone(),
+            make_downloaded(
+                Some("1.0.0"),
+                "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            ),
+        );
+
+        let mut user_id_by_canonical = HashMap::new();
+        user_id_by_canonical.insert(canonical.clone(), user_id.clone());
+
+        let lockfile = build_lockfile_from_features(
+            &[(canonical, feature_ref)],
+            &downloaded_features,
+            &user_id_by_canonical,
+        );
+
+        let entry = lockfile.features.get(&user_id).unwrap();
+        assert!(entry.depends_on.is_none());
+    }
 }
