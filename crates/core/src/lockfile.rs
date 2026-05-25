@@ -121,9 +121,39 @@ pub struct LockfileFeature {
     /// SHA256 digest for integrity checking (e.g., "sha256:...")
     pub integrity: String,
 
-    /// Optional feature dependencies
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional feature dependencies. Spec emits this field as `dependsOn`
+    /// (camelCase) — see upstream `generateLockfile` in
+    /// `devcontainers/cli` `src/spec-configuration/lockfile.ts`.
+    #[serde(rename = "dependsOn", skip_serializing_if = "Option::is_none", default)]
     pub depends_on: Option<Vec<String>>,
+}
+
+impl LockfileFeature {
+    /// Construct a lockfile entry in the upstream canonical form.
+    ///
+    /// Mirrors `generateLockfile` in `devcontainers/cli`
+    /// `src/spec-configuration/lockfile.ts`:
+    ///   resolved  = `{registry}/{repository}@{digest}`
+    ///   integrity = `{digest}`
+    /// The `digest` argument MUST be in `sha256:<64-hex>` form (the manifest
+    /// digest returned by the OCI fetcher).
+    ///
+    /// `depends_on` should be an alphabetically-sorted vec of feature IDs, or
+    /// `None` for features with no dependencies.
+    pub fn from_resolved(
+        registry: &str,
+        repository: &str,
+        digest: &str,
+        version: String,
+        depends_on: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            version,
+            resolved: format!("{}/{}@{}", registry, repository, digest),
+            integrity: digest.to_string(),
+            depends_on,
+        }
+    }
 }
 
 /// Get lockfile path adjacent to config file
@@ -274,9 +304,13 @@ pub fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) -> Res
     // Sort all object keys recursively for stable JSON output
     sort_json_object(&mut value);
 
-    // Serialize with pretty printing (2-space indentation)
-    let json =
+    // Serialize with pretty printing (2-space indentation) and a trailing
+    // newline to match upstream `devcontainers/cli`'s `writeLockfile` output
+    // (`JSON.stringify(..., 2) + '\n'`). Byte-identical output keeps the
+    // `--frozen-lockfile` content comparison stable across implementations.
+    let mut json =
         serde_json::to_string_pretty(&value).context("Failed to serialize lockfile to JSON")?;
+    json.push('\n');
 
     // Atomic write: write to temp file in same directory, then rename
     // Using same directory ensures same filesystem for atomic rename on all platforms
@@ -615,31 +649,35 @@ impl LockfileValidationResult {
     /// Format the validation result as an error message.
     ///
     /// Returns a user-friendly error message describing the mismatch,
-    /// including actionable guidance on how to resolve the issue.
+    /// including actionable guidance on how to resolve the issue. The leading
+    /// summary line mirrors the canonical upstream `devcontainers/cli` strings
+    /// (`"Lockfile does not exist."` / `"Lockfile does not match."`) so
+    /// existing CI scripts that match on those messages continue to work.
     pub fn format_error(&self) -> String {
         match self {
             LockfileValidationResult::Matched => "Lockfile validation passed".to_string(),
             LockfileValidationResult::Missing { expected_path } => {
                 format!(
-                    "Frozen lockfile mode requires a lockfile, but none found at '{}'.\n\
-                     Run without --experimental-frozen-lockfile to generate a lockfile, \
-                     or create one with `deacon build --experimental-lockfile`.",
+                    "Lockfile does not exist.\nExpected at '{}'.\n\
+                     Run without --frozen-lockfile to generate a lockfile, or \
+                     generate one with `deacon upgrade`.",
                     expected_path.display()
                 )
             }
             LockfileValidationResult::MissingFromLockfile { features } => {
                 format!(
-                    "Frozen lockfile mismatch: features declared in config but missing from lockfile:\n  \
+                    "Lockfile does not match.\nFeatures declared in config but missing from lockfile:\n  \
                      - {}\n\
-                     Update the lockfile or remove --experimental-frozen-lockfile to allow resolution.",
+                     Run without --frozen-lockfile to update the lockfile, or run `deacon upgrade`.",
                     features.join("\n  - ")
                 )
             }
             LockfileValidationResult::ExtraInLockfile { features } => {
                 format!(
-                    "Frozen lockfile mismatch: features in lockfile but not declared in config:\n  \
+                    "Lockfile does not match.\nFeatures in lockfile but not declared in config:\n  \
                      - {}\n\
-                     Update the lockfile to remove stale entries, or add these features to your config.",
+                     Update the lockfile to remove stale entries (e.g. via `deacon upgrade`), \
+                     or add these features to your config.",
                     features.join("\n  - ")
                 )
             }
@@ -648,10 +686,10 @@ impl LockfileValidationResult {
                 extra_in_lockfile,
             } => {
                 format!(
-                    "Frozen lockfile mismatch:\n\
+                    "Lockfile does not match.\n\
                      Features declared in config but missing from lockfile:\n  - {}\n\
                      Features in lockfile but not declared in config:\n  - {}\n\
-                     Update the lockfile or remove --experimental-frozen-lockfile to allow resolution.",
+                     Run without --frozen-lockfile to update the lockfile, or run `deacon upgrade`.",
                     missing_from_lockfile.join("\n  - "),
                     extra_in_lockfile.join("\n  - ")
                 )
@@ -1450,14 +1488,90 @@ mod tests {
         assert_eq!(result.format_error(), "Lockfile validation passed");
     }
 
+    // =========================================================================
+    // Upstream wire-format parity tests
+    // =========================================================================
+
+    /// The `dependsOn` field MUST serialize as camelCase per upstream
+    /// `devcontainers/cli` `generateLockfile`. Deserialization must accept
+    /// the camelCase form too.
+    #[test]
+    fn test_depends_on_serializes_as_camel_case() {
+        let entry = LockfileFeature {
+            version: "1.0.0".to_string(),
+            resolved: "ghcr.io/x/y@sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+            integrity: "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+            depends_on: Some(vec!["dep-a".to_string()]),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            json.contains("\"dependsOn\""),
+            "expected camelCase `dependsOn` on the wire, got: {}",
+            json
+        );
+        assert!(
+            !json.contains("\"depends_on\""),
+            "snake_case `depends_on` must not be emitted, got: {}",
+            json
+        );
+
+        // Round-trip both wire forms.
+        let from_camel: LockfileFeature = serde_json::from_str(&json).unwrap();
+        assert_eq!(from_camel, entry);
+    }
+
+    /// Writer emits a trailing newline to match upstream
+    /// `JSON.stringify(..., 2) + '\n'`.
+    #[test]
+    fn test_write_lockfile_emits_trailing_newline() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("lf.json");
+        let lockfile = Lockfile {
+            features: HashMap::new(),
+        };
+        write_lockfile(&path, &lockfile, true).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(
+            bytes.last().copied(),
+            Some(b'\n'),
+            "lockfile output must end with a single trailing newline"
+        );
+    }
+
+    /// `LockfileFeature::from_resolved` constructs entries in the upstream
+    /// canonical form: `{registry}/{repository}@{digest}` for `resolved`,
+    /// digest alone for `integrity`.
+    #[test]
+    fn test_from_resolved_constructs_upstream_form() {
+        let entry = LockfileFeature::from_resolved(
+            "ghcr.io",
+            "devcontainers/features/node",
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "1.2.3".to_string(),
+            None,
+        );
+        assert_eq!(entry.version, "1.2.3");
+        assert_eq!(
+            entry.resolved,
+            "ghcr.io/devcontainers/features/node@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        );
+        assert_eq!(
+            entry.integrity,
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        );
+        assert!(entry.depends_on.is_none());
+    }
+
     #[test]
     fn test_validation_result_format_error_missing() {
         let result = LockfileValidationResult::Missing {
             expected_path: PathBuf::from("/path/to/lockfile.json"),
         };
         let error = result.format_error();
-        assert!(error.contains("Frozen lockfile mode requires a lockfile"));
+        // Upstream-aligned strings (devcontainers/cli writeLockfile errors).
+        assert!(error.contains("Lockfile does not exist."));
         assert!(error.contains("/path/to/lockfile.json"));
+        assert!(error.contains("--frozen-lockfile"));
     }
 
     #[test]
@@ -1466,7 +1580,8 @@ mod tests {
             features: vec!["feature-a".to_string(), "feature-b".to_string()],
         };
         let error = result.format_error();
-        assert!(error.contains("features declared in config but missing from lockfile"));
+        assert!(error.contains("Lockfile does not match."));
+        assert!(error.contains("Features declared in config but missing from lockfile"));
         assert!(error.contains("feature-a"));
         assert!(error.contains("feature-b"));
     }
@@ -1477,7 +1592,8 @@ mod tests {
             features: vec!["stale-feature".to_string()],
         };
         let error = result.format_error();
-        assert!(error.contains("features in lockfile but not declared in config"));
+        assert!(error.contains("Lockfile does not match."));
+        assert!(error.contains("Features in lockfile but not declared in config"));
         assert!(error.contains("stale-feature"));
     }
 
@@ -1488,7 +1604,7 @@ mod tests {
             extra_in_lockfile: vec!["old-feature".to_string()],
         };
         let error = result.format_error();
-        assert!(error.contains("Frozen lockfile mismatch"));
+        assert!(error.contains("Lockfile does not match."));
         assert!(error.contains("new-feature"));
         assert!(error.contains("old-feature"));
     }
