@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::thread;
 use std::time::Instant;
 use tracing::{debug, error, info, instrument};
 
@@ -1278,34 +1279,47 @@ fn run_phase_host_sync(
             ))
         })?;
 
-        // Capture stdout line by line
-        let stdout_reader = BufReader::new(child.stdout.take().unwrap());
-        let stderr_reader = BufReader::new(child.stderr.take().unwrap());
+        let stdout = child.stdout.take().ok_or_else(|| {
+            DeaconError::Lifecycle(format!(
+                "Failed to capture stdout for phase {}",
+                phase.as_str()
+            ))
+        })?;
+        let stderr = child.stderr.take().ok_or_else(|| {
+            DeaconError::Lifecycle(format!(
+                "Failed to capture stderr for phase {}",
+                phase.as_str()
+            ))
+        })?;
 
-        let mut stdout_lines = Vec::new();
-        let mut stderr_lines = Vec::new();
+        let stdout_phase = phase;
+        let stderr_phase = phase;
+        let stdout_redaction_config = ctx.redaction_config.clone();
+        let stderr_redaction_config = ctx.redaction_config.clone();
 
-        // Read stdout
-        for line in stdout_reader.lines() {
-            let line =
-                line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stdout: {}", e)))?;
+        let stdout_handle = thread::spawn(move || -> std::result::Result<Vec<String>, String> {
+            let stdout_reader = BufReader::new(stdout);
+            let mut stdout_lines = Vec::new();
+            for line in stdout_reader.lines() {
+                let line = line.map_err(|e| format!("Failed to read stdout: {}", e))?;
+                let redacted_line = redact_if_enabled(&line, &stdout_redaction_config);
+                info!("[{}] stdout: {}", stdout_phase.as_str(), redacted_line);
+                stdout_lines.push(line);
+            }
+            Ok(stdout_lines)
+        });
 
-            // Apply redaction to the line before logging
-            let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
-            info!("[{}] stdout: {}", phase.as_str(), redacted_line);
-            stdout_lines.push(line); // Store original for result, log redacted
-        }
-
-        // Read stderr
-        for line in stderr_reader.lines() {
-            let line =
-                line.map_err(|e| DeaconError::Lifecycle(format!("Failed to read stderr: {}", e)))?;
-
-            // Apply redaction to the line before logging
-            let redacted_line = redact_if_enabled(&line, &ctx.redaction_config);
-            info!("[{}] stderr: {}", phase.as_str(), redacted_line);
-            stderr_lines.push(line); // Store original for result, log redacted
-        }
+        let stderr_handle = thread::spawn(move || -> std::result::Result<Vec<String>, String> {
+            let stderr_reader = BufReader::new(stderr);
+            let mut stderr_lines = Vec::new();
+            for line in stderr_reader.lines() {
+                let line = line.map_err(|e| format!("Failed to read stderr: {}", e))?;
+                let redacted_line = redact_if_enabled(&line, &stderr_redaction_config);
+                info!("[{}] stderr: {}", stderr_phase.as_str(), redacted_line);
+                stderr_lines.push(line);
+            }
+            Ok(stderr_lines)
+        });
 
         // Wait for command to complete
         let exit_status = child.wait().map_err(|e| {
@@ -1318,6 +1332,14 @@ fn run_phase_host_sync(
 
         let exit_code = exit_status.code().unwrap_or(-1);
         let duration = start_time.elapsed();
+        let stdout_lines = stdout_handle
+            .join()
+            .map_err(|_| DeaconError::Lifecycle("stdout reader thread panicked".to_string()))?
+            .map_err(DeaconError::Lifecycle)?;
+        let stderr_lines = stderr_handle
+            .join()
+            .map_err(|_| DeaconError::Lifecycle("stderr reader thread panicked".to_string()))?
+            .map_err(DeaconError::Lifecycle)?;
         let stdout = stdout_lines.join("\n");
         let stderr = stderr_lines.join("\n");
 

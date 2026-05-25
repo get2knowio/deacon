@@ -146,6 +146,8 @@ impl RegistryAuth {
                         if let Ok(auth_str) = String::from_utf8(decoded) {
                             if let Some((username, password)) = auth_str.split_once(':') {
                                 debug!("Loaded Docker config auth for registry: {}", registry);
+                                redaction::add_global_secret(&auth_string);
+                                redaction::add_global_secret(password);
                                 self.set_credentials(
                                     registry,
                                     RegistryCredentials::Basic {
@@ -163,6 +165,7 @@ impl RegistryAuth {
                         "Loaded Docker config username/password for registry: {}",
                         registry
                     );
+                    redaction::add_global_secret(&password);
                     self.set_credentials(
                         registry,
                         RegistryCredentials::Basic { username, password },

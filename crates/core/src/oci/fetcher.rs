@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tar::Archive;
@@ -13,6 +13,7 @@ use tracing::{debug, info, instrument, warn};
 use crate::errors::{FeatureError, Result};
 use crate::features::{parse_feature_metadata, FeatureMetadata};
 use crate::progress::{ProgressEvent, ProgressTracker};
+use crate::redaction;
 use crate::retry::{retry_async, RetryConfig};
 
 use super::client::{HttpClient, ReqwestClient};
@@ -1030,11 +1031,55 @@ impl<C: HttpClient> FeatureFetcher<C> {
         let cursor = std::io::Cursor::new(layer_data);
         let mut archive = Archive::new(cursor);
 
-        archive
-            .unpack(&extraction_dir)
-            .map_err(|e| FeatureError::Extraction {
-                message: format!("Failed to extract tar archive: {}", e),
+        let entries = archive.entries().map_err(|e| FeatureError::Extraction {
+            message: format!("Failed to read tar archive entries: {}", e),
+        })?;
+
+        for entry in entries {
+            let mut entry = entry.map_err(|e| FeatureError::Extraction {
+                message: format!("Failed to read tar archive entry: {}", e),
             })?;
+
+            let entry_path = entry.path().map_err(|e| FeatureError::Extraction {
+                message: format!("Failed to read tar entry path: {}", e),
+            })?;
+            let entry_path = entry_path.into_owned();
+
+            if entry_path.is_absolute()
+                || entry_path
+                    .components()
+                    .any(|c| matches!(c, Component::ParentDir | Component::Prefix(_)))
+            {
+                return Err(FeatureError::Extraction {
+                    message: format!(
+                        "Unsafe tar entry path rejected during extraction: {}",
+                        entry_path.display()
+                    ),
+                }
+                .into());
+            }
+
+            let entry_type = entry.header().entry_type();
+            if entry_type.is_symlink() || entry_type.is_hard_link() {
+                return Err(FeatureError::Extraction {
+                    message: format!(
+                        "Unsupported tar link entry rejected during extraction: {}",
+                        entry_path.display()
+                    ),
+                }
+                .into());
+            }
+
+            entry
+                .unpack_in(&extraction_dir)
+                .map_err(|e| FeatureError::Extraction {
+                    message: format!(
+                        "Failed to extract tar entry {}: {}",
+                        entry_path.display(),
+                        e
+                    ),
+                })?;
+        }
 
         Ok(extraction_dir)
     }
@@ -1110,7 +1155,8 @@ impl<C: HttpClient> FeatureFetcher<C> {
         // Set environment variables
         for (key, value) in env_vars {
             command.env(key, value);
-            debug!("Set environment variable: {}={}", key, value);
+            redaction::add_global_secret(value);
+            debug!("Set environment variable: {}=<redacted>", key);
         }
 
         // Capture stdout and stderr for streaming
@@ -1141,7 +1187,8 @@ impl<C: HttpClient> FeatureFetcher<C> {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                info!("[install] stdout: {}", line);
+                let redacted = redaction::global_registry().redact_text(&line);
+                info!("[install] stdout: {}", redacted);
             }
         });
 
@@ -1150,7 +1197,8 @@ impl<C: HttpClient> FeatureFetcher<C> {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                warn!("[install] stderr: {}", line);
+                let redacted = redaction::global_registry().redact_text(&line);
+                warn!("[install] stderr: {}", redacted);
             }
         });
 
@@ -1603,6 +1651,7 @@ pub fn default_fetcher_with_config(
 mod tests {
     use super::*;
     use std::io::Write;
+    use tar::{Builder, EntryType, Header};
     use tempfile::TempDir;
 
     // Note: These tests execute bash scripts directly on the host.
@@ -1739,6 +1788,74 @@ mod tests {
             result.is_ok(),
             "Expected install script to succeed with env vars, got error: {:?}",
             result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_extract_layer_rejects_absolute_paths() {
+        let temp_dir = TempDir::new().unwrap();
+        let client = crate::oci::client::ReqwestClient::new().unwrap();
+        let mut fetcher = FeatureFetcher::new(client);
+        fetcher.cache_dir = temp_dir.path().join("cache");
+
+        let mut tar_data = Vec::new();
+        {
+            let mut builder = Builder::new(&mut tar_data);
+            let payload = b"malicious content";
+            let mut header = Header::new_gnu();
+            header.set_path_absolute("/escape.txt").unwrap();
+            header.set_size(payload.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append(&header, &payload[..]).unwrap();
+            builder.finish().unwrap();
+        }
+
+        let result = fetcher
+            .extract_layer(Bytes::from(tar_data), "reject_absolute_path")
+            .await;
+
+        assert!(result.is_err(), "expected unsafe tar path to be rejected");
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Unsafe tar entry path rejected"),
+            "expected unsafe path error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_extract_layer_rejects_symlink_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let client = crate::oci::client::ReqwestClient::new().unwrap();
+        let mut fetcher = FeatureFetcher::new(client);
+        fetcher.cache_dir = temp_dir.path().join("cache");
+
+        let mut tar_data = Vec::new();
+        {
+            let mut builder = Builder::new(&mut tar_data);
+            let mut header = Header::new_gnu();
+            header.set_entry_type(EntryType::Symlink);
+            header.set_size(0);
+            header.set_mode(0o777);
+            header.set_link_name("../outside").unwrap();
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "linked-path", std::io::empty())
+                .unwrap();
+            builder.finish().unwrap();
+        }
+
+        let result = fetcher
+            .extract_layer(Bytes::from(tar_data), "reject_symlink")
+            .await;
+
+        assert!(result.is_err(), "expected symlink tar entry to be rejected");
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Unsupported tar link entry rejected"),
+            "expected link entry rejection, got: {}",
+            err
         );
     }
 }

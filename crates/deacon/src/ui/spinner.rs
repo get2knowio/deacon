@@ -3,18 +3,30 @@ use console::style;
 use deacon_core::progress::{ProgressEmitter, ProgressEvent};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
+use tracing::warn;
 
 // (no-op) TTY helpers live in CLI; UI module remains pure
 
 fn default_style() -> ProgressStyle {
     // Use a green spinner and leave message coloring to message composition
-    ProgressStyle::with_template("{spinner:.green} {msg}")
-        .unwrap()
-        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
+    style_from_template("{spinner:.green} {msg}").tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
 }
 
 fn success_style() -> ProgressStyle {
-    ProgressStyle::with_template("{msg}").unwrap()
+    style_from_template("{msg}")
+}
+
+fn style_from_template(template: &str) -> ProgressStyle {
+    match ProgressStyle::with_template(template) {
+        Ok(style) => style,
+        Err(error) => {
+            warn!(
+                "Failed to build progress style from template '{}': {}. Falling back to default style.",
+                template, error
+            );
+            ProgressStyle::default_spinner()
+        }
+    }
 }
 
 /// A spinner that maps ProgressEvent stream to friendly messages on stderr.
