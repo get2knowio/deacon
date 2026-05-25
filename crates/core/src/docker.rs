@@ -1948,6 +1948,14 @@ impl CliRuntime {
     /// This method builds a Docker image using BuildKit, which is required for
     /// mounting build contexts and proper layer caching.
     ///
+    /// Transient registry failures encountered during the build (TLS handshake
+    /// timeouts, 429 rate limits, dropped connections, 5xx from the registry)
+    /// are retried with the spec-correct network backoff profile (1s/2s/4s,
+    /// capped at 30s, max 3 retries). Terminal failures (Dockerfile syntax
+    /// errors, failing `RUN` commands, 401/403 from the registry) fail on the
+    /// first attempt — see [`crate::docker_retry::classify_docker_error`] for
+    /// the full classification table.
+    ///
     /// # Arguments
     ///
     /// * `args` - Build arguments to pass to `docker buildx build`
@@ -1959,16 +1967,11 @@ impl CliRuntime {
     pub async fn build_image(&self, args: &[String]) -> Result<String> {
         debug!("Building image with BuildKit: {:?}", args);
 
-        let output = Command::new(&self.runtime_path)
-            .args(args)
-            .output()
-            .await
-            .map_err(|e| DockerError::CLIError(format!("Failed to build image: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(DockerError::CLIError(format!("Image build failed: {}", stderr)).into());
-        }
+        let output = crate::docker_retry::run_build_with_retry(
+            std::path::Path::new(&self.runtime_path),
+            args,
+        )
+        .await?;
 
         // Parse the image ID from the output
         // BuildKit output format varies by version:
