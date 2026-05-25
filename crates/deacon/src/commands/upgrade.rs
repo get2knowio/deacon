@@ -5,11 +5,15 @@
 //! command. See `docs/subcommand-specs/upgrade/SPEC.md` for the authoritative
 //! behavior.
 //!
-//! ## PR-5a scope (MVP)
+//! ## Scope (PR-5a + PR-5b)
 //!
-//! - CLI surface (all spec §2 flags accepted)
+//! - CLI surface (all spec §2 flags)
 //! - Argument validation: `--feature` ↔ `--target-version` mutual requirement,
 //!   `--target-version` regex `^\d+(\.\d+(\.\d+)?)?$`
+//! - **`--feature` / `--target-version` config-pin behavior** (PR-5b):
+//!   text-level surgical edit of the matching feature key in
+//!   `devcontainer.json`. Preserves comments and whitespace since we never
+//!   parse-and-re-emit. Spec §5 phase 2.
 //! - Config load via shared `ConfigLoader::load_with_extends`
 //! - Feature resolution via the OCI fetcher (fetches manifests to obtain
 //!   digests + actual versions)
@@ -17,14 +21,6 @@
 //!   `build_lockfile_from_features` — will be deduplicated in a follow-up)
 //! - `--dry-run`: print canonical lockfile JSON to stdout
 //! - Default: `write_lockfile(force_init = true)` per spec §5
-//!
-//! ## Deferred to PR-5b
-//!
-//! - `--feature` / `--target-version` config-pin behavior (modifies
-//!   `devcontainer.json` in place). The flags are accepted today so the CLI
-//!   surface is stable, but using them returns
-//!   `"--feature/--target-version pinning is not yet implemented (PR-5b)"`
-//!   instead of silently doing nothing.
 
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
@@ -35,7 +31,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{debug, info, instrument, warn};
 
-use crate::commands::shared::{load_config, ConfigLoadArgs, ConfigLoadResult};
+use crate::commands::shared::{load_config, ConfigLoadArgs};
 
 /// Arguments for the `upgrade` command. Mirrors the spec's CLI surface
 /// (`docs/subcommand-specs/upgrade/SPEC.md` §2).
@@ -60,10 +56,10 @@ pub struct UpgradeArgs {
     pub dry_run: bool,
     /// Hidden: pin the version of a specific feature in `devcontainer.json`
     /// before regenerating the lockfile. Used by Dependabot. Must be set
-    /// together with `--target-version`. **Deferred to PR-5b.**
+    /// together with `--target-version`.
     pub feature: Option<String>,
     /// Hidden: target version for `--feature`. Must match
-    /// `^\d+(\.\d+(\.\d+)?)?$`. **Deferred to PR-5b.**
+    /// `^\d+(\.\d+(\.\d+)?)?$`.
     pub target_version: Option<String>,
 }
 
@@ -77,27 +73,44 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
     if let Some(tv) = args.target_version.as_deref() {
         validate_target_version_format(tv)?;
     }
-    if args.feature.is_some() {
-        // Surface-parity placeholder: accept the flag combination (so callers
-        // can validate their wiring) but bail before touching devcontainer.json.
-        return Err(anyhow::anyhow!(
-            "--feature/--target-version pinning is not yet implemented (PR-5b)"
-        ));
-    }
 
     // Phase 2: Resolve the workspace + config path via the shared loader.
     // The shared loader returns the resolved config_path so we can derive the
     // lockfile path adjacent to it (spec §6 naming rule).
-    let ConfigLoadResult {
-        config,
-        config_path,
-        ..
-    } = load_config(ConfigLoadArgs {
+    let initial = load_config(ConfigLoadArgs {
         workspace_folder: args.workspace_folder.as_deref(),
         config_path: args.config_path.as_deref(),
         override_config_path: None,
         secrets_files: &[],
     })?;
+    let config_path = initial.config_path.clone();
+
+    // Phase 2.5: Optional config edit (spec §5 phase 2). When both
+    // `--feature` and `--target-version` are set, rewrite the matching
+    // feature key in `devcontainer.json` in place. The edit is text-level
+    // so comments and whitespace are preserved. Per spec, we then re-read
+    // the config so the resolution phase sees the pinned form.
+    let config = if let (Some(feature), Some(target_version)) =
+        (args.feature.as_deref(), args.target_version.as_deref())
+    {
+        info!(
+            "Updating '{}' to '{}' in {}",
+            feature,
+            target_version,
+            config_path.display()
+        );
+        pin_feature_in_config_file(&config_path, feature, target_version)?;
+        // Re-read the config so downstream resolution sees the pinned tag.
+        load_config(ConfigLoadArgs {
+            workspace_folder: args.workspace_folder.as_deref(),
+            config_path: args.config_path.as_deref(),
+            override_config_path: None,
+            secrets_files: &[],
+        })?
+        .config
+    } else {
+        initial.config
+    };
 
     debug!(
         "Loaded configuration from '{}' (features: {:?})",
@@ -149,6 +162,105 @@ fn validate_target_version_format(version: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Pin a feature to a specific version by rewriting its key in
+/// `devcontainer.json`. Spec §5 phase 2.
+///
+/// This is a **text-level surgical edit**: we read the file as a string,
+/// find the literal JSON key for `--feature`, and replace it with the
+/// pinned form. We never parse-and-re-emit the JSON, so comments and
+/// whitespace are preserved — important for hand-maintained
+/// `devcontainer.json` files that often carry inline documentation.
+///
+/// The "matching Feature key" rule (spec §5) is interpreted as an exact
+/// match on the `--feature` value as the user provided it. If a user passed
+/// `--feature ghcr.io/devcontainers/features/node:1`, we look for the
+/// literal `"ghcr.io/devcontainers/features/node:1"` JSON key and replace
+/// with `"ghcr.io/devcontainers/features/node:<target_version>"`.
+///
+/// Errors:
+/// - Config file read/write failures bubble up with context.
+/// - Missing-key in the JSON text returns an error so the caller knows the
+///   `--feature` they specified isn't actually in the config.
+/// - Multiple matches return an error to prevent ambiguous edits (a feature
+///   ID appearing both as a key and inside a string value, for example).
+fn pin_feature_in_config_file(
+    config_path: &std::path::Path,
+    feature: &str,
+    target_version: &str,
+) -> Result<()> {
+    let contents = std::fs::read_to_string(config_path).with_context(|| {
+        format!(
+            "Failed to read devcontainer config from '{}'",
+            config_path.display()
+        )
+    })?;
+
+    let pinned_key = pinned_feature_key(feature, target_version);
+    let (updated, occurrences) = rewrite_feature_key(&contents, feature, &pinned_key);
+
+    match occurrences {
+        0 => Err(anyhow::anyhow!(
+            "Feature '{}' was not found in '{}'. Add it to the config's `features` map before pinning.",
+            feature,
+            config_path.display()
+        )),
+        1 => {
+            std::fs::write(config_path, updated).with_context(|| {
+                format!(
+                    "Failed to write pinned devcontainer config to '{}'",
+                    config_path.display()
+                )
+            })?;
+            debug!(
+                feature = %feature,
+                target_version = %target_version,
+                "Pinned feature key in {}",
+                config_path.display()
+            );
+            Ok(())
+        }
+        n => Err(anyhow::anyhow!(
+            "Feature '{}' appears {} times in '{}' (ambiguous edit). \
+             Resolve manually before re-running upgrade with --feature/--target-version.",
+            feature,
+            n,
+            config_path.display()
+        )),
+    }
+}
+
+/// Compute the pinned form of a feature key.
+///
+/// Strips any existing `:<tag>` suffix from `feature` and re-appends
+/// `:<target_version>`. Features without a tag get one appended.
+///
+/// Naive `rsplit(':')` is the right tool here: registry ports (e.g.
+/// `myregistry.io:5000/...`) live before the first `/`, while the tag is
+/// the segment after the LAST `:` AND with no `/` after it. The exact rule:
+/// the tag separator is the last `:` that occurs after the last `/`.
+fn pinned_feature_key(feature: &str, target_version: &str) -> String {
+    let base = match (feature.rfind(':'), feature.rfind('/')) {
+        (Some(colon), Some(slash)) if colon > slash => &feature[..colon],
+        (Some(colon), None) => &feature[..colon],
+        _ => feature,
+    };
+    format!("{}:{}", base, target_version)
+}
+
+/// Surgically rewrite the JSON key `"<feature>"` to `"<pinned>"` in
+/// `contents`. Returns the rewritten text and the number of replacements.
+///
+/// We match against the literal quoted form (`"<feature>"`) so we don't
+/// accidentally substitute matching substrings inside string *values*
+/// (only a JSON key would be both fully quoted and followed by `:` —
+/// but the leading `"` is enough to be precise without parsing).
+fn rewrite_feature_key(contents: &str, feature: &str, pinned: &str) -> (String, usize) {
+    let needle = format!("\"{}\"", feature);
+    let replacement = format!("\"{}\"", pinned);
+    let occurrences = contents.matches(&needle).count();
+    (contents.replace(&needle, &replacement), occurrences)
 }
 
 /// Pure predicate that mirrors the spec-§2 regex. Hand-rolled to avoid
@@ -466,6 +578,178 @@ mod tests {
     // =========================================================================
     // Args defaults
     // =========================================================================
+
+    // =========================================================================
+    // PR-5b: pin behavior — pure helpers
+    // =========================================================================
+
+    #[test]
+    fn pinned_feature_key_replaces_existing_tag() {
+        // Common case: tag-suffixed user ID gets its tag replaced.
+        assert_eq!(
+            pinned_feature_key("ghcr.io/devcontainers/features/node:1", "1.2.3"),
+            "ghcr.io/devcontainers/features/node:1.2.3"
+        );
+    }
+
+    #[test]
+    fn pinned_feature_key_appends_tag_when_absent() {
+        // No `:` in the user ID → append `:<target_version>`. This handles
+        // the rare case of an unversioned reference (which would otherwise
+        // default to `latest` and is brittle for reproducible builds).
+        assert_eq!(
+            pinned_feature_key("ghcr.io/devcontainers/features/node", "1.2.3"),
+            "ghcr.io/devcontainers/features/node:1.2.3"
+        );
+    }
+
+    #[test]
+    fn pinned_feature_key_preserves_registry_port() {
+        // Registry hostnames may carry a port (e.g. `myregistry.io:5000/...`).
+        // The port colon lives BEFORE the last `/`, so it must NOT be treated
+        // as the tag separator.
+        assert_eq!(
+            pinned_feature_key("myregistry.io:5000/features/node:1", "1.2.3"),
+            "myregistry.io:5000/features/node:1.2.3"
+        );
+        // And the port-only case (no tag) should still get the version appended.
+        assert_eq!(
+            pinned_feature_key("myregistry.io:5000/features/node", "1.2.3"),
+            "myregistry.io:5000/features/node:1.2.3"
+        );
+    }
+
+    #[test]
+    fn rewrite_feature_key_replaces_single_match() {
+        let contents = r#"{
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {}
+  }
+}"#;
+        let (out, n) = rewrite_feature_key(
+            contents,
+            "ghcr.io/devcontainers/features/node:1",
+            "ghcr.io/devcontainers/features/node:1.2.3",
+        );
+        assert_eq!(n, 1);
+        assert!(out.contains("\"ghcr.io/devcontainers/features/node:1.2.3\""));
+        assert!(!out.contains("\"ghcr.io/devcontainers/features/node:1\":"));
+    }
+
+    #[test]
+    fn rewrite_feature_key_preserves_unrelated_keys() {
+        // Sibling features in the same map must not be touched.
+        let contents = r#"{
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers/features/go:1": {}
+  }
+}"#;
+        let (out, _) = rewrite_feature_key(
+            contents,
+            "ghcr.io/devcontainers/features/node:1",
+            "ghcr.io/devcontainers/features/node:1.2.3",
+        );
+        assert!(out.contains("\"ghcr.io/devcontainers/features/node:1.2.3\""));
+        // The go feature must be untouched.
+        assert!(out.contains("\"ghcr.io/devcontainers/features/go:1\""));
+    }
+
+    #[test]
+    fn rewrite_feature_key_reports_zero_for_missing_feature() {
+        let contents = r#"{ "features": {} }"#;
+        let (out, n) = rewrite_feature_key(
+            contents,
+            "ghcr.io/devcontainers/features/node:1",
+            "ghcr.io/devcontainers/features/node:1.2.3",
+        );
+        assert_eq!(n, 0);
+        assert_eq!(out, contents, "no-op when nothing to replace");
+    }
+
+    #[test]
+    fn rewrite_feature_key_reports_ambiguous_when_multiple_matches() {
+        // The literal quoted form appears twice — once as a JSON key, once
+        // as an unescaped string value. We refuse to edit because picking
+        // one is ambiguous (the second occurrence is JSON-valid: the
+        // outer `"`s of the value are the same `"`s that bracket our
+        // needle, so the substring match catches it).
+        let contents = r#"{
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {}
+  },
+  "originalFeature": "ghcr.io/devcontainers/features/node:1"
+}"#;
+        let (_out, n) = rewrite_feature_key(
+            contents,
+            "ghcr.io/devcontainers/features/node:1",
+            "ghcr.io/devcontainers/features/node:1.2.3",
+        );
+        assert_eq!(n, 2, "must detect the ambiguity for caller error reporting");
+    }
+
+    #[test]
+    fn rewrite_feature_key_ignores_escaped_quoted_substring() {
+        // A JSON value containing the feature ID with escaped quotes is a
+        // *different* byte sequence (`\"` vs `"`), so the substring search
+        // correctly skips it. This documents the robustness of the
+        // text-level edit against the common "feature id mentioned in a
+        // comment-as-value" pattern.
+        let contents = r#"{
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {}
+  },
+  "note": "we use \"ghcr.io/devcontainers/features/node:1\" here"
+}"#;
+        let (_out, n) = rewrite_feature_key(
+            contents,
+            "ghcr.io/devcontainers/features/node:1",
+            "ghcr.io/devcontainers/features/node:1.2.3",
+        );
+        assert_eq!(
+            n, 1,
+            "escaped-quote occurrence inside a string value must not count as a match"
+        );
+    }
+
+    #[test]
+    fn pin_feature_in_config_file_round_trips_through_disk() {
+        // End-to-end sanity check: write a fixture, pin a feature, read back.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("devcontainer.json");
+        let original = r#"{
+  "name": "test",
+  "image": "alpine:3.18",
+  // comment that must survive
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" }
+  }
+}"#;
+        std::fs::write(&path, original).unwrap();
+
+        pin_feature_in_config_file(&path, "ghcr.io/devcontainers/features/node:1", "1.2.3")
+            .unwrap();
+
+        let updated = std::fs::read_to_string(&path).unwrap();
+        // Key rewritten.
+        assert!(updated.contains("\"ghcr.io/devcontainers/features/node:1.2.3\""));
+        // Comment preserved (this is the whole point of text-level editing).
+        assert!(updated.contains("// comment that must survive"));
+        // Other content preserved.
+        assert!(updated.contains("\"version\": \"lts\""));
+    }
+
+    #[test]
+    fn pin_feature_in_config_file_errors_when_feature_missing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("devcontainer.json");
+        std::fs::write(&path, r#"{ "features": {} }"#).unwrap();
+
+        let err =
+            pin_feature_in_config_file(&path, "ghcr.io/devcontainers/features/node:1", "1.2.3")
+                .unwrap_err();
+        assert!(err.to_string().contains("was not found"), "got: {err}");
+    }
 
     #[test]
     fn upgrade_args_defaults_are_sensible() {

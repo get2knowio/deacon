@@ -529,11 +529,11 @@ pub enum Commands {
         docker_compose_path: String,
         /// HIDDEN: pin the version of a specific Feature in `devcontainer.json`
         /// before regenerating the lockfile. Used by Dependabot.
-        /// Must be used with `--target-version`. **Pinning is deferred to PR-5b.**
+        /// Must be used with `--target-version`.
         #[arg(long, short = 'f', hide = true)]
         feature: Option<String>,
         /// HIDDEN: target version for `--feature`. Must match
-        /// `^\d+(\.\d+(\.\d+)?)?$`. **Pinning is deferred to PR-5b.**
+        /// `^\d+(\.\d+(\.\d+)?)?$`.
         #[arg(long, short = 'v', hide = true)]
         target_version: Option<String>,
     },
