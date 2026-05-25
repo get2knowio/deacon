@@ -6,12 +6,26 @@
 //!
 //! All logging output is directed to stderr to preserve stdout for command output.
 
-use crate::redaction::RedactionConfig;
+use crate::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
 use anyhow::Result;
 use std::{io, sync::Once};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 static INIT: Once = Once::new();
+
+#[derive(Clone)]
+struct RedactingStderr {
+    config: RedactionConfig,
+    registry: SecretRegistry,
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RedactingStderr {
+    type Writer = RedactingWriter<io::Stderr>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        RedactingWriter::new(io::stderr(), self.config.clone(), &self.registry)
+    }
+}
 
 /// Initialize the logging system with optional format specification and redaction config
 ///
@@ -66,9 +80,16 @@ pub fn init_with_redaction(
     format: Option<&str>,
     redaction_config: Option<RedactionConfig>,
 ) -> Result<()> {
-    let _redaction_config = redaction_config.unwrap_or_default();
+    let redaction_config = redaction_config.unwrap_or_default();
     INIT.call_once(|| {
         let filter = create_env_filter(None);
+        let redacting_stderr = RedactingStderr {
+            config: redaction_config.clone(),
+            registry: redaction_config
+                .custom_registry
+                .clone()
+                .unwrap_or_else(|| crate::redaction::global_registry().clone()),
+        };
 
         // Determine format from parameter or environment variable
         let env_format = std::env::var("DEACON_LOG_FORMAT").ok();
@@ -87,7 +108,7 @@ pub fn init_with_redaction(
                             .json()
                             .with_target(true)
                             .with_span_events(span_events)
-                            .with_writer(io::stderr),
+                            .with_writer(redacting_stderr.clone()),
                     )
                     .with(filter)
                     .init();
@@ -99,7 +120,7 @@ pub fn init_with_redaction(
                         fmt::layer()
                             .with_target(true)
                             .with_span_events(span_events)
-                            .with_writer(io::stderr),
+                            .with_writer(redacting_stderr),
                     )
                     .with(filter)
                     .init();

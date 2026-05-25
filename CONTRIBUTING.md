@@ -14,15 +14,15 @@ git clone https://github.com/YOUR_USERNAME/deacon.git
 cd deacon
 
 # Build all crates
-cargo build
+cargo build --quiet
 
 # Run the CLI (currently shows placeholder)
 cargo run -- --help
 cargo run -- --version
 cargo run
 
-# Run all tests
-cargo test
+# Fast default test loop (nextest)
+make test-nextest-fast
 
 # Format and lint
 cargo fmt --all
@@ -34,7 +34,7 @@ cargo clippy --all-targets -- -D warnings
 2. **Clone your fork locally**
 3. **Create a feature branch**: `git checkout -b feature/your-feature`
 4. **Make changes** following the coding guidelines below
-5. **Test your changes**: `cargo test` and manual testing
+5. **Test your changes**: `make test-nextest-fast` (or a more targeted `make test-nextest-*` target) and manual testing
 6. **Format and lint**: `cargo fmt --all && cargo clippy --all-targets -- -D warnings`
 7. **Commit with clear messages** (preferably following [Conventional Commits](https://conventionalcommits.org/))
 8. **Push to your fork**: `git push origin feature/your-feature`
@@ -56,7 +56,11 @@ docs/
 |------|---------|
 | Build | `cargo build` |
 | Build (full release feature set) | `cargo build --release` |
-| Test | `cargo test` |
+| Test (fast default) | `make test-nextest-fast` |
+| Test (full suite) | `make test-nextest` |
+| Test (unit only) | `make test-nextest-unit` |
+| Test (docker integration) | `make test-nextest-docker` |
+| Test (smoke) | `make test-nextest-smoke` |
 | Format code | `cargo fmt --all` |
 | Lint (clippy) | `cargo clippy --all-targets -- -D warnings` |
 | Update dependencies | `cargo update` |
@@ -81,37 +85,22 @@ cargo add --manifest-path crates/<crate>/Cargo.toml <crate_name>
 - **Performance**: Keep tests fast (< 2s) for quick feedback, e2e tests < 30s total
 - **Deterministic**: Tests should not depend on external networks or random data
 
-### Running End-to-End Tests
-The e2e test suite validates the complete integration of:
-- Configuration discovery and loading
-- Variable substitution
-- Feature parsing and handling
-- Lifecycle command processing
-- Plugin customization support
-- Logging and error handling
+### Running Test Suites
+
+Prefer the repository make targets (powered by `cargo-nextest`) over raw `cargo test`:
 
 ```bash
-# Run all e2e tests
-cargo test --test integration_e2e --manifest-path crates/deacon/Cargo.toml
+# Fast feedback during development (default)
+make test-nextest-fast
 
-# Run specific e2e test scenarios
-cargo test test_e2e_basic_config_read --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_variable_substitution --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_features_configuration --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_plugin_customizations --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_lifecycle_simulation --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_performance_under_30s --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_error_handling --manifest-path crates/deacon/Cargo.toml
+# Targeted suites
+make test-nextest-unit
+make test-nextest-docker
+make test-nextest-smoke
+
+# Full validation before PR
+make test-nextest
 ```
-
-The e2e tests are designed to run quickly (total runtime < 30 seconds) and validate:
-1. **Basic config reading**: Configuration discovery, loading, and JSON output
-2. **Variable substitution**: Replacement of workspace and environment variables
-3. **Feature configuration**: Parsing of local and remote feature references
-4. **Plugin customizations**: VSCode extensions and settings handling
-5. **Lifecycle simulation**: Command processing with variable substitution
-6. **Performance validation**: Ensuring operations complete within time limits
-7. **Error handling**: Proper handling of missing files and invalid JSON
 
 ## Coding Standards
 - **Follow `rustfmt` defaults** - run `cargo fmt --all` before committing
@@ -138,7 +127,7 @@ RUST_LOG=debug cargo run -- --help
 - **Ubuntu checks on PR/merge**:
   - Lint: rustfmt check, cargo check, clippy, doctests
   - Test: `make test-nextest-fast` (parallel via cargo-nextest)
-  - Smoke: `make test-smoke` (serial)
+  - Smoke: `make test-nextest-smoke` (serial)
   - Coverage: cargo-llvm-cov with LCOV upload (threshold enforced via `MIN_COVERAGE`)
 - **Nextest CI timing**: `make test-nextest-ci` produces `artifacts/nextest/ci-timing.json` for timing comparison
 - **macOS/Windows checks (manual)**: Trigger the "CI (Other OS)" workflow via "Run workflow" in GitHub Actions to run macOS and Windows jobs on demand (macOS uses Colima for Docker)

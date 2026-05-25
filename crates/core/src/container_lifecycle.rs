@@ -2067,62 +2067,73 @@ where
     info!("Dotfiles repository cloned successfully");
 
     // Step 3: Determine and execute install command
-    let install_command_str = if let Some(ref custom_command) = dotfiles_config.install_command {
+    let install_command = if let Some(ref custom_command) = dotfiles_config.install_command {
         debug!("Using custom dotfiles install command: {}", custom_command);
-        Some(custom_command.clone())
+        let parsed = shell_words::split(custom_command).map_err(|e| {
+            DeaconError::Lifecycle(format!("Invalid dotfiles install command syntax: {}", e))
+        })?;
+        if parsed.is_empty() {
+            return Err(DeaconError::Lifecycle(
+                "Dotfiles install command is empty after parsing".to_string(),
+            ));
+        }
+        Some(parsed)
     } else {
         // Auto-detect install script
         debug!("Auto-detecting install script in dotfiles repository");
 
-        let detect_script_command = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            format!(
-                "if [ -f {}/install.sh ]; then echo 'install.sh'; elif [ -f {}/setup.sh ]; then echo 'setup.sh'; fi",
-                target_path, target_path
-            ),
-        ];
+        let install_script = format!("{}/install.sh", target_path);
+        let setup_script = format!("{}/setup.sh", target_path);
 
-        let detect_result = docker
+        let has_install = docker
             .exec(
                 &lifecycle_config.container_id,
-                &detect_script_command,
+                &["test".to_string(), "-f".to_string(), install_script],
                 exec_config.clone(),
             )
-            .await;
+            .await
+            .map(|r| r.success)
+            .unwrap_or(false);
+        let has_setup = if has_install {
+            false
+        } else {
+            docker
+                .exec(
+                    &lifecycle_config.container_id,
+                    &["test".to_string(), "-f".to_string(), setup_script],
+                    exec_config.clone(),
+                )
+                .await
+                .map(|r| r.success)
+                .unwrap_or(false)
+        };
 
-        match detect_result {
-            Ok(result) if !result.stdout.trim().is_empty() => {
-                let script_name = result.stdout.trim();
-                debug!("Auto-detected install script: {}", script_name);
-
-                // Use detected shell or fallback to bash
-                let shell = detected_shell.unwrap_or("bash");
-                Some(format!("{} {}/{}", shell, target_path, script_name))
-            }
-            _ => {
-                debug!("No install script found in dotfiles repository");
-                None
-            }
+        if has_install {
+            debug!("Auto-detected install script: install.sh");
+            let shell = detected_shell.unwrap_or("bash");
+            Some(vec![shell.to_string(), format!("{}/install.sh", target_path)])
+        } else if has_setup {
+            debug!("Auto-detected install script: setup.sh");
+            let shell = detected_shell.unwrap_or("bash");
+            Some(vec![shell.to_string(), format!("{}/setup.sh", target_path)])
+        } else {
+            debug!("No install script found in dotfiles repository");
+            None
         }
     };
 
     // Step 4: Execute install command if present
-    if let Some(install_cmd) = install_command_str {
-        info!("Executing dotfiles install command: {}", install_cmd);
-
-        let install_command = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            format!("cd {} && {}", target_path, install_cmd),
-        ];
+    if let Some(install_command) = install_command {
+        info!("Executing dotfiles install command: {:?}", install_command);
+        let mut install_exec_config = exec_config;
+        install_exec_config.working_dir = Some(target_path.clone());
 
         let install_start = Instant::now();
         let install_result = docker
             .exec(
                 &lifecycle_config.container_id,
                 &install_command,
-                exec_config,
+                install_exec_config,
             )
             .await
             .map_err(|e| {
@@ -2130,7 +2141,7 @@ where
             })?;
 
         phase_result.commands.push(CommandResult {
-            command: install_cmd.clone(),
+            command: install_command.join(" "),
             exit_code: install_result.exit_code,
             duration: install_start.elapsed(),
             success: install_result.success,

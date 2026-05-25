@@ -18,7 +18,7 @@ impl From<DefaultUserEnvProbe> for ContainerProbeMode {
         match p {
             DefaultUserEnvProbe::None => ContainerProbeMode::None,
             DefaultUserEnvProbe::LoginInteractiveShell => ContainerProbeMode::LoginInteractiveShell,
-            DefaultUserEnvProbe::InteractiveShell => ContainerProbeMode::LoginShell,
+            DefaultUserEnvProbe::InteractiveShell => ContainerProbeMode::InteractiveShell,
             DefaultUserEnvProbe::LoginShell => ContainerProbeMode::LoginShell,
         }
     }
@@ -736,6 +736,13 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_redact: bool,
 
+    /// Trust the workspace and allow host-side initializeCommand execution.
+    ///
+    /// By default, host-side lifecycle execution is blocked unless trust is explicitly granted
+    /// via this flag or the DEACON_TRUST_WORKSPACE environment variable.
+    #[arg(long, global = true)]
+    pub trust_workspace: bool,
+
     /// Progress format (json|none|auto). Auto is silent unless --progress-file is set.
     #[arg(long, global = true, value_enum, default_value = "auto")]
     pub progress: ProgressFormat,
@@ -948,7 +955,15 @@ impl Cli {
                 format!("deacon={},deacon_core={}", log_level, log_level),
             );
         }
-        deacon_core::logging::init(log_format)?;
+
+        // Create redaction configuration from CLI flags
+        let redaction_config = if self.no_redact {
+            deacon_core::redaction::RedactionConfig::disabled()
+        } else {
+            deacon_core::redaction::RedactionConfig::default()
+        };
+
+        deacon_core::logging::init_with_redaction(log_format, Some(redaction_config.clone()))?;
 
         // Emit logs to help with testing and log-level verification
         tracing::debug!("CLI initialized with log level: {}", log_level);
@@ -958,13 +973,6 @@ impl Cli {
         if self.no_redact {
             tracing::warn!("Secret redaction is DISABLED via --no-redact flag. This may expose sensitive information in logs and output. Use only for debugging purposes!");
         }
-
-        // Create redaction configuration from CLI flags
-        let redaction_config = if self.no_redact {
-            deacon_core::redaction::RedactionConfig::disabled()
-        } else {
-            deacon_core::redaction::RedactionConfig::default()
-        };
 
         // Get global secret registry
         let secret_registry = deacon_core::redaction::global_registry();
@@ -1112,6 +1120,7 @@ impl Cli {
                     redaction_config: redaction_config.clone(),
                     secret_registry: secret_registry.clone(),
                     secrets_files: self.secrets_file.clone(),
+                    trust_workspace: self.trust_workspace,
                     env_file,
                     docker_path: self.docker_path.clone(),
                     docker_compose_path: self.docker_compose_path.clone(),

@@ -7,10 +7,12 @@ use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use super::auth::{RegistryAuth, RegistryCredentials};
 use super::types::HttpResponse;
+
+const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// HTTP client trait for OCI registry operations
 #[async_trait::async_trait]
@@ -67,9 +69,9 @@ pub struct ReqwestClient {
 }
 
 impl ReqwestClient {
-    /// Create a new ReqwestClient with default configuration (no timeout)
+    /// Create a new ReqwestClient with default configuration (safe timeout)
     pub fn new() -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::with_timeout(None)
+        Self::with_timeout(Some(DEFAULT_HTTP_TIMEOUT))
     }
 
     /// Parse WWW-Authenticate header and exchange for token
@@ -221,16 +223,7 @@ impl ReqwestClient {
 
 impl Default for ReqwestClient {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|e| {
-            warn!(
-                "Failed to create ReqwestClient with authentication: {}. Using basic client.",
-                e
-            );
-            Self {
-                client: reqwest::Client::new(),
-                auth: RegistryAuth::new(),
-            }
-        })
+        Self::new().expect("Failed to initialize ReqwestClient securely")
     }
 }
 

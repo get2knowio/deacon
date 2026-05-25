@@ -401,6 +401,7 @@ pub struct UpArgs {
     // Lifecycle
     pub shutdown: bool,
     pub container_name: Option<String>,
+    pub trust_workspace: bool,
 
     // Paths and config
     pub workspace_folder: Option<PathBuf>,
@@ -474,6 +475,7 @@ impl Default for UpArgs {
             forward_ports: Vec::new(),
             shutdown: false,
             container_name: None,
+            trust_workspace: false,
             workspace_folder: None,
             config_path: None,
             override_config_path: None,

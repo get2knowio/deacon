@@ -159,7 +159,13 @@ pub(crate) async fn execute_container_up(
 
     // Execute initializeCommand on host before any container operations
     if let Some(ref initialize) = config.initialize_command {
-        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
+        execute_initialize_command(
+            initialize,
+            workspace_folder,
+            &args.progress_tracker,
+            args.trust_workspace,
+        )
+        .await?;
     }
 
     // Check Docker availability after host-side initialization

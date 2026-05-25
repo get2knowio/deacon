@@ -369,6 +369,7 @@ pub(crate) async fn execute_initialize_command(
     progress_tracker: &std::sync::Arc<
         std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>,
     >,
+    trust_workspace: bool,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::ContainerLifecycleCommands;
     use deacon_core::variable::SubstitutionContext;
@@ -387,6 +388,15 @@ pub(crate) async fn execute_initialize_command(
             return Ok(());
         }
     };
+
+    let trusted_via_env = std::env::var("DEACON_TRUST_WORKSPACE")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if !(trust_workspace || trusted_via_env) {
+        anyhow::bail!(
+            "Refusing to run host initializeCommand in an untrusted workspace. Re-run with --trust-workspace or set DEACON_TRUST_WORKSPACE=1."
+        );
+    }
 
     // Build a LifecycleCommandList from the parsed value
     let command_list = LifecycleCommandList {

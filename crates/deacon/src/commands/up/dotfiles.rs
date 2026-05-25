@@ -101,11 +101,7 @@ pub(crate) async fn execute_dotfiles_installation(
     };
 
     // T015: Step 0 - Check if dotfiles directory already exists (idempotency)
-    let check_exists_command = vec![
-        "sh".to_string(),
-        "-c".to_string(),
-        format!("test -d {}", target_path),
-    ];
+    let check_exists_command = vec!["test".to_string(), "-d".to_string(), target_path.clone()];
 
     let exists_result = docker
         .exec(container_id, &check_exists_command, exec_config.clone())
@@ -177,53 +173,66 @@ pub(crate) async fn execute_dotfiles_installation(
     info!("Dotfiles repository cloned successfully");
 
     // T015: Step 2 - Determine and execute install script
-    let install_command_str = if let Some(custom_command) = &args.dotfiles_install_command {
+    let install_command = if let Some(custom_command) = &args.dotfiles_install_command {
         // Use custom install command
         debug!("Using custom dotfiles install command: {}", custom_command);
-        Some(custom_command.clone())
+        let parsed = shell_words::split(custom_command)
+            .map_err(|e| anyhow::anyhow!("Invalid dotfiles install command syntax: {}", e))?;
+        if parsed.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Dotfiles install command is empty after parsing"
+            ));
+        }
+        Some(parsed)
     } else {
         // Auto-detect install script
         debug!("Auto-detecting install script in dotfiles repository");
 
-        // Check for install.sh first, then setup.sh
-        let detect_script_command = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            format!(
-                "if [ -f {}/install.sh ]; then echo 'install.sh'; elif [ -f {}/setup.sh ]; then echo 'setup.sh'; fi",
-                target_path, target_path
-            ),
-        ];
+        let install_script = format!("{}/install.sh", target_path);
+        let setup_script = format!("{}/setup.sh", target_path);
+        let has_install = docker
+            .exec(
+                container_id,
+                &["test".to_string(), "-f".to_string(), install_script],
+                exec_config.clone(),
+            )
+            .await
+            .map(|r| r.success)
+            .unwrap_or(false);
+        let has_setup = if has_install {
+            false
+        } else {
+            docker
+                .exec(
+                    container_id,
+                    &["test".to_string(), "-f".to_string(), setup_script],
+                    exec_config.clone(),
+                )
+                .await
+                .map(|r| r.success)
+                .unwrap_or(false)
+        };
 
-        let detect_result = docker
-            .exec(container_id, &detect_script_command, exec_config.clone())
-            .await;
-
-        match detect_result {
-            Ok(result) if !result.stdout.trim().is_empty() => {
-                let script_name = result.stdout.trim();
-                debug!("Auto-detected install script: {}", script_name);
-                Some(format!("bash {}/{}", target_path, script_name))
-            }
-            _ => {
-                debug!("No install script found in dotfiles repository");
-                None
-            }
+        if has_install {
+            debug!("Auto-detected install script: install.sh");
+            Some(vec!["bash".to_string(), format!("{}/install.sh", target_path)])
+        } else if has_setup {
+            debug!("Auto-detected install script: setup.sh");
+            Some(vec!["bash".to_string(), format!("{}/setup.sh", target_path)])
+        } else {
+            debug!("No install script found in dotfiles repository");
+            None
         }
     };
 
     // T015: Step 3 - Execute install command if present
-    if let Some(install_cmd) = install_command_str {
-        info!("Executing dotfiles install command: {}", install_cmd);
-
-        let install_command = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            format!("cd {} && {}", target_path, install_cmd),
-        ];
+    if let Some(install_command) = install_command {
+        info!("Executing dotfiles install command: {:?}", install_command);
+        let mut install_exec_config = exec_config;
+        install_exec_config.working_dir = Some(target_path.clone());
 
         let install_result = docker
-            .exec(container_id, &install_command, exec_config)
+            .exec(container_id, &install_command, install_exec_config)
             .await?;
 
         // Check if install command was successful

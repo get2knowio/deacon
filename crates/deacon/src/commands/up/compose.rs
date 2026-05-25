@@ -239,7 +239,13 @@ pub(crate) async fn execute_compose_up(
 
     // Execute initializeCommand on host before starting compose operations
     if let Some(ref initialize) = config.initialize_command {
-        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
+        execute_initialize_command(
+            initialize,
+            workspace_folder,
+            &args.progress_tracker,
+            args.trust_workspace,
+        )
+        .await?;
     }
 
     // Stop existing containers if requested

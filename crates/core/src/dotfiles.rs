@@ -417,9 +417,17 @@ pub async fn execute_dotfiles_phase(config: &DotfilesPhaseConfig) -> Result<Dotf
 /// Execute a custom install command in the dotfiles directory
 #[instrument]
 async fn execute_custom_install_command(target: &Path, command: &str) -> Result<()> {
-    let output = Command::new("bash")
-        .arg("-c")
-        .arg(command)
+    let parsed = shell_words::split(command)
+        .map_err(|e| GitError::CLIError(format!("Invalid custom install command syntax: {}", e)))?;
+    if parsed.is_empty() {
+        return Err(GitError::CLIError("Custom install command is empty".to_string()).into());
+    }
+
+    let program = parsed[0].clone();
+    let args = &parsed[1..];
+
+    let output = Command::new(program)
+        .args(args)
         .current_dir(target)
         .output()
         .await
