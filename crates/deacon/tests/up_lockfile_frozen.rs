@@ -265,16 +265,17 @@ fn test_frozen_lockfile_missing_fails() {
         ),
     }
 
-    // Verify error message content
+    // Verify error message content matches upstream-aligned format
+    // ("Lockfile does not exist." / "--frozen-lockfile" — see lockfile.rs format_error)
     let error_msg = validation_result.format_error();
     assert!(
-        error_msg.contains("Frozen lockfile mode requires a lockfile"),
-        "Error message should indicate lockfile is required. Got: {}",
+        error_msg.contains("Lockfile does not exist."),
+        "Error message should match upstream missing-lockfile string. Got: {}",
         error_msg
     );
     assert!(
-        error_msg.contains("--experimental-frozen-lockfile"),
-        "Error message should mention the flag to disable. Got: {}",
+        error_msg.contains("--frozen-lockfile"),
+        "Error message should mention the graduated flag. Got: {}",
         error_msg
     );
 }
@@ -321,7 +322,7 @@ fn test_frozen_lockfile_mismatch_fails() {
     // Verify error message content
     let error_msg = validation_result.format_error();
     assert!(
-        error_msg.contains("features declared in config but missing from lockfile"),
+        error_msg.contains("Features declared in config but missing from lockfile"),
         "Error message should describe mismatch direction. Got: {}",
         error_msg
     );
@@ -385,7 +386,7 @@ fn test_lockfile_mismatch_warns_continues() {
     // The format_error() provides the warning message that would be logged.
     let warning_msg = validation_result.format_error();
     assert!(
-        warning_msg.contains("features in lockfile but not declared in config"),
+        warning_msg.contains("Features in lockfile but not declared in config"),
         "Warning should describe the mismatch. Got: {}",
         warning_msg
     );
@@ -480,7 +481,7 @@ fn test_frozen_mode_with_lockfile_features_not_in_config_fails() {
 
     let error_msg = validation_result.format_error();
     assert!(
-        error_msg.contains("features in lockfile but not declared in config"),
+        error_msg.contains("Features in lockfile but not declared in config"),
         "Error should describe the mismatch direction. Got: {}",
         error_msg
     );
@@ -584,10 +585,10 @@ fn test_frozen_missing_lockfile_error_message_content() {
 
     let error_msg = result.format_error();
 
-    // Verify message contains required components
+    // Verify message matches upstream-aligned format
     assert!(
-        error_msg.contains("Frozen lockfile mode requires a lockfile"),
-        "Error should indicate frozen mode requirement. Got: {}",
+        error_msg.contains("Lockfile does not exist."),
+        "Error should use upstream missing-lockfile string. Got: {}",
         error_msg
     );
     assert!(
@@ -596,8 +597,8 @@ fn test_frozen_missing_lockfile_error_message_content() {
         error_msg
     );
     assert!(
-        error_msg.contains("--experimental-frozen-lockfile"),
-        "Error should provide actionable guidance. Got: {}",
+        error_msg.contains("--frozen-lockfile"),
+        "Error should reference the graduated flag. Got: {}",
         error_msg
     );
 }
@@ -612,12 +613,12 @@ fn test_frozen_mismatch_missing_from_lockfile_error_message_content() {
     let error_msg = result.format_error();
 
     assert!(
-        error_msg.contains("Frozen lockfile mismatch"),
-        "Error should indicate frozen lockfile mismatch. Got: {}",
+        error_msg.contains("Lockfile does not match."),
+        "Error should use upstream mismatch string. Got: {}",
         error_msg
     );
     assert!(
-        error_msg.contains("features declared in config but missing from lockfile"),
+        error_msg.contains("Features declared in config but missing from lockfile"),
         "Error should describe mismatch direction. Got: {}",
         error_msg
     );
@@ -638,12 +639,12 @@ fn test_frozen_mismatch_extra_in_lockfile_error_message_content() {
     let error_msg = result.format_error();
 
     assert!(
-        error_msg.contains("Frozen lockfile mismatch"),
-        "Error should indicate frozen lockfile mismatch. Got: {}",
+        error_msg.contains("Lockfile does not match."),
+        "Error should use upstream mismatch string. Got: {}",
         error_msg
     );
     assert!(
-        error_msg.contains("features in lockfile but not declared in config"),
+        error_msg.contains("Features in lockfile but not declared in config"),
         "Error should describe mismatch direction. Got: {}",
         error_msg
     );
@@ -665,8 +666,8 @@ fn test_frozen_mismatch_bidirectional_error_message_content() {
     let error_msg = result.format_error();
 
     assert!(
-        error_msg.contains("Frozen lockfile mismatch"),
-        "Error should indicate frozen lockfile mismatch. Got: {}",
+        error_msg.contains("Lockfile does not match."),
+        "Error should use upstream mismatch string. Got: {}",
         error_msg
     );
     assert!(
