@@ -30,12 +30,11 @@ use tracing::{debug, instrument};
 pub struct ReadConfigurationArgs {
     pub include_merged_configuration: bool,
     pub include_features_configuration: bool,
-    /// TODO(#268): Implement container-based config reading
-    /// When container_id is provided, read configuration from running container
-    #[allow(dead_code)]
+    /// When set, target this container directly for label-based merged-config metadata
+    /// extraction (`devcontainer.metadata`); skips workspace-based discovery.
     pub container_id: Option<String>,
-    /// When id_label is provided, resolve container and read configuration from it
-    #[allow(dead_code)]
+    /// When non-empty, resolve target container by matching these `key=value` labels;
+    /// takes precedence over workspace-based discovery but yields to `container_id`.
     pub id_label: Vec<String>,
     /// Flag to control workspace root discovery behavior.
     /// When true (default), uses Git worktree detection to find the true workspace root.
