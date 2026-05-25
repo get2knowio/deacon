@@ -13,6 +13,8 @@ pub mod outdated;
 pub mod read_configuration;
 #[cfg(feature = "full")]
 pub mod run_user_commands;
+#[cfg(feature = "full")]
+pub mod set_up;
 pub mod shared;
 #[cfg(feature = "full")]
 pub mod templates;

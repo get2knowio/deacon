@@ -503,7 +503,7 @@ pub enum Commands {
         /// Skip postCreate lifecycle phase
         #[arg(long)]
         skip_post_create: bool,
-        /// Skip postAttach lifecycle phase  
+        /// Skip postAttach lifecycle phase
         #[arg(long)]
         skip_post_attach: bool,
         /// Skip non-blocking commands (postStart & postAttach phases)
@@ -521,6 +521,41 @@ pub enum Commands {
         /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
         #[arg(long, action = clap::ArgAction::Append)]
         id_label: Vec<String>,
+    },
+
+    /// Convert an already-running container into a DevContainer by applying
+    /// configuration + image metadata, executing lifecycle hooks, and emitting
+    /// a JSON snapshot of the resulting configuration.
+    ///
+    /// See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
+    #[cfg(feature = "full")]
+    SetUp {
+        /// Target container ID (required). The container must already exist.
+        #[arg(long)]
+        container_id: String,
+        /// Optional path to a devcontainer.json to layer on top of the
+        /// container's embedded image metadata.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Skip all lifecycle hooks (onCreate, updateContent, postCreate,
+        /// postStart, postAttach) and dotfiles installation.
+        #[arg(long)]
+        skip_post_create: bool,
+        /// Stop after the configured `waitFor` hook (default `updateContent`).
+        #[arg(long)]
+        skip_non_blocking_commands: bool,
+        /// Extra remote env to inject when running hooks (repeatable).
+        #[arg(long = "remote-env", action = clap::ArgAction::Append)]
+        remote_env: Vec<String>,
+        /// Include the (substituted) configuration in the JSON result.
+        #[arg(long)]
+        include_configuration: bool,
+        /// Include the (substituted) merged configuration in the JSON result.
+        #[arg(long)]
+        include_merged_configuration: bool,
+        /// Inside-container user data root (default `~/.devcontainer`).
+        #[arg(long)]
+        container_data_folder: Option<PathBuf>,
     },
 
     /// Stop and optionally remove development container or compose project
@@ -1336,6 +1371,37 @@ impl Cli {
                 };
 
                 execute_run_user_commands(args).await
+            }
+            #[cfg(feature = "full")]
+            Some(Commands::SetUp {
+                container_id,
+                config,
+                skip_post_create,
+                skip_non_blocking_commands,
+                remote_env,
+                include_configuration,
+                include_merged_configuration,
+                container_data_folder,
+            }) => {
+                use crate::commands::set_up::{execute_set_up, SetUpArgs};
+
+                let args = SetUpArgs {
+                    container_id,
+                    // Per spec §2: --config is local to set-up and overrides
+                    // the global --config when both are present.
+                    config_path: config.or(self.config.clone()),
+                    skip_post_create,
+                    skip_non_blocking_commands,
+                    remote_env,
+                    include_configuration,
+                    include_merged_configuration,
+                    container_data_folder: container_data_folder
+                        .or_else(|| self.container_data_folder.clone()),
+                    docker_path: self.docker_path.clone(),
+                    progress_tracker: progress_tracker.clone(),
+                };
+
+                execute_set_up(args).await
             }
             Some(Commands::Down {
                 remove,
