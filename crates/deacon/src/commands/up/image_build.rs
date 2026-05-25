@@ -232,21 +232,16 @@ pub(crate) async fn build_image_from_config(
 
     debug!("Docker build command: docker {}", build_args.join(" "));
 
-    // Execute docker build
-    let output = tokio::process::Command::new("docker")
-        .args(&build_args)
-        .output()
-        .await
-        .context("Failed to execute docker build")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(DeaconError::Docker(DockerError::CLIError(format!(
-            "Docker build failed: {}",
-            stderr
-        )))
-        .into());
-    }
+    // Execute docker build with retry-on-transient (network blips, 429,
+    // 5xx from registry). Terminal failures (Dockerfile syntax, RUN failure,
+    // 401/403) fail on the first attempt — see classifier in
+    // deacon_core::docker_retry.
+    let output = deacon_core::docker_retry::run_build_with_retry(
+        std::path::Path::new("docker"),
+        &build_args,
+    )
+    .await
+    .context("docker build failed")?;
 
     let image_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     debug!("Built image with ID: {}", image_id);
