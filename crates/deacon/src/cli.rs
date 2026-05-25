@@ -18,9 +18,67 @@ impl From<DefaultUserEnvProbe> for ContainerProbeMode {
         match p {
             DefaultUserEnvProbe::None => ContainerProbeMode::None,
             DefaultUserEnvProbe::LoginInteractiveShell => ContainerProbeMode::LoginInteractiveShell,
-            DefaultUserEnvProbe::InteractiveShell => ContainerProbeMode::LoginShell,
+            DefaultUserEnvProbe::InteractiveShell => ContainerProbeMode::InteractiveShell,
             DefaultUserEnvProbe::LoginShell => ContainerProbeMode::LoginShell,
         }
+    }
+}
+
+#[cfg(test)]
+mod default_user_env_probe_mapping_tests {
+    //! Pin every `DefaultUserEnvProbe` CLI variant to a distinct
+    //! `ContainerProbeMode` core variant. Catches the regression where
+    //! `InteractiveShell` silently aliased to `LoginShell` instead of the
+    //! spec-defined interactive-only mode.
+    use super::{ContainerProbeMode, DefaultUserEnvProbe};
+
+    #[test]
+    fn none_maps_to_none() {
+        let mode: ContainerProbeMode = DefaultUserEnvProbe::None.into();
+        assert_eq!(mode, ContainerProbeMode::None);
+    }
+
+    #[test]
+    fn login_interactive_shell_maps_through() {
+        let mode: ContainerProbeMode = DefaultUserEnvProbe::LoginInteractiveShell.into();
+        assert_eq!(mode, ContainerProbeMode::LoginInteractiveShell);
+    }
+
+    #[test]
+    fn interactive_shell_maps_to_interactive_shell() {
+        // Regression: this used to map to `LoginShell` (spec-incorrect).
+        // The spec defines `interactiveShell` as `shell -ic 'env'` — distinct
+        // from both `loginShell` (`-lc`) and `loginInteractiveShell` (`-lic`).
+        let mode: ContainerProbeMode = DefaultUserEnvProbe::InteractiveShell.into();
+        assert_eq!(mode, ContainerProbeMode::InteractiveShell);
+    }
+
+    #[test]
+    fn login_shell_maps_through() {
+        let mode: ContainerProbeMode = DefaultUserEnvProbe::LoginShell.into();
+        assert_eq!(mode, ContainerProbeMode::LoginShell);
+    }
+
+    #[test]
+    fn every_cli_variant_maps_to_a_distinct_core_variant() {
+        // The test fails if two CLI variants collide on the same
+        // `ContainerProbeMode` — catches accidental dedup if a future
+        // CLI addition lands without an accompanying core variant.
+        use std::collections::HashSet;
+        let mapped: HashSet<ContainerProbeMode> = [
+            DefaultUserEnvProbe::None,
+            DefaultUserEnvProbe::LoginInteractiveShell,
+            DefaultUserEnvProbe::InteractiveShell,
+            DefaultUserEnvProbe::LoginShell,
+        ]
+        .into_iter()
+        .map(ContainerProbeMode::from)
+        .collect();
+        assert_eq!(
+            mapped.len(),
+            4,
+            "every CLI probe variant must map to a distinct core variant"
+        );
     }
 }
 use std::io::IsTerminal;
