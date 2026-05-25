@@ -6,7 +6,7 @@
 
 use super::args::UpArgs;
 use super::features_build::build_image_with_features;
-use super::helpers::apply_user_mapping;
+use super::helpers::{apply_user_mapping, handle_lockfile_post_build};
 use super::lifecycle::{execute_initialize_command, execute_lifecycle_commands};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
@@ -215,6 +215,12 @@ pub(crate) async fn execute_container_up(
             "Updated config to use feature-extended image: {}",
             feature_build.image_tag
         );
+
+        // Lockfile graduation (PR-4b): write the freshly-built lockfile to disk
+        // (or byte-compare it in `--frozen-lockfile` mode). Runs only when
+        // features were actually resolved; with no features there is nothing
+        // to lock.
+        handle_lockfile_post_build(args, config_path, &feature_build.lockfile)?;
 
         Some(feature_build.resolved_features)
     } else {

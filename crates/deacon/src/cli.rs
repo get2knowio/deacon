@@ -510,33 +510,6 @@ pub enum Commands {
         command: TemplateCommands,
     },
 
-    /// Run user-defined lifecycle commands
-    #[cfg(feature = "full")]
-    #[allow(clippy::enum_variant_names)]
-    RunUserCommands {
-        /// Skip postCreate lifecycle phase
-        #[arg(long)]
-        skip_post_create: bool,
-        /// Skip postAttach lifecycle phase
-        #[arg(long)]
-        skip_post_attach: bool,
-        /// Skip non-blocking commands (postStart & postAttach phases)
-        #[arg(long)]
-        skip_non_blocking_commands: bool,
-        /// Stop after updateContentCommand (prebuild mode)
-        #[arg(long)]
-        prebuild: bool,
-        /// Stop before personalization
-        #[arg(long)]
-        stop_for_personalization: bool,
-        /// Target container ID directly
-        #[arg(long)]
-        container_id: Option<String>,
-        /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
-        #[arg(long, action = clap::ArgAction::Append)]
-        id_label: Vec<String>,
-    },
-
     /// Convert an already-running container into a DevContainer by applying
     /// configuration + image metadata, executing lifecycle hooks, and emitting
     /// a JSON snapshot of the resulting configuration.
@@ -587,6 +560,34 @@ pub enum Commands {
         container_system_data_folder: Option<PathBuf>,
     },
 
+    /// Run user-defined lifecycle commands
+    #[cfg(feature = "full")]
+    #[allow(clippy::enum_variant_names)]
+    RunUserCommands {
+        /// Skip postCreate lifecycle phase
+        #[arg(long)]
+        skip_post_create: bool,
+        /// Skip postAttach lifecycle phase
+        #[arg(long)]
+        skip_post_attach: bool,
+        /// Skip non-blocking commands (postStart & postAttach phases)
+        #[arg(long)]
+        skip_non_blocking_commands: bool,
+        /// Stop after updateContentCommand (prebuild mode)
+        #[arg(long)]
+        prebuild: bool,
+        /// Stop before personalization
+        #[arg(long)]
+        stop_for_personalization: bool,
+        /// Target container ID directly
+        #[arg(long)]
+        container_id: Option<String>,
+        /// Identify container by labels (KEY=VALUE format, can be specified multiple times)
+        #[arg(long, action = clap::ArgAction::Append)]
+        id_label: Vec<String>,
+    },
+
+    // PR-6a SetUp variant moved earlier in this file with PR-6b dotfiles flags.
     /// Stop and optionally remove development container or compose project
     Down {
         /// Remove containers after stopping them
