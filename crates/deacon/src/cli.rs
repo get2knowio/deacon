@@ -582,6 +582,10 @@ pub enum Commands {
         /// Inside-container user data root (default `~/.devcontainer`).
         #[arg(long)]
         container_data_folder: Option<PathBuf>,
+        /// Inside-container system data root for root-owned marker files
+        /// (default `/var/devcontainer`). Spec §6.
+        #[arg(long)]
+        container_system_data_folder: Option<PathBuf>,
     },
 
     /// Run user-defined lifecycle commands
@@ -1512,6 +1516,7 @@ impl Cli {
                 include_configuration,
                 include_merged_configuration,
                 container_data_folder,
+                container_system_data_folder,
             }) => {
                 use crate::commands::set_up::{execute_set_up, SetUpArgs};
 
@@ -1530,6 +1535,7 @@ impl Cli {
                     include_merged_configuration,
                     container_data_folder: container_data_folder
                         .or_else(|| self.container_data_folder.clone()),
+                    container_system_data_folder,
                     docker_path: self.docker_path.clone(),
                     progress_tracker: progress_tracker.clone(),
                 };
