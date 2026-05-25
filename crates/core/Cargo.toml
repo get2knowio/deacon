@@ -4,6 +4,13 @@ version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "Core library for deacon — DevContainer configuration resolution, OCI feature/template fetching, container runtime abstraction (Docker/Podman), lifecycle execution, and lockfile management."
 
 [dependencies]
 anyhow.workspace = true
