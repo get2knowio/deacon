@@ -66,11 +66,21 @@ pub struct BuildArgs {
     /// Do not persist customizations from features into image metadata
     #[allow(dead_code)] // Reserved for future feature implementation
     pub skip_persisting_customizations_from_features: bool,
-    /// Write feature lockfile (experimental)
-    #[allow(dead_code)] // Reserved for future feature implementation
+    /// Skip lockfile generation and verification (graduated 1.0).
+    #[allow(dead_code)] // Wired to behavior in PR-4b (writer integration follow-up)
+    pub no_lockfile: bool,
+    /// Require an up-to-date lockfile; fail if resolution would change it
+    /// (graduated 1.0). Effective value (CLI ORs the deprecated
+    /// `--experimental-frozen-lockfile` alias into this).
+    #[allow(dead_code)] // Wired to behavior in PR-4b
+    pub frozen_lockfile: bool,
+    /// DEPRECATED hidden alias for the legacy --experimental-lockfile (bool form).
+    /// CLI layer emits a WARN when set; kept through 1.x for backward compat.
+    #[allow(dead_code)] // Will be removed in 2.0
     pub experimental_lockfile: bool,
-    /// Fail if lockfile changes would occur (experimental)
-    #[allow(dead_code)] // Reserved for future feature implementation
+    /// DEPRECATED hidden alias for --frozen-lockfile.
+    /// CLI layer ORs into `frozen_lockfile` and emits a WARN.
+    #[allow(dead_code)] // Will be removed in 2.0
     pub experimental_frozen_lockfile: bool,
     /// Omit Dockerfile syntax directive workaround
     #[allow(dead_code)] // Reserved for future feature implementation
@@ -113,6 +123,8 @@ impl Default for BuildArgs {
             output: None,
             skip_feature_auto_mapping: false,
             skip_persisting_customizations_from_features: false,
+            no_lockfile: false,
+            frozen_lockfile: false,
             experimental_lockfile: false,
             experimental_frozen_lockfile: false,
             omit_syntax_directive: false,
@@ -1269,12 +1281,14 @@ async fn execute_image_reference_build(
         dockerfile_content.push('\n');
     }
 
-    // Add devcontainer metadata label
-    // Serialize basic configuration metadata
-    let metadata = serde_json::json!({
+    // Add devcontainer metadata label.
+    // Per spec (devcontainers/cli#1199, v0.86.0), the label value is always a
+    // JSON array of partial-config entries, even when only a single entry is
+    // present. Consumers (VS Code, Zed, envbuilder) iterate and merge.
+    let metadata = serde_json::json!([{
         "name": config.name.as_ref().unwrap_or(&"devcontainer".to_string()),
         "image": image,
-    });
+    }]);
     let metadata_str = serde_json::to_string(&metadata)?;
     let escaped_metadata = metadata_str.replace('"', "\\\"");
     dockerfile_content.push_str(&format!(
@@ -1543,11 +1557,13 @@ async fn execute_docker_build(
         build_args.push("--label".to_string());
         build_args.push(label);
 
-        // Add devcontainer metadata label (simplified for T011)
-        // This stores basic config info in the image for downstream tooling
-        let metadata_json = serde_json::json!({
+        // Add devcontainer metadata label (simplified for T011).
+        // Per spec (devcontainers/cli#1199, v0.86.0), the label value is always a
+        // JSON array of partial-config entries, even when only a single entry is
+        // present. Consumers (VS Code, Zed, envbuilder) iterate and merge.
+        let metadata_json = serde_json::json!([{
             "configHash": config_hash,
-        });
+        }]);
         let metadata_str = serde_json::to_string(&metadata_json)
             .map_err(|e| anyhow!("Failed to serialize metadata: {}", e))?;
         build_args.push("--label".to_string());

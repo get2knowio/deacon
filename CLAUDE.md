@@ -374,7 +374,7 @@ echo "$OUTPUT" | jq '.configuration'
 
 **Container Runtimes:**
 - Docker (default, production-ready)
-- Podman (in development)
+- Podman (experimental in 1.0; trait-level support complete; parity items and test coverage targeted for 1.1)
 
 ## CI/CD Requirements
 
