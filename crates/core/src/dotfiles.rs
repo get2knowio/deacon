@@ -414,7 +414,18 @@ pub async fn execute_dotfiles_phase(config: &DotfilesPhaseConfig) -> Result<Dotf
     Ok(DotfilesPhaseResult::executed(result))
 }
 
-/// Execute a custom install command in the dotfiles directory
+/// Execute a custom install command in the dotfiles directory.
+///
+/// Trust boundary note: `command` is interpreted as shell by `bash -c`,
+/// which is the design intent (it accepts pipelines, redirects, etc.).
+/// The trust gate is the *source* of the command — currently
+/// `--dotfiles-install-command` (CLI, user opt-in) — not this exec
+/// layer. If a future caller plumbs through devcontainer.json's
+/// dotfiles config, that path needs the workspace-trust check (audit
+/// gap #3 / spec §12) before reaching here.
+///
+/// `target` is passed through `current_dir`, which is a syscall argument
+/// (not a shell interpolation), so no quoting is needed for the path.
 #[instrument]
 async fn execute_custom_install_command(target: &Path, command: &str) -> Result<()> {
     let output = Command::new("bash")

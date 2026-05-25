@@ -185,13 +185,20 @@ pub(crate) async fn execute_dotfiles_installation(
         // Auto-detect install script
         debug!("Auto-detecting install script in dotfiles repository");
 
-        // Check for install.sh first, then setup.sh
+        // Check for install.sh first, then setup.sh.
+        //
+        // `target_path` may carry user-controlled characters (it derives from
+        // `--dotfiles-target-path` or from `$HOME` inside the container —
+        // both can contain spaces, single-quotes, or `$(...)`). Pass it
+        // through `shell_words::quote` so it interpolates as a single
+        // shell token, eliminating injection via crafted paths.
+        let target_quoted = shell_words::quote(target_path.as_str()).into_owned();
         let detect_script_command = vec![
             "sh".to_string(),
             "-c".to_string(),
             format!(
-                "if [ -f {}/install.sh ]; then echo 'install.sh'; elif [ -f {}/setup.sh ]; then echo 'setup.sh'; fi",
-                target_path, target_path
+                "if [ -f {tq}/install.sh ]; then echo 'install.sh'; elif [ -f {tq}/setup.sh ]; then echo 'setup.sh'; fi",
+                tq = target_quoted,
             ),
         ];
 
@@ -203,7 +210,13 @@ pub(crate) async fn execute_dotfiles_installation(
             Ok(result) if !result.stdout.trim().is_empty() => {
                 let script_name = result.stdout.trim();
                 debug!("Auto-detected install script: {}", script_name);
-                Some(format!("bash {}/{}", target_path, script_name))
+                // Auto-detected script name is one of "install.sh" /
+                // "setup.sh" — known-safe values, but quote the path anyway.
+                Some(format!(
+                    "bash {tq}/{name}",
+                    tq = target_quoted,
+                    name = script_name
+                ))
             }
             _ => {
                 debug!("No install script found in dotfiles repository");
@@ -216,10 +229,18 @@ pub(crate) async fn execute_dotfiles_installation(
     if let Some(install_cmd) = install_command_str {
         info!("Executing dotfiles install command: {}", install_cmd);
 
+        // `cd` target gets shell-quoted; the install command itself is
+        // user-supplied shell (custom install command) and inherently
+        // executes as shell — that trust boundary is the workspace-trust
+        // gate (separate concern, tracked in gap #3), not this layer.
         let install_command = vec![
             "sh".to_string(),
             "-c".to_string(),
-            format!("cd {} && {}", target_path, install_cmd),
+            format!(
+                "cd {tq} && {cmd}",
+                tq = shell_words::quote(target_path.as_str()),
+                cmd = install_cmd
+            ),
         ];
 
         let install_result = docker
@@ -242,4 +263,85 @@ pub(crate) async fn execute_dotfiles_installation(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod shell_quoting_tests {
+    //! Pin the shell-quoting behavior for `target_path` interpolation. The
+    //! tests don't exec anything — they check that `shell_words::quote`
+    //! handles the adversarial path strings we care about so the shell
+    //! command builder is provably safe by construction.
+
+    #[test]
+    fn shell_quote_handles_spaces_in_target_path() {
+        let quoted = shell_words::quote("/home/me/my dotfiles");
+        // Result should be a single shell token. The exact form may use
+        // single quotes or backslash escapes — both are acceptable.
+        let parsed = shell_words::split(&quoted).unwrap();
+        assert_eq!(parsed, vec!["/home/me/my dotfiles".to_string()]);
+    }
+
+    #[test]
+    fn shell_quote_neutralizes_command_substitution() {
+        // The literal `$(rm -rf /)` would execute as a sub-shell if
+        // interpolated unquoted. Quoting must preserve it as data.
+        let evil = "/tmp/foo$(rm -rf /)";
+        let quoted = shell_words::quote(evil);
+        let parsed = shell_words::split(&quoted).unwrap();
+        assert_eq!(parsed, vec![evil.to_string()]);
+        // And the quoted form must contain no unescaped `$(`.
+        assert!(
+            !quoted.contains("$(") || quoted.starts_with('\''),
+            "command substitution must be quoted/escaped, got: {}",
+            quoted
+        );
+    }
+
+    #[test]
+    fn shell_quote_neutralizes_semicolon_chain() {
+        let evil = "/tmp/foo; touch /tmp/owned";
+        let quoted = shell_words::quote(evil);
+        let parsed = shell_words::split(&quoted).unwrap();
+        assert_eq!(parsed, vec![evil.to_string()]);
+    }
+
+    #[test]
+    fn shell_quote_neutralizes_backticks() {
+        let evil = "/tmp/foo`whoami`";
+        let quoted = shell_words::quote(evil);
+        let parsed = shell_words::split(&quoted).unwrap();
+        assert_eq!(parsed, vec![evil.to_string()]);
+    }
+
+    #[test]
+    fn shell_quote_neutralizes_embedded_single_quotes() {
+        // POSIX single-quoting can't contain a literal `'`, so quoters
+        // must escape via `'\''` or switch strategies. Round-trip is the
+        // invariant that matters.
+        let evil = "/tmp/it's broken";
+        let quoted = shell_words::quote(evil);
+        let parsed = shell_words::split(&quoted).unwrap();
+        assert_eq!(parsed, vec![evil.to_string()]);
+    }
+
+    #[test]
+    fn detect_script_command_is_a_single_shell_token_for_evil_path() {
+        // Reproduce the format string from the production code and verify
+        // the path stays one token after parsing.
+        let target = "/tmp/foo; rm -rf /";
+        let tq = shell_words::quote(target);
+        let cmd = format!(
+            "if [ -f {tq}/install.sh ]; then echo 'install.sh'; elif [ -f {tq}/setup.sh ]; then echo 'setup.sh'; fi",
+            tq = tq
+        );
+        // Parse the assembled shell — the `;` inside the target_path must
+        // NOT terminate the `[ -f ... ]` token. With proper quoting the
+        // path appears as `/tmp/foo;rm -rf //install.sh` (single arg) and
+        // `[` will fail-closed on the missing file rather than executing.
+        let tokens = shell_words::split(&cmd).unwrap();
+        // The `[`, `-f`, then the quoted-path-with-suffix should appear
+        // as three sequential tokens, not split apart by the embedded `;`.
+        let idx = tokens.iter().position(|t| t == "-f").unwrap();
+        assert_eq!(tokens[idx + 1], "/tmp/foo; rm -rf //install.sh");
+    }
 }
