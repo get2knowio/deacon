@@ -31,7 +31,7 @@ use std::path::PathBuf;
 pub enum RuntimeOption {
     /// Docker runtime
     Docker,
-    /// Podman runtime
+    /// Podman runtime (experimental in 1.0)
     Podman,
 }
 
@@ -688,7 +688,7 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     pub plugin: Vec<String>,
 
-    /// Container runtime to use (docker or podman, can be set via DEACON_RUNTIME env var)
+    /// Container runtime to use (docker or podman [experimental]; can be set via DEACON_RUNTIME env var)
     #[arg(long, global = true, value_enum)]
     pub runtime: Option<RuntimeOption>,
 
