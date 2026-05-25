@@ -66,11 +66,21 @@ pub struct BuildArgs {
     /// Do not persist customizations from features into image metadata
     #[allow(dead_code)] // Reserved for future feature implementation
     pub skip_persisting_customizations_from_features: bool,
-    /// Write feature lockfile (experimental)
-    #[allow(dead_code)] // Reserved for future feature implementation
+    /// Skip lockfile generation and verification (graduated 1.0).
+    #[allow(dead_code)] // Wired to behavior in PR-4b (writer integration follow-up)
+    pub no_lockfile: bool,
+    /// Require an up-to-date lockfile; fail if resolution would change it
+    /// (graduated 1.0). Effective value (CLI ORs the deprecated
+    /// `--experimental-frozen-lockfile` alias into this).
+    #[allow(dead_code)] // Wired to behavior in PR-4b
+    pub frozen_lockfile: bool,
+    /// DEPRECATED hidden alias for the legacy --experimental-lockfile (bool form).
+    /// CLI layer emits a WARN when set; kept through 1.x for backward compat.
+    #[allow(dead_code)] // Will be removed in 2.0
     pub experimental_lockfile: bool,
-    /// Fail if lockfile changes would occur (experimental)
-    #[allow(dead_code)] // Reserved for future feature implementation
+    /// DEPRECATED hidden alias for --frozen-lockfile.
+    /// CLI layer ORs into `frozen_lockfile` and emits a WARN.
+    #[allow(dead_code)] // Will be removed in 2.0
     pub experimental_frozen_lockfile: bool,
     /// Omit Dockerfile syntax directive workaround
     #[allow(dead_code)] // Reserved for future feature implementation
@@ -113,6 +123,8 @@ impl Default for BuildArgs {
             output: None,
             skip_feature_auto_mapping: false,
             skip_persisting_customizations_from_features: false,
+            no_lockfile: false,
+            frozen_lockfile: false,
             experimental_lockfile: false,
             experimental_frozen_lockfile: false,
             omit_syntax_directive: false,
@@ -531,6 +543,7 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     let mut config = load_result.config;
     let workspace_folder = load_result.workspace_folder;
+    let config_path = load_result.config_path;
 
     debug!("Loaded configuration: {:?}", config.name);
 
@@ -625,22 +638,37 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     let config_hash = calculate_config_hash(&build_config, &workspace_folder)?;
     debug!("Configuration hash: {}", config_hash);
 
-    // Fail fast if features are specified (not yet supported)
-    // This check applies to all build modes (Dockerfile, image-reference, compose)
-    if !config.features.is_null()
+    // PR-4c: feature installation during build.
+    //
+    // Dockerfile-based builds support features via a post-build layering pass
+    // (we run the user's `docker build`, then layer a feature-install stage
+    // on top of the resulting image using `build_image_with_features` —
+    // the same helper the `up` command uses, which also produces a lockfile).
+    //
+    // Compose and image-reference builds still fail fast: they need different
+    // integration patterns (compose-build is workspace-of-services, image-ref
+    // wraps a pre-built upstream image with a synthetic Dockerfile) and the
+    // work to support each is tracked separately.
+    let features_present = !config.features.is_null()
         && config
             .features
             .as_object()
-            .is_some_and(|obj| !obj.is_empty())
-    {
+            .is_some_and(|obj| !obj.is_empty());
+    if features_present && (config.uses_compose() || config.image.is_some()) {
         return Err(anyhow!(
-            "Feature installation during build is not yet implemented. \
-             Remove features from devcontainer.json or use 'deacon up' which will apply features after build."
+            "Feature installation during build is not yet supported for compose or \
+             image-reference configurations. Use a Dockerfile-based build, or run \
+             'deacon up' which supports all configurations."
         ));
     }
 
-    // Check cache if not forced (skip cache if pushing or exporting)
-    if !args.force && !args.push && args.output.is_none() {
+    // Check cache if not forced (skip cache if pushing or exporting).
+    // When features are present we deliberately skip the cache check: the
+    // current `config_hash` does not include feature digests, so a cached
+    // hit would point at a base image without the feature layers.
+    // Re-running keeps correctness; a future refinement can fold the
+    // feature digests into the hash for proper caching.
+    if !args.force && !args.push && args.output.is_none() && !features_present {
         if let Some(cached_result) = check_build_cache(&config_hash, &workspace_folder).await? {
             info!("Using cached build result");
             output_result(
@@ -704,13 +732,30 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
             tracker.record_duration("build", build_duration);
         }
     }
+
+    // PR-4c: post-build feature install. When features are present we run a
+    // second BuildKit pass that FROMs the just-built image and layers the
+    // feature install stages on top, then write the lockfile next to the
+    // config file. This matches `up`'s feature flow (`build_image_with_features`)
+    // which also returns a `Lockfile` ready for `write_lockfile`.
+    let (image_id, feature_lockfile) = if features_present {
+        apply_features_and_lockfile(&config, &result.image_id, &workspace_folder, &config_path)
+            .await?
+    } else {
+        (result.image_id, None)
+    };
+
     let final_result = BuildResult {
-        image_id: result.image_id,
+        image_id,
         tags: result.tags,
         build_duration: build_duration.as_secs_f64(),
         metadata: result.metadata,
         config_hash: config_hash.clone(),
     };
+
+    if let Some(path) = feature_lockfile {
+        debug!("Wrote feature lockfile to '{}'", path.display());
+    }
 
     // Cache the result
     cache_build_result(&final_result, &workspace_folder).await?;
@@ -1269,12 +1314,14 @@ async fn execute_image_reference_build(
         dockerfile_content.push('\n');
     }
 
-    // Add devcontainer metadata label
-    // Serialize basic configuration metadata
-    let metadata = serde_json::json!({
+    // Add devcontainer metadata label.
+    // Per spec (devcontainers/cli#1199, v0.86.0), the label value is always a
+    // JSON array of partial-config entries, even when only a single entry is
+    // present. Consumers (VS Code, Zed, envbuilder) iterate and merge.
+    let metadata = serde_json::json!([{
         "name": config.name.as_ref().unwrap_or(&"devcontainer".to_string()),
         "image": image,
-    });
+    }]);
     let metadata_str = serde_json::to_string(&metadata)?;
     let escaped_metadata = metadata_str.replace('"', "\\\"");
     dockerfile_content.push_str(&format!(
@@ -1308,6 +1355,111 @@ async fn execute_image_reference_build(
     let _ = std::fs::remove_dir_all(&temp_dir);
 
     result
+}
+
+/// PR-4c: layer features on top of the just-built image and write the
+/// lockfile next to the config file.
+///
+/// Synthesizes a config that points at the just-built `image_id` and reuses
+/// `up`'s `build_image_with_features` helper to:
+/// 1. Resolve + download every feature declared in `config.features`,
+/// 2. Generate an extension Dockerfile (`FROM <built_image> AS dev_containers_target_stage`
+///    + one BuildKit RUN-mount per feature),
+/// 3. Build the extended image via `docker buildx build`,
+/// 4. Hand back a `FeatureBuildOutput` whose `lockfile` field is keyed by
+///    the user-provided feature ID (matching upstream `generateLockfile`).
+///
+/// The returned `Lockfile` is then written to disk via
+/// `deacon_core::lockfile::write_lockfile(force_init = true)` — same path
+/// + format as `up`'s post-build lockfile write (PR-4b). On read-only
+/// workspaces (`EROFS`/`EACCES`) the write is downgraded to a WARN so a
+/// read-only CI mount doesn't fail the build.
+///
+/// Returns `(new_image_id, Some(lockfile_path))` on success.
+#[instrument(skip(config))]
+async fn apply_features_and_lockfile(
+    config: &DevContainerConfig,
+    built_image_id: &str,
+    workspace_folder: &Path,
+    config_path: &Path,
+) -> Result<(String, Option<PathBuf>)> {
+    use crate::commands::up::features_build::build_image_with_features;
+    use deacon_core::container::ContainerIdentity;
+    use deacon_core::lockfile::{get_lockfile_path, write_lockfile};
+
+    info!(
+        built_image = %built_image_id,
+        "Layering features on top of build output"
+    );
+
+    // Synthesize a single-container config that points at the just-built
+    // image. `build_image_with_features` reads `config.image`,
+    // `config.features`, and `config.override_feature_install_order`; other
+    // fields are ignored, so cloning + retargeting `image` is sufficient.
+    let mut synth_config = config.clone();
+    synth_config.image = Some(built_image_id.to_string());
+
+    // Namespace the produced tag by workspace+config so it does not collide
+    // with `up`'s feature-extended images on the same host.
+    let mut identity = ContainerIdentity::new(workspace_folder, &synth_config);
+    identity.workspace_hash = format!("{}-build", identity.workspace_hash);
+
+    let feature_build = build_image_with_features(&synth_config, &identity, workspace_folder, None)
+        .await
+        .context("Failed to build feature-extended image from build output")?;
+
+    info!(
+        feature_image = %feature_build.image_tag,
+        "Successfully built feature-extended image"
+    );
+
+    // Write the lockfile next to the config file (spec §6 naming rule).
+    let lockfile_path = get_lockfile_path(config_path);
+    let written = match write_lockfile(&lockfile_path, &feature_build.lockfile, true) {
+        Ok(()) => Some(lockfile_path),
+        Err(e) if is_readonly_filesystem_error(&e) => {
+            warn!(
+                path = %lockfile_path.display(),
+                error = %e,
+                "Lockfile write skipped (read-only workspace); continuing without persisting lockfile"
+            );
+            None
+        }
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!("Failed to write lockfile to '{}'", lockfile_path.display())
+            });
+        }
+    };
+
+    Ok((feature_build.image_tag, written))
+}
+
+/// Mirror of `up::helpers::is_readonly_fs_error` for build's write path. We
+/// don't share the helper today because `up::helpers` is private to `up`;
+/// a future cleanup can lift both helpers into a shared module.
+fn is_readonly_filesystem_error(err: &anyhow::Error) -> bool {
+    use std::io;
+    // Linux EROFS (28 on most arches, 30 on Linux) — checked via raw errno
+    // because `io::ErrorKind::ReadOnlyFilesystem` requires Rust 1.83 and our
+    // MSRV is 1.82.
+    #[cfg(unix)]
+    const EROFS: i32 = 30;
+    err.chain().any(|cause| {
+        let Some(io_err) = cause.downcast_ref::<io::Error>() else {
+            return false;
+        };
+        if io_err.kind() == io::ErrorKind::PermissionDenied {
+            return true;
+        }
+        #[cfg(unix)]
+        {
+            if io_err.raw_os_error() == Some(EROFS) {
+                return true;
+            }
+        }
+        false
+    })
 }
 
 /// Execute Docker build
@@ -1543,11 +1695,13 @@ async fn execute_docker_build(
         build_args.push("--label".to_string());
         build_args.push(label);
 
-        // Add devcontainer metadata label (simplified for T011)
-        // This stores basic config info in the image for downstream tooling
-        let metadata_json = serde_json::json!({
+        // Add devcontainer metadata label (simplified for T011).
+        // Per spec (devcontainers/cli#1199, v0.86.0), the label value is always a
+        // JSON array of partial-config entries, even when only a single entry is
+        // present. Consumers (VS Code, Zed, envbuilder) iterate and merge.
+        let metadata_json = serde_json::json!([{
             "configHash": config_hash,
-        });
+        }]);
         let metadata_str = serde_json::to_string(&metadata_json)
             .map_err(|e| anyhow!("Failed to serialize metadata: {}", e))?;
         build_args.push("--label".to_string());
@@ -2879,5 +3033,33 @@ mod tests {
         };
         let value = secret.read_value().await.unwrap();
         assert_eq!(value, "my_secret_token");
+    }
+
+    // =========================================================================
+    // PR-4c: features-during-build (helpers tested in isolation)
+    // =========================================================================
+
+    #[test]
+    fn is_readonly_filesystem_error_detects_permission_denied() {
+        // EACCES surfaces as PermissionDenied — the most common cause of
+        // a "can't write the lockfile" path on container CI mounts.
+        let inner = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let err: anyhow::Error = anyhow::anyhow!(inner).context("write failed");
+        assert!(super::is_readonly_filesystem_error(&err));
+    }
+
+    #[test]
+    fn is_readonly_filesystem_error_ignores_unrelated_io_errors() {
+        // Other IO errors (NotFound, BrokenPipe, etc.) must propagate —
+        // downgrading them all would hide real bugs.
+        let inner = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let err: anyhow::Error = anyhow::anyhow!(inner).context("read failed");
+        assert!(!super::is_readonly_filesystem_error(&err));
+    }
+
+    #[test]
+    fn is_readonly_filesystem_error_ignores_non_io_errors() {
+        let err = anyhow::anyhow!("not an io error");
+        assert!(!super::is_readonly_filesystem_error(&err));
     }
 }

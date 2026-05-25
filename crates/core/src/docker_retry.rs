@@ -525,8 +525,9 @@ mod tests {
     }
 
     /// The retry loop recovers once the synthetic transient failure counter
-    /// drains. We run against `/bin/true` so that the real subprocess
-    /// succeeds on the recovery attempt (no Docker daemon required).
+    /// drains. We run against `/usr/bin/true` (present on both Linux and macOS
+    /// runners; `/bin/true` is absent on macOS GHA images) so that the real
+    /// subprocess succeeds on the recovery attempt (no Docker daemon required).
     #[tokio::test]
     async fn run_build_recovers_after_transient_failures() {
         let _guard = ENV_LOCK.lock().await;
@@ -535,7 +536,7 @@ mod tests {
         std::env::set_var(DEACON_TEST_DOCKER_FAIL_N, "2");
 
         let result =
-            run_build_with_retry(std::path::Path::new("/bin/true"), &[] as &[String]).await;
+            run_build_with_retry(std::path::Path::new("/usr/bin/true"), &[] as &[String]).await;
 
         assert!(
             result.is_ok(),
@@ -561,7 +562,7 @@ mod tests {
         std::env::set_var(DEACON_TEST_DOCKER_FAIL_N, "10");
 
         let result =
-            run_build_with_retry(std::path::Path::new("/bin/true"), &[] as &[String]).await;
+            run_build_with_retry(std::path::Path::new("/usr/bin/true"), &[] as &[String]).await;
 
         assert!(
             result.is_err(),
@@ -589,7 +590,7 @@ mod tests {
         clear_fail_hook();
 
         let result =
-            run_build_with_retry(std::path::Path::new("/bin/true"), &[] as &[String]).await;
+            run_build_with_retry(std::path::Path::new("/usr/bin/true"), &[] as &[String]).await;
 
         assert!(result.is_ok(), "expected success, got {:?}", result);
     }

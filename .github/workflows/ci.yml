@@ -5,13 +5,33 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Daily 07:00 UTC — surfaces new advisories without spamming PRs.
+    # Only the `security` job runs on this trigger; see job-level `if` guards.
+    - cron: '0 7 * * *'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  security:
+    name: Security (cargo deny)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install cargo-deny
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-deny
+
+    - name: Run cargo deny
+      run: cargo deny check
+
   lint:
     name: Lint (fmt + clippy)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
     - name: Free disk space
@@ -51,6 +71,7 @@ jobs:
 
   test-fast:
     name: Test (MVP fast) (${{ matrix.os }})
+    if: github.event_name != 'schedule'
     needs: lint
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 20
@@ -99,6 +120,7 @@ jobs:
 
   test-integration:
     name: Test (MVP integration)
+    if: github.event_name != 'schedule'
     needs: test-fast
     runs-on: ubuntu-latest
     timeout-minutes: 30
