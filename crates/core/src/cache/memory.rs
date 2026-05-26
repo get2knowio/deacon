@@ -1,7 +1,7 @@
 //! In-memory cache implementation with LRU eviction
 
-use super::{Cache, CacheStats, TtlEntry};
-use anyhow::Result;
+use super::{Cache, CacheStats, Result, TtlEntry};
+use crate::errors::CacheError;
 use linked_hash_map::LinkedHashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -90,11 +90,10 @@ where
 
         // If this single entry is larger than max size, reject it
         if size > self.max_size_bytes {
-            return Err(anyhow::anyhow!(
-                "Entry size ({} bytes) exceeds maximum cache size ({} bytes)",
+            return Err(CacheError::EntryTooLarge {
                 size,
-                self.max_size_bytes
-            ));
+                max: self.max_size_bytes,
+            });
         }
 
         // Remove existing entry if present
