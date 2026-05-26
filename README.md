@@ -109,7 +109,7 @@ The following features are planned but not yet ready for use:
 | Port forwarding | Planned | Flags exist, functionality deferred |
 | Podman runtime | Experimental (1.0) | Trait-level support is complete; lacks test coverage and rootless-Podman parity items (`label=disable`, `--userns=keep-id`, `--uidmap`/`--gidmap`). Targeted for full support in 1.1 ([#30](https://github.com/get2knowio/deacon/issues/30)). |
 
-For the full roadmap, see [docs/MVP-ROADMAP.md](docs/MVP-ROADMAP.md).
+For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md).
 
 ## Examples
 

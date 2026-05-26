@@ -50,3 +50,9 @@ artifacts/nextest/full-timing.json
 .dolt/
 *.db
 .beads-credential-key
+
+# AI-context snapshots (e.g. repomix output) — never commit. These are
+# regenerated on demand from upstream and tend to be MB-sized blobs that
+# pollute search results and inflate every assistant's context window.
+repomix-output*
+**/repomix-output*
