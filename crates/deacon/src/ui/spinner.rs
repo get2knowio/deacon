@@ -1,6 +1,5 @@
-use anyhow::Result;
 use console::style;
-use deacon_core::progress::{ProgressEmitter, ProgressEvent};
+use deacon_core::progress::{ProgressEmitter, ProgressEvent, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
 
