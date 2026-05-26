@@ -512,8 +512,10 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                         .push(serde_json::Value::String(mount.clone()));
                 }
 
-                // TODO: Support metadata.init properly when DevContainerConfig gains an init field
-                // For now, metadata.init is not mapped to avoid incorrectly enabling privileged mode
+                // Init flag
+                if let Some(init) = metadata.init {
+                    derived_config.init = Some(init);
+                }
 
                 // Privileged flag
                 if let Some(privileged) = metadata.privileged {
@@ -1581,6 +1583,50 @@ API_KEY=another-secret
         let result = execute_read_configuration(args).await;
         assert!(result.is_ok());
         // The workspace field should be None/omitted in the output
+    }
+
+    #[tokio::test]
+    async fn test_container_metadata_merge_preserves_init() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            ..Default::default()
+        };
+
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            serde_json::json!([{ "init": true }]).to_string(),
+        );
+
+        let container_info = deacon_core::docker::ContainerInfo {
+            id: "container-id".to_string(),
+            names: vec![],
+            image: "ubuntu:24.04".to_string(),
+            status: "running".to_string(),
+            state: "running".to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
+            env: HashMap::new(),
+            labels,
+            mounts: vec![],
+        };
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(
+            &base_config,
+            Some(&container_info),
+            Some(&context),
+            None,
+            None,
+            &fetcher,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(merged.get("init"), Some(&serde_json::json!(true)));
     }
 
     #[tokio::test]
