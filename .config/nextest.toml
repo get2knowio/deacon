@@ -136,6 +136,11 @@ test-group = 'fs-heavy'
 slow-timeout = "5m"
 
 [[profile.default.overrides]]
+filter = 'binary(=integration_trust)'
+test-group = 'fs-heavy'
+slow-timeout = "2m"
+
+[[profile.default.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
@@ -223,6 +228,11 @@ slow-timeout = { period = "10m", terminate-after = 1 }
 [[profile.dev-fast.overrides]]
 filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
 test-group = 'fs-heavy'
+
+[[profile.dev-fast.overrides]]
+filter = 'binary(=integration_trust)'
+test-group = 'fs-heavy'
+slow-timeout = "2m"
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
@@ -330,6 +340,11 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.docker.overrides]]
+filter = 'binary(=integration_trust)'
+test-group = 'fs-heavy'
+slow-timeout = "2m"
+
+[[profile.docker.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
@@ -401,6 +416,11 @@ slow-timeout = { period = "10m", terminate-after = 1 }
 [[profile.full.overrides]]
 filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
 test-group = 'fs-heavy'
+
+[[profile.full.overrides]]
+filter = 'binary(=integration_trust)'
+test-group = 'fs-heavy'
+slow-timeout = "2m"
 
 [[profile.full.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
@@ -484,6 +504,11 @@ slow-timeout = { period = "10m", terminate-after = 1 }
 filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
 test-group = 'fs-heavy'
 threads-required = 1
+
+[[profile.ci.overrides]]
+filter = 'binary(=integration_trust)'
+test-group = 'fs-heavy'
+slow-timeout = "2m"
 
 [[profile.ci.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'

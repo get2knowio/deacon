@@ -10,7 +10,7 @@ use super::features_build::{
     build_image_with_features, build_image_with_features_from_dockerfile, FeatureBuildOutput,
 };
 use super::helpers::handle_lockfile_post_build;
-use super::lifecycle::{execute_initialize_command, resolve_force_pty};
+use super::lifecycle::{execute_initialize_command, resolve_force_pty, HostTrustArgs};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
 };
@@ -239,7 +239,18 @@ pub(crate) async fn execute_compose_up(
 
     // Execute initializeCommand on host before starting compose operations
     if let Some(ref initialize) = config.initialize_command {
-        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
+        let trust_args = HostTrustArgs {
+            trust_workspace: args.trust_workspace,
+            trust_workspace_persist: args.trust_workspace_persist,
+            user_data_folder: args.user_data_folder.as_deref(),
+        };
+        execute_initialize_command(
+            initialize,
+            workspace_folder,
+            &args.progress_tracker,
+            trust_args,
+        )
+        .await?;
     }
 
     // Stop existing containers if requested

@@ -299,6 +299,55 @@ pub async fn check_workspace_trust(
     }
 }
 
+/// Resolve a [`WorkspaceTrustPolicy`] from CLI / env inputs.
+///
+/// Rules:
+/// - `trust_one_shot = true` or `trust_persist = true` → `AlwaysAllow`.
+/// - `deacon_no_prompt = true` (typically `DEACON_NO_PROMPT=1`) → `Deny`.
+///   Used by CI to fail closed without surprising a user with a hidden
+///   prompt.
+/// - Otherwise → `Allowlist(trust_store_path(user_data_folder))`. Workspaces
+///   previously recorded via `--trust-workspace-persist` will pass; any
+///   other workspace will be denied at the gate. The caller is responsible
+///   for translating the `Denied` decision into the right user-facing
+///   message — we deliberately do NOT prompt from inside core to keep this
+///   layer IO-free apart from the store load.
+pub fn resolve_policy(
+    trust_one_shot: bool,
+    trust_persist: bool,
+    deacon_no_prompt: bool,
+    user_data_folder: Option<&Path>,
+) -> Result<WorkspaceTrustPolicy> {
+    if trust_one_shot || trust_persist {
+        return Ok(WorkspaceTrustPolicy::AlwaysAllow);
+    }
+    if deacon_no_prompt {
+        return Ok(WorkspaceTrustPolicy::Deny);
+    }
+    Ok(WorkspaceTrustPolicy::Allowlist(trust_store_path(
+        user_data_folder,
+    )?))
+}
+
+/// Convert a `Denied` [`TrustDecision`] into a [`DeaconError::WorkspaceUntrusted`].
+///
+/// `Trusted` decisions become `Ok(())` so call sites can write
+/// `decision_to_result(check_workspace_trust(...).await?)?` and have the
+/// gate behave like any other fallible step.
+pub fn decision_to_result(decision: TrustDecision) -> Result<()> {
+    match decision {
+        TrustDecision::Trusted => Ok(()),
+        TrustDecision::Denied { workspace, reason } => {
+            let instructions = opt_in_instructions(&workspace);
+            Err(DeaconError::WorkspaceUntrusted {
+                workspace,
+                reason,
+                instructions,
+            })
+        }
+    }
+}
+
 /// Render the user-facing opt-in instructions emitted when a host-side hook is
 /// refused. Kept here so the wording is consistent between `up` (initialize)
 /// and dotfiles call sites.
@@ -494,5 +543,56 @@ mod tests {
         assert!(msg.contains("--trust-workspace-persist"));
         assert!(msg.contains("DEACON_NO_PROMPT"));
         assert!(msg.contains("/repo"));
+    }
+
+    #[test]
+    fn resolve_policy_trust_one_shot_means_always_allow() {
+        let tmp = TempDir::new().unwrap();
+        let p = resolve_policy(true, false, false, Some(tmp.path())).unwrap();
+        assert!(matches!(p, WorkspaceTrustPolicy::AlwaysAllow));
+    }
+
+    #[test]
+    fn resolve_policy_trust_persist_means_always_allow() {
+        let tmp = TempDir::new().unwrap();
+        let p = resolve_policy(false, true, false, Some(tmp.path())).unwrap();
+        assert!(matches!(p, WorkspaceTrustPolicy::AlwaysAllow));
+    }
+
+    #[test]
+    fn resolve_policy_no_prompt_means_deny() {
+        let tmp = TempDir::new().unwrap();
+        let p = resolve_policy(false, false, true, Some(tmp.path())).unwrap();
+        assert!(matches!(p, WorkspaceTrustPolicy::Deny));
+    }
+
+    #[test]
+    fn resolve_policy_default_is_allowlist() {
+        let tmp = TempDir::new().unwrap();
+        let p = resolve_policy(false, false, false, Some(tmp.path())).unwrap();
+        match p {
+            WorkspaceTrustPolicy::Allowlist(path) => {
+                assert!(path.ends_with("trusted_workspaces.json"));
+            }
+            other => panic!("expected Allowlist, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn decision_to_result_trusted_is_ok() {
+        assert!(decision_to_result(TrustDecision::Trusted).is_ok());
+    }
+
+    #[test]
+    fn decision_to_result_denied_is_workspace_untrusted() {
+        let err = decision_to_result(TrustDecision::Denied {
+            workspace: PathBuf::from("/repo"),
+            reason: "test".to_string(),
+        })
+        .unwrap_err();
+        assert!(matches!(err, DeaconError::WorkspaceUntrusted { .. }));
+        let msg = err.to_string();
+        assert!(msg.contains("/repo"));
+        assert!(msg.contains("--trust-workspace"));
     }
 }

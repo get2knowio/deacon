@@ -876,6 +876,27 @@ pub struct Cli {
     )]
     pub default_user_env_probe: DefaultUserEnvProbe,
 
+    /// Trust the current workspace for this invocation only.
+    ///
+    /// Gates host-side lifecycle hooks (`initializeCommand`, dotfiles
+    /// installs) behind explicit user opt-in. Without this flag (or
+    /// --trust-workspace-persist) the workspace must have been previously
+    /// persisted to the trust store; otherwise the host-side hook is
+    /// refused with a clear error.
+    ///
+    /// Conflicts with --trust-workspace-persist.
+    #[arg(long, global = true, conflicts_with = "trust_workspace_persist")]
+    pub trust_workspace: bool,
+
+    /// Trust the current workspace for this invocation AND persist it to
+    /// `{user_data_folder}/trusted_workspaces.json`. Future invocations
+    /// against the same canonicalized workspace path will pass the gate
+    /// automatically.
+    ///
+    /// Conflicts with --trust-workspace.
+    #[arg(long, global = true, conflicts_with = "trust_workspace")]
+    pub trust_workspace_persist: bool,
+
     /// Terminal columns for output formatting (requires --terminal-rows)
     #[arg(long, global = true, requires = "terminal_rows")]
     pub terminal_columns: Option<u32>,
@@ -1172,6 +1193,8 @@ impl Cli {
                     // JSON log format auto-forces PTY allocation so lifecycle exec output
                     // stays usable; the explicit flag remains as a manual override.
                     force_tty_if_json: self.force_tty_if_json || json_format,
+                    trust_workspace: self.trust_workspace,
+                    trust_workspace_persist: self.trust_workspace_persist,
                 };
 
                 // Execute up and emit JSON output per contract (specs/001-up-gap-spec/contracts/up.md)
@@ -1856,6 +1879,42 @@ mod tests {
     fn test_validate_accepts_no_dimensions() {
         let cli = Cli::parse_from(["deacon"]);
         assert!(cli.validate().is_ok());
+    }
+
+    /// `--trust-workspace` is a global flag.
+    #[test]
+    fn test_trust_workspace_global_flag_parses() {
+        let cli = Cli::parse_from(["deacon", "--trust-workspace"]);
+        assert!(cli.trust_workspace);
+        assert!(!cli.trust_workspace_persist);
+    }
+
+    /// `--trust-workspace-persist` is a separate global flag.
+    #[test]
+    fn test_trust_workspace_persist_flag_parses() {
+        let cli = Cli::parse_from(["deacon", "--trust-workspace-persist"]);
+        assert!(!cli.trust_workspace);
+        assert!(cli.trust_workspace_persist);
+    }
+
+    /// Both trust flags cannot be combined — clap enforces mutual exclusion.
+    #[test]
+    fn test_trust_workspace_flags_are_mutually_exclusive() {
+        let result =
+            Cli::try_parse_from(["deacon", "--trust-workspace", "--trust-workspace-persist"]);
+        assert!(
+            result.is_err(),
+            "expected mutual-exclusion error, got: {:?}",
+            result.ok()
+        );
+    }
+
+    /// Default state: neither trust flag is set.
+    #[test]
+    fn test_trust_workspace_default_off() {
+        let cli = Cli::parse_from(["deacon"]);
+        assert!(!cli.trust_workspace);
+        assert!(!cli.trust_workspace_persist);
     }
 
     #[test]

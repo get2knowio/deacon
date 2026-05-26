@@ -40,7 +40,8 @@
 //! ```
 
 use crate::errors::{GitError, Result};
-use std::path::Path;
+use crate::trust::{check_workspace_trust, decision_to_result, WorkspaceTrustPolicy};
+use std::path::{Path, PathBuf};
 use tokio::process::Command;
 use tracing::{debug, info, instrument, warn};
 
@@ -237,6 +238,29 @@ pub async fn apply_dotfiles(
 // Lifecycle Integration
 // =============================================================================
 
+/// Provenance of the install command, used by the workspace-trust gate to
+/// decide whether to require an explicit opt-in before exec'ing host shell.
+///
+/// `UserCliFlag` describes a command that came directly from a `--dotfiles-*`
+/// CLI flag — the user typed it, so it's already trusted by virtue of having
+/// been passed on the command line. `WorkspaceSourced` describes a command
+/// that came from `devcontainer.json` (or any future workspace-resident
+/// source); it MUST be gated by [`check_workspace_trust`] before exec.
+#[derive(Debug, Clone, Default)]
+pub enum HostTrustSource {
+    /// Came from a CLI flag the user typed; no extra gate needed.
+    #[default]
+    UserCliFlag,
+    /// Came from a workspace-resident source (e.g. `devcontainer.json`).
+    /// Gate via the supplied trust policy before exec'ing any host shell.
+    WorkspaceSourced {
+        /// Workspace path used to look up the trust decision.
+        workspace: PathBuf,
+        /// Trust policy resolved by the caller (CLI tier).
+        policy: WorkspaceTrustPolicy,
+    },
+}
+
 /// Configuration for executing dotfiles as a lifecycle phase.
 ///
 /// This struct captures the CLI arguments and configuration needed to execute
@@ -252,6 +276,9 @@ pub struct DotfilesPhaseConfig {
     pub target_path: Option<String>,
     /// Custom install command (fallback if no install.sh/setup.sh is auto-detected)
     pub install_command: Option<String>,
+    /// Provenance of the install command — controls whether the host-trust
+    /// gate fires before exec. See [`HostTrustSource`].
+    pub host_trust: HostTrustSource,
 }
 
 impl DotfilesPhaseConfig {
@@ -275,6 +302,12 @@ impl DotfilesPhaseConfig {
     /// Set a custom install command
     pub fn with_install_command(mut self, cmd: impl Into<String>) -> Self {
         self.install_command = Some(cmd.into());
+        self
+    }
+
+    /// Mark the install command as workspace-sourced for the trust gate.
+    pub fn with_host_trust(mut self, host_trust: HostTrustSource) -> Self {
+        self.host_trust = host_trust;
         self
     }
 
@@ -403,9 +436,14 @@ pub async fn execute_dotfiles_phase(config: &DotfilesPhaseConfig) -> Result<Dotf
     let result = apply_dotfiles(&repository, target, &options).await?;
 
     // If custom install command was provided and no script was auto-detected,
-    // execute the custom command
+    // execute the custom command (gated by workspace trust when the command
+    // came from a workspace-resident source — see HostTrustSource).
     if let Some(ref custom_cmd) = config.install_command {
         if !result.script_executed {
+            if let HostTrustSource::WorkspaceSourced { workspace, policy } = &config.host_trust {
+                let decision = check_workspace_trust(workspace, policy.clone()).await?;
+                decision_to_result(decision)?;
+            }
             info!("Executing custom dotfiles install command: {}", custom_cmd);
             execute_custom_install_command(target, custom_cmd).await?;
         }
@@ -818,6 +856,7 @@ mod tests {
             repository: None,
             target_path: Some("/path".to_string()),
             install_command: None,
+            host_trust: HostTrustSource::UserCliFlag,
         };
         assert!(!with_target_only.is_configured());
     }
