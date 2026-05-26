@@ -489,7 +489,7 @@ pub(crate) async fn execute_container_up(
         &container_result.container_id,
         None,
         config_user.clone(),
-        args.default_user_env_probe,
+        config.user_env_probe.unwrap_or(args.default_user_env_probe),
         Some(&config.remote_env),
         cli_remote_env,
         cache_folder.as_deref(),

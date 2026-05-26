@@ -10,13 +10,15 @@ use super::args::UpArgs;
 use super::{ENV_FORCE_TTY_IF_JSON, ENV_LOG_FORMAT};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
-use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::container_lifecycle::{
     aggregate_lifecycle_commands, AggregatedLifecycleCommand, DotfilesConfig, LifecycleCommandList,
     LifecycleCommandSource, LifecycleCommandValue,
 };
 use deacon_core::features::ResolvedFeature;
-use deacon_core::lifecycle::{InvocationContext, InvocationFlags, LifecyclePhaseState};
+use deacon_core::lifecycle::{
+    should_queue_phase_for_wait_for, should_run_dotfiles_for_wait_for, wait_for_phase,
+    InvocationContext, InvocationFlags, LifecyclePhase, LifecyclePhaseState,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -146,7 +148,6 @@ pub(crate) async fn execute_lifecycle_commands(
         execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
         ContainerLifecycleConfig,
     };
-    use deacon_core::lifecycle::LifecyclePhase;
     use deacon_core::variable::SubstitutionContext;
 
     debug!("Executing lifecycle commands in container");
@@ -213,8 +214,18 @@ pub(crate) async fn execute_lifecycle_commands(
         std::env::var(ENV_FORCE_TTY_IF_JSON).unwrap_or_else(|_| "unset".to_string())
     );
 
+    let wait_for = wait_for_phase(config.wait_for.as_deref())?;
+    if args.skip_non_blocking_commands {
+        debug!(
+            "Lifecycle will stop after waitFor phase {} because --skip-non-blocking-commands is set",
+            wait_for.as_str()
+        );
+    }
+
     // Build dotfiles configuration from CLI args (T009: per SC-001 lifecycle ordering)
-    let dotfiles_config = if args.dotfiles_repository.is_some() {
+    let dotfiles_config = if args.dotfiles_repository.is_some()
+        && should_run_dotfiles_for_wait_for(args.skip_non_blocking_commands, wait_for)
+    {
         Some(DotfilesConfig {
             repository: args.dotfiles_repository.clone(),
             target_path: args.dotfiles_target_path.clone(),
@@ -234,7 +245,7 @@ pub(crate) async fn execute_lifecycle_commands(
         skip_non_blocking_commands: args.skip_non_blocking_commands,
         non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout
         use_login_shell: true, // Default: use login shell for lifecycle commands
-        user_env_probe: ContainerProbeMode::None,
+        user_env_probe: config.user_env_probe.unwrap_or(args.default_user_env_probe),
         cache_folder: cache_folder.clone(),
         force_pty,
         dotfiles: dotfiles_config,
@@ -259,6 +270,15 @@ pub(crate) async fn execute_lifecycle_commands(
     ];
 
     for &phase in &phases {
+        if !should_queue_phase_for_wait_for(args.skip_non_blocking_commands, wait_for, phase) {
+            debug!(
+                "Skipping {}: occurs after configured waitFor phase {} with --skip-non-blocking-commands",
+                phase.as_str(),
+                wait_for.as_str()
+            );
+            continue;
+        }
+
         if let Some(skip_reason) = invocation_context.should_skip_phase(phase) {
             debug!("Skipping {}: {}", phase.as_str(), skip_reason);
             continue;
@@ -442,10 +462,70 @@ pub(crate) async fn execute_initialize_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deacon_core::lifecycle::{InvocationMode, LifecyclePhase, PhaseStatus};
+    use deacon_core::lifecycle::{InvocationMode, PhaseStatus};
 
     fn default_args() -> UpArgs {
         UpArgs::default()
+    }
+
+    #[test]
+    fn test_wait_for_phase_defaults_to_update_content() {
+        assert_eq!(wait_for_phase(None).unwrap(), LifecyclePhase::UpdateContent);
+    }
+
+    #[test]
+    fn test_wait_for_phase_accepts_spec_values() {
+        assert_eq!(
+            wait_for_phase(Some("initializeCommand")).unwrap(),
+            LifecyclePhase::Initialize
+        );
+        assert_eq!(
+            wait_for_phase(Some("onCreateCommand")).unwrap(),
+            LifecyclePhase::OnCreate
+        );
+        assert_eq!(
+            wait_for_phase(Some("postAttachCommand")).unwrap(),
+            LifecyclePhase::PostAttach
+        );
+    }
+
+    #[test]
+    fn test_wait_for_phase_rejects_invalid_value() {
+        let err = wait_for_phase(Some("postCreate")).unwrap_err();
+        assert!(err.to_string().contains("Invalid waitFor value"));
+    }
+
+    #[test]
+    fn test_skip_non_blocking_queues_only_through_wait_for() {
+        let wait_for = LifecyclePhase::UpdateContent;
+
+        assert!(should_queue_phase_for_wait_for(
+            true,
+            wait_for,
+            LifecyclePhase::OnCreate
+        ));
+        assert!(should_queue_phase_for_wait_for(
+            true,
+            wait_for,
+            LifecyclePhase::UpdateContent
+        ));
+        assert!(!should_queue_phase_for_wait_for(
+            true,
+            wait_for,
+            LifecyclePhase::PostCreate
+        ));
+    }
+
+    #[test]
+    fn test_wait_for_post_start_includes_dotfiles_boundary() {
+        assert!(!should_run_dotfiles_for_wait_for(
+            true,
+            LifecyclePhase::PostCreate
+        ));
+        assert!(should_run_dotfiles_for_wait_for(
+            true,
+            LifecyclePhase::PostStart
+        ));
     }
 
     // ========================================================================

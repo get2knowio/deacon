@@ -164,8 +164,10 @@ fn test_port_attributes_for_multiservice() {
         PortAttributes {
             label: Some("Web App".to_string()),
             on_auto_forward: Some(OnAutoForward::Notify),
+            protocol: None,
             open_preview: None,
             require_local_port: None,
+            elevate_if_needed: None,
             description: None,
         },
     );
@@ -174,8 +176,10 @@ fn test_port_attributes_for_multiservice() {
         PortAttributes {
             label: Some("PostgreSQL".to_string()),
             on_auto_forward: Some(OnAutoForward::Silent),
+            protocol: None,
             open_preview: None,
             require_local_port: None,
+            elevate_if_needed: None,
             description: None,
         },
     );
@@ -184,8 +188,10 @@ fn test_port_attributes_for_multiservice() {
         PortAttributes {
             label: Some("Redis".to_string()),
             on_auto_forward: Some(OnAutoForward::Ignore),
+            protocol: None,
             open_preview: None,
             require_local_port: None,
+            elevate_if_needed: None,
             description: None,
         },
     );

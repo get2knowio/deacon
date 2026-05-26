@@ -11,6 +11,7 @@ use deacon_core::container_lifecycle::{
     ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
     LifecycleCommandSource, LifecycleCommandValue,
 };
+use deacon_core::lifecycle::{should_queue_phase_for_wait_for, wait_for_phase, LifecyclePhase};
 use deacon_core::variable::SubstitutionContext;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -190,22 +191,42 @@ async fn execute_lifecycle_commands(
     // Note: initializeCommand is intentionally omitted here. It is a host-side command
     // that runs before container creation and belongs only in the `up` workflow.
 
+    let wait_for = wait_for_phase(config.wait_for.as_deref())?;
+
     // Phase 1: onCreate (container)
-    if let Some(ref on_create) = config.on_create_command {
-        if let Some(cmd_list) = parse_phase_command(on_create, "onCreateCommand")? {
-            commands = commands.with_on_create(cmd_list);
+    if should_queue_phase_for_wait_for(
+        args.skip_non_blocking_commands,
+        wait_for,
+        LifecyclePhase::OnCreate,
+    ) {
+        if let Some(ref on_create) = config.on_create_command {
+            if let Some(cmd_list) = parse_phase_command(on_create, "onCreateCommand")? {
+                commands = commands.with_on_create(cmd_list);
+            }
         }
     }
 
     // Phase 2: updateContent (container)
-    if let Some(ref update_content) = config.update_content_command {
-        if let Some(cmd_list) = parse_phase_command(update_content, "updateContentCommand")? {
-            commands = commands.with_update_content(cmd_list);
+    if should_queue_phase_for_wait_for(
+        args.skip_non_blocking_commands,
+        wait_for,
+        LifecyclePhase::UpdateContent,
+    ) {
+        if let Some(ref update_content) = config.update_content_command {
+            if let Some(cmd_list) = parse_phase_command(update_content, "updateContentCommand")? {
+                commands = commands.with_update_content(cmd_list);
+            }
         }
     }
 
     // Phase 3: postCreate (container, can be skipped)
-    if !args.skip_post_create {
+    if !args.skip_post_create
+        && should_queue_phase_for_wait_for(
+            args.skip_non_blocking_commands,
+            wait_for,
+            LifecyclePhase::PostCreate,
+        )
+    {
         if let Some(ref post_create) = config.post_create_command {
             if let Some(cmd_list) = parse_phase_command(post_create, "postCreateCommand")? {
                 commands = commands.with_post_create(cmd_list);
@@ -214,7 +235,11 @@ async fn execute_lifecycle_commands(
     }
 
     // Phase 4: postStart (container, non-blocking, can be skipped)
-    if !args.skip_non_blocking_commands {
+    if should_queue_phase_for_wait_for(
+        args.skip_non_blocking_commands,
+        wait_for,
+        LifecyclePhase::PostStart,
+    ) {
         if let Some(ref post_start) = config.post_start_command {
             if let Some(cmd_list) = parse_phase_command(post_start, "postStartCommand")? {
                 commands = commands.with_post_start(cmd_list);
@@ -222,7 +247,13 @@ async fn execute_lifecycle_commands(
         }
 
         // Phase 5: postAttach (container, non-blocking, can be skipped)
-        if !args.skip_post_attach {
+        if !args.skip_post_attach
+            && should_queue_phase_for_wait_for(
+                args.skip_non_blocking_commands,
+                wait_for,
+                LifecyclePhase::PostAttach,
+            )
+        {
             if let Some(ref post_attach) = config.post_attach_command {
                 if let Some(cmd_list) = parse_phase_command(post_attach, "postAttachCommand")? {
                     commands = commands.with_post_attach(cmd_list);

@@ -354,6 +354,8 @@ mod tests {
     fn test_workspace_hash_different_paths() {
         let temp_dir1 = TempDir::new().unwrap();
         let temp_dir2 = TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir1.path().join(".git")).unwrap();
+        std::fs::create_dir(temp_dir2.path().join(".git")).unwrap();
 
         let config = DevContainerConfig {
             name: Some("test".to_string()),

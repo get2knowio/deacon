@@ -393,10 +393,13 @@ pub(crate) async fn execute_up_with_runtime(
         debug!("Validating host requirements");
         let mut evaluator = deacon_core::host_requirements::HostRequirementsEvaluator::new();
 
-        match evaluator.validate_requirements(
+        let gpu_available = Some(args.gpu_mode == deacon_core::gpu::GpuMode::All);
+
+        match evaluator.validate_requirements_with_gpu_availability(
             host_requirements,
             Some(workspace_folder.as_path()),
             args.ignore_host_requirements,
+            gpu_available,
         ) {
             Ok(evaluation) => {
                 if evaluation.requirements_met {

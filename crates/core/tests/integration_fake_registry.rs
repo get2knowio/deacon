@@ -397,6 +397,7 @@ async fn test_fake_registry_push_pull_cycle() {
         version: Some("1.0.0".to_string()),
         options: std::collections::HashMap::new(),
         container_env: std::collections::HashMap::new(),
+        customizations: None,
         mounts: vec![],
         init: None,
         privileged: None,

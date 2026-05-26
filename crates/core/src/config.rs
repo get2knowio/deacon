@@ -21,6 +21,7 @@
 //! This implementation aligns with the [Development Containers Specification](https://containers.dev/implementors/spec/)
 //! and follows the configuration resolution workflow defined in the CLI specification.
 
+use crate::container_env_probe::ContainerProbeMode;
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -166,11 +167,17 @@ pub struct PortAttributes {
     /// Action to take when the port is auto-forwarded
     pub on_auto_forward: Option<OnAutoForward>,
 
+    /// Protocol hint for forwarded ports (`http` or `https`).
+    pub protocol: Option<String>,
+
     /// Whether to open a preview of the port automatically
     pub open_preview: Option<bool>,
 
     /// Whether to require a specific local port for forwarding
     pub require_local_port: Option<bool>,
+
+    /// Whether tools should try to elevate privileges for low local ports.
+    pub elevate_if_needed: Option<bool>,
 
     /// Description of what this port is used for
     pub description: Option<String>,
@@ -315,11 +322,24 @@ pub struct HostRequirements {
     pub memory: Option<ResourceSpec>,
     /// Minimum storage space required (e.g., "10GB", "500MB")
     pub storage: Option<ResourceSpec>,
+    /// GPU requirement. Supports boolean, string, or object forms per spec.
+    pub gpu: Option<serde_json::Value>,
 }
 
 /// Parse a resource string with unit suffix to bytes.
 ///
-/// Supports units: B, KB, MB, GB, TB (1000-based) and KiB, MiB, GiB, TiB (1024-based)
+/// Unit semantics align with upstream `devcontainers/cli` `parseBytes`
+/// (`src/spec-node/imageMetadata.ts`): the short suffixes `kb`/`mb`/`gb`/`tb` are
+/// **binary** (powers of 1024), matching how Docker, Linux memory limits, and the
+/// reference CLI interpret them. `B` (raw bytes) and the explicit-binary aliases
+/// `KiB`/`MiB`/`GiB`/`TiB` are accepted as a superset for clarity. Suffixes are
+/// case-insensitive.
+///
+/// Examples:
+/// - `"4GB"` → `4 * 2^30 = 4_294_967_296`
+/// - `"512MB"` → `512 * 2^20 = 536_870_912`
+/// - `"1GiB"` → `1 * 2^30 = 1_073_741_824` (same as `1GB`)
+/// - `"4"` → `4` (raw bytes)
 fn parse_resource_string(s: &str) -> Result<u64> {
     let s = s.trim();
 
@@ -343,16 +363,14 @@ fn parse_resource_string(s: &str) -> Result<u64> {
     })?;
     let unit = captures[2].to_lowercase();
 
-    let multiplier = match unit.as_str() {
+    // Per upstream `parseBytes`: kb/mb/gb/tb are 1024-based.
+    // The kib/mib/gib/tib aliases are kept for callers that prefer the explicit form.
+    let multiplier: u64 = match unit.as_str() {
         "b" => 1,
-        "kb" => 1_000,
-        "mb" => 1_000_000,
-        "gb" => 1_000_000_000,
-        "tb" => 1_000_000_000_000,
-        "kib" => 1_024,
-        "mib" => 1_024 * 1_024,
-        "gib" => 1_024 * 1_024 * 1_024,
-        "tib" => 1_024_u64.pow(4),
+        "kb" | "kib" => 1_024,
+        "mb" | "mib" => 1_024 * 1_024,
+        "gb" | "gib" => 1_024_u64.pow(3),
+        "tb" | "tib" => 1_024_u64.pow(4),
         _ => {
             return Err(ConfigError::Validation {
                 message: format!("Unknown unit: {}", unit),
@@ -496,6 +514,11 @@ pub struct DevContainerConfig {
     #[serde(rename = "updateRemoteUserUID")]
     pub update_remote_user_uid: Option<bool>,
 
+    /// Shell probing mode used to collect user environment variables.
+    ///
+    /// Reference: [userEnvProbe](https://containers.dev/implementors/json_reference/#general-devcontainerjson-properties)
+    pub user_env_probe: Option<ContainerProbeMode>,
+
     /// Ports to forward from the container.
     ///
     /// Reference: [Port Configuration - forwardPorts](https://containers.dev/implementors/json_reference/#forward-ports)
@@ -535,6 +558,11 @@ pub struct DevContainerConfig {
     ///
     /// Reference: [Container Configuration - overrideCommand](https://containers.dev/implementors/json_reference/#override-command)
     pub override_command: Option<bool>,
+
+    /// Lifecycle phase that supporting tools should wait for before connecting.
+    ///
+    /// Reference: [Lifecycle Commands - waitFor](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+    pub wait_for: Option<String>,
 
     /// Command to run once after the container is created.
     ///
@@ -1018,6 +1046,7 @@ impl Default for DevContainerConfig {
             container_user: None,
             remote_user: None,
             update_remote_user_uid: None,
+            user_env_probe: None,
             forward_ports: Vec::new(),
             app_port: None,
             ports_attributes: HashMap::new(),
@@ -1025,6 +1054,7 @@ impl Default for DevContainerConfig {
             run_args: Vec::new(),
             shutdown_action: None,
             override_command: None,
+            wait_for: None,
             on_create_command: None,
             post_start_command: None,
             post_create_command: None,
@@ -1114,6 +1144,7 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.shutdown_action.clone()),
             override_command: overlay.override_command.or(base.override_command),
+            wait_for: overlay.wait_for.clone().or_else(|| base.wait_for.clone()),
             // Docker Compose fields
             docker_compose_file: overlay
                 .docker_compose_file
@@ -1138,9 +1169,12 @@ impl ConfigMerger {
             // Customizations: deep merge as objects
             customizations: Self::merge_json_objects(&base.customizations, &overlay.customizations),
 
-            // Arrays: union with deduplication — entries from all sources preserved
-            mounts: Self::union_arrays(&base.mounts, &overlay.mounts),
-            forward_ports: Self::union_arrays(&base.forward_ports, &overlay.forward_ports),
+            // Mounts: dedupe per container-side target, last-wins in declaration order
+            // (matches upstream `mergeMounts` in devcontainers/cli's mergeConfiguration).
+            // forwardPorts: dedupe with `localhost:N` ↔ Number(N) normalization, preserving
+            // first-seen order (matches upstream `mergeForwardPorts`).
+            mounts: crate::mount::union_mounts_by_target(&base.mounts, &overlay.mounts),
+            forward_ports: Self::union_forward_ports(&base.forward_ports, &overlay.forward_ports),
             on_create_command: overlay
                 .on_create_command
                 .clone()
@@ -1182,6 +1216,7 @@ impl ConfigMerger {
             update_remote_user_uid: overlay
                 .update_remote_user_uid
                 .or(base.update_remote_user_uid),
+            user_env_probe: overlay.user_env_probe.or(base.user_env_probe),
 
             // runArgs: concatenate arrays
             run_args: Self::concat_string_arrays(&base.run_args, &overlay.run_args),
@@ -1196,22 +1231,28 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.other_ports_attributes.clone()),
 
-            // Host requirements: last writer wins
-            host_requirements: overlay
-                .host_requirements
-                .clone()
-                .or_else(|| base.host_requirements.clone()),
+            // Host requirements: field-wise max for cpus/memory/storage, OR-merge for gpu
+            // (matches upstream `mergeHostRequirements` in devcontainers/cli's
+            // mergeConfiguration). Falls back to whichever side is `Some` when only one
+            // contributes.
+            host_requirements: Self::merge_host_requirements(
+                base.host_requirements.as_ref(),
+                overlay.host_requirements.as_ref(),
+            ),
 
-            // Security options: OR semantics for privileged and init, concatenate arrays for capabilities and security opts
+            // Security options: OR semantics for privileged and init; set-union for cap_add /
+            // security_opt to match upstream `unionOrUndefined` in
+            // devcontainers/cli/src/spec-node/imageMetadata.ts (mergeConfiguration). Duplicates
+            // are dropped while preserving first-seen order across the metadata chain.
             privileged: Self::merge_bool_or(base.privileged, overlay.privileged),
             init: Self::merge_bool_or(base.init, overlay.init),
-            cap_add: Self::concat_string_arrays(&base.cap_add, &overlay.cap_add),
-            security_opt: Self::concat_string_arrays(&base.security_opt, &overlay.security_opt),
+            cap_add: Self::union_arrays(&base.cap_add, &overlay.cap_add),
+            security_opt: Self::union_arrays(&base.security_opt, &overlay.security_opt),
         }
     }
 
     /// Merge two JSON objects deeply
-    fn merge_json_objects(
+    pub fn merge_json_objects(
         base: &serde_json::Value,
         overlay: &serde_json::Value,
     ) -> serde_json::Value {
@@ -1282,6 +1323,178 @@ impl ConfigMerger {
             }
         }
         result
+    }
+
+    /// Merge two `forwardPorts` lists with `localhost:N` ↔ `Number(N)` normalization, matching
+    /// upstream `mergeForwardPorts` in `devcontainers/cli/src/spec-node/imageMetadata.ts`.
+    ///
+    /// Semantics:
+    /// - Each entry is normalized to a canonical dedup key: `Number(N)` and `String("localhost:N")`
+    ///   share the key `localhost:N`; all other strings are their own keys (so `"3000"` and
+    ///   `Number(3000)` remain distinct, mirroring upstream).
+    /// - Entries are kept in first-seen order across base+overlay.
+    /// - On output, any entry whose canonical key matches `localhost:<u16>` is emitted as
+    ///   `PortSpec::Number(N)` (canonicalization); other entries are preserved verbatim.
+    fn union_forward_ports(base: &[PortSpec], overlay: &[PortSpec]) -> Vec<PortSpec> {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut result: Vec<PortSpec> = Vec::new();
+        for entry in base.iter().chain(overlay.iter()) {
+            let key = match entry {
+                PortSpec::Number(n) => format!("localhost:{}", n),
+                PortSpec::String(s) => s.clone(),
+            };
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            // Canonicalize `localhost:<u16>` (regardless of original variant) to Number(N).
+            let canonical = key
+                .strip_prefix("localhost:")
+                .and_then(|rest| rest.parse::<u16>().ok())
+                .map(PortSpec::Number);
+            result.push(canonical.unwrap_or_else(|| entry.clone()));
+        }
+        result
+    }
+
+    /// Merge two optional [`HostRequirements`] following upstream `mergeHostRequirements`
+    /// semantics: per-field max for `cpus`/`memory`/`storage`, OR-style merge for `gpu`.
+    ///
+    /// When only one side is `Some`, it is returned unchanged. When both are `Some`, each
+    /// numeric field is canonicalized for comparison (cpus as cores, memory/storage as
+    /// bytes), the max is taken, and the result is emitted as `ResourceSpec::Number` (cpus)
+    /// or `ResourceSpec::String("<bytes>")` (memory/storage) — matching upstream's
+    /// `cpus: number, memory: string, storage: string` output shape.
+    fn merge_host_requirements(
+        base: Option<&HostRequirements>,
+        overlay: Option<&HostRequirements>,
+    ) -> Option<HostRequirements> {
+        match (base, overlay) {
+            (None, None) => None,
+            (Some(b), None) => Some(b.clone()),
+            (None, Some(o)) => Some(o.clone()),
+            (Some(b), Some(o)) => Some(HostRequirements {
+                cpus: Self::merge_max_cpus(b.cpus.as_ref(), o.cpus.as_ref()),
+                memory: Self::merge_max_bytes(b.memory.as_ref(), o.memory.as_ref()),
+                storage: Self::merge_max_bytes(b.storage.as_ref(), o.storage.as_ref()),
+                gpu: Self::merge_gpu_requirements(b.gpu.as_ref(), o.gpu.as_ref()),
+            }),
+        }
+    }
+
+    /// Take the max of two optional CPU specifications (in cores). Unparseable inputs are
+    /// treated as 0; the result is emitted as `ResourceSpec::Number` when > 0, else `None`.
+    fn merge_max_cpus(a: Option<&ResourceSpec>, b: Option<&ResourceSpec>) -> Option<ResourceSpec> {
+        let av = a.and_then(|r| r.parse_cpu_cores().ok()).unwrap_or(0.0);
+        let bv = b.and_then(|r| r.parse_cpu_cores().ok()).unwrap_or(0.0);
+        let max = av.max(bv);
+        if max > 0.0 {
+            Some(ResourceSpec::Number(max))
+        } else {
+            None
+        }
+    }
+
+    /// Take the max of two optional byte specifications. Unparseable inputs are treated as 0;
+    /// the result is emitted as `ResourceSpec::String` of the raw byte count when > 0, else
+    /// `None` (matches upstream's `memory ? ${memory} : undefined`).
+    fn merge_max_bytes(a: Option<&ResourceSpec>, b: Option<&ResourceSpec>) -> Option<ResourceSpec> {
+        let av = a.and_then(|r| r.parse_bytes().ok()).unwrap_or(0);
+        let bv = b.and_then(|r| r.parse_bytes().ok()).unwrap_or(0);
+        let max = av.max(bv);
+        if max > 0 {
+            Some(ResourceSpec::String(max.to_string()))
+        } else {
+            None
+        }
+    }
+
+    /// Merge two optional GPU requirements per upstream `mergeGpuRequirements`:
+    /// - `undefined`/`false` from either side → use the other side verbatim.
+    /// - Both `"optional"` → `"optional"`.
+    /// - Otherwise treat each as the object form (non-object → `{}`) and take max of
+    ///   `cores` and `memory` (in bytes), emitting an object with whichever fields are > 0.
+    fn merge_gpu_requirements(
+        a: Option<&serde_json::Value>,
+        b: Option<&serde_json::Value>,
+    ) -> Option<serde_json::Value> {
+        fn is_false_or_null(v: &serde_json::Value) -> bool {
+            matches!(v, serde_json::Value::Bool(false) | serde_json::Value::Null)
+        }
+        fn is_optional_string(v: &serde_json::Value) -> bool {
+            v.as_str() == Some("optional")
+        }
+        fn cores_of(v: Option<&serde_json::Value>) -> f64 {
+            v.and_then(|v| v.as_object())
+                .and_then(|m| m.get("cores"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+        }
+        fn memory_bytes_of(v: Option<&serde_json::Value>) -> u64 {
+            v.and_then(|v| v.as_object())
+                .and_then(|m| m.get("memory"))
+                .and_then(|mv| {
+                    if let Some(s) = mv.as_str() {
+                        parse_resource_string(s).ok()
+                    } else if let Some(n) = mv.as_u64() {
+                        Some(n)
+                    } else {
+                        mv.as_f64().map(|f| f as u64)
+                    }
+                })
+                .unwrap_or(0)
+        }
+
+        match (a, b) {
+            (None, None) => None,
+            (Some(av), None) => {
+                if is_false_or_null(av) {
+                    None
+                } else {
+                    Some(av.clone())
+                }
+            }
+            (None, Some(bv)) => {
+                if is_false_or_null(bv) {
+                    None
+                } else {
+                    Some(bv.clone())
+                }
+            }
+            (Some(av), Some(bv)) => {
+                if is_false_or_null(av) {
+                    return if is_false_or_null(bv) {
+                        None
+                    } else {
+                        Some(bv.clone())
+                    };
+                }
+                if is_false_or_null(bv) {
+                    return Some(av.clone());
+                }
+                if is_optional_string(av) && is_optional_string(bv) {
+                    return Some(serde_json::Value::String("optional".to_string()));
+                }
+                // Object-form merge: take max of cores and memory.
+                let cores = cores_of(Some(av)).max(cores_of(Some(bv)));
+                let memory = memory_bytes_of(Some(av)).max(memory_bytes_of(Some(bv)));
+                let mut obj = serde_json::Map::new();
+                if cores > 0.0 {
+                    obj.insert(
+                        "cores".to_string(),
+                        serde_json::Number::from_f64(cores)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                }
+                if memory > 0 {
+                    obj.insert(
+                        "memory".to_string(),
+                        serde_json::Value::String(memory.to_string()),
+                    );
+                }
+                Some(serde_json::Value::Object(obj))
+            }
+        }
     }
 
     /// Resolve an effective configuration by merging image labels and applying variable substitution.
@@ -3681,6 +3894,443 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
+    // Tests for upstream-aligned forwardPorts dedup with localhost normalization.
+    // Mirrors `mergeForwardPorts` in devcontainers/cli (imageMetadata.ts):
+    // Number(N) and String("localhost:N") share the dedup key `localhost:N` and
+    // surface as Number(N) on output. All other strings remain distinct.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_union_forward_ports_dedupes_number_and_localhost_string() {
+        // Number(3000) and "localhost:3000" must collapse to a single Number(3000).
+        let base = vec![PortSpec::Number(3000)];
+        let overlay = vec![PortSpec::String("localhost:3000".to_string())];
+        let result = ConfigMerger::union_forward_ports(&base, &overlay);
+        assert_eq!(result, vec![PortSpec::Number(3000)]);
+    }
+
+    #[test]
+    fn test_union_forward_ports_canonicalizes_localhost_string_to_number() {
+        // String("localhost:3000") with no Number(3000) elsewhere must still canonicalize.
+        let base = vec![PortSpec::String("localhost:3000".to_string())];
+        let result = ConfigMerger::union_forward_ports(&base, &[]);
+        assert_eq!(result, vec![PortSpec::Number(3000)]);
+    }
+
+    #[test]
+    fn test_union_forward_ports_keeps_distinct_string_variants() {
+        // Per upstream, only `localhost:N` is normalized. Plain `"3000"` and `"3000:3000"`
+        // are distinct from Number(3000).
+        let base = vec![PortSpec::Number(3000)];
+        let overlay = vec![
+            PortSpec::String("3000".to_string()),
+            PortSpec::String("3000:3000".to_string()),
+        ];
+        let result = ConfigMerger::union_forward_ports(&base, &overlay);
+        assert_eq!(
+            result,
+            vec![
+                PortSpec::Number(3000),
+                PortSpec::String("3000".to_string()),
+                PortSpec::String("3000:3000".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_union_forward_ports_preserves_first_seen_order() {
+        // First-seen wins for ordering: later duplicates are dropped, surviving entries keep
+        // their original declaration position.
+        let base = vec![
+            PortSpec::Number(8080),
+            PortSpec::String("localhost:3000".to_string()),
+        ];
+        let overlay = vec![
+            PortSpec::Number(3000), // dup of localhost:3000 in base
+            PortSpec::Number(5432), // new
+            PortSpec::String("localhost:8080".to_string()), // dup of base 8080
+        ];
+        let result = ConfigMerger::union_forward_ports(&base, &overlay);
+        assert_eq!(
+            result,
+            vec![
+                PortSpec::Number(8080),
+                PortSpec::Number(3000),
+                PortSpec::Number(5432),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_union_forward_ports_passes_through_unrecognized_localhost() {
+        // `localhost:abc` is not a valid port; it must remain as a String entry and dedupe on
+        // exact string match.
+        let base = vec![PortSpec::String("localhost:abc".to_string())];
+        let overlay = vec![PortSpec::String("localhost:abc".to_string())];
+        let result = ConfigMerger::union_forward_ports(&base, &overlay);
+        assert_eq!(result, vec![PortSpec::String("localhost:abc".to_string())]);
+    }
+
+    /// End-to-end fold through `merge_configs`: a 3-layer chain must collapse all
+    /// `Number(N)` / `String("localhost:N")` pairs to a single `Number(N)` regardless of
+    /// which layer contributed each form.
+    #[test]
+    fn test_merge_configs_forward_ports_dedupes_through_full_chain() {
+        let layer_a = DevContainerConfig {
+            forward_ports: vec![PortSpec::Number(3000)],
+            ..Default::default()
+        };
+        let layer_b = DevContainerConfig {
+            forward_ports: vec![
+                PortSpec::String("localhost:3000".to_string()),
+                PortSpec::Number(8080),
+            ],
+            ..Default::default()
+        };
+        let layer_c = DevContainerConfig {
+            forward_ports: vec![PortSpec::String("localhost:8080".to_string())],
+            ..Default::default()
+        };
+
+        let merged = ConfigMerger::merge_configs(&[layer_a, layer_b, layer_c]);
+
+        assert_eq!(
+            merged.forward_ports,
+            vec![PortSpec::Number(3000), PortSpec::Number(8080)]
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for upstream-aligned hostRequirements merge semantics.
+    // Mirrors `mergeHostRequirements` / `mergeGpuRequirements` in devcontainers/cli
+    // (imageMetadata.ts): per-field max for cpus/memory/storage, OR-style for gpu.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_merge_host_requirements_picks_max_cpus() {
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(2.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(8.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged
+            .host_requirements
+            .expect("merged should retain hostRequirements");
+        assert_eq!(hr.cpus, Some(ResourceSpec::Number(8.0)));
+        assert!(hr.memory.is_none());
+        assert!(hr.storage.is_none());
+        assert!(hr.gpu.is_none());
+    }
+
+    #[test]
+    fn test_merge_host_requirements_picks_max_cpus_regardless_of_order() {
+        // Verify max is taken regardless of which side has the larger value.
+        let small = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(2.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let large = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(8.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let a = ConfigMerger::merge_two_configs(&small, &large);
+        let b = ConfigMerger::merge_two_configs(&large, &small);
+        assert_eq!(
+            a.host_requirements.unwrap().cpus,
+            Some(ResourceSpec::Number(8.0))
+        );
+        assert_eq!(
+            b.host_requirements.unwrap().cpus,
+            Some(ResourceSpec::Number(8.0))
+        );
+    }
+
+    #[test]
+    fn test_merge_host_requirements_picks_max_memory_as_bytes_string() {
+        // Per upstream parseBytes, both "4GB" and "8GB" are 1024-based; 8GB wins.
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: Some(ResourceSpec::String("4GB".to_string())),
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: Some(ResourceSpec::String("8GB".to_string())),
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(
+            hr.memory,
+            Some(ResourceSpec::String(
+                (8_u64 * 1024 * 1024 * 1024).to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_merge_host_requirements_picks_max_storage_across_units() {
+        // "4GB" and "8GiB" are both 1024-based per upstream parseBytes; 8GiB wins by magnitude.
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: Some(ResourceSpec::String("4GB".to_string())),
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: Some(ResourceSpec::String("8GiB".to_string())),
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(
+            hr.storage,
+            Some(ResourceSpec::String(
+                (8_u64 * 1024 * 1024 * 1024).to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_merge_host_requirements_single_side_passes_through() {
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(4.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig::default();
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(hr.cpus, Some(ResourceSpec::Number(4.0)));
+    }
+
+    #[test]
+    fn test_merge_host_requirements_both_none_yields_none() {
+        let base = DevContainerConfig::default();
+        let overlay = DevContainerConfig::default();
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        assert!(merged.host_requirements.is_none());
+    }
+
+    #[test]
+    fn test_merge_gpu_false_yields_other_side() {
+        // false on one side: use the other.
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::Bool(false)),
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::Bool(true)),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(hr.gpu, Some(serde_json::Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_merge_gpu_both_optional_stays_optional() {
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::String("optional".to_string())),
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::String("optional".to_string())),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(
+            hr.gpu,
+            Some(serde_json::Value::String("optional".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_merge_gpu_object_form_takes_max() {
+        // Object-form merge: max cores, max memory.
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::json!({ "cores": 2, "memory": "4GB" })),
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::json!({ "cores": 8, "memory": "2GB" })),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        let gpu_obj = hr
+            .gpu
+            .expect("gpu must be present")
+            .as_object()
+            .cloned()
+            .expect("gpu must be an object after object-form merge");
+        assert_eq!(gpu_obj.get("cores").and_then(|v| v.as_f64()), Some(8.0));
+        let memory_str = gpu_obj
+            .get("memory")
+            .and_then(|v| v.as_str())
+            .expect("gpu.memory must be a string");
+        // "4GB" is 1024-based per upstream parseBytes alignment.
+        assert_eq!(memory_str, (4_u64 * 1024 * 1024 * 1024).to_string());
+    }
+
+    #[test]
+    fn test_merge_gpu_true_with_object_form_promotes_to_object_max() {
+        // `true` is treated as object form `{}` per upstream `asHostGPURequirements`.
+        // Merging `true` + `{cores: 4, memory: "8GB"}` keeps the explicit object's values.
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::Bool(true)),
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::json!({ "cores": 4, "memory": "8GB" })),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        let gpu_obj = hr.gpu.unwrap().as_object().cloned().unwrap();
+        assert_eq!(gpu_obj.get("cores").and_then(|v| v.as_f64()), Some(4.0));
+        let memory_str = gpu_obj
+            .get("memory")
+            .and_then(|v| v.as_str())
+            .expect("gpu.memory must be a string");
+        // "8GB" is 1024-based per upstream parseBytes alignment.
+        assert_eq!(memory_str, (8_u64 * 1024 * 1024 * 1024).to_string());
+    }
+
+    #[test]
+    fn test_merge_host_requirements_full_chain_collapses_to_field_wise_max() {
+        // 3-layer chain: each layer contributes a different field.
+        let a = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(2.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let b = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(4.0)),
+                memory: Some(ResourceSpec::String("8GB".to_string())),
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let c = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: Some(ResourceSpec::String("2GB".to_string())),
+                storage: Some(ResourceSpec::String("50GB".to_string())),
+                gpu: Some(serde_json::Value::Bool(true)),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_configs(&[a, b, c]);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(hr.cpus, Some(ResourceSpec::Number(4.0)));
+        assert_eq!(
+            hr.memory,
+            Some(ResourceSpec::String(
+                (8_u64 * 1024 * 1024 * 1024).to_string()
+            ))
+        );
+        assert_eq!(
+            hr.storage,
+            Some(ResourceSpec::String(
+                (50_u64 * 1024 * 1024 * 1024).to_string()
+            ))
+        );
+        assert_eq!(hr.gpu, Some(serde_json::Value::Bool(true)));
+    }
+
+    // -------------------------------------------------------------------------
     // Integration test for init OR semantics (T025)
     // -------------------------------------------------------------------------
 
@@ -3965,20 +4615,14 @@ pub mod merge {
                 mounts: if metadata.mounts.is_empty() {
                     None
                 } else {
-                    Some(
-                        metadata
-                            .mounts
-                            .iter()
-                            .map(|m| serde_json::Value::String(m.clone()))
-                            .collect(),
-                    )
+                    Some(metadata.mounts.clone())
                 },
                 container_env: if metadata.container_env.is_empty() {
                     None
                 } else {
                     Some(metadata.container_env.clone())
                 },
-                customizations: None, // TODO: Extract customizations from feature metadata if available
+                customizations: metadata.customizations.clone(),
                 provenance: Some(Provenance {
                     source: Some(source),
                     service,
@@ -4256,6 +4900,36 @@ pub mod merge {
                 image: Some(image.to_string()),
                 ..Default::default()
             }
+        }
+
+        #[test]
+        fn test_feature_metadata_entry_preserves_customizations() {
+            let metadata = crate::features::FeatureMetadata {
+                id: "feature-with-customizations".to_string(),
+                customizations: Some(serde_json::json!({
+                    "vscode": {
+                        "extensions": ["ms-vscode.cpptools"]
+                    }
+                })),
+                ..Default::default()
+            };
+
+            let entry = FeatureMetadataEntry::from_resolved(
+                metadata.id.clone(),
+                "oci://ghcr.io/example/features/custom:1".to_string(),
+                None,
+                &metadata,
+                0,
+                None,
+            );
+
+            assert_eq!(
+                entry
+                    .customizations
+                    .as_ref()
+                    .and_then(|value| value.pointer("/vscode/extensions/0")),
+                Some(&serde_json::Value::String("ms-vscode.cpptools".to_string()))
+            );
         }
 
         #[test]

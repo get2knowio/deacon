@@ -33,6 +33,7 @@ use tracing::{debug, info, instrument, warn};
 
 /// Environment probing modes for container
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub enum ContainerProbeMode {
     /// No environment probing
     None,

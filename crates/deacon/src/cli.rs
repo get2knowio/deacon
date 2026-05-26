@@ -315,18 +315,23 @@ pub enum Commands {
         include_merged_configuration: bool,
 
         // GPU and advanced options
-        /// GPU handling mode for container operations
+        /// GPU availability handling for container operations
         ///
         /// Controls how GPU resources are requested when creating containers.
         ///
         /// Values:
         ///   all    - Always request GPU resources (--gpus all)
         ///   detect - Auto-detect GPU availability; warn once if absent
-        ///   none   - No GPU requests, no GPU-related output (default)
+        ///   none   - No GPU requests, no GPU-related output
         ///
         /// In detect mode, the system will probe for GPU capabilities and emit
         /// a single warning if no GPU runtime is found, then continue without GPU support.
-        #[arg(long = "gpu-mode", default_value = "none", value_enum)]
+        #[arg(
+            long = "gpu-availability",
+            visible_alias = "gpu-mode",
+            default_value = "detect",
+            value_enum
+        )]
         gpu_mode: deacon_core::gpu::GpuMode,
         /// Update remote user UID default behavior (never, on, off)
         #[arg(long)]

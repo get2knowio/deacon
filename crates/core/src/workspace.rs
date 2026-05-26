@@ -426,10 +426,10 @@ mod tests {
 
     #[test]
     fn test_find_git_repository_root_no_git() -> anyhow::Result<()> {
-        let temp_dir = TempDir::new()?;
+        let path = Path::new("/deacon-test-path-outside-any-repository");
 
         // No .git at all
-        let result = find_git_repository_root(temp_dir.path())?;
+        let result = find_git_repository_root(path)?;
         assert!(
             result.is_none(),
             "Should return None when not in a git repository"

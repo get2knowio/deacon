@@ -108,6 +108,11 @@ UNION SourceInformation = GithubSourceInformation | DirectTarballSourceInformati
 
 ## MergedDevContainerConfig (shape)
 
+This mirrors the upstream `devcontainers/cli` `MergedDevContainerConfig` produced by
+`mergeConfiguration` (`src/spec-node/imageMetadata.ts`). The "collected" properties
+— `entrypoint` plus all five lifecycle hooks — are stripped from the base config and
+re-emitted as plural arrays in declaration order across the image-metadata chain.
+
 ```pseudocode
 STRUCT MergedDevContainerConfig:
     configFilePath: URI
@@ -123,15 +128,39 @@ STRUCT MergedDevContainerConfig:
     runArgs?: string[]
     mounts?: (string | Mount)[]                 // deduplicated by target; normalized formats mixed
     hostRequirements?: HostRequirements
-    customizations?: map<string, any>
-    // Lifecycle commands merged according to spec/metadata
-    onCreateCommand?: string | string[] | { command?: string, commandWithArgs?: string[] }
-    updateContentCommand?: string | string[]
-    postCreateCommand?: string | string[]
-    postStartCommand?: string | string[]
-    postAttachCommand?: string | string[]
+    // Customizations: per-tool array of contributor values (NOT deep-merged).
+    // Each tool key maps to an array; one slot per metadata source that supplied a value
+    // for that tool. Consumers (e.g. VS Code, JetBrains) merge entries within their slot.
+    // Omitted entirely when no source contributes any customizations.
+    customizations?: map<string, any[]>
+    // Collected from each metadata entry (features and base config) in declaration order.
+    // Each plural field is OMITTED when no entry contributes a value.
+    entrypoints?: string[]                      // collected; feature-supplied
+    onCreateCommands?: LifecycleCommand[]
+    updateContentCommands?: LifecycleCommand[]
+    postCreateCommands?: LifecycleCommand[]
+    postStartCommands?: LifecycleCommand[]
+    postAttachCommands?: LifecycleCommand[]
 END STRUCT
+
+UNION LifecycleCommand = string | string[] | map<string, string | string[]>
 ```
+
+Notes:
+- The singular `entrypoint`, `onCreateCommand`, `updateContentCommand`, `postCreateCommand`,
+  `postStartCommand`, and `postAttachCommand` fields are NOT present in the merged output —
+  they live only on the base `DevContainerConfig` (per-source) and image-metadata entries
+  before merge.
+- For the container path, collected arrays are populated from each `devcontainer.metadata`
+  label entry; the base config does not contribute lifecycle commands (matches upstream
+  `pickUpdateableConfigProperties`, which carries only `remoteUser` / `userEnvProbe` /
+  `remoteEnv`).
+- For the features path, collected arrays are populated from each resolved feature's
+  metadata followed by the base config's own collected fields.
+- `customizations` follows the same source ordering rule but uses the per-tool array shape
+  (`{ tool: [c_from_entry1, c_from_entry2, ...] }`) instead of the singular/plural rename. In
+  the container path the base config does NOT contribute customizations (per upstream
+  `pickUpdateableConfigProperties`); in the features path it contributes as the trailing entry.
 
 ## Supporting Types (subset)
 

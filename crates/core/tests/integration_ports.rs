@@ -18,8 +18,10 @@ fn test_port_event_generation_with_attributes() {
         PortAttributes {
             label: Some("Web Server".to_string()),
             on_auto_forward: Some(OnAutoForward::Notify),
+            protocol: None,
             open_preview: Some(true),
             require_local_port: None,
+            elevate_if_needed: None,
             description: Some("Main web application".to_string()),
         },
     );
@@ -28,8 +30,10 @@ fn test_port_event_generation_with_attributes() {
         PortAttributes {
             label: Some("API Server".to_string()),
             on_auto_forward: Some(OnAutoForward::OpenBrowser),
+            protocol: None,
             open_preview: None,
             require_local_port: Some(true),
+            elevate_if_needed: None,
             description: None,
         },
     );
@@ -46,8 +50,10 @@ fn test_port_event_generation_with_attributes() {
     config.other_ports_attributes = Some(PortAttributes {
         label: Some("Default Service".to_string()),
         on_auto_forward: Some(OnAutoForward::Silent),
+        protocol: None,
         open_preview: Some(false),
         require_local_port: Some(false),
+        elevate_if_needed: None,
         description: Some("Fallback description".to_string()),
     });
 
@@ -110,7 +116,7 @@ fn test_port_event_generation_with_attributes() {
 
     // Find and verify the 3000 port event
     let port_3000_event = events.iter().find(|e| e.port == 3000).unwrap();
-    assert_eq!(port_3000_event.protocol, "tcp");
+    assert_eq!(port_3000_event.protocol, None);
     assert_eq!(port_3000_event.label, Some("Web Server".to_string()));
     assert_eq!(port_3000_event.on_auto_forward, Some(OnAutoForward::Notify));
     assert_eq!(
@@ -124,7 +130,7 @@ fn test_port_event_generation_with_attributes() {
 
     // Find and verify the 8080 port event
     let port_8080_event = events.iter().find(|e| e.port == 8080).unwrap();
-    assert_eq!(port_8080_event.protocol, "tcp");
+    assert_eq!(port_8080_event.protocol, None);
     assert_eq!(port_8080_event.label, Some("API Server".to_string()));
     assert_eq!(
         port_8080_event.on_auto_forward,
@@ -137,7 +143,7 @@ fn test_port_event_generation_with_attributes() {
 
     // Find and verify the 4000 port event (appPort with fallback attributes)
     let port_4000_event = events.iter().find(|e| e.port == 4000).unwrap();
-    assert_eq!(port_4000_event.protocol, "tcp");
+    assert_eq!(port_4000_event.protocol, None);
     assert_eq!(port_4000_event.label, Some("Default Service".to_string())); // From otherPortsAttributes
     assert_eq!(port_4000_event.on_auto_forward, Some(OnAutoForward::Silent)); // From otherPortsAttributes
     assert_eq!(
@@ -157,7 +163,7 @@ fn test_port_event_generation_with_attributes() {
 fn test_port_event_serialization() {
     let event = PortEvent {
         port: 3000,
-        protocol: "tcp".to_string(),
+        protocol: Some("http".to_string()),
         label: Some("Web Server".to_string()),
         on_auto_forward: Some(OnAutoForward::Notify),
         auto_forwarded: true,
@@ -166,13 +172,15 @@ fn test_port_event_serialization() {
         description: Some("Main web server".to_string()),
         open_preview: Some(true),
         require_local_port: Some(false),
+        elevate_if_needed: Some(false),
     };
 
     let json = serde_json::to_string(&event).unwrap();
     let parsed: PortEvent = serde_json::from_str(&json).unwrap();
 
     assert_eq!(parsed.port, event.port);
-    assert_eq!(parsed.protocol, event.protocol);
+    assert_eq!(parsed.elevate_if_needed, Some(false));
+    assert_eq!(parsed.protocol, Some("http".to_string()));
     assert_eq!(parsed.label, event.label);
     assert_eq!(parsed.on_auto_forward, event.on_auto_forward);
     assert_eq!(parsed.auto_forwarded, event.auto_forwarded);
@@ -194,8 +202,10 @@ fn test_port_attribute_fallback_behavior() {
     config.other_ports_attributes = Some(PortAttributes {
         label: Some("Generic Service".to_string()),
         on_auto_forward: Some(OnAutoForward::Silent),
+        protocol: None,
         open_preview: Some(false),
         require_local_port: Some(false),
+        elevate_if_needed: None,
         description: Some("Generic description".to_string()),
     });
 
@@ -283,7 +293,7 @@ fn test_port_event_redaction() {
     // Create a port event containing the secret
     let _port_event = PortEvent {
         port: 3000,
-        protocol: "tcp".to_string(),
+        protocol: None,
         label: Some("Web with secret-port-token-123".to_string()),
         on_auto_forward: Some(OnAutoForward::Notify),
         auto_forwarded: true,
@@ -292,6 +302,7 @@ fn test_port_event_redaction() {
         description: Some("Contains secret-port-token-123 in description".to_string()),
         open_preview: Some(false),
         require_local_port: Some(false),
+        elevate_if_needed: None,
     };
 
     // Create minimal container and config for testing
@@ -322,8 +333,10 @@ fn test_port_event_redaction() {
         PortAttributes {
             label: Some("Web with secret-port-token-123".to_string()),
             on_auto_forward: Some(OnAutoForward::Notify),
+            protocol: None,
             open_preview: Some(false),
             require_local_port: Some(false),
+            elevate_if_needed: None,
             description: Some("Contains secret-port-token-123 in description".to_string()),
         },
     );

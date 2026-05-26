@@ -18,8 +18,8 @@ use tracing::{info, warn};
 pub struct PortEvent {
     /// The port number being forwarded
     pub port: u16,
-    /// The protocol (tcp/udp)
-    pub protocol: String,
+    /// Protocol handling hint from portsAttributes (`http`/`https`)
+    pub protocol: Option<String>,
     /// Human-readable label for this port
     pub label: Option<String>,
     /// The action taken when this port was auto-forwarded
@@ -36,6 +36,8 @@ pub struct PortEvent {
     pub open_preview: Option<bool>,
     /// Whether this port requires a specific local port
     pub require_local_port: Option<bool>,
+    /// Whether tools should try to elevate privileges for low local ports
+    pub elevate_if_needed: Option<bool>,
 }
 
 /// Port forwarding manager that handles port discovery, matching, and event emission
@@ -142,12 +144,16 @@ impl PortForwardingManager {
                 }
             }
 
-            // Try with /tcp suffix removal
-            if !found && port_key.ends_with("/tcp") {
-                let port_without_suffix = &port_key[..port_key.len() - 4];
-                if let Ok(port_num) = port_without_suffix.parse::<u16>() {
-                    if configured_ports.contains_key(&port_num) {
-                        found = true;
+            // Try with transport protocol suffix removal
+            if !found {
+                for suffix in ["/tcp", "/udp"] {
+                    if let Some(port_without_suffix) = port_key.strip_suffix(suffix) {
+                        if let Ok(port_num) = port_without_suffix.parse::<u16>() {
+                            if configured_ports.contains_key(&port_num) {
+                                found = true;
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -179,11 +185,12 @@ impl PortForwardingManager {
         config: &DevContainerConfig,
     ) -> PortEvent {
         // Get port attributes for this specific port
-        let port_attrs = Self::get_port_attributes(exposed_port.port, config);
+        let port_attrs =
+            Self::get_port_attributes_for(exposed_port.port, &exposed_port.protocol, config);
 
         PortEvent {
             port: exposed_port.port,
-            protocol: exposed_port.protocol.clone(),
+            protocol: port_attrs.protocol,
             label: port_attrs.label,
             on_auto_forward: port_attrs.on_auto_forward,
             auto_forwarded: port_mapping.is_some(),
@@ -192,69 +199,68 @@ impl PortForwardingManager {
             description: port_attrs.description,
             open_preview: port_attrs.open_preview,
             require_local_port: port_attrs.require_local_port,
+            elevate_if_needed: port_attrs.elevate_if_needed,
         }
     }
 
-    /// Get merged port attributes for a specific port
-    fn get_port_attributes(port: u16, config: &DevContainerConfig) -> PortAttributes {
+    /// Get merged port attributes for a specific port and transport protocol
+    fn get_port_attributes_for(
+        port: u16,
+        transport_protocol: &str,
+        config: &DevContainerConfig,
+    ) -> PortAttributes {
         let mut attrs = PortAttributes {
             label: None,
             on_auto_forward: None,
+            protocol: None,
             open_preview: None,
             require_local_port: None,
+            elevate_if_needed: None,
             description: None,
         };
 
         // Apply otherPortsAttributes as defaults
         if let Some(other_attrs) = &config.other_ports_attributes {
-            attrs.label = other_attrs.label.clone();
-            attrs.on_auto_forward = other_attrs.on_auto_forward.clone();
-            attrs.open_preview = other_attrs.open_preview;
-            attrs.require_local_port = other_attrs.require_local_port;
-            attrs.description = other_attrs.description.clone();
+            Self::merge_port_attributes(&mut attrs, other_attrs);
         }
 
         // Override with specific port attributes
         let port_key = port.to_string();
         if let Some(specific_attrs) = config.ports_attributes.get(&port_key) {
-            if specific_attrs.label.is_some() {
-                attrs.label = specific_attrs.label.clone();
-            }
-            if specific_attrs.on_auto_forward.is_some() {
-                attrs.on_auto_forward = specific_attrs.on_auto_forward.clone();
-            }
-            if specific_attrs.open_preview.is_some() {
-                attrs.open_preview = specific_attrs.open_preview;
-            }
-            if specific_attrs.require_local_port.is_some() {
-                attrs.require_local_port = specific_attrs.require_local_port;
-            }
-            if specific_attrs.description.is_some() {
-                attrs.description = specific_attrs.description.clone();
-            }
+            Self::merge_port_attributes(&mut attrs, specific_attrs);
         }
 
-        // Also try with protocol suffix
-        let port_key_tcp = format!("{}/tcp", port);
-        if let Some(specific_attrs) = config.ports_attributes.get(&port_key_tcp) {
-            if specific_attrs.label.is_some() {
-                attrs.label = specific_attrs.label.clone();
-            }
-            if specific_attrs.on_auto_forward.is_some() {
-                attrs.on_auto_forward = specific_attrs.on_auto_forward.clone();
-            }
-            if specific_attrs.open_preview.is_some() {
-                attrs.open_preview = specific_attrs.open_preview;
-            }
-            if specific_attrs.require_local_port.is_some() {
-                attrs.require_local_port = specific_attrs.require_local_port;
-            }
-            if specific_attrs.description.is_some() {
-                attrs.description = specific_attrs.description.clone();
-            }
+        // Also try with transport protocol suffix
+        let port_key_with_protocol = format!("{}/{}", port, transport_protocol);
+        if let Some(specific_attrs) = config.ports_attributes.get(&port_key_with_protocol) {
+            Self::merge_port_attributes(&mut attrs, specific_attrs);
         }
 
         attrs
+    }
+
+    fn merge_port_attributes(target: &mut PortAttributes, source: &PortAttributes) {
+        if source.label.is_some() {
+            target.label = source.label.clone();
+        }
+        if source.on_auto_forward.is_some() {
+            target.on_auto_forward = source.on_auto_forward.clone();
+        }
+        if source.protocol.is_some() {
+            target.protocol = source.protocol.clone();
+        }
+        if source.open_preview.is_some() {
+            target.open_preview = source.open_preview;
+        }
+        if source.require_local_port.is_some() {
+            target.require_local_port = source.require_local_port;
+        }
+        if source.elevate_if_needed.is_some() {
+            target.elevate_if_needed = source.elevate_if_needed;
+        }
+        if source.description.is_some() {
+            target.description = source.description.clone();
+        }
     }
 
     /// Emit a port event to stdout with PORT_EVENT prefix
@@ -286,6 +292,7 @@ impl PortForwardingManager {
         }
 
         // Handle onAutoForward behaviors
+        let url_scheme = event.protocol.as_deref().unwrap_or("http");
         if let Some(ref action) = event.on_auto_forward {
             match action {
                 OnAutoForward::Notify => {
@@ -297,8 +304,9 @@ impl PortForwardingManager {
                 }
                 OnAutoForward::OpenBrowser => {
                     info!(
-                        "Port {} is now available - would open browser at http://localhost:{}",
+                        "Port {} is now available - would open browser at {}://localhost:{}",
                         event.port,
+                        url_scheme,
                         event.local_port.unwrap_or(event.port)
                     );
                     // In a real implementation, this would open the browser
@@ -357,8 +365,10 @@ mod tests {
             PortAttributes {
                 label: Some("Web Server".to_string()),
                 on_auto_forward: Some(OnAutoForward::Notify),
+                protocol: None,
                 open_preview: None,
                 require_local_port: None,
+                elevate_if_needed: None,
                 description: None,
             },
         );
@@ -368,20 +378,22 @@ mod tests {
         config.other_ports_attributes = Some(PortAttributes {
             label: Some("Default Service".to_string()),
             on_auto_forward: Some(OnAutoForward::Silent),
+            protocol: None,
             open_preview: Some(false),
             require_local_port: Some(false),
+            elevate_if_needed: None,
             description: Some("Default description".to_string()),
         });
 
         // Test specific port override
-        let attrs = PortForwardingManager::get_port_attributes(3000, &config);
+        let attrs = PortForwardingManager::get_port_attributes_for(3000, "tcp", &config);
         assert_eq!(attrs.label, Some("Web Server".to_string()));
         assert_eq!(attrs.on_auto_forward, Some(OnAutoForward::Notify));
         assert_eq!(attrs.open_preview, Some(false)); // From default
         assert_eq!(attrs.description, Some("Default description".to_string())); // From default
 
         // Test fallback to defaults
-        let attrs = PortForwardingManager::get_port_attributes(8080, &config);
+        let attrs = PortForwardingManager::get_port_attributes_for(8080, "tcp", &config);
         assert_eq!(attrs.label, Some("Default Service".to_string()));
         assert_eq!(attrs.on_auto_forward, Some(OnAutoForward::Silent));
         assert_eq!(attrs.open_preview, Some(false));
@@ -411,8 +423,10 @@ mod tests {
             PortAttributes {
                 label: Some("Web Server".to_string()),
                 on_auto_forward: Some(OnAutoForward::Notify),
+                protocol: None,
                 open_preview: Some(true),
                 require_local_port: None,
+                elevate_if_needed: None,
                 description: Some("Main web server".to_string()),
             },
         );
@@ -428,7 +442,7 @@ mod tests {
         );
 
         assert_eq!(event.port, 3000);
-        assert_eq!(event.protocol, "tcp");
+        assert_eq!(event.protocol, None);
         assert_eq!(event.label, Some("Web Server".to_string()));
         assert_eq!(event.on_auto_forward, Some(OnAutoForward::Notify));
         assert!(event.auto_forwarded);
@@ -436,6 +450,62 @@ mod tests {
         assert_eq!(event.host_ip, Some("0.0.0.0".to_string()));
         assert_eq!(event.description, Some("Main web server".to_string()));
         assert_eq!(event.open_preview, Some(true));
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_port_event_includes_protocol_and_elevation_attributes() {
+        let exposed_port = ExposedPort {
+            port: 8443,
+            protocol: "udp".to_string(),
+        };
+        let port_mapping = PortMapping {
+            host_port: 443,
+            container_port: 8443,
+            protocol: "udp".to_string(),
+            host_ip: "0.0.0.0".to_string(),
+        };
+
+        let mut ports_attributes = HashMap::new();
+        ports_attributes.insert(
+            "8443".to_string(),
+            PortAttributes {
+                label: Some("Base label".to_string()),
+                on_auto_forward: None,
+                protocol: Some("http".to_string()),
+                open_preview: None,
+                require_local_port: None,
+                elevate_if_needed: Some(false),
+                description: None,
+            },
+        );
+        ports_attributes.insert(
+            "8443/udp".to_string(),
+            PortAttributes {
+                label: Some("Secure API".to_string()),
+                on_auto_forward: None,
+                protocol: Some("https".to_string()),
+                open_preview: None,
+                require_local_port: None,
+                elevate_if_needed: Some(true),
+                description: None,
+            },
+        );
+
+        let mut config = DevContainerConfig::default();
+        config.forward_ports = vec![PortSpec::Number(8443)];
+        config.ports_attributes = ports_attributes;
+
+        let event = PortForwardingManager::create_port_event(
+            &exposed_port,
+            Some(&port_mapping),
+            &PortSpec::Number(8443),
+            &config,
+        );
+
+        assert_eq!(event.protocol, Some("https".to_string()));
+        assert_eq!(event.label, Some("Secure API".to_string()));
+        assert_eq!(event.elevate_if_needed, Some(true));
     }
 
     #[test]
@@ -448,8 +518,10 @@ mod tests {
             PortAttributes {
                 label: Some("Valid Port".to_string()),
                 on_auto_forward: Some(OnAutoForward::Notify),
+                protocol: None,
                 open_preview: None,
                 require_local_port: None,
+                elevate_if_needed: None,
                 description: None,
             },
         );
@@ -458,8 +530,10 @@ mod tests {
             PortAttributes {
                 label: Some("Unknown Port".to_string()),
                 on_auto_forward: Some(OnAutoForward::Silent),
+                protocol: None,
                 open_preview: None,
                 require_local_port: None,
+                elevate_if_needed: None,
                 description: None,
             },
         );

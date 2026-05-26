@@ -38,6 +38,7 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
         cpus: Some(ResourceSpec::Number(1.0)),
         memory: Some(ResourceSpec::String("100MB".to_string())),
         storage: Some(ResourceSpec::String("100MB".to_string())),
+        gpu: None,
     };
 
     create_test_devcontainer_with_requirements(&temp_dir, requirements)
@@ -46,6 +47,7 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
     let args = UpArgs {
         skip_post_create: true,
         skip_non_blocking_commands: true,
+        mount_workspace_git_root: false,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
         ..Default::default()
     };
@@ -80,6 +82,7 @@ async fn test_host_requirements_validation_fails_with_unrealistic_requirements()
         cpus: Some(ResourceSpec::Number(1000.0)), // Impossible number of CPUs
         memory: Some(ResourceSpec::String("1TB".to_string())), // Very large memory
         storage: Some(ResourceSpec::String("1PB".to_string())), // Impossible storage
+        gpu: None,
     };
 
     create_test_devcontainer_with_requirements(&temp_dir, requirements)
@@ -88,6 +91,7 @@ async fn test_host_requirements_validation_fails_with_unrealistic_requirements()
     let args = UpArgs {
         skip_post_create: true,
         skip_non_blocking_commands: true,
+        mount_workspace_git_root: false,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
         ..Default::default()
     };
@@ -122,6 +126,7 @@ async fn test_host_requirements_ignored_with_flag() {
         cpus: Some(ResourceSpec::Number(1000.0)),
         memory: Some(ResourceSpec::String("1TB".to_string())),
         storage: Some(ResourceSpec::String("1PB".to_string())),
+        gpu: None,
     };
 
     create_test_devcontainer_with_requirements(&temp_dir, requirements)
@@ -130,6 +135,7 @@ async fn test_host_requirements_ignored_with_flag() {
     let args = UpArgs {
         skip_post_create: true,
         skip_non_blocking_commands: true,
+        mount_workspace_git_root: false,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
         ignore_host_requirements: true,
         ..Default::default()
@@ -164,8 +170,9 @@ fn test_resource_spec_parsing_edge_cases() {
     let spec = ResourceSpec::String("2.5".to_string());
     assert_eq!(spec.parse_cpu_cores().unwrap(), 2.5);
 
+    // 1024-based per upstream parseBytes alignment.
     let spec = ResourceSpec::String("512KB".to_string());
-    assert_eq!(spec.parse_bytes().unwrap(), 512_000);
+    assert_eq!(spec.parse_bytes().unwrap(), 512 * 1024);
 
     let spec = ResourceSpec::String("2 GiB".to_string());
     assert_eq!(spec.parse_bytes().unwrap(), 2 * 1024 * 1024 * 1024);
@@ -186,6 +193,7 @@ fn test_host_requirements_serialization() {
         cpus: Some(ResourceSpec::Number(4.0)),
         memory: Some(ResourceSpec::String("8GB".to_string())),
         storage: Some(ResourceSpec::String("50GB".to_string())),
+        gpu: None,
     };
 
     // Test serialization/deserialization
