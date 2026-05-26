@@ -15,7 +15,9 @@ use deacon_core::container_lifecycle::{
     LifecycleCommandSource, LifecycleCommandValue,
 };
 use deacon_core::features::ResolvedFeature;
-use deacon_core::lifecycle::{InvocationContext, InvocationFlags, LifecyclePhaseState};
+use deacon_core::lifecycle::{
+    InvocationContext, InvocationFlags, LifecyclePhase, LifecyclePhaseState,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -42,6 +44,49 @@ pub(crate) fn resolve_force_pty(flag: bool, json_mode: bool) -> bool {
     } else {
         false // default: no PTY
     }
+}
+
+fn wait_for_phase(wait_for: Option<&str>) -> Result<LifecyclePhase> {
+    match wait_for.unwrap_or("updateContentCommand") {
+        "initializeCommand" => Ok(LifecyclePhase::Initialize),
+        "onCreateCommand" => Ok(LifecyclePhase::OnCreate),
+        "updateContentCommand" => Ok(LifecyclePhase::UpdateContent),
+        "postCreateCommand" => Ok(LifecyclePhase::PostCreate),
+        "postStartCommand" => Ok(LifecyclePhase::PostStart),
+        "postAttachCommand" => Ok(LifecyclePhase::PostAttach),
+        value => anyhow::bail!(
+            "Invalid waitFor value '{}'. Expected one of initializeCommand, onCreateCommand, updateContentCommand, postCreateCommand, postStartCommand, postAttachCommand.",
+            value
+        ),
+    }
+}
+
+fn lifecycle_wait_rank(phase: LifecyclePhase) -> u8 {
+    match phase {
+        LifecyclePhase::Initialize => 0,
+        LifecyclePhase::OnCreate => 1,
+        LifecyclePhase::UpdateContent => 2,
+        LifecyclePhase::PostCreate => 3,
+        LifecyclePhase::Dotfiles => 4,
+        LifecyclePhase::PostStart => 5,
+        LifecyclePhase::PostAttach => 6,
+    }
+}
+
+fn should_queue_phase_for_wait_for(
+    skip_non_blocking_commands: bool,
+    wait_for: LifecyclePhase,
+    phase: LifecyclePhase,
+) -> bool {
+    !skip_non_blocking_commands || lifecycle_wait_rank(phase) <= lifecycle_wait_rank(wait_for)
+}
+
+fn should_run_dotfiles_for_wait_for(
+    skip_non_blocking_commands: bool,
+    wait_for: LifecyclePhase,
+) -> bool {
+    !skip_non_blocking_commands
+        || lifecycle_wait_rank(wait_for) >= lifecycle_wait_rank(LifecyclePhase::PostStart)
 }
 
 /// Build an `InvocationContext` from CLI arguments and prior state markers.
@@ -145,7 +190,6 @@ pub(crate) async fn execute_lifecycle_commands(
         execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
         ContainerLifecycleConfig,
     };
-    use deacon_core::lifecycle::LifecyclePhase;
     use deacon_core::variable::SubstitutionContext;
 
     debug!("Executing lifecycle commands in container");
@@ -212,8 +256,18 @@ pub(crate) async fn execute_lifecycle_commands(
         std::env::var(ENV_FORCE_TTY_IF_JSON).unwrap_or_else(|_| "unset".to_string())
     );
 
+    let wait_for = wait_for_phase(config.wait_for.as_deref())?;
+    if args.skip_non_blocking_commands {
+        debug!(
+            "Lifecycle will stop after waitFor phase {} because --skip-non-blocking-commands is set",
+            wait_for.as_str()
+        );
+    }
+
     // Build dotfiles configuration from CLI args (T009: per SC-001 lifecycle ordering)
-    let dotfiles_config = if args.dotfiles_repository.is_some() {
+    let dotfiles_config = if args.dotfiles_repository.is_some()
+        && should_run_dotfiles_for_wait_for(args.skip_non_blocking_commands, wait_for)
+    {
         Some(DotfilesConfig {
             repository: args.dotfiles_repository.clone(),
             target_path: args.dotfiles_target_path.clone(),
@@ -258,6 +312,15 @@ pub(crate) async fn execute_lifecycle_commands(
     ];
 
     for &phase in &phases {
+        if !should_queue_phase_for_wait_for(args.skip_non_blocking_commands, wait_for, phase) {
+            debug!(
+                "Skipping {}: occurs after configured waitFor phase {} with --skip-non-blocking-commands",
+                phase.as_str(),
+                wait_for.as_str()
+            );
+            continue;
+        }
+
         if let Some(skip_reason) = invocation_context.should_skip_phase(phase) {
             debug!("Skipping {}: {}", phase.as_str(), skip_reason);
             continue;
@@ -441,10 +504,70 @@ pub(crate) async fn execute_initialize_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deacon_core::lifecycle::{InvocationMode, LifecyclePhase, PhaseStatus};
+    use deacon_core::lifecycle::{InvocationMode, PhaseStatus};
 
     fn default_args() -> UpArgs {
         UpArgs::default()
+    }
+
+    #[test]
+    fn test_wait_for_phase_defaults_to_update_content() {
+        assert_eq!(wait_for_phase(None).unwrap(), LifecyclePhase::UpdateContent);
+    }
+
+    #[test]
+    fn test_wait_for_phase_accepts_spec_values() {
+        assert_eq!(
+            wait_for_phase(Some("initializeCommand")).unwrap(),
+            LifecyclePhase::Initialize
+        );
+        assert_eq!(
+            wait_for_phase(Some("onCreateCommand")).unwrap(),
+            LifecyclePhase::OnCreate
+        );
+        assert_eq!(
+            wait_for_phase(Some("postAttachCommand")).unwrap(),
+            LifecyclePhase::PostAttach
+        );
+    }
+
+    #[test]
+    fn test_wait_for_phase_rejects_invalid_value() {
+        let err = wait_for_phase(Some("postCreate")).unwrap_err();
+        assert!(err.to_string().contains("Invalid waitFor value"));
+    }
+
+    #[test]
+    fn test_skip_non_blocking_queues_only_through_wait_for() {
+        let wait_for = LifecyclePhase::UpdateContent;
+
+        assert!(should_queue_phase_for_wait_for(
+            true,
+            wait_for,
+            LifecyclePhase::OnCreate
+        ));
+        assert!(should_queue_phase_for_wait_for(
+            true,
+            wait_for,
+            LifecyclePhase::UpdateContent
+        ));
+        assert!(!should_queue_phase_for_wait_for(
+            true,
+            wait_for,
+            LifecyclePhase::PostCreate
+        ));
+    }
+
+    #[test]
+    fn test_wait_for_post_start_includes_dotfiles_boundary() {
+        assert!(!should_run_dotfiles_for_wait_for(
+            true,
+            LifecyclePhase::PostCreate
+        ));
+        assert!(should_run_dotfiles_for_wait_for(
+            true,
+            LifecyclePhase::PostStart
+        ));
     }
 
     // ========================================================================
