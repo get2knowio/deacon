@@ -400,6 +400,98 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     })
 }
 
+/// Properties that the upstream `mergeConfiguration` strips from the base config and emits as
+/// arrays under their plural names. The ordering is preserved: `entrypoint` first, then lifecycle
+/// hooks in their canonical sequence (see
+/// `devcontainers/cli/src/spec-node/imageMetadata.ts`).
+const COLLECTED_PROPERTIES: &[(&str, &str)] = &[
+    ("entrypoint", "entrypoints"),
+    ("onCreateCommand", "onCreateCommands"),
+    ("updateContentCommand", "updateContentCommands"),
+    ("postCreateCommand", "postCreateCommands"),
+    ("postStartCommand", "postStartCommands"),
+    ("postAttachCommand", "postAttachCommands"),
+];
+
+/// Apply the upstream `mergeConfiguration` output shape to the merged base config JSON.
+///
+/// For each `(singular, plural)` pair in [`COLLECTED_PROPERTIES`] this strips the singular
+/// property from `base` and—if any entry in `entries` carries a non-null value—emits the
+/// plural array at the same position, preserving entry declaration order.
+fn apply_upstream_merge_shape(
+    mut base: serde_json::Value,
+    entries: &[serde_json::Map<String, serde_json::Value>],
+) -> serde_json::Value {
+    let Some(obj) = base.as_object_mut() else {
+        return base;
+    };
+
+    for (singular, _) in COLLECTED_PROPERTIES {
+        obj.remove(*singular);
+    }
+
+    for (singular, plural) in COLLECTED_PROPERTIES {
+        let collected: Vec<serde_json::Value> = entries
+            .iter()
+            .filter_map(|e| e.get(*singular))
+            .filter(|v| !v.is_null())
+            .cloned()
+            .collect();
+        if !collected.is_empty() {
+            obj.insert((*plural).to_string(), serde_json::Value::Array(collected));
+        }
+    }
+
+    base
+}
+
+/// Extract collected-property fields (entrypoint + lifecycle hooks) from a config JSON object
+/// into a metadata entry suitable for [`apply_upstream_merge_shape`].
+fn collect_entry_from_config_json(
+    value: &serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut entry = serde_json::Map::new();
+    if let Some(obj) = value.as_object() {
+        for (singular, _) in COLLECTED_PROPERTIES {
+            if let Some(v) = obj.get(*singular) {
+                if !v.is_null() {
+                    entry.insert((*singular).to_string(), v.clone());
+                }
+            }
+        }
+    }
+    entry
+}
+
+/// Build a metadata entry directly from a resolved feature's [`FeatureMetadata`].
+fn collect_entry_from_feature_metadata(
+    metadata: &deacon_core::features::FeatureMetadata,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut entry = serde_json::Map::new();
+    if let Some(ep) = &metadata.entrypoint {
+        entry.insert(
+            "entrypoint".to_string(),
+            serde_json::Value::String(ep.clone()),
+        );
+    }
+    if let Some(cmd) = &metadata.on_create_command {
+        entry.insert("onCreateCommand".to_string(), cmd.clone());
+    }
+    if let Some(cmd) = &metadata.update_content_command {
+        entry.insert("updateContentCommand".to_string(), cmd.clone());
+    }
+    if let Some(cmd) = &metadata.post_create_command {
+        entry.insert("postCreateCommand".to_string(), cmd.clone());
+    }
+    if let Some(cmd) = &metadata.post_start_command {
+        entry.insert("postStartCommand".to_string(), cmd.clone());
+    }
+    if let Some(cmd) = &metadata.post_attach_command {
+        entry.insert("postAttachCommand".to_string(), cmd.clone());
+    }
+    entry
+}
+
 /// Compute merged configuration by merging base config with image metadata
 ///
 /// Per the specification, merged configuration is:
@@ -410,6 +502,10 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
 /// - Features metadata computation (when no container) - derives a partial config from each
 ///   resolved feature's metadata, then merges with the base config in declaration order.
 ///
+/// The returned JSON matches the upstream `MergedDevContainerConfig` shape: `entrypoint` and
+/// the singular lifecycle hooks (`onCreateCommand`, etc.) are stripped and emitted as plural
+/// arrays (`entrypoints`, `onCreateCommands`, ...) collected from each metadata source. See
+/// `devcontainers/cli/src/spec-node/imageMetadata.ts::mergeConfiguration`.
 #[instrument(skip_all)]
 async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
     base_config: &deacon_core::config::DevContainerConfig,
@@ -462,10 +558,25 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         // Deserialize each array entry as a partial DevContainerConfig, apply
         // variable substitution, then merge in declaration order with the base
         // config (later entries override earlier per spec merge semantics).
+        //
+        // In parallel, retain each entry's raw collected-property fields so the
+        // upstream merge shape (entrypoints + plural lifecycle arrays) can be
+        // emitted afterwards. Per upstream `getImageMetadataFromContainer`,
+        // when the container's id-labels match, base config contributes only
+        // `pickUpdateableConfigProperties` (remoteUser/userEnvProbe/remoteEnv) —
+        // none of which are collected — so base lifecycle commands are NOT
+        // added to the plural arrays in this path.
         let mut chain: Vec<deacon_core::config::DevContainerConfig> =
             Vec::with_capacity(1 + entries.len());
         chain.push(base_config.clone());
+        let mut metadata_entries: Vec<serde_json::Map<String, serde_json::Value>> =
+            Vec::with_capacity(entries.len());
         for (idx, entry) in entries.into_iter().enumerate() {
+            // Pre-substitution capture of the original entry's collected fields preserves
+            // the literal label content for the plural arrays even if substitution would
+            // expand variables that don't apply (no host vars in scope here).
+            let raw_entry_collected = collect_entry_from_config_json(&entry);
+
             let cfg: deacon_core::config::DevContainerConfig = serde_json::from_value(entry)
                 .with_context(|| {
                     format!(
@@ -474,18 +585,39 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                     )
                 })?;
             let (substituted, _) = cfg.apply_variable_substitution(container_context);
+
+            // Prefer the substituted JSON when it surfaces a collected field; otherwise fall
+            // back to the raw entry capture (handles fields that DevContainerConfig might
+            // not yet round-trip through serde, e.g. future additions).
+            let substituted_json = serde_json::to_value(&substituted)?;
+            let mut entry_map = collect_entry_from_config_json(&substituted_json);
+            for (key, value) in raw_entry_collected {
+                entry_map.entry(key).or_insert(value);
+            }
+            if !entry_map.is_empty() {
+                metadata_entries.push(entry_map);
+            }
             chain.push(substituted);
         }
 
         let merged = deacon_core::config::ConfigMerger::merge_configs(&chain);
+        let base_json = serde_json::to_value(&merged)?;
 
-        debug!("Container-based merged configuration computed successfully");
-        Ok(serde_json::to_value(&merged)?)
+        debug!(
+            "Container-based merged configuration computed successfully ({} metadata entries)",
+            metadata_entries.len()
+        );
+        Ok(apply_upstream_merge_shape(base_json, &metadata_entries))
     } else if let Some(features_config) = features_config {
         debug!("Computing features-based merged configuration");
 
-        // Derive configuration from features metadata
+        // Derive configuration from features metadata (for non-collected fields)
+        // alongside a list of per-feature metadata entries (for the plural collected
+        // arrays). The base config is appended as the final entry so its own
+        // lifecycle commands flow into the plural arrays — matching upstream's
+        // `getDevcontainerMetadata` which appends `pick(devContainerConfig, pickConfigProperties)`.
         let mut derived_config = deacon_core::config::DevContainerConfig::default();
+        let mut metadata_entries: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
 
         for feature_set in &features_config.feature_sets {
             for feature in &feature_set.features {
@@ -517,15 +649,23 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
 
                 let metadata = &downloaded.metadata;
 
-                // Merge feature metadata into derived config
-                // Container environment variables
+                // Collect this feature's entrypoint + lifecycle hooks (none of which live
+                // on DevContainerConfig) for the plural output arrays.
+                let entry = collect_entry_from_feature_metadata(metadata);
+                if !entry.is_empty() {
+                    metadata_entries.push(entry);
+                }
+
+                // Merge non-collected metadata into derived_config. Lifecycle commands
+                // are intentionally NOT folded in here — they're collected separately
+                // for the plural output. Mirrors upstream `mergeConfiguration` which
+                // strips replaceProperties from the base before re-emitting plurals.
                 for (key, value) in &metadata.container_env {
                     derived_config
                         .container_env
                         .insert(key.clone(), value.clone());
                 }
 
-                // Mounts - convert Vec<String> to Vec<serde_json::Value>
                 for mount in &metadata.mounts {
                     derived_config.mounts.push(mount.clone());
                 }
@@ -538,46 +678,19 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                         );
                 }
 
-                // Init flag
                 if let Some(init) = metadata.init {
                     derived_config.init = Some(init);
                 }
 
-                // Privileged flag
                 if let Some(privileged) = metadata.privileged {
                     derived_config.privileged = Some(privileged);
                 }
 
-                // Capabilities to add
                 derived_config.cap_add.extend(metadata.cap_add.clone());
 
-                // Security options
                 derived_config
                     .security_opt
                     .extend(metadata.security_opt.clone());
-
-                // Feature entrypoint scripts are intentionally not surfaced in DevContainerConfig:
-                // they are runtime artefacts (chained into the container ENTRYPOINT during
-                // `up`, see `build_entrypoint_chain` in crates/core/src/features.rs) and are not
-                // part of the merged-configuration schema in
-                // docs/subcommand-specs/completed-specs/read-configuration/DATA-STRUCTURES.md.
-
-                // Lifecycle commands
-                if let Some(cmd) = &metadata.on_create_command {
-                    derived_config.on_create_command = Some(cmd.clone());
-                }
-                if let Some(cmd) = &metadata.update_content_command {
-                    derived_config.update_content_command = Some(cmd.clone());
-                }
-                if let Some(cmd) = &metadata.post_create_command {
-                    derived_config.post_create_command = Some(cmd.clone());
-                }
-                if let Some(cmd) = &metadata.post_start_command {
-                    derived_config.post_start_command = Some(cmd.clone());
-                }
-                if let Some(cmd) = &metadata.post_attach_command {
-                    derived_config.post_attach_command = Some(cmd.clone());
-                }
             }
         }
 
@@ -593,18 +706,40 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         let (substituted_derived, _) =
             derived_config.apply_variable_substitution(&substitution_context);
 
-        // Merge base config with derived feature metadata
+        // Append the base config's collected fields as the trailing metadata entry so
+        // user-authored lifecycle commands appear in the plural arrays.
+        let base_json_for_collection = serde_json::to_value(base_config)?;
+        let base_entry = collect_entry_from_config_json(&base_json_for_collection);
+        if !base_entry.is_empty() {
+            metadata_entries.push(base_entry);
+        }
+
+        // Merge base config with derived feature metadata (for non-collected fields).
         let merged = deacon_core::config::ConfigMerger::merge_configs(&[
             base_config.clone(),
             substituted_derived,
         ]);
+        let merged_json = serde_json::to_value(&merged)?;
 
-        debug!("Features-based merged configuration computed successfully");
-        Ok(serde_json::to_value(&merged)?)
+        debug!(
+            "Features-based merged configuration computed successfully ({} metadata entries)",
+            metadata_entries.len()
+        );
+        Ok(apply_upstream_merge_shape(merged_json, &metadata_entries))
     } else {
-        // No container and no features: merged config is same as base config
-        debug!("No metadata sources available; merged config equals base config");
-        Ok(serde_json::to_value(base_config)?)
+        // No container and no features: still apply the upstream output shape so that
+        // user-authored lifecycle commands surface as the plural arrays.
+        debug!(
+            "No metadata sources available; merged config equals base config (shape-normalized)"
+        );
+        let base_json = serde_json::to_value(base_config)?;
+        let base_entry = collect_entry_from_config_json(&base_json);
+        let entries = if base_entry.is_empty() {
+            Vec::new()
+        } else {
+            vec![base_entry]
+        };
+        Ok(apply_upstream_merge_shape(base_json, &entries))
     }
 }
 
@@ -1652,6 +1787,223 @@ API_KEY=another-secret
         .unwrap();
 
         assert_eq!(merged.get("init"), Some(&serde_json::json!(true)));
+    }
+
+    /// Container-label merged output must emit `entrypoints` collected from the label entries
+    /// and must not surface a singular `entrypoint` (matches devcontainers/cli mergeConfiguration).
+    #[tokio::test]
+    async fn test_container_metadata_collects_entrypoints_array() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            ..Default::default()
+        };
+
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            serde_json::json!([
+                { "id": "ghcr.io/x/a:1", "entrypoint": "/scripts/a-entrypoint.sh" },
+                { "id": "ghcr.io/x/b:1", "entrypoint": "/scripts/b-entrypoint.sh" }
+            ])
+            .to_string(),
+        );
+
+        let container_info = deacon_core::docker::ContainerInfo {
+            id: "cid".to_string(),
+            names: vec![],
+            image: "ubuntu:24.04".to_string(),
+            status: "running".to_string(),
+            state: "running".to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
+            env: HashMap::new(),
+            labels,
+            mounts: vec![],
+        };
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(
+            &base_config,
+            Some(&container_info),
+            Some(&context),
+            None,
+            None,
+            &fetcher,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            merged.get("entrypoints"),
+            Some(&serde_json::json!([
+                "/scripts/a-entrypoint.sh",
+                "/scripts/b-entrypoint.sh"
+            ]))
+        );
+        assert!(merged.get("entrypoint").is_none());
+    }
+
+    /// Container-label lifecycle hooks must be emitted as plural arrays (`onCreateCommands`,
+    /// `postCreateCommands`, etc.) collected per label entry; singular names must be absent.
+    #[tokio::test]
+    async fn test_container_metadata_collects_lifecycle_arrays() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            ..Default::default()
+        };
+
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            serde_json::json!([
+                { "onCreateCommand": "echo a", "postCreateCommand": "echo a-post" },
+                { "onCreateCommand": ["echo", "b"], "postStartCommand": "echo b-start" }
+            ])
+            .to_string(),
+        );
+
+        let container_info = deacon_core::docker::ContainerInfo {
+            id: "cid".to_string(),
+            names: vec![],
+            image: "ubuntu:24.04".to_string(),
+            status: "running".to_string(),
+            state: "running".to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
+            env: HashMap::new(),
+            labels,
+            mounts: vec![],
+        };
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(
+            &base_config,
+            Some(&container_info),
+            Some(&context),
+            None,
+            None,
+            &fetcher,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            merged.get("onCreateCommands"),
+            Some(&serde_json::json!(["echo a", ["echo", "b"]]))
+        );
+        assert_eq!(
+            merged.get("postCreateCommands"),
+            Some(&serde_json::json!(["echo a-post"]))
+        );
+        assert_eq!(
+            merged.get("postStartCommands"),
+            Some(&serde_json::json!(["echo b-start"]))
+        );
+        // Singular names must NOT appear in the merged output.
+        for singular in [
+            "onCreateCommand",
+            "updateContentCommand",
+            "postCreateCommand",
+            "postStartCommand",
+            "postAttachCommand",
+            "entrypoint",
+        ] {
+            assert!(
+                merged.get(singular).is_none(),
+                "singular '{}' should not appear in merged output",
+                singular
+            );
+        }
+    }
+
+    /// When no container and no features are available, the base config's own lifecycle hooks
+    /// must still surface as plural arrays in the merged output.
+    #[tokio::test]
+    async fn test_merged_shape_collects_base_lifecycle_when_no_metadata() {
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            on_create_command: Some(serde_json::json!("echo from-base-config")),
+            post_create_command: Some(serde_json::json!(["echo", "two-args"])),
+            ..Default::default()
+        };
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(&base_config, None, None, None, None, &fetcher)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            merged.get("onCreateCommands"),
+            Some(&serde_json::json!(["echo from-base-config"]))
+        );
+        assert_eq!(
+            merged.get("postCreateCommands"),
+            Some(&serde_json::json!([["echo", "two-args"]]))
+        );
+        assert!(merged.get("onCreateCommand").is_none());
+        assert!(merged.get("postCreateCommand").is_none());
+    }
+
+    /// Direct unit test of the shape helper: singular names are removed and plural arrays
+    /// preserve entry order, skipping nulls.
+    #[test]
+    fn test_apply_upstream_merge_shape_basic() {
+        let base = serde_json::json!({
+            "image": "ubuntu:24.04",
+            "name": "test",
+            "onCreateCommand": "should be stripped",
+            "entrypoint": "also stripped",
+        });
+        let entries: Vec<serde_json::Map<String, serde_json::Value>> = vec![
+            serde_json::json!({ "entrypoint": "/a.sh", "onCreateCommand": "echo a" })
+                .as_object()
+                .unwrap()
+                .clone(),
+            serde_json::json!({ "entrypoint": null, "postCreateCommand": "echo b-post" })
+                .as_object()
+                .unwrap()
+                .clone(),
+            serde_json::json!({ "entrypoint": "/c.sh" })
+                .as_object()
+                .unwrap()
+                .clone(),
+        ];
+
+        let result = apply_upstream_merge_shape(base, &entries);
+
+        // Singular fields removed from base
+        assert!(result.get("onCreateCommand").is_none());
+        assert!(result.get("entrypoint").is_none());
+
+        // Non-collected base fields preserved
+        assert_eq!(
+            result.get("image"),
+            Some(&serde_json::json!("ubuntu:24.04"))
+        );
+        assert_eq!(result.get("name"), Some(&serde_json::json!("test")));
+
+        // Plural arrays collected in entry order, skipping null
+        assert_eq!(
+            result.get("entrypoints"),
+            Some(&serde_json::json!(["/a.sh", "/c.sh"]))
+        );
+        assert_eq!(
+            result.get("onCreateCommands"),
+            Some(&serde_json::json!(["echo a"]))
+        );
+        assert_eq!(
+            result.get("postCreateCommands"),
+            Some(&serde_json::json!(["echo b-post"]))
+        );
+        // No entries contributed updateContentCommand → field omitted
+        assert!(result.get("updateContentCommands").is_none());
     }
 
     #[tokio::test]
