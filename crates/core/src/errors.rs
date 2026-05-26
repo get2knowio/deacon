@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn test_progress_error_variants() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "noisy");
+        let io_err = std::io::Error::other("noisy");
         let err: ProgressError = io_err.into();
         assert!(err.to_string().contains("Progress I/O error"));
     }
@@ -684,12 +684,10 @@ mod tests {
         .into();
         assert!(matches!(de, DeaconError::State(_)));
 
-        let de: DeaconError =
-            IoError::from(std::io::Error::new(std::io::ErrorKind::Other, "oops")).into();
+        let de: DeaconError = IoError::from(std::io::Error::other("oops")).into();
         assert!(matches!(de, DeaconError::Output(_)));
 
-        let de: DeaconError =
-            ProgressError::from(std::io::Error::new(std::io::ErrorKind::Other, "oops")).into();
+        let de: DeaconError = ProgressError::from(std::io::Error::other("oops")).into();
         assert!(matches!(de, DeaconError::Progress(_)));
 
         let de: DeaconError = ContainerSelectorError::NoSelector.into();
