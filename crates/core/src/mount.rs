@@ -931,6 +931,82 @@ impl MountParser {
     }
 }
 
+/// Extract the container-side target path from a single mount specification, supporting both
+/// string forms (Docker `--mount` syntax and short `source:target[:options]` syntax) and
+/// object form (`{ "type": ..., "source": ..., "target": ... }`).
+///
+/// Returns `None` for inputs whose target cannot be determined (non-string, non-object values
+/// or malformed strings missing a target). Callers should treat untargeted mounts as opaque
+/// and preserve them in declaration order rather than deduplicating them.
+pub fn extract_mount_target(mount: &serde_json::Value) -> Option<String> {
+    match mount {
+        serde_json::Value::Object(map) => map
+            .get("target")
+            .or_else(|| map.get("destination"))
+            .or_else(|| map.get("dst"))
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        serde_json::Value::String(s) => {
+            if s.contains('=') {
+                for part in s.split(',') {
+                    let part = part.trim();
+                    if let Some((key, value)) = part.split_once('=') {
+                        if matches!(key.trim(), "target" | "dst" | "destination") {
+                            return Some(value.trim().to_string());
+                        }
+                    }
+                }
+                None
+            } else {
+                // Volume syntax `source:target[:options]` — second component is the target.
+                let parts: Vec<&str> = s.split(':').collect();
+                if parts.len() >= 2 && !parts[1].is_empty() {
+                    Some(parts[1].to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Merge two mount lists with per-target deduplication, mirroring the upstream `mergeMounts`
+/// in `devcontainers/cli/src/spec-node/imageMetadata.ts`.
+///
+/// Semantics:
+/// - Both lists are concatenated in declaration order (base first, then overlay).
+/// - For each container-side target that appears more than once, only the LAST occurrence is
+///   kept; earlier occurrences are dropped.
+/// - Mounts whose target cannot be parsed are preserved verbatim in their original position.
+/// - Surviving mounts retain their original declaration order.
+pub fn union_mounts_by_target(
+    base: &[serde_json::Value],
+    overlay: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    let combined: Vec<serde_json::Value> = base.iter().chain(overlay.iter()).cloned().collect();
+    if combined.is_empty() {
+        return combined;
+    }
+
+    let mut keep = vec![true; combined.len()];
+    let mut last_index_by_target: HashMap<String, usize> = HashMap::new();
+    for (idx, mount) in combined.iter().enumerate() {
+        if let Some(target) = extract_mount_target(mount) {
+            if let Some(&prev_idx) = last_index_by_target.get(&target) {
+                keep[prev_idx] = false;
+            }
+            last_index_by_target.insert(target, idx);
+        }
+    }
+
+    combined
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(m, k)| if k { Some(m) } else { None })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1185,6 +1261,126 @@ mod tests {
             // Should contain the absolute temp path
             assert!(source_part.contains(temp_path.to_str().unwrap()));
         }
+    }
+}
+
+#[cfg(test)]
+mod target_dedup_tests {
+    //! Unit tests for [`extract_mount_target`] and [`union_mounts_by_target`].
+    //!
+    //! Mirrors upstream `mergeMounts` semantics in
+    //! `devcontainers/cli/src/spec-node/imageMetadata.ts`: per-target dedupe with the LAST
+    //! occurrence winning, surviving entries keeping original declaration order.
+
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_extract_target_object_form() {
+        let mount = json!({ "type": "bind", "source": "/host", "target": "/container" });
+        assert_eq!(extract_mount_target(&mount).as_deref(), Some("/container"));
+    }
+
+    #[test]
+    fn test_extract_target_object_form_alias_keys() {
+        // Both `destination` and `dst` are accepted aliases per Docker syntax.
+        let with_dst = json!({ "type": "bind", "source": "/x", "dst": "/y" });
+        assert_eq!(extract_mount_target(&with_dst).as_deref(), Some("/y"));
+        let with_destination = json!({ "type": "bind", "source": "/a", "destination": "/b" });
+        assert_eq!(
+            extract_mount_target(&with_destination).as_deref(),
+            Some("/b")
+        );
+    }
+
+    #[test]
+    fn test_extract_target_docker_string_syntax() {
+        let mount = json!("type=bind,source=/host,target=/container,ro");
+        assert_eq!(extract_mount_target(&mount).as_deref(), Some("/container"));
+    }
+
+    #[test]
+    fn test_extract_target_volume_syntax() {
+        let mount = json!("/host/path:/container/path:ro");
+        assert_eq!(
+            extract_mount_target(&mount).as_deref(),
+            Some("/container/path")
+        );
+    }
+
+    #[test]
+    fn test_extract_target_missing_target() {
+        // No target field in object → None.
+        let mount = json!({ "type": "tmpfs", "source": "/host" });
+        assert_eq!(extract_mount_target(&mount), None);
+        // String with only one component → None.
+        let bare = json!("/host/path");
+        assert_eq!(extract_mount_target(&bare), None);
+        // Non-string, non-object → None.
+        let arr = json!(["not", "a", "mount"]);
+        assert_eq!(extract_mount_target(&arr), None);
+    }
+
+    #[test]
+    fn test_union_mounts_last_wins_for_overlapping_target() {
+        let m1 = json!({ "type": "bind", "source": "/v1", "target": "/data" });
+        let m2 = json!({ "type": "bind", "source": "/v2", "target": "/data" });
+        let result = union_mounts_by_target(&[m1], std::slice::from_ref(&m2));
+        assert_eq!(result, vec![m2]);
+    }
+
+    #[test]
+    fn test_union_mounts_preserves_order_of_survivors() {
+        // [A1, B, A2] → drop A1 (superseded by A2), preserve [B, A2] in original order.
+        let a1 = json!({ "type": "bind", "source": "/a1", "target": "/a" });
+        let b = json!({ "type": "bind", "source": "/b", "target": "/b" });
+        let a2 = json!({ "type": "bind", "source": "/a2", "target": "/a" });
+        let result = union_mounts_by_target(&[a1, b.clone()], std::slice::from_ref(&a2));
+        assert_eq!(result, vec![b, a2]);
+    }
+
+    #[test]
+    fn test_union_mounts_dedupes_within_a_single_list() {
+        // Duplicates within `base` alone must also dedupe (covers feature-loop accumulation).
+        let m1 = json!({ "type": "bind", "source": "/v1", "target": "/data" });
+        let m2 = json!({ "type": "bind", "source": "/v2", "target": "/data" });
+        let result = union_mounts_by_target(&[m1, m2.clone()], &[]);
+        assert_eq!(result, vec![m2]);
+    }
+
+    #[test]
+    fn test_union_mounts_string_vs_object_form_same_target_dedupes() {
+        // String and object forms with the same target → object wins (later in declaration order).
+        let string_form = json!("type=bind,source=/v1,target=/data");
+        let object_form = json!({ "type": "bind", "source": "/v2", "target": "/data" });
+        let result = union_mounts_by_target(&[string_form], std::slice::from_ref(&object_form));
+        assert_eq!(result, vec![object_form]);
+    }
+
+    #[test]
+    fn test_union_mounts_preserves_unparseable_entries() {
+        // A mount with no extractable target is kept as-is and does not cause panics.
+        let untargeted = json!({ "type": "tmpfs", "source": "/x" });
+        let m_with_target = json!({ "type": "bind", "source": "/v", "target": "/data" });
+        let result = union_mounts_by_target(
+            std::slice::from_ref(&untargeted),
+            std::slice::from_ref(&m_with_target),
+        );
+        assert_eq!(result, vec![untargeted, m_with_target]);
+    }
+
+    #[test]
+    fn test_union_mounts_empty_inputs() {
+        assert!(union_mounts_by_target(&[], &[]).is_empty());
+        let m = json!({ "type": "bind", "source": "/v", "target": "/t" });
+        assert_eq!(
+            union_mounts_by_target(std::slice::from_ref(&m), &[]),
+            vec![m.clone()]
+        );
+        assert_eq!(
+            union_mounts_by_target(&[], std::slice::from_ref(&m)),
+            vec![m]
+        );
     }
 }
 

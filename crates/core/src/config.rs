@@ -1160,8 +1160,10 @@ impl ConfigMerger {
             // Customizations: deep merge as objects
             customizations: Self::merge_json_objects(&base.customizations, &overlay.customizations),
 
-            // Arrays: union with deduplication — entries from all sources preserved
-            mounts: Self::union_arrays(&base.mounts, &overlay.mounts),
+            // Mounts: dedupe per container-side target, last-wins in declaration order
+            // (matches upstream `mergeMounts` in devcontainers/cli's mergeConfiguration).
+            // forwardPorts: union with deduplication — entries from all sources preserved.
+            mounts: crate::mount::union_mounts_by_target(&base.mounts, &overlay.mounts),
             forward_ports: Self::union_arrays(&base.forward_ports, &overlay.forward_ports),
             on_create_command: overlay
                 .on_create_command

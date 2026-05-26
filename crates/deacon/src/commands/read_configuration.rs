@@ -2018,6 +2018,91 @@ API_KEY=another-secret
         );
     }
 
+    /// Container-label merged output must dedupe `mounts` by container-side target across
+    /// base config + label entries: last-wins per target, matching upstream `mergeMounts`.
+    #[tokio::test]
+    async fn test_container_metadata_dedupes_mounts_by_target() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            mounts: vec![serde_json::json!({
+                "type": "bind",
+                "source": "/host/base",
+                "target": "/data"
+            })],
+            ..Default::default()
+        };
+
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            serde_json::json!([
+                {
+                    "mounts": [
+                        { "type": "bind", "source": "/host/feature-a", "target": "/data" },
+                        { "type": "volume", "source": "shared", "target": "/cache" }
+                    ]
+                },
+                {
+                    "mounts": [
+                        { "type": "bind", "source": "/host/feature-b", "target": "/data" }
+                    ]
+                }
+            ])
+            .to_string(),
+        );
+
+        let container_info = deacon_core::docker::ContainerInfo {
+            id: "cid".to_string(),
+            names: vec![],
+            image: "ubuntu:24.04".to_string(),
+            status: "running".to_string(),
+            state: "running".to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
+            env: HashMap::new(),
+            labels,
+            mounts: vec![],
+        };
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(
+            &base_config,
+            Some(&container_info),
+            Some(&context),
+            None,
+            None,
+            &fetcher,
+        )
+        .await
+        .unwrap();
+
+        let mounts = merged
+            .get("mounts")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .expect("merged config must include mounts array");
+
+        // Per-target last-wins: /data → feature-b (final occurrence wins), /cache kept once.
+        // Surviving entries retain their declaration order: /cache appears before the final /data.
+        assert_eq!(
+            mounts.len(),
+            2,
+            "expected two mounts after target-dedup, got {:?}",
+            mounts
+        );
+        assert_eq!(
+            mounts[0],
+            serde_json::json!({ "type": "volume", "source": "shared", "target": "/cache" })
+        );
+        assert_eq!(
+            mounts[1],
+            serde_json::json!({ "type": "bind", "source": "/host/feature-b", "target": "/data" })
+        );
+    }
+
     /// Direct unit test of the shape helper: singular names are removed and plural arrays
     /// preserve entry order, skipping nulls.
     #[test]
