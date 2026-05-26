@@ -16,6 +16,7 @@ use deacon_core::container_lifecycle::{
 };
 use deacon_core::features::ResolvedFeature;
 use deacon_core::lifecycle::{
+    should_queue_phase_for_wait_for, should_run_dotfiles_for_wait_for, wait_for_phase,
     InvocationContext, InvocationFlags, LifecyclePhase, LifecyclePhaseState,
 };
 use std::collections::HashMap;
@@ -44,49 +45,6 @@ pub(crate) fn resolve_force_pty(flag: bool, json_mode: bool) -> bool {
     } else {
         false // default: no PTY
     }
-}
-
-fn wait_for_phase(wait_for: Option<&str>) -> Result<LifecyclePhase> {
-    match wait_for.unwrap_or("updateContentCommand") {
-        "initializeCommand" => Ok(LifecyclePhase::Initialize),
-        "onCreateCommand" => Ok(LifecyclePhase::OnCreate),
-        "updateContentCommand" => Ok(LifecyclePhase::UpdateContent),
-        "postCreateCommand" => Ok(LifecyclePhase::PostCreate),
-        "postStartCommand" => Ok(LifecyclePhase::PostStart),
-        "postAttachCommand" => Ok(LifecyclePhase::PostAttach),
-        value => anyhow::bail!(
-            "Invalid waitFor value '{}'. Expected one of initializeCommand, onCreateCommand, updateContentCommand, postCreateCommand, postStartCommand, postAttachCommand.",
-            value
-        ),
-    }
-}
-
-fn lifecycle_wait_rank(phase: LifecyclePhase) -> u8 {
-    match phase {
-        LifecyclePhase::Initialize => 0,
-        LifecyclePhase::OnCreate => 1,
-        LifecyclePhase::UpdateContent => 2,
-        LifecyclePhase::PostCreate => 3,
-        LifecyclePhase::Dotfiles => 4,
-        LifecyclePhase::PostStart => 5,
-        LifecyclePhase::PostAttach => 6,
-    }
-}
-
-fn should_queue_phase_for_wait_for(
-    skip_non_blocking_commands: bool,
-    wait_for: LifecyclePhase,
-    phase: LifecyclePhase,
-) -> bool {
-    !skip_non_blocking_commands || lifecycle_wait_rank(phase) <= lifecycle_wait_rank(wait_for)
-}
-
-fn should_run_dotfiles_for_wait_for(
-    skip_non_blocking_commands: bool,
-    wait_for: LifecyclePhase,
-) -> bool {
-    !skip_non_blocking_commands
-        || lifecycle_wait_rank(wait_for) >= lifecycle_wait_rank(LifecyclePhase::PostStart)
 }
 
 /// Build an `InvocationContext` from CLI arguments and prior state markers.

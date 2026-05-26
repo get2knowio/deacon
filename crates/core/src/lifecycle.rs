@@ -6,7 +6,7 @@
 //!
 //! References: subcommand-specs/*/SPEC.md "Container Lifecycle Management"
 
-use crate::errors::{DeaconError, Result};
+use crate::errors::{ConfigError, DeaconError, Result};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -106,6 +106,61 @@ impl LifecyclePhase {
                 | LifecyclePhase::PostAttach
         )
     }
+}
+
+/// Parse a devcontainer `waitFor` value into the corresponding lifecycle phase.
+///
+/// Missing `waitFor` defaults to `updateContentCommand` per the devcontainer
+/// lifecycle contract.
+pub fn wait_for_phase(wait_for: Option<&str>) -> Result<LifecyclePhase> {
+    match wait_for.unwrap_or("updateContentCommand") {
+        "initializeCommand" => Ok(LifecyclePhase::Initialize),
+        "onCreateCommand" => Ok(LifecyclePhase::OnCreate),
+        "updateContentCommand" => Ok(LifecyclePhase::UpdateContent),
+        "postCreateCommand" => Ok(LifecyclePhase::PostCreate),
+        "postStartCommand" => Ok(LifecyclePhase::PostStart),
+        "postAttachCommand" => Ok(LifecyclePhase::PostAttach),
+        value => Err(ConfigError::Validation {
+            message: format!(
+                "Invalid waitFor value '{}'. Expected one of initializeCommand, onCreateCommand, updateContentCommand, postCreateCommand, postStartCommand, postAttachCommand.",
+                value
+            ),
+        }
+        .into()),
+    }
+}
+
+fn lifecycle_wait_rank(phase: LifecyclePhase) -> u8 {
+    match phase {
+        LifecyclePhase::Initialize => 0,
+        LifecyclePhase::OnCreate => 1,
+        LifecyclePhase::UpdateContent => 2,
+        LifecyclePhase::PostCreate => 3,
+        LifecyclePhase::Dotfiles => 4,
+        LifecyclePhase::PostStart => 5,
+        LifecyclePhase::PostAttach => 6,
+    }
+}
+
+/// Return whether a phase should be queued when `--skip-non-blocking-commands`
+/// stops execution at the configured `waitFor` phase.
+pub fn should_queue_phase_for_wait_for(
+    skip_non_blocking_commands: bool,
+    wait_for: LifecyclePhase,
+    phase: LifecyclePhase,
+) -> bool {
+    !skip_non_blocking_commands || lifecycle_wait_rank(phase) <= lifecycle_wait_rank(wait_for)
+}
+
+/// Return whether dotfiles should run for the configured `waitFor` cutoff.
+///
+/// Dotfiles execute after `postCreateCommand` and before `postStartCommand`.
+pub fn should_run_dotfiles_for_wait_for(
+    skip_non_blocking_commands: bool,
+    wait_for: LifecyclePhase,
+) -> bool {
+    !skip_non_blocking_commands
+        || lifecycle_wait_rank(wait_for) >= lifecycle_wait_rank(LifecyclePhase::PostStart)
 }
 
 /// Status of a lifecycle phase execution
