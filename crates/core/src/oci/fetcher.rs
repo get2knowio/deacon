@@ -1107,10 +1107,13 @@ impl<C: HttpClient> FeatureFetcher<C> {
         let mut command = Command::new("bash");
         command.arg(script_path);
 
-        // Set environment variables
+        // Set environment variables. Log only key names — values can contain user-supplied
+        // secrets (e.g. tokens piped through feature options). The redaction layer is a
+        // safety net but defense-in-depth means we never emit values here in the first
+        // place.
         for (key, value) in env_vars {
             command.env(key, value);
-            debug!("Set environment variable: {}={}", key, value);
+            debug!("Set environment variable: {}", key);
         }
 
         // Capture stdout and stderr for streaming
