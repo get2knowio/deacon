@@ -328,7 +328,18 @@ pub struct HostRequirements {
 
 /// Parse a resource string with unit suffix to bytes.
 ///
-/// Supports units: B, KB, MB, GB, TB (1000-based) and KiB, MiB, GiB, TiB (1024-based)
+/// Unit semantics align with upstream `devcontainers/cli` `parseBytes`
+/// (`src/spec-node/imageMetadata.ts`): the short suffixes `kb`/`mb`/`gb`/`tb` are
+/// **binary** (powers of 1024), matching how Docker, Linux memory limits, and the
+/// reference CLI interpret them. `B` (raw bytes) and the explicit-binary aliases
+/// `KiB`/`MiB`/`GiB`/`TiB` are accepted as a superset for clarity. Suffixes are
+/// case-insensitive.
+///
+/// Examples:
+/// - `"4GB"` → `4 * 2^30 = 4_294_967_296`
+/// - `"512MB"` → `512 * 2^20 = 536_870_912`
+/// - `"1GiB"` → `1 * 2^30 = 1_073_741_824` (same as `1GB`)
+/// - `"4"` → `4` (raw bytes)
 fn parse_resource_string(s: &str) -> Result<u64> {
     let s = s.trim();
 
@@ -352,16 +363,14 @@ fn parse_resource_string(s: &str) -> Result<u64> {
     })?;
     let unit = captures[2].to_lowercase();
 
-    let multiplier = match unit.as_str() {
+    // Per upstream `parseBytes`: kb/mb/gb/tb are 1024-based.
+    // The kib/mib/gib/tib aliases are kept for callers that prefer the explicit form.
+    let multiplier: u64 = match unit.as_str() {
         "b" => 1,
-        "kb" => 1_000,
-        "mb" => 1_000_000,
-        "gb" => 1_000_000_000,
-        "tb" => 1_000_000_000_000,
-        "kib" => 1_024,
-        "mib" => 1_024 * 1_024,
-        "gib" => 1_024 * 1_024 * 1_024,
-        "tib" => 1_024_u64.pow(4),
+        "kb" | "kib" => 1_024,
+        "mb" | "mib" => 1_024 * 1_024,
+        "gb" | "gib" => 1_024_u64.pow(3),
+        "tb" | "tib" => 1_024_u64.pow(4),
         _ => {
             return Err(ConfigError::Validation {
                 message: format!("Unknown unit: {}", unit),
@@ -4062,10 +4071,11 @@ mod tests {
 
     #[test]
     fn test_merge_host_requirements_picks_max_memory_as_bytes_string() {
+        // Per upstream parseBytes, both "4GB" and "8GB" are 1024-based; 8GB wins.
         let base = DevContainerConfig {
             host_requirements: Some(HostRequirements {
                 cpus: None,
-                memory: Some(ResourceSpec::String("4GB".to_string())), // 4_000_000_000 bytes
+                memory: Some(ResourceSpec::String("4GB".to_string())),
                 storage: None,
                 gpu: None,
             }),
@@ -4074,7 +4084,7 @@ mod tests {
         let overlay = DevContainerConfig {
             host_requirements: Some(HostRequirements {
                 cpus: None,
-                memory: Some(ResourceSpec::String("8GB".to_string())), // 8_000_000_000 bytes
+                memory: Some(ResourceSpec::String("8GB".to_string())),
                 storage: None,
                 gpu: None,
             }),
@@ -4084,13 +4094,15 @@ mod tests {
         let hr = merged.host_requirements.unwrap();
         assert_eq!(
             hr.memory,
-            Some(ResourceSpec::String("8000000000".to_string()))
+            Some(ResourceSpec::String(
+                (8_u64 * 1024 * 1024 * 1024).to_string()
+            ))
         );
     }
 
     #[test]
     fn test_merge_host_requirements_picks_max_storage_across_units() {
-        // 8GiB (binary, 2^33) vs 4GB (decimal, 4_000_000_000) — binary wins.
+        // "4GB" and "8GiB" are both 1024-based per upstream parseBytes; 8GiB wins by magnitude.
         let base = DevContainerConfig {
             host_requirements: Some(HostRequirements {
                 cpus: None,
@@ -4228,10 +4240,12 @@ mod tests {
             .cloned()
             .expect("gpu must be an object after object-form merge");
         assert_eq!(gpu_obj.get("cores").and_then(|v| v.as_f64()), Some(8.0));
-        assert_eq!(
-            gpu_obj.get("memory").and_then(|v| v.as_str()),
-            Some("4000000000")
-        );
+        let memory_str = gpu_obj
+            .get("memory")
+            .and_then(|v| v.as_str())
+            .expect("gpu.memory must be a string");
+        // "4GB" is 1024-based per upstream parseBytes alignment.
+        assert_eq!(memory_str, (4_u64 * 1024 * 1024 * 1024).to_string());
     }
 
     #[test]
@@ -4260,10 +4274,12 @@ mod tests {
         let hr = merged.host_requirements.unwrap();
         let gpu_obj = hr.gpu.unwrap().as_object().cloned().unwrap();
         assert_eq!(gpu_obj.get("cores").and_then(|v| v.as_f64()), Some(4.0));
-        assert_eq!(
-            gpu_obj.get("memory").and_then(|v| v.as_str()),
-            Some("8000000000")
-        );
+        let memory_str = gpu_obj
+            .get("memory")
+            .and_then(|v| v.as_str())
+            .expect("gpu.memory must be a string");
+        // "8GB" is 1024-based per upstream parseBytes alignment.
+        assert_eq!(memory_str, (8_u64 * 1024 * 1024 * 1024).to_string());
     }
 
     #[test]
@@ -4301,11 +4317,15 @@ mod tests {
         assert_eq!(hr.cpus, Some(ResourceSpec::Number(4.0)));
         assert_eq!(
             hr.memory,
-            Some(ResourceSpec::String("8000000000".to_string()))
+            Some(ResourceSpec::String(
+                (8_u64 * 1024 * 1024 * 1024).to_string()
+            ))
         );
         assert_eq!(
             hr.storage,
-            Some(ResourceSpec::String("50000000000".to_string()))
+            Some(ResourceSpec::String(
+                (50_u64 * 1024 * 1024 * 1024).to_string()
+            ))
         );
         assert_eq!(hr.gpu, Some(serde_json::Value::Bool(true)));
     }

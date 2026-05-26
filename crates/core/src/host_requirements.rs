@@ -620,13 +620,15 @@ mod tests {
         let spec = ResourceSpec::String("2.5".to_string());
         assert_eq!(spec.parse_cpu_cores().unwrap(), 2.5);
 
-        // Test string parsing for memory/storage
+        // Test string parsing for memory/storage. kb/mb/gb/tb are 1024-based per upstream
+        // `parseBytes` (devcontainers/cli `src/spec-node/imageMetadata.ts`).
         let spec = ResourceSpec::String("4GB".to_string());
-        assert_eq!(spec.parse_bytes().unwrap(), 4_000_000_000);
+        assert_eq!(spec.parse_bytes().unwrap(), 4_u64 * 1024 * 1024 * 1024);
 
         let spec = ResourceSpec::String("512MB".to_string());
-        assert_eq!(spec.parse_bytes().unwrap(), 512_000_000);
+        assert_eq!(spec.parse_bytes().unwrap(), 512_u64 * 1024 * 1024);
 
+        // Explicit-binary aliases are equivalent to the short form.
         let spec = ResourceSpec::String("1GiB".to_string());
         assert_eq!(spec.parse_bytes().unwrap(), 1_073_741_824);
     }
@@ -670,7 +672,8 @@ mod tests {
         assert!(evaluation.storage_evaluation.is_some());
         let storage_eval = evaluation.storage_evaluation.unwrap();
         assert!(storage_eval.met);
-        assert_eq!(storage_eval.required, 1_000_000_000.0);
+        // 1GB is 1024-based per upstream parseBytes alignment.
+        assert_eq!(storage_eval.required, 1_073_741_824.0);
         assert_eq!(storage_eval.available, 1_500_000_000.0);
     }
 
@@ -699,7 +702,8 @@ mod tests {
         assert!(evaluation.storage_evaluation.is_some());
         let storage_eval = evaluation.storage_evaluation.unwrap();
         assert!(!storage_eval.met);
-        assert_eq!(storage_eval.required, 1_000_000_000.0);
+        // 1GB is 1024-based per upstream parseBytes alignment.
+        assert_eq!(storage_eval.required, 1_073_741_824.0);
         assert_eq!(storage_eval.available, 500_000_000.0);
     }
 

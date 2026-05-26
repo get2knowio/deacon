@@ -170,8 +170,9 @@ fn test_resource_spec_parsing_edge_cases() {
     let spec = ResourceSpec::String("2.5".to_string());
     assert_eq!(spec.parse_cpu_cores().unwrap(), 2.5);
 
+    // 1024-based per upstream parseBytes alignment.
     let spec = ResourceSpec::String("512KB".to_string());
-    assert_eq!(spec.parse_bytes().unwrap(), 512_000);
+    assert_eq!(spec.parse_bytes().unwrap(), 512 * 1024);
 
     let spec = ResourceSpec::String("2 GiB".to_string());
     assert_eq!(spec.parse_bytes().unwrap(), 2 * 1024 * 1024 * 1024);
