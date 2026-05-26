@@ -24,6 +24,7 @@ pub mod features;
 pub mod gpu;
 pub mod host_requirements;
 pub mod io;
+pub mod jsonc;
 pub mod lifecycle;
 pub mod lockfile;
 pub mod logging;

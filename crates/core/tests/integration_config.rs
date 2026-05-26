@@ -171,7 +171,7 @@ fn test_error_line_col_information() {
             message,
         }) => {
             // Should contain some indication of parsing error
-            assert!(message.contains("JSON parsing error"));
+            assert!(message.contains("JSONC parsing error"));
         }
         err => panic!("Expected Config(Parsing) error, got: {:?}", err),
     }

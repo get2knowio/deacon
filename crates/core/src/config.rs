@@ -1,8 +1,9 @@
 //! Configuration resolution and parsing
 //!
 //! This module handles devcontainer.json parsing following the Development Containers Specification.
-//! It supports JSON-with-comments (JSONC) parsing using the json5 crate to handle comments and
-//! trailing commas commonly found in devcontainer configuration files.
+//! It supports JSON-with-comments (JSONC) parsing via the `crate::jsonc` adapter so that
+//! comments and trailing commas commonly found in devcontainer configuration files are
+//! accepted.
 //!
 //! The configuration model mirrors the subset of fields needed for early implementation,
 //! with full type safety for known fields and flexibility for future extensions.
@@ -1781,7 +1782,7 @@ impl ConfigLoader {
     ///
     /// This method:
     /// 1. Reads the file as UTF-8 text
-    /// 2. Parses JSON-with-comments using json5
+    /// 2. Parses JSON-with-comments (JSONC) via the `crate::jsonc` adapter
     /// 3. Deserializes into strongly typed configuration
     /// 4. Logs unknown top-level keys at DEBUG level
     /// 5. Performs basic validation
@@ -1830,12 +1831,10 @@ impl ConfigLoader {
             DeaconError::Config(ConfigError::Io(e))
         })?;
 
-        // Parse JSON5 (JSON with comments and trailing commas)
-        let raw_value: serde_json::Value = json5::from_str(&content).map_err(|e| {
+        // Parse JSONC (JSON with comments and trailing commas).
+        let raw_value: serde_json::Value = crate::jsonc::parse(&content).map_err(|e| {
             debug!("Failed to parse configuration file: {}", e);
-            DeaconError::Config(ConfigError::Parsing {
-                message: format!("JSON parsing error: {}", e),
-            })
+            e
         })?;
 
         // Ensure root is a JSON object per spec
@@ -2648,7 +2647,11 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Parsing { message }) => {
-                assert!(message.contains("JSON parsing error"));
+                assert!(
+                    message.contains("JSONC parsing error"),
+                    "unexpected error message: {}",
+                    message
+                );
             }
             _ => panic!("Expected Config(Parsing) error"),
         }
