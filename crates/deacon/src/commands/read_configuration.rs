@@ -42,12 +42,11 @@ pub struct ReadConfigurationArgs {
     pub mount_workspace_git_root: bool,
     pub additional_features: Option<String>,
     pub skip_feature_auto_mapping: bool,
-    /// Docker tooling path. Accepted per spec for CLI parity; not yet consumed by implementation.
-    /// Future use: #292 will integrate with container runtime selection.
-    #[allow(dead_code)]
+    /// Docker tooling path. Forwarded to the container runtime so `docker inspect` invocations
+    /// honor the spec-defined `--docker-path` flag.
     pub docker_path: String,
-    /// Docker Compose tooling path. Accepted per spec for CLI parity; not yet consumed by
-    /// implementation. Future use: #292 will integrate with container runtime selection.
+    /// Docker Compose tooling path. Accepted per spec (§3) for CLI parity; read-configuration
+    /// performs no compose operations, so the value is retained only to keep the CLI surface stable.
     #[allow(dead_code)]
     pub docker_compose_path: String,
     /// User data folder path. Accepted per spec (Section 3, line 62) but not used by
@@ -408,11 +407,8 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
 ///
 /// Where imageMetadata comes from:
 /// - Container inspection (when container_id is provided) - extracts devcontainer.metadata label
-/// - Features metadata computation (when no container) - **Blocked by #289**
-///
-/// ## Current Implementation Status
-///
-/// Container-based merge is implemented. Features-based merge is a placeholder.
+/// - Features metadata computation (when no container) - derives a partial config from each
+///   resolved feature's metadata, then merges with the base config in declaration order.
 ///
 #[instrument(skip_all)]
 async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
@@ -493,9 +489,10 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
 
         for feature_set in &features_config.feature_sets {
             for feature in &feature_set.features {
-                // We need to get the feature metadata - this requires fetching it again
-                // or storing it in the FeaturesConfiguration. For now, we'll fetch it.
-                // TODO: Consider caching metadata in FeaturesConfiguration to avoid refetching
+                // Re-fetch metadata per resolved feature. FeaturesConfiguration intentionally
+                // does not carry the full FeatureMetadata blob (output schema only keeps the
+                // user-visible subset), so we look it up again via the same OCI fetcher used
+                // upstream — cached connections keep the cost low.
 
                 // Parse the feature reference - prefer the preserved source field if available
                 let reference_to_parse = feature.source.as_ref().unwrap_or(&feature.id);
@@ -559,10 +556,11 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                     .security_opt
                     .extend(metadata.security_opt.clone());
 
-                // Entrypoint override - DevContainerConfig doesn't have entrypoint field
-                // if let Some(entrypoint) = &metadata.entrypoint {
-                //     derived_config.entrypoint = Some(entrypoint.clone());
-                // }
+                // Feature entrypoint scripts are intentionally not surfaced in DevContainerConfig:
+                // they are runtime artefacts (chained into the container ENTRYPOINT during
+                // `up`, see `build_entrypoint_chain` in crates/core/src/features.rs) and are not
+                // part of the merged-configuration schema in
+                // docs/subcommand-specs/completed-specs/read-configuration/DATA-STRUCTURES.md.
 
                 // Lifecycle commands
                 if let Some(cmd) = &metadata.on_create_command {
@@ -769,7 +767,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     {
         // Discover container using provided selectors
         debug!("Container discovery requested");
-        let docker = deacon_core::docker::CliDocker::new();
+        let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
 
         // Build container selector
         let selector = ContainerSelector::new(
@@ -916,7 +914,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     // Per spec: Features are needed for:
     // 1. When --include-features-configuration is set (explicit request)
     // 2. When --include-merged-configuration is set WITHOUT a container
-    //    (to derive metadata from features per issue #289)
+    //    (metadata is derived from feature manifests rather than container labels)
     let features_configuration_for_output = if args.include_features_configuration
         || (args.include_merged_configuration && args.container_id.is_none())
     {
@@ -1288,7 +1286,7 @@ API_KEY=another-secret
 
     #[tokio::test]
     async fn test_read_configuration_mount_workspace_git_root_flag() {
-        // Test that the flag is accepted by the CLI (functionality not yet wired to ConfigLoader)
+        // Test that the flag is honored by workspace resolution (see resolve_workspace_configuration).
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("devcontainer.json");
 
@@ -1479,7 +1477,7 @@ API_KEY=another-secret
     #[tokio::test]
     async fn test_merged_configuration_without_container_or_features() {
         // Test that merged configuration is correctly computed when requested
-        // without container or features (should return base config as placeholder)
+        // without container or features (merged config equals base config)
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("devcontainer.json");
 
@@ -1514,9 +1512,7 @@ API_KEY=another-secret
         let result = execute_read_configuration(args).await;
         assert!(result.is_ok());
 
-        // Note: The merged configuration should be present in the output
-        // Currently it returns the base config as a placeholder until
-        // issues #288 (container metadata) and #289 (features metadata) are resolved
+        // With no container and no features, merged configuration equals the base config.
     }
 
     #[tokio::test]
