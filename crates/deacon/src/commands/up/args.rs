@@ -450,7 +450,7 @@ impl Default for UpArgs {
             omit_config_remote_env_from_metadata: false,
             include_configuration: false,
             include_merged_configuration: false,
-            gpu_mode: deacon_core::gpu::GpuMode::None,
+            gpu_mode: deacon_core::gpu::GpuMode::Detect,
             update_remote_user_uid_default: None,
             ports_events: false,
             forward_ports: Vec::new(),
