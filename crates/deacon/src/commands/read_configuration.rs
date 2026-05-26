@@ -463,6 +463,22 @@ fn collect_entry_from_config_json(
     entry
 }
 
+/// OR-merge two optional booleans following upstream's `imageMetadata.some(entry => entry.X)`
+/// semantics. Used to accumulate `init` / `privileged` across feature metadata entries so a
+/// later `Some(false)` cannot silently revoke an earlier `Some(true)`.
+///
+/// Truth table:
+/// - `(None, None)` → `None`
+/// - `(None, x)` / `(x, None)` → `x`
+/// - `(Some(a), Some(b))` → `Some(a || b)`
+fn or_merge_bool(current: Option<bool>, new: Option<bool>) -> Option<bool> {
+    match (current, new) {
+        (None, n) => n,
+        (Some(c), None) => Some(c),
+        (Some(c), Some(n)) => Some(c || n),
+    }
+}
+
 /// Apply the upstream `mergeConfiguration` customizations shape to the merged base JSON.
 ///
 /// Upstream collects `customizations` per tool key into an array of values across every metadata
@@ -749,13 +765,13 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                     }
                 }
 
-                if let Some(init) = metadata.init {
-                    derived_config.init = Some(init);
-                }
-
-                if let Some(privileged) = metadata.privileged {
-                    derived_config.privileged = Some(privileged);
-                }
+                // init / privileged accumulate with OR semantics across features (matches
+                // upstream `imageMetadata.some(entry => entry.init)` in mergeConfiguration).
+                // Last-wins per feature would let a later `Some(false)` silently revoke an
+                // earlier feature's `Some(true)`, which contradicts the spec.
+                derived_config.init = or_merge_bool(derived_config.init, metadata.init);
+                derived_config.privileged =
+                    or_merge_bool(derived_config.privileged, metadata.privileged);
 
                 derived_config.cap_add.extend(metadata.cap_add.clone());
 
@@ -2282,6 +2298,67 @@ API_KEY=another-secret
         let result = apply_customizations_shape(base, &[]);
         assert!(result.get("customizations").is_none());
         assert_eq!(result.get("image"), Some(&serde_json::json!("ubuntu")));
+    }
+
+    /// `or_merge_bool` MUST treat `None` as the identity for the OR and short-circuit on any
+    /// `Some(true)`. Used to accumulate `init` / `privileged` across feature metadata so a
+    /// later `Some(false)` can never revoke an earlier `Some(true)` (matches upstream
+    /// `imageMetadata.some(entry => entry.init)` semantics).
+    #[test]
+    fn test_or_merge_bool_truth_table() {
+        // (None, None) → None — no source has expressed an opinion.
+        assert_eq!(or_merge_bool(None, None), None);
+
+        // (None, Some(x)) and (Some(x), None) → Some(x) — single source wins.
+        assert_eq!(or_merge_bool(None, Some(true)), Some(true));
+        assert_eq!(or_merge_bool(None, Some(false)), Some(false));
+        assert_eq!(or_merge_bool(Some(true), None), Some(true));
+        assert_eq!(or_merge_bool(Some(false), None), Some(false));
+
+        // (Some(_), Some(_)) → Some(a || b).
+        assert_eq!(or_merge_bool(Some(true), Some(true)), Some(true));
+        assert_eq!(or_merge_bool(Some(true), Some(false)), Some(true));
+        assert_eq!(or_merge_bool(Some(false), Some(true)), Some(true));
+        assert_eq!(or_merge_bool(Some(false), Some(false)), Some(false));
+    }
+
+    /// Regression: simulating the features-loop accumulation with a sequence of
+    /// (true, None, false, true) values must yield `Some(true)`. Last-wins would have
+    /// returned `Some(true)` for this particular sequence by accident, but any sequence
+    /// ending in `Some(false)` exposed the old bug — verified below.
+    #[test]
+    fn test_or_merge_bool_accumulates_through_feature_sequence() {
+        // Bug-trigger sequence: true then false — last-wins returns false, OR returns true.
+        let mut acc: Option<bool> = None;
+        for value in [Some(true), Some(false)] {
+            acc = or_merge_bool(acc, value);
+        }
+        assert_eq!(
+            acc,
+            Some(true),
+            "later Some(false) must not revoke earlier Some(true)"
+        );
+
+        // Mixed sequence including None: Some(false), None, Some(false), Some(true), None
+        let mut acc: Option<bool> = None;
+        for value in [Some(false), None, Some(false), Some(true), None] {
+            acc = or_merge_bool(acc, value);
+        }
+        assert_eq!(acc, Some(true));
+
+        // All None → None (no feature set the field).
+        let mut acc: Option<bool> = None;
+        for value in [None, None, None] {
+            acc = or_merge_bool(acc, value);
+        }
+        assert_eq!(acc, None);
+
+        // All Some(false) → Some(false).
+        let mut acc: Option<bool> = None;
+        for value in [Some(false), Some(false)] {
+            acc = or_merge_bool(acc, value);
+        }
+        assert_eq!(acc, Some(false));
     }
 
     /// Container-label merged output must dedupe `forwardPorts` with upstream's
