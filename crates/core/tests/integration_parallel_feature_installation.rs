@@ -57,7 +57,7 @@ fn create_test_feature_with_mount(id: &str, mounts: Vec<String>) -> ResolvedFeat
         options: HashMap::new(),
         container_env: HashMap::new(),
         customizations: None,
-        mounts,
+        mounts: mounts.into_iter().map(serde_json::Value::String).collect(),
         init: None,
         privileged: None,
         cap_add: vec![],

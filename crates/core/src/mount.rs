@@ -356,9 +356,21 @@ pub fn merge_mounts(
 
     // Process feature mounts in installation order
     for feature in features {
-        for mount_str in &feature.metadata.mounts {
+        for mount_value in &feature.metadata.mounts {
+            let mount_str = crate::features::feature_mount_to_string(mount_value).map_err(|e| {
+                warn!(
+                    feature_id = %feature.id,
+                    mount_spec = ?mount_value,
+                    error = %e,
+                    "Failed to convert mount from feature"
+                );
+                ConfigError::Validation {
+                    message: format!("Invalid mount in feature {}: {}", feature.id, e),
+                }
+            })?;
+
             // Parse the mount to get the target and validate it
-            let mount = MountParser::parse_mount(mount_str).map_err(|e| {
+            let mount = MountParser::parse_mount(&mount_str).map_err(|e| {
                 warn!(
                     feature_id = %feature.id,
                     mount_spec = %mount_str,
@@ -1205,7 +1217,7 @@ mod merge_mounts_tests {
             options: HashMap::new(),
             container_env: HashMap::new(),
             customizations: None,
-            mounts,
+            mounts: mounts.into_iter().map(serde_json::Value::String).collect(),
             init: None,
             privileged: None,
             cap_add: vec![],

@@ -337,7 +337,7 @@ pub struct FeatureMetadata {
 
     /// Container mounts
     #[serde(default, deserialize_with = "deserialize_mounts")]
-    pub mounts: Vec<String>,
+    pub mounts: Vec<serde_json::Value>,
 
     /// Whether to use init
     #[serde(default)]
@@ -425,7 +425,9 @@ impl FeatureMetadata {
     }
 }
 
-fn deserialize_mounts<'de, D>(deserializer: D) -> std::result::Result<Vec<String>, D::Error>
+fn deserialize_mounts<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Vec<serde_json::Value>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -433,33 +435,38 @@ where
     raw_mounts
         .into_iter()
         .map(|val| match val {
-            Value::String(s) => Ok(s),
-            Value::Object(map) => {
-                let mut parts: Vec<String> = map
-                    .into_iter()
-                    .map(|(k, v)| {
-                        let v_str = v.as_str().ok_or_else(|| {
-                            de::Error::custom("Mount object values must be strings")
-                        })?;
-                        Ok(format!("{k}={v_str}"))
-                    })
-                    .collect::<std::result::Result<_, _>>()?;
-
-                parts.sort();
-
-                if parts.is_empty() {
-                    Err(de::Error::custom(
-                        "Mount object must have at least one field",
-                    ))
-                } else {
-                    Ok(parts.join(","))
-                }
-            }
+            Value::String(_) => Ok(val),
+            Value::Object(ref map) if !map.is_empty() => Ok(val),
+            Value::Object(_) => Err(de::Error::custom(
+                "Mount object must have at least one field",
+            )),
             other => Err(de::Error::custom(format!(
                 "Mount entry must be a string or object, got {other:?}"
             ))),
         })
         .collect()
+}
+
+/// Convert a preserved feature mount value into a Docker mount syntax string.
+pub fn feature_mount_to_string(mount: &serde_json::Value) -> Result<String> {
+    match mount {
+        serde_json::Value::String(s) => Ok(s.clone()),
+        serde_json::Value::Object(map) => {
+            let mut parts = Vec::with_capacity(map.len());
+            for (key, value) in map {
+                let value = value.as_str().ok_or_else(|| FeatureError::Validation {
+                    message: "Mount object values must be strings".to_string(),
+                })?;
+                parts.push(format!("{key}={value}"));
+            }
+            parts.sort();
+            Ok(parts.join(","))
+        }
+        other => Err(FeatureError::Validation {
+            message: format!("Mount entry must be a string or object, got {other:?}"),
+        }
+        .into()),
+    }
 }
 
 /// Parse feature metadata from a devcontainer-feature.json file
@@ -2052,12 +2059,14 @@ mod tests {
         let metadata = parse_feature_metadata(temp_file.path()).unwrap();
         assert_eq!(metadata.id, "mounty");
         assert_eq!(metadata.mounts.len(), 2);
-        assert!(metadata
-            .mounts
-            .contains(&"consistency=cached,source=dind-var-lib-docker-${devcontainerId},target=/var/lib/docker,type=volume".to_string()));
-        assert!(metadata
-            .mounts
-            .contains(&"source=custom,target=/data,type=volume".to_string()));
+        assert_eq!(
+            metadata.mounts[0]["source"],
+            "dind-var-lib-docker-${devcontainerId}"
+        );
+        assert_eq!(metadata.mounts[0]["target"], "/var/lib/docker");
+        assert_eq!(metadata.mounts[0]["type"], "volume");
+        assert_eq!(metadata.mounts[0]["consistency"], "cached");
+        assert_eq!(metadata.mounts[1], "source=custom,target=/data,type=volume");
     }
 
     #[test]

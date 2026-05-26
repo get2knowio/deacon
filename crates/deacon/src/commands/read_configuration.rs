@@ -102,7 +102,7 @@ pub struct Feature {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub privileged: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mounts: Option<Vec<String>>,
+    pub mounts: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container_env: Option<HashMap<String, String>>,
 }
@@ -530,9 +530,7 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
 
                 // Mounts - convert Vec<String> to Vec<serde_json::Value>
                 for mount in &metadata.mounts {
-                    derived_config
-                        .mounts
-                        .push(serde_json::Value::String(mount.clone()));
+                    derived_config.mounts.push(mount.clone());
                 }
 
                 if let Some(customizations) = &metadata.customizations {

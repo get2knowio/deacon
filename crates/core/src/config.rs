@@ -3988,13 +3988,7 @@ pub mod merge {
                 mounts: if metadata.mounts.is_empty() {
                     None
                 } else {
-                    Some(
-                        metadata
-                            .mounts
-                            .iter()
-                            .map(|m| serde_json::Value::String(m.clone()))
-                            .collect(),
-                    )
+                    Some(metadata.mounts.clone())
                 },
                 container_env: if metadata.container_env.is_empty() {
                     None
