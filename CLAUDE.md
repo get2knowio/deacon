@@ -215,6 +215,38 @@ sg --pattern 'old_fn($ARG)' --rewrite 'new_fn($ARG)' --lang rust --update-all
 - Don't forget to update test mocks when changing trait methods
 - Do test with realistic mock responses matching OCI distribution spec
 
+## Workspace-Trust Gate (Host-Side Lifecycle Hooks)
+
+`initializeCommand` runs **on the developer's host** before any container
+sandboxing. Any code path that wants to exec host shell from a
+workspace-resident source (e.g. `devcontainer.json`, a future dotfiles
+config in the workspace) MUST go through `crates/core/src/trust.rs`.
+
+**Resolution order** (from `cli.rs` global flags → `core::trust::resolve_policy`):
+
+1. `--trust-workspace` or `--trust-workspace-persist` → `AlwaysAllow`
+   (persist also records to `{user_data_folder}/trusted_workspaces.json`).
+2. `DEACON_NO_PROMPT=1` → `Deny` (CI fail-closed).
+3. Default → `Allowlist({user_data_folder}/trusted_workspaces.json)`;
+   pass only if the canonicalized workspace path is in the store.
+
+On deny, return `DeaconError::WorkspaceUntrusted { workspace, reason,
+instructions }`. The display string already names the workspace and the
+opt-in flags — don't reformat at higher layers.
+
+**Adding a new host-side exec site:**
+1. Resolve the policy at the CLI tier (don't pass raw flags deeper).
+2. Call `check_workspace_trust(&workspace, policy).await?`.
+3. Convert via `decision_to_result(decision)?` — `Trusted` becomes
+   `Ok(())`, `Denied` becomes `DeaconError::WorkspaceUntrusted`.
+4. If the trust source is workspace-resident, set the appropriate
+   `HostTrustSource` on the consumer struct (see `DotfilesPhaseConfig`).
+
+**This gate is deacon-specific.** The upstream containers.dev spec does
+not mandate it. See `SECURITY.md` for the threat model and end-user
+documentation. Refusing to add the gate to a new host-side exec site is
+a security regression — surface it in code review.
+
 ## Container Environment Probe Caching
 
 **Architecture Overview:**
