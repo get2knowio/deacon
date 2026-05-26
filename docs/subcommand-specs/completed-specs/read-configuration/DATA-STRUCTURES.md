@@ -128,7 +128,11 @@ STRUCT MergedDevContainerConfig:
     runArgs?: string[]
     mounts?: (string | Mount)[]                 // deduplicated by target; normalized formats mixed
     hostRequirements?: HostRequirements
-    customizations?: map<string, any>
+    // Customizations: per-tool array of contributor values (NOT deep-merged).
+    // Each tool key maps to an array; one slot per metadata source that supplied a value
+    // for that tool. Consumers (e.g. VS Code, JetBrains) merge entries within their slot.
+    // Omitted entirely when no source contributes any customizations.
+    customizations?: map<string, any[]>
     // Collected from each metadata entry (features and base config) in declaration order.
     // Each plural field is OMITTED when no entry contributes a value.
     entrypoints?: string[]                      // collected; feature-supplied
@@ -153,6 +157,10 @@ Notes:
   `remoteEnv`).
 - For the features path, collected arrays are populated from each resolved feature's
   metadata followed by the base config's own collected fields.
+- `customizations` follows the same source ordering rule but uses the per-tool array shape
+  (`{ tool: [c_from_entry1, c_from_entry2, ...] }`) instead of the singular/plural rename. In
+  the container path the base config does NOT contribute customizations (per upstream
+  `pickUpdateableConfigProperties`); in the features path it contributes as the trailing entry.
 
 ## Supporting Types (subset)
 

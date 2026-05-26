@@ -463,6 +463,56 @@ fn collect_entry_from_config_json(
     entry
 }
 
+/// Apply the upstream `mergeConfiguration` customizations shape to the merged base JSON.
+///
+/// Upstream collects `customizations` per tool key into an array of values across every metadata
+/// entry — one slot per contributor — rather than deep-merging into a single object:
+/// `{ tool: [c_from_entry1, c_from_entry2, ...] }` (see `mergeConfiguration` in
+/// `devcontainers/cli/src/spec-node/imageMetadata.ts`). The consuming tool is responsible for
+/// merging entries within its own slot.
+///
+/// This helper strips the deep-merged `customizations` field that ConfigMerger emits and
+/// replaces it with the per-tool array form. If no entry contributes any customizations the
+/// field is omitted entirely (matching upstream's
+/// `Object.keys(customizations).length ? customizations : undefined`).
+fn apply_customizations_shape(
+    mut base: serde_json::Value,
+    customizations_entries: &[serde_json::Value],
+) -> serde_json::Value {
+    let Some(obj) = base.as_object_mut() else {
+        return base;
+    };
+
+    obj.remove("customizations");
+
+    let mut per_tool: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    for entry in customizations_entries {
+        let serde_json::Value::Object(tools) = entry else {
+            continue;
+        };
+        if tools.is_empty() {
+            continue;
+        }
+        for (tool, value) in tools {
+            match per_tool.get_mut(tool) {
+                Some(serde_json::Value::Array(arr)) => arr.push(value.clone()),
+                _ => {
+                    per_tool.insert(tool.clone(), serde_json::Value::Array(vec![value.clone()]));
+                }
+            }
+        }
+    }
+
+    if !per_tool.is_empty() {
+        obj.insert(
+            "customizations".to_string(),
+            serde_json::Value::Object(per_tool),
+        );
+    }
+
+    base
+}
+
 /// Build a metadata entry directly from a resolved feature's [`FeatureMetadata`].
 fn collect_entry_from_feature_metadata(
     metadata: &deacon_core::features::FeatureMetadata,
@@ -571,11 +621,23 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         chain.push(base_config.clone());
         let mut metadata_entries: Vec<serde_json::Map<String, serde_json::Value>> =
             Vec::with_capacity(entries.len());
+        // Per-entry customizations objects, captured pre-substitution. Per upstream
+        // `getImageMetadataFromContainer` with id-labels match, base config contributes
+        // only `pickUpdateableConfigProperties` (remoteUser/userEnvProbe/remoteEnv) — so
+        // base config's customizations are intentionally NOT included here.
+        let mut customizations_entries: Vec<serde_json::Value> = Vec::with_capacity(entries.len());
         for (idx, entry) in entries.into_iter().enumerate() {
             // Pre-substitution capture of the original entry's collected fields preserves
             // the literal label content for the plural arrays even if substitution would
             // expand variables that don't apply (no host vars in scope here).
             let raw_entry_collected = collect_entry_from_config_json(&entry);
+            if let Some(customizations) = entry.get("customizations") {
+                if let serde_json::Value::Object(map) = customizations {
+                    if !map.is_empty() {
+                        customizations_entries.push(customizations.clone());
+                    }
+                }
+            }
 
             let cfg: deacon_core::config::DevContainerConfig = serde_json::from_value(entry)
                 .with_context(|| {
@@ -604,10 +666,12 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         let base_json = serde_json::to_value(&merged)?;
 
         debug!(
-            "Container-based merged configuration computed successfully ({} metadata entries)",
-            metadata_entries.len()
+            "Container-based merged configuration computed successfully ({} metadata entries, {} customizations entries)",
+            metadata_entries.len(),
+            customizations_entries.len()
         );
-        Ok(apply_upstream_merge_shape(base_json, &metadata_entries))
+        let shaped = apply_upstream_merge_shape(base_json, &metadata_entries);
+        Ok(apply_customizations_shape(shaped, &customizations_entries))
     } else if let Some(features_config) = features_config {
         debug!("Computing features-based merged configuration");
 
@@ -616,8 +680,11 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         // arrays). The base config is appended as the final entry so its own
         // lifecycle commands flow into the plural arrays — matching upstream's
         // `getDevcontainerMetadata` which appends `pick(devContainerConfig, pickConfigProperties)`.
+        // `customizations` follows the same trailing-base ordering but uses the per-tool
+        // array shape (see `apply_customizations_shape`).
         let mut derived_config = deacon_core::config::DevContainerConfig::default();
         let mut metadata_entries: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
+        let mut customizations_entries: Vec<serde_json::Value> = Vec::new();
 
         for feature_set in &features_config.feature_sets {
             for feature in &feature_set.features {
@@ -670,12 +737,16 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                     derived_config.mounts.push(mount.clone());
                 }
 
+                // Customizations are emitted as per-tool arrays in the final output
+                // (see `apply_customizations_shape`). Collect this feature's contribution
+                // here rather than deep-merging into derived_config — that downstream
+                // shape transformation strips deep-merged customizations anyway.
                 if let Some(customizations) = &metadata.customizations {
-                    derived_config.customizations =
-                        deacon_core::config::ConfigMerger::merge_json_objects(
-                            &derived_config.customizations,
-                            customizations,
-                        );
+                    if let serde_json::Value::Object(map) = customizations {
+                        if !map.is_empty() {
+                            customizations_entries.push(customizations.clone());
+                        }
+                    }
                 }
 
                 if let Some(init) = metadata.init {
@@ -713,6 +784,13 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         if !base_entry.is_empty() {
             metadata_entries.push(base_entry);
         }
+        // Per upstream `getDevcontainerMetadata`, the base config's `customizations` is the
+        // final entry in the metadata chain (pickConfigProperties includes `customizations`).
+        if let serde_json::Value::Object(map) = &base_config.customizations {
+            if !map.is_empty() {
+                customizations_entries.push(base_config.customizations.clone());
+            }
+        }
 
         // Merge base config with derived feature metadata (for non-collected fields).
         let merged = deacon_core::config::ConfigMerger::merge_configs(&[
@@ -722,13 +800,16 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         let merged_json = serde_json::to_value(&merged)?;
 
         debug!(
-            "Features-based merged configuration computed successfully ({} metadata entries)",
-            metadata_entries.len()
+            "Features-based merged configuration computed successfully ({} metadata entries, {} customizations entries)",
+            metadata_entries.len(),
+            customizations_entries.len()
         );
-        Ok(apply_upstream_merge_shape(merged_json, &metadata_entries))
+        let shaped = apply_upstream_merge_shape(merged_json, &metadata_entries);
+        Ok(apply_customizations_shape(shaped, &customizations_entries))
     } else {
         // No container and no features: still apply the upstream output shape so that
-        // user-authored lifecycle commands surface as the plural arrays.
+        // user-authored lifecycle commands surface as the plural arrays. Customizations
+        // from the base config (if any) collapse to a single-entry per-tool array.
         debug!(
             "No metadata sources available; merged config equals base config (shape-normalized)"
         );
@@ -739,7 +820,14 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         } else {
             vec![base_entry]
         };
-        Ok(apply_upstream_merge_shape(base_json, &entries))
+        let customizations_entries: Vec<serde_json::Value> = match &base_config.customizations {
+            serde_json::Value::Object(map) if !map.is_empty() => {
+                vec![base_config.customizations.clone()]
+            }
+            _ => Vec::new(),
+        };
+        let shaped = apply_upstream_merge_shape(base_json, &entries);
+        Ok(apply_customizations_shape(shaped, &customizations_entries))
     }
 }
 
@@ -2016,6 +2104,184 @@ API_KEY=another-secret
             merged.get("securityOpt"),
             Some(&serde_json::json!(["seccomp=unconfined", "label=disable"]))
         );
+    }
+
+    /// Container-label merged output must collect customizations per tool key into arrays
+    /// rather than deep-merging objects (matches upstream `mergeConfiguration`). Per
+    /// `pickUpdateableConfigProperties`, the base config's own customizations do NOT
+    /// contribute when the container's id-labels match.
+    #[tokio::test]
+    async fn test_container_metadata_collects_customizations_per_tool() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            customizations: serde_json::json!({
+                "vscode": { "extensions": ["base.ext-should-not-leak"] }
+            }),
+            ..Default::default()
+        };
+
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            serde_json::json!([
+                {
+                    "customizations": {
+                        "vscode": { "extensions": ["feat-a.ext-1"] }
+                    }
+                },
+                {
+                    "customizations": {
+                        "vscode": { "extensions": ["feat-b.ext-2"], "settings": {"k": "v"} },
+                        "jetbrains": { "plugins": ["plug-1"] }
+                    }
+                }
+            ])
+            .to_string(),
+        );
+
+        let container_info = deacon_core::docker::ContainerInfo {
+            id: "cid".to_string(),
+            names: vec![],
+            image: "ubuntu:24.04".to_string(),
+            status: "running".to_string(),
+            state: "running".to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
+            env: HashMap::new(),
+            labels,
+            mounts: vec![],
+        };
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(
+            &base_config,
+            Some(&container_info),
+            Some(&context),
+            None,
+            None,
+            &fetcher,
+        )
+        .await
+        .unwrap();
+
+        // Each tool key holds an ordered array, one entry per contributor that supplied
+        // a value for that tool. Base config does NOT contribute in this path.
+        assert_eq!(
+            merged.get("customizations"),
+            Some(&serde_json::json!({
+                "vscode": [
+                    { "extensions": ["feat-a.ext-1"] },
+                    { "extensions": ["feat-b.ext-2"], "settings": { "k": "v" } }
+                ],
+                "jetbrains": [
+                    { "plugins": ["plug-1"] }
+                ]
+            }))
+        );
+    }
+
+    /// Without container or features, base config's `customizations` must still be emitted
+    /// as a per-tool array (single-element arrays), not as the deep-merged object.
+    #[tokio::test]
+    async fn test_base_only_customizations_collapse_to_single_entry_arrays() {
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            customizations: serde_json::json!({
+                "vscode": { "extensions": ["from-base"] }
+            }),
+            ..Default::default()
+        };
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(&base_config, None, None, None, None, &fetcher)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            merged.get("customizations"),
+            Some(&serde_json::json!({
+                "vscode": [ { "extensions": ["from-base"] } ]
+            }))
+        );
+    }
+
+    /// When the base config has no customizations and no other source contributes any,
+    /// the `customizations` field must be omitted entirely (matches upstream
+    /// `Object.keys(customizations).length ? customizations : undefined`).
+    #[tokio::test]
+    async fn test_no_customizations_omits_field() {
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            ..Default::default()
+        };
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(&base_config, None, None, None, None, &fetcher)
+            .await
+            .unwrap();
+
+        assert!(
+            merged.get("customizations").is_none(),
+            "customizations should be omitted when no source contributes, got {:?}",
+            merged.get("customizations")
+        );
+    }
+
+    /// Direct unit test of the customizations shape helper: tool keys are first-seen ordered,
+    /// per-tool values are kept in entry-declaration order, empty entries are skipped, and
+    /// the existing deep-merged `customizations` is stripped.
+    #[test]
+    fn test_apply_customizations_shape_basic() {
+        let base = serde_json::json!({
+            "image": "ubuntu",
+            "customizations": { "vscode": { "extensions": ["leftover-deep-merge"] } }
+        });
+        let entries = vec![
+            serde_json::json!({ "vscode": { "extensions": ["a"] } }),
+            serde_json::json!({}), // empty contributor — skipped
+            serde_json::json!({
+                "vscode": { "settings": { "x": 1 } },
+                "jetbrains": { "plugins": ["p1"] }
+            }),
+            serde_json::json!({ "jetbrains": { "plugins": ["p2"] } }),
+        ];
+
+        let result = apply_customizations_shape(base, &entries);
+
+        // Deep-merge form stripped; per-tool arrays present in first-seen tool order.
+        assert_eq!(
+            result.get("customizations"),
+            Some(&serde_json::json!({
+                "vscode": [
+                    { "extensions": ["a"] },
+                    { "settings": { "x": 1 } }
+                ],
+                "jetbrains": [
+                    { "plugins": ["p1"] },
+                    { "plugins": ["p2"] }
+                ]
+            }))
+        );
+        // Other fields preserved.
+        assert_eq!(result.get("image"), Some(&serde_json::json!("ubuntu")));
+    }
+
+    /// Empty entries (and any non-object inputs) must result in customizations being omitted
+    /// from the output entirely, even if the input base had a deep-merged customizations.
+    #[test]
+    fn test_apply_customizations_shape_strips_empty() {
+        let base = serde_json::json!({
+            "image": "ubuntu",
+            "customizations": { "vscode": { "extensions": ["should-be-removed"] } }
+        });
+        let result = apply_customizations_shape(base, &[]);
+        assert!(result.get("customizations").is_none());
+        assert_eq!(result.get("image"), Some(&serde_json::json!("ubuntu")));
     }
 
     /// Container-label merged output must dedupe `forwardPorts` with upstream's
