@@ -9,8 +9,18 @@ A fast, focused Rust CLI for developers who use [dev containers](https://contain
   <a href="https://github.com/get2knowio/deacon/releases/latest">
     <img alt="Latest Release" src="https://img.shields.io/github/v/release/get2knowio/deacon" />
   </a>
-  <a href="https://github.com/get2knowio/deacon/actions/workflows/ci.yml">
-    <img alt="Build Status" src="https://github.com/get2knowio/deacon/actions/workflows/ci.yml/badge.svg" />
+  <a href="https://github.com/get2knowio/deacon/actions/workflows/ci.yml?query=branch%3Amain">
+    <img alt="CI" src="https://github.com/get2knowio/deacon/actions/workflows/ci.yml/badge.svg?branch=main" />
+  </a>
+  <a href="https://github.com/get2knowio/deacon/actions/workflows/codeql.yml?query=branch%3Amain">
+    <img alt="CodeQL" src="https://github.com/get2knowio/deacon/actions/workflows/codeql.yml/badge.svg?branch=main" />
+  </a>
+  <a href="https://coveralls.io/github/get2knowio/deacon?branch=main">
+    <img alt="Coverage" src="https://img.shields.io/coverallsCoverage/github/get2knowio/deacon?branch=main" />
+  </a>
+  <img alt="MSRV" src="https://img.shields.io/badge/MSRV-1.82-blue.svg" />
+  <a href="https://github.com/get2knowio/deacon/security/policy">
+    <img alt="Security Policy" src="https://img.shields.io/badge/security-policy-blue.svg" />
   </a>
   <a href="https://github.com/get2knowio/deacon/blob/main/LICENSE">
     <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg" />
@@ -87,29 +97,27 @@ deacon --version
 
 | Command | Description |
 |---------|-------------|
-| `up` | Create and start a dev container |
-| `down` | Stop and remove a dev container |
+| `up` | Create and start a dev container (features installed at build time via BuildKit) |
+| `down` | Stop and remove a dev container or compose project |
 | `exec` | Execute a command in a running container |
-| `build` | Build a dev container image |
-| `read-configuration` | Resolve and output devcontainer.json |
-| `run-user-commands` | Run lifecycle commands in a container |
+| `build` | Build a dev container image (with feature layering for Dockerfile configs) |
+| `read-configuration` | Resolve and output `devcontainer.json` (with extends + variable substitution) |
+| `run-user-commands` | Run lifecycle commands in an existing container |
+| `set-up` | Convert an already-running container into a DevContainer (lifecycle + dotfiles + `/etc` patches) |
+| `upgrade` | Regenerate the lockfile from the currently resolved feature set |
+| `outdated` | Report current / wanted / latest feature versions |
 | `templates apply` | Scaffold a project from a template |
-| `doctor` | Check system prerequisites and configuration |
+| `config` | Configuration management subcommands |
+| `doctor` | Environment diagnostics and support bundle creation |
 
-## In Progress
+## Known limitations
 
-The following features are planned but not yet ready for use:
+| Limitation | Notes |
+|---|---|
+| **Podman runtime** | Ships as **experimental in 1.0**. Trait-level integration is complete and the happy path works, but rootless-Podman parity items (`label=disable`, `--userns=keep-id`, `--uidmap`/`--gidmap`) and dedicated test coverage are targeted for **1.1** — see [#30](https://github.com/get2knowio/deacon/issues/30). Using `--runtime podman` emits a one-time WARN. |
+| **`build` features** | Feature installation during `build` is supported for **Dockerfile-based** configs only. Compose-build and image-reference configs still error out with features (different integration patterns; tracked as a post-1.0 follow-up). |
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Docker Compose profiles | Planned | Basic Compose works, profile selection coming soon |
-| Features installation during `up` | Experimental | Feature config merges, but installation may be incomplete |
-| Dotfiles (container-side) | Planned | Host-side dotfiles work, container clone/install coming |
-| `--expect-existing-container` | Planned | Flag exists but validation not implemented |
-| Port forwarding | Planned | Flags exist, functionality deferred |
-| Podman runtime | Experimental (1.0) | Trait-level support is complete; lacks test coverage and rootless-Podman parity items (`label=disable`, `--userns=keep-id`, `--uidmap`/`--gidmap`). Targeted for full support in 1.1 ([#30](https://github.com/get2knowio/deacon/issues/30)). |
-
-For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md).
+For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). Post-1.0 hardening work (redaction wiring, workspace-trust gate, async I/O audit, typed errors, json5→jsonc migration) is tracked in [#52](https://github.com/get2knowio/deacon/issues/52).
 
 ## Examples
 
@@ -479,7 +487,7 @@ curl -LO https://github.com/get2knowio/deacon/releases/download/<version>/SHA256
 grep '<archive-filename>' SHA256SUMS | sha256sum -c -
 ```
 
-Planned enhancements (tracked in issue: Code Signing):
+Planned enhancements (no tracking issue yet — file one if you need any of these prioritized):
 - GPG detached signature for `SHA256SUMS` (`SHA256SUMS.asc`)
 - macOS codesign + notarization
 - Windows Authenticode signature
