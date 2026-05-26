@@ -215,6 +215,17 @@ fn parse_df_output(
     .into())
 }
 
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
 /// Host system information collected for requirements evaluation.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct HostInfo {
@@ -239,6 +250,7 @@ pub struct HostRequirementsEvaluation {
     pub cpu_evaluation: Option<RequirementEvaluation>,
     pub memory_evaluation: Option<RequirementEvaluation>,
     pub storage_evaluation: Option<RequirementEvaluation>,
+    pub gpu_evaluation: Option<RequirementEvaluation>,
 }
 
 /// Evaluation result for a specific requirement.
@@ -316,6 +328,17 @@ impl<F: FilesystemProvider> HostRequirementsEvaluator<F> {
         requirements: &HostRequirements,
         workspace_path: Option<&std::path::Path>,
     ) -> Result<HostRequirementsEvaluation> {
+        self.evaluate_requirements_with_gpu_availability(requirements, workspace_path, None)
+    }
+
+    /// Evaluate host requirements against actual system capabilities and a known
+    /// GPU availability result.
+    pub fn evaluate_requirements_with_gpu_availability(
+        &mut self,
+        requirements: &HostRequirements,
+        workspace_path: Option<&std::path::Path>,
+        gpu_available: Option<bool>,
+    ) -> Result<HostRequirementsEvaluation> {
         let host_info = self.get_host_info(workspace_path)?;
 
         let cpu_evaluation = requirements.cpus.as_ref().map(|req| {
@@ -384,10 +407,18 @@ impl<F: FilesystemProvider> HostRequirementsEvaluator<F> {
                     }
                 });
 
-        let requirements_met = [&cpu_evaluation, &memory_evaluation, &storage_evaluation]
-            .iter()
-            .filter_map(|&eval| eval.as_ref())
-            .all(|eval| eval.met);
+        let gpu_evaluation =
+            Self::evaluate_gpu_requirement(requirements.gpu.as_ref(), gpu_available)?;
+
+        let requirements_met = [
+            &cpu_evaluation,
+            &memory_evaluation,
+            &storage_evaluation,
+            &gpu_evaluation,
+        ]
+        .iter()
+        .filter_map(|&eval| eval.as_ref())
+        .all(|eval| eval.met);
 
         Ok(HostRequirementsEvaluation {
             host_info,
@@ -396,7 +427,74 @@ impl<F: FilesystemProvider> HostRequirementsEvaluator<F> {
             cpu_evaluation,
             memory_evaluation,
             storage_evaluation,
+            gpu_evaluation,
         })
+    }
+
+    fn evaluate_gpu_requirement(
+        requirement: Option<&serde_json::Value>,
+        gpu_available: Option<bool>,
+    ) -> Result<Option<RequirementEvaluation>> {
+        let Some(requirement) = requirement else {
+            return Ok(None);
+        };
+
+        let available = if gpu_available.unwrap_or(false) {
+            1.0
+        } else {
+            0.0
+        };
+        match requirement {
+            serde_json::Value::Bool(false) => Ok(Some(RequirementEvaluation {
+                required: 0.0,
+                available,
+                met: true,
+                description: "GPU: not required".to_string(),
+            })),
+            serde_json::Value::Bool(true) => Ok(Some(RequirementEvaluation {
+                required: 1.0,
+                available,
+                met: available >= 1.0,
+                description: format!(
+                    "GPU: required, {}",
+                    if available >= 1.0 { "available" } else { "not available" }
+                ),
+            })),
+            serde_json::Value::String(value) if value == "optional" => Ok(Some(
+                RequirementEvaluation {
+                    required: 0.0,
+                    available,
+                    met: true,
+                    description: format!(
+                        "GPU: optional, {}",
+                        if available >= 1.0 { "available" } else { "not available" }
+                    ),
+                },
+            )),
+            serde_json::Value::String(value) => Err(ConfigError::Validation {
+                message: format!(
+                    "Invalid hostRequirements.gpu string '{}'. Expected 'optional'.",
+                    value
+                ),
+            }
+            .into()),
+            serde_json::Value::Object(_) => Ok(Some(RequirementEvaluation {
+                required: 1.0,
+                available,
+                met: available >= 1.0,
+                description: format!(
+                    "GPU: resources required, {}",
+                    if available >= 1.0 { "available" } else { "not available" }
+                ),
+            })),
+            other => Err(ConfigError::Validation {
+                message: format!(
+                    "Invalid hostRequirements.gpu value: expected boolean, 'optional', or object, got {}.",
+                    json_type_name(other)
+                ),
+            }
+            .into()),
+        }
     }
 
     /// Validate host requirements, returning an error if requirements are not met.
@@ -409,13 +507,34 @@ impl<F: FilesystemProvider> HostRequirementsEvaluator<F> {
         workspace_path: Option<&std::path::Path>,
         ignore_failures: bool,
     ) -> Result<HostRequirementsEvaluation> {
-        let evaluation = self.evaluate_requirements(requirements, workspace_path)?;
+        self.validate_requirements_with_gpu_availability(
+            requirements,
+            workspace_path,
+            ignore_failures,
+            None,
+        )
+    }
+
+    /// Validate host requirements with a known GPU availability result.
+    pub fn validate_requirements_with_gpu_availability(
+        &mut self,
+        requirements: &HostRequirements,
+        workspace_path: Option<&std::path::Path>,
+        ignore_failures: bool,
+        gpu_available: Option<bool>,
+    ) -> Result<HostRequirementsEvaluation> {
+        let evaluation = self.evaluate_requirements_with_gpu_availability(
+            requirements,
+            workspace_path,
+            gpu_available,
+        )?;
 
         if !evaluation.requirements_met {
             let failed_requirements: Vec<String> = [
                 &evaluation.cpu_evaluation,
                 &evaluation.memory_evaluation,
                 &evaluation.storage_evaluation,
+                &evaluation.gpu_evaluation,
             ]
             .iter()
             .filter_map(|&eval| eval.as_ref())
@@ -610,6 +729,80 @@ mod tests {
         assert!(result.is_ok());
         let evaluation = result.unwrap();
         assert!(!evaluation.requirements_met);
+    }
+
+    #[test]
+    fn test_gpu_requirement_required_fails_when_unavailable() {
+        let mut mock_provider = MockFilesystemProvider::new();
+        mock_provider.set_available_space(".", 2_000_000_000);
+        let mut evaluator =
+            HostRequirementsEvaluator::<MockFilesystemProvider>::with_filesystem_provider(
+                mock_provider,
+            );
+
+        let requirements = HostRequirements {
+            cpus: None,
+            memory: None,
+            storage: None,
+            gpu: Some(serde_json::Value::Bool(true)),
+        };
+
+        let evaluation = evaluator
+            .evaluate_requirements_with_gpu_availability(&requirements, None, Some(false))
+            .unwrap();
+
+        assert!(!evaluation.requirements_met);
+        assert_eq!(evaluation.gpu_evaluation.unwrap().required, 1.0);
+    }
+
+    #[test]
+    fn test_gpu_requirement_optional_does_not_fail_when_unavailable() {
+        let mut mock_provider = MockFilesystemProvider::new();
+        mock_provider.set_available_space(".", 2_000_000_000);
+        let mut evaluator =
+            HostRequirementsEvaluator::<MockFilesystemProvider>::with_filesystem_provider(
+                mock_provider,
+            );
+
+        let requirements = HostRequirements {
+            cpus: None,
+            memory: None,
+            storage: None,
+            gpu: Some(serde_json::Value::String("optional".to_string())),
+        };
+
+        let evaluation = evaluator
+            .evaluate_requirements_with_gpu_availability(&requirements, None, Some(false))
+            .unwrap();
+
+        assert!(evaluation.requirements_met);
+        assert!(evaluation.gpu_evaluation.unwrap().met);
+    }
+
+    #[test]
+    fn test_gpu_requirement_invalid_string_fails_fast() {
+        let mut mock_provider = MockFilesystemProvider::new();
+        mock_provider.set_available_space(".", 2_000_000_000);
+        let mut evaluator =
+            HostRequirementsEvaluator::<MockFilesystemProvider>::with_filesystem_provider(
+                mock_provider,
+            );
+
+        let requirements = HostRequirements {
+            cpus: None,
+            memory: None,
+            storage: None,
+            gpu: Some(serde_json::Value::String("maybe".to_string())),
+        };
+
+        let result =
+            evaluator.evaluate_requirements_with_gpu_availability(&requirements, None, Some(true));
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected 'optional'"));
     }
 
     #[test]
