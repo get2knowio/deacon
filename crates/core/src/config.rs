@@ -1225,11 +1225,14 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.host_requirements.clone()),
 
-            // Security options: OR semantics for privileged and init, concatenate arrays for capabilities and security opts
+            // Security options: OR semantics for privileged and init; set-union for cap_add /
+            // security_opt to match upstream `unionOrUndefined` in
+            // devcontainers/cli/src/spec-node/imageMetadata.ts (mergeConfiguration). Duplicates
+            // are dropped while preserving first-seen order across the metadata chain.
             privileged: Self::merge_bool_or(base.privileged, overlay.privileged),
             init: Self::merge_bool_or(base.init, overlay.init),
-            cap_add: Self::concat_string_arrays(&base.cap_add, &overlay.cap_add),
-            security_opt: Self::concat_string_arrays(&base.security_opt, &overlay.security_opt),
+            cap_add: Self::union_arrays(&base.cap_add, &overlay.cap_add),
+            security_opt: Self::union_arrays(&base.security_opt, &overlay.security_opt),
         }
     }
 

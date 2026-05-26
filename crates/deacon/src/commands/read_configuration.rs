@@ -1951,6 +1951,73 @@ API_KEY=another-secret
         assert!(merged.get("postCreateCommand").is_none());
     }
 
+    /// Container-label merged output must dedupe capAdd / securityOpt across base + label
+    /// entries (set-union, matching upstream `unionOrUndefined`).
+    #[tokio::test]
+    async fn test_container_metadata_dedupes_cap_add_and_security_opt() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            cap_add: vec!["NET_ADMIN".to_string()],
+            security_opt: vec!["seccomp=unconfined".to_string()],
+            ..Default::default()
+        };
+
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            serde_json::json!([
+                {
+                    "capAdd": ["NET_ADMIN", "SYS_PTRACE"],
+                    "securityOpt": ["seccomp=unconfined", "label=disable"]
+                },
+                {
+                    "capAdd": ["SYS_PTRACE", "SYS_ADMIN"],
+                    "securityOpt": ["label=disable"]
+                }
+            ])
+            .to_string(),
+        );
+
+        let container_info = deacon_core::docker::ContainerInfo {
+            id: "cid".to_string(),
+            names: vec![],
+            image: "ubuntu:24.04".to_string(),
+            status: "running".to_string(),
+            state: "running".to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
+            env: HashMap::new(),
+            labels,
+            mounts: vec![],
+        };
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(
+            &base_config,
+            Some(&container_info),
+            Some(&context),
+            None,
+            None,
+            &fetcher,
+        )
+        .await
+        .unwrap();
+
+        // Set-union: each entry appears exactly once, base order preserved, overlay
+        // entries appended in declaration order.
+        assert_eq!(
+            merged.get("capAdd"),
+            Some(&serde_json::json!(["NET_ADMIN", "SYS_PTRACE", "SYS_ADMIN"]))
+        );
+        assert_eq!(
+            merged.get("securityOpt"),
+            Some(&serde_json::json!(["seccomp=unconfined", "label=disable"]))
+        );
+    }
+
     /// Direct unit test of the shape helper: singular names are removed and plural arrays
     /// preserve entry order, skipping nulls.
     #[test]

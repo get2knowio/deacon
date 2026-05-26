@@ -157,7 +157,7 @@ fn test_config_merge_security_options() -> anyhow::Result<()> {
     // Overlay config with additional security options
     let overlay_config = DevContainerConfig {
         privileged: Some(true),                 // This should override
-        cap_add: vec!["NET_ADMIN".to_string()], // This should be concatenated
+        cap_add: vec!["NET_ADMIN".to_string()], // Set-union with base
         security_opt: vec!["seccomp=unconfined".to_string()],
         ..Default::default()
     };
@@ -167,8 +167,75 @@ fn test_config_merge_security_options() -> anyhow::Result<()> {
 
     // Verify merged security options
     assert_eq!(merged.privileged, Some(true)); // Last writer wins
-    assert_eq!(merged.cap_add, vec!["SYS_PTRACE", "NET_ADMIN"]); // Concatenated
+    assert_eq!(merged.cap_add, vec!["SYS_PTRACE", "NET_ADMIN"]); // Union, base order preserved
     assert_eq!(merged.security_opt, vec!["seccomp=unconfined"]);
+
+    Ok(())
+}
+
+/// capAdd / securityOpt MUST be merged as a set-union across configs (no duplicates),
+/// matching upstream `unionOrUndefined` in `devcontainers/cli`
+/// (`src/spec-node/imageMetadata.ts::mergeConfiguration`). First-seen order is preserved.
+#[test]
+fn test_config_merge_security_options_dedupes_overlapping_entries() -> anyhow::Result<()> {
+    use deacon_core::config::ConfigMerger;
+
+    let base = DevContainerConfig {
+        cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
+        security_opt: vec!["seccomp=unconfined".to_string()],
+        ..Default::default()
+    };
+
+    // Overlay overlaps with base on SYS_PTRACE and seccomp=unconfined and adds new entries.
+    let overlay = DevContainerConfig {
+        cap_add: vec![
+            "SYS_PTRACE".to_string(), // already in base — must dedupe
+            "SYS_ADMIN".to_string(),
+        ],
+        security_opt: vec![
+            "seccomp=unconfined".to_string(), // already in base — must dedupe
+            "apparmor=unconfined".to_string(),
+        ],
+        ..Default::default()
+    };
+
+    let merged = ConfigMerger::merge_configs(&[base, overlay]);
+
+    // Base order preserved; overlay-only entries appended in order; duplicates dropped.
+    assert_eq!(merged.cap_add, vec!["SYS_PTRACE", "NET_ADMIN", "SYS_ADMIN"]);
+    assert_eq!(
+        merged.security_opt,
+        vec!["seccomp=unconfined", "apparmor=unconfined"]
+    );
+
+    Ok(())
+}
+
+/// Folding across more than two configs (e.g. extends chain or container metadata array) must
+/// still deduplicate across every layer, not just adjacent pairs.
+#[test]
+fn test_config_merge_security_options_dedupes_across_multi_layer_chain() -> anyhow::Result<()> {
+    use deacon_core::config::ConfigMerger;
+
+    let layer_a = DevContainerConfig {
+        cap_add: vec!["NET_ADMIN".to_string()],
+        ..Default::default()
+    };
+    let layer_b = DevContainerConfig {
+        cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
+        security_opt: vec!["label=disable".to_string()],
+        ..Default::default()
+    };
+    let layer_c = DevContainerConfig {
+        cap_add: vec!["SYS_ADMIN".to_string(), "SYS_PTRACE".to_string()],
+        security_opt: vec!["label=disable".to_string()],
+        ..Default::default()
+    };
+
+    let merged = ConfigMerger::merge_configs(&[layer_a, layer_b, layer_c]);
+
+    assert_eq!(merged.cap_add, vec!["NET_ADMIN", "SYS_PTRACE", "SYS_ADMIN"]);
+    assert_eq!(merged.security_opt, vec!["label=disable"]);
 
     Ok(())
 }
