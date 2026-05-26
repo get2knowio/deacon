@@ -2074,12 +2074,17 @@ where
         // Auto-detect install script
         debug!("Auto-detecting install script in dotfiles repository");
 
+        // `target_path` derives from `--dotfiles-target-path` (user-controllable)
+        // or from `$HOME` inside the container. Quote it so paths with spaces,
+        // single-quotes, or `$(...)` interpolate as a single shell token rather
+        // than allowing command injection.
+        let target_quoted = shell_words::quote(target_path.as_str()).into_owned();
         let detect_script_command = vec![
             "sh".to_string(),
             "-c".to_string(),
             format!(
-                "if [ -f {}/install.sh ]; then echo 'install.sh'; elif [ -f {}/setup.sh ]; then echo 'setup.sh'; fi",
-                target_path, target_path
+                "if [ -f {tq}/install.sh ]; then echo 'install.sh'; elif [ -f {tq}/setup.sh ]; then echo 'setup.sh'; fi",
+                tq = target_quoted,
             ),
         ];
 
@@ -2096,9 +2101,16 @@ where
                 let script_name = result.stdout.trim();
                 debug!("Auto-detected install script: {}", script_name);
 
-                // Use detected shell or fallback to bash
+                // Use detected shell or fallback to bash. Script name is one
+                // of "install.sh" / "setup.sh" (known-safe), but the path
+                // gets quoted unconditionally.
                 let shell = detected_shell.unwrap_or("bash");
-                Some(format!("{} {}/{}", shell, target_path, script_name))
+                Some(format!(
+                    "{shell} {tq}/{name}",
+                    shell = shell,
+                    tq = target_quoted,
+                    name = script_name
+                ))
             }
             _ => {
                 debug!("No install script found in dotfiles repository");
@@ -2111,10 +2123,18 @@ where
     if let Some(install_cmd) = install_command_str {
         info!("Executing dotfiles install command: {}", install_cmd);
 
+        // `cd` target gets shell-quoted; the install command itself is
+        // user-supplied shell (custom install command) and inherently
+        // executes as shell — that trust boundary is the workspace-trust
+        // gate (separate concern, tracked in gap #3), not this layer.
         let install_command = vec![
             "sh".to_string(),
             "-c".to_string(),
-            format!("cd {} && {}", target_path, install_cmd),
+            format!(
+                "cd {tq} && {cmd}",
+                tq = shell_words::quote(target_path.as_str()),
+                cmd = install_cmd
+            ),
         ];
 
         let install_start = Instant::now();
