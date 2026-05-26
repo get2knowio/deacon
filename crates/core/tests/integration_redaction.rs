@@ -1042,3 +1042,156 @@ fn test_cryptographic_hash_security_properties() {
     let hash3 = format!("{:x}", hasher3.finalize());
     assert_ne!(hash, hash3);
 }
+
+/// Helper: A `MakeWriter` that wraps an `Arc<Mutex<Vec<u8>>>` in a `RedactingWriter`
+/// per event. Mirrors the production `RedactingMakeWriter` but with an in-memory sink
+/// so integration tests can inspect the resulting byte stream.
+mod redacting_buffer {
+    use deacon_core::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::fmt::MakeWriter;
+
+    pub struct BufferMakeWriter {
+        pub buffer: Arc<Mutex<Vec<u8>>>,
+        pub config: RedactionConfig,
+        pub registry: SecretRegistry,
+    }
+
+    pub struct BufferWriter {
+        buffer: Arc<Mutex<Vec<u8>>>,
+        config: RedactionConfig,
+        registry: SecretRegistry,
+    }
+
+    impl Write for BufferWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut sink: Vec<u8> = Vec::new();
+            let mut redactor = RedactingWriter::new(&mut sink, self.config.clone(), &self.registry);
+            redactor.write_all(buf)?;
+            redactor.flush()?;
+            drop(redactor);
+            self.buffer
+                .lock()
+                .expect("buffer mutex poisoned")
+                .extend_from_slice(&sink);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for BufferMakeWriter {
+        type Writer = BufferWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            BufferWriter {
+                buffer: Arc::clone(&self.buffer),
+                config: self.config.clone(),
+                registry: self.registry.clone(),
+            }
+        }
+    }
+}
+
+/// End-to-end: a secret registered in `SecretRegistry` and surfaced through the OCI
+/// feature installer's logging path must never appear verbatim in formatted tracing
+/// output. Exercises the wiring in `init_with_redaction` via an equivalent in-process
+/// subscriber so the integration test stays hermetic (no real registry, no global
+/// subscriber install).
+#[tokio::test]
+async fn test_oci_install_env_secret_not_in_logs() {
+    use deacon_core::oci::{DownloadedFeature, FeatureFetcher, ReqwestClient};
+    use std::sync::{Arc, Mutex as StdMutex};
+    use tempfile::TempDir;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    // The literal secret value that will be passed to the install script as
+    // FEATURE_VERSION. The installer used to log this verbatim; now both the call
+    // site and the redaction layer should keep it out of the byte stream.
+    let secret_value = "oci-install-hunter2-token";
+
+    // Per-test registry + redaction config (no reliance on the global registry).
+    let registry = SecretRegistry::new();
+    registry.add_secret(secret_value);
+    let config = RedactionConfig::with_custom_registry(registry.clone());
+
+    // Build a feature on disk whose version IS the secret. install_feature will
+    // marshal this into the FEATURE_VERSION env var for the install script.
+    let temp_dir = TempDir::new().unwrap();
+    let feature_dir = temp_dir.path().join("redact-feature");
+    std::fs::create_dir_all(&feature_dir).unwrap();
+    let feature_json = format!(
+        r#"{{
+            "id": "redact-feature",
+            "name": "Redaction Test Feature",
+            "version": "{}"
+        }}"#,
+        secret_value
+    );
+    std::fs::write(
+        feature_dir.join("devcontainer-feature.json"),
+        feature_json.as_bytes(),
+    )
+    .unwrap();
+    let install_script = b"#!/bin/bash\necho \"installing\"\n";
+    std::fs::write(feature_dir.join("install.sh"), install_script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(feature_dir.join("install.sh"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(feature_dir.join("install.sh"), perms).unwrap();
+    }
+
+    let metadata = deacon_core::features::parse_feature_metadata(
+        &feature_dir.join("devcontainer-feature.json"),
+    )
+    .unwrap();
+    let downloaded_feature = DownloadedFeature {
+        path: feature_dir,
+        metadata,
+        digest: "test-digest".to_string(),
+    };
+
+    let client = ReqwestClient::new().unwrap();
+    let fetcher = FeatureFetcher::new(client);
+
+    // Capture all formatted tracing output through the same RedactingWriter pipeline
+    // that the production fmt layer uses.
+    let buffer: Arc<StdMutex<Vec<u8>>> = Arc::new(StdMutex::new(Vec::new()));
+    let make_writer = redacting_buffer::BufferMakeWriter {
+        buffer: Arc::clone(&buffer),
+        config: config.clone(),
+        registry: registry.clone(),
+    };
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new("trace"))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(true)
+                .with_writer(make_writer),
+        );
+
+    // `set_default` returns a thread-local guard that drops on scope exit, which is
+    // safe to hold across `.await` on a single-threaded tokio runtime.
+    let dispatch = tracing::Dispatch::new(subscriber);
+    let _guard = tracing::dispatcher::set_default(&dispatch);
+
+    let result = fetcher.install_feature(&downloaded_feature).await;
+    assert!(result.is_ok(), "install_feature failed: {result:?}");
+
+    drop(_guard);
+
+    let captured = String::from_utf8(buffer.lock().expect("buffer mutex poisoned").clone())
+        .expect("captured output must be utf-8");
+
+    assert!(
+        !captured.contains(secret_value),
+        "OCI install logs leaked the registered secret: {captured:?}"
+    );
+}
