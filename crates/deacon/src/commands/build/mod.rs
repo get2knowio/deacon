@@ -60,31 +60,20 @@ pub struct BuildArgs {
     pub push: bool,
     /// Export image to file or directory
     pub output: Option<String>,
-    /// Skip feature auto-mapping (hidden testing flag)
-    #[allow(dead_code)] // Reserved for future feature implementation
+    /// Skip feature auto-mapping (hidden testing flag).
     pub skip_feature_auto_mapping: bool,
-    /// Do not persist customizations from features into image metadata
-    #[allow(dead_code)] // Reserved for future feature implementation
-    pub skip_persisting_customizations_from_features: bool,
     /// Skip lockfile generation and verification (graduated 1.0).
-    #[allow(dead_code)] // Wired to behavior in PR-4b (writer integration follow-up)
+    /// Currently not yet consumed by `build`'s lockfile-writing path —
+    /// PR-4c (#41) hardcoded "always write when features present". Plumb
+    /// this into `apply_features_and_lockfile` when wiring the gate.
+    #[allow(dead_code)]
     pub no_lockfile: bool,
-    /// Require an up-to-date lockfile; fail if resolution would change it
-    /// (graduated 1.0). Effective value (CLI ORs the deprecated
-    /// `--experimental-frozen-lockfile` alias into this).
-    #[allow(dead_code)] // Wired to behavior in PR-4b
+    /// Require an up-to-date lockfile; fail if resolution would change it.
+    /// Same follow-up as `no_lockfile`: the byte-compare frozen behavior
+    /// lives in `up::helpers::handle_lockfile_post_build` and needs to be
+    /// lifted into a shared helper before `build` can consume it.
+    #[allow(dead_code)]
     pub frozen_lockfile: bool,
-    /// DEPRECATED hidden alias for the legacy --experimental-lockfile (bool form).
-    /// CLI layer emits a WARN when set; kept through 1.x for backward compat.
-    #[allow(dead_code)] // Will be removed in 2.0
-    pub experimental_lockfile: bool,
-    /// DEPRECATED hidden alias for --frozen-lockfile.
-    /// CLI layer ORs into `frozen_lockfile` and emits a WARN.
-    #[allow(dead_code)] // Will be removed in 2.0
-    pub experimental_frozen_lockfile: bool,
-    /// Omit Dockerfile syntax directive workaround
-    #[allow(dead_code)] // Reserved for future feature implementation
-    pub omit_syntax_directive: bool,
 }
 
 impl Default for BuildArgs {
@@ -122,12 +111,8 @@ impl Default for BuildArgs {
             push: false,
             output: None,
             skip_feature_auto_mapping: false,
-            skip_persisting_customizations_from_features: false,
             no_lockfile: false,
             frozen_lockfile: false,
-            experimental_lockfile: false,
-            experimental_frozen_lockfile: false,
-            omit_syntax_directive: false,
         }
     }
 }

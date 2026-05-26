@@ -14,14 +14,15 @@
 //! - `compose` - Docker Compose flow
 //! - `container` - Single container flow
 //! - `lifecycle` - Lifecycle command execution
-//! - `dotfiles` - Dotfiles installation
 //! - `ports` - Port event handling
 //! - `helpers` - Utility functions
 
 mod args;
 mod compose;
 mod container;
-mod dotfiles;
+// `dotfiles` module deleted: dotfiles execution is now integrated into
+// `deacon_core::container_lifecycle::execute_dotfiles_in_container`, which
+// runs in the spec-correct `postCreate -> dotfiles -> postStart` slot.
 pub(crate) mod features_build;
 mod helpers;
 mod image_build;
@@ -204,16 +205,9 @@ pub(crate) async fn execute_up_with_runtime(
     debug!("Validated features - no disallowed features found");
 
     // Frozen-lockfile pre-build validation (graduated in 1.0).
-    // `args.frozen_lockfile` is the effective value (CLI layer ORs the
-    // deprecated --experimental-frozen-lockfile alias into it).
     // Skip lockfile interaction entirely when --no-lockfile is set.
-    if !args.no_lockfile && (args.frozen_lockfile || args.experimental_lockfile.is_some()) {
-        // Determine lockfile path: use explicit path if provided (deprecated),
-        // otherwise derive from config.
-        let lockfile_path = args
-            .experimental_lockfile
-            .clone()
-            .unwrap_or_else(|| get_lockfile_path(&config_path));
+    if !args.no_lockfile && args.frozen_lockfile {
+        let lockfile_path = get_lockfile_path(&config_path);
 
         if args.frozen_lockfile {
             info!(

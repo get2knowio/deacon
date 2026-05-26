@@ -264,10 +264,7 @@ pub(crate) fn handle_lockfile_post_build(
         return Ok(());
     }
 
-    let lockfile_path = args
-        .experimental_lockfile
-        .clone()
-        .unwrap_or_else(|| get_lockfile_path(config_path));
+    let lockfile_path = get_lockfile_path(config_path);
 
     if args.frozen_lockfile {
         compare_lockfile_frozen(&lockfile_path, lockfile)
@@ -567,33 +564,6 @@ mod lockfile_post_build_tests {
         assert!(
             msg.contains("Lockfile does not match."),
             "expected upstream-aligned summary, got: {msg}"
-        );
-    }
-
-    /// When the deprecated `--experimental-lockfile <PATH>` is set, the helper
-    /// uses that explicit path instead of deriving from the config file.
-    #[test]
-    fn experimental_lockfile_path_overrides_derivation() {
-        let tmp = TempDir::new().unwrap();
-        let config_path = tmp.path().join(".devcontainer/devcontainer.json");
-        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-
-        let explicit = tmp.path().join("custom-lockfile.json");
-        let lockfile = one_feature_lockfile("1.0.0", &"9".repeat(64));
-
-        let mut args = make_args(false, false);
-        args.experimental_lockfile = Some(explicit.clone());
-
-        handle_lockfile_post_build(&args, &config_path, &lockfile)
-            .expect("explicit path must write");
-
-        assert!(
-            explicit.exists(),
-            "experimental_lockfile path must be honored over derived path"
-        );
-        assert!(
-            !get_lockfile_path(&config_path).exists(),
-            "derived path must NOT be written when explicit path is set"
         );
     }
 

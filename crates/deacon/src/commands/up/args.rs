@@ -258,7 +258,6 @@ pub struct NormalizedUpInput {
     pub include_configuration: bool,
     pub include_merged_configuration: bool,
     pub omit_config_remote_env_from_metadata: bool,
-    pub omit_syntax_directive: bool,
 
     // Data folders
     pub container_data_folder: Option<PathBuf>,
@@ -369,29 +368,15 @@ pub struct UpArgs {
     /// Skip lockfile generation and verification.
     pub no_lockfile: bool,
     /// Require an up-to-date lockfile; fail if resolution would change it.
-    /// This is the effective value (already OR'd with the deprecated
-    /// `experimental_frozen_lockfile` alias in the CLI layer).
     pub frozen_lockfile: bool,
-    /// DEPRECATED hidden alias for the legacy `--experimental-lockfile <PATH>`
-    /// form. Kept through the 1.x line so existing CI scripts keep working;
-    /// the CLI layer emits a WARN when set. The custom-path semantics have
-    /// no replacement in the graduated flag surface.
-    pub experimental_lockfile: Option<PathBuf>,
-    /// DEPRECATED hidden alias for `--frozen-lockfile`. The CLI layer ORs
-    /// this into `frozen_lockfile` and emits a WARN; downstream code should
-    /// read `frozen_lockfile` only.
-    #[allow(dead_code)] // Plumbed for shape parity; CLI layer ORs into frozen_lockfile.
-    pub experimental_frozen_lockfile: bool,
 
     // Metadata and output control
     pub omit_config_remote_env_from_metadata: bool,
-    pub omit_syntax_directive: bool,
     pub include_configuration: bool,
     pub include_merged_configuration: bool,
 
     // GPU and advanced options
     pub gpu_mode: deacon_core::gpu::GpuMode,
-    #[allow(dead_code)] // TODO: Will be wired in T009
     pub update_remote_user_uid_default: Option<String>,
 
     // Port handling
@@ -462,10 +447,7 @@ impl Default for UpArgs {
             dotfiles_target_path: None,
             no_lockfile: false,
             frozen_lockfile: false,
-            experimental_lockfile: None,
-            experimental_frozen_lockfile: false,
             omit_config_remote_env_from_metadata: false,
-            omit_syntax_directive: false,
             include_configuration: false,
             include_merged_configuration: false,
             gpu_mode: deacon_core::gpu::GpuMode::None,
@@ -636,7 +618,6 @@ pub(crate) fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpI
         include_configuration: args.include_configuration,
         include_merged_configuration: args.include_merged_configuration,
         omit_config_remote_env_from_metadata: args.omit_config_remote_env_from_metadata,
-        omit_syntax_directive: args.omit_syntax_directive,
         container_data_folder: args.container_data_folder.clone(),
         container_system_data_folder: args.container_system_data_folder.clone(),
         user_data_folder: args.user_data_folder.clone(),

@@ -293,13 +293,6 @@ pub enum Commands {
         /// Mutually exclusive with --no-lockfile.
         #[arg(long)]
         frozen_lockfile: bool,
-        /// DEPRECATED: use --frozen-lockfile (and pass a path via --config if needed).
-        /// Kept as a hidden alias through the 1.x line; emits a WARN when used.
-        #[arg(long, hide = true)]
-        experimental_lockfile: Option<PathBuf>,
-        /// DEPRECATED alias for --frozen-lockfile (graduated in 1.0). Hidden; emits a WARN.
-        #[arg(long, hide = true)]
-        experimental_frozen_lockfile: bool,
         /// Dotfiles repository URL
         #[arg(long)]
         dotfiles_repository: Option<String>,
@@ -314,9 +307,6 @@ pub enum Commands {
         /// Omit config remoteEnv from image metadata
         #[arg(long)]
         omit_config_remote_env_from_metadata: bool,
-        /// Omit Dockerfile syntax directive workaround
-        #[arg(long)]
-        omit_syntax_directive: bool,
         /// Include configuration in JSON output
         #[arg(long)]
         include_configuration: bool,
@@ -442,9 +432,6 @@ pub enum Commands {
         /// Skip feature auto-mapping (hidden testing flag)
         #[arg(long, hide = true)]
         skip_feature_auto_mapping: bool,
-        /// Do not persist customizations from features into image metadata
-        #[arg(long, hide = true)]
-        skip_persisting_customizations_from_features: bool,
         /// Disable lockfile generation and verification. Mutually exclusive with --frozen-lockfile.
         #[arg(long)]
         no_lockfile: bool,
@@ -452,15 +439,6 @@ pub enum Commands {
         /// Mutually exclusive with --no-lockfile.
         #[arg(long)]
         frozen_lockfile: bool,
-        /// DEPRECATED: lockfile is now written by default. Hidden alias kept through 1.x; emits a WARN.
-        #[arg(long, hide = true)]
-        experimental_lockfile: bool,
-        /// DEPRECATED alias for --frozen-lockfile (graduated in 1.0). Hidden; emits a WARN.
-        #[arg(long, hide = true)]
-        experimental_frozen_lockfile: bool,
-        /// Omit Dockerfile syntax directive workaround
-        #[arg(long, hide = true)]
-        omit_syntax_directive: bool,
     },
 
     /// Execute a command inside a running container.
@@ -1112,13 +1090,10 @@ impl Cli {
                 skip_feature_auto_mapping,
                 no_lockfile,
                 frozen_lockfile,
-                experimental_lockfile,
-                experimental_frozen_lockfile,
                 dotfiles_repository,
                 dotfiles_install_command,
                 dotfiles_target_path,
                 omit_config_remote_env_from_metadata,
-                omit_syntax_directive,
                 include_configuration,
                 include_merged_configuration,
                 gpu_mode,
@@ -1133,27 +1108,9 @@ impl Cli {
                 use crate::commands::up::{execute_up, UpArgs};
 
                 // Mutual exclusivity check (mirrors devcontainers/cli).
-                if no_lockfile && (frozen_lockfile || experimental_frozen_lockfile) {
+                if no_lockfile && frozen_lockfile {
                     anyhow::bail!("--no-lockfile and --frozen-lockfile are mutually exclusive.");
                 }
-                // Emit deprecation WARN for the hidden experimental aliases.
-                if experimental_lockfile.is_some() {
-                    tracing::warn!(
-                        target: "deacon::lockfile",
-                        "--experimental-lockfile is deprecated and will be removed in 2.0. \
-                         Lockfile generation is now the default; pass --no-lockfile to disable. \
-                         The custom-path form has no replacement (the lockfile lives next to the config)."
-                    );
-                }
-                if experimental_frozen_lockfile {
-                    tracing::warn!(
-                        target: "deacon::lockfile",
-                        "--experimental-frozen-lockfile is deprecated and will be removed in 2.0; \
-                         use --frozen-lockfile."
-                    );
-                }
-                // effective_frozen = either flag (matches upstream's effectiveFrozenLockfile)
-                let effective_frozen_lockfile = frozen_lockfile || experimental_frozen_lockfile;
 
                 let args = UpArgs {
                     id_label,
@@ -1174,14 +1131,11 @@ impl Cli {
                     buildkit,
                     skip_feature_auto_mapping,
                     no_lockfile,
-                    frozen_lockfile: effective_frozen_lockfile,
-                    experimental_lockfile,
-                    experimental_frozen_lockfile,
+                    frozen_lockfile,
                     dotfiles_repository,
                     dotfiles_install_command,
                     dotfiles_target_path,
                     omit_config_remote_env_from_metadata,
-                    omit_syntax_directive,
                     include_configuration,
                     include_merged_configuration,
                     gpu_mode,
@@ -1314,34 +1268,15 @@ impl Cli {
                 push,
                 output,
                 skip_feature_auto_mapping,
-                skip_persisting_customizations_from_features,
                 no_lockfile,
                 frozen_lockfile,
-                experimental_lockfile,
-                experimental_frozen_lockfile,
-                omit_syntax_directive,
             }) => {
                 use crate::commands::build::{execute_build, BuildArgs};
 
                 // Mutual exclusivity check (mirrors devcontainers/cli).
-                if no_lockfile && (frozen_lockfile || experimental_frozen_lockfile) {
+                if no_lockfile && frozen_lockfile {
                     anyhow::bail!("--no-lockfile and --frozen-lockfile are mutually exclusive.");
                 }
-                if experimental_lockfile {
-                    tracing::warn!(
-                        target: "deacon::lockfile",
-                        "--experimental-lockfile is deprecated and will be removed in 2.0; \
-                         lockfile generation is now the default. Pass --no-lockfile to disable."
-                    );
-                }
-                if experimental_frozen_lockfile {
-                    tracing::warn!(
-                        target: "deacon::lockfile",
-                        "--experimental-frozen-lockfile is deprecated and will be removed in 2.0; \
-                         use --frozen-lockfile."
-                    );
-                }
-                let effective_frozen_lockfile = frozen_lockfile || experimental_frozen_lockfile;
 
                 let args = BuildArgs {
                     no_cache,
@@ -1376,12 +1311,8 @@ impl Cli {
                     push,
                     output,
                     skip_feature_auto_mapping,
-                    skip_persisting_customizations_from_features,
                     no_lockfile,
-                    frozen_lockfile: effective_frozen_lockfile,
-                    experimental_lockfile,
-                    experimental_frozen_lockfile,
-                    omit_syntax_directive,
+                    frozen_lockfile,
                 };
 
                 execute_build(args).await?;

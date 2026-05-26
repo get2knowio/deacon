@@ -520,15 +520,9 @@ fn test_frozen_mode_with_no_features_passes() {
     );
 }
 
-/// Test: experimental_frozen_lockfile flag defaults to false.
-#[test]
-fn test_experimental_frozen_lockfile_defaults_to_false() {
-    let args = UpArgs::default();
-    assert!(
-        !args.experimental_frozen_lockfile,
-        "experimental_frozen_lockfile should default to false"
-    );
-}
+// (Deleted: test_experimental_frozen_lockfile_defaults_to_false — the
+// `--experimental-*` deprecation aliases have been removed; only the
+// graduated `--frozen-lockfile` / `--no-lockfile` flags remain.)
 
 // =============================================================================
 // Lockfile Path Derivation Tests
@@ -694,8 +688,8 @@ fn test_up_args_feature_control_fields() {
     // skip_feature_auto_mapping should exist and default to false
     assert!(!args.skip_feature_auto_mapping);
 
-    // experimental_frozen_lockfile should exist and default to false
-    assert!(!args.experimental_frozen_lockfile);
+    // frozen_lockfile should default to false
+    assert!(!args.frozen_lockfile);
 
     // additional_features should exist and default to None
     assert!(args.additional_features.is_none());
@@ -706,7 +700,7 @@ fn test_up_args_feature_control_fields() {
 fn test_up_args_with_all_feature_options() {
     let args = UpArgs {
         skip_feature_auto_mapping: true,
-        experimental_frozen_lockfile: true,
+        frozen_lockfile: true,
         additional_features: None, // Cannot have features when skip is enabled
         prefer_cli_features: false,
         feature_install_order: Some("feature-a,feature-b".to_string()),
@@ -714,7 +708,7 @@ fn test_up_args_with_all_feature_options() {
     };
 
     assert!(args.skip_feature_auto_mapping);
-    assert!(args.experimental_frozen_lockfile);
+    assert!(args.frozen_lockfile);
     assert!(args.additional_features.is_none());
     assert!(!args.prefer_cli_features);
     assert_eq!(
@@ -734,14 +728,14 @@ fn test_up_args_with_all_feature_options() {
 fn test_frozen_lockfile_with_skip_auto_mapping() {
     let args = UpArgs {
         skip_feature_auto_mapping: true,
-        experimental_frozen_lockfile: true,
+        frozen_lockfile: true,
         additional_features: None,
         ..Default::default()
     };
 
     // Both should be enabled without conflict
     assert!(
-        args.skip_feature_auto_mapping && args.experimental_frozen_lockfile,
+        args.skip_feature_auto_mapping && args.frozen_lockfile,
         "Both frozen lockfile and skip auto-mapping should be enableable together"
     );
 }
