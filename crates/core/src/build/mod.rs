@@ -153,15 +153,6 @@ pub struct BuildRequest {
 
     /// Skip persisting customizations in metadata
     pub skip_persist_customizations: bool,
-
-    /// Enable experimental lockfile generation
-    pub experimental_lockfile: bool,
-
-    /// Require lockfile match (fail if lockfile doesn't match)
-    pub experimental_frozen_lockfile: bool,
-
-    /// Omit syntax directive from generated Dockerfile
-    pub omit_syntax_directive: bool,
 }
 
 impl BuildRequest {
@@ -411,9 +402,6 @@ mod tests {
             cache_to: None,
             skip_feature_auto_mapping: false,
             skip_persist_customizations: false,
-            experimental_lockfile: false,
-            experimental_frozen_lockfile: false,
-            omit_syntax_directive: false,
         };
 
         // Valid config file name
@@ -440,9 +428,6 @@ mod tests {
             cache_to: None,
             skip_feature_auto_mapping: false,
             skip_persist_customizations: false,
-            experimental_lockfile: false,
-            experimental_frozen_lockfile: false,
-            omit_syntax_directive: false,
         };
 
         // Both push and output set - should fail
