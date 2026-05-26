@@ -47,6 +47,7 @@ pub mod semver_utils;
 pub mod state;
 pub mod templates;
 pub mod text;
+pub mod trust;
 pub mod user_mapping;
 pub mod variable;
 pub mod workspace;
