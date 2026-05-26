@@ -1222,11 +1222,14 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.other_ports_attributes.clone()),
 
-            // Host requirements: last writer wins
-            host_requirements: overlay
-                .host_requirements
-                .clone()
-                .or_else(|| base.host_requirements.clone()),
+            // Host requirements: field-wise max for cpus/memory/storage, OR-merge for gpu
+            // (matches upstream `mergeHostRequirements` in devcontainers/cli's
+            // mergeConfiguration). Falls back to whichever side is `Some` when only one
+            // contributes.
+            host_requirements: Self::merge_host_requirements(
+                base.host_requirements.as_ref(),
+                overlay.host_requirements.as_ref(),
+            ),
 
             // Security options: OR semantics for privileged and init; set-union for cap_add /
             // security_opt to match upstream `unionOrUndefined` in
@@ -1342,6 +1345,147 @@ impl ConfigMerger {
             result.push(canonical.unwrap_or_else(|| entry.clone()));
         }
         result
+    }
+
+    /// Merge two optional [`HostRequirements`] following upstream `mergeHostRequirements`
+    /// semantics: per-field max for `cpus`/`memory`/`storage`, OR-style merge for `gpu`.
+    ///
+    /// When only one side is `Some`, it is returned unchanged. When both are `Some`, each
+    /// numeric field is canonicalized for comparison (cpus as cores, memory/storage as
+    /// bytes), the max is taken, and the result is emitted as `ResourceSpec::Number` (cpus)
+    /// or `ResourceSpec::String("<bytes>")` (memory/storage) — matching upstream's
+    /// `cpus: number, memory: string, storage: string` output shape.
+    fn merge_host_requirements(
+        base: Option<&HostRequirements>,
+        overlay: Option<&HostRequirements>,
+    ) -> Option<HostRequirements> {
+        match (base, overlay) {
+            (None, None) => None,
+            (Some(b), None) => Some(b.clone()),
+            (None, Some(o)) => Some(o.clone()),
+            (Some(b), Some(o)) => Some(HostRequirements {
+                cpus: Self::merge_max_cpus(b.cpus.as_ref(), o.cpus.as_ref()),
+                memory: Self::merge_max_bytes(b.memory.as_ref(), o.memory.as_ref()),
+                storage: Self::merge_max_bytes(b.storage.as_ref(), o.storage.as_ref()),
+                gpu: Self::merge_gpu_requirements(b.gpu.as_ref(), o.gpu.as_ref()),
+            }),
+        }
+    }
+
+    /// Take the max of two optional CPU specifications (in cores). Unparseable inputs are
+    /// treated as 0; the result is emitted as `ResourceSpec::Number` when > 0, else `None`.
+    fn merge_max_cpus(a: Option<&ResourceSpec>, b: Option<&ResourceSpec>) -> Option<ResourceSpec> {
+        let av = a.and_then(|r| r.parse_cpu_cores().ok()).unwrap_or(0.0);
+        let bv = b.and_then(|r| r.parse_cpu_cores().ok()).unwrap_or(0.0);
+        let max = av.max(bv);
+        if max > 0.0 {
+            Some(ResourceSpec::Number(max))
+        } else {
+            None
+        }
+    }
+
+    /// Take the max of two optional byte specifications. Unparseable inputs are treated as 0;
+    /// the result is emitted as `ResourceSpec::String` of the raw byte count when > 0, else
+    /// `None` (matches upstream's `memory ? ${memory} : undefined`).
+    fn merge_max_bytes(a: Option<&ResourceSpec>, b: Option<&ResourceSpec>) -> Option<ResourceSpec> {
+        let av = a.and_then(|r| r.parse_bytes().ok()).unwrap_or(0);
+        let bv = b.and_then(|r| r.parse_bytes().ok()).unwrap_or(0);
+        let max = av.max(bv);
+        if max > 0 {
+            Some(ResourceSpec::String(max.to_string()))
+        } else {
+            None
+        }
+    }
+
+    /// Merge two optional GPU requirements per upstream `mergeGpuRequirements`:
+    /// - `undefined`/`false` from either side → use the other side verbatim.
+    /// - Both `"optional"` → `"optional"`.
+    /// - Otherwise treat each as the object form (non-object → `{}`) and take max of
+    ///   `cores` and `memory` (in bytes), emitting an object with whichever fields are > 0.
+    fn merge_gpu_requirements(
+        a: Option<&serde_json::Value>,
+        b: Option<&serde_json::Value>,
+    ) -> Option<serde_json::Value> {
+        fn is_false_or_null(v: &serde_json::Value) -> bool {
+            matches!(v, serde_json::Value::Bool(false) | serde_json::Value::Null)
+        }
+        fn is_optional_string(v: &serde_json::Value) -> bool {
+            v.as_str() == Some("optional")
+        }
+        fn cores_of(v: Option<&serde_json::Value>) -> f64 {
+            v.and_then(|v| v.as_object())
+                .and_then(|m| m.get("cores"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+        }
+        fn memory_bytes_of(v: Option<&serde_json::Value>) -> u64 {
+            v.and_then(|v| v.as_object())
+                .and_then(|m| m.get("memory"))
+                .and_then(|mv| {
+                    if let Some(s) = mv.as_str() {
+                        parse_resource_string(s).ok()
+                    } else if let Some(n) = mv.as_u64() {
+                        Some(n)
+                    } else {
+                        mv.as_f64().map(|f| f as u64)
+                    }
+                })
+                .unwrap_or(0)
+        }
+
+        match (a, b) {
+            (None, None) => None,
+            (Some(av), None) => {
+                if is_false_or_null(av) {
+                    None
+                } else {
+                    Some(av.clone())
+                }
+            }
+            (None, Some(bv)) => {
+                if is_false_or_null(bv) {
+                    None
+                } else {
+                    Some(bv.clone())
+                }
+            }
+            (Some(av), Some(bv)) => {
+                if is_false_or_null(av) {
+                    return if is_false_or_null(bv) {
+                        None
+                    } else {
+                        Some(bv.clone())
+                    };
+                }
+                if is_false_or_null(bv) {
+                    return Some(av.clone());
+                }
+                if is_optional_string(av) && is_optional_string(bv) {
+                    return Some(serde_json::Value::String("optional".to_string()));
+                }
+                // Object-form merge: take max of cores and memory.
+                let cores = cores_of(Some(av)).max(cores_of(Some(bv)));
+                let memory = memory_bytes_of(Some(av)).max(memory_bytes_of(Some(bv)));
+                let mut obj = serde_json::Map::new();
+                if cores > 0.0 {
+                    obj.insert(
+                        "cores".to_string(),
+                        serde_json::Number::from_f64(cores)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                }
+                if memory > 0 {
+                    obj.insert(
+                        "memory".to_string(),
+                        serde_json::Value::String(memory.to_string()),
+                    );
+                }
+                Some(serde_json::Value::Object(obj))
+            }
+        }
     }
 
     /// Resolve an effective configuration by merging image labels and applying variable substitution.
@@ -3845,6 +3989,325 @@ mod tests {
             merged.forward_ports,
             vec![PortSpec::Number(3000), PortSpec::Number(8080)]
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for upstream-aligned hostRequirements merge semantics.
+    // Mirrors `mergeHostRequirements` / `mergeGpuRequirements` in devcontainers/cli
+    // (imageMetadata.ts): per-field max for cpus/memory/storage, OR-style for gpu.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_merge_host_requirements_picks_max_cpus() {
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(2.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(8.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged
+            .host_requirements
+            .expect("merged should retain hostRequirements");
+        assert_eq!(hr.cpus, Some(ResourceSpec::Number(8.0)));
+        assert!(hr.memory.is_none());
+        assert!(hr.storage.is_none());
+        assert!(hr.gpu.is_none());
+    }
+
+    #[test]
+    fn test_merge_host_requirements_picks_max_cpus_regardless_of_order() {
+        // Verify max is taken regardless of which side has the larger value.
+        let small = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(2.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let large = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(8.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let a = ConfigMerger::merge_two_configs(&small, &large);
+        let b = ConfigMerger::merge_two_configs(&large, &small);
+        assert_eq!(
+            a.host_requirements.unwrap().cpus,
+            Some(ResourceSpec::Number(8.0))
+        );
+        assert_eq!(
+            b.host_requirements.unwrap().cpus,
+            Some(ResourceSpec::Number(8.0))
+        );
+    }
+
+    #[test]
+    fn test_merge_host_requirements_picks_max_memory_as_bytes_string() {
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: Some(ResourceSpec::String("4GB".to_string())), // 4_000_000_000 bytes
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: Some(ResourceSpec::String("8GB".to_string())), // 8_000_000_000 bytes
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(
+            hr.memory,
+            Some(ResourceSpec::String("8000000000".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_merge_host_requirements_picks_max_storage_across_units() {
+        // 8GiB (binary, 2^33) vs 4GB (decimal, 4_000_000_000) — binary wins.
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: Some(ResourceSpec::String("4GB".to_string())),
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: Some(ResourceSpec::String("8GiB".to_string())),
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(
+            hr.storage,
+            Some(ResourceSpec::String(
+                (8_u64 * 1024 * 1024 * 1024).to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_merge_host_requirements_single_side_passes_through() {
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(4.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig::default();
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(hr.cpus, Some(ResourceSpec::Number(4.0)));
+    }
+
+    #[test]
+    fn test_merge_host_requirements_both_none_yields_none() {
+        let base = DevContainerConfig::default();
+        let overlay = DevContainerConfig::default();
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        assert!(merged.host_requirements.is_none());
+    }
+
+    #[test]
+    fn test_merge_gpu_false_yields_other_side() {
+        // false on one side: use the other.
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::Bool(false)),
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::Bool(true)),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(hr.gpu, Some(serde_json::Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_merge_gpu_both_optional_stays_optional() {
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::String("optional".to_string())),
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::String("optional".to_string())),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(
+            hr.gpu,
+            Some(serde_json::Value::String("optional".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_merge_gpu_object_form_takes_max() {
+        // Object-form merge: max cores, max memory.
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::json!({ "cores": 2, "memory": "4GB" })),
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::json!({ "cores": 8, "memory": "2GB" })),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        let gpu_obj = hr
+            .gpu
+            .expect("gpu must be present")
+            .as_object()
+            .cloned()
+            .expect("gpu must be an object after object-form merge");
+        assert_eq!(gpu_obj.get("cores").and_then(|v| v.as_f64()), Some(8.0));
+        assert_eq!(
+            gpu_obj.get("memory").and_then(|v| v.as_str()),
+            Some("4000000000")
+        );
+    }
+
+    #[test]
+    fn test_merge_gpu_true_with_object_form_promotes_to_object_max() {
+        // `true` is treated as object form `{}` per upstream `asHostGPURequirements`.
+        // Merging `true` + `{cores: 4, memory: "8GB"}` keeps the explicit object's values.
+        let base = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::Value::Bool(true)),
+            }),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: None,
+                storage: None,
+                gpu: Some(serde_json::json!({ "cores": 4, "memory": "8GB" })),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let hr = merged.host_requirements.unwrap();
+        let gpu_obj = hr.gpu.unwrap().as_object().cloned().unwrap();
+        assert_eq!(gpu_obj.get("cores").and_then(|v| v.as_f64()), Some(4.0));
+        assert_eq!(
+            gpu_obj.get("memory").and_then(|v| v.as_str()),
+            Some("8000000000")
+        );
+    }
+
+    #[test]
+    fn test_merge_host_requirements_full_chain_collapses_to_field_wise_max() {
+        // 3-layer chain: each layer contributes a different field.
+        let a = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(2.0)),
+                memory: None,
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let b = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: Some(ResourceSpec::Number(4.0)),
+                memory: Some(ResourceSpec::String("8GB".to_string())),
+                storage: None,
+                gpu: None,
+            }),
+            ..Default::default()
+        };
+        let c = DevContainerConfig {
+            host_requirements: Some(HostRequirements {
+                cpus: None,
+                memory: Some(ResourceSpec::String("2GB".to_string())),
+                storage: Some(ResourceSpec::String("50GB".to_string())),
+                gpu: Some(serde_json::Value::Bool(true)),
+            }),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_configs(&[a, b, c]);
+        let hr = merged.host_requirements.unwrap();
+        assert_eq!(hr.cpus, Some(ResourceSpec::Number(4.0)));
+        assert_eq!(
+            hr.memory,
+            Some(ResourceSpec::String("8000000000".to_string()))
+        );
+        assert_eq!(
+            hr.storage,
+            Some(ResourceSpec::String("50000000000".to_string()))
+        );
+        assert_eq!(hr.gpu, Some(serde_json::Value::Bool(true)));
     }
 
     // -------------------------------------------------------------------------
