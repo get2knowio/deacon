@@ -203,10 +203,26 @@ impl std::fmt::Display for OptionValue {
             OptionValue::Boolean(b) => write!(f, "{}", b),
             OptionValue::String(s) => write!(f, "{}", s),
             OptionValue::Number(n) => write!(f, "{}", n),
-            OptionValue::Array(a) => write!(f, "{}", serde_json::to_string(a).unwrap_or_default()),
-            OptionValue::Object(o) => {
-                write!(f, "{}", serde_json::to_string(o).unwrap_or_default())
-            }
+            // `serde_json::to_string` on an already-deserialized `Value`
+            // (which `OptionValue::Array` / `Object` always carry) is
+            // effectively infallible — but per CLAUDE.md's "no silent
+            // fallbacks" principle, an empty-string fallback would hide
+            // any future violation of that invariant. Use a tagged
+            // sentinel + WARN log so the failure is visible.
+            OptionValue::Array(a) => match serde_json::to_string(a) {
+                Ok(s) => write!(f, "{}", s),
+                Err(e) => {
+                    tracing::warn!(error = %e, "OptionValue::Array failed to serialize");
+                    write!(f, "<array:serialize-error>")
+                }
+            },
+            OptionValue::Object(o) => match serde_json::to_string(o) {
+                Ok(s) => write!(f, "{}", s),
+                Err(e) => {
+                    tracing::warn!(error = %e, "OptionValue::Object failed to serialize");
+                    write!(f, "<object:serialize-error>")
+                }
+            },
             OptionValue::Null => write!(f, "null"),
         }
     }
