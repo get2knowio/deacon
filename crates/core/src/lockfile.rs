@@ -57,11 +57,14 @@
 //! );
 //! ```
 
-use anyhow::{Context, Result};
+use crate::errors::LockfileError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Convenience `Result` alias for lockfile operations
+pub type Result<T, E = LockfileError> = std::result::Result<T, E>;
 
 /// Lockfile structure per DevContainer specification
 ///
@@ -236,16 +239,20 @@ pub fn read_lockfile(path: &Path) -> Result<Option<Lockfile>> {
     }
 
     // Read file contents
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read lockfile from {}", path.display()))?;
+    let contents = fs::read_to_string(path).map_err(|source| LockfileError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
 
     // Parse JSON
-    let lockfile: Lockfile = serde_json::from_str(&contents)
-        .with_context(|| format!("Failed to parse lockfile from {}", path.display()))?;
+    let lockfile: Lockfile =
+        serde_json::from_str(&contents).map_err(|source| LockfileError::Json {
+            path: path.to_path_buf(),
+            source,
+        })?;
 
     // Validate lockfile
-    validate_lockfile(&lockfile)
-        .with_context(|| format!("Lockfile validation failed for {}", path.display()))?;
+    validate_lockfile(&lockfile)?;
 
     Ok(Some(lockfile))
 }
@@ -282,24 +289,27 @@ pub fn read_lockfile(path: &Path) -> Result<Option<Lockfile>> {
 pub fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) -> Result<()> {
     // Check if file exists and force_init is false
     if path.exists() && !force_init {
-        anyhow::bail!(
-            "Lockfile already exists at {}. Use force_init=true to overwrite.",
-            path.display()
-        );
+        return Err(LockfileError::AlreadyExists {
+            path: path.to_path_buf(),
+        });
     }
 
     // Validate lockfile before writing
-    validate_lockfile(lockfile).context("Lockfile validation failed before write")?;
+    validate_lockfile(lockfile)?;
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+        fs::create_dir_all(parent).map_err(|source| LockfileError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
     }
 
     // Convert to serde_json::Value for deterministic ordering
-    let mut value =
-        serde_json::to_value(lockfile).context("Failed to convert lockfile to JSON value")?;
+    let mut value = serde_json::to_value(lockfile).map_err(|source| LockfileError::Json {
+        path: path.to_path_buf(),
+        source,
+    })?;
 
     // Sort all object keys recursively for stable JSON output
     sort_json_object(&mut value);
@@ -308,8 +318,10 @@ pub fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) -> Res
     // newline to match upstream `devcontainers/cli`'s `writeLockfile` output
     // (`JSON.stringify(..., 2) + '\n'`). Byte-identical output keeps the
     // `--frozen-lockfile` content comparison stable across implementations.
-    let mut json =
-        serde_json::to_string_pretty(&value).context("Failed to serialize lockfile to JSON")?;
+    let mut json = serde_json::to_string_pretty(&value).map_err(|source| LockfileError::Json {
+        path: path.to_path_buf(),
+        source,
+    })?;
     json.push('\n');
 
     // Atomic write: write to temp file in same directory, then rename
@@ -330,22 +342,24 @@ pub fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) -> Res
         ))
     };
 
-    fs::write(&temp_path, json.as_bytes()).with_context(|| {
-        format!(
-            "Failed to write temporary lockfile to {}",
-            temp_path.display()
-        )
+    fs::write(&temp_path, json.as_bytes()).map_err(|source| LockfileError::Io {
+        path: temp_path.clone(),
+        source,
     })?;
 
     // On Windows, remove destination file if it exists before rename
     #[cfg(windows)]
     if path.exists() {
-        fs::remove_file(path)
-            .with_context(|| format!("Failed to remove existing lockfile at {}", path.display()))?;
+        fs::remove_file(path).map_err(|source| LockfileError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
     }
 
-    fs::rename(&temp_path, path)
-        .with_context(|| format!("Failed to rename temporary lockfile to {}", path.display()))?;
+    fs::rename(&temp_path, path).map_err(|source| LockfileError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
 
     Ok(())
 }
@@ -420,26 +434,39 @@ pub fn merge_lockfile_features(existing: &Lockfile, new: &Lockfile) -> Lockfile 
 fn validate_lockfile(lockfile: &Lockfile) -> Result<()> {
     for (feature_id, feature) in &lockfile.features {
         // Validate version is valid semver
-        validate_semver(&feature.version)
-            .with_context(|| format!("Invalid version field for feature '{}'", feature_id))?;
+        validate_semver(&feature.version).map_err(|msg| LockfileError::Validation {
+            message: format!(
+                "Invalid version field for feature '{}': {}",
+                feature_id, msg
+            ),
+        })?;
 
         // Validate resolved is a valid OCI reference
-        validate_oci_reference(&feature.resolved)
-            .with_context(|| format!("Invalid resolved field for feature '{}'", feature_id))?;
+        validate_oci_reference(&feature.resolved).map_err(|msg| LockfileError::Validation {
+            message: format!(
+                "Invalid resolved field for feature '{}': {}",
+                feature_id, msg
+            ),
+        })?;
 
         // Validate integrity is a valid SHA256 digest
-        validate_sha256_digest(&feature.integrity)
-            .with_context(|| format!("Invalid integrity field for feature '{}'", feature_id))?;
+        validate_sha256_digest(&feature.integrity).map_err(|msg| LockfileError::Validation {
+            message: format!(
+                "Invalid integrity field for feature '{}': {}",
+                feature_id, msg
+            ),
+        })?;
 
         // Validate dependencies exist in lockfile
         if let Some(deps) = &feature.depends_on {
             for dep in deps {
                 if !lockfile.features.contains_key(dep) {
-                    anyhow::bail!(
-                        "Feature '{}' has dependency '{}' in depends_on field which is not present in the lockfile",
-                        feature_id,
-                        dep
-                    );
+                    return Err(LockfileError::Validation {
+                        message: format!(
+                            "Feature '{}' has dependency '{}' in depends_on field which is not present in the lockfile",
+                            feature_id, dep
+                        ),
+                    });
                 }
             }
         }
@@ -475,10 +502,7 @@ fn detect_dependency_cycles(lockfile: &Lockfile) -> Result<()> {
                         // Found a cycle
                         path.push(dep.to_string());
                         let cycle_path = path.join(" -> ");
-                        anyhow::bail!(
-                            "Circular dependency detected in depends_on fields: {}",
-                            cycle_path
-                        );
+                        return Err(LockfileError::DependencyCycle { cycle_path });
                     }
                 }
             }
@@ -533,14 +557,14 @@ fn sort_json_object(value: &mut serde_json::Value) {
 }
 
 /// Validate semantic version format
-fn validate_semver(version: &str) -> Result<()> {
+fn validate_semver(version: &str) -> std::result::Result<(), String> {
     // Use semver crate for proper validation
     use semver::Version;
 
-    Version::parse(version).with_context(|| {
+    Version::parse(version).map_err(|e| {
         format!(
-            "Invalid semantic version '{}': must be in format X.Y.Z (e.g., '1.2.3')",
-            version
+            "Invalid semantic version '{}': must be in format X.Y.Z (e.g., '1.2.3'): {}",
+            version, e
         )
     })?;
 
@@ -550,54 +574,54 @@ fn validate_semver(version: &str) -> Result<()> {
 /// Validate OCI reference format
 ///
 /// Basic validation that the reference contains required components
-fn validate_oci_reference(reference: &str) -> Result<()> {
+fn validate_oci_reference(reference: &str) -> std::result::Result<(), String> {
     // Must contain @ for digest-based reference
     if !reference.contains('@') {
-        anyhow::bail!(
+        return Err(format!(
             "OCI reference '{}' must contain '@' separator with digest (expected format: 'registry/path@sha256:...')",
             reference
-        );
+        ));
     }
 
     // Must contain sha256: in the digest part
     if !reference.contains("sha256:") {
-        anyhow::bail!(
+        return Err(format!(
             "OCI reference '{}' must contain 'sha256:' digest (expected format: 'registry/path@sha256:...')",
             reference
-        );
+        ));
     }
 
     Ok(())
 }
 
 /// Validate SHA256 digest format
-fn validate_sha256_digest(digest: &str) -> Result<()> {
+fn validate_sha256_digest(digest: &str) -> std::result::Result<(), String> {
     // Must start with sha256:
     if !digest.starts_with("sha256:") {
-        anyhow::bail!(
+        return Err(format!(
             "Digest '{}' must start with 'sha256:' (expected format: 'sha256:<64-hex-chars>')",
             digest
-        );
+        ));
     }
 
-    // Extract hash part after sha256:
-    let hash = digest.strip_prefix("sha256:").unwrap();
+    // `starts_with("sha256:")` guarantees the prefix is present.
+    let hash = digest.strip_prefix("sha256:").unwrap_or_default();
 
     // Hash should be 64 hex characters
     if hash.len() != 64 {
-        anyhow::bail!(
+        return Err(format!(
             "SHA256 hash in '{}' must be exactly 64 characters, got {} (expected format: 'sha256:<64-hex-chars>')",
             digest,
             hash.len()
-        );
+        ));
     }
 
     // All characters should be valid hex
     if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
-        anyhow::bail!(
+        return Err(format!(
             "SHA256 hash in '{}' must contain only hexadecimal characters (0-9, a-f, A-F)",
             digest
-        );
+        ));
     }
 
     Ok(())

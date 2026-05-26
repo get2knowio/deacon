@@ -331,6 +331,7 @@ fn write_lockfile_best_effort(lockfile_path: &Path, lockfile: &Lockfile) -> Resu
             Ok(())
         }
         Err(e) => {
+            let e = anyhow::Error::from(e);
             if is_readonly_fs_error(&e) {
                 warn!(
                     path = %lockfile_path.display(),
