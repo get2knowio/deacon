@@ -179,8 +179,16 @@ Constitution principle 9 mandates "Executable & Self-Verifying Examples" (every 
 - Dependabot is configured (recent commit `bb4abf6`); good.
 
 ### Docs that should be reconciled or pruned
-- `docs/MVP-ROADMAP.md` (13 KB), `docs/CLI_PARITY.md` (11 KB), `docs/PARITY_APPROACH.md` (8 KB), `docs/PARITY_PROMPT.md` (10 KB) overlap heavily. Consolidate into one canonical roadmap (this file + `CLI_PARITY.md`) and archive or delete the rest.
-- `docs/repomix-output-devcontainers-cli.xml` (1.4 MB) is a build artifact; should not be checked in.
+
+**Done (2026-05-26 docs purge):** the four overlapping roadmap/parity docs
+(`MVP-ROADMAP.md`, `CLI_PARITY.md`, `PARITY_APPROACH.md`,
+`PARITY_PROMPT.md`) and the 1.4 MB `repomix-output-devcontainers-cli.xml`
+upstream-codebase snapshot have all been deleted, along with the
+per-subcommand `GAP.md` / `IMPLEMENTATION_STATUS.md` /
+`IMPLEMENTATION_CHECKLIST.md` / `SPEC_VS_IMPLEMENTATION.md` / `tasks/`
+pre-implementation artifacts under `docs/subcommand-specs/`. The
+authoritative spec content (`SPEC.md`, `DATA-STRUCTURES.md`,
+`DIAGRAMS.md` per command) is retained.
 
 ---
 
@@ -213,8 +221,8 @@ Constitution principle 9 mandates "Executable & Self-Verifying Examples" (every 
 20. Add snapshot tests (`insta`) for JSON output contracts (tech-debt issue #3).
 21. Document `reqwest 0.12` pin rationale inline in `Cargo.toml`.
 22. Examples cleanup per Constitution §9: either complete or delete the 9 incomplete example directories.
-23. Consolidate `docs/MVP-ROADMAP.md`, `docs/CLI_PARITY.md`, `docs/PARITY_*.md` into a single canonical doc; remove `repomix-output-devcontainers-cli.xml` from VCS.
-24. Add `SECURITY.md` and `CONTRIBUTING.md`.
+23. **Done (2026-05-26):** historical roadmap/parity docs and the `repomix-output-devcontainers-cli.xml` snapshot purged; `.gitignore` updated to keep `repomix-output*` artifacts out of VCS.
+24. **Done:** `SECURITY.md` added in PR #47 (2026-05-26); `CONTRIBUTING.md` refreshed in the same PR.
 
 ### Tier 3 — Nice-to-have for 1.0; otherwise post-1.0
 
