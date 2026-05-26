@@ -1162,9 +1162,10 @@ impl ConfigMerger {
 
             // Mounts: dedupe per container-side target, last-wins in declaration order
             // (matches upstream `mergeMounts` in devcontainers/cli's mergeConfiguration).
-            // forwardPorts: union with deduplication — entries from all sources preserved.
+            // forwardPorts: dedupe with `localhost:N` ↔ Number(N) normalization, preserving
+            // first-seen order (matches upstream `mergeForwardPorts`).
             mounts: crate::mount::union_mounts_by_target(&base.mounts, &overlay.mounts),
-            forward_ports: Self::union_arrays(&base.forward_ports, &overlay.forward_ports),
+            forward_ports: Self::union_forward_ports(&base.forward_ports, &overlay.forward_ports),
             on_create_command: overlay
                 .on_create_command
                 .clone()
@@ -1308,6 +1309,37 @@ impl ConfigMerger {
             if !result.contains(entry) {
                 result.push(entry.clone());
             }
+        }
+        result
+    }
+
+    /// Merge two `forwardPorts` lists with `localhost:N` ↔ `Number(N)` normalization, matching
+    /// upstream `mergeForwardPorts` in `devcontainers/cli/src/spec-node/imageMetadata.ts`.
+    ///
+    /// Semantics:
+    /// - Each entry is normalized to a canonical dedup key: `Number(N)` and `String("localhost:N")`
+    ///   share the key `localhost:N`; all other strings are their own keys (so `"3000"` and
+    ///   `Number(3000)` remain distinct, mirroring upstream).
+    /// - Entries are kept in first-seen order across base+overlay.
+    /// - On output, any entry whose canonical key matches `localhost:<u16>` is emitted as
+    ///   `PortSpec::Number(N)` (canonicalization); other entries are preserved verbatim.
+    fn union_forward_ports(base: &[PortSpec], overlay: &[PortSpec]) -> Vec<PortSpec> {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut result: Vec<PortSpec> = Vec::new();
+        for entry in base.iter().chain(overlay.iter()) {
+            let key = match entry {
+                PortSpec::Number(n) => format!("localhost:{}", n),
+                PortSpec::String(s) => s.clone(),
+            };
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            // Canonicalize `localhost:<u16>` (regardless of original variant) to Number(N).
+            let canonical = key
+                .strip_prefix("localhost:")
+                .and_then(|rest| rest.parse::<u16>().ok())
+                .map(PortSpec::Number);
+            result.push(canonical.unwrap_or_else(|| entry.clone()));
         }
         result
     }
@@ -3706,6 +3738,113 @@ mod tests {
         let base = vec![PortSpec::Number(3000)];
         let result = ConfigMerger::union_arrays(&base, &[]);
         assert_eq!(result, vec![PortSpec::Number(3000)]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for upstream-aligned forwardPorts dedup with localhost normalization.
+    // Mirrors `mergeForwardPorts` in devcontainers/cli (imageMetadata.ts):
+    // Number(N) and String("localhost:N") share the dedup key `localhost:N` and
+    // surface as Number(N) on output. All other strings remain distinct.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_union_forward_ports_dedupes_number_and_localhost_string() {
+        // Number(3000) and "localhost:3000" must collapse to a single Number(3000).
+        let base = vec![PortSpec::Number(3000)];
+        let overlay = vec![PortSpec::String("localhost:3000".to_string())];
+        let result = ConfigMerger::union_forward_ports(&base, &overlay);
+        assert_eq!(result, vec![PortSpec::Number(3000)]);
+    }
+
+    #[test]
+    fn test_union_forward_ports_canonicalizes_localhost_string_to_number() {
+        // String("localhost:3000") with no Number(3000) elsewhere must still canonicalize.
+        let base = vec![PortSpec::String("localhost:3000".to_string())];
+        let result = ConfigMerger::union_forward_ports(&base, &[]);
+        assert_eq!(result, vec![PortSpec::Number(3000)]);
+    }
+
+    #[test]
+    fn test_union_forward_ports_keeps_distinct_string_variants() {
+        // Per upstream, only `localhost:N` is normalized. Plain `"3000"` and `"3000:3000"`
+        // are distinct from Number(3000).
+        let base = vec![PortSpec::Number(3000)];
+        let overlay = vec![
+            PortSpec::String("3000".to_string()),
+            PortSpec::String("3000:3000".to_string()),
+        ];
+        let result = ConfigMerger::union_forward_ports(&base, &overlay);
+        assert_eq!(
+            result,
+            vec![
+                PortSpec::Number(3000),
+                PortSpec::String("3000".to_string()),
+                PortSpec::String("3000:3000".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_union_forward_ports_preserves_first_seen_order() {
+        // First-seen wins for ordering: later duplicates are dropped, surviving entries keep
+        // their original declaration position.
+        let base = vec![
+            PortSpec::Number(8080),
+            PortSpec::String("localhost:3000".to_string()),
+        ];
+        let overlay = vec![
+            PortSpec::Number(3000), // dup of localhost:3000 in base
+            PortSpec::Number(5432), // new
+            PortSpec::String("localhost:8080".to_string()), // dup of base 8080
+        ];
+        let result = ConfigMerger::union_forward_ports(&base, &overlay);
+        assert_eq!(
+            result,
+            vec![
+                PortSpec::Number(8080),
+                PortSpec::Number(3000),
+                PortSpec::Number(5432),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_union_forward_ports_passes_through_unrecognized_localhost() {
+        // `localhost:abc` is not a valid port; it must remain as a String entry and dedupe on
+        // exact string match.
+        let base = vec![PortSpec::String("localhost:abc".to_string())];
+        let overlay = vec![PortSpec::String("localhost:abc".to_string())];
+        let result = ConfigMerger::union_forward_ports(&base, &overlay);
+        assert_eq!(result, vec![PortSpec::String("localhost:abc".to_string())]);
+    }
+
+    /// End-to-end fold through `merge_configs`: a 3-layer chain must collapse all
+    /// `Number(N)` / `String("localhost:N")` pairs to a single `Number(N)` regardless of
+    /// which layer contributed each form.
+    #[test]
+    fn test_merge_configs_forward_ports_dedupes_through_full_chain() {
+        let layer_a = DevContainerConfig {
+            forward_ports: vec![PortSpec::Number(3000)],
+            ..Default::default()
+        };
+        let layer_b = DevContainerConfig {
+            forward_ports: vec![
+                PortSpec::String("localhost:3000".to_string()),
+                PortSpec::Number(8080),
+            ],
+            ..Default::default()
+        };
+        let layer_c = DevContainerConfig {
+            forward_ports: vec![PortSpec::String("localhost:8080".to_string())],
+            ..Default::default()
+        };
+
+        let merged = ConfigMerger::merge_configs(&[layer_a, layer_b, layer_c]);
+
+        assert_eq!(
+            merged.forward_ports,
+            vec![PortSpec::Number(3000), PortSpec::Number(8080)]
+        );
     }
 
     // -------------------------------------------------------------------------

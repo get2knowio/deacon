@@ -2018,6 +2018,62 @@ API_KEY=another-secret
         );
     }
 
+    /// Container-label merged output must dedupe `forwardPorts` with upstream's
+    /// `localhost:N` ↔ `Number(N)` normalization (matches `mergeForwardPorts`).
+    #[tokio::test]
+    async fn test_container_metadata_dedupes_forward_ports_with_localhost_normalization() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_config = DevContainerConfig {
+            image: Some("ubuntu:24.04".to_string()),
+            forward_ports: vec![deacon_core::config::PortSpec::Number(3000)],
+            ..Default::default()
+        };
+
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            serde_json::json!([
+                { "forwardPorts": ["localhost:3000", 8080] },
+                { "forwardPorts": ["localhost:8080", "3000:3000"] }
+            ])
+            .to_string(),
+        );
+
+        let container_info = deacon_core::docker::ContainerInfo {
+            id: "cid".to_string(),
+            names: vec![],
+            image: "ubuntu:24.04".to_string(),
+            status: "running".to_string(),
+            state: "running".to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
+            env: HashMap::new(),
+            labels,
+            mounts: vec![],
+        };
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(
+            &base_config,
+            Some(&container_info),
+            Some(&context),
+            None,
+            None,
+            &fetcher,
+        )
+        .await
+        .unwrap();
+
+        // 3000 / "localhost:3000" collapse into Number(3000); 8080 / "localhost:8080" collapse
+        // into Number(8080); the port mapping "3000:3000" is a distinct entry (not normalized).
+        assert_eq!(
+            merged.get("forwardPorts"),
+            Some(&serde_json::json!([3000, 8080, "3000:3000"]))
+        );
+    }
+
     /// Container-label merged output must dedupe `mounts` by container-side target across
     /// base config + label entries: last-wins per target, matching upstream `mergeMounts`.
     #[tokio::test]
