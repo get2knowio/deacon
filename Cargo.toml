@@ -10,6 +10,10 @@ edition = "2021"
 license = "MIT"
 authors = ["get2knowio <dev@get2know.io>"]
 repository = "https://github.com/get2knowio/deacon"
+homepage = "https://github.com/get2knowio/deacon"
+documentation = "https://docs.rs/deacon-core"
+keywords = ["devcontainer", "containers", "docker", "development", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 rust-version = "1.82"
 
 [workspace.dependencies]

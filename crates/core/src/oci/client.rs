@@ -7,7 +7,7 @@ use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use super::auth::{RegistryAuth, RegistryCredentials};
 use super::types::HttpResponse;
@@ -66,9 +66,34 @@ pub struct ReqwestClient {
     auth: RegistryAuth,
 }
 
+/// Default total request timeout for OCI HTTP operations.
+///
+/// Covers the slowest expected operation — large blob downloads. The
+/// previous `None` (no timeout) default risked indefinite hangs on a
+/// stalled connection, which is precisely the failure mode CI is supposed
+/// to surface quickly. Callers needing a different bound should construct
+/// via [`ReqwestClient::with_timeout`].
+const DEFAULT_TOTAL_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Default connect-phase timeout. Connect should be fast on a healthy
+/// network — 10s is generous but bounds DNS + TCP handshake hangs.
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 impl ReqwestClient {
-    /// Create a new ReqwestClient with default configuration (no timeout)
+    /// Create a new ReqwestClient with sensible default timeouts
+    /// (`DEFAULT_TOTAL_TIMEOUT` total, `DEFAULT_CONNECT_TIMEOUT` connect).
+    /// Use [`Self::with_timeout`] for a custom total timeout, or
+    /// [`Self::with_no_timeout`] for the legacy "wait forever" behavior
+    /// (discouraged; reserved for explicit opt-in by callers that handle
+    /// their own watchdogs).
     pub fn new() -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::with_timeout(Some(DEFAULT_TOTAL_TIMEOUT))
+    }
+
+    /// Create a client with timeouts disabled. Only call this when an
+    /// upstream layer enforces its own timeout / cancellation token.
+    pub fn with_no_timeout() -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>>
+    {
         Self::with_timeout(None)
     }
 
@@ -156,14 +181,24 @@ impl ReqwestClient {
     pub fn with_timeout(
         timeout: Option<Duration>,
     ) -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let mut client_builder = reqwest::Client::builder();
+        // Always bound the connect phase — DNS + TCP handshake should never
+        // hang indefinitely even when the caller chose `None` for the total
+        // timeout. The original `None`-without-connect-bound configuration
+        // could turn a stalled registry into a CI deadlock.
+        let mut client_builder =
+            reqwest::Client::builder().connect_timeout(DEFAULT_CONNECT_TIMEOUT);
 
         // Configure timeout if specified
         if let Some(timeout_duration) = timeout {
             client_builder = client_builder.timeout(timeout_duration);
             debug!(
-                "Configured HTTP client with timeout: {:?}",
-                timeout_duration
+                "Configured HTTP client with timeout: {:?} (connect: {:?})",
+                timeout_duration, DEFAULT_CONNECT_TIMEOUT
+            );
+        } else {
+            debug!(
+                "HTTP client with no total timeout (connect: {:?})",
+                DEFAULT_CONNECT_TIMEOUT
             );
         }
 
@@ -219,20 +254,12 @@ impl ReqwestClient {
     }
 }
 
-impl Default for ReqwestClient {
-    fn default() -> Self {
-        Self::new().unwrap_or_else(|e| {
-            warn!(
-                "Failed to create ReqwestClient with authentication: {}. Using basic client.",
-                e
-            );
-            Self {
-                client: reqwest::Client::new(),
-                auth: RegistryAuth::new(),
-            }
-        })
-    }
-}
+// NOTE: deliberately no `Default` impl. The previous impl silently fell
+// back to an unauthenticated client whenever auth setup failed (e.g. a
+// malformed `~/.docker/config.json`) — the opposite of fail-fast. Callers
+// must use [`ReqwestClient::new`] and propagate the `Result` so any auth-
+// loading failure surfaces immediately and isn't masked as an anonymous
+// 401 against a private registry.
 
 #[async_trait::async_trait]
 impl HttpClient for ReqwestClient {

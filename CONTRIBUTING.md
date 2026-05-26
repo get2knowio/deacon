@@ -16,18 +16,27 @@ cd deacon
 # Build all crates
 cargo build
 
-# Run the CLI (currently shows placeholder)
+# Run the CLI
 cargo run -- --help
 cargo run -- --version
-cargo run
+cargo run -- up                # start a devcontainer in the current dir
+cargo run -- read-configuration
 
-# Run all tests
-cargo test
+# Fast development loop: fmt + clippy + fast tests (recommended during iteration)
+make dev-fast
+
+# Run the fast test suite via cargo-nextest (excludes docker/smoke tests)
+make test-nextest-fast
 
 # Format and lint
 cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 ```
+
+`cargo-nextest` is the standard test runner — install it once with
+`cargo install cargo-nextest --locked`. The `make` targets shell out to
+`cargo nextest run` with the right profile, parallelism, and grouping
+(see `.config/nextest.toml`).
 
 ## Development Workflow
 1. **Fork the repository** on GitHub
@@ -55,12 +64,26 @@ docs/
 | Task | Command |
 |------|---------|
 | Build | `cargo build` |
-| Build (full release feature set) | `cargo build --release` |
-| Test | `cargo test` |
+| Build (release) | `cargo build --release` |
+| Fast dev loop (fmt + clippy + fast tests) | `make dev-fast` |
+| Fast tests (unit + bins + examples + doctests; excludes docker/smoke) | `make test-nextest-fast` |
+| Unit tests only (super fast) | `make test-nextest-unit` |
+| Docker integration tests | `make test-nextest-docker` |
+| High-level smoke tests | `make test-nextest-smoke` |
+| Full parallel suite (before PR) | `make test-nextest` |
+| Full quality gate (fmt + clippy + test + build) | `make release-check` |
+| View test group assignments | `make test-nextest-audit` |
 | Format code | `cargo fmt --all` |
 | Lint (clippy) | `cargo clippy --all-targets -- -D warnings` |
 | Update dependencies | `cargo update` |
 | Clean build | `cargo clean` |
+| Coverage report | `make coverage` |
+
+Test groups live in `.config/nextest.toml` (`docker-exclusive`,
+`docker-shared`, `fs-heavy`, `long-running`, `smoke`, `parity`). When you
+add an integration test that touches Docker or filesystem heavily, add a
+group override to all profiles in that file so the suite stays
+parallel-safe.
 
 ## Adding Dependencies
 Add to workspace root for shared dependencies:
@@ -81,37 +104,26 @@ cargo add --manifest-path crates/<crate>/Cargo.toml <crate_name>
 - **Performance**: Keep tests fast (< 2s) for quick feedback, e2e tests < 30s total
 - **Deterministic**: Tests should not depend on external networks or random data
 
-### Running End-to-End Tests
-The e2e test suite validates the complete integration of:
-- Configuration discovery and loading
-- Variable substitution
-- Feature parsing and handling
-- Lifecycle command processing
-- Plugin customization support
-- Logging and error handling
+### Running specific tests
 
 ```bash
-# Run all e2e tests
-cargo test --test integration_e2e --manifest-path crates/deacon/Cargo.toml
+# Run a single test by name (cargo-nextest, parallel)
+cargo nextest run test_name
 
-# Run specific e2e test scenarios
-cargo test test_e2e_basic_config_read --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_variable_substitution --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_features_configuration --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_plugin_customizations --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_lifecycle_simulation --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_performance_under_30s --manifest-path crates/deacon/Cargo.toml
-cargo test test_e2e_error_handling --manifest-path crates/deacon/Cargo.toml
+# Run a test pattern across the workspace
+cargo nextest run 'test(integration_)*'
+
+# Traditional cargo test still works if you need it (serial)
+cargo test test_name -- --test-threads=1
 ```
 
-The e2e tests are designed to run quickly (total runtime < 30 seconds) and validate:
-1. **Basic config reading**: Configuration discovery, loading, and JSON output
-2. **Variable substitution**: Replacement of workspace and environment variables
-3. **Feature configuration**: Parsing of local and remote feature references
-4. **Plugin customizations**: VSCode extensions and settings handling
-5. **Lifecycle simulation**: Command processing with variable substitution
-6. **Performance validation**: Ensuring operations complete within time limits
-7. **Error handling**: Proper handling of missing files and invalid JSON
+### E2E + integration tests
+
+End-to-end tests live alongside the unit tests in each crate's `tests/`
+directory and run as part of `make test-nextest`. They are deterministic
+and hermetic by default (no network); tests that need Docker are gated
+into the `docker-shared` or `docker-exclusive` nextest groups so they're
+opted out of the fast loop.
 
 ## Coding Standards
 - **Follow `rustfmt` defaults** - run `cargo fmt --all` before committing
@@ -134,16 +146,18 @@ RUST_LOG=debug cargo run -- --help
 ```
 
 ## CI/CD
-- **GitHub Actions** runs tests on every PR and push to main
-- **Ubuntu checks on PR/merge**:
-  - Lint: rustfmt check, cargo check, clippy, doctests
-  - Test: `make test-nextest-fast` (parallel via cargo-nextest)
-  - Smoke: `make test-smoke` (serial)
-  - Coverage: cargo-llvm-cov with LCOV upload (threshold enforced via `MIN_COVERAGE`)
-- **Nextest CI timing**: `make test-nextest-ci` produces `artifacts/nextest/ci-timing.json` for timing comparison
-- **macOS/Windows checks (manual)**: Trigger the "CI (Other OS)" workflow via "Run workflow" in GitHub Actions to run macOS and Windows jobs on demand (macOS uses Colima for Docker)
-- **Release builds** are automatically created on version tags (`v*.*.*`)
-- **Format and clippy checks** must pass for PR approval
+- **GitHub Actions** runs on every PR and push to main:
+  - **Lint** (`.github/workflows/ci.yml`): rustfmt check + clippy (zero warnings)
+  - **Test (MVP fast)** on Ubuntu + macOS: `make test-nextest-fast`
+  - **Test (MVP integration)** on Ubuntu: full integration suite
+  - **Security (cargo-deny)**: advisories + bans + licenses + sources;
+    also runs on a daily schedule
+  - **CodeQL** (`.github/workflows/codeql.yml`): security scanning, PR +
+    weekly schedule
+  - **Validate PR title**: enforces Conventional Commits
+- **Release builds** trigger on version tags (`v*.*.*`) and produce
+  SLSA-attested artifacts (see `.github/workflows/release.yml`).
+- **Format and clippy must pass** for merge — no exceptions.
 
 ### Running macOS/Windows CI manually
 To validate on other operating systems without gating PRs:
