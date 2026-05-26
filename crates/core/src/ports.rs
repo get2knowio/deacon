@@ -200,8 +200,10 @@ impl PortForwardingManager {
         let mut attrs = PortAttributes {
             label: None,
             on_auto_forward: None,
+            protocol: None,
             open_preview: None,
             require_local_port: None,
+            elevate_if_needed: None,
             description: None,
         };
 
@@ -357,8 +359,10 @@ mod tests {
             PortAttributes {
                 label: Some("Web Server".to_string()),
                 on_auto_forward: Some(OnAutoForward::Notify),
+                protocol: None,
                 open_preview: None,
                 require_local_port: None,
+                elevate_if_needed: None,
                 description: None,
             },
         );
@@ -368,8 +372,10 @@ mod tests {
         config.other_ports_attributes = Some(PortAttributes {
             label: Some("Default Service".to_string()),
             on_auto_forward: Some(OnAutoForward::Silent),
+            protocol: None,
             open_preview: Some(false),
             require_local_port: Some(false),
+            elevate_if_needed: None,
             description: Some("Default description".to_string()),
         });
 
@@ -411,8 +417,10 @@ mod tests {
             PortAttributes {
                 label: Some("Web Server".to_string()),
                 on_auto_forward: Some(OnAutoForward::Notify),
+                protocol: None,
                 open_preview: Some(true),
                 require_local_port: None,
+                elevate_if_needed: None,
                 description: Some("Main web server".to_string()),
             },
         );
@@ -448,8 +456,10 @@ mod tests {
             PortAttributes {
                 label: Some("Valid Port".to_string()),
                 on_auto_forward: Some(OnAutoForward::Notify),
+                protocol: None,
                 open_preview: None,
                 require_local_port: None,
+                elevate_if_needed: None,
                 description: None,
             },
         );
@@ -458,8 +468,10 @@ mod tests {
             PortAttributes {
                 label: Some("Unknown Port".to_string()),
                 on_auto_forward: Some(OnAutoForward::Silent),
+                protocol: None,
                 open_preview: None,
                 require_local_port: None,
+                elevate_if_needed: None,
                 description: None,
             },
         );

@@ -21,6 +21,7 @@
 //! This implementation aligns with the [Development Containers Specification](https://containers.dev/implementors/spec/)
 //! and follows the configuration resolution workflow defined in the CLI specification.
 
+use crate::container_env_probe::ContainerProbeMode;
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -166,11 +167,17 @@ pub struct PortAttributes {
     /// Action to take when the port is auto-forwarded
     pub on_auto_forward: Option<OnAutoForward>,
 
+    /// Protocol hint for forwarded ports (`http` or `https`).
+    pub protocol: Option<String>,
+
     /// Whether to open a preview of the port automatically
     pub open_preview: Option<bool>,
 
     /// Whether to require a specific local port for forwarding
     pub require_local_port: Option<bool>,
+
+    /// Whether tools should try to elevate privileges for low local ports.
+    pub elevate_if_needed: Option<bool>,
 
     /// Description of what this port is used for
     pub description: Option<String>,
@@ -315,6 +322,8 @@ pub struct HostRequirements {
     pub memory: Option<ResourceSpec>,
     /// Minimum storage space required (e.g., "10GB", "500MB")
     pub storage: Option<ResourceSpec>,
+    /// GPU requirement. Supports boolean, string, or object forms per spec.
+    pub gpu: Option<serde_json::Value>,
 }
 
 /// Parse a resource string with unit suffix to bytes.
@@ -496,6 +505,11 @@ pub struct DevContainerConfig {
     #[serde(rename = "updateRemoteUserUID")]
     pub update_remote_user_uid: Option<bool>,
 
+    /// Shell probing mode used to collect user environment variables.
+    ///
+    /// Reference: [userEnvProbe](https://containers.dev/implementors/json_reference/#general-devcontainerjson-properties)
+    pub user_env_probe: Option<ContainerProbeMode>,
+
     /// Ports to forward from the container.
     ///
     /// Reference: [Port Configuration - forwardPorts](https://containers.dev/implementors/json_reference/#forward-ports)
@@ -535,6 +549,11 @@ pub struct DevContainerConfig {
     ///
     /// Reference: [Container Configuration - overrideCommand](https://containers.dev/implementors/json_reference/#override-command)
     pub override_command: Option<bool>,
+
+    /// Lifecycle phase that supporting tools should wait for before connecting.
+    ///
+    /// Reference: [Lifecycle Commands - waitFor](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+    pub wait_for: Option<String>,
 
     /// Command to run once after the container is created.
     ///
@@ -1018,6 +1037,7 @@ impl Default for DevContainerConfig {
             container_user: None,
             remote_user: None,
             update_remote_user_uid: None,
+            user_env_probe: None,
             forward_ports: Vec::new(),
             app_port: None,
             ports_attributes: HashMap::new(),
@@ -1025,6 +1045,7 @@ impl Default for DevContainerConfig {
             run_args: Vec::new(),
             shutdown_action: None,
             override_command: None,
+            wait_for: None,
             on_create_command: None,
             post_start_command: None,
             post_create_command: None,
@@ -1114,6 +1135,7 @@ impl ConfigMerger {
                 .clone()
                 .or_else(|| base.shutdown_action.clone()),
             override_command: overlay.override_command.or(base.override_command),
+            wait_for: overlay.wait_for.clone().or_else(|| base.wait_for.clone()),
             // Docker Compose fields
             docker_compose_file: overlay
                 .docker_compose_file
@@ -1182,6 +1204,7 @@ impl ConfigMerger {
             update_remote_user_uid: overlay
                 .update_remote_user_uid
                 .or(base.update_remote_user_uid),
+            user_env_probe: overlay.user_env_probe.or(base.user_env_probe),
 
             // runArgs: concatenate arrays
             run_args: Self::concat_string_arrays(&base.run_args, &overlay.run_args),

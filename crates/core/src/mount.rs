@@ -814,24 +814,108 @@ impl MountParser {
     /// Vector of successfully parsed mounts
     #[instrument(skip_all)]
     pub fn parse_mounts_from_json(mount_values: &[serde_json::Value]) -> Vec<Mount> {
-        let mut mount_specs = Vec::new();
+        let mut mounts = Vec::new();
 
         for value in mount_values {
             match value {
-                serde_json::Value::String(s) => {
-                    mount_specs.push(s.clone());
-                }
-                serde_json::Value::Object(_) => {
-                    // For future object-based mount specifications
-                    warn!("Object-based mount specifications not yet supported, skipping");
-                }
+                serde_json::Value::String(s) => match Self::parse_mount(s) {
+                    Ok(mount) => mounts.push(mount),
+                    Err(e) => warn!("Failed to parse mount '{}': {}", s, e),
+                },
+                serde_json::Value::Object(object) => match Self::parse_mount_object(object) {
+                    Ok(mount) => mounts.push(mount),
+                    Err(e) => warn!("Failed to parse object mount: {}", e),
+                },
                 _ => {
                     warn!("Invalid mount specification type, expected string or object");
                 }
             }
         }
 
-        Self::parse_mounts(&mount_specs)
+        mounts
+    }
+
+    fn parse_mount_object(object: &serde_json::Map<String, serde_json::Value>) -> Result<Mount> {
+        fn string_field(
+            object: &serde_json::Map<String, serde_json::Value>,
+            names: &[&str],
+        ) -> Option<String> {
+            names
+                .iter()
+                .find_map(|name| object.get(*name).and_then(|v| v.as_str()))
+                .map(ToOwned::to_owned)
+        }
+
+        let mount_type = string_field(object, &["type"])
+            .ok_or_else(|| ConfigError::Validation {
+                message: "Object mount specification must include 'type' field".to_string(),
+            })?
+            .parse::<MountType>()?;
+
+        let source = string_field(object, &["source", "src"]);
+        let target = string_field(object, &["target", "dst", "destination"]).ok_or_else(|| {
+            ConfigError::Validation {
+                message: "Object mount specification must include 'target' field".to_string(),
+            }
+        })?;
+
+        let mode = if object
+            .get("readOnly")
+            .or_else(|| object.get("readonly"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            MountMode::ReadOnly
+        } else {
+            MountMode::ReadWrite
+        };
+
+        let consistency = string_field(object, &["consistency"])
+            .map(|value| value.parse::<MountConsistency>())
+            .transpose()?;
+
+        let mut options = HashMap::new();
+        for (key, value) in object {
+            if matches!(
+                key.as_str(),
+                "type"
+                    | "source"
+                    | "src"
+                    | "target"
+                    | "dst"
+                    | "destination"
+                    | "readOnly"
+                    | "readonly"
+                    | "consistency"
+            ) {
+                continue;
+            }
+
+            match value {
+                serde_json::Value::Bool(true) => {
+                    options.insert(key.clone(), String::new());
+                }
+                serde_json::Value::Bool(false) | serde_json::Value::Null => {}
+                serde_json::Value::String(s) => {
+                    options.insert(key.clone(), s.clone());
+                }
+                other => {
+                    options.insert(key.clone(), other.to_string());
+                }
+            }
+        }
+
+        let mount = Mount {
+            mount_type,
+            source,
+            target,
+            mode,
+            consistency,
+            options,
+        };
+
+        mount.validate()?;
+        Ok(mount)
     }
 }
 
@@ -862,6 +946,24 @@ mod tests {
             MountConsistency::Delegated
         );
         assert!("invalid".parse::<MountConsistency>().is_err());
+    }
+
+    #[test]
+    fn test_parse_object_mount_from_json() {
+        let mounts = MountParser::parse_mounts_from_json(&[serde_json::json!({
+            "type": "bind",
+            "source": "/host/path",
+            "target": "/container/path",
+            "readOnly": true,
+            "consistency": "cached"
+        })]);
+
+        assert_eq!(mounts.len(), 1);
+        assert_eq!(mounts[0].mount_type, MountType::Bind);
+        assert_eq!(mounts[0].source.as_deref(), Some("/host/path"));
+        assert_eq!(mounts[0].target, "/container/path");
+        assert_eq!(mounts[0].mode, MountMode::ReadOnly);
+        assert_eq!(mounts[0].consistency, Some(MountConsistency::Cached));
     }
 
     #[test]

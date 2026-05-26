@@ -4,6 +4,7 @@
 //! using real fixture files in various scenarios.
 
 use deacon_core::config::ConfigLoader;
+use deacon_core::container_env_probe::ContainerProbeMode;
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -104,6 +105,48 @@ fn test_load_copied_fixture() {
     // Verify that JSON5 parsing worked (file contains comments and trailing commas)
     assert!(config.features.is_object());
     assert!(config.customizations.is_object());
+}
+
+#[test]
+fn test_loads_additional_developer_facing_spec_fields() {
+    let temp_dir = TempDir::new().expect("Should create temp directory");
+    let config_path = temp_dir.path().join("devcontainer.json");
+
+    std::fs::write(
+        &config_path,
+        r#"{
+  "image": "ubuntu:24.04",
+  "userEnvProbe": "interactiveShell",
+  "waitFor": "postCreateCommand",
+  "portsAttributes": {
+    "3000": {
+      "label": "web",
+      "protocol": "https",
+      "elevateIfNeeded": true
+    }
+  },
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "4gb",
+    "storage": "32gb",
+    "gpu": "optional"
+  }
+}"#,
+    )
+    .expect("Should write config");
+
+    let config = ConfigLoader::load_from_path(&config_path).expect("Should load config");
+
+    assert_eq!(
+        config.user_env_probe,
+        Some(ContainerProbeMode::InteractiveShell)
+    );
+    assert_eq!(config.wait_for.as_deref(), Some("postCreateCommand"));
+    let attrs = config.ports_attributes.get("3000").unwrap();
+    assert_eq!(attrs.protocol.as_deref(), Some("https"));
+    assert_eq!(attrs.elevate_if_needed, Some(true));
+    let host = config.host_requirements.unwrap();
+    assert_eq!(host.gpu, Some(serde_json::json!("optional")));
 }
 
 #[test]

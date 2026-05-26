@@ -612,8 +612,12 @@ where
             config_remote_env = Some(resolved.remote_env.clone());
         }
 
-        // Determine probe mode (map from CLI/global default flag)
-        let probe_mode = args.default_user_env_probe.unwrap_or_default();
+        // Config `userEnvProbe` wins when present; otherwise use the CLI/global default.
+        let probe_mode = resolved_config
+            .as_ref()
+            .and_then(|config_ctx| config_ctx.config.user_env_probe)
+            .or(args.default_user_env_probe)
+            .unwrap_or_default();
 
         let env_user_resolution = resolve_env_and_user(
             docker_client,

@@ -10,7 +10,6 @@ use super::args::UpArgs;
 use super::{ENV_FORCE_TTY_IF_JSON, ENV_LOG_FORMAT};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
-use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::container_lifecycle::{
     aggregate_lifecycle_commands, AggregatedLifecycleCommand, DotfilesConfig, LifecycleCommandList,
     LifecycleCommandSource, LifecycleCommandValue,
@@ -234,7 +233,7 @@ pub(crate) async fn execute_lifecycle_commands(
         skip_non_blocking_commands: args.skip_non_blocking_commands,
         non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout
         use_login_shell: true, // Default: use login shell for lifecycle commands
-        user_env_probe: ContainerProbeMode::None,
+        user_env_probe: config.user_env_probe.unwrap_or(args.default_user_env_probe),
         cache_folder: cache_folder.clone(),
         force_pty,
         dotfiles: dotfiles_config,

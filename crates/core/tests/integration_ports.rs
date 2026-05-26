@@ -18,8 +18,10 @@ fn test_port_event_generation_with_attributes() {
         PortAttributes {
             label: Some("Web Server".to_string()),
             on_auto_forward: Some(OnAutoForward::Notify),
+            protocol: None,
             open_preview: Some(true),
             require_local_port: None,
+            elevate_if_needed: None,
             description: Some("Main web application".to_string()),
         },
     );
@@ -28,8 +30,10 @@ fn test_port_event_generation_with_attributes() {
         PortAttributes {
             label: Some("API Server".to_string()),
             on_auto_forward: Some(OnAutoForward::OpenBrowser),
+            protocol: None,
             open_preview: None,
             require_local_port: Some(true),
+            elevate_if_needed: None,
             description: None,
         },
     );
@@ -46,8 +50,10 @@ fn test_port_event_generation_with_attributes() {
     config.other_ports_attributes = Some(PortAttributes {
         label: Some("Default Service".to_string()),
         on_auto_forward: Some(OnAutoForward::Silent),
+        protocol: None,
         open_preview: Some(false),
         require_local_port: Some(false),
+        elevate_if_needed: None,
         description: Some("Fallback description".to_string()),
     });
 
@@ -194,8 +200,10 @@ fn test_port_attribute_fallback_behavior() {
     config.other_ports_attributes = Some(PortAttributes {
         label: Some("Generic Service".to_string()),
         on_auto_forward: Some(OnAutoForward::Silent),
+        protocol: None,
         open_preview: Some(false),
         require_local_port: Some(false),
+        elevate_if_needed: None,
         description: Some("Generic description".to_string()),
     });
 
@@ -322,8 +330,10 @@ fn test_port_event_redaction() {
         PortAttributes {
             label: Some("Web with secret-port-token-123".to_string()),
             on_auto_forward: Some(OnAutoForward::Notify),
+            protocol: None,
             open_preview: Some(false),
             require_local_port: Some(false),
+            elevate_if_needed: None,
             description: Some("Contains secret-port-token-123 in description".to_string()),
         },
     );

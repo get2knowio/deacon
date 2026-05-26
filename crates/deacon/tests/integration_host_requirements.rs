@@ -38,6 +38,7 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
         cpus: Some(ResourceSpec::Number(1.0)),
         memory: Some(ResourceSpec::String("100MB".to_string())),
         storage: Some(ResourceSpec::String("100MB".to_string())),
+        gpu: None,
     };
 
     create_test_devcontainer_with_requirements(&temp_dir, requirements)
@@ -80,6 +81,7 @@ async fn test_host_requirements_validation_fails_with_unrealistic_requirements()
         cpus: Some(ResourceSpec::Number(1000.0)), // Impossible number of CPUs
         memory: Some(ResourceSpec::String("1TB".to_string())), // Very large memory
         storage: Some(ResourceSpec::String("1PB".to_string())), // Impossible storage
+        gpu: None,
     };
 
     create_test_devcontainer_with_requirements(&temp_dir, requirements)
@@ -122,6 +124,7 @@ async fn test_host_requirements_ignored_with_flag() {
         cpus: Some(ResourceSpec::Number(1000.0)),
         memory: Some(ResourceSpec::String("1TB".to_string())),
         storage: Some(ResourceSpec::String("1PB".to_string())),
+        gpu: None,
     };
 
     create_test_devcontainer_with_requirements(&temp_dir, requirements)
@@ -186,6 +189,7 @@ fn test_host_requirements_serialization() {
         cpus: Some(ResourceSpec::Number(4.0)),
         memory: Some(ResourceSpec::String("8GB".to_string())),
         storage: Some(ResourceSpec::String("50GB".to_string())),
+        gpu: None,
     };
 
     // Test serialization/deserialization

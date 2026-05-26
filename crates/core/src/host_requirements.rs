@@ -541,6 +541,7 @@ mod tests {
             cpus: Some(ResourceSpec::Number(1.0)),
             memory: Some(ResourceSpec::String("100MB".to_string())),
             storage: Some(ResourceSpec::String("1GB".to_string())), // Should pass
+            gpu: None,
         };
 
         let result = evaluator.evaluate_requirements(&requirements, None);
@@ -568,6 +569,7 @@ mod tests {
             cpus: None,
             memory: None,
             storage: Some(ResourceSpec::String("1GB".to_string())), // Should fail
+            gpu: None,
         };
 
         let result = evaluator.evaluate_requirements(&requirements, None);
@@ -596,6 +598,7 @@ mod tests {
             cpus: None,
             memory: None,
             storage: Some(ResourceSpec::String("1GB".to_string())), // Should fail
+            gpu: None,
         };
 
         // Should fail without ignore flag
@@ -658,6 +661,7 @@ mod tests {
             cpus: Some(ResourceSpec::Number(1.0)),
             memory: Some(ResourceSpec::String("100MB".to_string())),
             storage: Some(ResourceSpec::String("1MB".to_string())),
+            gpu: None,
         };
 
         let result = evaluator.evaluate_requirements(&requirements, None);
@@ -682,6 +686,7 @@ mod tests {
             cpus: Some(ResourceSpec::Number(1000.0)), // Very high CPU requirement
             memory: Some(ResourceSpec::String("1TB".to_string())), // Very high memory
             storage: Some(ResourceSpec::String("1PB".to_string())), // Impossible storage
+            gpu: None,
         };
 
         // Should fail without ignore flag
@@ -825,6 +830,7 @@ mod tests {
             cpus: None,
             memory: None,
             storage: Some(ResourceSpec::String("10GB".to_string())), // Need 10GB
+            gpu: None,
         };
 
         // Without ignore flag, should return error
@@ -902,6 +908,7 @@ mod tests {
             cpus: Some(ResourceSpec::Number(1.0)),
             memory: Some(ResourceSpec::String("1GB".to_string())),
             storage: Some(ResourceSpec::String("1GB".to_string())),
+            gpu: None,
         };
         let result = evaluator.evaluate_requirements(&requirements, None);
         assert!(result.is_err());
