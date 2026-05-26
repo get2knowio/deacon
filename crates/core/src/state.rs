@@ -223,11 +223,10 @@ impl StateManager {
     }
 }
 
-impl Default for StateManager {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default StateManager")
-    }
-}
+// NOTE: deliberately no `Default` impl. `StateManager::new()` is fallible
+// (it derives a cache directory and may hit IO errors), so a Default impl
+// that calls `.expect(...)` would panic at runtime. Use `StateManager::new()`
+// or `StateManager::new_with_cache_dir(path)` and propagate the `Result`.
 
 // =============================================================================
 // Lifecycle Phase Marker Helpers
