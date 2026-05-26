@@ -95,6 +95,16 @@ pub struct Feature {
     /// Source reference preserving registry/namespace/tag (e.g., "oci://ghcr.io/devcontainers/features/node:1.2.3")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customizations: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub init: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub privileged: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mounts: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_env: Option<HashMap<String, String>>,
 }
 
 /// Source information for features
@@ -353,6 +363,19 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             id: resolved.id.clone(),
             options,
             source: Some(resolved.source.clone()),
+            customizations: resolved.metadata.customizations.clone(),
+            init: resolved.metadata.init,
+            privileged: resolved.metadata.privileged,
+            mounts: if resolved.metadata.mounts.is_empty() {
+                None
+            } else {
+                Some(resolved.metadata.mounts.clone())
+            },
+            container_env: if resolved.metadata.container_env.is_empty() {
+                None
+            } else {
+                Some(resolved.metadata.container_env.clone())
+            },
         };
 
         features_by_registry
@@ -510,6 +533,14 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                     derived_config
                         .mounts
                         .push(serde_json::Value::String(mount.clone()));
+                }
+
+                if let Some(customizations) = &metadata.customizations {
+                    derived_config.customizations =
+                        deacon_core::config::ConfigMerger::merge_json_objects(
+                            &derived_config.customizations,
+                            customizations,
+                        );
                 }
 
                 // Init flag

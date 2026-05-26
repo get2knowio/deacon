@@ -316,6 +316,7 @@ mod tests {
                 license_url: None,
                 options: HashMap::new(),
                 container_env: HashMap::new(),
+                customizations: None,
                 mounts: Vec::new(),
                 init: None,
                 privileged,
@@ -471,6 +472,7 @@ mod tests {
                 license_url: None,
                 options: HashMap::new(),
                 container_env: HashMap::new(),
+                customizations: None,
                 mounts: Vec::new(),
                 init: None,
                 privileged: Some(false), // Explicit conflict
@@ -521,6 +523,7 @@ mod tests {
                 license_url: None,
                 options: HashMap::new(),
                 container_env: HashMap::new(),
+                customizations: None,
                 mounts: Vec::new(),
                 init: None,
                 privileged: None,

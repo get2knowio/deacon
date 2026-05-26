@@ -298,6 +298,7 @@ mod tests {
                 license_url: None,
                 options: HashMap::new(),
                 container_env: HashMap::new(),
+                customizations: None,
                 mounts: Vec::new(),
                 entrypoint: None,
                 privileged: None,

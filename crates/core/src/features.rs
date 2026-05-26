@@ -331,6 +331,10 @@ pub struct FeatureMetadata {
     #[serde(default)]
     pub container_env: HashMap<String, String>,
 
+    /// Product-specific customizations contributed by the feature.
+    #[serde(default)]
+    pub customizations: Option<serde_json::Value>,
+
     /// Container mounts
     #[serde(default, deserialize_with = "deserialize_mounts")]
     pub mounts: Vec<String>,
@@ -1681,6 +1685,35 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_feature_metadata_preserves_customizations() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            r#"{{
+                "id": "feature-with-customizations",
+                "version": "1.0.0",
+                "name": "Feature With Customizations",
+                "customizations": {{
+                    "vscode": {{
+                        "extensions": ["ms-vscode.cpptools"]
+                    }}
+                }}
+            }}"#
+        )
+        .unwrap();
+
+        let metadata = parse_feature_metadata(file.path()).unwrap();
+
+        assert_eq!(
+            metadata
+                .customizations
+                .as_ref()
+                .and_then(|value| value.pointer("/vscode/extensions/0")),
+            Some(&serde_json::Value::String("ms-vscode.cpptools".to_string()))
+        );
+    }
+
+    #[test]
     fn test_option_value_all_types() {
         // Test Boolean
         let bool_val = OptionValue::Boolean(true);
@@ -2397,6 +2430,7 @@ mod tests {
             license_url: None,
             options: HashMap::new(),
             container_env: HashMap::new(),
+            customizations: None,
             mounts: vec![],
             init: None,
             privileged: None,
@@ -2727,6 +2761,7 @@ mod security_merge_tests {
             license_url: None,
             options: HashMap::new(),
             container_env: HashMap::new(),
+            customizations: None,
             mounts: vec![],
             init,
             privileged,

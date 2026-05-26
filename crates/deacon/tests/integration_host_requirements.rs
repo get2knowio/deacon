@@ -47,6 +47,7 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
     let args = UpArgs {
         skip_post_create: true,
         skip_non_blocking_commands: true,
+        mount_workspace_git_root: false,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
         ..Default::default()
     };
@@ -90,6 +91,7 @@ async fn test_host_requirements_validation_fails_with_unrealistic_requirements()
     let args = UpArgs {
         skip_post_create: true,
         skip_non_blocking_commands: true,
+        mount_workspace_git_root: false,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
         ..Default::default()
     };
@@ -133,6 +135,7 @@ async fn test_host_requirements_ignored_with_flag() {
     let args = UpArgs {
         skip_post_create: true,
         skip_non_blocking_commands: true,
+        mount_workspace_git_root: false,
         workspace_folder: Some(temp_dir.path().to_path_buf()),
         ignore_host_requirements: true,
         ..Default::default()

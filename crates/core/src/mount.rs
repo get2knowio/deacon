@@ -1204,6 +1204,7 @@ mod merge_mounts_tests {
             license_url: None,
             options: HashMap::new(),
             container_env: HashMap::new(),
+            customizations: None,
             mounts,
             init: None,
             privileged: None,

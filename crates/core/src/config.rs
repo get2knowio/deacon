@@ -1234,7 +1234,7 @@ impl ConfigMerger {
     }
 
     /// Merge two JSON objects deeply
-    fn merge_json_objects(
+    pub fn merge_json_objects(
         base: &serde_json::Value,
         overlay: &serde_json::Value,
     ) -> serde_json::Value {
@@ -4001,7 +4001,7 @@ pub mod merge {
                 } else {
                     Some(metadata.container_env.clone())
                 },
-                customizations: None, // TODO: Extract customizations from feature metadata if available
+                customizations: metadata.customizations.clone(),
                 provenance: Some(Provenance {
                     source: Some(source),
                     service,
@@ -4279,6 +4279,36 @@ pub mod merge {
                 image: Some(image.to_string()),
                 ..Default::default()
             }
+        }
+
+        #[test]
+        fn test_feature_metadata_entry_preserves_customizations() {
+            let metadata = crate::features::FeatureMetadata {
+                id: "feature-with-customizations".to_string(),
+                customizations: Some(serde_json::json!({
+                    "vscode": {
+                        "extensions": ["ms-vscode.cpptools"]
+                    }
+                })),
+                ..Default::default()
+            };
+
+            let entry = FeatureMetadataEntry::from_resolved(
+                metadata.id.clone(),
+                "oci://ghcr.io/example/features/custom:1".to_string(),
+                None,
+                &metadata,
+                0,
+                None,
+            );
+
+            assert_eq!(
+                entry
+                    .customizations
+                    .as_ref()
+                    .and_then(|value| value.pointer("/vscode/extensions/0")),
+                Some(&serde_json::Value::String("ms-vscode.cpptools".to_string()))
+            );
         }
 
         #[test]

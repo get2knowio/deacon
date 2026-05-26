@@ -17,6 +17,7 @@ fn create_feature_with_entrypoint(id: &str, entrypoint: Option<String>) -> Featu
         license_url: None,
         options: HashMap::new(),
         container_env: HashMap::new(),
+        customizations: None,
         mounts: vec![],
         init: None,
         privileged: None,

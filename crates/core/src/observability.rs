@@ -236,6 +236,8 @@ mod tests {
     fn test_workspace_id_different_paths() {
         let temp_dir1 = TempDir::new().unwrap();
         let temp_dir2 = TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir1.path().join(".git")).unwrap();
+        std::fs::create_dir(temp_dir2.path().join(".git")).unwrap();
 
         let id1 = workspace_id(temp_dir1.path());
         let id2 = workspace_id(temp_dir2.path());
