@@ -27,7 +27,7 @@ use tempfile::TempDir;
 fn write_executed_marker(workspace: &std::path::Path, phase: LifecyclePhase) {
     let marker_path = marker_path_for_phase(workspace, phase);
     let state = LifecyclePhaseState::new_executed(phase, marker_path.clone());
-    write_phase_marker(&marker_path, &state).expect("Failed to write marker");
+    block_on_async(write_phase_marker(&marker_path, &state)).expect("Failed to write marker");
 }
 
 /// Helper function to write a corrupted (invalid JSON) marker file
@@ -40,6 +40,17 @@ fn write_corrupted_marker(workspace: &std::path::Path, phase: LifecyclePhase) {
     // Write invalid JSON content
     std::fs::write(&marker_path, "this is not valid json {{{")
         .expect("Failed to write corrupted marker");
+}
+
+/// Bridge async state helpers into the existing synchronous `#[test]` setup.
+/// Each test gets its own tiny current-thread runtime so we don't take a
+/// runtime dependency on test scaffolding.
+fn block_on_async<F: std::future::Future>(fut: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime for test")
+        .block_on(fut)
 }
 
 // =============================================================================
@@ -235,7 +246,8 @@ fn test_recovery_filesystem_partial_up_to_postcreate() {
     write_executed_marker(workspace, LifecyclePhase::PostCreate);
 
     // Read all markers
-    let markers = read_all_markers(workspace, false).expect("Failed to read markers");
+    let markers =
+        block_on_async(read_all_markers(workspace, false)).expect("Failed to read markers");
     assert_eq!(markers.len(), 3, "Should have 3 markers");
 
     // Find earliest incomplete
@@ -258,7 +270,8 @@ fn test_recovery_filesystem_only_oncreate() {
     write_executed_marker(workspace, LifecyclePhase::OnCreate);
 
     // Read all markers
-    let markers = read_all_markers(workspace, false).expect("Failed to read markers");
+    let markers =
+        block_on_async(read_all_markers(workspace, false)).expect("Failed to read markers");
     assert_eq!(markers.len(), 1, "Should have 1 marker");
 
     // Find earliest incomplete
@@ -286,14 +299,16 @@ fn test_recovery_corrupted_marker_treated_as_missing() {
 
     // Read the corrupted marker directly - should return None
     let corrupted_path = marker_path_for_phase(workspace, LifecyclePhase::PostCreate);
-    let corrupted_state = read_phase_marker(&corrupted_path).expect("Read should not error");
+    let corrupted_state =
+        block_on_async(read_phase_marker(&corrupted_path)).expect("Read should not error");
     assert!(
         corrupted_state.is_none(),
         "Corrupted marker should be treated as missing (return None)"
     );
 
     // Read all markers - corrupted marker should not be included
-    let markers = read_all_markers(workspace, false).expect("Failed to read markers");
+    let markers =
+        block_on_async(read_all_markers(workspace, false)).expect("Failed to read markers");
     assert_eq!(
         markers.len(),
         2,
@@ -326,7 +341,8 @@ fn test_recovery_corrupted_marker_in_middle() {
     write_executed_marker(workspace, LifecyclePhase::PostCreate);
 
     // Read all markers
-    let markers = read_all_markers(workspace, false).expect("Failed to read markers");
+    let markers =
+        block_on_async(read_all_markers(workspace, false)).expect("Failed to read markers");
     assert_eq!(
         markers.len(),
         2,
@@ -354,7 +370,8 @@ fn test_clear_markers_resets_state() {
     }
 
     // Verify all markers exist
-    let markers_before = read_all_markers(workspace, false).expect("Failed to read markers");
+    let markers_before =
+        block_on_async(read_all_markers(workspace, false)).expect("Failed to read markers");
     assert_eq!(
         markers_before.len(),
         6,
@@ -362,10 +379,11 @@ fn test_clear_markers_resets_state() {
     );
 
     // Clear markers
-    clear_markers(workspace, false).expect("Failed to clear markers");
+    block_on_async(clear_markers(workspace, false)).expect("Failed to clear markers");
 
     // Verify markers are gone
-    let markers_after = read_all_markers(workspace, false).expect("Failed to read markers");
+    let markers_after =
+        block_on_async(read_all_markers(workspace, false)).expect("Failed to read markers");
     assert!(
         markers_after.is_empty(),
         "Should have 0 markers after clear"
@@ -664,7 +682,8 @@ fn test_full_recovery_flow_from_disk() {
     write_executed_marker(workspace, LifecyclePhase::PostCreate);
 
     // Read markers from disk
-    let prior_markers = read_all_markers(workspace, false).expect("Failed to read markers");
+    let prior_markers =
+        block_on_async(read_all_markers(workspace, false)).expect("Failed to read markers");
     assert_eq!(prior_markers.len(), 3);
 
     // Create resume context with the read markers
@@ -715,7 +734,8 @@ fn test_full_recovery_flow_with_corruption() {
     write_executed_marker(workspace, LifecyclePhase::PostAttach);
 
     // Read markers from disk - corrupted marker should be excluded
-    let prior_markers = read_all_markers(workspace, false).expect("Failed to read markers");
+    let prior_markers =
+        block_on_async(read_all_markers(workspace, false)).expect("Failed to read markers");
 
     // Should have 5 markers (corrupted postCreate excluded)
     assert_eq!(
@@ -767,7 +787,8 @@ fn test_execute_in_order_after_resume() {
     write_executed_marker(workspace, LifecyclePhase::UpdateContent);
 
     // Read markers from disk
-    let prior_markers = read_all_markers(workspace, false).expect("Failed to read markers");
+    let prior_markers =
+        block_on_async(read_all_markers(workspace, false)).expect("Failed to read markers");
 
     // Create resume context
     let ctx = InvocationContext::new_resume(workspace.to_path_buf(), prior_markers);
