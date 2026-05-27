@@ -117,7 +117,7 @@ deacon --version
 | **Podman runtime** | Ships as **experimental in 1.0**. Trait-level integration is complete and the happy path works, but rootless-Podman parity items (`label=disable`, `--userns=keep-id`, `--uidmap`/`--gidmap`) and dedicated test coverage are targeted for **1.1** — see [#30](https://github.com/get2knowio/deacon/issues/30). Using `--runtime podman` emits a one-time WARN. |
 | **`build` features** | Feature installation during `build` is supported for **Dockerfile-based** configs only. Compose-build and image-reference configs still error out with features (different integration patterns; tracked as a post-1.0 follow-up). |
 
-For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). Post-1.0 hardening work (redaction wiring, workspace-trust gate, async I/O audit, typed errors, json5→jsonc migration) is tracked in [#52](https://github.com/get2knowio/deacon/issues/52).
+For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). Post-1.0 hardening landed in May 2026 — redaction wiring into the tracing pipeline, a [workspace-trust gate](#workspace-trust) for host-side lifecycle hooks, async I/O conversion across `crates/core`, typed errors throughout `crates/core`, and the `json5`→`jsonc-parser` migration (see closed [#52](https://github.com/get2knowio/deacon/issues/52)).
 
 ## Examples
 
@@ -257,6 +257,28 @@ echo "$OUTPUT" | jq '.configFilePath'
 
 ### Docker Integration
 All Docker functionality is available when Docker is installed and running. If the Docker daemon isn’t available, deacon emits a clear runtime error with guidance to install or start Docker.
+
+## Workspace Trust
+
+`deacon up` runs `initializeCommand` and any custom dotfiles install command on the **host** — outside the container sandbox. To prevent arbitrary host-side execution when cloning hostile repos, deacon gates these hooks behind a workspace-trust check that fails closed by default.
+
+```bash
+# Untrusted workspaces error out:
+$ deacon up
+Error: workspace is not trusted: /path/to/workspace
+       Re-run with --trust-workspace (or --trust-workspace-persist to remember).
+
+# Opt in for this run only:
+deacon --trust-workspace up
+
+# Opt in and remember (persisted to ~/.local/share/deacon/trusted_workspaces.json):
+deacon --trust-workspace-persist up
+
+# CI fail-closed mode — never auto-trust, error immediately on first untrusted run:
+DEACON_NO_PROMPT=1 deacon up
+```
+
+The check only fires when host-side hooks are actually configured. Containers without `initializeCommand` or a host-side dotfiles install are unaffected. See [SECURITY.md](./SECURITY.md#workspace-trust-model-host-side-lifecycle-hooks) for the full threat model.
 
 ## Usage
 
