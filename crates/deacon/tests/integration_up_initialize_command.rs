@@ -37,6 +37,7 @@ fn test_initialize_command_creates_host_marker() {
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let _ = up_cmd
         .current_dir(&temp_dir)
+        .arg("--trust-workspace")
         .arg("up")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
@@ -96,6 +97,7 @@ fn test_initialize_command_array_syntax() {
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let _ = up_cmd
         .current_dir(&temp_dir)
+        .arg("--trust-workspace")
         .arg("up")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
@@ -153,6 +155,7 @@ fn test_initialize_command_runs_before_container() {
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let _ = up_cmd
         .current_dir(&temp_dir)
+        .arg("--trust-workspace")
         .arg("up")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
@@ -210,6 +213,7 @@ services:
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let _ = up_cmd
         .current_dir(&temp_dir)
+        .arg("--trust-workspace")
         .arg("up")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
@@ -258,6 +262,7 @@ fn test_initialize_command_failure_prevents_container_creation() {
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let up_output = up_cmd
         .current_dir(&temp_dir)
+        .arg("--trust-workspace")
         .arg("up")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
@@ -309,6 +314,7 @@ fn test_initialize_command_variable_substitution() {
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let _up_output = up_cmd
         .current_dir(&temp_dir)
+        .arg("--trust-workspace")
         .arg("up")
         .arg("--workspace-folder")
         .arg(temp_dir.path())

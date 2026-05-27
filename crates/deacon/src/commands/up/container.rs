@@ -7,7 +7,7 @@
 use super::args::UpArgs;
 use super::features_build::build_image_with_features;
 use super::helpers::{apply_user_mapping, handle_lockfile_post_build};
-use super::lifecycle::{execute_initialize_command, execute_lifecycle_commands};
+use super::lifecycle::{execute_initialize_command, execute_lifecycle_commands, HostTrustArgs};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
 };
@@ -159,7 +159,18 @@ pub(crate) async fn execute_container_up(
 
     // Execute initializeCommand on host before any container operations
     if let Some(ref initialize) = config.initialize_command {
-        execute_initialize_command(initialize, workspace_folder, &args.progress_tracker).await?;
+        let trust_args = HostTrustArgs {
+            trust_workspace: args.trust_workspace,
+            trust_workspace_persist: args.trust_workspace_persist,
+            user_data_folder: args.user_data_folder.as_deref(),
+        };
+        execute_initialize_command(
+            initialize,
+            workspace_folder,
+            &args.progress_tracker,
+            trust_args,
+        )
+        .await?;
     }
 
     // Check Docker availability after host-side initialization

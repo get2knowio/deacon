@@ -57,6 +57,35 @@ The following are **out of scope**:
 - Denial-of-service against the local CLI process (e.g. crafted
   `devcontainer.json` that triggers an OOM).
 
+## Workspace-trust model (host-side lifecycle hooks)
+
+`initializeCommand` (and any other host-side hook that runs unsandboxed
+shell on the developer's machine, e.g. a workspace-sourced dotfiles
+install command) is gated by a workspace-trust check. The threat the
+gate addresses: `git clone <hostile-repo> && deacon up` would otherwise
+execute arbitrary shell from `devcontainer.json` on the host before any
+container sandboxing.
+
+**Policy resolution** (see `crates/core/src/trust.rs`):
+
+- `--trust-workspace` — one-shot trust for the current invocation.
+- `--trust-workspace-persist` — one-shot trust plus appends the
+  canonicalized workspace path to
+  `{user_data_folder}/trusted_workspaces.json` so future invocations
+  pass the gate without a flag.
+- `DEACON_NO_PROMPT=1` — switches the default from "allowlist-then-fail"
+  to a hard `Deny`. Set this in CI so untrusted workspaces fail loudly
+  instead of silently looking like a normal run failure.
+- Default (no flag, no env) — consult the persisted allowlist; if the
+  current canonical workspace path is present, allow; otherwise refuse.
+
+The trust file is written atomically (write-temp-then-rename) so a
+mid-write crash leaves either the previous file or the new file on
+disk, never a partial one.
+
+This trust check is **deacon-specific**: the upstream
+[containers.dev spec](https://containers.dev) does not mandate it.
+
 ## Security-relevant CI gates
 
 - `cargo-deny` (advisories + bans + licenses + sources) runs on every PR

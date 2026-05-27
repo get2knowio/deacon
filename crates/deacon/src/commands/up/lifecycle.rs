@@ -4,7 +4,8 @@
 //! - `resolve_force_pty` - Resolve PTY preference based on flags and environment
 //! - `build_invocation_context` - Build InvocationContext from CLI args and prior state
 //! - `execute_lifecycle_commands` - Execute lifecycle phases in container
-//! - `execute_initialize_command` - Execute initializeCommand on host
+//! - `execute_initialize_command` - Execute initializeCommand on host (with workspace-trust gate)
+//! - `HostTrustArgs` / `enforce_host_trust` - Workspace-trust gate primitives
 
 use super::args::UpArgs;
 use super::{ENV_FORCE_TTY_IF_JSON, ENV_LOG_FORMAT};
@@ -381,14 +382,87 @@ pub(crate) async fn execute_lifecycle_commands(
     Ok(())
 }
 
+/// Inputs needed to resolve the workspace-trust policy for a host-side
+/// lifecycle hook.
+///
+/// Borrowed view to avoid forcing callers to clone every flag — the
+/// `up`-tier already owns the underlying buffers.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HostTrustArgs<'a> {
+    /// `--trust-workspace` flag (one-shot trust, no persistence).
+    pub trust_workspace: bool,
+    /// `--trust-workspace-persist` flag (one-shot + writes to the trust store).
+    pub trust_workspace_persist: bool,
+    /// Host-side user data folder (where the trust store lives). When
+    /// `None`, the default `~/.deacon/` is used.
+    pub user_data_folder: Option<&'a Path>,
+}
+
+/// Read `DEACON_NO_PROMPT` from the environment. `1`, `true`, `yes`
+/// (case-insensitive) are truthy; anything else (including unset) is falsey.
+fn deacon_no_prompt_env() -> bool {
+    std::env::var("DEACON_NO_PROMPT")
+        .ok()
+        .map(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            v == "1" || v == "true" || v == "yes"
+        })
+        .unwrap_or(false)
+}
+
+/// Enforce the workspace-trust gate before a host-side lifecycle hook runs.
+///
+/// On success this also handles the `--trust-workspace-persist` side-effect
+/// (writing the workspace into the trust store) so callers don't have to
+/// thread the persistence step separately.
+pub(crate) async fn enforce_host_trust(
+    workspace_folder: &Path,
+    args: &HostTrustArgs<'_>,
+) -> Result<()> {
+    use deacon_core::trust::{
+        check_workspace_trust, decision_to_result, record_trusted_workspace, resolve_policy,
+    };
+
+    let policy = resolve_policy(
+        args.trust_workspace,
+        args.trust_workspace_persist,
+        deacon_no_prompt_env(),
+        args.user_data_folder,
+    )
+    .context("Failed to resolve workspace trust policy")?;
+
+    let decision = check_workspace_trust(workspace_folder, policy)
+        .await
+        .context("Workspace trust check failed")?;
+
+    decision_to_result(decision).map_err(anyhow::Error::from)?;
+
+    if args.trust_workspace_persist {
+        record_trusted_workspace(workspace_folder, args.user_data_folder)
+            .await
+            .context("Failed to persist workspace trust entry")?;
+    }
+
+    Ok(())
+}
+
 /// Execute initializeCommand on the host before container creation
-#[instrument(skip(initialize_command, progress_tracker))]
+///
+/// `initializeCommand` runs arbitrary shell on the **developer's host** before
+/// any container sandboxing. The trust check below is the only thing standing
+/// between `git clone <hostile-repo> && deacon up` and arbitrary code
+/// execution on the host. Callers MUST pass the resolved trust args
+/// (`--trust-workspace`, `--trust-workspace-persist`, `DEACON_NO_PROMPT`)
+/// through `trust_args`; see [`HostTrustArgs`] for the source-of-truth
+/// resolution rules.
+#[instrument(skip(initialize_command, progress_tracker, trust_args))]
 pub(crate) async fn execute_initialize_command(
     initialize_command: &serde_json::Value,
     workspace_folder: &Path,
     progress_tracker: &std::sync::Arc<
         std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>,
     >,
+    trust_args: HostTrustArgs<'_>,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::ContainerLifecycleCommands;
     use deacon_core::variable::SubstitutionContext;
@@ -407,6 +481,9 @@ pub(crate) async fn execute_initialize_command(
             return Ok(());
         }
     };
+
+    // Trust gate: refuse to run host-side shell from an untrusted workspace.
+    enforce_host_trust(workspace_folder, &trust_args).await?;
 
     // Build a LifecycleCommandList from the parsed value
     let command_list = LifecycleCommandList {

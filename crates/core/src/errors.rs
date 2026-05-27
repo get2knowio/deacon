@@ -251,6 +251,20 @@ pub enum DeaconError {
     #[error("Runtime error: {0}")]
     Runtime(String),
 
+    /// Workspace is not trusted; host-side lifecycle hooks were refused.
+    ///
+    /// See `crates/core/src/trust.rs` and the `--trust-workspace[-persist]`
+    /// CLI surface for opt-in mechanics.
+    #[error("Workspace `{workspace}` is not trusted: {reason}\n{instructions}")]
+    WorkspaceUntrusted {
+        /// Workspace path that failed the check.
+        workspace: std::path::PathBuf,
+        /// Short reason intended for logs.
+        reason: String,
+        /// User-facing opt-in instructions.
+        instructions: String,
+    },
+
     /// Feature not implemented
     #[error("Feature not implemented: {feature}")]
     NotImplemented { feature: String },

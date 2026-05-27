@@ -417,6 +417,11 @@ pub struct UpArgs {
     pub redaction_config: deacon_core::redaction::RedactionConfig,
     pub secret_registry: deacon_core::redaction::SecretRegistry,
     pub force_tty_if_json: bool,
+
+    /// `--trust-workspace` flag (one-shot trust, does not persist).
+    pub trust_workspace: bool,
+    /// `--trust-workspace-persist` flag (one-shot + writes to the trust store).
+    pub trust_workspace_persist: bool,
 }
 
 impl Default for UpArgs {
@@ -474,6 +479,8 @@ impl Default for UpArgs {
             redaction_config: deacon_core::redaction::RedactionConfig::default(),
             secret_registry: deacon_core::redaction::global_registry().clone(),
             force_tty_if_json: false,
+            trust_workspace: false,
+            trust_workspace_persist: false,
         }
     }
 }
