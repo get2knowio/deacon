@@ -10,8 +10,8 @@ use std::path::Path;
 use tempfile::TempDir;
 
 /// Test configuration discovery with fixture
-#[test]
-fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
+#[tokio::test]
+async fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
     let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
@@ -39,7 +39,7 @@ fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
     std::fs::copy(&fixture_config, &target_config)?;
 
     // Test configuration discovery
-    let result = ConfigLoader::discover_config(workspace)?;
+    let result = ConfigLoader::discover_config(workspace).await?;
     assert_eq!(result, DiscoveryResult::Single(target_config.clone()));
 
     // Extract the path from the discovery result
@@ -49,7 +49,7 @@ fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
     };
 
     // Test loading with variable substitution
-    let (config, report) = ConfigLoader::load_with_substitution(&config_path, workspace)?;
+    let (config, report) = ConfigLoader::load_with_substitution(&config_path, workspace).await?;
 
     // Verify basic config was loaded
     assert_eq!(
@@ -152,13 +152,13 @@ fn test_deterministic_devcontainer_id() -> anyhow::Result<()> {
 }
 
 /// Test configuration discovery order and fallback
-#[test]
-fn test_config_discovery_order() -> anyhow::Result<()> {
+#[tokio::test]
+async fn test_config_discovery_order() -> anyhow::Result<()> {
     let temp_workspace = TempDir::new()?;
     let workspace = temp_workspace.path();
 
     // Test 1: No config files exist
-    let result = ConfigLoader::discover_config(workspace)?;
+    let result = ConfigLoader::discover_config(workspace).await?;
     let expected_default = workspace.join(".devcontainer").join("devcontainer.json");
     assert_eq!(result, DiscoveryResult::None(expected_default));
 
@@ -166,7 +166,7 @@ fn test_config_discovery_order() -> anyhow::Result<()> {
     let root_config = workspace.join(".devcontainer.json");
     std::fs::write(&root_config, r#"{"name": "Root Config"}"#)?;
 
-    let result = ConfigLoader::discover_config(workspace)?;
+    let result = ConfigLoader::discover_config(workspace).await?;
     assert_eq!(result, DiscoveryResult::Single(root_config));
 
     // Test 3: Both configs exist - should prefer .devcontainer/devcontainer.json
@@ -175,7 +175,7 @@ fn test_config_discovery_order() -> anyhow::Result<()> {
     let dir_config = devcontainer_dir.join("devcontainer.json");
     std::fs::write(&dir_config, r#"{"name": "Dir Config"}"#)?;
 
-    let result = ConfigLoader::discover_config(workspace)?;
+    let result = ConfigLoader::discover_config(workspace).await?;
     let config_path = match &result {
         DiscoveryResult::Single(p) => p.clone(),
         _ => panic!("Expected Single discovery result"),
@@ -183,7 +183,7 @@ fn test_config_discovery_order() -> anyhow::Result<()> {
     assert_eq!(config_path, dir_config);
 
     // Verify we can load the correct config
-    let config = ConfigLoader::load_from_path(&config_path)?;
+    let config = ConfigLoader::load_from_path(&config_path).await?;
     assert_eq!(config.name, Some("Dir Config".to_string()));
 
     println!("✅ Configuration discovery order test passed");

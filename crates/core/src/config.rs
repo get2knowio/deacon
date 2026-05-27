@@ -2101,6 +2101,7 @@ impl ConfigLoader {
     /// ## Returns
     ///
     /// Returns a vector of configurations with their source paths in merge order (base first, overlay last).
+    #[allow(clippy::type_complexity)]
     #[instrument(skip_all, fields(path = %config_path.display()))]
     fn resolve_extends_chain_with_paths<'a>(
         config_path: &'a Path,

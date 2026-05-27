@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
-#[test]
-fn test_security_options_in_config_parsing() -> anyhow::Result<()> {
+#[tokio::test]
+async fn test_security_options_in_config_parsing() -> anyhow::Result<()> {
     // Create a test configuration with security options
     let config_content = json!({
         "image": "ubuntu:22.04",
@@ -23,7 +23,7 @@ fn test_security_options_in_config_parsing() -> anyhow::Result<()> {
     temp_file.write_all(config_content.to_string().as_bytes())?;
 
     // Load and parse the configuration
-    let config = ConfigLoader::load_from_path(temp_file.path())?;
+    let config = ConfigLoader::load_from_path(temp_file.path()).await?;
 
     // Verify security options are parsed correctly
     assert_eq!(config.privileged, Some(true));

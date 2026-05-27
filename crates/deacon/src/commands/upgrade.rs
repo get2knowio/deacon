@@ -82,7 +82,8 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
         config_path: args.config_path.as_deref(),
         override_config_path: None,
         secrets_files: &[],
-    })?;
+    })
+    .await?;
     let config_path = initial.config_path.clone();
 
     // Phase 2.5: Optional config edit (spec §5 phase 2). When both
@@ -106,7 +107,8 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
             config_path: args.config_path.as_deref(),
             override_config_path: None,
             secrets_files: &[],
-        })?
+        })
+        .await?
         .config
     } else {
         initial.config

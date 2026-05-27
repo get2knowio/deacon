@@ -526,7 +526,8 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
         config_path: args.config_path.as_deref(),
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
-    })?;
+    })
+    .await?;
 
     let mut config = load_result.config;
     let workspace_folder = load_result.workspace_folder;

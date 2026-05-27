@@ -508,6 +508,7 @@ where
                     override_config_path: args.override_config_path.as_deref(),
                     secrets_files: &args.secrets_files,
                 })
+                .await
                 .map_err(map_config_error)?,
             );
         }

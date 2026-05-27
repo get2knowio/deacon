@@ -188,8 +188,8 @@ fn test_workspace_id_worktree_isolation() {
     );
 }
 
-#[test]
-fn test_config_discovery_in_worktree() {
+#[tokio::test]
+async fn test_config_discovery_in_worktree() {
     if !is_git_available() {
         eprintln!("Skipping test: git is not available");
         return;
@@ -218,7 +218,7 @@ fn test_config_discovery_in_worktree() {
     fs::write(&config_path, config_content).unwrap();
 
     // Discover config should find it in the worktree
-    let discovered = ConfigLoader::discover_config(&worktree_path).unwrap();
+    let discovered = ConfigLoader::discover_config(&worktree_path).await.unwrap();
     assert_eq!(discovered, DiscoveryResult::Single(config_path));
 }
 

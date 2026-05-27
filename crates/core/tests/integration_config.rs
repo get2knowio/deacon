@@ -8,8 +8,8 @@ use deacon_core::container_env_probe::ContainerProbeMode;
 use std::path::Path;
 use tempfile::TempDir;
 
-#[test]
-fn test_load_basic_fixture() {
+#[tokio::test]
+async fn test_load_basic_fixture() {
     let fixture_path = Path::new("../../fixtures/config/basic/devcontainer.jsonc");
 
     // Skip test if fixture doesn't exist (for CI environments)
@@ -21,8 +21,9 @@ fn test_load_basic_fixture() {
         return;
     }
 
-    let config =
-        ConfigLoader::load_from_path(fixture_path).expect("Should successfully load basic fixture");
+    let config = ConfigLoader::load_from_path(fixture_path)
+        .await
+        .expect("Should successfully load basic fixture");
 
     // Verify basic properties
     assert_eq!(config.name, Some("Rust Development Container".to_string()));
@@ -75,8 +76,8 @@ fn test_load_basic_fixture() {
     assert_eq!(config.mounts.len(), 1);
 }
 
-#[test]
-fn test_load_copied_fixture() {
+#[tokio::test]
+async fn test_load_copied_fixture() {
     // Copy fixture to temporary directory as mentioned in issue requirements
     let temp_dir = TempDir::new().expect("Should create temp directory");
     let fixture_source = Path::new("../../fixtures/config/basic/devcontainer.jsonc");
@@ -96,6 +97,7 @@ fn test_load_copied_fixture() {
 
     // Load configuration from temporary location
     let config = ConfigLoader::load_from_path(&temp_config_path)
+        .await
         .expect("Should successfully load copied fixture");
 
     // Basic verification
@@ -107,8 +109,8 @@ fn test_load_copied_fixture() {
     assert!(config.customizations.is_object());
 }
 
-#[test]
-fn test_loads_additional_developer_facing_spec_fields() {
+#[tokio::test]
+async fn test_loads_additional_developer_facing_spec_fields() {
     let temp_dir = TempDir::new().expect("Should create temp directory");
     let config_path = temp_dir.path().join("devcontainer.json");
 
@@ -135,7 +137,9 @@ fn test_loads_additional_developer_facing_spec_fields() {
     )
     .expect("Should write config");
 
-    let config = ConfigLoader::load_from_path(&config_path).expect("Should load config");
+    let config = ConfigLoader::load_from_path(&config_path)
+        .await
+        .expect("Should load config");
 
     assert_eq!(
         config.user_env_probe,
@@ -149,8 +153,8 @@ fn test_loads_additional_developer_facing_spec_fields() {
     assert_eq!(host.gpu, Some(serde_json::json!("optional")));
 }
 
-#[test]
-fn test_error_line_col_information() {
+#[tokio::test]
+async fn test_error_line_col_information() {
     // Create a temporary file with invalid JSON at a specific location
     let temp_dir = TempDir::new().expect("Should create temp directory");
     let temp_config_path = temp_dir.path().join("invalid.jsonc");
@@ -163,7 +167,7 @@ fn test_error_line_col_information() {
 
     std::fs::write(&temp_config_path, invalid_content).expect("Should write invalid config");
 
-    let result = ConfigLoader::load_from_path(&temp_config_path);
+    let result = ConfigLoader::load_from_path(&temp_config_path).await;
     assert!(result.is_err());
 
     match result.unwrap_err() {

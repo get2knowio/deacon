@@ -965,7 +965,8 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             config_path: args.config_path.as_deref(),
             override_config_path: args.override_config_path.as_deref(),
             secrets_files: &args.secrets_files,
-        })?;
+        })
+        .await?;
         (config_result.config, config_result.substitution_report)
     };
 

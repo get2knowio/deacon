@@ -247,8 +247,8 @@ fn test_config_compose_helper_methods() {
     assert!(!regular_config.has_stop_compose_shutdown());
 }
 
-#[test]
-fn test_config_loading_from_file() {
+#[tokio::test]
+async fn test_config_loading_from_file() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let config_dir = temp_dir.path().join(".devcontainer");
     fs::create_dir_all(&config_dir).expect("Failed to create config dir");
@@ -267,8 +267,9 @@ fn test_config_loading_from_file() {
     fs::write(&config_file, devcontainer_content.to_string()).expect("Failed to write config file");
 
     // Load configuration using ConfigLoader
-    let loaded_config =
-        ConfigLoader::load_from_path(&config_file).expect("Failed to load configuration");
+    let loaded_config = ConfigLoader::load_from_path(&config_file)
+        .await
+        .expect("Failed to load configuration");
 
     assert_eq!(
         loaded_config.name,
@@ -304,8 +305,8 @@ fn test_compose_project_name_generation() {
 
 /// Integration test that validates Docker Compose configuration parsing
 /// and project setup without actually running Docker commands.
-#[test]
-fn test_full_compose_integration_setup() {
+#[tokio::test]
+async fn test_full_compose_integration_setup() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let workspace_dir = temp_dir.path().join("my-project");
     fs::create_dir_all(&workspace_dir).expect("Failed to create workspace dir");
@@ -352,8 +353,9 @@ services:
         .expect("Failed to write devcontainer config");
 
     // Load and validate configuration
-    let config =
-        ConfigLoader::load_from_path(&config_file).expect("Failed to load devcontainer config");
+    let config = ConfigLoader::load_from_path(&config_file)
+        .await
+        .expect("Failed to load devcontainer config");
 
     assert_eq!(config.name, Some("Full Stack Development".to_string()));
     assert!(config.uses_compose());

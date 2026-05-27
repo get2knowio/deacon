@@ -106,10 +106,10 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
     };
 
     // Resolve configuration path with precedence: override_config > config > auto-discovery
-    let config_location = resolve_config_path(&workspace_folder, &args)?;
+    let config_location = resolve_config_path(&workspace_folder, &args).await?;
 
     // Load configuration
-    let config = load_config(&config_location)?;
+    let config = load_config(&config_location).await?;
 
     // Extract features map preserving declaration order
     let features_map_opt = config.features.as_object();
@@ -386,7 +386,7 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
 /// 1. `--override-config` (highest precedence)
 /// 2. `--config` (explicit path)
 /// 3. Auto-discovery in workspace folder
-fn resolve_config_path(
+async fn resolve_config_path(
     workspace_folder: &Path,
     args: &OutdatedArgs,
 ) -> Result<deacon_core::config::ConfigLocation> {
@@ -411,7 +411,7 @@ fn resolve_config_path(
         "Auto-discovering config in workspace: {}",
         workspace_folder.display()
     );
-    match ConfigLoader::discover_config(workspace_folder) {
+    match ConfigLoader::discover_config(workspace_folder).await {
         Ok(DiscoveryResult::Single(path)) => Ok(deacon_core::config::ConfigLocation::new(path)),
         Ok(DiscoveryResult::Multiple(paths)) => {
             let display_paths: Vec<String> = paths
@@ -448,10 +448,10 @@ fn resolve_config_path(
 /// and apply variable substitution to obtain the effective configuration.
 ///
 /// Returns appropriate error messages per spec §2, §9.
-fn load_config(
+async fn load_config(
     config_location: &deacon_core::config::ConfigLocation,
 ) -> Result<deacon_core::config::DevContainerConfig> {
-    match ConfigLoader::load_with_extends(config_location.path()) {
+    match ConfigLoader::load_with_extends(config_location.path()).await {
         Ok(cfg) => Ok(cfg),
         Err(e) => match e {
             DeaconError::Config(ConfigError::NotFound { path }) => {
