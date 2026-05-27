@@ -10,8 +10,8 @@ use deacon_core::lockfile::{
 use std::collections::HashMap;
 use tempfile::TempDir;
 
-#[test]
-fn test_read_write_integration() {
+#[tokio::test(flavor = "current_thread")]
+async fn test_read_write_integration() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let lockfile_path = temp_dir.path().join("devcontainer-lock.json");
 
@@ -41,13 +41,16 @@ fn test_read_write_integration() {
     );
 
     // Write lockfile
-    write_lockfile(&lockfile_path, &lockfile, false).expect("Failed to write lockfile");
+    write_lockfile(&lockfile_path, &lockfile, false)
+        .await
+        .expect("Failed to write lockfile");
 
     // Verify file exists
     assert!(lockfile_path.exists());
 
     // Read back and verify
     let read_lockfile = read_lockfile(&lockfile_path)
+        .await
         .expect("Failed to read lockfile")
         .expect("Lockfile should exist");
 
@@ -92,8 +95,8 @@ fn test_lockfile_path_derivation() {
     assert_eq!(lockfile_path.parent().unwrap(), config_dir);
 }
 
-#[test]
-fn test_merge_workflow() {
+#[tokio::test(flavor = "current_thread")]
+async fn test_merge_workflow() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let lockfile_path = temp_dir.path().join("devcontainer-lock.json");
 
@@ -121,7 +124,9 @@ fn test_merge_workflow() {
         },
     );
 
-    write_lockfile(&lockfile_path, &existing, false).expect("Failed to write initial lockfile");
+    write_lockfile(&lockfile_path, &existing, false)
+        .await
+        .expect("Failed to write initial lockfile");
 
     // Create update with new version of feature-a and new feature-c
     let mut update = Lockfile {
@@ -149,6 +154,7 @@ fn test_merge_workflow() {
 
     // Read existing and merge
     let existing_read = read_lockfile(&lockfile_path)
+        .await
         .expect("Failed to read lockfile")
         .expect("Lockfile should exist");
 
@@ -167,18 +173,21 @@ fn test_merge_workflow() {
     assert_eq!(merged.features.get("feature-c").unwrap().version, "3.0.0");
 
     // Write merged lockfile (force_init=true to overwrite existing)
-    write_lockfile(&lockfile_path, &merged, true).expect("Failed to write merged lockfile");
+    write_lockfile(&lockfile_path, &merged, true)
+        .await
+        .expect("Failed to write merged lockfile");
 
     // Verify final state
     let final_lockfile = read_lockfile(&lockfile_path)
+        .await
         .expect("Failed to read final lockfile")
         .expect("Lockfile should exist");
 
     assert_eq!(final_lockfile, merged);
 }
 
-#[test]
-fn test_json_formatting() {
+#[tokio::test(flavor = "current_thread")]
+async fn test_json_formatting() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let lockfile_path = temp_dir.path().join("formatted-lock.json");
 
@@ -196,7 +205,9 @@ fn test_json_formatting() {
         },
     );
 
-    write_lockfile(&lockfile_path, &lockfile, false).expect("Failed to write lockfile");
+    write_lockfile(&lockfile_path, &lockfile, false)
+        .await
+        .expect("Failed to write lockfile");
 
     // Read the raw JSON to verify formatting
     let json_content =
@@ -211,18 +222,20 @@ fn test_json_formatting() {
         serde_json::from_str(&json_content).expect("Failed to parse JSON");
 }
 
-#[test]
-fn test_nonexistent_file() {
+#[tokio::test(flavor = "current_thread")]
+async fn test_nonexistent_file() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let nonexistent_path = temp_dir.path().join("does-not-exist.json");
 
     // Reading nonexistent file should return None, not error
-    let result = read_lockfile(&nonexistent_path).expect("Should not error on nonexistent file");
+    let result = read_lockfile(&nonexistent_path)
+        .await
+        .expect("Should not error on nonexistent file");
     assert!(result.is_none());
 }
 
-#[test]
-fn test_invalid_json() {
+#[tokio::test(flavor = "current_thread")]
+async fn test_invalid_json() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let invalid_path = temp_dir.path().join("invalid.json");
 
@@ -230,12 +243,12 @@ fn test_invalid_json() {
     std::fs::write(&invalid_path, "not valid json").expect("Failed to write invalid JSON");
 
     // Reading should error
-    let result = read_lockfile(&invalid_path);
+    let result = read_lockfile(&invalid_path).await;
     assert!(result.is_err());
 }
 
-#[test]
-fn test_nested_directory_creation() {
+#[tokio::test(flavor = "current_thread")]
+async fn test_nested_directory_creation() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let nested_path = temp_dir
         .path()
@@ -250,13 +263,14 @@ fn test_nested_directory_creation() {
 
     // Should create parent directories automatically
     write_lockfile(&nested_path, &lockfile, false)
+        .await
         .expect("Failed to write lockfile with nested path");
 
     assert!(nested_path.exists());
 }
 
-#[test]
-fn test_overwrite_existing_lockfile() {
+#[tokio::test(flavor = "current_thread")]
+async fn test_overwrite_existing_lockfile() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let lockfile_path = temp_dir.path().join("overwrite-test.json");
 
@@ -274,7 +288,9 @@ fn test_overwrite_existing_lockfile() {
         },
     );
 
-    write_lockfile(&lockfile_path, &lockfile1, false).expect("Failed to write first lockfile");
+    write_lockfile(&lockfile_path, &lockfile1, false)
+        .await
+        .expect("Failed to write first lockfile");
 
     // Overwrite with new lockfile
     let mut lockfile2 = Lockfile {
@@ -290,10 +306,13 @@ fn test_overwrite_existing_lockfile() {
         },
     );
 
-    write_lockfile(&lockfile_path, &lockfile2, true).expect("Failed to overwrite lockfile");
+    write_lockfile(&lockfile_path, &lockfile2, true)
+        .await
+        .expect("Failed to overwrite lockfile");
 
     // Verify the new content
     let read_lockfile = read_lockfile(&lockfile_path)
+        .await
         .expect("Failed to read lockfile")
         .expect("Lockfile should exist");
 
@@ -302,8 +321,8 @@ fn test_overwrite_existing_lockfile() {
     assert!(!read_lockfile.features.contains_key("feature-a"));
 }
 
-#[test]
-fn test_no_overwrite_when_force_init_false() {
+#[tokio::test(flavor = "current_thread")]
+async fn test_no_overwrite_when_force_init_false() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let lockfile_path = temp_dir.path().join("no-overwrite-test.json");
 
@@ -321,7 +340,9 @@ fn test_no_overwrite_when_force_init_false() {
         },
     );
 
-    write_lockfile(&lockfile_path, &lockfile1, false).expect("Failed to write first lockfile");
+    write_lockfile(&lockfile_path, &lockfile1, false)
+        .await
+        .expect("Failed to write first lockfile");
 
     // Read original content
     let original_content = std::fs::read_to_string(&lockfile_path).expect("Failed to read file");
@@ -340,7 +361,7 @@ fn test_no_overwrite_when_force_init_false() {
         },
     );
 
-    let result = write_lockfile(&lockfile_path, &lockfile2, false);
+    let result = write_lockfile(&lockfile_path, &lockfile2, false).await;
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
     assert!(error_msg.contains("already exists"));
@@ -352,6 +373,7 @@ fn test_no_overwrite_when_force_init_false() {
 
     // Verify original content is still there
     let read_lockfile = read_lockfile(&lockfile_path)
+        .await
         .expect("Failed to read lockfile")
         .expect("Lockfile should exist");
     assert_eq!(read_lockfile.features.len(), 1);
@@ -359,8 +381,8 @@ fn test_no_overwrite_when_force_init_false() {
     assert!(!read_lockfile.features.contains_key("new-feature"));
 }
 
-#[test]
-fn test_real_world_scenario() {
+#[tokio::test(flavor = "current_thread")]
+async fn test_real_world_scenario() {
     // Simulate a real-world scenario with config file and adjacent lockfile
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let devcontainer_dir = temp_dir.path().join(".devcontainer");
@@ -405,7 +427,9 @@ fn test_real_world_scenario() {
     );
 
     // Write lockfile
-    write_lockfile(&lockfile_path, &lockfile, false).expect("Failed to write lockfile");
+    write_lockfile(&lockfile_path, &lockfile, false)
+        .await
+        .expect("Failed to write lockfile");
 
     // Verify lockfile is in correct location
     assert_eq!(
@@ -416,6 +440,7 @@ fn test_real_world_scenario() {
 
     // Read and verify
     let read_lockfile = read_lockfile(&lockfile_path)
+        .await
         .expect("Failed to read lockfile")
         .expect("Lockfile should exist");
 

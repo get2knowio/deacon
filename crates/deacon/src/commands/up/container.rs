@@ -231,7 +231,7 @@ pub(crate) async fn execute_container_up(
         // (or byte-compare it in `--frozen-lockfile` mode). Runs only when
         // features were actually resolved; with no features there is nothing
         // to lock.
-        handle_lockfile_post_build(args, config_path, &feature_build.lockfile)?;
+        handle_lockfile_post_build(args, config_path, &feature_build.lockfile).await?;
 
         Some(feature_build.resolved_features)
     } else {

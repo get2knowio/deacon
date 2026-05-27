@@ -1400,7 +1400,7 @@ async fn apply_features_and_lockfile(
 
     // Write the lockfile next to the config file (spec §6 naming rule).
     let lockfile_path = get_lockfile_path(config_path);
-    let written = match write_lockfile(&lockfile_path, &feature_build.lockfile, true) {
+    let written = match write_lockfile(&lockfile_path, &feature_build.lockfile, true).await {
         Ok(()) => Some(lockfile_path),
         Err(e) => {
             let e = anyhow::Error::from(e);

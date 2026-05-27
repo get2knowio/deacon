@@ -144,7 +144,7 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
 
     // Read lockfile if present
     let lockfile_path = core_lockfile::get_lockfile_path(config_location.path());
-    let lockfile_opt = match core_lockfile::read_lockfile(&lockfile_path) {
+    let lockfile_opt = match core_lockfile::read_lockfile(&lockfile_path).await {
         Ok(opt) => opt,
         Err(e) => {
             debug!(error = ?e, "Failed to read lockfile - proceeding without it");

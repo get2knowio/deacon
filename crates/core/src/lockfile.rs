@@ -60,8 +60,8 @@
 use crate::errors::LockfileError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
+use tokio::fs;
 
 /// Convenience `Result` alias for lockfile operations
 pub type Result<T, E = LockfileError> = std::result::Result<T, E>;
@@ -224,25 +224,28 @@ pub fn get_lockfile_path(config_path: &Path) -> PathBuf {
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,no_run
 /// use deacon_core::lockfile::read_lockfile;
 /// use std::path::Path;
 ///
+/// # async fn run() {
 /// // Non-existent file returns None (not an error)
-/// let result = read_lockfile(Path::new("/tmp/nonexistent-lockfile.json")).unwrap();
+/// let result = read_lockfile(Path::new("/tmp/nonexistent-lockfile.json")).await.unwrap();
 /// assert!(result.is_none());
+/// # }
 /// ```
-pub fn read_lockfile(path: &Path) -> Result<Option<Lockfile>> {
-    // Check if file exists
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    // Read file contents
-    let contents = fs::read_to_string(path).map_err(|source| LockfileError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+pub async fn read_lockfile(path: &Path) -> Result<Option<Lockfile>> {
+    // Read file contents; map NotFound to Ok(None) so a missing lockfile is not an error.
+    let contents = match fs::read_to_string(path).await {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(LockfileError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
 
     // Parse JSON
     let lockfile: Lockfile =
@@ -280,15 +283,17 @@ pub fn read_lockfile(path: &Path) -> Result<Option<Lockfile>> {
 /// use std::collections::HashMap;
 /// use std::path::Path;
 ///
+/// # async fn run() {
 /// let lockfile = Lockfile {
 ///     features: HashMap::new(),
 /// };
 ///
-/// write_lockfile(Path::new("/tmp/test-lock.json"), &lockfile, false).unwrap();
+/// write_lockfile(Path::new("/tmp/test-lock.json"), &lockfile, false).await.unwrap();
+/// # }
 /// ```
-pub fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) -> Result<()> {
-    // Check if file exists and force_init is false
-    if path.exists() && !force_init {
+pub async fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) -> Result<()> {
+    // Check if file exists and force_init is false. Use async metadata to avoid blocking.
+    if !force_init && fs::metadata(path).await.is_ok() {
         return Err(LockfileError::AlreadyExists {
             path: path.to_path_buf(),
         });
@@ -299,10 +304,12 @@ pub fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) -> Res
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| LockfileError::Io {
-            path: parent.to_path_buf(),
-            source,
-        })?;
+        fs::create_dir_all(parent)
+            .await
+            .map_err(|source| LockfileError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
     }
 
     // Convert to serde_json::Value for deterministic ordering
@@ -342,24 +349,30 @@ pub fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) -> Res
         ))
     };
 
-    fs::write(&temp_path, json.as_bytes()).map_err(|source| LockfileError::Io {
-        path: temp_path.clone(),
-        source,
-    })?;
+    fs::write(&temp_path, json.as_bytes())
+        .await
+        .map_err(|source| LockfileError::Io {
+            path: temp_path.clone(),
+            source,
+        })?;
 
     // On Windows, remove destination file if it exists before rename
     #[cfg(windows)]
-    if path.exists() {
-        fs::remove_file(path).map_err(|source| LockfileError::Io {
+    if fs::metadata(path).await.is_ok() {
+        fs::remove_file(path)
+            .await
+            .map_err(|source| LockfileError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+    }
+
+    fs::rename(&temp_path, path)
+        .await
+        .map_err(|source| LockfileError::Io {
             path: path.to_path_buf(),
             source,
         })?;
-    }
-
-    fs::rename(&temp_path, path).map_err(|source| LockfileError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
 
     Ok(())
 }
@@ -1012,17 +1025,17 @@ mod tests {
         assert_eq!(merged.features.get("feature-a").unwrap().version, "2.0.0");
     }
 
-    #[test]
-    fn test_read_nonexistent_lockfile() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_read_nonexistent_lockfile() {
         let temp_dir = TempDir::new().unwrap();
         let lockfile_path = temp_dir.path().join("nonexistent.json");
 
-        let result = read_lockfile(&lockfile_path).unwrap();
+        let result = read_lockfile(&lockfile_path).await.unwrap();
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_write_and_read_lockfile() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_write_and_read_lockfile() {
         let temp_dir = TempDir::new().unwrap();
         let lockfile_path = temp_dir.path().join("test-lock.json");
 
@@ -1040,10 +1053,12 @@ mod tests {
         );
 
         // Write lockfile
-        write_lockfile(&lockfile_path, &lockfile, false).unwrap();
+        write_lockfile(&lockfile_path, &lockfile, false)
+            .await
+            .unwrap();
 
         // Read it back
-        let read_lockfile = read_lockfile(&lockfile_path).unwrap().unwrap();
+        let read_lockfile = read_lockfile(&lockfile_path).await.unwrap().unwrap();
 
         // Verify
         assert_eq!(lockfile, read_lockfile);
@@ -1122,8 +1137,8 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("missing-feature"));
     }
 
-    #[test]
-    fn test_atomic_write_behavior() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_atomic_write_behavior() {
         let temp_dir = TempDir::new().unwrap();
         let lockfile_path = temp_dir.path().join("atomic-test.json");
 
@@ -1141,7 +1156,9 @@ mod tests {
         );
 
         // Write lockfile
-        write_lockfile(&lockfile_path, &lockfile, false).unwrap();
+        write_lockfile(&lockfile_path, &lockfile, false)
+            .await
+            .unwrap();
 
         // Verify temp file was cleaned up (new naming: .atomic-test.json.tmp)
         let temp_path = temp_dir.path().join(".atomic-test.json.tmp");
@@ -1151,8 +1168,8 @@ mod tests {
         assert!(lockfile_path.exists());
     }
 
-    #[test]
-    fn test_unicode_handling() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_unicode_handling() {
         let temp_dir = TempDir::new().unwrap();
         let lockfile_path = temp_dir.path().join("unicode-test.json");
 
@@ -1171,8 +1188,10 @@ mod tests {
         );
 
         // Write and read back
-        write_lockfile(&lockfile_path, &lockfile, false).unwrap();
-        let read_back = read_lockfile(&lockfile_path).unwrap().unwrap();
+        write_lockfile(&lockfile_path, &lockfile, false)
+            .await
+            .unwrap();
+        let read_back = read_lockfile(&lockfile_path).await.unwrap().unwrap();
 
         assert_eq!(lockfile, read_back);
     }
@@ -1243,8 +1262,8 @@ mod tests {
         assert!(error_msg.contains("Circular dependency"));
     }
 
-    #[test]
-    fn test_deterministic_json_ordering() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_deterministic_json_ordering() {
         let temp_dir = TempDir::new().unwrap();
         let lockfile_path = temp_dir.path().join("ordered-test.json");
 
@@ -1284,11 +1303,15 @@ mod tests {
         );
 
         // Write twice and verify output is identical
-        write_lockfile(&lockfile_path, &lockfile, false).unwrap();
+        write_lockfile(&lockfile_path, &lockfile, false)
+            .await
+            .unwrap();
         let content1 = std::fs::read_to_string(&lockfile_path).unwrap();
 
         std::fs::remove_file(&lockfile_path).unwrap();
-        write_lockfile(&lockfile_path, &lockfile, false).unwrap();
+        write_lockfile(&lockfile_path, &lockfile, false)
+            .await
+            .unwrap();
         let content2 = std::fs::read_to_string(&lockfile_path).unwrap();
 
         assert_eq!(content1, content2);
@@ -1546,14 +1569,14 @@ mod tests {
 
     /// Writer emits a trailing newline to match upstream
     /// `JSON.stringify(..., 2) + '\n'`.
-    #[test]
-    fn test_write_lockfile_emits_trailing_newline() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_write_lockfile_emits_trailing_newline() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("lf.json");
         let lockfile = Lockfile {
             features: HashMap::new(),
         };
-        write_lockfile(&path, &lockfile, true).unwrap();
+        write_lockfile(&path, &lockfile, true).await.unwrap();
         let bytes = std::fs::read(&path).unwrap();
         assert_eq!(
             bytes.last().copied(),

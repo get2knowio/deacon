@@ -99,7 +99,7 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
             target_version,
             config_path.display()
         );
-        pin_feature_in_config_file(&config_path, feature, target_version)?;
+        pin_feature_in_config_file(&config_path, feature, target_version).await?;
         // Re-read the config so downstream resolution sees the pinned tag.
         load_config(ConfigLoadArgs {
             workspace_folder: args.workspace_folder.as_deref(),
@@ -136,6 +136,7 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
     let lockfile_path = get_lockfile_path(&config_path);
     // Spec §5 phase 4: force_init = true so the writer always overwrites.
     write_lockfile(&lockfile_path, &lockfile, true)
+        .await
         .with_context(|| format!("Failed to write lockfile to '{}'", lockfile_path.display()))?;
     info!("Wrote lockfile to '{}'", lockfile_path.display());
     Ok(())
@@ -185,17 +186,19 @@ fn validate_target_version_format(version: &str) -> Result<()> {
 ///   `--feature` they specified isn't actually in the config.
 /// - Multiple matches return an error to prevent ambiguous edits (a feature
 ///   ID appearing both as a key and inside a string value, for example).
-fn pin_feature_in_config_file(
+async fn pin_feature_in_config_file(
     config_path: &std::path::Path,
     feature: &str,
     target_version: &str,
 ) -> Result<()> {
-    let contents = std::fs::read_to_string(config_path).with_context(|| {
-        format!(
-            "Failed to read devcontainer config from '{}'",
-            config_path.display()
-        )
-    })?;
+    let contents = tokio::fs::read_to_string(config_path)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to read devcontainer config from '{}'",
+                config_path.display()
+            )
+        })?;
 
     let pinned_key = pinned_feature_key(feature, target_version);
     let (updated, occurrences) = rewrite_feature_key(&contents, feature, &pinned_key);
@@ -207,7 +210,7 @@ fn pin_feature_in_config_file(
             config_path.display()
         )),
         1 => {
-            std::fs::write(config_path, updated).with_context(|| {
+            tokio::fs::write(config_path, updated).await.with_context(|| {
                 format!(
                     "Failed to write pinned devcontainer config to '{}'",
                     config_path.display()
@@ -712,8 +715,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn pin_feature_in_config_file_round_trips_through_disk() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn pin_feature_in_config_file_round_trips_through_disk() {
         // End-to-end sanity check: write a fixture, pin a feature, read back.
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("devcontainer.json");
@@ -728,6 +731,7 @@ mod tests {
         std::fs::write(&path, original).unwrap();
 
         pin_feature_in_config_file(&path, "ghcr.io/devcontainers/features/node:1", "1.2.3")
+            .await
             .unwrap();
 
         let updated = std::fs::read_to_string(&path).unwrap();
@@ -739,14 +743,15 @@ mod tests {
         assert!(updated.contains("\"version\": \"lts\""));
     }
 
-    #[test]
-    fn pin_feature_in_config_file_errors_when_feature_missing() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn pin_feature_in_config_file_errors_when_feature_missing() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("devcontainer.json");
         std::fs::write(&path, r#"{ "features": {} }"#).unwrap();
 
         let err =
             pin_feature_in_config_file(&path, "ghcr.io/devcontainers/features/node:1", "1.2.3")
+                .await
                 .unwrap_err();
         assert!(err.to_string().contains("was not found"), "got: {err}");
     }

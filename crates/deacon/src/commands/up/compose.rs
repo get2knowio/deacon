@@ -280,7 +280,7 @@ pub(crate) async fn execute_compose_up(
     // Only runs when features were actually built (the compose path returns
     // `None` when no features are declared).
     if let Some(ref fb) = feature_build {
-        handle_lockfile_post_build(args, config_path, &fb.lockfile)?;
+        handle_lockfile_post_build(args, config_path, &fb.lockfile).await?;
     }
 
     // Start the compose project

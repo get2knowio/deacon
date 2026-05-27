@@ -55,7 +55,18 @@ fn create_lockfile(config_path: &Path, feature_ids: &[&str]) {
     }
 
     let lockfile = Lockfile { features };
-    write_lockfile(&lockfile_path, &lockfile, true).unwrap();
+    block_on_async(write_lockfile(&lockfile_path, &lockfile, true)).unwrap();
+}
+
+/// Bridge async lockfile helpers into the existing synchronous `#[test]` setup
+/// in this file. Each test gets its own tiny current-thread runtime so we don't
+/// take a runtime dependency on test scaffolding.
+fn block_on_async<F: std::future::Future>(fut: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime for test")
+        .block_on(fut)
 }
 
 // =============================================================================
@@ -244,7 +255,7 @@ fn test_frozen_lockfile_missing_fails() {
     );
 
     // Read lockfile (will return None since it doesn't exist)
-    let lockfile = read_lockfile(&lockfile_path).unwrap();
+    let lockfile = block_on_async(read_lockfile(&lockfile_path)).unwrap();
     assert!(lockfile.is_none(), "Lockfile should be None when missing");
 
     // Validate against config - should return Missing result
@@ -303,7 +314,9 @@ fn test_frozen_lockfile_mismatch_fails() {
     assert!(lockfile_path.exists(), "Lockfile should exist");
 
     // Read and validate lockfile
-    let lockfile = read_lockfile(&lockfile_path).unwrap().unwrap();
+    let lockfile = block_on_async(read_lockfile(&lockfile_path))
+        .unwrap()
+        .unwrap();
     let validation_result =
         validate_lockfile_against_config(Some(&lockfile), &features, &lockfile_path);
 
@@ -359,7 +372,9 @@ fn test_lockfile_mismatch_warns_continues() {
     );
 
     let lockfile_path = get_lockfile_path(&config_path);
-    let lockfile = read_lockfile(&lockfile_path).unwrap().unwrap();
+    let lockfile = block_on_async(read_lockfile(&lockfile_path))
+        .unwrap()
+        .unwrap();
 
     // Validate lockfile against config
     let validation_result =
@@ -416,7 +431,9 @@ fn test_frozen_mode_with_valid_lockfile_passes() {
     assert!(lockfile_path.exists(), "Lockfile should exist");
 
     // Read and validate
-    let lockfile = read_lockfile(&lockfile_path).unwrap().unwrap();
+    let lockfile = block_on_async(read_lockfile(&lockfile_path))
+        .unwrap()
+        .unwrap();
     let validation_result =
         validate_lockfile_against_config(Some(&lockfile), &features, &lockfile_path);
 
@@ -457,7 +474,9 @@ fn test_frozen_mode_with_lockfile_features_not_in_config_fails() {
     );
 
     let lockfile_path = get_lockfile_path(&config_path);
-    let lockfile = read_lockfile(&lockfile_path).unwrap().unwrap();
+    let lockfile = block_on_async(read_lockfile(&lockfile_path))
+        .unwrap()
+        .unwrap();
 
     let validation_result =
         validate_lockfile_against_config(Some(&lockfile), &features, &lockfile_path);
@@ -505,7 +524,9 @@ fn test_frozen_mode_with_no_features_passes() {
     assert!(lockfile_path.exists(), "Lockfile should exist");
 
     // Read and validate
-    let lockfile = read_lockfile(&lockfile_path).unwrap().unwrap();
+    let lockfile = block_on_async(read_lockfile(&lockfile_path))
+        .unwrap()
+        .unwrap();
     assert!(
         lockfile.features.is_empty(),
         "Lockfile should have no features"
@@ -766,7 +787,9 @@ fn test_lockfile_validation_multiple_features() {
     );
 
     let lockfile_path = get_lockfile_path(&config_path);
-    let lockfile = read_lockfile(&lockfile_path).unwrap().unwrap();
+    let lockfile = block_on_async(read_lockfile(&lockfile_path))
+        .unwrap()
+        .unwrap();
 
     let validation_result =
         validate_lockfile_against_config(Some(&lockfile), &features, &lockfile_path);
