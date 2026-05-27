@@ -41,7 +41,7 @@ pub struct ConfigLoadResult {
 ///
 /// Secrets from `secrets_files` are threaded into substitution. Errors are surfaced
 /// as `DeaconError::Config` variants to preserve upstream JSON contracts.
-pub fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
+pub async fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
     let workspace_folder = if let Some(folder) = args.workspace_folder {
         folder.to_path_buf()
     } else {
@@ -67,7 +67,7 @@ pub fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
         }
         path.to_path_buf()
     } else {
-        match ConfigLoader::discover_config(&workspace_folder)? {
+        match ConfigLoader::discover_config(&workspace_folder).await? {
             DiscoveryResult::Single(path) => path,
             DiscoveryResult::Multiple(paths) => {
                 let display_paths: Vec<String> = paths
@@ -107,7 +107,8 @@ pub fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
         override_config_path.as_deref(),
         secrets.as_ref(),
         &workspace_folder,
-    )?;
+    )
+    .await?;
 
     Ok(ConfigLoadResult {
         config,
@@ -123,8 +124,8 @@ mod tests {
     use deacon_core::errors::{ConfigError, DeaconError};
     use tempfile::TempDir;
 
-    #[test]
-    fn uses_override_when_base_missing() {
+    #[tokio::test]
+    async fn uses_override_when_base_missing() {
         let temp = TempDir::new().unwrap();
         let override_path = temp.path().join(".devcontainer.json");
         std::fs::write(
@@ -139,14 +140,15 @@ mod tests {
             override_config_path: Some(override_path.as_path()),
             secrets_files: &[],
         })
+        .await
         .unwrap();
 
         assert_eq!(result.config.name.as_deref(), Some("override-only"));
         assert_eq!(result.config_path, override_path);
     }
 
-    #[test]
-    fn surfaces_not_found_error() {
+    #[tokio::test]
+    async fn surfaces_not_found_error() {
         let temp = TempDir::new().unwrap();
 
         let err = load_config(ConfigLoadArgs {
@@ -155,6 +157,7 @@ mod tests {
             override_config_path: None,
             secrets_files: &[],
         })
+        .await
         .unwrap_err();
 
         match err {
@@ -171,8 +174,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn config_path_bypasses_discovery() {
+    #[tokio::test]
+    async fn config_path_bypasses_discovery() {
         // When --config is provided, discover_config() is skipped
         // and the specific path is used directly
         let temp = TempDir::new().unwrap();
@@ -189,6 +192,7 @@ mod tests {
             override_config_path: None,
             secrets_files: &[],
         })
+        .await
         .unwrap();
 
         // The explicitly provided config should be used
@@ -196,8 +200,8 @@ mod tests {
         assert_eq!(result.config_path, config_path);
     }
 
-    #[test]
-    fn config_path_to_named_config_works_with_multiple_named_configs() {
+    #[tokio::test]
+    async fn config_path_to_named_config_works_with_multiple_named_configs() {
         // --config to a specific named config works even when multiple named configs exist
         let temp = TempDir::new().unwrap();
         let workspace = temp.path();
@@ -225,6 +229,7 @@ mod tests {
             override_config_path: None,
             secrets_files: &[],
         })
+        .await
         .unwrap();
 
         // Should use the explicitly specified rust config without error
@@ -232,8 +237,8 @@ mod tests {
         assert_eq!(result.config_path, explicit_config);
     }
 
-    #[test]
-    fn config_path_nonexistent_returns_error() {
+    #[tokio::test]
+    async fn config_path_nonexistent_returns_error() {
         // --config to non-existent file returns appropriate error
         let temp = TempDir::new().unwrap();
         let nonexistent_path = temp.path().join("devcontainer.json");
@@ -245,6 +250,7 @@ mod tests {
             override_config_path: None,
             secrets_files: &[],
         })
+        .await
         .unwrap_err();
 
         // Should return a not-found or io error, not panic

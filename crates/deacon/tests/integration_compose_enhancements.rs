@@ -62,16 +62,17 @@ fn test_compose_security_options_detection() {
     ComposeCommand::warn_security_options_for_compose(&config_without_security);
 }
 
-#[test]
-fn test_multiservice_fixture_loading() {
+#[tokio::test]
+async fn test_multiservice_fixture_loading() {
     // Test loading the multi-service fixture we created
     let fixture_path =
         PathBuf::from("fixtures/config/compose-multiservice/.devcontainer/devcontainer.json");
 
     // Only run if fixture exists (in case tests run in different environments)
     if fixture_path.exists() {
-        let config =
-            ConfigLoader::load_from_path(&fixture_path).expect("Should load multi-service fixture");
+        let config = ConfigLoader::load_from_path(&fixture_path)
+            .await
+            .expect("Should load multi-service fixture");
 
         assert!(config.uses_compose());
         assert_eq!(config.service.as_ref().unwrap(), "app");

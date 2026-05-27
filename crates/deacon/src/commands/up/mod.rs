@@ -196,7 +196,8 @@ pub(crate) async fn execute_up_with_runtime(
         config_path: args.config_path.as_deref(),
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
-    })?;
+    })
+    .await?;
 
     debug!("Loaded configuration: {:?}", config.name);
 

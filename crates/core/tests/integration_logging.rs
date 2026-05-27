@@ -9,8 +9,8 @@ use deacon_core::{config::ConfigLoader, logging};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
-#[test]
-fn test_debug_logging_from_config_loader() {
+#[tokio::test]
+async fn test_debug_logging_from_config_loader() {
     // Initialize logging with debug level
     let _ = logging::init(Some("debug"));
 
@@ -29,7 +29,7 @@ fn test_debug_logging_from_config_loader() {
         .expect("Should write config content");
 
     // Load the configuration - this should trigger debug logs about unknown keys
-    let result = ConfigLoader::load_from_path(temp_file.path());
+    let result = ConfigLoader::load_from_path(temp_file.path()).await;
     assert!(result.is_ok());
 
     // We can't easily capture the debug output in unit tests, but we can

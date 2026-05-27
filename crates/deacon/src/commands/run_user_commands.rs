@@ -59,7 +59,8 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
         config_path: args.config_path.as_deref(),
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
-    })?;
+    })
+    .await?;
 
     debug!("Loaded configuration with overrides and secrets support");
 

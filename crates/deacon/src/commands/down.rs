@@ -58,10 +58,10 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
 
     // Try to load configuration
     let config_result = if let Some(config_path) = args.config_path.as_ref() {
-        ConfigLoader::load_from_path(config_path)
+        ConfigLoader::load_from_path(config_path).await
     } else {
-        match ConfigLoader::discover_config(workspace_folder)? {
-            DiscoveryResult::Single(path) => ConfigLoader::load_from_path(&path),
+        match ConfigLoader::discover_config(workspace_folder).await? {
+            DiscoveryResult::Single(path) => ConfigLoader::load_from_path(&path).await,
             DiscoveryResult::Multiple(paths) => {
                 let display_paths: Vec<String> = paths
                     .iter()

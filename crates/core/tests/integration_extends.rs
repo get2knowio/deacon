@@ -20,8 +20,8 @@ fn create_config_file(dir: &TempDir, path: &str, content: &str) -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_simple_extends() -> Result<()> {
+#[tokio::test]
+async fn test_simple_extends() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create base configuration
@@ -53,7 +53,7 @@ fn test_simple_extends() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("app/devcontainer.json");
-    let merged_config = ConfigLoader::load_with_extends(&config_path)?;
+    let merged_config = ConfigLoader::load_with_extends(&config_path).await?;
 
     // Check merged values
     assert_eq!(merged_config.name, Some("App Container".to_string())); // Override
@@ -78,8 +78,8 @@ fn test_simple_extends() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_multi_level_extends() -> Result<()> {
+#[tokio::test]
+async fn test_multi_level_extends() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create base configuration
@@ -126,7 +126,7 @@ fn test_multi_level_extends() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("app/devcontainer.json");
-    let merged_config = ConfigLoader::load_with_extends(&config_path)?;
+    let merged_config = ConfigLoader::load_with_extends(&config_path).await?;
 
     // Check merged values (app overrides middle overrides base)
     assert_eq!(merged_config.name, Some("App Container".to_string()));
@@ -155,8 +155,8 @@ fn test_multi_level_extends() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_multiple_extends_array() -> Result<()> {
+#[tokio::test]
+async fn test_multiple_extends_array() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create first base configuration
@@ -202,7 +202,7 @@ fn test_multiple_extends_array() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("app/devcontainer.json");
-    let merged_config = ConfigLoader::load_with_extends(&config_path)?;
+    let merged_config = ConfigLoader::load_with_extends(&config_path).await?;
 
     // Check merged values (app overrides base2 overrides base1)
     assert_eq!(merged_config.name, Some("App Container".to_string()));
@@ -231,8 +231,8 @@ fn test_multiple_extends_array() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_cycle_detection() -> Result<()> {
+#[tokio::test]
+async fn test_cycle_detection() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create configuration A that extends B
@@ -266,7 +266,7 @@ fn test_cycle_detection() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("a/devcontainer.json");
-    let result = ConfigLoader::load_with_extends(&config_path);
+    let result = ConfigLoader::load_with_extends(&config_path).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -279,8 +279,8 @@ fn test_cycle_detection() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_features_merge() -> Result<()> {
+#[tokio::test]
+async fn test_features_merge() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create base configuration with features
@@ -316,7 +316,7 @@ fn test_features_merge() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("app/devcontainer.json");
-    let merged_config = ConfigLoader::load_with_extends(&config_path)?;
+    let merged_config = ConfigLoader::load_with_extends(&config_path).await?;
 
     // Features should deep merge
     let features = &merged_config.features;
@@ -339,8 +339,8 @@ fn test_features_merge() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_lifecycle_commands_override() -> Result<()> {
+#[tokio::test]
+async fn test_lifecycle_commands_override() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create base configuration with lifecycle commands
@@ -365,7 +365,7 @@ fn test_lifecycle_commands_override() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("app/devcontainer.json");
-    let merged_config = ConfigLoader::load_with_extends(&config_path)?;
+    let merged_config = ConfigLoader::load_with_extends(&config_path).await?;
 
     // Lifecycle commands should override (not merge)
     assert_eq!(
@@ -384,8 +384,8 @@ fn test_lifecycle_commands_override() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_oci_reference_not_implemented() -> Result<()> {
+#[tokio::test]
+async fn test_oci_reference_not_implemented() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create configuration with OCI reference
@@ -399,7 +399,7 @@ fn test_oci_reference_not_implemented() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("app/devcontainer.json");
-    let result = ConfigLoader::load_with_extends(&config_path);
+    let result = ConfigLoader::load_with_extends(&config_path).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {

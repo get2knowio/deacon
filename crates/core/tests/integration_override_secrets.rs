@@ -64,7 +64,8 @@ UNUSED_SECRET=ignored-value
         Some(&override_config_path),
         Some(&secrets),
         temp_dir.path(),
-    )?;
+    )
+    .await?;
 
     // Verify override config took precedence
     assert_eq!(config.name, Some("override-container".to_string()));

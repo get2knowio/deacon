@@ -19,8 +19,8 @@ fn create_config_file(dir: &TempDir, path: &str, content: &str) -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_enhanced_merge_with_metadata() -> Result<()> {
+#[tokio::test]
+async fn test_enhanced_merge_with_metadata() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create base configuration
@@ -52,7 +52,7 @@ fn test_enhanced_merge_with_metadata() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("app/devcontainer.json");
-    let merged_result = ConfigLoader::load_with_extends_and_metadata(&config_path, true)?;
+    let merged_result = ConfigLoader::load_with_extends_and_metadata(&config_path, true).await?;
 
     // Check the merged configuration
     assert_eq!(merged_result.config.name, Some("App Container".to_string()));
@@ -91,8 +91,8 @@ fn test_enhanced_merge_with_metadata() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_enhanced_merge_without_metadata() -> Result<()> {
+#[tokio::test]
+async fn test_enhanced_merge_without_metadata() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create base configuration
@@ -116,7 +116,7 @@ fn test_enhanced_merge_without_metadata() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("app/devcontainer.json");
-    let merged_result = ConfigLoader::load_with_extends_and_metadata(&config_path, false)?;
+    let merged_result = ConfigLoader::load_with_extends_and_metadata(&config_path, false).await?;
 
     // Check the merged configuration
     assert_eq!(merged_result.config.name, Some("App Container".to_string()));
@@ -128,8 +128,8 @@ fn test_enhanced_merge_without_metadata() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_serialization_with_metadata() -> Result<()> {
+#[tokio::test]
+async fn test_serialization_with_metadata() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create configuration
@@ -146,7 +146,7 @@ fn test_serialization_with_metadata() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("devcontainer.json");
-    let merged_result = ConfigLoader::load_with_extends_and_metadata(&config_path, true)?;
+    let merged_result = ConfigLoader::load_with_extends_and_metadata(&config_path, true).await?;
 
     // Serialize to JSON
     let json_output = serde_json::to_string_pretty(&merged_result)?;
@@ -166,8 +166,8 @@ fn test_serialization_with_metadata() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_multi_level_extends_with_metadata() -> Result<()> {
+#[tokio::test]
+async fn test_multi_level_extends_with_metadata() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
     // Create base configuration
@@ -210,7 +210,7 @@ fn test_multi_level_extends_with_metadata() -> Result<()> {
     )?;
 
     let config_path = temp_dir.path().join("app/devcontainer.json");
-    let merged_result = ConfigLoader::load_with_extends_and_metadata(&config_path, true)?;
+    let merged_result = ConfigLoader::load_with_extends_and_metadata(&config_path, true).await?;
 
     // Check the merged configuration
     assert_eq!(merged_result.config.name, Some("App Container".to_string()));

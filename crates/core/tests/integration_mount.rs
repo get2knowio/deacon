@@ -260,8 +260,8 @@ fn test_mount_types_and_consistency() {
     );
 }
 
-#[test]
-fn test_mount_from_fixture_config() {
+#[tokio::test]
+async fn test_mount_from_fixture_config() {
     // Test loading and parsing mounts from actual fixture files
     let fixture_path = Path::new("../../fixtures/config/basic/devcontainer.jsonc");
 
@@ -274,7 +274,7 @@ fn test_mount_from_fixture_config() {
         return;
     }
 
-    let config = ConfigLoader::load_from_path(fixture_path).unwrap();
+    let config = ConfigLoader::load_from_path(fixture_path).await.unwrap();
 
     // Verify mount from fixture is parsed correctly
     assert_eq!(config.mounts.len(), 1);
@@ -292,8 +292,8 @@ fn test_mount_from_fixture_config() {
     assert_eq!(mount.consistency, Some(MountConsistency::Cached));
 }
 
-#[test]
-fn test_mount_with_variables_fixture() {
+#[tokio::test]
+async fn test_mount_with_variables_fixture() {
     // Test mount parsing with variable substitution from fixtures
     let fixture_path = Path::new("../../fixtures/config/with-variables/devcontainer.jsonc");
 
@@ -309,7 +309,7 @@ fn test_mount_with_variables_fixture() {
     let workspace_dir = TempDir::new().unwrap();
     let workspace_path = workspace_dir.path();
 
-    let config = ConfigLoader::load_from_path(fixture_path).unwrap();
+    let config = ConfigLoader::load_from_path(fixture_path).await.unwrap();
 
     // Apply variable substitution
     let context = SubstitutionContext::new(workspace_path).unwrap();

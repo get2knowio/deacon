@@ -103,12 +103,12 @@ async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
     // Load configuration
     let (config, substitution_report) = if let Some(config_path) = args.config_path.as_ref() {
         // For specified config, still apply overrides and substitution
-        let base_config = ConfigLoader::load_from_path(config_path)?;
+        let base_config = ConfigLoader::load_from_path(config_path).await?;
         let mut configs = vec![base_config];
 
         // Add override config if provided
         if let Some(override_path) = args.override_config_path.as_ref() {
-            let override_config = ConfigLoader::load_from_path(override_path)?;
+            let override_config = ConfigLoader::load_from_path(override_path).await?;
             configs.push(override_config);
         }
 
@@ -141,7 +141,7 @@ async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
         (substituted_config, report)
     } else {
         // Discover configuration
-        let config_path = match ConfigLoader::discover_config(workspace_folder)? {
+        let config_path = match ConfigLoader::discover_config(workspace_folder).await? {
             DiscoveryResult::Single(path) => path,
             DiscoveryResult::Multiple(paths) => {
                 let display_paths: Vec<String> = paths
@@ -167,12 +167,12 @@ async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
         };
 
         // For discovered config, still apply overrides and substitution
-        let base_config = ConfigLoader::load_from_path(&config_path)?;
+        let base_config = ConfigLoader::load_from_path(&config_path).await?;
         let mut configs = vec![base_config];
 
         // Add override config if provided
         if let Some(override_path) = args.override_config_path.as_ref() {
-            let override_config = ConfigLoader::load_from_path(override_path)?;
+            let override_config = ConfigLoader::load_from_path(override_path).await?;
             configs.push(override_config);
         }
 

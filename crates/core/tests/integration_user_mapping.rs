@@ -9,8 +9,8 @@ use deacon_core::user_mapping::{UserInfo, UserMappingConfig};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
-#[test]
-fn test_user_mapping_config_parsing() -> anyhow::Result<()> {
+#[tokio::test]
+async fn test_user_mapping_config_parsing() -> anyhow::Result<()> {
     let config_content = r#"{
         "name": "User Mapping Test",
         "image": "alpine:3.19",
@@ -23,7 +23,7 @@ fn test_user_mapping_config_parsing() -> anyhow::Result<()> {
     let mut temp_file = NamedTempFile::new()?;
     temp_file.write_all(config_content.as_bytes())?;
 
-    let config = ConfigLoader::load_from_path(temp_file.path())?;
+    let config = ConfigLoader::load_from_path(temp_file.path()).await?;
 
     assert_eq!(config.name, Some("User Mapping Test".to_string()));
     assert_eq!(config.image, Some("alpine:3.19".to_string()));
@@ -83,8 +83,8 @@ fn test_devcontainer_config_user_fields_default() {
     assert_eq!(config.update_remote_user_uid, None);
 }
 
-#[test]
-fn test_config_with_minimal_user_mapping() -> anyhow::Result<()> {
+#[tokio::test]
+async fn test_config_with_minimal_user_mapping() -> anyhow::Result<()> {
     let config_content = r#"{
         "name": "Minimal User Test",
         "image": "ubuntu:20.04",
@@ -94,7 +94,7 @@ fn test_config_with_minimal_user_mapping() -> anyhow::Result<()> {
     let mut temp_file = NamedTempFile::new()?;
     temp_file.write_all(config_content.as_bytes())?;
 
-    let config = ConfigLoader::load_from_path(temp_file.path())?;
+    let config = ConfigLoader::load_from_path(temp_file.path()).await?;
 
     assert_eq!(config.name, Some("Minimal User Test".to_string()));
     assert_eq!(config.remote_user, Some("vscode".to_string()));

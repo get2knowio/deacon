@@ -150,7 +150,7 @@ pub async fn execute_set_up(args: SetUpArgs) -> Result<()> {
     );
 
     // Phase 3: Load the optional --config and the image-metadata config.
-    let base_config = load_optional_config(args.config_path.as_deref())?;
+    let base_config = load_optional_config(args.config_path.as_deref()).await?;
     let metadata_config = extract_image_metadata_config(&container)?;
 
     // Phase 4: Build the merged configuration. Per spec §4 the merge order is
@@ -244,7 +244,7 @@ fn parse_remote_env(entries: &[String]) -> Result<Vec<(String, String)>> {
 /// extends chain is honored (per CLAUDE.md "use `ConfigLoader::load_with_extends`").
 ///
 /// Returns a default `DevContainerConfig` when no path is provided.
-fn load_optional_config(path: Option<&std::path::Path>) -> Result<DevContainerConfig> {
+async fn load_optional_config(path: Option<&std::path::Path>) -> Result<DevContainerConfig> {
     let Some(path) = path else {
         debug!("No --config provided; using empty base configuration");
         return Ok(DevContainerConfig::default());
@@ -258,12 +258,14 @@ fn load_optional_config(path: Option<&std::path::Path>) -> Result<DevContainerCo
     }
 
     use deacon_core::config::ConfigLoader;
-    let resolved = ConfigLoader::load_with_extends(path).with_context(|| {
-        format!(
-            "Failed to load devcontainer config from '{}'",
-            path.display()
-        )
-    })?;
+    let resolved = ConfigLoader::load_with_extends(path)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to load devcontainer config from '{}'",
+                path.display()
+            )
+        })?;
     Ok(resolved)
 }
 
@@ -751,17 +753,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn load_optional_config_returns_default_when_none() {
-        let cfg = load_optional_config(None).unwrap();
+    #[tokio::test]
+    async fn load_optional_config_returns_default_when_none() {
+        let cfg = load_optional_config(None).await.unwrap();
         assert!(cfg.name.is_none());
         assert!(cfg.image.is_none());
     }
 
-    #[test]
-    fn load_optional_config_errors_on_missing_path() {
+    #[tokio::test]
+    async fn load_optional_config_errors_on_missing_path() {
         let bogus = std::path::Path::new("/tmp/definitely-does-not-exist/devcontainer.json");
-        let err = load_optional_config(Some(bogus)).unwrap_err();
+        let err = load_optional_config(Some(bogus)).await.unwrap_err();
         // Spec §9: "Dev container config (<path>) not found."
         assert!(err.to_string().contains("Dev container config"));
         assert!(err.to_string().contains("not found"));

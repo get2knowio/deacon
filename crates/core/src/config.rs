@@ -1602,19 +1602,25 @@ fn check_config_file(dir: &Path) -> Option<PathBuf> {
 /// # Errors
 ///
 /// Returns `ConfigError::Io` if `read_dir` or `file_type` fails.
-fn enumerate_named_configs(devcontainer_dir: &Path) -> Result<Vec<PathBuf>> {
+async fn enumerate_named_configs(devcontainer_dir: &Path) -> Result<Vec<PathBuf>> {
     if !devcontainer_dir.exists() {
         return Ok(Vec::new());
     }
 
-    let entries =
-        std::fs::read_dir(devcontainer_dir).map_err(|e| DeaconError::Config(ConfigError::Io(e)))?;
+    let mut entries = tokio::fs::read_dir(devcontainer_dir)
+        .await
+        .map_err(|e| DeaconError::Config(ConfigError::Io(e)))?;
 
     let mut subdirs: Vec<(String, PathBuf)> = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| DeaconError::Config(ConfigError::Io(e)))?;
+    loop {
+        let entry = entries
+            .next_entry()
+            .await
+            .map_err(|e| DeaconError::Config(ConfigError::Io(e)))?;
+        let Some(entry) = entry else { break };
         let file_type = entry
             .file_type()
+            .await
             .map_err(|e| DeaconError::Config(ConfigError::Io(e)))?;
         if !file_type.is_dir() {
             continue;
@@ -1643,8 +1649,8 @@ fn enumerate_named_configs(devcontainer_dir: &Path) -> Result<Vec<PathBuf>> {
 /// use deacon_core::config::ConfigLoader;
 /// use std::path::Path;
 ///
-/// # fn example() -> anyhow::Result<()> {
-/// let config = ConfigLoader::load_from_path(Path::new("devcontainer.jsonc"))?;
+/// # async fn example() -> anyhow::Result<()> {
+/// let config = ConfigLoader::load_from_path(Path::new("devcontainer.jsonc")).await?;
 /// println!("Loaded configuration: {}", config.name.unwrap_or_default());
 /// # Ok(())
 /// # }
@@ -1686,9 +1692,9 @@ impl ConfigLoader {
     /// use deacon_core::config::ConfigLoader;
     /// use std::path::Path;
     ///
-    /// # fn example() -> anyhow::Result<()> {
+    /// # async fn example() -> anyhow::Result<()> {
     /// use deacon_core::config::DiscoveryResult;
-    /// match ConfigLoader::discover_config(Path::new("/workspace"))? {
+    /// match ConfigLoader::discover_config(Path::new("/workspace")).await? {
     ///     DiscoveryResult::Single(path) => println!("Found config at: {}", path.display()),
     ///     DiscoveryResult::Multiple(paths) => println!("Multiple configs found: {}", paths.len()),
     ///     DiscoveryResult::None(default) => println!("No config found, default: {}", default.display()),
@@ -1697,7 +1703,7 @@ impl ConfigLoader {
     /// # }
     /// ```
     #[instrument(skip_all, fields(workspace = %workspace.display()))]
-    pub fn discover_config(workspace: &Path) -> Result<DiscoveryResult> {
+    pub async fn discover_config(workspace: &Path) -> Result<DiscoveryResult> {
         debug!(
             "Discovering DevContainer configuration in workspace: {}",
             workspace.display()
@@ -1736,7 +1742,7 @@ impl ConfigLoader {
             "Checking priority 3: named configs in {}",
             devcontainer_dir.display()
         );
-        let named_configs = enumerate_named_configs(&devcontainer_dir)?;
+        let named_configs = enumerate_named_configs(&devcontainer_dir).await?;
         match named_configs.len() {
             0 => {
                 let default_path = devcontainer_dir.join("devcontainer.json");
@@ -1806,8 +1812,8 @@ impl ConfigLoader {
     /// use deacon_core::config::ConfigLoader;
     /// use std::path::Path;
     ///
-    /// # fn example() -> anyhow::Result<()> {
-    /// let config = ConfigLoader::load_from_path(Path::new(".devcontainer/devcontainer.json"))?;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let config = ConfigLoader::load_from_path(Path::new(".devcontainer/devcontainer.json")).await?;
     /// if let Some(name) = &config.name {
     ///     println!("Container name: {}", name);
     /// }
@@ -1815,7 +1821,7 @@ impl ConfigLoader {
     /// # }
     /// ```
     #[instrument(skip_all, fields(path = %path.display()))]
-    pub fn load_from_path(path: &Path) -> Result<DevContainerConfig> {
+    pub async fn load_from_path(path: &Path) -> Result<DevContainerConfig> {
         debug!("Loading DevContainer configuration from {}", path.display());
 
         // Check if file exists
@@ -1826,7 +1832,7 @@ impl ConfigLoader {
         }
 
         // Read file content
-        let content = std::fs::read_to_string(path).map_err(|e| {
+        let content = tokio::fs::read_to_string(path).await.map_err(|e| {
             debug!("Failed to read configuration file: {}", e);
             DeaconError::Config(ConfigError::Io(e))
         })?;
@@ -1889,21 +1895,21 @@ impl ConfigLoader {
     /// use deacon_core::config::ConfigLoader;
     /// use std::path::Path;
     ///
-    /// # fn example() -> anyhow::Result<()> {
-    /// let config = ConfigLoader::load_with_extends(Path::new(".devcontainer/devcontainer.json"))?;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let config = ConfigLoader::load_with_extends(Path::new(".devcontainer/devcontainer.json")).await?;
     /// println!("Loaded merged config: {:?}", config.name);
     /// # Ok(())
     /// # }
     /// ```
     #[instrument(skip_all, fields(path = %path.display()))]
-    pub fn load_with_extends(path: &Path) -> Result<DevContainerConfig> {
+    pub async fn load_with_extends(path: &Path) -> Result<DevContainerConfig> {
         debug!(
             "Loading configuration with extends resolution from {}",
             path.display()
         );
 
         let mut visited = HashSet::new();
-        let configs = Self::resolve_extends_chain(path, &mut visited)?;
+        let configs = Self::resolve_extends_chain(path, &mut visited).await?;
 
         debug!(
             "Resolved extends chain with {} configurations",
@@ -1931,106 +1937,111 @@ impl ConfigLoader {
     ///
     /// Returns a vector of configurations in merge order (base first, overlay last).
     #[instrument(skip_all, fields(path = %config_path.display()))]
-    fn resolve_extends_chain(
-        config_path: &Path,
-        visited: &mut HashSet<PathBuf>,
-    ) -> Result<Vec<DevContainerConfig>> {
-        let canonical_path = config_path.canonicalize().map_err(|e| {
-            debug!(
-                "Failed to canonicalize path {}: {}",
-                config_path.display(),
-                e
-            );
-            DeaconError::Config(ConfigError::NotFound {
-                path: config_path.display().to_string(),
-            })
-        })?;
-
-        // Guard against pathologically deep chains (independent of cycle detection,
-        // which can't catch a long but acyclic chain).
-        if visited.len() >= MAX_EXTENDS_DEPTH {
-            let chain = visited
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            let depth_chain = format!("{} -> {}", chain, canonical_path.display());
-            return Err(DeaconError::Config(ConfigError::ExtendsTooDeep {
-                max: MAX_EXTENDS_DEPTH,
-                chain: depth_chain,
-            }));
-        }
-
-        // Check for cycles
-        if visited.contains(&canonical_path) {
-            let chain = visited
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            let cycle_chain = format!("{} -> {}", chain, canonical_path.display());
-
-            return Err(DeaconError::Config(ConfigError::ExtendsCycle {
-                chain: cycle_chain,
-            }));
-        }
-
-        visited.insert(canonical_path.clone());
-
-        // Load the current configuration
-        let config = Self::load_from_path(&canonical_path)?;
-
-        let mut all_configs = Vec::new();
-
-        // Recursively resolve extends
-        if let Some(extends_paths) = &config.extends {
-            debug!("Resolving {} extends paths", extends_paths.len());
-
-            for extend_path in extends_paths {
-                // Check for OCI references (not yet implemented)
-                if extend_path.contains("://")
-                    || extend_path.starts_with("ghcr.io/")
-                    || extend_path.starts_with("mcr.microsoft.com/")
-                {
-                    warn!(
-                        "OCI extends reference detected but not yet implemented: {}",
-                        extend_path
-                    );
-                    return Err(DeaconError::Config(ConfigError::NotImplemented {
-                        feature: format!("OCI extends reference: {}", extend_path),
-                    }));
-                }
-
-                // Resolve relative path
-                let base_dir = canonical_path.parent().unwrap_or(&canonical_path);
-                let resolved_path = base_dir.join(extend_path);
-
+    fn resolve_extends_chain<'a>(
+        config_path: &'a Path,
+        visited: &'a mut HashSet<PathBuf>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<DevContainerConfig>>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let canonical_path = config_path.canonicalize().map_err(|e| {
                 debug!(
-                    "Resolving extends path: {} -> {}",
-                    extend_path,
-                    resolved_path.display()
+                    "Failed to canonicalize path {}: {}",
+                    config_path.display(),
+                    e
                 );
+                DeaconError::Config(ConfigError::NotFound {
+                    path: config_path.display().to_string(),
+                })
+            })?;
 
-                // Recursively resolve the extended configuration
-                let mut extended_configs = Self::resolve_extends_chain(&resolved_path, visited)?;
-                all_configs.append(&mut extended_configs);
+            // Guard against pathologically deep chains (independent of cycle detection,
+            // which can't catch a long but acyclic chain).
+            if visited.len() >= MAX_EXTENDS_DEPTH {
+                let chain = visited
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" -> ");
+                let depth_chain = format!("{} -> {}", chain, canonical_path.display());
+                return Err(DeaconError::Config(ConfigError::ExtendsTooDeep {
+                    max: MAX_EXTENDS_DEPTH,
+                    chain: depth_chain,
+                }));
             }
-        }
 
-        // Add the current config last (highest precedence)
-        let mut config_without_extends = config.clone();
-        config_without_extends.extends = None; // Remove extends from final config
-        all_configs.push(config_without_extends);
+            // Check for cycles
+            if visited.contains(&canonical_path) {
+                let chain = visited
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" -> ");
+                let cycle_chain = format!("{} -> {}", chain, canonical_path.display());
 
-        visited.remove(&canonical_path);
+                return Err(DeaconError::Config(ConfigError::ExtendsCycle {
+                    chain: cycle_chain,
+                }));
+            }
 
-        debug!(
-            "Resolved extends chain for {}: {} total configs",
-            canonical_path.display(),
-            all_configs.len()
-        );
+            visited.insert(canonical_path.clone());
 
-        Ok(all_configs)
+            // Load the current configuration
+            let config = Self::load_from_path(&canonical_path).await?;
+
+            let mut all_configs = Vec::new();
+
+            // Recursively resolve extends
+            if let Some(extends_paths) = &config.extends {
+                debug!("Resolving {} extends paths", extends_paths.len());
+
+                for extend_path in extends_paths {
+                    // Check for OCI references (not yet implemented)
+                    if extend_path.contains("://")
+                        || extend_path.starts_with("ghcr.io/")
+                        || extend_path.starts_with("mcr.microsoft.com/")
+                    {
+                        warn!(
+                            "OCI extends reference detected but not yet implemented: {}",
+                            extend_path
+                        );
+                        return Err(DeaconError::Config(ConfigError::NotImplemented {
+                            feature: format!("OCI extends reference: {}", extend_path),
+                        }));
+                    }
+
+                    // Resolve relative path
+                    let base_dir = canonical_path.parent().unwrap_or(&canonical_path);
+                    let resolved_path = base_dir.join(extend_path);
+
+                    debug!(
+                        "Resolving extends path: {} -> {}",
+                        extend_path,
+                        resolved_path.display()
+                    );
+
+                    // Recursively resolve the extended configuration
+                    let mut extended_configs =
+                        Self::resolve_extends_chain(&resolved_path, visited).await?;
+                    all_configs.append(&mut extended_configs);
+                }
+            }
+
+            // Add the current config last (highest precedence)
+            let mut config_without_extends = config.clone();
+            config_without_extends.extends = None; // Remove extends from final config
+            all_configs.push(config_without_extends);
+
+            visited.remove(&canonical_path);
+
+            debug!(
+                "Resolved extends chain for {}: {} total configs",
+                canonical_path.display(),
+                all_configs.len()
+            );
+
+            Ok(all_configs)
+        })
     }
 
     /// Load configuration with extends resolution and metadata tracking
@@ -2047,7 +2058,7 @@ impl ConfigLoader {
     ///
     /// Returns the merged configuration with optional metadata about the layers.
     #[instrument(skip_all, fields(path = %path.display()))]
-    pub fn load_with_extends_and_metadata(
+    pub async fn load_with_extends_and_metadata(
         path: &Path,
         include_metadata: bool,
     ) -> Result<crate::config::merge::MergedDevContainerConfig> {
@@ -2057,7 +2068,7 @@ impl ConfigLoader {
         );
 
         let mut visited = HashSet::new();
-        let configs_with_paths = Self::resolve_extends_chain_with_paths(path, &mut visited)?;
+        let configs_with_paths = Self::resolve_extends_chain_with_paths(path, &mut visited).await?;
 
         debug!(
             "Resolved extends chain with {} configurations",
@@ -2090,108 +2101,117 @@ impl ConfigLoader {
     /// ## Returns
     ///
     /// Returns a vector of configurations with their source paths in merge order (base first, overlay last).
+    #[allow(clippy::type_complexity)]
     #[instrument(skip_all, fields(path = %config_path.display()))]
-    fn resolve_extends_chain_with_paths(
-        config_path: &Path,
-        visited: &mut HashSet<PathBuf>,
-    ) -> Result<Vec<(DevContainerConfig, PathBuf)>> {
-        let canonical_path = config_path.canonicalize().map_err(|e| {
-            debug!(
-                "Failed to canonicalize path {}: {}",
-                config_path.display(),
-                e
-            );
-            DeaconError::Config(ConfigError::NotFound {
-                path: config_path.display().to_string(),
-            })
-        })?;
-
-        // Guard against pathologically deep chains (independent of cycle detection,
-        // which can't catch a long but acyclic chain).
-        if visited.len() >= MAX_EXTENDS_DEPTH {
-            let chain = visited
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            let depth_chain = format!("{} -> {}", chain, canonical_path.display());
-            return Err(DeaconError::Config(ConfigError::ExtendsTooDeep {
-                max: MAX_EXTENDS_DEPTH,
-                chain: depth_chain,
-            }));
-        }
-
-        // Check for cycles
-        if visited.contains(&canonical_path) {
-            let chain = visited
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            let cycle_chain = format!("{} -> {}", chain, canonical_path.display());
-
-            return Err(DeaconError::Config(ConfigError::ExtendsCycle {
-                chain: cycle_chain,
-            }));
-        }
-
-        visited.insert(canonical_path.clone());
-
-        // Load the current configuration
-        let config = Self::load_from_path(&canonical_path)?;
-
-        let mut all_configs = Vec::new();
-
-        // Recursively resolve extends
-        if let Some(extends_paths) = &config.extends {
-            debug!("Resolving {} extends paths", extends_paths.len());
-
-            for extend_path in extends_paths {
-                // Check for OCI references (not yet implemented)
-                if extend_path.contains("://")
-                    || extend_path.starts_with("ghcr.io/")
-                    || extend_path.starts_with("mcr.microsoft.com/")
-                {
-                    warn!(
-                        "OCI extends reference detected but not yet implemented: {}",
-                        extend_path
-                    );
-                    return Err(DeaconError::Config(ConfigError::NotImplemented {
-                        feature: format!("OCI extends reference: {}", extend_path),
-                    }));
-                }
-
-                // Resolve relative path
-                let base_dir = canonical_path.parent().unwrap_or(&canonical_path);
-                let resolved_path = base_dir.join(extend_path);
-
+    fn resolve_extends_chain_with_paths<'a>(
+        config_path: &'a Path,
+        visited: &'a mut HashSet<PathBuf>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<(DevContainerConfig, PathBuf)>>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let canonical_path = config_path.canonicalize().map_err(|e| {
                 debug!(
-                    "Resolving extends path: {} -> {}",
-                    extend_path,
-                    resolved_path.display()
+                    "Failed to canonicalize path {}: {}",
+                    config_path.display(),
+                    e
                 );
+                DeaconError::Config(ConfigError::NotFound {
+                    path: config_path.display().to_string(),
+                })
+            })?;
 
-                // Recursively resolve the extended configuration
-                let mut extended_configs =
-                    Self::resolve_extends_chain_with_paths(&resolved_path, visited)?;
-                all_configs.append(&mut extended_configs);
+            // Guard against pathologically deep chains (independent of cycle detection,
+            // which can't catch a long but acyclic chain).
+            if visited.len() >= MAX_EXTENDS_DEPTH {
+                let chain = visited
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" -> ");
+                let depth_chain = format!("{} -> {}", chain, canonical_path.display());
+                return Err(DeaconError::Config(ConfigError::ExtendsTooDeep {
+                    max: MAX_EXTENDS_DEPTH,
+                    chain: depth_chain,
+                }));
             }
-        }
 
-        // Add the current config last (highest precedence)
-        let mut config_without_extends = config.clone();
-        config_without_extends.extends = None; // Remove extends from final config
-        all_configs.push((config_without_extends, canonical_path.clone()));
+            // Check for cycles
+            if visited.contains(&canonical_path) {
+                let chain = visited
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" -> ");
+                let cycle_chain = format!("{} -> {}", chain, canonical_path.display());
 
-        visited.remove(&canonical_path);
+                return Err(DeaconError::Config(ConfigError::ExtendsCycle {
+                    chain: cycle_chain,
+                }));
+            }
 
-        debug!(
-            "Resolved extends chain for {}: {} total configs",
-            canonical_path.display(),
-            all_configs.len()
-        );
+            visited.insert(canonical_path.clone());
 
-        Ok(all_configs)
+            // Load the current configuration
+            let config = Self::load_from_path(&canonical_path).await?;
+
+            let mut all_configs = Vec::new();
+
+            // Recursively resolve extends
+            if let Some(extends_paths) = &config.extends {
+                debug!("Resolving {} extends paths", extends_paths.len());
+
+                for extend_path in extends_paths {
+                    // Check for OCI references (not yet implemented)
+                    if extend_path.contains("://")
+                        || extend_path.starts_with("ghcr.io/")
+                        || extend_path.starts_with("mcr.microsoft.com/")
+                    {
+                        warn!(
+                            "OCI extends reference detected but not yet implemented: {}",
+                            extend_path
+                        );
+                        return Err(DeaconError::Config(ConfigError::NotImplemented {
+                            feature: format!("OCI extends reference: {}", extend_path),
+                        }));
+                    }
+
+                    // Resolve relative path
+                    let base_dir = canonical_path.parent().unwrap_or(&canonical_path);
+                    let resolved_path = base_dir.join(extend_path);
+
+                    debug!(
+                        "Resolving extends path: {} -> {}",
+                        extend_path,
+                        resolved_path.display()
+                    );
+
+                    // Recursively resolve the extended configuration
+                    let mut extended_configs =
+                        Self::resolve_extends_chain_with_paths(&resolved_path, visited).await?;
+                    all_configs.append(&mut extended_configs);
+                }
+            }
+
+            // Add the current config last (highest precedence)
+            let mut config_without_extends = config.clone();
+            config_without_extends.extends = None; // Remove extends from final config
+            all_configs.push((config_without_extends, canonical_path.clone()));
+
+            visited.remove(&canonical_path);
+
+            debug!(
+                "Resolved extends chain for {}: {} total configs",
+                canonical_path.display(),
+                all_configs.len()
+            );
+
+            Ok(all_configs)
+        })
     }
 
     /// Enhanced load with overrides, substitution, and metadata tracking
@@ -2212,7 +2232,7 @@ impl ConfigLoader {
     ///
     /// Returns the merged configuration with optional metadata and substitution report.
     #[instrument(skip_all, fields(path = %path.display(), override_path = ?override_config_path.as_ref().map(|p| p.display())))]
-    pub fn load_with_full_resolution(
+    pub async fn load_with_full_resolution(
         path: &Path,
         override_config_path: Option<&Path>,
         secrets: Option<&crate::secrets::SecretsCollection>,
@@ -2230,7 +2250,7 @@ impl ConfigLoader {
         // Load base config with extends resolution and path tracking
         let mut configs_with_paths = {
             let mut visited = HashSet::new();
-            Self::resolve_extends_chain_with_paths(path, &mut visited)?
+            Self::resolve_extends_chain_with_paths(path, &mut visited).await?
         };
 
         // Add override config if provided
@@ -2239,7 +2259,7 @@ impl ConfigLoader {
                 "Loading override configuration from {}",
                 override_path.display()
             );
-            let override_config = Self::load_from_path(override_path)?;
+            let override_config = Self::load_from_path(override_path).await?;
             configs_with_paths.push((override_config, override_path.to_path_buf()));
         }
 
@@ -2300,7 +2320,7 @@ impl ConfigLoader {
     ///
     /// Returns the merged and substituted configuration with substitution report.
     #[instrument(skip_all, fields(path = %path.display(), override_path = ?override_config_path.as_ref().map(|p| p.display())))]
-    pub fn load_with_overrides_and_substitution(
+    pub async fn load_with_overrides_and_substitution(
         path: &Path,
         override_config_path: Option<&Path>,
         secrets: Option<&crate::secrets::SecretsCollection>,
@@ -2314,7 +2334,7 @@ impl ConfigLoader {
         // Load base config with extends resolution
         let mut configs = {
             let mut visited = HashSet::new();
-            Self::resolve_extends_chain(path, &mut visited)?
+            Self::resolve_extends_chain(path, &mut visited).await?
         };
 
         // Add override config if provided
@@ -2323,7 +2343,7 @@ impl ConfigLoader {
                 "Loading override configuration from {}",
                 override_path.display()
             );
-            let override_config = Self::load_from_path(override_path)?;
+            let override_config = Self::load_from_path(override_path).await?;
             configs.push(override_config);
         }
 
@@ -2375,18 +2395,18 @@ impl ConfigLoader {
     /// use deacon_core::config::ConfigLoader;
     /// use std::path::Path;
     ///
-    /// # fn example() -> anyhow::Result<()> {
+    /// # async fn example() -> anyhow::Result<()> {
     /// let (config, report) = ConfigLoader::load_with_substitution(
     ///     Path::new(".devcontainer/devcontainer.json"),
     ///     Path::new("/workspace")
-    /// )?;
+    /// ).await?;
     ///
     /// println!("Loaded config with {} substitutions", report.replacements.len());
     /// # Ok(())
     /// # }
     /// ```
     #[instrument(skip_all, fields(path = %path.display(), workspace = %workspace.display()))]
-    pub fn load_with_substitution(
+    pub async fn load_with_substitution(
         path: &Path,
         workspace: &Path,
     ) -> Result<(DevContainerConfig, SubstitutionReport)> {
@@ -2396,7 +2416,7 @@ impl ConfigLoader {
         );
 
         // Load base configuration
-        let config = Self::load_from_path(path)?;
+        let config = Self::load_from_path(path).await?;
 
         // Create substitution context
         let context = SubstitutionContext::new(workspace)?;
@@ -2582,8 +2602,8 @@ mod tests {
         assert!(config.customizations.is_object());
     }
 
-    #[test]
-    fn test_load_valid_config_with_comments() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_load_valid_config_with_comments() -> anyhow::Result<()> {
         let config_content = r#"{
             // This is a comment
             "name": "Test Container",
@@ -2606,7 +2626,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
 
         assert_eq!(config.name, Some("Test Container".to_string()));
         assert_eq!(config.image, Some("ubuntu:20.04".to_string()));
@@ -2621,9 +2641,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_load_file_not_found() {
-        let result = ConfigLoader::load_from_path(Path::new("nonexistent.json"));
+    #[tokio::test]
+    async fn test_load_file_not_found() {
+        let result = ConfigLoader::load_from_path(Path::new("nonexistent.json")).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::NotFound { path }) => {
@@ -2633,8 +2653,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_load_invalid_json() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_load_invalid_json() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test",
             "invalid": json syntax
@@ -2643,7 +2663,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let result = ConfigLoader::load_from_path(temp_file.path());
+        let result = ConfigLoader::load_from_path(temp_file.path()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Parsing { message }) => {
@@ -2659,8 +2679,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_validation_both_image_and_dockerfile() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_validation_both_image_and_dockerfile() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test",
             "image": "ubuntu:20.04",
@@ -2670,7 +2690,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let result = ConfigLoader::load_from_path(temp_file.path());
+        let result = ConfigLoader::load_from_path(temp_file.path()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -2682,8 +2702,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_validation_invalid_shutdown_action() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_validation_invalid_shutdown_action() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test",
             "image": "ubuntu:20.04",
@@ -2693,7 +2713,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let result = ConfigLoader::load_from_path(temp_file.path());
+        let result = ConfigLoader::load_from_path(temp_file.path()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -2705,8 +2725,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_extends_field_parsing() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_extends_field_parsing() -> anyhow::Result<()> {
         // Test string extends
         let config_content = r#"{
             "name": "Test",
@@ -2716,7 +2736,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let result = ConfigLoader::load_from_path(temp_file.path());
+        let result = ConfigLoader::load_from_path(temp_file.path()).await;
         assert!(result.is_ok());
         let config = result.unwrap();
         assert_eq!(
@@ -2733,7 +2753,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let result = ConfigLoader::load_from_path(temp_file.path());
+        let result = ConfigLoader::load_from_path(temp_file.path()).await;
         assert!(result.is_ok());
         let config = result.unwrap();
         assert_eq!(
@@ -2749,15 +2769,15 @@ mod tests {
 
     /// BEAD-15-T01: circular extends (A -> B -> A) returns an error including
     /// the cycle path, without hanging.
-    #[test]
-    fn test_extends_chain_cycle_two_files() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_extends_chain_cycle_two_files() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
         let a = dir.path().join("a.json");
         let b = dir.path().join("b.json");
         std::fs::write(&a, r#"{ "name": "A", "extends": "b.json" }"#)?;
         std::fs::write(&b, r#"{ "name": "B", "extends": "a.json" }"#)?;
 
-        let err = ConfigLoader::load_with_extends(&a).unwrap_err();
+        let err = ConfigLoader::load_with_extends(&a).await.unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("Cycle detected"),
@@ -2779,13 +2799,13 @@ mod tests {
     }
 
     /// BEAD-15-T02: self-referencing extends (A -> A) returns a cycle error.
-    #[test]
-    fn test_extends_chain_self_cycle() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_extends_chain_self_cycle() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
         let a = dir.path().join("a.json");
         std::fs::write(&a, r#"{ "name": "A", "extends": "a.json" }"#)?;
 
-        let err = ConfigLoader::load_with_extends(&a).unwrap_err();
+        let err = ConfigLoader::load_with_extends(&a).await.unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("Cycle detected"),
@@ -2797,8 +2817,8 @@ mod tests {
     }
 
     /// BEAD-15-T03: deep non-circular chain under the limit loads successfully.
-    #[test]
-    fn test_extends_chain_deep_under_limit_succeeds() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_extends_chain_deep_under_limit_succeeds() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
         let depth = 20usize;
         for i in 0..depth {
@@ -2812,15 +2832,15 @@ mod tests {
         }
 
         let top = dir.path().join("c0.json");
-        let config = ConfigLoader::load_with_extends(&top)?;
+        let config = ConfigLoader::load_with_extends(&top).await?;
         // Innermost extends has highest precedence, so the leaf (c19) wins for "name".
         assert_eq!(config.name, Some("c0".to_string()));
         Ok(())
     }
 
     /// BEAD-15-T04: chain exceeding the max-depth limit returns ExtendsTooDeep.
-    #[test]
-    fn test_extends_chain_too_deep_errors() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_extends_chain_too_deep_errors() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
         let depth = MAX_EXTENDS_DEPTH + 1;
         for i in 0..depth {
@@ -2834,7 +2854,7 @@ mod tests {
         }
 
         let top = dir.path().join("c0.json");
-        let err = ConfigLoader::load_with_extends(&top).unwrap_err();
+        let err = ConfigLoader::load_with_extends(&top).await.unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("too deep"),
@@ -2851,8 +2871,8 @@ mod tests {
     }
 
     /// BEAD-15-T05: cycle error message includes the file that caused the cycle.
-    #[test]
-    fn test_extends_chain_cycle_message_names_offender() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_extends_chain_cycle_message_names_offender() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
         let a = dir.path().join("a.json");
         let b = dir.path().join("b.json");
@@ -2862,7 +2882,7 @@ mod tests {
         // c re-extends b to close the cycle
         std::fs::write(&c, r#"{ "name": "C", "extends": "b.json" }"#)?;
 
-        let err = ConfigLoader::load_with_extends(&a).unwrap_err();
+        let err = ConfigLoader::load_with_extends(&a).await.unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("b.json"),
@@ -2872,8 +2892,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_unknown_keys_logged() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_unknown_keys_logged() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test",
             "image": "ubuntu:20.04",
@@ -2885,15 +2905,15 @@ mod tests {
         temp_file.write_all(config_content.as_bytes())?;
 
         // This should succeed despite unknown keys
-        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
         assert_eq!(config.name, Some("Test".to_string()));
         assert_eq!(config.image, Some("ubuntu:20.04".to_string()));
 
         Ok(())
     }
 
-    #[test]
-    fn test_empty_arrays_and_objects_default() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_empty_arrays_and_objects_default() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test",
             "image": "ubuntu:20.04"
@@ -2902,7 +2922,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
 
         // Arrays should default to empty
         assert_eq!(config.mounts.len(), 0);
@@ -2920,8 +2940,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_devcontainer_dir() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_devcontainer_dir() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
         let devcontainer_dir = workspace.join(".devcontainer");
@@ -2930,27 +2950,27 @@ mod tests {
         let config_path = devcontainer_dir.join("devcontainer.json");
         std::fs::write(&config_path, r#"{"name": "Test"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         assert_eq!(result, DiscoveryResult::Single(config_path));
 
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_root_file() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_root_file() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
         let config_path = workspace.join(".devcontainer.json");
         std::fs::write(&config_path, r#"{"name": "Test"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         assert_eq!(result, DiscoveryResult::Single(config_path));
 
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_preference_order() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_preference_order() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
         let devcontainer_dir = workspace.join(".devcontainer");
@@ -2962,19 +2982,19 @@ mod tests {
         std::fs::write(&dir_config_path, r#"{"name": "Dir Config"}"#)?;
         std::fs::write(&root_config_path, r#"{"name": "Root Config"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         // Should prefer .devcontainer/devcontainer.json
         assert_eq!(result, DiscoveryResult::Single(dir_config_path));
 
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_no_file_exists() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_no_file_exists() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         // Should return None with the preferred default path
         let expected_default = workspace.join(".devcontainer").join("devcontainer.json");
         assert_eq!(result, DiscoveryResult::None(expected_default));
@@ -2982,9 +3002,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_workspace_not_exists() {
-        let result = ConfigLoader::discover_config(Path::new("/nonexistent/workspace"));
+    #[tokio::test]
+    async fn test_discover_config_workspace_not_exists() {
+        let result = ConfigLoader::discover_config(Path::new("/nonexistent/workspace")).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::NotFound { path }) => {
@@ -2996,8 +3016,8 @@ mod tests {
 
     // --- T007: Single named config ---
 
-    #[test]
-    fn test_discover_config_single_named_config() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_single_named_config() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
         let python_dir = workspace.join(".devcontainer").join("python");
@@ -3005,7 +3025,7 @@ mod tests {
         let config_path = python_dir.join("devcontainer.json");
         std::fs::write(&config_path, r#"{"name": "Python"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         assert_eq!(result, DiscoveryResult::Single(config_path));
 
         Ok(())
@@ -3013,8 +3033,8 @@ mod tests {
 
     // --- T008: JSONC support tests ---
 
-    #[test]
-    fn test_discover_config_jsonc_priority1() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_jsonc_priority1() -> anyhow::Result<()> {
         // .devcontainer/devcontainer.jsonc found at priority 1
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3023,14 +3043,14 @@ mod tests {
         let config_path = devcontainer_dir.join("devcontainer.jsonc");
         std::fs::write(&config_path, r#"{"name": "JSONC Test"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         assert_eq!(result, DiscoveryResult::Single(config_path));
 
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_json_preferred_over_jsonc() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_json_preferred_over_jsonc() -> anyhow::Result<()> {
         // When both .json and .jsonc exist in same dir, .json wins
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3041,15 +3061,15 @@ mod tests {
         std::fs::write(&json_path, r#"{"name": "JSON"}"#)?;
         std::fs::write(&jsonc_path, r#"{"name": "JSONC"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         // .json should be preferred over .jsonc
         assert_eq!(result, DiscoveryResult::Single(json_path));
 
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_jsonc_named() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_jsonc_named() -> anyhow::Result<()> {
         // Named config with only .jsonc is discovered
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3058,7 +3078,7 @@ mod tests {
         let config_path = rust_dir.join("devcontainer.jsonc");
         std::fs::write(&config_path, r#"{"name": "Rust JSONC"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         assert_eq!(result, DiscoveryResult::Single(config_path));
 
         Ok(())
@@ -3066,8 +3086,8 @@ mod tests {
 
     // --- T009: Short-circuit behavior tests ---
 
-    #[test]
-    fn test_discover_config_priority1_overrides_named() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_priority1_overrides_named() -> anyhow::Result<()> {
         // .devcontainer/devcontainer.json exists alongside .devcontainer/python/devcontainer.json
         // → returns priority 1 path (short-circuit)
         let temp_dir = TempDir::new()?;
@@ -3082,14 +3102,14 @@ mod tests {
         std::fs::write(&priority1_path, r#"{"name": "Priority 1"}"#)?;
         std::fs::write(&named_path, r#"{"name": "Named"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         assert_eq!(result, DiscoveryResult::Single(priority1_path));
 
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_priority2_overrides_named() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_priority2_overrides_named() -> anyhow::Result<()> {
         // .devcontainer.json exists alongside named configs → returns priority 2 path
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3101,7 +3121,7 @@ mod tests {
         std::fs::write(&priority2_path, r#"{"name": "Priority 2"}"#)?;
         std::fs::write(&named_path, r#"{"name": "Named"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         assert_eq!(result, DiscoveryResult::Single(priority2_path));
 
         Ok(())
@@ -3109,8 +3129,8 @@ mod tests {
 
     // --- T010: Edge case tests ---
 
-    #[test]
-    fn test_discover_config_skip_non_dir_entries() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_skip_non_dir_entries() -> anyhow::Result<()> {
         // Files in .devcontainer/ alongside named subdirs are ignored
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3124,14 +3144,14 @@ mod tests {
         let config_path = python_dir.join("devcontainer.json");
         std::fs::write(&config_path, r#"{"name": "Python"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         assert_eq!(result, DiscoveryResult::Single(config_path));
 
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_deep_nesting_ignored() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_deep_nesting_ignored() -> anyhow::Result<()> {
         // .devcontainer/a/b/devcontainer.json NOT found (one level only)
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3141,7 +3161,7 @@ mod tests {
         // Also create the parent subdir 'a' but without a config file
         // → .devcontainer/a/ exists but has no devcontainer.json directly
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         // .devcontainer/a/ has no devcontainer.json, so it's skipped
         // Nested .devcontainer/a/b/devcontainer.json is NOT found
         let expected_default = workspace.join(".devcontainer").join("devcontainer.json");
@@ -3150,8 +3170,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_empty_devcontainer_dir() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_empty_devcontainer_dir() -> anyhow::Result<()> {
         // .devcontainer/ exists but has no subdirs with configs → returns None
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3159,15 +3179,15 @@ mod tests {
         std::fs::create_dir_all(&devcontainer_dir)?;
         // Empty directory — no subdirs, no files
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         let expected_default = devcontainer_dir.join("devcontainer.json");
         assert_eq!(result, DiscoveryResult::None(expected_default));
 
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_subdir_without_config_skipped() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_subdir_without_config_skipped() -> anyhow::Result<()> {
         // Subdir exists but has no devcontainer.json → skipped
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3175,7 +3195,7 @@ mod tests {
         std::fs::create_dir_all(&empty_subdir)?;
         // No devcontainer.json in empty_subdir
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         let expected_default = workspace.join(".devcontainer").join("devcontainer.json");
         assert_eq!(result, DiscoveryResult::None(expected_default));
 
@@ -3184,8 +3204,8 @@ mod tests {
 
     // --- T015: Multiple configs tests ---
 
-    #[test]
-    fn test_discover_config_multiple_named_configs() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_multiple_named_configs() -> anyhow::Result<()> {
         // Two+ named subdirs with configs → returns DiscoveryResult::Multiple
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3199,7 +3219,7 @@ mod tests {
         std::fs::write(&node_config, r#"{"name": "Node"}"#)?;
         std::fs::write(&python_config, r#"{"name": "Python"}"#)?;
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         // Should be Multiple with both paths
         assert!(
             matches!(&result, DiscoveryResult::Multiple(paths) if paths.len() == 2),
@@ -3210,8 +3230,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_discover_config_multiple_sorted_alphabetically() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_discover_config_multiple_sorted_alphabetically() -> anyhow::Result<()> {
         // Verify paths in Multiple are sorted by subdirectory name
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
@@ -3225,7 +3245,7 @@ mod tests {
             )?;
         }
 
-        let result = ConfigLoader::discover_config(workspace)?;
+        let result = ConfigLoader::discover_config(workspace).await?;
         if let DiscoveryResult::Multiple(paths) = result {
             assert_eq!(paths.len(), 3);
             // Sorted alphabetically: node, python, rust
@@ -3264,8 +3284,8 @@ mod tests {
         assert!(lines.len() >= 4); // header + 3 paths
     }
 
-    #[test]
-    fn test_load_with_substitution() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_load_with_substitution() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
         // Use canonical path for comparisons to avoid platform-specific symlink prefixes
@@ -3290,7 +3310,8 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let (config, report) = ConfigLoader::load_with_substitution(temp_file.path(), workspace)?;
+        let (config, report) =
+            ConfigLoader::load_with_substitution(temp_file.path(), workspace).await?;
 
         // Check that substitution was applied
         assert!(report.has_substitutions());
@@ -3416,8 +3437,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_config_with_ports_and_attributes() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_config_with_ports_and_attributes() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test Container",
             "image": "node:18",
@@ -3443,7 +3464,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
 
         assert_eq!(config.name, Some("Test Container".to_string()));
         assert_eq!(config.forward_ports.len(), 2);
@@ -3475,8 +3496,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_port_validation_valid_references() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_port_validation_valid_references() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test Container",
             "image": "node:18",
@@ -3493,17 +3514,17 @@ mod tests {
         temp_file.write_all(config_content.as_bytes())?;
 
         // This should not fail validation
-        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
         assert_eq!(config.ports_attributes.len(), 3);
 
         Ok(())
     }
 
-    #[test]
-    fn test_port_validation_with_string_ports() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_port_validation_with_string_ports() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test Container",
-            "image": "node:18", 
+            "image": "node:18",
             "forwardPorts": ["3000:3000", "8080"],
             "portsAttributes": {
                 "3000:3000": { "label": "Web" },
@@ -3514,14 +3535,14 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
         assert_eq!(config.ports_attributes.len(), 2);
 
         Ok(())
     }
 
-    #[test]
-    fn test_port_validation_missing_references() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_port_validation_missing_references() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test Container",
             "image": "node:18",
@@ -3536,7 +3557,7 @@ mod tests {
         temp_file.write_all(config_content.as_bytes())?;
 
         // This should load but log warnings about missing port 8080
-        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
         assert_eq!(config.ports_attributes.len(), 2);
 
         Ok(())
@@ -3554,8 +3575,8 @@ mod tests {
         assert_eq!(config.update_remote_user_uid, None);
     }
 
-    #[test]
-    fn test_config_with_user_mapping_fields() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_config_with_user_mapping_fields() -> anyhow::Result<()> {
         let config_content = r#"{
             "name": "Test Container with User Mapping",
             "image": "ubuntu:20.04",
@@ -3567,7 +3588,7 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(config_content.as_bytes())?;
 
-        let config = ConfigLoader::load_from_path(temp_file.path())?;
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
 
         assert_eq!(
             config.name,
@@ -3608,12 +3629,12 @@ mod tests {
         assert_eq!(merged.update_remote_user_uid, Some(true)); // From overlay
     }
 
-    #[test]
-    fn test_load_root_is_array() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_load_root_is_array() -> anyhow::Result<()> {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(b"[]")?;
 
-        let result = ConfigLoader::load_from_path(temp_file.path());
+        let result = ConfigLoader::load_from_path(temp_file.path()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -3630,12 +3651,12 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_load_root_is_null() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_load_root_is_null() -> anyhow::Result<()> {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(b"null")?;
 
-        let result = ConfigLoader::load_from_path(temp_file.path());
+        let result = ConfigLoader::load_from_path(temp_file.path()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -3652,12 +3673,12 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_load_root_is_number() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_load_root_is_number() -> anyhow::Result<()> {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(b"123")?;
 
-        let result = ConfigLoader::load_from_path(temp_file.path());
+        let result = ConfigLoader::load_from_path(temp_file.path()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -3674,12 +3695,12 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_load_root_is_string() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_load_root_is_string() -> anyhow::Result<()> {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(br#""hello""#)?;
 
-        let result = ConfigLoader::load_from_path(temp_file.path());
+        let result = ConfigLoader::load_from_path(temp_file.path()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
