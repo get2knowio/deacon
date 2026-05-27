@@ -1021,7 +1021,16 @@ impl Cli {
                 format!("deacon={},deacon_core={}", log_level, log_level),
             );
         }
-        deacon_core::logging::init(log_format)?;
+        // Create redaction configuration from CLI flags so it can be threaded into the
+        // logging initializer below. The redaction layer needs to be wired up at init
+        // time — otherwise registered secrets can still leak into tracing output.
+        let redaction_config = if self.no_redact {
+            deacon_core::redaction::RedactionConfig::disabled()
+        } else {
+            deacon_core::redaction::RedactionConfig::default()
+        };
+
+        deacon_core::logging::init_with_redaction(log_format, Some(redaction_config.clone()))?;
 
         // Emit logs to help with testing and log-level verification
         tracing::debug!("CLI initialized with log level: {}", log_level);
@@ -1031,13 +1040,6 @@ impl Cli {
         if self.no_redact {
             tracing::warn!("Secret redaction is DISABLED via --no-redact flag. This may expose sensitive information in logs and output. Use only for debugging purposes!");
         }
-
-        // Create redaction configuration from CLI flags
-        let redaction_config = if self.no_redact {
-            deacon_core::redaction::RedactionConfig::disabled()
-        } else {
-            deacon_core::redaction::RedactionConfig::default()
-        };
 
         // Get global secret registry
         let secret_registry = deacon_core::redaction::global_registry();

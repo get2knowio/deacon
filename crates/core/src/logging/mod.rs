@@ -8,8 +8,12 @@
 
 use crate::redaction::RedactionConfig;
 use anyhow::Result;
-use std::{io, sync::Once};
+use std::sync::Once;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+pub mod redaction_layer;
+
+use self::redaction_layer::RedactingMakeWriter;
 
 static INIT: Once = Once::new();
 
@@ -66,7 +70,7 @@ pub fn init_with_redaction(
     format: Option<&str>,
     redaction_config: Option<RedactionConfig>,
 ) -> Result<()> {
-    let _redaction_config = redaction_config.unwrap_or_default();
+    let redaction_config = redaction_config.unwrap_or_default();
     INIT.call_once(|| {
         let filter = create_env_filter(None);
 
@@ -79,6 +83,12 @@ pub fn init_with_redaction(
         // - json: NEW | CLOSE (preserve observability for tests/tools)
         let span_events = span_events_for_format(effective_format);
 
+        // The redacting writer wraps stderr so the formatter's serialized output is
+        // scanned for registered secrets before any bytes leave the process. This is
+        // ordered after the env-filter (filter drops events first → no wasted scan)
+        // and around the formatter (so we redact what the formatter produced).
+        let writer = RedactingMakeWriter::new(redaction_config);
+
         match effective_format {
             "json" => {
                 tracing_subscriber::registry()
@@ -87,7 +97,7 @@ pub fn init_with_redaction(
                             .json()
                             .with_target(true)
                             .with_span_events(span_events)
-                            .with_writer(io::stderr),
+                            .with_writer(writer),
                     )
                     .with(filter)
                     .init();
@@ -99,7 +109,7 @@ pub fn init_with_redaction(
                         fmt::layer()
                             .with_target(true)
                             .with_span_events(span_events)
-                            .with_writer(io::stderr),
+                            .with_writer(writer),
                     )
                     .with(filter)
                     .init();
@@ -240,5 +250,99 @@ mod tests {
 
         // Test that JSON format initialization works
         assert!(init(Some("json")).is_ok());
+    }
+
+    /// Registered secrets must not survive the tracing formatter pipeline.
+    ///
+    /// We can't reuse `init_with_redaction` here (it installs a process-global subscriber
+    /// behind `Once`), so this test builds an equivalent fmt subscriber whose writer is
+    /// a `RedactingWriter` over an in-memory buffer. The redaction config carries a
+    /// scoped registry that holds "hunter2hunter2" — the secret value of the synthetic
+    /// log event — and the buffer is asserted not to contain the literal secret.
+    #[test]
+    fn test_redaction_layer_strips_registered_secret() {
+        use crate::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
+        use std::io::Write;
+        use std::sync::{Arc, Mutex as StdMutex};
+        use tracing::Level;
+        use tracing_subscriber::fmt::MakeWriter;
+
+        // Buffer shared between every write the fmt layer makes.
+        let buffer: Arc<StdMutex<Vec<u8>>> = Arc::new(StdMutex::new(Vec::new()));
+
+        // Local registry so the assertion is hermetic with respect to the global one.
+        let registry = SecretRegistry::new();
+        registry.add_secret("hunter2hunter2");
+        let config = RedactionConfig::with_custom_registry(registry.clone());
+
+        struct TestMakeWriter {
+            buffer: Arc<StdMutex<Vec<u8>>>,
+            config: RedactionConfig,
+            registry: SecretRegistry,
+        }
+
+        struct TestWriter {
+            buffer: Arc<StdMutex<Vec<u8>>>,
+            config: RedactionConfig,
+            registry: SecretRegistry,
+        }
+
+        impl Write for TestWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let mut sink: Vec<u8> = Vec::new();
+                let mut redactor =
+                    RedactingWriter::new(&mut sink, self.config.clone(), &self.registry);
+                redactor.write_all(buf)?;
+                redactor.flush()?;
+                drop(redactor);
+                self.buffer
+                    .lock()
+                    .expect("buffer mutex poisoned")
+                    .extend_from_slice(&sink);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        impl<'a> MakeWriter<'a> for TestMakeWriter {
+            type Writer = TestWriter;
+
+            fn make_writer(&'a self) -> Self::Writer {
+                TestWriter {
+                    buffer: Arc::clone(&self.buffer),
+                    config: self.config.clone(),
+                    registry: self.registry.clone(),
+                }
+            }
+        }
+
+        let make_writer = TestMakeWriter {
+            buffer: Arc::clone(&buffer),
+            config: config.clone(),
+            registry: registry.clone(),
+        };
+
+        let subscriber = tracing_subscriber::registry()
+            .with(EnvFilter::new("trace"))
+            .with(fmt::layer().with_target(true).with_writer(make_writer));
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::event!(Level::INFO, message = "my password is hunter2hunter2");
+        });
+
+        let captured = String::from_utf8(buffer.lock().expect("buffer mutex poisoned").clone())
+            .expect("captured output must be utf-8");
+
+        assert!(
+            !captured.contains("hunter2hunter2"),
+            "secret leaked into formatted output: {captured:?}"
+        );
+        assert!(
+            captured.contains("****"),
+            "redaction placeholder missing from output: {captured:?}"
+        );
     }
 }
