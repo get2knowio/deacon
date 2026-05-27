@@ -937,7 +937,6 @@ impl ProgressEmitter for StdoutEmitter {
     /// # Examples
     ///
     /// ```
-    /// use anyhow::Result;
     /// use deacon_core::progress::{StdoutEmitter, ProgressEvent, ProgressEmitter};
     /// let mut emitter = StdoutEmitter;
     /// let event = ProgressEvent::BuildBegin {
@@ -946,8 +945,7 @@ impl ProgressEmitter for StdoutEmitter {
     ///     context: "ctx".into(),
     ///     dockerfile: None,
     /// };
-    /// let res: Result<()> = emitter.emit(&event);
-    /// assert!(res.is_ok());
+    /// assert!(emitter.emit(&event).is_ok());
     /// ```
     fn emit(&mut self, event: &ProgressEvent) -> Result<()> {
         let line = serde_json::to_string(event)?;
