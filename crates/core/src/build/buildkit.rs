@@ -11,6 +11,7 @@
 //! ```no_run
 //! use deacon_core::build::buildkit::{BuildKitOptions, require_buildkit_for_options};
 //!
+//! # async fn run() -> Result<(), deacon_core::errors::DeaconError> {
 //! let options = BuildKitOptions {
 //!     cache_from: vec!["type=registry,ref=myregistry.io/cache:latest".to_string()],
 //!     cache_to: vec![],
@@ -18,12 +19,13 @@
 //! };
 //!
 //! // This will fail with a clear error if BuildKit is not available
-//! require_buildkit_for_options(&options)?;
-//! # Ok::<(), deacon_core::errors::DeaconError>(())
+//! require_buildkit_for_options(&options).await?;
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::errors::Result;
-use std::process::Command;
+use tokio::process::Command;
 use tracing::{debug, instrument};
 
 /// Detects if BuildKit is available on the host.
@@ -36,10 +38,13 @@ use tracing::{debug, instrument};
 /// * `Ok(false)` - BuildKit is not available
 /// * `Err(_)` - Failed to detect BuildKit (should be treated as unavailable)
 #[instrument]
-pub fn is_buildkit_available() -> Result<bool> {
+pub async fn is_buildkit_available() -> Result<bool> {
     debug!("Checking BuildKit availability");
 
-    let output = Command::new("docker").args(["buildx", "version"]).output();
+    let output = Command::new("docker")
+        .args(["buildx", "version"])
+        .output()
+        .await;
 
     match output {
         Ok(output) => {
@@ -64,8 +69,8 @@ pub fn is_buildkit_available() -> Result<bool> {
 ///
 /// Returns a validation error with a spec-compliant message if BuildKit is not available.
 #[instrument]
-pub fn require_buildkit(operation: &str) -> Result<()> {
-    if !is_buildkit_available()? {
+pub async fn require_buildkit(operation: &str) -> Result<()> {
+    if !is_buildkit_available().await? {
         return Err(crate::errors::DeaconError::Runtime(format!(
             "BuildKit is required for {}. Enable BuildKit or remove {} flag.",
             operation, operation
@@ -188,6 +193,7 @@ impl BuildKitOptions {
 /// ```no_run
 /// use deacon_core::build::buildkit::{BuildKitOptions, require_buildkit_for_options};
 ///
+/// # async fn run() -> Result<(), deacon_core::errors::DeaconError> {
 /// let options = BuildKitOptions {
 ///     cache_from: vec!["type=registry,ref=cache".to_string()],
 ///     cache_to: vec!["type=local,dest=/tmp".to_string()],
@@ -196,11 +202,12 @@ impl BuildKitOptions {
 ///
 /// // Will fail if BuildKit is not available, with message like:
 /// // "BuildKit is required for --cache-from, --cache-to, --builder. Enable BuildKit or remove these flags."
-/// require_buildkit_for_options(&options)?;
-/// # Ok::<(), deacon_core::errors::DeaconError>(())
+/// require_buildkit_for_options(&options).await?;
+/// # Ok(())
+/// # }
 /// ```
 #[instrument(skip(options), fields(requires_buildkit = options.requires_buildkit()))]
-pub fn require_buildkit_for_options(options: &BuildKitOptions) -> Result<()> {
+pub async fn require_buildkit_for_options(options: &BuildKitOptions) -> Result<()> {
     // If no options require BuildKit, validation passes immediately
     if !options.requires_buildkit() {
         debug!("No BuildKit-requiring options present, skipping availability check");
@@ -208,7 +215,7 @@ pub fn require_buildkit_for_options(options: &BuildKitOptions) -> Result<()> {
     }
 
     // Check BuildKit availability
-    if !is_buildkit_available()? {
+    if !is_buildkit_available().await? {
         let required_options = options.buildkit_required_options();
         let options_list = required_options.join(", ");
 
@@ -226,11 +233,11 @@ pub fn require_buildkit_for_options(options: &BuildKitOptions) -> Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_is_buildkit_available() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_is_buildkit_available() {
         // This test will pass regardless of BuildKit availability
         // The function should not panic
-        let _ = is_buildkit_available();
+        let _ = is_buildkit_available().await;
     }
 
     // ==========================================================================
@@ -326,13 +333,13 @@ mod tests {
     // require_buildkit_for_options tests
     // ==========================================================================
 
-    #[test]
-    fn require_buildkit_for_options_passes_when_empty() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn require_buildkit_for_options_passes_when_empty() {
         let options = BuildKitOptions::default();
 
         // Should always pass when no BuildKit-requiring options are set
         // (does not even check BuildKit availability)
-        let result = require_buildkit_for_options(&options);
+        let result = require_buildkit_for_options(&options).await;
         assert!(result.is_ok());
     }
 

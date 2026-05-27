@@ -273,7 +273,8 @@ impl BuildSecret {
     pub async fn read_value(&self) -> Result<String> {
         match &self.source {
             BuildSecretSource::File(path) => {
-                let value = std::fs::read_to_string(path)
+                let value = tokio::fs::read_to_string(path)
+                    .await
                     .with_context(|| format!("Failed to read secret from '{}'", path.display()))?;
                 Ok(value.trim().to_string())
             }
@@ -287,12 +288,13 @@ impl BuildSecret {
                 Ok(value)
             }
             BuildSecretSource::Stdin => {
-                use std::io::{self, BufRead};
-                let stdin = io::stdin();
+                use tokio::io::AsyncBufReadExt;
+                let stdin = tokio::io::stdin();
+                let mut reader = tokio::io::BufReader::new(stdin);
                 let mut line = String::new();
-                stdin
-                    .lock()
+                reader
                     .read_line(&mut line)
+                    .await
                     .context("Failed to read secret from stdin")?;
                 Ok(line.trim().to_string())
             }
@@ -386,12 +388,12 @@ pub struct ContextFile {
 }
 
 /// Helper function to validate BuildKit availability with consistent error handling
-fn validate_buildkit_requirement(
+async fn validate_buildkit_requirement(
     output_format: &OutputFormat,
     feature_name: &str,
     flag_name: &str,
 ) -> Result<()> {
-    match deacon_core::build::buildkit::is_buildkit_available() {
+    match deacon_core::build::buildkit::is_buildkit_available().await {
         Ok(true) => {
             // BuildKit available, proceed
             Ok(())
@@ -500,22 +502,22 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
 
     // Validate BuildKit requirements for --push
     if args.push {
-        validate_buildkit_requirement(&args.output_format, "push", "--push")?;
+        validate_buildkit_requirement(&args.output_format, "push", "--push").await?;
     }
 
     // Validate BuildKit requirements for --output
     if args.output.is_some() {
-        validate_buildkit_requirement(&args.output_format, "output", "--output")?;
+        validate_buildkit_requirement(&args.output_format, "output", "--output").await?;
     }
 
     // Validate BuildKit requirements for --platform
     if args.platform.is_some() {
-        validate_buildkit_requirement(&args.output_format, "platform", "--platform")?;
+        validate_buildkit_requirement(&args.output_format, "platform", "--platform").await?;
     }
 
     // Validate BuildKit requirements for --cache-to
     if !args.cache_to.is_empty() {
-        validate_buildkit_requirement(&args.output_format, "cache-to", "--cache-to")?;
+        validate_buildkit_requirement(&args.output_format, "cache-to", "--cache-to").await?;
     }
 
     // Load configuration using shared helper for consistency with up/exec
@@ -1048,40 +1050,37 @@ async fn check_build_cache(
 ) -> Result<Option<BuildResult>> {
     let cache_file = get_build_cache_path(workspace_folder, config_hash);
 
-    if !cache_file.exists() {
-        debug!("No cache file found at {}", cache_file.display());
-        return Ok(None);
-    }
-
-    // Read and deserialize cache file
-    match std::fs::read_to_string(&cache_file) {
-        Ok(contents) => {
-            match serde_json::from_str::<BuildMetadata>(&contents) {
-                Ok(metadata) => {
-                    // Validate that the image still exists
-                    if is_image_available(&metadata.result.image_id).await? {
-                        debug!("Cache hit for config hash {}", config_hash);
-                        Ok(Some(metadata.result))
-                    } else {
-                        debug!(
-                            "Cached image {} no longer available, invalidating cache",
-                            metadata.result.image_id
-                        );
-                        // Remove invalid cache file
-                        let _ = std::fs::remove_file(&cache_file);
-                        Ok(None)
-                    }
-                }
-                Err(e) => {
-                    debug!("Failed to deserialize cache metadata: {}", e);
-                    // Remove corrupted cache file
-                    let _ = std::fs::remove_file(&cache_file);
-                    Ok(None)
-                }
-            }
+    // Read cache file. NotFound is a normal cache-miss; other errors fall through too.
+    let contents = match tokio::fs::read_to_string(&cache_file).await {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            debug!("No cache file found at {}", cache_file.display());
+            return Ok(None);
         }
         Err(e) => {
             debug!("Failed to read cache file: {}", e);
+            return Ok(None);
+        }
+    };
+
+    match serde_json::from_str::<BuildMetadata>(&contents) {
+        Ok(metadata) => {
+            // Validate that the image still exists
+            if is_image_available(&metadata.result.image_id).await? {
+                debug!("Cache hit for config hash {}", config_hash);
+                Ok(Some(metadata.result))
+            } else {
+                debug!(
+                    "Cached image {} no longer available, invalidating cache",
+                    metadata.result.image_id
+                );
+                let _ = tokio::fs::remove_file(&cache_file).await;
+                Ok(None)
+            }
+        }
+        Err(e) => {
+            debug!("Failed to deserialize cache metadata: {}", e);
+            let _ = tokio::fs::remove_file(&cache_file).await;
             Ok(None)
         }
     }
@@ -1092,7 +1091,7 @@ async fn cache_build_result(result: &BuildResult, workspace_folder: &Path) -> Re
     let cache_dir = get_build_cache_dir(workspace_folder);
 
     // Ensure cache directory exists
-    if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+    if let Err(e) = tokio::fs::create_dir_all(&cache_dir).await {
         debug!("Failed to create cache directory: {}", e);
         return Ok(()); // Don't fail the build if caching fails
     }
@@ -1114,7 +1113,7 @@ async fn cache_build_result(result: &BuildResult, workspace_folder: &Path) -> Re
 
     match serde_json::to_string_pretty(&metadata) {
         Ok(json) => {
-            if let Err(e) = std::fs::write(&cache_file, json) {
+            if let Err(e) = tokio::fs::write(&cache_file, json).await {
                 debug!("Failed to write cache file: {}", e);
             } else {
                 debug!("Cached build result to {}", cache_file.display());
@@ -1283,7 +1282,7 @@ async fn execute_image_reference_build(
 
     // Create a temporary Dockerfile that extends the base image
     let temp_dir = workspace_folder.join(".deacon-temp-build");
-    std::fs::create_dir_all(&temp_dir)?;
+    tokio::fs::create_dir_all(&temp_dir).await?;
 
     // Build Dockerfile content with base image
     let mut dockerfile_content = format!("FROM {}\n\n", image);
@@ -1319,7 +1318,7 @@ async fn execute_image_reference_build(
     // For now, image-reference builds with features are a future enhancement
 
     let dockerfile_path = temp_dir.join("Dockerfile");
-    std::fs::write(&dockerfile_path, dockerfile_content)?;
+    tokio::fs::write(&dockerfile_path, dockerfile_content).await?;
 
     // Create a BuildConfig for this temporary Dockerfile
     let build_config = BuildConfig {
@@ -1337,7 +1336,7 @@ async fn execute_image_reference_build(
         execute_docker_build(&build_config, args, &config_hash, workspace_folder, labels).await;
 
     // Clean up temporary directory
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
     result
 }
@@ -1598,12 +1597,14 @@ async fn execute_docker_build(
                     BuildSecretSource::Env(_) | BuildSecretSource::Stdin => {
                         let temp_file = tempfile::NamedTempFile::new()
                             .context("Failed to create temporary file for build secret")?;
-                        std::fs::write(temp_file.path(), value).with_context(|| {
-                            format!(
-                                "Failed to write build secret '{}' to temporary file",
-                                secret.id
-                            )
-                        })?;
+                        tokio::fs::write(temp_file.path(), value)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "Failed to write build secret '{}' to temporary file",
+                                    secret.id
+                                )
+                            })?;
                         debug!(
                             "Wrote build secret '{}' to temp file: {}",
                             secret.id,

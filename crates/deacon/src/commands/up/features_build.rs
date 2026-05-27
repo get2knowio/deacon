@@ -20,7 +20,6 @@ use deacon_core::lockfile::{Lockfile, LockfileFeature};
 use deacon_core::oci::{default_fetcher, DownloadedFeature, FeatureRef};
 use deacon_core::registry_parser::parse_registry_reference;
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
 
@@ -119,15 +118,14 @@ pub(crate) async fn build_image_with_features(
 
     // Write Dockerfile
     let dockerfile_path = staged.temp_dir.join("Dockerfile.extended");
-    let mut dockerfile_file = std::fs::File::create(&dockerfile_path)?;
-    dockerfile_file.write_all(dockerfile_content.as_bytes())?;
+    tokio::fs::write(&dockerfile_path, dockerfile_content.as_bytes()).await?;
 
     debug!("Generated Dockerfile at {}", dockerfile_path.display());
 
     // Generate image tag
     let extended_image_tag = format!("deacon-devcontainer-features:{}", identity.workspace_hash);
 
-    ensure_buildkit_or_error()?;
+    ensure_buildkit_or_error().await?;
     log_cache_configuration(build_options);
 
     // Build image with BuildKit
@@ -263,8 +261,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     // dir, so we never pollute the workspace). buildx will read it via `-f`
     // regardless of the context directory's location.
     let dockerfile_path = staged.temp_dir.join("Dockerfile.extended");
-    let mut dockerfile_file = std::fs::File::create(&dockerfile_path)?;
-    dockerfile_file.write_all(combined.as_bytes())?;
+    tokio::fs::write(&dockerfile_path, combined.as_bytes()).await?;
     debug!(
         "Wrote merged Dockerfile ({} bytes) at {}",
         combined.len(),
@@ -273,7 +270,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
 
     let extended_image_tag = format!("deacon-devcontainer-features:{}", identity.workspace_hash);
 
-    ensure_buildkit_or_error()?;
+    ensure_buildkit_or_error().await?;
     log_cache_configuration(build_options);
 
     // Build args: hand-rolled here (NOT the generator's defaults) because the
@@ -457,11 +454,11 @@ async fn resolve_and_stage_features(
     // Create temporary directory for features and Dockerfile
     let temp_dir =
         std::env::temp_dir().join(format!("deacon-features-{}", identity.workspace_hash));
-    std::fs::create_dir_all(&temp_dir)?;
+    tokio::fs::create_dir_all(&temp_dir).await?;
 
     // Create features directory structure for BuildKit context
     let features_dir = temp_dir.join("features");
-    std::fs::create_dir_all(&features_dir)?;
+    tokio::fs::create_dir_all(&features_dir).await?;
 
     // Copy features to the BuildKit context directory
     for (level_idx, level) in installation_plan.levels.iter().enumerate() {
@@ -488,7 +485,12 @@ async fn resolve_and_stage_features(
 
             let feature_dir_name = format!("{}_{}", sanitized_id, level_idx);
             let feature_dest = features_dir.join(&feature_dir_name);
-            copy_dir_all(&downloaded.path, &feature_dest)?;
+            let src = downloaded.path.clone();
+            // copy_dir_all is sync std::fs; offload to the blocking pool so we
+            // don't stall the runtime on a recursive file copy.
+            tokio::task::spawn_blocking(move || copy_dir_all(&src, &feature_dest))
+                .await
+                .map_err(|e| DeaconError::Runtime(format!("copy_dir_all join error: {}", e)))??;
         }
     }
 
@@ -578,9 +580,9 @@ fn build_lockfile_from_features(
     Lockfile { features: entries }
 }
 
-fn ensure_buildkit_or_error() -> Result<()> {
+async fn ensure_buildkit_or_error() -> Result<()> {
     use deacon_core::build::buildkit::is_buildkit_available;
-    if !is_buildkit_available()? {
+    if !is_buildkit_available().await? {
         return Err(DeaconError::Runtime(
             "BuildKit is required for feature installation. Please enable BuildKit.".to_string(),
         )

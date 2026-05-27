@@ -149,39 +149,37 @@ impl ContainerEnvironmentProber {
             });
         }
 
-        // Attempt to load cached probe result if available
+        // Attempt to load cached probe result if available. NotFound is a normal
+        // cache-miss; any other read error is logged and we fall back to fresh probe.
         if let Some(folder) = cache_folder {
             let cache_key = format!("{}_{}", container_id, user.unwrap_or("root"));
             let cache_path = folder.join(format!("env_probe_{}.json", cache_key));
-            if cache_path.exists() {
-                match std::fs::read_to_string(&cache_path) {
-                    Ok(contents) => {
-                        match serde_json::from_str::<HashMap<String, String>>(&contents) {
-                            Ok(env_vars) => {
-                                let var_count = env_vars.len();
-                                debug!(cache_path = %cache_path.display(), var_count = var_count, "Loaded cached env probe");
-                                return Ok(ContainerProbeResult {
-                                    env_vars,
-                                    shell_used: "cache".to_string(),
-                                    var_count,
-                                });
-                            }
-                            Err(e) => {
-                                warn!(
-                                    cache_path = %cache_path.display(),
-                                    error = %e,
-                                    "Failed to parse cache file, falling back to fresh probe"
-                                );
-                            }
-                        }
+            match tokio::fs::read_to_string(&cache_path).await {
+                Ok(contents) => match serde_json::from_str::<HashMap<String, String>>(&contents) {
+                    Ok(env_vars) => {
+                        let var_count = env_vars.len();
+                        debug!(cache_path = %cache_path.display(), var_count = var_count, "Loaded cached env probe");
+                        return Ok(ContainerProbeResult {
+                            env_vars,
+                            shell_used: "cache".to_string(),
+                            var_count,
+                        });
                     }
                     Err(e) => {
                         warn!(
                             cache_path = %cache_path.display(),
                             error = %e,
-                            "Failed to read cache file, falling back to fresh probe"
+                            "Failed to parse cache file, falling back to fresh probe"
                         );
                     }
+                },
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    warn!(
+                        cache_path = %cache_path.display(),
+                        error = %e,
+                        "Failed to read cache file, falling back to fresh probe"
+                    );
                 }
             }
         }
@@ -211,7 +209,7 @@ impl ContainerEnvironmentProber {
 
         // Persist cache if requested
         if let Some(folder) = cache_folder {
-            if let Err(e) = std::fs::create_dir_all(folder) {
+            if let Err(e) = tokio::fs::create_dir_all(folder).await {
                 warn!(
                     cache_folder = %folder.display(),
                     error = %e,
@@ -222,7 +220,7 @@ impl ContainerEnvironmentProber {
                 let cache_path = folder.join(format!("env_probe_{}.json", cache_key));
                 match serde_json::to_string(&env_vars) {
                     Ok(contents) => {
-                        if let Err(e) = std::fs::write(&cache_path, &contents) {
+                        if let Err(e) = tokio::fs::write(&cache_path, &contents).await {
                             warn!(
                                 cache_path = %cache_path.display(),
                                 error = %e,
