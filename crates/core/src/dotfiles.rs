@@ -29,6 +29,7 @@
 //!     repository: Some("https://github.com/user/dotfiles".to_string()),
 //!     target_path: Some("/home/user/.dotfiles".to_string()),
 //!     install_command: None,
+//!     ..Default::default()
 //! };
 //!
 //! // Returns Ok(None) if no dotfiles configured (graceful skip)
