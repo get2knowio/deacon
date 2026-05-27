@@ -675,7 +675,7 @@ fn test_e2e_error_handling() {
     ]);
     result
         .assert_failure()
-        .assert_stderr_contains("JSON parsing error");
+        .assert_stderr_contains("JSONC parsing error");
 
     println!("✅ Error handling test completed successfully");
 }
