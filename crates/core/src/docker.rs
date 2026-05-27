@@ -477,16 +477,35 @@ struct TerminalResizeGuard {
 
 #[cfg(unix)]
 impl TerminalResizeGuard {
-    fn apply(size: TerminalSize) -> Option<Self> {
-        let previous_modes = Self::capture_state().ok()?;
-        if let Err(err) = Self::apply_size(size) {
-            debug!("Failed to apply terminal size override: {}", err);
-            return None;
-        }
-
-        Some(Self {
-            previous_modes: Some(previous_modes),
+    /// Capture current stty state and apply a new size. Returns the guard so
+    /// the previous state is restored when it goes out of scope.
+    ///
+    /// `stty` is sync; we offload the two-call sequence to `spawn_blocking` so
+    /// we don't block the runtime threadpool. The `Drop` impl below also calls
+    /// `stty` synchronously; that's acceptable here because by the time the
+    /// guard drops, the parent `exec` has already returned and we're not
+    /// preventing other async work from making progress.
+    async fn apply(size: TerminalSize) -> Option<Self> {
+        let result = tokio::task::spawn_blocking(move || -> std::io::Result<String> {
+            let previous_modes = Self::capture_state()?;
+            Self::apply_size(size)?;
+            Ok(previous_modes)
         })
+        .await;
+
+        match result {
+            Ok(Ok(previous_modes)) => Some(Self {
+                previous_modes: Some(previous_modes),
+            }),
+            Ok(Err(err)) => {
+                debug!("Failed to apply terminal size override: {}", err);
+                None
+            }
+            Err(err) => {
+                debug!("Failed to apply terminal size override (join): {}", err);
+                None
+            }
+        }
     }
 
     fn capture_state() -> std::io::Result<String> {
@@ -1421,7 +1440,10 @@ impl Docker for CliRuntime {
 
         #[cfg(unix)]
         let _terminal_resize_guard = if config.tty {
-            config.terminal_size.and_then(TerminalResizeGuard::apply)
+            match config.terminal_size {
+                Some(size) => TerminalResizeGuard::apply(size).await,
+                None => None,
+            }
         } else {
             None
         };
