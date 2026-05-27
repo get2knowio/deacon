@@ -9,7 +9,7 @@ use bytesize::ByteSize;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
 /// Macro for printing redacted output
@@ -195,8 +195,9 @@ pub async fn run_doctor(
 
     // Create bundle if requested
     if let Some(bundle_path) = bundle_path {
-        create_support_bundle(&doctor_info, &bundle_path, &context).await?;
-        info!("Support bundle created at: {}", bundle_path.display());
+        let bundle_path_clone = bundle_path.clone();
+        create_support_bundle(doctor_info, bundle_path, &context).await?;
+        info!("Support bundle created at: {}", bundle_path_clone.display());
     }
 
     Ok(())
@@ -741,148 +742,167 @@ fn print_text_output_with_redaction(
 }
 
 /// Create a support bundle with diagnostic information and configuration files
+///
+/// The whole bundle build (std::fs::File::create, ZipWriter writes, the
+/// inner config-file reads, ZipWriter::finish) is synchronous; the `zip`
+/// crate has no async surface. We offload the entire block to
+/// `spawn_blocking` so we don't block the runtime threadpool on the
+/// archive write.
 async fn create_support_bundle(
-    doctor_info: &DoctorInfo,
-    bundle_path: &Path,
+    doctor_info: DoctorInfo,
+    bundle_path: PathBuf,
     context: &DoctorContext,
 ) -> Result<()> {
     info!("Creating support bundle at: {}", bundle_path.display());
 
-    use std::io::Write;
+    let workspace_folder: Option<PathBuf> = context.workspace_folder.clone();
 
-    let file = std::fs::File::create(bundle_path).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to create bundle file: {}", e),
-        })
-    })?;
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        use std::io::Write;
 
-    let mut zip = zip::ZipWriter::new(file);
-    let options: zip::write::FileOptions<()> =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-
-    // Add doctor.json to bundle
-    zip.start_file("doctor.json", options).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to add doctor.json to bundle: {}", e),
-        })
-    })?;
-    let doctor_json = serde_json::to_string_pretty(doctor_info).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to serialize doctor info: {}", e),
-        })
-    })?;
-    zip.write_all(doctor_json.as_bytes()).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to write doctor.json: {}", e),
-        })
-    })?;
-
-    // Add sanitized config files if they exist
-    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let base_path = context.workspace_folder.as_ref().unwrap_or(&current_dir);
-
-    for config_file in &doctor_info.config_discovery.config_files_found {
-        let config_path = base_path.join(config_file);
-        if let Ok(content) = fs::read_to_string(&config_path) {
-            let sanitized_content = sanitize_secrets(&content)?;
-            zip.start_file(format!("configs/{}", config_file), options)
-                .map_err(|e| {
-                    DeaconError::Internal(crate::errors::InternalError::Generic {
-                        message: format!("Failed to add config file to bundle: {}", e),
-                    })
-                })?;
-            zip.write_all(sanitized_content.as_bytes()).map_err(|e| {
-                DeaconError::Internal(crate::errors::InternalError::Generic {
-                    message: format!("Failed to write config file: {}", e),
-                })
-            })?;
-        }
-    }
-
-    // Add truncated docker info if available
-    if doctor_info.docker_info.daemon_running {
-        zip.start_file("docker-info-summary.json", options)
-            .map_err(|e| {
-                DeaconError::Internal(crate::errors::InternalError::Generic {
-                    message: format!("Failed to add docker info to bundle: {}", e),
-                })
-            })?;
-        if let Some(summary) = &doctor_info.docker_info.info_summary {
-            let summary_json = serde_json::to_string_pretty(summary).map_err(|e| {
-                DeaconError::Internal(crate::errors::InternalError::Generic {
-                    message: format!("Failed to serialize Docker info summary: {}", e),
-                })
-            })?;
-            zip.write_all(summary_json.as_bytes()).map_err(|e| {
-                DeaconError::Internal(crate::errors::InternalError::Generic {
-                    message: format!("Failed to write docker info: {}", e),
-                })
-            })?;
-        }
-    }
-
-    // Add environment information
-    zip.start_file("environment.json", options).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to add environment info to bundle: {}", e),
-        })
-    })?;
-    let env_json = serde_json::to_string_pretty(&doctor_info.environment).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to serialize environment info: {}", e),
-        })
-    })?;
-    // Apply redaction to environment variables
-    let redacted_env = crate::redaction::redact_if_enabled(
-        &env_json,
-        &crate::redaction::RedactionConfig::default(),
-    );
-    zip.write_all(redacted_env.as_bytes()).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to write environment info: {}", e),
-        })
-    })?;
-
-    // Add runtime configuration
-    zip.start_file("runtime-config.json", options)
-        .map_err(|e| {
+        let file = std::fs::File::create(&bundle_path).map_err(|e| {
             DeaconError::Internal(crate::errors::InternalError::Generic {
-                message: format!("Failed to add runtime config to bundle: {}", e),
+                message: format!("Failed to create bundle file: {}", e),
             })
         })?;
-    let runtime_json = serde_json::to_string_pretty(&doctor_info.runtime_config).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to serialize runtime config: {}", e),
-        })
-    })?;
-    zip.write_all(runtime_json.as_bytes()).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to write runtime config: {}", e),
-        })
-    })?;
 
-    // Add system resources information
-    zip.start_file("resources.json", options).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to add resources info to bundle: {}", e),
-        })
-    })?;
-    let resources_json = serde_json::to_string_pretty(&doctor_info.resources).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to serialize resources info: {}", e),
-        })
-    })?;
-    zip.write_all(resources_json.as_bytes()).map_err(|e| {
-        DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to write resources info: {}", e),
-        })
-    })?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options: zip::write::FileOptions<()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    zip.finish().map_err(|e| {
+        // Add doctor.json to bundle
+        zip.start_file("doctor.json", options).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to add doctor.json to bundle: {}", e),
+            })
+        })?;
+        let doctor_json = serde_json::to_string_pretty(&doctor_info).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to serialize doctor info: {}", e),
+            })
+        })?;
+        zip.write_all(doctor_json.as_bytes()).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to write doctor.json: {}", e),
+            })
+        })?;
+
+        // Add sanitized config files if they exist
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let base_path = workspace_folder.as_ref().unwrap_or(&current_dir);
+
+        for config_file in &doctor_info.config_discovery.config_files_found {
+            let config_path = base_path.join(config_file);
+            if let Ok(content) = fs::read_to_string(&config_path) {
+                let sanitized_content = sanitize_secrets(&content)?;
+                zip.start_file(format!("configs/{}", config_file), options)
+                    .map_err(|e| {
+                        DeaconError::Internal(crate::errors::InternalError::Generic {
+                            message: format!("Failed to add config file to bundle: {}", e),
+                        })
+                    })?;
+                zip.write_all(sanitized_content.as_bytes()).map_err(|e| {
+                    DeaconError::Internal(crate::errors::InternalError::Generic {
+                        message: format!("Failed to write config file: {}", e),
+                    })
+                })?;
+            }
+        }
+
+        // Add truncated docker info if available
+        if doctor_info.docker_info.daemon_running {
+            zip.start_file("docker-info-summary.json", options)
+                .map_err(|e| {
+                    DeaconError::Internal(crate::errors::InternalError::Generic {
+                        message: format!("Failed to add docker info to bundle: {}", e),
+                    })
+                })?;
+            if let Some(summary) = &doctor_info.docker_info.info_summary {
+                let summary_json = serde_json::to_string_pretty(summary).map_err(|e| {
+                    DeaconError::Internal(crate::errors::InternalError::Generic {
+                        message: format!("Failed to serialize Docker info summary: {}", e),
+                    })
+                })?;
+                zip.write_all(summary_json.as_bytes()).map_err(|e| {
+                    DeaconError::Internal(crate::errors::InternalError::Generic {
+                        message: format!("Failed to write docker info: {}", e),
+                    })
+                })?;
+            }
+        }
+
+        // Add environment information
+        zip.start_file("environment.json", options).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to add environment info to bundle: {}", e),
+            })
+        })?;
+        let env_json = serde_json::to_string_pretty(&doctor_info.environment).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to serialize environment info: {}", e),
+            })
+        })?;
+        // Apply redaction to environment variables
+        let redacted_env = crate::redaction::redact_if_enabled(
+            &env_json,
+            &crate::redaction::RedactionConfig::default(),
+        );
+        zip.write_all(redacted_env.as_bytes()).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to write environment info: {}", e),
+            })
+        })?;
+
+        // Add runtime configuration
+        zip.start_file("runtime-config.json", options)
+            .map_err(|e| {
+                DeaconError::Internal(crate::errors::InternalError::Generic {
+                    message: format!("Failed to add runtime config to bundle: {}", e),
+                })
+            })?;
+        let runtime_json =
+            serde_json::to_string_pretty(&doctor_info.runtime_config).map_err(|e| {
+                DeaconError::Internal(crate::errors::InternalError::Generic {
+                    message: format!("Failed to serialize runtime config: {}", e),
+                })
+            })?;
+        zip.write_all(runtime_json.as_bytes()).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to write runtime config: {}", e),
+            })
+        })?;
+
+        // Add system resources information
+        zip.start_file("resources.json", options).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to add resources info to bundle: {}", e),
+            })
+        })?;
+        let resources_json = serde_json::to_string_pretty(&doctor_info.resources).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to serialize resources info: {}", e),
+            })
+        })?;
+        zip.write_all(resources_json.as_bytes()).map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to write resources info: {}", e),
+            })
+        })?;
+
+        zip.finish().map_err(|e| {
+            DeaconError::Internal(crate::errors::InternalError::Generic {
+                message: format!("Failed to finish bundle: {}", e),
+            })
+        })?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| {
         DeaconError::Internal(crate::errors::InternalError::Generic {
-            message: format!("Failed to finish bundle: {}", e),
+            message: format!("create_support_bundle join error: {}", e),
         })
-    })?;
+    })??;
+
     Ok(())
 }
 

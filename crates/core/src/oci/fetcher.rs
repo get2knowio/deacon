@@ -166,14 +166,21 @@ impl<C: HttpClient> FeatureFetcher<C> {
                     },
                 })?;
 
-            // Parse metadata
+            // Parse metadata. parse_feature_metadata is sync and does file IO;
+            // offload to spawn_blocking so we don't block the runtime.
             let metadata_path = extracted_dir.join("devcontainer-feature.json");
-            let metadata = parse_feature_metadata(&metadata_path).map_err(|e| match e {
-                crate::errors::DeaconError::Feature(f) => f,
-                _ => FeatureError::Oci {
-                    message: format!("Metadata parse error: {}", e),
-                },
-            })?;
+            let parse_path = metadata_path.clone();
+            let metadata = tokio::task::spawn_blocking(move || parse_feature_metadata(&parse_path))
+                .await
+                .map_err(|e| FeatureError::Oci {
+                    message: format!("parse_feature_metadata join error: {}", e),
+                })?
+                .map_err(|e| match e {
+                    crate::errors::DeaconError::Feature(f) => f,
+                    _ => FeatureError::Oci {
+                        message: format!("Metadata parse error: {}", e),
+                    },
+                })?;
 
             // Validate metadata before use
             metadata.validate()?;
@@ -1016,25 +1023,34 @@ impl<C: HttpClient> FeatureFetcher<C> {
     }
 
     /// Extract a tar layer to the cache directory
+    ///
+    /// `tar::Archive::unpack` is synchronous and the `tar` crate has no async
+    /// equivalent, so we offload the whole create_dir_all + unpack block to
+    /// spawn_blocking instead of blocking the runtime threadpool.
     async fn extract_layer(&self, layer_data: Bytes, cache_key: &str) -> Result<PathBuf> {
         let extraction_dir = self.cache_dir.join(cache_key);
-
-        // Create cache directory if it doesn't exist
-        std::fs::create_dir_all(&extraction_dir).map_err(|e| FeatureError::Extraction {
-            message: format!("Failed to create extraction directory: {}", e),
-        })?;
+        let dir_for_task = extraction_dir.clone();
 
         debug!("Extracting layer to: {}", extraction_dir.display());
 
-        // Extract tar archive
-        let cursor = std::io::Cursor::new(layer_data);
-        let mut archive = Archive::new(cursor);
-
-        archive
-            .unpack(&extraction_dir)
-            .map_err(|e| FeatureError::Extraction {
-                message: format!("Failed to extract tar archive: {}", e),
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            std::fs::create_dir_all(&dir_for_task).map_err(|e| FeatureError::Extraction {
+                message: format!("Failed to create extraction directory: {}", e),
             })?;
+
+            let cursor = std::io::Cursor::new(layer_data);
+            let mut archive = Archive::new(cursor);
+            archive
+                .unpack(&dir_for_task)
+                .map_err(|e| FeatureError::Extraction {
+                    message: format!("Failed to extract tar archive: {}", e),
+                })?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| FeatureError::Extraction {
+            message: format!("extract_layer join error: {}", e),
+        })??;
 
         Ok(extraction_dir)
     }
@@ -1046,7 +1062,14 @@ impl<C: HttpClient> FeatureFetcher<C> {
         digest: String,
     ) -> Result<DownloadedFeature> {
         let metadata_path = cached_dir.join("devcontainer-feature.json");
-        let metadata = parse_feature_metadata(&metadata_path)?;
+        // parse_feature_metadata is sync and does file IO; offload to spawn_blocking
+        // so we don't block the runtime.
+        let parse_path = metadata_path.clone();
+        let metadata = tokio::task::spawn_blocking(move || parse_feature_metadata(&parse_path))
+            .await
+            .map_err(|e| FeatureError::Oci {
+                message: format!("parse_feature_metadata join error: {}", e),
+            })??;
 
         // Validate metadata before use
         metadata.validate()?;

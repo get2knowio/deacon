@@ -737,7 +737,9 @@ where
                 &workspace_folder,
                 LifecyclePhase::OnCreate,
                 updated_config.is_prebuild,
-            ) {
+            )
+            .await
+            {
                 warn!("Failed to record marker for phase onCreate: {}", e);
             } else {
                 debug!(
@@ -770,7 +772,9 @@ where
                 &workspace_folder,
                 LifecyclePhase::UpdateContent,
                 updated_config.is_prebuild,
-            ) {
+            )
+            .await
+            {
                 warn!("Failed to record marker for phase updateContent: {}", e);
             } else {
                 debug!(
@@ -804,7 +808,9 @@ where
                     &workspace_folder,
                     LifecyclePhase::PostCreate,
                     updated_config.is_prebuild,
-                ) {
+                )
+                .await
+                {
                     warn!("Failed to record marker for phase postCreate: {}", e);
                 } else {
                     debug!(
@@ -842,7 +848,9 @@ where
                         &workspace_folder,
                         LifecyclePhase::Dotfiles,
                         updated_config.is_prebuild,
-                    ) {
+                    )
+                    .await
+                    {
                         warn!("Failed to record marker for phase dotfiles: {}", e);
                     } else {
                         debug!(
@@ -2603,6 +2611,7 @@ impl ContainerLifecycleResult {
                     if phase_result.success {
                         if let Err(e) =
                             record_phase_executed(&spec.workspace_folder, spec.phase, spec.prebuild)
+                                .await
                         {
                             warn!(
                                 "Failed to record marker for phase {}: {}",
@@ -3081,11 +3090,11 @@ mod tests {
 
         // Verify no markers exist before execution
         assert!(
-            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false),
+            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false).await,
             "postStart marker should not exist before execution"
         );
         assert!(
-            !marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false),
+            !marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false).await,
             "postAttach marker should not exist before execution"
         );
 
@@ -3153,11 +3162,11 @@ mod tests {
 
         // Verify markers were written for both phases
         assert!(
-            marker_exists(&workspace_folder, LifecyclePhase::PostStart, false),
+            marker_exists(&workspace_folder, LifecyclePhase::PostStart, false).await,
             "postStart marker should exist after successful execution"
         );
         assert!(
-            marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false),
+            marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false).await,
             "postAttach marker should exist after successful execution"
         );
     }
@@ -3228,7 +3237,7 @@ mod tests {
 
         // Verify marker was NOT written because phase failed
         assert!(
-            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false),
+            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false).await,
             "postStart marker should NOT exist after failed execution"
         );
     }

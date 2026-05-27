@@ -374,23 +374,23 @@ impl MarkerValidation {
 /// use std::path::Path;
 /// use deacon_core::state::{validate_phase_marker, MarkerValidation};
 ///
+/// # async fn run() {
 /// let path = Path::new("/workspace/.devcontainer-state/onCreate.json");
-/// let validation = validate_phase_marker(path);
+/// let validation = validate_phase_marker(path).await;
 /// if validation.treat_as_missing() {
 ///     println!("Marker is invalid or missing: {}", validation.description());
 /// }
+/// # }
 /// ```
 #[instrument(skip_all, fields(path = %path.display()))]
-pub fn validate_phase_marker(path: &Path) -> MarkerValidation {
-    // Check if file exists
-    if !path.exists() {
-        debug!("Marker file does not exist: {}", path.display());
-        return MarkerValidation::Missing;
-    }
-
-    // Try to read the file
-    let content = match std::fs::read_to_string(path) {
+pub async fn validate_phase_marker(path: &Path) -> MarkerValidation {
+    // Try to read the file; NotFound is the canonical "missing" path.
+    let content = match tokio::fs::read_to_string(path).await {
         Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            debug!("Marker file does not exist: {}", path.display());
+            return MarkerValidation::Missing;
+        }
         Err(e) => {
             warn!(
                 "Cannot read marker file at {}: {}. Will treat as missing.",
@@ -519,24 +519,28 @@ pub fn validate_phase_marker(path: &Path) -> MarkerValidation {
 /// use std::path::Path;
 /// use deacon_core::state::read_phase_marker;
 ///
+/// # async fn run() {
 /// let path = Path::new("/workspace/.devcontainer-state/onCreate.json");
-/// match read_phase_marker(path) {
+/// match read_phase_marker(path).await {
 ///     Ok(Some(state)) => println!("Phase {} status: {:?}", state.phase.as_str(), state.status),
 ///     Ok(None) => println!("Marker not found or corrupted"),
 ///     Err(e) => eprintln!("Error reading marker: {}", e),
 /// }
+/// # }
 /// ```
 #[instrument(skip_all, fields(path = %path.display()))]
-pub fn read_phase_marker(path: &Path) -> Result<Option<LifecyclePhaseState>> {
+pub async fn read_phase_marker(path: &Path) -> Result<Option<LifecyclePhaseState>> {
     // First validate the marker file
-    let validation = validate_phase_marker(path);
+    let validation = validate_phase_marker(path).await;
     if validation.treat_as_missing() {
         // Per Decision 2: all corruption scenarios treated as missing
         return Ok(None);
     }
 
     // Now read and parse the file (validation already confirmed it's valid JSON)
-    let content = std::fs::read_to_string(path).map_err(state_io(path.to_path_buf()))?;
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .map_err(state_io(path.to_path_buf()))?;
 
     match serde_json::from_str::<LifecyclePhaseState>(&content) {
         Ok(state) => {
@@ -576,15 +580,19 @@ pub fn read_phase_marker(path: &Path) -> Result<Option<LifecyclePhaseState>> {
 /// use deacon_core::state::write_phase_marker;
 /// use deacon_core::lifecycle::{LifecyclePhase, LifecyclePhaseState};
 ///
+/// # async fn run() {
 /// let path = PathBuf::from("/workspace/.devcontainer-state/onCreate.json");
 /// let state = LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, path.clone());
-/// write_phase_marker(&path, &state).expect("Failed to write marker");
+/// write_phase_marker(&path, &state).await.expect("Failed to write marker");
+/// # }
 /// ```
 #[instrument(skip_all, fields(path = %path.display(), phase = %state.phase.as_str()))]
-pub fn write_phase_marker(path: &Path, state: &LifecyclePhaseState) -> Result<()> {
+pub async fn write_phase_marker(path: &Path, state: &LifecyclePhaseState) -> Result<()> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(state_io(parent.to_path_buf()))?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(state_io(parent.to_path_buf()))?;
     }
 
     let content = serde_json::to_string_pretty(state).map_err(|source| StateError::Serialize {
@@ -594,9 +602,13 @@ pub fn write_phase_marker(path: &Path, state: &LifecyclePhaseState) -> Result<()
 
     // Write atomically via temp file + rename for crash safety
     let temp_path = path.with_extension("tmp");
-    std::fs::write(&temp_path, &content).map_err(state_io(temp_path.clone()))?;
+    tokio::fs::write(&temp_path, &content)
+        .await
+        .map_err(state_io(temp_path.clone()))?;
 
-    std::fs::rename(&temp_path, path).map_err(state_io(path.to_path_buf()))?;
+    tokio::fs::rename(&temp_path, path)
+        .await
+        .map_err(state_io(path.to_path_buf()))?;
 
     debug!(
         "Wrote marker for phase {} with status {:?} to {}",
@@ -627,14 +639,19 @@ pub fn write_phase_marker(path: &Path, state: &LifecyclePhaseState) -> Result<()
 /// use std::path::Path;
 /// use deacon_core::state::read_all_markers;
 ///
+/// # async fn run() {
 /// let workspace = Path::new("/workspace");
-/// let markers = read_all_markers(workspace, false).expect("Failed to read markers");
+/// let markers = read_all_markers(workspace, false).await.expect("Failed to read markers");
 /// for marker in markers {
 ///     println!("{}: {:?}", marker.phase.as_str(), marker.status);
 /// }
+/// # }
 /// ```
 #[instrument(skip_all, fields(workspace = %workspace.display(), prebuild))]
-pub fn read_all_markers(workspace: &Path, prebuild: bool) -> Result<Vec<LifecyclePhaseState>> {
+pub async fn read_all_markers(
+    workspace: &Path,
+    prebuild: bool,
+) -> Result<Vec<LifecyclePhaseState>> {
     let mut markers = Vec::new();
 
     for phase in LifecyclePhase::spec_order() {
@@ -644,7 +661,7 @@ pub fn read_all_markers(workspace: &Path, prebuild: bool) -> Result<Vec<Lifecycl
             marker_path_for_phase(workspace, *phase)
         };
 
-        if let Some(state) = read_phase_marker(&path)? {
+        if let Some(state) = read_phase_marker(&path).await? {
             markers.push(state);
         }
     }
@@ -675,14 +692,16 @@ pub fn read_all_markers(workspace: &Path, prebuild: bool) -> Result<Vec<Lifecycl
 /// use std::path::Path;
 /// use deacon_core::state::clear_markers;
 ///
+/// # async fn run() {
 /// let workspace = Path::new("/workspace");
-/// clear_markers(workspace, false).expect("Failed to clear markers");
+/// clear_markers(workspace, false).await.expect("Failed to clear markers");
+/// # }
 /// ```
 #[instrument(skip_all, fields(workspace = %workspace.display(), prebuild))]
-pub fn clear_markers(workspace: &Path, prebuild: bool) -> Result<()> {
+pub async fn clear_markers(workspace: &Path, prebuild: bool) -> Result<()> {
     let base_dir = marker_base_dir(workspace, prebuild);
 
-    if !base_dir.exists() {
+    if tokio::fs::metadata(&base_dir).await.is_err() {
         debug!("Marker directory does not exist, nothing to clear");
         return Ok(());
     }
@@ -690,9 +709,10 @@ pub fn clear_markers(workspace: &Path, prebuild: bool) -> Result<()> {
     let mut cleared_count = 0;
     for phase in LifecyclePhase::spec_order() {
         let path = base_dir.join(format!("{}.{}", phase.as_str(), MARKER_EXTENSION));
-        if path.exists() {
-            std::fs::remove_file(&path).map_err(state_io(path.clone()))?;
-            cleared_count += 1;
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => cleared_count += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(state_io(path.clone())(e)),
         }
     }
 
@@ -809,18 +829,20 @@ pub fn all_phases_complete_up_to(
 /// use deacon_core::state::marker_exists;
 /// use deacon_core::lifecycle::LifecyclePhase;
 ///
+/// # async fn run() {
 /// let workspace = Path::new("/workspace");
-/// if marker_exists(workspace, LifecyclePhase::OnCreate, false) {
+/// if marker_exists(workspace, LifecyclePhase::OnCreate, false).await {
 ///     println!("onCreate marker exists");
 /// }
+/// # }
 /// ```
-pub fn marker_exists(workspace: &Path, phase: LifecyclePhase, prebuild: bool) -> bool {
+pub async fn marker_exists(workspace: &Path, phase: LifecyclePhase, prebuild: bool) -> bool {
     let marker_path = if prebuild {
         prebuild_marker_path_for_phase(workspace, phase)
     } else {
         marker_path_for_phase(workspace, phase)
     };
-    marker_path.exists()
+    tokio::fs::metadata(&marker_path).await.is_ok()
 }
 
 /// Record a phase as successfully executed by writing its marker to disk.
@@ -846,13 +868,16 @@ pub fn marker_exists(workspace: &Path, phase: LifecyclePhase, prebuild: bool) ->
 /// use deacon_core::state::record_phase_executed;
 /// use deacon_core::lifecycle::LifecyclePhase;
 ///
+/// # async fn run() {
 /// let workspace = Path::new("/workspace");
 /// let state = record_phase_executed(workspace, LifecyclePhase::OnCreate, false)
+///     .await
 ///     .expect("Failed to record phase");
 /// assert_eq!(state.phase, LifecyclePhase::OnCreate);
+/// # }
 /// ```
 #[instrument(skip_all, fields(workspace = %workspace.display(), phase = %phase.as_str(), prebuild))]
-pub fn record_phase_executed(
+pub async fn record_phase_executed(
     workspace: &Path,
     phase: LifecyclePhase,
     prebuild: bool,
@@ -864,7 +889,7 @@ pub fn record_phase_executed(
     };
 
     let state = LifecyclePhaseState::new_executed(phase, marker_path.clone());
-    write_phase_marker(&marker_path, &state)?;
+    write_phase_marker(&marker_path, &state).await?;
 
     info!(
         "Recorded phase {} as executed at {}",
@@ -899,13 +924,16 @@ pub fn record_phase_executed(
 /// use deacon_core::state::record_phase_skipped;
 /// use deacon_core::lifecycle::LifecyclePhase;
 ///
+/// # async fn run() {
 /// let workspace = Path::new("/workspace");
 /// let state = record_phase_skipped(workspace, LifecyclePhase::PostCreate, "prebuild mode", true)
+///     .await
 ///     .expect("Failed to record skipped phase");
 /// assert_eq!(state.reason, Some("prebuild mode".to_string()));
+/// # }
 /// ```
 #[instrument(skip_all, fields(workspace = %workspace.display(), phase = %phase.as_str(), reason = %reason, prebuild))]
-pub fn record_phase_skipped(
+pub async fn record_phase_skipped(
     workspace: &Path,
     phase: LifecyclePhase,
     reason: &str,
@@ -918,7 +946,7 @@ pub fn record_phase_skipped(
     };
 
     let state = LifecyclePhaseState::new_skipped(phase, marker_path.clone(), reason);
-    write_phase_marker(&marker_path, &state)?;
+    write_phase_marker(&marker_path, &state).await?;
 
     info!(
         "Recorded phase {} as skipped (reason: {}) at {}",
@@ -954,6 +982,7 @@ pub fn record_phase_skipped(
 /// use deacon_core::lifecycle::{LifecyclePhase, LifecyclePhaseState, PhaseStatus};
 /// use std::path::PathBuf;
 ///
+/// # async fn run() {
 /// let workspace = Path::new("/workspace");
 /// let phases = vec![
 ///     LifecyclePhaseState::new_executed(
@@ -966,10 +995,11 @@ pub fn record_phase_skipped(
 ///         "prebuild mode"
 ///     ),
 /// ];
-/// record_all_phase_markers(workspace, &phases, false).expect("Failed to record markers");
+/// record_all_phase_markers(workspace, &phases, false).await.expect("Failed to record markers");
+/// # }
 /// ```
 #[instrument(skip_all, fields(workspace = %workspace.display(), phase_count = phases.len(), prebuild))]
-pub fn record_all_phase_markers(
+pub async fn record_all_phase_markers(
     workspace: &Path,
     phases: &[LifecyclePhaseState],
     prebuild: bool,
@@ -999,7 +1029,7 @@ pub fn record_all_phase_markers(
                     _ => unreachable!(),
                 };
 
-                write_phase_marker(&marker_path, &state)?;
+                write_phase_marker(&marker_path, &state).await?;
                 recorded += 1;
             }
             PhaseStatus::Pending | PhaseStatus::Failed => {
@@ -1202,34 +1232,34 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_read_phase_marker_nonexistent() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_read_phase_marker_nonexistent() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("nonexistent.json");
 
-        let result = read_phase_marker(&path).unwrap();
+        let result = read_phase_marker(&path).await.unwrap();
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_write_and_read_phase_marker() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_write_and_read_phase_marker() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
         let path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
 
         // Write a marker
         let state = LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, path.clone());
-        write_phase_marker(&path, &state).unwrap();
+        write_phase_marker(&path, &state).await.unwrap();
 
         // Read it back
-        let read_state = read_phase_marker(&path).unwrap().unwrap();
+        let read_state = read_phase_marker(&path).await.unwrap().unwrap();
         assert_eq!(read_state.phase, LifecyclePhase::OnCreate);
         assert_eq!(read_state.status, PhaseStatus::Executed);
         assert_eq!(read_state.marker_path, path);
     }
 
-    #[test]
-    fn test_write_phase_marker_creates_directory() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_write_phase_marker_creates_directory() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
         let path = prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
@@ -1239,14 +1269,14 @@ mod tests {
 
         // Write should create directories
         let state = LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, path.clone());
-        write_phase_marker(&path, &state).unwrap();
+        write_phase_marker(&path, &state).await.unwrap();
 
         // Now the file should exist
         assert!(path.exists());
     }
 
-    #[test]
-    fn test_read_phase_marker_corrupted_returns_none() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_read_phase_marker_corrupted_returns_none() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("corrupted.json");
 
@@ -1254,21 +1284,21 @@ mod tests {
         std::fs::write(&path, "not valid json {{{").unwrap();
 
         // Should return None (not error) per Decision 2
-        let result = read_phase_marker(&path).unwrap();
+        let result = read_phase_marker(&path).await.unwrap();
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_read_all_markers_empty() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_read_all_markers_empty() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
-        let markers = read_all_markers(workspace, false).unwrap();
+        let markers = read_all_markers(workspace, false).await.unwrap();
         assert!(markers.is_empty());
     }
 
-    #[test]
-    fn test_read_all_markers_partial() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_read_all_markers_partial() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1276,24 +1306,28 @@ mod tests {
         let on_create_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
         let on_create_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, on_create_path.clone());
-        write_phase_marker(&on_create_path, &on_create_state).unwrap();
+        write_phase_marker(&on_create_path, &on_create_state)
+            .await
+            .unwrap();
 
         let update_content_path = marker_path_for_phase(workspace, LifecyclePhase::UpdateContent);
         let update_content_state = LifecyclePhaseState::new_executed(
             LifecyclePhase::UpdateContent,
             update_content_path.clone(),
         );
-        write_phase_marker(&update_content_path, &update_content_state).unwrap();
+        write_phase_marker(&update_content_path, &update_content_state)
+            .await
+            .unwrap();
 
         // Read all markers
-        let markers = read_all_markers(workspace, false).unwrap();
+        let markers = read_all_markers(workspace, false).await.unwrap();
         assert_eq!(markers.len(), 2);
         assert_eq!(markers[0].phase, LifecyclePhase::OnCreate);
         assert_eq!(markers[1].phase, LifecyclePhase::UpdateContent);
     }
 
-    #[test]
-    fn test_read_all_markers_prebuild_isolation() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_read_all_markers_prebuild_isolation() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1301,27 +1335,31 @@ mod tests {
         let normal_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
         let normal_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, normal_path.clone());
-        write_phase_marker(&normal_path, &normal_state).unwrap();
+        write_phase_marker(&normal_path, &normal_state)
+            .await
+            .unwrap();
 
         // Write prebuild marker
         let prebuild_path = prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
         let prebuild_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, prebuild_path.clone());
-        write_phase_marker(&prebuild_path, &prebuild_state).unwrap();
+        write_phase_marker(&prebuild_path, &prebuild_state)
+            .await
+            .unwrap();
 
         // Normal markers should not include prebuild
-        let normal_markers = read_all_markers(workspace, false).unwrap();
+        let normal_markers = read_all_markers(workspace, false).await.unwrap();
         assert_eq!(normal_markers.len(), 1);
         assert_eq!(normal_markers[0].marker_path, normal_path);
 
         // Prebuild markers should not include normal
-        let prebuild_markers = read_all_markers(workspace, true).unwrap();
+        let prebuild_markers = read_all_markers(workspace, true).await.unwrap();
         assert_eq!(prebuild_markers.len(), 1);
         assert_eq!(prebuild_markers[0].marker_path, prebuild_path);
     }
 
-    #[test]
-    fn test_clear_markers() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_clear_markers() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1333,23 +1371,23 @@ mod tests {
         ] {
             let path = marker_path_for_phase(workspace, *phase);
             let state = LifecyclePhaseState::new_executed(*phase, path.clone());
-            write_phase_marker(&path, &state).unwrap();
+            write_phase_marker(&path, &state).await.unwrap();
         }
 
         // Verify markers exist
-        let markers = read_all_markers(workspace, false).unwrap();
+        let markers = read_all_markers(workspace, false).await.unwrap();
         assert_eq!(markers.len(), 3);
 
         // Clear markers
-        clear_markers(workspace, false).unwrap();
+        clear_markers(workspace, false).await.unwrap();
 
         // Verify markers are gone
-        let markers = read_all_markers(workspace, false).unwrap();
+        let markers = read_all_markers(workspace, false).await.unwrap();
         assert!(markers.is_empty());
     }
 
-    #[test]
-    fn test_clear_markers_prebuild_only() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_clear_markers_prebuild_only() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1357,34 +1395,38 @@ mod tests {
         let normal_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
         let normal_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, normal_path.clone());
-        write_phase_marker(&normal_path, &normal_state).unwrap();
+        write_phase_marker(&normal_path, &normal_state)
+            .await
+            .unwrap();
 
         // Write prebuild marker
         let prebuild_path = prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
         let prebuild_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, prebuild_path.clone());
-        write_phase_marker(&prebuild_path, &prebuild_state).unwrap();
+        write_phase_marker(&prebuild_path, &prebuild_state)
+            .await
+            .unwrap();
 
         // Clear only prebuild markers
-        clear_markers(workspace, true).unwrap();
+        clear_markers(workspace, true).await.unwrap();
 
         // Normal markers should still exist
-        let normal_markers = read_all_markers(workspace, false).unwrap();
+        let normal_markers = read_all_markers(workspace, false).await.unwrap();
         assert_eq!(normal_markers.len(), 1);
 
         // Prebuild markers should be gone
-        let prebuild_markers = read_all_markers(workspace, true).unwrap();
+        let prebuild_markers = read_all_markers(workspace, true).await.unwrap();
         assert!(prebuild_markers.is_empty());
     }
 
-    #[test]
-    fn test_clear_markers_nonexistent_directory() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_clear_markers_nonexistent_directory() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
         // Should not error when directory doesn't exist
-        clear_markers(workspace, false).unwrap();
-        clear_markers(workspace, true).unwrap();
+        clear_markers(workspace, false).await.unwrap();
+        clear_markers(workspace, true).await.unwrap();
     }
 
     #[test]
@@ -1529,13 +1571,15 @@ mod tests {
     // Record Phase Marker Tests
     // =========================================================================
 
-    #[test]
-    fn test_record_phase_executed() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_record_phase_executed() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
         // Record onCreate as executed
-        let state = record_phase_executed(workspace, LifecyclePhase::OnCreate, false).unwrap();
+        let state = record_phase_executed(workspace, LifecyclePhase::OnCreate, false)
+            .await
+            .unwrap();
 
         assert_eq!(state.phase, LifecyclePhase::OnCreate);
         assert_eq!(state.status, PhaseStatus::Executed);
@@ -1544,19 +1588,22 @@ mod tests {
         // Verify the marker was written to disk
         let read_state =
             read_phase_marker(&marker_path_for_phase(workspace, LifecyclePhase::OnCreate))
+                .await
                 .unwrap()
                 .unwrap();
         assert_eq!(read_state.phase, LifecyclePhase::OnCreate);
         assert_eq!(read_state.status, PhaseStatus::Executed);
     }
 
-    #[test]
-    fn test_record_phase_executed_prebuild() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_record_phase_executed_prebuild() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
         // Record onCreate as executed in prebuild mode
-        let state = record_phase_executed(workspace, LifecyclePhase::OnCreate, true).unwrap();
+        let state = record_phase_executed(workspace, LifecyclePhase::OnCreate, true)
+            .await
+            .unwrap();
 
         assert_eq!(state.phase, LifecyclePhase::OnCreate);
         assert_eq!(state.status, PhaseStatus::Executed);
@@ -1566,6 +1613,7 @@ mod tests {
             workspace,
             LifecyclePhase::OnCreate,
         ))
+        .await
         .unwrap()
         .unwrap();
         assert_eq!(read_state.phase, LifecyclePhase::OnCreate);
@@ -1574,13 +1622,14 @@ mod tests {
         // Verify normal marker directory does NOT have the marker
         assert!(
             read_phase_marker(&marker_path_for_phase(workspace, LifecyclePhase::OnCreate))
+                .await
                 .unwrap()
                 .is_none()
         );
     }
 
-    #[test]
-    fn test_record_phase_skipped() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_record_phase_skipped() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1591,6 +1640,7 @@ mod tests {
             "prebuild mode",
             false,
         )
+        .await
         .unwrap();
 
         assert_eq!(state.phase, LifecyclePhase::PostCreate);
@@ -1602,6 +1652,7 @@ mod tests {
             workspace,
             LifecyclePhase::PostCreate,
         ))
+        .await
         .unwrap()
         .unwrap();
         assert_eq!(read_state.phase, LifecyclePhase::PostCreate);
@@ -1609,8 +1660,8 @@ mod tests {
         assert_eq!(read_state.reason, Some("prebuild mode".to_string()));
     }
 
-    #[test]
-    fn test_record_phase_skipped_prebuild() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_record_phase_skipped_prebuild() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1621,6 +1672,7 @@ mod tests {
             "--skip-post-create flag",
             true,
         )
+        .await
         .unwrap();
 
         assert_eq!(state.phase, LifecyclePhase::PostCreate);
@@ -1631,6 +1683,7 @@ mod tests {
             workspace,
             LifecyclePhase::PostCreate,
         ))
+        .await
         .unwrap()
         .unwrap();
         assert_eq!(read_state.status, PhaseStatus::Skipped);
@@ -1640,8 +1693,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_record_all_phase_markers() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_record_all_phase_markers() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1668,10 +1721,12 @@ mod tests {
         ];
 
         // Record all markers
-        record_all_phase_markers(workspace, &phases, false).unwrap();
+        record_all_phase_markers(workspace, &phases, false)
+            .await
+            .unwrap();
 
         // Verify all markers were written
-        let markers = read_all_markers(workspace, false).unwrap();
+        let markers = read_all_markers(workspace, false).await.unwrap();
         assert_eq!(markers.len(), 4);
 
         // Check executed phases
@@ -1697,8 +1752,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_record_all_phase_markers_skips_pending_and_failed() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_record_all_phase_markers_skips_pending_and_failed() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1720,17 +1775,19 @@ mod tests {
         ];
 
         // Record all markers
-        record_all_phase_markers(workspace, &phases, false).unwrap();
+        record_all_phase_markers(workspace, &phases, false)
+            .await
+            .unwrap();
 
         // Verify only executed phase was recorded
-        let markers = read_all_markers(workspace, false).unwrap();
+        let markers = read_all_markers(workspace, false).await.unwrap();
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0].phase, LifecyclePhase::OnCreate);
         assert_eq!(markers[0].status, PhaseStatus::Executed);
     }
 
-    #[test]
-    fn test_record_all_phase_markers_prebuild_isolation() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_record_all_phase_markers_prebuild_isolation() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1746,29 +1803,33 @@ mod tests {
         ];
 
         // Record markers in prebuild mode
-        record_all_phase_markers(workspace, &phases, true).unwrap();
+        record_all_phase_markers(workspace, &phases, true)
+            .await
+            .unwrap();
 
         // Verify markers exist in prebuild directory
-        let prebuild_markers = read_all_markers(workspace, true).unwrap();
+        let prebuild_markers = read_all_markers(workspace, true).await.unwrap();
         assert_eq!(prebuild_markers.len(), 2);
 
         // Verify normal marker directory is empty
-        let normal_markers = read_all_markers(workspace, false).unwrap();
+        let normal_markers = read_all_markers(workspace, false).await.unwrap();
         assert!(normal_markers.is_empty());
     }
 
-    #[test]
-    fn test_record_phases_in_lifecycle_order() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_record_phases_in_lifecycle_order() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
         // Record phases in lifecycle order (simulating a fresh run)
         for phase in LifecyclePhase::spec_order() {
-            record_phase_executed(workspace, *phase, false).unwrap();
+            record_phase_executed(workspace, *phase, false)
+                .await
+                .unwrap();
         }
 
         // Read all markers and verify they are in order
-        let markers = read_all_markers(workspace, false).unwrap();
+        let markers = read_all_markers(workspace, false).await.unwrap();
         assert_eq!(markers.len(), 6);
 
         // Verify order matches spec order
@@ -1786,69 +1847,69 @@ mod tests {
     // Marker Validation Tests (T015 - Corrupted/Missing Marker Handling)
     // =========================================================================
 
-    #[test]
-    fn test_validate_phase_marker_nonexistent() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_nonexistent() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("nonexistent.json");
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert_eq!(validation, MarkerValidation::Missing);
         assert!(validation.treat_as_missing());
         assert_eq!(validation.description(), "file does not exist");
     }
 
-    #[test]
-    fn test_validate_phase_marker_empty_file() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_empty_file() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("empty.json");
 
         std::fs::write(&path, "").unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert_eq!(validation, MarkerValidation::Empty);
         assert!(validation.treat_as_missing());
         assert_eq!(validation.description(), "file is empty");
     }
 
-    #[test]
-    fn test_validate_phase_marker_whitespace_only() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_whitespace_only() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("whitespace.json");
 
         std::fs::write(&path, "   \n  \t  ").unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert_eq!(validation, MarkerValidation::Empty);
         assert!(validation.treat_as_missing());
     }
 
-    #[test]
-    fn test_validate_phase_marker_invalid_json() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_invalid_json() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("invalid.json");
 
         std::fs::write(&path, "not valid json {{{").unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert!(matches!(validation, MarkerValidation::InvalidJson(_)));
         assert!(validation.treat_as_missing());
         assert_eq!(validation.description(), "invalid JSON");
     }
 
-    #[test]
-    fn test_validate_phase_marker_json_array() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_json_array() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("array.json");
 
         std::fs::write(&path, "[1, 2, 3]").unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert!(matches!(validation, MarkerValidation::InvalidJson(_)));
         assert!(validation.treat_as_missing());
     }
 
-    #[test]
-    fn test_validate_phase_marker_missing_phase_field() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_missing_phase_field() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("missing_phase.json");
 
@@ -1858,13 +1919,13 @@ mod tests {
         )
         .unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert!(matches!(validation, MarkerValidation::MissingFields(_)));
         assert!(validation.treat_as_missing());
     }
 
-    #[test]
-    fn test_validate_phase_marker_missing_status_field() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_missing_status_field() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("missing_status.json");
 
@@ -1874,25 +1935,25 @@ mod tests {
         )
         .unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert!(matches!(validation, MarkerValidation::MissingFields(_)));
         assert!(validation.treat_as_missing());
     }
 
-    #[test]
-    fn test_validate_phase_marker_missing_marker_path_field() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_missing_marker_path_field() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("missing_marker_path.json");
 
         std::fs::write(&path, r#"{"phase": "onCreate", "status": "executed"}"#).unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert!(matches!(validation, MarkerValidation::MissingFields(_)));
         assert!(validation.treat_as_missing());
     }
 
-    #[test]
-    fn test_validate_phase_marker_invalid_phase_value() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_invalid_phase_value() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("invalid_phase.json");
 
@@ -1902,13 +1963,13 @@ mod tests {
         )
         .unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert!(matches!(validation, MarkerValidation::MissingFields(_)));
         assert!(validation.treat_as_missing());
     }
 
-    #[test]
-    fn test_validate_phase_marker_invalid_status_value() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_invalid_status_value() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("invalid_status.json");
 
@@ -1918,13 +1979,13 @@ mod tests {
         )
         .unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert!(matches!(validation, MarkerValidation::MissingFields(_)));
         assert!(validation.treat_as_missing());
     }
 
-    #[test]
-    fn test_validate_phase_marker_valid() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_valid() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("valid.json");
 
@@ -1934,15 +1995,15 @@ mod tests {
         )
         .unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert_eq!(validation, MarkerValidation::Valid);
         assert!(validation.is_valid());
         assert!(!validation.treat_as_missing());
         assert_eq!(validation.description(), "valid");
     }
 
-    #[test]
-    fn test_validate_phase_marker_valid_with_camel_case_marker_path() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_validate_phase_marker_valid_with_camel_case_marker_path() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("valid_camel.json");
 
@@ -1953,24 +2014,24 @@ mod tests {
         )
         .unwrap();
 
-        let validation = validate_phase_marker(&path);
+        let validation = validate_phase_marker(&path).await;
         assert_eq!(validation, MarkerValidation::Valid);
     }
 
-    #[test]
-    fn test_read_phase_marker_empty_file_returns_none() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_read_phase_marker_empty_file_returns_none() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("empty.json");
 
         std::fs::write(&path, "").unwrap();
 
         // Per Decision 2: empty file should return None (treat as missing)
-        let result = read_phase_marker(&path).unwrap();
+        let result = read_phase_marker(&path).await.unwrap();
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_read_phase_marker_missing_fields_returns_none() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_read_phase_marker_missing_fields_returns_none() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("incomplete.json");
 
@@ -1978,12 +2039,12 @@ mod tests {
         std::fs::write(&path, r#"{"phase": "onCreate", "status": "executed"}"#).unwrap();
 
         // Per Decision 2: incomplete marker should return None
-        let result = read_phase_marker(&path).unwrap();
+        let result = read_phase_marker(&path).await.unwrap();
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_read_all_markers_skips_corrupted() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_read_all_markers_skips_corrupted() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -1991,7 +2052,9 @@ mod tests {
         let on_create_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
         let on_create_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, on_create_path.clone());
-        write_phase_marker(&on_create_path, &on_create_state).unwrap();
+        write_phase_marker(&on_create_path, &on_create_state)
+            .await
+            .unwrap();
 
         // Write a corrupted marker for updateContent
         let update_content_path = marker_path_for_phase(workspace, LifecyclePhase::UpdateContent);
@@ -2002,10 +2065,12 @@ mod tests {
         let post_create_path = marker_path_for_phase(workspace, LifecyclePhase::PostCreate);
         let post_create_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::PostCreate, post_create_path.clone());
-        write_phase_marker(&post_create_path, &post_create_state).unwrap();
+        write_phase_marker(&post_create_path, &post_create_state)
+            .await
+            .unwrap();
 
         // Read all markers - should skip the corrupted one
-        let markers = read_all_markers(workspace, false).unwrap();
+        let markers = read_all_markers(workspace, false).await.unwrap();
 
         // Only 2 valid markers should be returned (onCreate and postCreate)
         assert_eq!(markers.len(), 2);
@@ -2013,8 +2078,8 @@ mod tests {
         assert_eq!(markers[1].phase, LifecyclePhase::PostCreate);
     }
 
-    #[test]
-    fn test_find_earliest_incomplete_with_corrupted_marker() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_find_earliest_incomplete_with_corrupted_marker() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
@@ -2022,7 +2087,9 @@ mod tests {
         let on_create_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
         let on_create_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, on_create_path.clone());
-        write_phase_marker(&on_create_path, &on_create_state).unwrap();
+        write_phase_marker(&on_create_path, &on_create_state)
+            .await
+            .unwrap();
 
         // Write corrupted marker for updateContent (simulating corruption)
         let update_content_path = marker_path_for_phase(workspace, LifecyclePhase::UpdateContent);
@@ -2030,15 +2097,15 @@ mod tests {
         std::fs::write(&update_content_path, "").unwrap(); // Empty file = corrupted
 
         // Read markers - corrupted one will be skipped
-        let markers = read_all_markers(workspace, false).unwrap();
+        let markers = read_all_markers(workspace, false).await.unwrap();
 
         // Find earliest incomplete - should be updateContent (the corrupted one)
         let earliest = find_earliest_incomplete_phase(&markers);
         assert_eq!(earliest, Some(LifecyclePhase::UpdateContent));
     }
 
-    #[test]
-    fn test_marker_validation_all_valid_phases() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_marker_validation_all_valid_phases() {
         let temp_dir = TempDir::new().unwrap();
 
         // Test all valid phase names
@@ -2063,7 +2130,7 @@ mod tests {
             )
             .unwrap();
 
-            let validation = validate_phase_marker(&path);
+            let validation = validate_phase_marker(&path).await;
             assert_eq!(
                 validation,
                 MarkerValidation::Valid,
@@ -2073,8 +2140,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_marker_validation_all_valid_statuses() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_marker_validation_all_valid_statuses() {
         let temp_dir = TempDir::new().unwrap();
 
         // Test all valid status values
@@ -2091,7 +2158,7 @@ mod tests {
             )
             .unwrap();
 
-            let validation = validate_phase_marker(&path);
+            let validation = validate_phase_marker(&path).await;
             assert_eq!(
                 validation,
                 MarkerValidation::Valid,

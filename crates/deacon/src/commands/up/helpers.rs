@@ -254,7 +254,7 @@ pub(crate) async fn apply_user_mapping<R: deacon_core::docker::Docker + Send + S
 ///
 /// Mirrors upstream `writeLockfile` in `devcontainers/cli`
 /// `src/spec-configuration/lockfile.ts` (`PR #1212`).
-pub(crate) fn handle_lockfile_post_build(
+pub(crate) async fn handle_lockfile_post_build(
     args: &UpArgs,
     config_path: &Path,
     lockfile: &Lockfile,
@@ -267,9 +267,9 @@ pub(crate) fn handle_lockfile_post_build(
     let lockfile_path = get_lockfile_path(config_path);
 
     if args.frozen_lockfile {
-        compare_lockfile_frozen(&lockfile_path, lockfile)
+        compare_lockfile_frozen(&lockfile_path, lockfile).await
     } else {
-        write_lockfile_best_effort(&lockfile_path, lockfile)
+        write_lockfile_best_effort(&lockfile_path, lockfile).await
     }
 }
 
@@ -277,28 +277,31 @@ pub(crate) fn handle_lockfile_post_build(
 /// canonical byte form `write_lockfile` would emit, then compare byte-for-byte
 /// with the on-disk file. Any deviation (missing file, mismatched bytes)
 /// fails the build with the upstream-aligned summary string.
-fn compare_lockfile_frozen(lockfile_path: &Path, lockfile: &Lockfile) -> Result<()> {
-    if !lockfile_path.exists() {
-        return Err(
-            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                message: format!(
-                    "Lockfile does not exist.\nExpected at '{}'.\n\
-                     Run without --frozen-lockfile to generate a lockfile, or \
-                     generate one with `deacon upgrade`.",
-                    lockfile_path.display()
-                ),
-            })
-            .into(),
-        );
-    }
+async fn compare_lockfile_frozen(lockfile_path: &Path, lockfile: &Lockfile) -> Result<()> {
+    let actual_bytes = match tokio::fs::read(lockfile_path).await {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(
+                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                    message: format!(
+                        "Lockfile does not exist.\nExpected at '{}'.\n\
+                         Run without --frozen-lockfile to generate a lockfile, or \
+                         generate one with `deacon upgrade`.",
+                        lockfile_path.display()
+                    ),
+                })
+                .into(),
+            );
+        }
+        Err(e) => {
+            return Err(anyhow::Error::from(e).context(format!(
+                "Failed to read existing lockfile at '{}'",
+                lockfile_path.display()
+            )));
+        }
+    };
 
     let expected_bytes = canonical_lockfile_bytes(lockfile)?;
-    let actual_bytes = std::fs::read(lockfile_path).with_context(|| {
-        format!(
-            "Failed to read existing lockfile at '{}'",
-            lockfile_path.display()
-        )
-    })?;
 
     if expected_bytes != actual_bytes {
         return Err(
@@ -324,8 +327,8 @@ fn compare_lockfile_frozen(lockfile_path: &Path, lockfile: &Lockfile) -> Result<
 /// Best-effort write: succeeds normally, but downgrades EROFS/EACCES to WARN
 /// so a read-only workspace (e.g. CI mount, container with a read-only volume)
 /// doesn't break `up`. All other write errors propagate.
-fn write_lockfile_best_effort(lockfile_path: &Path, lockfile: &Lockfile) -> Result<()> {
-    match write_lockfile(lockfile_path, lockfile, true) {
+async fn write_lockfile_best_effort(lockfile_path: &Path, lockfile: &Lockfile) -> Result<()> {
+    match write_lockfile(lockfile_path, lockfile, true).await {
         Ok(()) => {
             debug!("Wrote lockfile to '{}'", lockfile_path.display());
             Ok(())
@@ -449,14 +452,16 @@ mod lockfile_post_build_tests {
     /// `canonical_lockfile_bytes` MUST match what `write_lockfile` actually
     /// puts on disk — otherwise `--frozen-lockfile` would report spurious
     /// mismatches because the two paths produce different bytes.
-    #[test]
-    fn canonical_bytes_match_write_lockfile_output() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn canonical_bytes_match_write_lockfile_output() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("devcontainer-lock.json");
 
         let lockfile = one_feature_lockfile("1.6.1", &"a".repeat(64));
 
-        write_lockfile(&path, &lockfile, true).expect("write_lockfile");
+        write_lockfile(&path, &lockfile, true)
+            .await
+            .expect("write_lockfile");
         let on_disk = std::fs::read(&path).unwrap();
         let in_memory = canonical_lockfile_bytes(&lockfile).expect("canonicalize");
 
@@ -470,15 +475,17 @@ mod lockfile_post_build_tests {
     /// `--no-lockfile` short-circuits the helper entirely: no read, no write,
     /// no comparison, even in `--frozen-lockfile` (the two are mutually
     /// exclusive at the CLI layer, but the helper is defensive).
-    #[test]
-    fn no_lockfile_flag_skips_all_io() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_lockfile_flag_skips_all_io() {
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join(".devcontainer/devcontainer.json");
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
         let lockfile = one_feature_lockfile("1.0.0", &"b".repeat(64));
 
         let args = make_args(true, false);
-        handle_lockfile_post_build(&args, &config_path, &lockfile).expect("no-lockfile path");
+        handle_lockfile_post_build(&args, &config_path, &lockfile)
+            .await
+            .expect("no-lockfile path");
 
         let derived = get_lockfile_path(&config_path);
         assert!(
@@ -490,26 +497,31 @@ mod lockfile_post_build_tests {
     /// Default mode writes the lockfile next to the config file, sorted by
     /// key with a trailing newline (validated downstream by parity tests in
     /// `deacon_core::lockfile`).
-    #[test]
-    fn default_mode_writes_lockfile_next_to_config() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn default_mode_writes_lockfile_next_to_config() {
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join(".devcontainer/devcontainer.json");
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
         let lockfile = one_feature_lockfile("1.0.0", &"c".repeat(64));
 
         let args = make_args(false, false);
-        handle_lockfile_post_build(&args, &config_path, &lockfile).expect("default-write path");
+        handle_lockfile_post_build(&args, &config_path, &lockfile)
+            .await
+            .expect("default-write path");
 
         let derived = get_lockfile_path(&config_path);
-        let on_disk = read_lockfile(&derived).expect("read_lockfile").unwrap();
+        let on_disk = read_lockfile(&derived)
+            .await
+            .expect("read_lockfile")
+            .unwrap();
         assert_eq!(on_disk, lockfile);
     }
 
     /// Frozen mode against a missing lockfile fails with the upstream string
     /// `"Lockfile does not exist."` so CI scripts that match on the message
     /// keep working.
-    #[test]
-    fn frozen_mode_missing_lockfile_fails_with_upstream_string() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn frozen_mode_missing_lockfile_fails_with_upstream_string() {
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join(".devcontainer/devcontainer.json");
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
@@ -517,6 +529,7 @@ mod lockfile_post_build_tests {
 
         let args = make_args(false, true);
         let err = handle_lockfile_post_build(&args, &config_path, &lockfile)
+            .await
             .expect_err("frozen + missing must fail");
         let msg = format!("{:#}", err);
         assert!(
@@ -526,8 +539,8 @@ mod lockfile_post_build_tests {
     }
 
     /// Frozen mode with a byte-identical existing lockfile succeeds.
-    #[test]
-    fn frozen_mode_matches_existing_lockfile() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn frozen_mode_matches_existing_lockfile() {
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join(".devcontainer/devcontainer.json");
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
@@ -535,17 +548,18 @@ mod lockfile_post_build_tests {
 
         // Seed the on-disk file with the canonical form.
         let derived = get_lockfile_path(&config_path);
-        write_lockfile(&derived, &lockfile, true).unwrap();
+        write_lockfile(&derived, &lockfile, true).await.unwrap();
 
         let args = make_args(false, true);
         handle_lockfile_post_build(&args, &config_path, &lockfile)
+            .await
             .expect("frozen + matching must succeed");
     }
 
     /// Frozen mode with a mismatched on-disk lockfile fails with the upstream
     /// string `"Lockfile does not match."`.
-    #[test]
-    fn frozen_mode_mismatch_fails_with_upstream_string() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn frozen_mode_mismatch_fails_with_upstream_string() {
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join(".devcontainer/devcontainer.json");
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
@@ -553,13 +567,14 @@ mod lockfile_post_build_tests {
         // On disk: version 1.0.0
         let stale = one_feature_lockfile("1.0.0", &"f".repeat(64));
         let derived = get_lockfile_path(&config_path);
-        write_lockfile(&derived, &stale, true).unwrap();
+        write_lockfile(&derived, &stale, true).await.unwrap();
 
         // Freshly resolved: version 2.0.0 — should NOT match.
         let fresh = one_feature_lockfile("2.0.0", &"f".repeat(64));
 
         let args = make_args(false, true);
         let err = handle_lockfile_post_build(&args, &config_path, &fresh)
+            .await
             .expect_err("frozen + mismatch must fail");
         let msg = format!("{:#}", err);
         assert!(

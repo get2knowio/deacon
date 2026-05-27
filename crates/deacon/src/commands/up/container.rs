@@ -231,7 +231,7 @@ pub(crate) async fn execute_container_up(
         // (or byte-compare it in `--frozen-lockfile` mode). Runs only when
         // features were actually resolved; with no features there is nothing
         // to lock.
-        handle_lockfile_post_build(args, config_path, &feature_build.lockfile)?;
+        handle_lockfile_post_build(args, config_path, &feature_build.lockfile).await?;
 
         Some(feature_build.resolved_features)
     } else {
@@ -511,6 +511,7 @@ pub(crate) async fn execute_container_up(
     // Per SC-002: On resume, skip onCreate, updateContent, postCreate, dotfiles; run postStart, postAttach
     // Per FR-004: On partial resume, skip completed phases, run remaining from earliest incomplete
     let prior_markers = deacon_core::state::read_all_markers(workspace_folder, args.prebuild)
+        .await
         .unwrap_or_else(|e| {
             debug!("Failed to read prior lifecycle markers: {}", e);
             Vec::new()

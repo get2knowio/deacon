@@ -804,6 +804,7 @@ impl LifecycleOrchestrator {
     /// use std::path::PathBuf;
     /// use deacon_core::lifecycle::{LifecycleOrchestrator, InvocationContext, LifecyclePhase};
     ///
+    /// # async fn run() {
     /// let workspace = PathBuf::from("/workspace");
     /// let context = InvocationContext::new_fresh(workspace.clone());
     /// let mut orchestrator = LifecycleOrchestrator::new(context);
@@ -811,9 +812,10 @@ impl LifecycleOrchestrator {
     /// let summary = orchestrator.execute_with_markers(|phase| {
     ///     println!("Executing phase: {}", phase.as_str());
     ///     Ok::<(), String>(())
-    /// }, false).unwrap();
+    /// }, false).await.unwrap();
+    /// # }
     /// ```
-    pub fn execute_with_markers<F, E>(
+    pub async fn execute_with_markers<F, E>(
         &mut self,
         mut executor: F,
         prebuild: bool,
@@ -842,7 +844,7 @@ impl LifecycleOrchestrator {
                         let state = LifecyclePhaseState::new_executed(phase, marker_path.clone());
 
                         // Write marker to disk - log errors but don't fail the execution
-                        if let Err(e) = write_phase_marker(&marker_path, &state) {
+                        if let Err(e) = write_phase_marker(&marker_path, &state).await {
                             tracing::warn!(
                                 "Failed to write marker for phase {}: {}",
                                 phase.as_str(),
@@ -867,7 +869,7 @@ impl LifecycleOrchestrator {
                         LifecyclePhaseState::new_skipped(phase, marker_path.clone(), reason);
 
                     // Write skipped marker to disk - log errors but don't fail
-                    if let Err(e) = write_phase_marker(&marker_path, &state) {
+                    if let Err(e) = write_phase_marker(&marker_path, &state).await {
                         tracing::warn!(
                             "Failed to write skip marker for phase {}: {}",
                             phase.as_str(),
@@ -923,7 +925,7 @@ impl LifecycleOrchestrator {
                         let state = LifecyclePhaseState::new_executed(phase, marker_path.clone());
 
                         // Write marker to disk - log errors but don't fail the execution
-                        if let Err(e) = write_phase_marker(&marker_path, &state) {
+                        if let Err(e) = write_phase_marker(&marker_path, &state).await {
                             tracing::warn!(
                                 "Failed to write marker for phase {}: {}",
                                 phase.as_str(),
@@ -948,7 +950,7 @@ impl LifecycleOrchestrator {
                         LifecyclePhaseState::new_skipped(phase, marker_path.clone(), reason);
 
                     // Write skipped marker to disk - log errors but don't fail
-                    if let Err(e) = write_phase_marker(&marker_path, &state) {
+                    if let Err(e) = write_phase_marker(&marker_path, &state).await {
                         tracing::warn!(
                             "Failed to write skip marker for phase {}: {}",
                             phase.as_str(),
@@ -2214,8 +2216,8 @@ mod tests {
     // execute_with_markers Tests
     // =========================================================================
 
-    #[test]
-    fn test_orchestrator_execute_with_markers_writes_markers() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_orchestrator_execute_with_markers_writes_markers() {
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
@@ -2234,6 +2236,7 @@ mod tests {
                 },
                 false,
             )
+            .await
             .unwrap();
 
         // All 6 phases should have been executed in order
@@ -2243,7 +2246,7 @@ mod tests {
 
         // Verify markers were written to disk
         use crate::state::read_all_markers;
-        let markers = read_all_markers(&workspace, false).unwrap();
+        let markers = read_all_markers(&workspace, false).await.unwrap();
         assert_eq!(markers.len(), 6);
 
         // Verify markers are in spec order
@@ -2254,8 +2257,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_orchestrator_execute_with_markers_prebuild_isolation() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_orchestrator_execute_with_markers_prebuild_isolation() {
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
@@ -2266,6 +2269,7 @@ mod tests {
 
         let summary = orchestrator
             .execute_with_markers(|_phase| Ok::<(), String>(()), true)
+            .await
             .unwrap();
 
         // 2 executed (onCreate, updateContent), 4 skipped (postCreate, dotfiles, postStart, postAttach)
@@ -2274,11 +2278,11 @@ mod tests {
 
         // Verify markers were written to prebuild directory
         use crate::state::read_all_markers;
-        let prebuild_markers = read_all_markers(&workspace, true).unwrap();
+        let prebuild_markers = read_all_markers(&workspace, true).await.unwrap();
         assert_eq!(prebuild_markers.len(), 6); // All phases get markers (executed or skipped)
 
         // Verify normal directory is empty
-        let normal_markers = read_all_markers(&workspace, false).unwrap();
+        let normal_markers = read_all_markers(&workspace, false).await.unwrap();
         assert!(normal_markers.is_empty());
 
         // Verify only onCreate and updateContent are executed
@@ -2298,8 +2302,8 @@ mod tests {
         assert_eq!(skipped.len(), 4);
     }
 
-    #[test]
-    fn test_orchestrator_execute_with_markers_stops_on_error() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_orchestrator_execute_with_markers_stops_on_error() {
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
@@ -2310,17 +2314,19 @@ mod tests {
 
         let mut executed_phases = Vec::new();
 
-        let result = orchestrator.execute_with_markers(
-            |phase| {
-                executed_phases.push(phase);
-                if phase == LifecyclePhase::PostCreate {
-                    Err("postCreate failed".to_string())
-                } else {
-                    Ok(())
-                }
-            },
-            false,
-        );
+        let result = orchestrator
+            .execute_with_markers(
+                |phase| {
+                    executed_phases.push(phase);
+                    if phase == LifecyclePhase::PostCreate {
+                        Err("postCreate failed".to_string())
+                    } else {
+                        Ok(())
+                    }
+                },
+                false,
+            )
+            .await;
 
         // Should have executed up to and including postCreate (where it failed)
         assert_eq!(executed_phases.len(), 3);
@@ -2328,7 +2334,7 @@ mod tests {
 
         // Verify only successfully executed phases have markers
         use crate::state::read_all_markers;
-        let markers = read_all_markers(&workspace, false).unwrap();
+        let markers = read_all_markers(&workspace, false).await.unwrap();
         assert_eq!(markers.len(), 2); // Only onCreate and updateContent should have markers
 
         // Verify phases
@@ -2359,12 +2365,12 @@ mod tests {
 
         // Verify markers were written to disk
         use crate::state::read_all_markers;
-        let markers = read_all_markers(&workspace, false).unwrap();
+        let markers = read_all_markers(&workspace, false).await.unwrap();
         assert_eq!(markers.len(), 6);
     }
 
-    #[test]
-    fn test_orchestrator_execute_with_markers_dotfiles_in_order() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_orchestrator_execute_with_markers_dotfiles_in_order() {
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
@@ -2383,6 +2389,7 @@ mod tests {
                 },
                 false,
             )
+            .await
             .unwrap();
 
         // Verify dotfiles is executed between postCreate and postStart
@@ -2410,7 +2417,7 @@ mod tests {
 
         // Verify markers reflect this order
         use crate::state::read_all_markers;
-        let markers = read_all_markers(&workspace, false).unwrap();
+        let markers = read_all_markers(&workspace, false).await.unwrap();
 
         let marker_order: Vec<_> = markers.iter().map(|m| m.phase).collect();
         assert_eq!(

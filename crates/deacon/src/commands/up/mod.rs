@@ -222,7 +222,7 @@ pub(crate) async fn execute_up_with_runtime(
         }
 
         // Read the lockfile (may be None if missing)
-        let lockfile = read_lockfile(&lockfile_path).with_context(|| {
+        let lockfile = read_lockfile(&lockfile_path).await.with_context(|| {
             format!(
                 "Failed to read lockfile at '{}'. \
                  The file may be corrupted or contain invalid JSON. \
