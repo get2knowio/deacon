@@ -5,6 +5,7 @@
 //! (Configuration, Docker, Feature, etc.) that are then wrapped in the main
 //! DeaconError enum for unified error handling.
 
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// Configuration-related errors
@@ -212,6 +213,118 @@ pub enum InternalError {
     Unexpected { message: String },
 }
 
+/// Lockfile-related errors
+#[derive(Error, Debug)]
+pub enum LockfileError {
+    /// I/O error reading or writing a lockfile
+    #[error("Lockfile I/O error at {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// JSON parsing or serialization error
+    #[error("Lockfile JSON error at {path}: {source}")]
+    Json {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+
+    /// Lockfile already exists and force_init=false
+    #[error("Lockfile already exists at {path}. Use force_init=true to overwrite.")]
+    AlreadyExists { path: PathBuf },
+
+    /// Lockfile contents fail validation (semver, OCI ref, sha256, deps)
+    #[error("Lockfile validation failed: {message}")]
+    Validation { message: String },
+
+    /// Dependency cycle detected in `dependsOn`
+    #[error("Circular dependency detected in depends_on fields: {cycle_path}")]
+    DependencyCycle { cycle_path: String },
+}
+
+/// Cache-related errors
+#[derive(Error, Debug)]
+pub enum CacheError {
+    /// I/O error during cache operations
+    #[error("Cache I/O error: {message}")]
+    Io {
+        message: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Serialization/deserialization error for cache payloads
+    #[error("Cache serialization error: {message}")]
+    Serialization { message: String },
+
+    /// Entry size exceeds the cache's maximum
+    #[error("Cache entry size ({size} bytes) exceeds maximum size ({max} bytes)")]
+    EntryTooLarge { size: usize, max: usize },
+}
+
+/// Workspace state/marker errors
+#[derive(Error, Debug)]
+pub enum StateError {
+    /// I/O error while reading or writing workspace state / phase markers
+    #[error("State I/O error at {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to serialize state to JSON
+    #[error("Failed to serialize state for {kind}: {source}")]
+    Serialize {
+        kind: String,
+        #[source]
+        source: serde_json::Error,
+    },
+
+    /// Underlying cache operation failed
+    #[error("State cache error: {0}")]
+    Cache(#[from] CacheError),
+}
+
+/// Output / stdout-stderr separation errors
+#[derive(Error, Debug)]
+pub enum IoError {
+    /// Failed to write to the underlying stream
+    #[error("Output write error: {0}")]
+    Write(#[from] std::io::Error),
+
+    /// Failed to serialize a value to JSON for output
+    #[error("Output JSON serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+/// Progress / metrics / audit logging errors
+#[derive(Error, Debug)]
+pub enum ProgressError {
+    /// I/O error while writing progress events or audit log
+    #[error("Progress I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// Failed to serialize a progress event
+    #[error("Progress event serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+/// Container selector / lookup errors
+#[derive(Error, Debug)]
+pub enum ContainerSelectorError {
+    /// id-label string did not match `name=value`
+    #[error("Unmatched argument format: id-label must match <name>=<value>.")]
+    InvalidLabelFormat,
+
+    /// At least one selector is required (container_id, id_labels, or workspace_folder)
+    #[error("Missing required argument: One of --container-id, --id-label or --workspace-folder is required.")]
+    NoSelector,
+}
+
 /// Main error enum wrapping all domain-specific errors
 #[derive(Error, Debug)]
 pub enum DeaconError {
@@ -272,6 +385,30 @@ pub enum DeaconError {
     /// Internal/generic errors
     #[error("Internal error: {0}")]
     Internal(#[from] InternalError),
+
+    /// Lockfile errors
+    #[error("Lockfile error: {0}")]
+    Lockfile(#[from] LockfileError),
+
+    /// Cache errors
+    #[error("Cache error: {0}")]
+    Cache(#[from] CacheError),
+
+    /// Workspace state errors
+    #[error("State error: {0}")]
+    State(#[from] StateError),
+
+    /// Output stream errors
+    #[error("Output error: {0}")]
+    Output(#[from] IoError),
+
+    /// Progress/audit errors
+    #[error("Progress error: {0}")]
+    Progress(#[from] ProgressError),
+
+    /// Container selector errors
+    #[error("Container selector error: {0}")]
+    ContainerSelector(#[from] ContainerSelectorError),
 }
 
 /// Convenience type alias for Results with DeaconError
@@ -462,6 +599,113 @@ mod tests {
         let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "File not found");
         let config_error: ConfigError = io_error.into();
         assert!(matches!(config_error, ConfigError::Io(_)));
+    }
+
+    #[test]
+    fn test_lockfile_error_variants() {
+        let path = PathBuf::from("/tmp/lock.json");
+
+        let err = LockfileError::AlreadyExists { path: path.clone() };
+        assert!(err.to_string().contains("Lockfile already exists"));
+        assert!(err.to_string().contains("/tmp/lock.json"));
+
+        let err = LockfileError::Validation {
+            message: "invalid integrity".to_string(),
+        };
+        assert!(err.to_string().contains("invalid integrity"));
+
+        let err = LockfileError::DependencyCycle {
+            cycle_path: "a -> b -> a".to_string(),
+        };
+        assert!(err.to_string().contains("Circular dependency"));
+        assert!(err.to_string().contains("a -> b -> a"));
+
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
+        let err = LockfileError::Io {
+            path: path.clone(),
+            source: io_err,
+        };
+        assert!(err.to_string().contains("Lockfile I/O error"));
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn test_cache_error_variants() {
+        let err = CacheError::EntryTooLarge {
+            size: 4096,
+            max: 1024,
+        };
+        assert!(err.to_string().contains("4096"));
+        assert!(err.to_string().contains("1024"));
+
+        let err = CacheError::Serialization {
+            message: "bad value".to_string(),
+        };
+        assert!(err.to_string().contains("bad value"));
+    }
+
+    #[test]
+    fn test_state_error_variants() {
+        let path = PathBuf::from("/tmp/state.json");
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let err = StateError::Io {
+            path: path.clone(),
+            source: io_err,
+        };
+        assert!(err.to_string().contains("State I/O error"));
+        assert!(err.to_string().contains("/tmp/state.json"));
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn test_io_error_variants() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "broken");
+        let err: IoError = io_err.into();
+        assert!(err.to_string().contains("Output write error"));
+    }
+
+    #[test]
+    fn test_progress_error_variants() {
+        let io_err = std::io::Error::other("noisy");
+        let err: ProgressError = io_err.into();
+        assert!(err.to_string().contains("Progress I/O error"));
+    }
+
+    #[test]
+    fn test_container_selector_error_variants() {
+        let err = ContainerSelectorError::InvalidLabelFormat;
+        assert!(err.to_string().contains("id-label must match"));
+
+        let err = ContainerSelectorError::NoSelector;
+        assert!(err.to_string().contains("Missing required argument"));
+    }
+
+    #[test]
+    fn test_new_errors_into_deacon_error() {
+        let de: DeaconError = LockfileError::Validation {
+            message: "x".into(),
+        }
+        .into();
+        assert!(matches!(de, DeaconError::Lockfile(_)));
+
+        let de: DeaconError = CacheError::EntryTooLarge { size: 1, max: 0 }.into();
+        assert!(matches!(de, DeaconError::Cache(_)));
+
+        let de: DeaconError = StateError::Serialize {
+            kind: "ContainerState".into(),
+            source: serde_json::from_str::<serde_json::Value>("not json").unwrap_err(),
+        }
+        .into();
+        assert!(matches!(de, DeaconError::State(_)));
+
+        let de: DeaconError = IoError::from(std::io::Error::other("oops")).into();
+        assert!(matches!(de, DeaconError::Output(_)));
+
+        let de: DeaconError = ProgressError::from(std::io::Error::other("oops")).into();
+        assert!(matches!(de, DeaconError::Progress(_)));
+
+        let de: DeaconError = ContainerSelectorError::NoSelector.into();
+        assert!(matches!(de, DeaconError::ContainerSelector(_)));
     }
 
     #[test]

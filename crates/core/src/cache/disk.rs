@@ -1,7 +1,7 @@
 //! Disk-based cache implementation with TTL support
 
-use super::{hash_key, Cache, CacheStats, TtlEntry};
-use anyhow::{Context, Result};
+use super::{hash_key, Cache, CacheStats, Result, TtlEntry};
+use crate::errors::CacheError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -10,6 +10,25 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, trace, warn};
+
+fn cache_io<S: Into<String>>(message: S) -> impl FnOnce(std::io::Error) -> CacheError {
+    let message = message.into();
+    move |source| CacheError::Io { message, source }
+}
+
+fn cache_serialize<S: Into<String>>(message: S) -> impl FnOnce(postcard::Error) -> CacheError {
+    let message = message.into();
+    move |source| CacheError::Serialization {
+        message: format!("{}: {}", message, source),
+    }
+}
+
+fn cache_serde_json<S: Into<String>>(message: S) -> impl FnOnce(serde_json::Error) -> CacheError {
+    let message = message.into();
+    move |source| CacheError::Serialization {
+        message: format!("{}: {}", message, source),
+    }
+}
 
 /// Disk-based cache that stores entries as files
 pub struct DiskCache<K, V> {
@@ -45,8 +64,10 @@ where
 
         // Create cache directory if it doesn't exist
         if !cache_dir.exists() {
-            fs::create_dir_all(&cache_dir)
-                .with_context(|| format!("Failed to create cache directory: {:?}", cache_dir))?;
+            fs::create_dir_all(&cache_dir).map_err(cache_io(format!(
+                "Failed to create cache directory: {:?}",
+                cache_dir
+            )))?;
         }
 
         let mut cache = Self {
@@ -67,11 +88,13 @@ where
         let metadata_file = self.cache_dir.join("index.json");
 
         if metadata_file.exists() {
-            let content = fs::read_to_string(&metadata_file)
-                .with_context(|| format!("Failed to read cache index: {:?}", metadata_file))?;
+            let content = fs::read_to_string(&metadata_file).map_err(cache_io(format!(
+                "Failed to read cache index: {:?}",
+                metadata_file
+            )))?;
 
-            self.index =
-                serde_json::from_str(&content).with_context(|| "Failed to parse cache index")?;
+            self.index = serde_json::from_str(&content)
+                .map_err(cache_serde_json("Failed to parse cache index"))?;
 
             // Remove expired entries and clean up orphaned files
             self.cleanup_expired_entries()?;
@@ -86,10 +109,12 @@ where
     fn save_index(&self) -> Result<()> {
         let metadata_file = self.cache_dir.join("index.json");
         let content = serde_json::to_string_pretty(&self.index)
-            .with_context(|| "Failed to serialize cache index")?;
+            .map_err(cache_serde_json("Failed to serialize cache index"))?;
 
-        fs::write(&metadata_file, content)
-            .with_context(|| format!("Failed to write cache index: {:?}", metadata_file))?;
+        fs::write(&metadata_file, content).map_err(cache_io(format!(
+            "Failed to write cache index: {:?}",
+            metadata_file
+        )))?;
 
         Ok(())
     }
@@ -145,11 +170,13 @@ where
 
         // Serialize and write the TTL entry
         let ttl_entry = TtlEntry::new(value, ttl);
-        let serialized =
-            postcard::to_allocvec(&ttl_entry).with_context(|| "Failed to serialize cache entry")?;
+        let serialized = postcard::to_allocvec(&ttl_entry)
+            .map_err(cache_serialize("Failed to serialize cache entry"))?;
 
-        fs::write(&data_file, &serialized)
-            .with_context(|| format!("Failed to write cache file: {:?}", data_file))?;
+        fs::write(&data_file, &serialized).map_err(cache_io(format!(
+            "Failed to write cache file: {:?}",
+            data_file
+        )))?;
 
         // Update metadata
         let metadata = CacheMetadata {
@@ -182,11 +209,13 @@ where
             return Ok(None);
         }
 
-        let serialized = fs::read(&metadata.data_file)
-            .with_context(|| format!("Failed to read cache file: {:?}", metadata.data_file))?;
+        let serialized = fs::read(&metadata.data_file).map_err(cache_io(format!(
+            "Failed to read cache file: {:?}",
+            metadata.data_file
+        )))?;
 
         let entry: TtlEntry<V> = postcard::from_bytes(&serialized)
-            .with_context(|| "Failed to deserialize cache entry")?;
+            .map_err(cache_serialize("Failed to deserialize cache entry"))?;
 
         if entry.is_expired() {
             return Ok(None);

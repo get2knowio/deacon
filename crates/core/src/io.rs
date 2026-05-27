@@ -5,10 +5,13 @@
 //! instead of direct `println!` to prevent accidental mixing of logs with
 //! machine-readable output.
 
+use crate::errors::IoError;
 use crate::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
-use anyhow::Result;
 use serde::Serialize;
 use std::io::{self, Write};
+
+/// Convenience `Result` alias for the output helper
+pub type Result<T, E = IoError> = std::result::Result<T, E>;
 
 /// Output helper that enforces stdout/stderr separation contract
 ///

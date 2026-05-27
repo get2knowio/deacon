@@ -4,7 +4,6 @@
 //! in-memory metrics collection with histogram aggregation, and persistent
 //! audit logging with rotation.
 
-use anyhow::Result;
 use directories_next::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -16,7 +15,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, instrument, warn};
 
+use crate::errors::ProgressError;
 use crate::redaction::{RedactingWriter, RedactionConfig, SecretRegistry};
+
+/// Convenience `Result` alias for progress operations
+pub type Result<T, E = ProgressError> = std::result::Result<T, E>;
 
 /// Global event ID counter for deterministic ordering
 pub static EVENT_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -934,7 +937,6 @@ impl ProgressEmitter for StdoutEmitter {
     /// # Examples
     ///
     /// ```
-    /// use anyhow::Result;
     /// use deacon_core::progress::{StdoutEmitter, ProgressEvent, ProgressEmitter};
     /// let mut emitter = StdoutEmitter;
     /// let event = ProgressEvent::BuildBegin {
@@ -943,8 +945,7 @@ impl ProgressEmitter for StdoutEmitter {
     ///     context: "ctx".into(),
     ///     dockerfile: None,
     /// };
-    /// let res: Result<()> = emitter.emit(&event);
-    /// assert!(res.is_ok());
+    /// assert!(emitter.emit(&event).is_ok());
     /// ```
     fn emit(&mut self, event: &ProgressEvent) -> Result<()> {
         let line = serde_json::to_string(event)?;

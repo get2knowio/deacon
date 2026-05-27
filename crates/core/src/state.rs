@@ -16,11 +16,19 @@
 //! updateContent before proceeding to postCreate/postStart/postAttach.
 
 use crate::cache::{Cache, DiskCache};
+use crate::errors::StateError;
 use crate::lifecycle::{LifecyclePhase, LifecyclePhaseState, PhaseStatus};
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
+
+/// Convenience `Result` alias for state operations
+pub type Result<T, E = StateError> = std::result::Result<T, E>;
+
+fn state_io<P: Into<PathBuf>>(path: P) -> impl FnOnce(std::io::Error) -> StateError {
+    let path = path.into();
+    move |source| StateError::Io { path, source }
+}
 
 /// State information for a running container
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -74,8 +82,7 @@ impl StateManager {
     /// Create a new state manager with custom cache directory
     pub fn new_with_cache_dir<P: AsRef<Path>>(cache_dir: P) -> Result<Self> {
         let state_cache_dir = cache_dir.as_ref().join("state");
-        let cache = DiskCache::new(&state_cache_dir)
-            .with_context(|| format!("Failed to create state cache in {:?}", state_cache_dir))?;
+        let cache = DiskCache::new(&state_cache_dir)?;
 
         Ok(Self { cache })
     }
@@ -85,9 +92,7 @@ impl StateManager {
         // Use the same pattern as features cache
         let cache_dir = std::env::temp_dir().join("deacon-state");
         if !cache_dir.exists() {
-            std::fs::create_dir_all(&cache_dir).with_context(|| {
-                format!("Failed to create state cache directory: {:?}", cache_dir)
-            })?;
+            std::fs::create_dir_all(&cache_dir).map_err(state_io(cache_dir.clone()))?;
         }
         Ok(cache_dir)
     }
@@ -106,14 +111,7 @@ impl StateManager {
         );
 
         let state = WorkspaceState::Container(container_state);
-        self.cache
-            .set(workspace_hash.to_string(), state)
-            .with_context(|| {
-                format!(
-                    "Failed to save container state for workspace {}",
-                    workspace_hash
-                )
-            })?;
+        self.cache.set(workspace_hash.to_string(), state)?;
 
         info!(
             workspace_hash = %workspace_hash,
@@ -137,14 +135,7 @@ impl StateManager {
         );
 
         let state = WorkspaceState::Compose(compose_state);
-        self.cache
-            .set(workspace_hash.to_string(), state)
-            .with_context(|| {
-                format!(
-                    "Failed to save compose state for workspace {}",
-                    workspace_hash
-                )
-            })?;
+        self.cache.set(workspace_hash.to_string(), state)?;
 
         info!(
             workspace_hash = %workspace_hash,
@@ -545,8 +536,7 @@ pub fn read_phase_marker(path: &Path) -> Result<Option<LifecyclePhaseState>> {
     }
 
     // Now read and parse the file (validation already confirmed it's valid JSON)
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read marker file: {}", path.display()))?;
+    let content = std::fs::read_to_string(path).map_err(state_io(path.to_path_buf()))?;
 
     match serde_json::from_str::<LifecyclePhaseState>(&content) {
         Ok(state) => {
@@ -594,29 +584,19 @@ pub fn read_phase_marker(path: &Path) -> Result<Option<LifecyclePhaseState>> {
 pub fn write_phase_marker(path: &Path, state: &LifecyclePhaseState) -> Result<()> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create marker directory: {}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(state_io(parent.to_path_buf()))?;
     }
 
-    let content = serde_json::to_string_pretty(state).with_context(|| {
-        format!(
-            "Failed to serialize phase state for {}",
-            state.phase.as_str()
-        )
+    let content = serde_json::to_string_pretty(state).map_err(|source| StateError::Serialize {
+        kind: format!("LifecyclePhaseState({})", state.phase.as_str()),
+        source,
     })?;
 
     // Write atomically via temp file + rename for crash safety
     let temp_path = path.with_extension("tmp");
-    std::fs::write(&temp_path, &content)
-        .with_context(|| format!("Failed to write temp marker file: {}", temp_path.display()))?;
+    std::fs::write(&temp_path, &content).map_err(state_io(temp_path.clone()))?;
 
-    std::fs::rename(&temp_path, path).with_context(|| {
-        format!(
-            "Failed to rename temp marker file {} to {}",
-            temp_path.display(),
-            path.display()
-        )
-    })?;
+    std::fs::rename(&temp_path, path).map_err(state_io(path.to_path_buf()))?;
 
     debug!(
         "Wrote marker for phase {} with status {:?} to {}",
@@ -711,8 +691,7 @@ pub fn clear_markers(workspace: &Path, prebuild: bool) -> Result<()> {
     for phase in LifecyclePhase::spec_order() {
         let path = base_dir.join(format!("{}.{}", phase.as_str(), MARKER_EXTENSION));
         if path.exists() {
-            std::fs::remove_file(&path)
-                .with_context(|| format!("Failed to remove marker file: {}", path.display()))?;
+            std::fs::remove_file(&path).map_err(state_io(path.clone()))?;
             cleared_count += 1;
         }
     }

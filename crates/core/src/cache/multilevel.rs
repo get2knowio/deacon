@@ -2,8 +2,7 @@
 
 use super::disk::DiskCache;
 use super::memory::InMemoryCache;
-use super::{Cache, CacheStats};
-use anyhow::Result;
+use super::{Cache, CacheStats, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::hash::Hash;

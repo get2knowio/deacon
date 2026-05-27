@@ -3,11 +3,14 @@
 //! This module provides a multi-level cache implementation supporting both
 //! in-memory and disk-based caching with TTL and LRU eviction policies.
 
-use anyhow::Result;
+use crate::errors::CacheError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt::Debug;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// Convenience `Result` alias for cache operations
+pub type Result<T, E = CacheError> = std::result::Result<T, E>;
 
 mod disk;
 mod keys;

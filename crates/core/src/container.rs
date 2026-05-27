@@ -5,7 +5,7 @@
 //! to the DevContainer specification.
 
 use crate::config::DevContainerConfig;
-use crate::errors::Result;
+use crate::errors::{ContainerSelectorError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -708,7 +708,7 @@ impl ContainerSelector {
         id_label_strings: Vec<String>,
         workspace_folder: Option<std::path::PathBuf>,
         override_config_path: Option<std::path::PathBuf>,
-    ) -> anyhow::Result<Self> {
+    ) -> std::result::Result<Self, ContainerSelectorError> {
         let id_labels = Self::parse_labels(&id_label_strings)?;
         let workspace_folder = match (workspace_folder, override_config_path) {
             (Some(folder), _) => Some(folder),
@@ -745,14 +745,12 @@ impl ContainerSelector {
     /// let selector = ContainerSelector::new(None, vec![], None, None).unwrap();
     /// assert!(selector.validate().is_err());
     /// ```
-    pub fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> std::result::Result<(), ContainerSelectorError> {
         if self.container_id.is_none()
             && self.id_labels.is_empty()
             && self.workspace_folder.is_none()
         {
-            anyhow::bail!(
-                "Missing required argument: One of --container-id, --id-label or --workspace-folder is required."
-            );
+            return Err(ContainerSelectorError::NoSelector);
         }
         Ok(())
     }
@@ -789,13 +787,15 @@ impl ContainerSelector {
     /// let invalid = vec!["invalid".to_string()];
     /// assert!(ContainerSelector::parse_labels(&invalid).is_err());
     /// ```
-    pub fn parse_labels(labels: &[String]) -> anyhow::Result<Vec<(String, String)>> {
+    pub fn parse_labels(
+        labels: &[String],
+    ) -> std::result::Result<Vec<(String, String)>, ContainerSelectorError> {
         use regex::Regex;
         let regex = Regex::new(r"^.+=.+$").expect("Valid regex pattern");
         let mut result = Vec::new();
         for label in labels {
             if !regex.is_match(label) {
-                anyhow::bail!("Unmatched argument format: id-label must match <name>=<value>.");
+                return Err(ContainerSelectorError::InvalidLabelFormat);
             }
             let parts: Vec<&str> = label.splitn(2, '=').collect();
             result.push((parts[0].to_string(), parts[1].to_string()));

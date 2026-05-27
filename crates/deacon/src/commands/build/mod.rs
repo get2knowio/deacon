@@ -1402,18 +1402,20 @@ async fn apply_features_and_lockfile(
     let lockfile_path = get_lockfile_path(config_path);
     let written = match write_lockfile(&lockfile_path, &feature_build.lockfile, true) {
         Ok(()) => Some(lockfile_path),
-        Err(e) if is_readonly_filesystem_error(&e) => {
-            warn!(
-                path = %lockfile_path.display(),
-                error = %e,
-                "Lockfile write skipped (read-only workspace); continuing without persisting lockfile"
-            );
-            None
-        }
         Err(e) => {
-            return Err(e).with_context(|| {
-                format!("Failed to write lockfile to '{}'", lockfile_path.display())
-            });
+            let e = anyhow::Error::from(e);
+            if is_readonly_filesystem_error(&e) {
+                warn!(
+                    path = %lockfile_path.display(),
+                    error = %e,
+                    "Lockfile write skipped (read-only workspace); continuing without persisting lockfile"
+                );
+                None
+            } else {
+                return Err(e).with_context(|| {
+                    format!("Failed to write lockfile to '{}'", lockfile_path.display())
+                });
+            }
         }
     };
 
