@@ -713,6 +713,27 @@ impl DevContainerConfig {
             ));
         }
 
+        // Substitute image (per #124 — image refs may legally include
+        // `${variable}` tags per the spec; deacon was emitting them
+        // verbatim to docker run/create).
+        if let Some(ref image) = config.image {
+            config.image = Some(VariableSubstitution::substitute_string(
+                image,
+                context,
+                &mut report,
+            ));
+        }
+
+        // Substitute docker_compose_file (string or array of strings
+        // carrying `${localWorkspaceFolder}/compose.yml`-style paths). #124.
+        if let Some(ref compose_file) = config.docker_compose_file {
+            config.docker_compose_file = Some(VariableSubstitution::substitute_json_value(
+                compose_file,
+                context,
+                &mut report,
+            ));
+        }
+
         // Substitute workspace_folder
         if let Some(ref workspace_folder) = config.workspace_folder {
             config.workspace_folder = Some(VariableSubstitution::substitute_string(
@@ -3461,6 +3482,36 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_substitution_covers_image_and_compose_file() {
+        // Per #124 — apply_variable_substitution must also expand variables
+        // in `image` and `docker_compose_file` since both flow into
+        // user-visible runtime commands.
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = temp_dir.path();
+        let mut context = SubstitutionContext::new(workspace).unwrap();
+        context
+            .local_env
+            .insert("MY_TAG".to_string(), "v1.2.3".to_string());
+
+        let config = DevContainerConfig {
+            image: Some("ghcr.io/example:${localEnv:MY_TAG}".to_string()),
+            docker_compose_file: Some(serde_json::Value::String(
+                "${localWorkspaceFolder}/compose.yml".to_string(),
+            )),
+            ..Default::default()
+        };
+        let (substituted, _) = config.apply_variable_substitution(&context);
+        assert_eq!(substituted.image.as_deref(), Some("ghcr.io/example:v1.2.3"));
+        let compose_file = substituted
+            .docker_compose_file
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert!(compose_file.ends_with("/compose.yml"));
+        assert!(!compose_file.contains("${"));
     }
 
     #[test]

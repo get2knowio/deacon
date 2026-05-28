@@ -369,7 +369,34 @@ pub(crate) async fn execute_container_up(
 
     // Build entrypoint chain from features and config
     // DevContainerConfig does not currently have an entrypoint field; pass None for config entrypoint.
-    let features_slice = resolved_features.as_deref().unwrap_or(&[]);
+    //
+    // Per #124, feature entrypoints may legally reference `${devcontainerId}`
+    // etc.; substitute before chaining so the Docker `--entrypoint` arg
+    // doesn't see literal `${...}`.
+    let features_owned: Vec<deacon_core::features::ResolvedFeature>;
+    let features_slice: &[deacon_core::features::ResolvedFeature] =
+        if let Some(features) = resolved_features.as_deref() {
+            let mut report = deacon_core::variable::SubstitutionReport::new();
+            features_owned = features
+                .iter()
+                .map(|f| {
+                    let mut new_f = f.clone();
+                    if let Some(ref ep) = f.metadata.entrypoint {
+                        new_f.metadata.entrypoint = Some(
+                            deacon_core::variable::VariableSubstitution::substitute_string(
+                                ep,
+                                &mount_substitution_context,
+                                &mut report,
+                            ),
+                        );
+                    }
+                    new_f
+                })
+                .collect();
+            &features_owned
+        } else {
+            &[]
+        };
     let entrypoint_chain = build_entrypoint_chain(features_slice, None);
 
     // T044: Log entrypoint chain decision
