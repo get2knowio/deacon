@@ -1437,6 +1437,7 @@ where
                     interactive: false,
                     detach: false,
                     silent: false,
+                    stdout_to_stderr: true,
                     terminal_size: None,
                 };
 
@@ -1613,6 +1614,7 @@ where
                     interactive: false,
                     detach: false,
                     silent: false,
+                    stdout_to_stderr: true,
                     terminal_size: None,
                 };
 
@@ -1789,6 +1791,7 @@ where
                             interactive: false,
                             detach: false,
                             silent: false,
+                            stdout_to_stderr: true,
                             terminal_size: None,
                         };
                         let container_id = &config.container_id;
@@ -1997,6 +2000,7 @@ where
         interactive: false,
         detach: false,
         silent: false,
+        stdout_to_stderr: true,
         terminal_size: None,
     };
 

@@ -665,6 +665,7 @@ async fn run_root_shell<D: Docker>(docker: &D, container_id: &str, script: &str)
         // so set-up's JSON output stays clean. The lifecycle helper handles
         // its own streaming separately.
         silent: true,
+        stdout_to_stderr: false,
         terminal_size: None,
     };
     let result = docker
