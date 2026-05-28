@@ -45,6 +45,8 @@ SETUP_ERR="$(mktemp)"
 snapshot="$(run "$DEACON_BIN" set-up \
 	--container-id "$CID" \
 	--config "$SCRIPT_DIR/devcontainer.json" \
+	--include-configuration \
+	--include-merged-configuration \
 	--log-format json 2> "$SETUP_ERR")" || {
 	echo "FAIL: set-up exited non-zero" >&2
 	sed 's/^/  | /' "$SETUP_ERR" >&2
