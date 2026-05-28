@@ -1,0 +1,10 @@
+{
+	"name": "GPU detailed (object form)",
+	"image": "alpine:3.18",
+	"hostRequirements": {
+		"gpu": {
+			"cores": 2,
+			"memory": "8gb"
+		}
+	}
+}

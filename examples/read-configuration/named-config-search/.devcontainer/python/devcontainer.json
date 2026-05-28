@@ -1,0 +1,9 @@
+{
+	"name": "Python variant",
+	"image": "mcr.microsoft.com/devcontainers/python:3.12",
+	"remoteUser": "vscode",
+	"workspaceFolder": "/workspace",
+	"containerEnv": {
+		"VARIANT": "python"
+	}
+}

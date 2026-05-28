@@ -1,0 +1,5 @@
+services:
+  app:
+    environment:
+      OVERRIDE: from-override
+      FINAL: override-wins

@@ -1,0 +1,7 @@
+{
+	"name": "GPU required (boolean true)",
+	"image": "alpine:3.18",
+	"hostRequirements": {
+		"gpu": true
+	}
+}

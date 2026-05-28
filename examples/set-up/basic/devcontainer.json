@@ -1,0 +1,12 @@
+{
+	"name": "Set-Up: attach to existing container",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/tmp",
+	"remoteEnv": {
+		"DEACON_SET_UP_DEMO": "1"
+	},
+	"onCreateCommand": "echo onCreate > /tmp/onCreate.flag",
+	"postCreateCommand": "echo postCreate > /tmp/postCreate.flag",
+	"postStartCommand": "echo postStart > /tmp/postStart.flag"
+}

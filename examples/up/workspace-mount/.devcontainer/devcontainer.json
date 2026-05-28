@@ -1,0 +1,8 @@
+{
+	"name": "Custom workspaceMount",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/srv/app,type=bind,consistency=cached",
+	"workspaceFolder": "/srv/app",
+	"postCreateCommand": "pwd > /tmp/pwd && ls /srv/app > /tmp/listing"
+}

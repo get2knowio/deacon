@@ -1,0 +1,14 @@
+{
+	"name": "overrideFeatureInstallOrder",
+	"image": "mcr.microsoft.com/devcontainers/base:alpine",
+	"features": {
+		"./feature-alpha": {},
+		"./feature-bravo": {},
+		"./feature-charlie": {}
+	},
+	"overrideFeatureInstallOrder": [
+		"./feature-charlie",
+		"./feature-alpha",
+		"./feature-bravo"
+	]
+}

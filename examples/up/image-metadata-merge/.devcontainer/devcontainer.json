@@ -1,0 +1,12 @@
+{
+	"name": "Image-metadata merge",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"containerEnv": {
+		"CONFIG_LAYER": "from-devcontainer-json"
+	},
+	"postCreateCommand": "env | grep -E '^(CONFIG_LAYER|IMAGE_LAYER|MERGED_LAYER)=' | sort > /tmp/merged.env"
+}

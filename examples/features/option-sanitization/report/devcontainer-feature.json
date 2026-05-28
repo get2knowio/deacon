@@ -1,0 +1,23 @@
+{
+	"id": "report",
+	"version": "1.0.0",
+	"name": "Option-name sanitization report",
+	"description": "Records every install-time env var so we can verify the spec's name-sanitization rules.",
+	"options": {
+		"my-string-option": {
+			"type": "string",
+			"default": "default",
+			"description": "Hyphenated option name."
+		},
+		"another.weird-key": {
+			"type": "string",
+			"default": "default",
+			"description": "Dotted + hyphenated option name."
+		},
+		"flagOption": {
+			"type": "boolean",
+			"default": false,
+			"description": "CamelCase boolean."
+		}
+	}
+}

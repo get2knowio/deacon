@@ -1,0 +1,15 @@
+{
+	"name": "Security Options",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"init": true,
+	"privileged": false,
+	"capAdd": [
+		"SYS_PTRACE"
+	],
+	"securityOpt": [
+		"seccomp=unconfined"
+	],
+	"postCreateCommand": "apk add --no-cache strace >/dev/null 2>&1 || true"
+}

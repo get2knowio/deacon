@@ -1,0 +1,10 @@
+{
+	"name": "Feature env-var injection (_REMOTE_USER et al)",
+	"image": "mcr.microsoft.com/devcontainers/base:debian",
+	"remoteUser": "vscode",
+	"containerUser": "vscode",
+	"workspaceFolder": "/workspace",
+	"features": {
+		"./capture-env": {}
+	}
+}

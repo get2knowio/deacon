@@ -1,0 +1,8 @@
+{
+	"name": "containerUser vs remoteUser",
+	"image": "mcr.microsoft.com/devcontainers/base:debian",
+	"workspaceFolder": "/workspace",
+	"containerUser": "root",
+	"remoteUser": "vscode",
+	"postCreateCommand": "id -un > /tmp/postcreate.user"
+}

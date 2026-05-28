@@ -1,0 +1,6 @@
+{
+	"id": "feature-charlie",
+	"version": "1.0.0",
+	"name": "Feature Charlie",
+	"description": "Independent feature; alphabetical default would install this last"
+}

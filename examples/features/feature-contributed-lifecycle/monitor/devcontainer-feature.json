@@ -1,0 +1,8 @@
+{
+	"id": "monitor",
+	"version": "1.0.0",
+	"name": "Monitor",
+	"description": "Adds its own postCreate + postStart hooks. The spec requires these to merge with the user's lifecycle.",
+	"postCreateCommand": "echo monitor-postcreate >> /tmp/lifecycle.log",
+	"postStartCommand": "echo monitor-poststart >> /tmp/lifecycle.log"
+}

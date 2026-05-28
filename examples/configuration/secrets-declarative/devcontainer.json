@@ -1,0 +1,21 @@
+{
+	"name": "Declarative secrets",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"secrets": {
+		"GITHUB_TOKEN": {
+			"description": "Personal access token for GitHub API calls and clones from private repos",
+			"documentationUrl": "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token"
+		},
+		"DATABASE_URL": {
+			"description": "PostgreSQL connection string for the dev database",
+			"documentationUrl": "https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING"
+		}
+	},
+	"remoteEnv": {
+		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
+		"DATABASE_URL": "${localEnv:DATABASE_URL}"
+	},
+	"postCreateCommand": "printenv GITHUB_TOKEN | head -c 8 > /tmp/redaction-canary; echo configured > /tmp/secrets.ready"
+}

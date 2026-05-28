@@ -1,0 +1,7 @@
+{
+	"id": "tooling",
+	"version": "1.0.0",
+	"name": "Tooling",
+	"description": "Contributes a postCreate hook. The user's hook and this one both fire.",
+	"postCreateCommand": "echo tooling-postcreate >> /tmp/lifecycle.log"
+}

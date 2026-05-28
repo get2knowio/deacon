@@ -1,0 +1,11 @@
+{
+	"name": "dockerComposeFile as array",
+	"dockerComposeFile": [
+		"docker-compose.yml",
+		"docker-compose.override.yml"
+	],
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"shutdownAction": "stopCompose",
+	"postCreateCommand": "env | grep -E '^(BASE|OVERRIDE|FINAL)=' | sort > /tmp/merged.env"
+}

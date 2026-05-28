@@ -1,0 +1,10 @@
+{
+	"name": "overrideCommand: false",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"overrideCommand": false,
+	"shutdownAction": "none"
+}

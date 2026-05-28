@@ -1,0 +1,6 @@
+{
+	"id": "capture-env",
+	"version": "1.0.0",
+	"name": "Capture install-time env",
+	"description": "Records the spec-mandated env vars provided to feature install scripts."
+}

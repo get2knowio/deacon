@@ -1,0 +1,8 @@
+services:
+  app:
+    image: alpine:3.18
+    command: sleep infinity
+    working_dir: /workspace
+    environment:
+      BASE: from-base
+      FINAL: base-wins

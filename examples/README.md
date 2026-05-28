@@ -2,29 +2,106 @@
 
 Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into it and run the shown commands without referencing assets elsewhere in the repo.
 
+### Status: which examples pass today
+
+Several of the newer examples are intentionally designed as **canaries** — they exercise spec-mandated behavior that deacon doesn't fully implement yet. If you run them today and they fail, it's by design.
+
+The **single source of truth** for which examples are currently blocked on upstream deacon bugs is the tracking issue:
+
+➡️ **[#74 — Tracking: example scripts blocked on upstream deacon bugs](https://github.com/get2knowio/deacon/issues/74)**
+
+That issue lists each blocked example, the specific deacon bug it surfaces, and ticks them off as the underlying issues land. Each affected example's own `README.md` also links to the specific issue(s) it surfaces, as a breadcrumb back to #74.
+
+**Workaround for running examples today**: most `up`-based examples currently need `--mount-workspace-git-root false` (see [#67](https://github.com/get2knowio/deacon/issues/67)) when run from inside the deacon repo, to avoid silently picking up the repo's own `.devcontainer/`. Once #67 lands, the workaround is no longer needed.
+
 ### Index
 
 - Build: Dockerfile builds, platform targeting, build args, secrets & SSH, Compose service targeting, image reference builds, multi-tag + labels, push/export workflows, feature installation across modes, validation & error scenarios (`build/`)
 - CLI: CLI-specific features and flags including port forwarding and custom container names (`cli/`)
-- Configuration: basic, variable substitution, extends chain, and nested variables (`configuration/`)
 - Container Lifecycle: lifecycle command execution, ordering, variables, skip flags, progress events, and redaction (`container-lifecycle/`)
-- Doctor: environment diagnostics including host requirements and storage checks (`doctor/`)
-- Docker Compose: multi-service orchestration and port events (`compose/`)
 - Exec: command execution semantics covering working directory, user, TTY, and environment (`exec/`)
-- Feature System: dependencies, parallelism, caching, and lockfile support (`features/`)
 - Observability: JSON logs, standardized spans, and structured fields (`observability/`)
-- Template Management: minimal & with-options templates (`template-management/`)
+- Registry: authentication methods for push/pull operations (`registry/`)
 
- - Read-Configuration: configuration reading examples (`read-configuration/`)
-   - `read-configuration/basic/` — Minimal config discovery and output
-   - `read-configuration/with-variables/` — Variable substitution for local env and workspace folder
-   - `read-configuration/extends-chain/` — Chained `extends` across base/mid/leaf configs
-   - `read-configuration/override-config/` — Apply an override with `--override-config`
-   - `read-configuration/features-minimal/` — Local Feature with `--include-features-configuration`
-   - `read-configuration/features-additional/` — Inject a Feature via `--additional-features`
-   - `read-configuration/compose/` — Config referencing a Docker Compose file
-   - `read-configuration/legacy-normalization/` — Legacy `containerEnv` normalized to `remoteEnv`
-   - `read-configuration/id-labels-and-devcontainerId/` — `${devcontainerId}` via `--id-label`
+- Configuration (`configuration/`)
+  - `configuration/basic/` — Minimum viable config
+  - `configuration/with-variables/` — `${localEnv:VAR}` and workspace tokens
+  - `configuration/extends-chain/` — Chained `extends` across base/mid/leaf
+  - `configuration/extends-chain-cycle/` — Cycle detection in extends (two-file + self-extending)
+  - `configuration/nested-variables/` — Variable substitution into nested objects
+  - `configuration/secrets-declarative/` — Top-level `secrets` property with description + documentationUrl
+
+- Docker Compose (`compose/`)
+  - `compose/multiservice-basic/` — App + Redis, `shutdownAction: stopCompose`
+  - `compose/multiple-compose-files/` — `dockerComposeFile` as an array merging base + override
+  - `compose/port-events/` — `--ports-events` streaming
+
+- Doctor (`doctor/`)
+  - `doctor/host-requirements/` — Realistic CPU/memory/storage check (passes)
+  - `doctor/host-requirements-failure/` — Unmeetable requirements (text + JSON output)
+  - `doctor/gpu-host-requirements/` — `hostRequirements.gpu` in all three spec shapes (`true`, `"optional"`, object)
+
+- Down (`down/`)
+  - `down/basic/` — `shutdownAction: stopContainer`, `--remove`, `--volumes`, `--force`, `--all`, idempotency
+
+- Feature System (`features/`)
+  - `features/dependencies-and-ordering/` — `dependsOn` / `installsAfter` resolution
+  - `features/parallel-install-demo/` — Parallel install levels
+  - `features/cache-reuse-hint/` — Digest-based caching
+  - `features/lockfile-demo/` — `devcontainer-lock.json` shape
+  - `features/override-install-order/` — `overrideFeatureInstallOrder` forces non-default order
+  - `features/feature-contributed-lifecycle/` — Feature-declared `postCreate`/`postStart` merge with the user's
+  - `features/feature-env-injection/` — Spec-mandated `_REMOTE_USER` / `_REMOTE_USER_HOME` / `_CONTAINER_USER` / `_CONTAINER_USER_HOME` during install
+  - `features/option-sanitization/` — Option-name → env-var name sanitization rules
+  - `features/oci-digest-pin/` — Feature ref pinned by `@sha256:` for reproducibility (network)
+
+- Read-Configuration (`read-configuration/`)
+  - `read-configuration/basic/` — Minimal config discovery and output
+  - `read-configuration/with-variables/` — Variable substitution for local env and workspace folder
+  - `read-configuration/extends-chain/` — Chained `extends` across base/mid/leaf configs
+  - `read-configuration/override-config/` — Apply an override with `--override-config`
+  - `read-configuration/features-minimal/` — Local Feature with `--include-features-configuration`
+  - `read-configuration/features-additional/` — Inject a Feature via `--additional-features`
+  - `read-configuration/compose/` — Config referencing a Docker Compose file
+  - `read-configuration/legacy-normalization/` — Legacy `containerEnv` normalized to `remoteEnv`
+  - `read-configuration/id-labels-and-devcontainerId/` — `${devcontainerId}` via `--id-label`
+  - `read-configuration/named-config-search/` — `.devcontainer/<name>/devcontainer.json` discovery alongside the default
+
+- Run-User-Commands (`run-user-commands/`)
+  - `run-user-commands/basic/` — Re-execute lifecycle hooks against an existing container; covers `--prebuild`, `--skip-non-blocking-commands`, `--container-id`
+
+- Set-Up (`set-up/`)
+  - `set-up/basic/` — Attach to a vanilla `docker run` container and layer a `devcontainer.json` via `--config`
+
+- Template Management (`template-management/`)
+  - `template-management/minimal-template/` — Minimal template metadata + apply
+  - `template-management/template-with-options/` — Boolean, string, enum options
+  - `template-management/templates-apply/` — Driver script for the apply workflow
+  - `template-management/optional-paths/` — Spec-mandatory `optionalPaths` field for opt-in files
+
+- Up (`up/`)
+  - `up/basic-image/` — Image-based start
+  - `up/dockerfile-build/` — Build from Dockerfile
+  - `up/compose-basic/`, `up/compose-profiles/` — Compose with optional profiles
+  - `up/with-features/` — Features installed during up
+  - `up/lifecycle-hooks/` — All five hooks
+  - `up/initialize-command/` — Host-side `initializeCommand` + workspace-trust gate (`--trust-workspace`, `--trust-workspace-persist`, `DEACON_NO_PROMPT`)
+  - `up/skip-lifecycle/` — Lifecycle skip flags
+  - `up/prebuild-mode/` — `--prebuild`
+  - `up/dotfiles-integration/` — Dotfiles flags
+  - `up/additional-mounts/`, `up/workspace-mount/` — Extra mounts and custom `workspaceMount`
+  - `up/remote-env-secrets/` — `--remote-env`, `--secrets-file`
+  - `up/id-labels-reconnect/`, `up/remove-existing/` — Reconnect / replace patterns
+  - `up/gpu-modes/` — `--gpu-availability`
+  - `up/configuration-output/` — `--include-configuration` / `--include-merged-configuration`
+  - `up/user-env-probe-modes/` — `userEnvProbe` four-value matrix on the up side
+  - `up/wait-for/` — `waitFor` enum + `--skip-non-blocking-commands` cutoff
+  - `up/container-user-vs-remote-user/` — `containerUser` (PID 1) vs `remoteUser` (lifecycle + exec)
+  - `up/security-options/` — `init`, `capAdd`, `securityOpt`, `privileged`
+  - `up/override-command/` — `overrideCommand: false` runs the image's own CMD
+  - `up/update-remote-user-uid/` — UID/GID sync to host user (Linux)
+  - `up/ports-config/` — `forwardPorts` string form, `portsAttributes` sub-fields, `otherPortsAttributes`, `appPort`
+  - `up/image-metadata-merge/` — Image `devcontainer.metadata` LABEL merged with user config
 
 ### Quick Start
 Build a basic Dockerfile with build args:

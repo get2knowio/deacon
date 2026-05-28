@@ -1,0 +1,8 @@
+{
+	"name": "initializeCommand + workspace-trust gate",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"initializeCommand": "echo \"host-side init at $(date -u +%FT%TZ)\" > .initialize-marker",
+	"postCreateCommand": "echo container-side >> /tmp/lifecycle.log"
+}

@@ -1,0 +1,9 @@
+{
+	"name": "Rust variant",
+	"image": "mcr.microsoft.com/devcontainers/rust:1",
+	"remoteUser": "vscode",
+	"workspaceFolder": "/workspace",
+	"containerEnv": {
+		"VARIANT": "rust"
+	}
+}

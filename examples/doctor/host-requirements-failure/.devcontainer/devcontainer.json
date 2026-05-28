@@ -1,0 +1,11 @@
+{
+	"name": "Doctor: unmeetable host requirements",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"hostRequirements": {
+		"cpus": 1024,
+		"memory": "9999gb",
+		"storage": "9999tb"
+	}
+}

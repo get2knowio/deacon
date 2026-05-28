@@ -1,0 +1,9 @@
+{
+	"name": "Default config (.devcontainer/devcontainer.json)",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"containerEnv": {
+		"VARIANT": "default"
+	}
+}
