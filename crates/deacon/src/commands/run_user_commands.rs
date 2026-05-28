@@ -26,7 +26,6 @@ pub struct RunUserCommandsArgs {
     pub skip_post_create: bool,
     pub skip_post_attach: bool,
     pub skip_non_blocking_commands: bool,
-    #[allow(dead_code)] // Future feature: prebuild mode
     pub prebuild: bool,
     #[allow(dead_code)] // Future feature: stop for personalization
     pub stop_for_personalization: bool,
@@ -161,7 +160,7 @@ async fn execute_lifecycle_commands(
         force_pty: false,
         // run-user-commands does not install dotfiles - that is handled by `up` command
         dotfiles: None,
-        is_prebuild: false,
+        is_prebuild: args.prebuild,
         config_hash: None,
     };
 
@@ -222,7 +221,12 @@ async fn execute_lifecycle_commands(
     }
 
     // Phase 3: postCreate (container, can be skipped)
+    // In prebuild mode the run stops after updateContent (postCreate, dotfiles,
+    // postStart, postAttach are all skipped — see InvocationMode::Prebuild in
+    // core::lifecycle and the `up` parity path), so gate postCreate onward on
+    // `!args.prebuild` in addition to `--skip-post-create`.
     if !args.skip_post_create
+        && !args.prebuild
         && should_queue_phase_for_wait_for(
             args.skip_non_blocking_commands,
             wait_for,
@@ -236,12 +240,15 @@ async fn execute_lifecycle_commands(
         }
     }
 
-    // Phase 4: postStart (container, non-blocking, can be skipped)
-    if should_queue_phase_for_wait_for(
-        args.skip_non_blocking_commands,
-        wait_for,
-        LifecyclePhase::PostStart,
-    ) {
+    // Phase 4: postStart (container, non-blocking, can be skipped).
+    // Also skipped in prebuild mode (stops after updateContent).
+    if !args.prebuild
+        && should_queue_phase_for_wait_for(
+            args.skip_non_blocking_commands,
+            wait_for,
+            LifecyclePhase::PostStart,
+        )
+    {
         if let Some(ref post_start) = config.post_start_command {
             if let Some(cmd_list) = parse_phase_command(post_start, "postStartCommand")? {
                 commands = commands.with_post_start(cmd_list);
