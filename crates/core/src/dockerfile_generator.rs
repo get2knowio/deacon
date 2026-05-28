@@ -147,7 +147,15 @@ impl DockerfileGenerator {
         Ok(dockerfile)
     }
 
-    /// Generate the RUN command for installing a single feature
+    /// Generate the RUN command for installing a single feature.
+    ///
+    /// Feature option env vars are passed via `export KEY="value"` followed
+    /// by `&& cd ... && ./install.sh`. The previous form (inline
+    /// `KEY="value" cd …`) only exported the variables to `cd` itself —
+    /// every subsequent `&&`-chained command (including `./install.sh`,
+    /// which is what actually consumes the options) ran with empty env
+    /// (#88). `export … &&` propagates the variables to every later
+    /// command in the chain.
     fn generate_feature_install_command(
         &self,
         feature: &ResolvedFeature,
@@ -165,10 +173,19 @@ impl DockerfileGenerator {
             FEATURE_CONTENT_SOURCE, feature_dir_name, mount_target
         ));
 
-        // Add environment variables for feature options
+        // Export environment variables for feature options so they
+        // propagate to the install script (and any other command in the
+        // chain). Deterministic order: sort by sanitized key.
         let env_vars = Self::build_environment_variables(feature);
-        for (key, value) in env_vars {
-            command.push_str(&format!("    {} \\\n", Self::format_env_var(&key, &value)));
+        if !env_vars.is_empty() {
+            let mut sorted: Vec<(&String, &String)> = env_vars.iter().collect();
+            sorted.sort_by(|a, b| a.0.cmp(b.0));
+            for (key, value) in sorted {
+                command.push_str(&format!(
+                    "    export {} && \\\n",
+                    Self::format_env_var(key, value)
+                ));
+            }
         }
 
         // Execute the install script
@@ -194,18 +211,48 @@ impl DockerfileGenerator {
             .collect()
     }
 
-    /// Build environment variables from feature options
+    /// Build environment variables from feature options.
+    ///
+    /// Per the [features spec](https://containers.dev/implementors/features/#options-environment-vars),
+    /// option ids are passed to `install.sh` as env vars. Shells reject env
+    /// var names containing anything but `[A-Za-z_][A-Za-z0-9_]*`, so deacon
+    /// MUST sanitize: uppercase the key, then replace every non-alphanumeric
+    /// non-underscore character with `_`. Without this the BuildKit `RUN`
+    /// step crashes on options like `another.weird-key`:
+    ///
+    ///     /bin/sh: ANOTHER.WEIRD-KEY=x/y/z: not found
+    ///
+    /// Option *values* are never sanitized — only keys (#88).
     fn build_environment_variables(feature: &ResolvedFeature) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
 
         for (key, value) in &feature.options {
-            // Convert option key to uppercase as per DevContainer spec
-            let env_key = key.to_uppercase();
+            let env_key = Self::sanitize_option_key(key);
             let env_value = Self::option_value_to_string(value);
             env_vars.insert(env_key, env_value);
         }
 
         env_vars
+    }
+
+    /// Sanitize a feature option id into a valid POSIX shell env var name.
+    ///
+    /// - Uppercase per the spec.
+    /// - Replace any `[^A-Z0-9_]` character with `_` so non-identifier
+    ///   characters like `.` and `-` don't reach `/bin/sh`.
+    /// - Leave purely numeric / empty keys to the caller — the dependency
+    ///   resolver upstream guarantees ids are non-empty.
+    fn sanitize_option_key(id: &str) -> String {
+        id.to_uppercase()
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
     }
 
     /// Convert OptionValue to string for environment variable
@@ -325,6 +372,35 @@ mod tests {
         assert_eq!(
             DockerfileGenerator::sanitize_feature_id("common-utils"),
             "common-utils"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_option_key() {
+        // Spec parity (#88): non-identifier characters in feature option
+        // ids must be replaced with `_`, and the whole key uppercased,
+        // before being passed to `install.sh` as a shell env var.
+        assert_eq!(
+            DockerfileGenerator::sanitize_option_key("my-string-option"),
+            "MY_STRING_OPTION"
+        );
+        assert_eq!(
+            DockerfileGenerator::sanitize_option_key("another.weird-key"),
+            "ANOTHER_WEIRD_KEY"
+        );
+        assert_eq!(
+            DockerfileGenerator::sanitize_option_key("flagOption"),
+            "FLAGOPTION"
+        );
+        // Already-identifier keys are unaffected (except for uppercasing).
+        assert_eq!(
+            DockerfileGenerator::sanitize_option_key("version"),
+            "VERSION"
+        );
+        // Underscores survive untouched.
+        assert_eq!(
+            DockerfileGenerator::sanitize_option_key("install_zsh"),
+            "INSTALL_ZSH"
         );
     }
 
