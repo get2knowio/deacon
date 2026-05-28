@@ -17,7 +17,7 @@ Non-interactive mode is essential for scripting, CI/CD pipelines, and any scenar
 
 ## Files
 
-- `devcontainer.json` - Basic configuration
+- `.devcontainer.json` - Basic configuration
 - `generate-output.sh` - Script producing both stdout and stderr
 - `binary-test.sh` - Script demonstrating binary-safe I/O
 - `data/sample.bin` - Binary test file

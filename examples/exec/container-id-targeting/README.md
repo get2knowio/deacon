@@ -13,7 +13,7 @@ When you know the exact container ID, `--container-id` provides the most direct 
 
 ## Files
 
-- `devcontainer.json` - Basic dev container configuration
+- `.devcontainer.json` - Basic dev container configuration
 - `test-script.sh` - A simple script to demonstrate execution
 
 ## Usage

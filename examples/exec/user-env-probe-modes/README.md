@@ -13,7 +13,7 @@ The `userEnvProbe` setting determines how the container's shell initialization i
 
 ## Files
 
-- `devcontainer.json` - Configuration with `userEnvProbe` set
+- `.devcontainer.json` - Configuration with `userEnvProbe` set
 - `probe-test.sh` - Script to verify environment collection
 - `.bashrc` - Custom bash initialization (demonstrates shell init)
 

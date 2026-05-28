@@ -17,7 +17,7 @@ Reliable exit code handling is essential for:
 
 ## Files
 
-- `devcontainer.json` - Basic configuration
+- `.devcontainer.json` - Basic configuration
 - `exit-codes.sh` - Script demonstrating various exit scenarios
 - `signal-test.sh` - Script for testing signal termination
 - `timeout-test.sh` - Long-running script for timeout testing
