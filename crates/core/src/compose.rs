@@ -1046,6 +1046,7 @@ impl ComposeManager {
     ///     external_volumes: Vec::new(),
     ///     override_command: Some(false),
     ///     service_image_override: None,
+    ///     deacon_labels: IndexMap::new(),
     /// };
     ///
     /// let output = manager.build_service(&project, "web").await?;
@@ -1110,6 +1111,7 @@ impl ComposeManager {
     ///     external_volumes: Vec::new(),
     ///     override_command: Some(false),
     ///     service_image_override: None,
+    ///     deacon_labels: IndexMap::new(),
     /// };
     ///
     /// if manager.validate_service_exists(&project, "web").await? {
