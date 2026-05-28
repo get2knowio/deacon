@@ -10,13 +10,11 @@ run() {
 }
 
 container_id() {
-	# Deacon-created compose containers don't carry deacon's name labels —
-	# only the standard docker-compose ones. Filter by compose project +
-	# service. Deacon derives the project name from the workspace dir's
-	# basename.
-	local project
-	project="$(basename "$SCRIPT_DIR")"
-	docker ps -a --filter "label=com.docker.compose.project=${project}" \
+	# Deacon applies the spec-mandated `devcontainer.local_folder` label
+	# to compose-managed containers as of #100/#101 — match upstream's
+	# discovery pattern (also used by VS Code Dev Containers and
+	# `deacon exec --id-label`).
+	docker ps -a --filter "label=devcontainer.local_folder=${SCRIPT_DIR}" \
 		--filter "label=com.docker.compose.service=app" --format '{{.ID}}' | head -n1
 }
 
