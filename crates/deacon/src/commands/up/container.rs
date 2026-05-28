@@ -334,8 +334,24 @@ pub(crate) async fn execute_container_up(
         "Merging mounts from config and features"
     );
 
-    let merged_mounts = merge_mounts(&config.mounts, resolved_features.as_deref().unwrap_or(&[]))
-        .with_context(|| "Failed to merge mounts from config and features")?;
+    // Per #122, feature mounts must run through the same substitution
+    // context the config uses so tokens like `${devcontainerId}` resolve
+    // before docker sees them. Build a context anchored to the user's
+    // workspace folder; `devcontainerId` is the spec-defined hash of the
+    // container's id-labels (matches read-configuration's path at
+    // `read_configuration.rs:1185`).
+    let mount_substitution_context = {
+        let mut ctx = deacon_core::variable::SubstitutionContext::new(workspace_folder)?;
+        let id_labels: Vec<(String, String)> = identity.labels().into_iter().collect();
+        ctx.devcontainer_id = deacon_core::container::compute_dev_container_id(&id_labels);
+        ctx
+    };
+    let merged_mounts = merge_mounts(
+        &config.mounts,
+        resolved_features.as_deref().unwrap_or(&[]),
+        Some(&mount_substitution_context),
+    )
+    .with_context(|| "Failed to merge mounts from config and features")?;
 
     info!(
         feature_mounts = feature_mount_count,
