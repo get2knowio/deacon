@@ -1328,8 +1328,13 @@ impl Docker for CliRuntime {
     async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
         debug!("Inspecting image: {}", image_ref);
 
+        // Use the default array-of-objects output (no --format). With
+        // `--format "{{json .}}"` Docker emits a single bare object per
+        // image, which the array parser below would reject; this surfaced
+        // when image-metadata merging started actually consuming the
+        // labels (#70).
         let output = Command::new(&self.runtime_path)
-            .args(["image", "inspect", "--format", "{{json .}}", image_ref])
+            .args(["image", "inspect", image_ref])
             .output()
             .await
             .map_err(|e| {
@@ -1346,19 +1351,32 @@ impl Docker for CliRuntime {
             );
         }
 
-        // Parse JSON output - it's an array with one element
+        // `docker image inspect <ref>` returns a JSON array with one
+        // element per matching image. We accept the array form by default
+        // and also a bare object (defensive — some Docker variants and
+        // older Podman releases print a single object).
         let stdout = String::from_utf8(output.stdout).map_err(|e| {
             DockerError::CLIError(format!("Invalid UTF-8 in runtime output: {}", e))
         })?;
 
-        let images: Vec<serde_json::Value> = serde_json::from_str(&stdout).map_err(|e| {
+        let parsed: serde_json::Value = serde_json::from_str(&stdout).map_err(|e| {
             DockerError::CLIError(format!("Failed to parse image inspect output: {}", e))
         })?;
 
-        let image = images
-            .into_iter()
-            .next()
-            .ok_or_else(|| DockerError::CLIError("Empty image inspect output".to_string()))?;
+        let image = match parsed {
+            serde_json::Value::Array(mut arr) => arr
+                .drain(..)
+                .next()
+                .ok_or_else(|| DockerError::CLIError("Empty image inspect output".to_string()))?,
+            obj @ serde_json::Value::Object(_) => obj,
+            other => {
+                return Err(DockerError::CLIError(format!(
+                    "Unexpected image inspect output shape: {}",
+                    other
+                ))
+                .into());
+            }
+        };
 
         let id = image
             .get("Id")
