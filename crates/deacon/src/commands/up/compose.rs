@@ -56,25 +56,32 @@ pub(crate) async fn execute_compose_up(
 
     // Apply default workspace mount for Compose when consistency is provided
     // Per FR-001: workspace_mount_consistency MUST apply to both Docker and Compose outputs
-    // This mirrors the Docker behavior in execute_docker_up()
+    // This mirrors the Docker behavior in execute_docker_up().
+    //
+    // Spec parity (#67): when `--mount-workspace-git-root` is true, the
+    // mount *source* walks up to the enclosing git root so git operations
+    // inside the container work; otherwise the user's workspace folder.
+    // Discovery has already used the user's path by this point.
     let mut additional_mounts = Vec::new();
     if args.workspace_mount_consistency.is_some() {
-        // Compute target path (container path) - same logic as Docker path
+        let mount_source = if args.mount_workspace_git_root {
+            deacon_core::workspace::resolve_workspace_root(workspace_folder)?
+        } else {
+            workspace_folder.to_path_buf()
+        };
         let target_path = config.workspace_folder.clone().unwrap_or_else(|| {
             format!(
                 "/workspaces/{}",
-                workspace_folder
+                mount_source
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("workspace")
             )
         });
-        // Source path is the resolved workspace_folder (already canonicalized in execute_up)
-        let source_path = workspace_folder.display().to_string();
 
         additional_mounts.push(deacon_core::compose::ComposeMount {
             mount_type: "bind".to_string(),
-            source: source_path,
+            source: mount_source.display().to_string(),
             target: target_path,
             read_only: false,
             consistency: args.workspace_mount_consistency.clone(),
