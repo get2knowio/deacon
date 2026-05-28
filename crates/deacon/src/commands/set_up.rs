@@ -451,15 +451,43 @@ async fn execute_lifecycle_hooks(
         result.phases.len(),
         result.non_blocking_phases.len()
     );
-    result.log_non_blocking_phases();
 
     // Warn about anything that ran in best-effort fallback so the operator
-    // can spot silently-skipped work in CI logs.
+    // can spot silently-skipped work in CI logs. Read this *before* moving
+    // `result` into `execute_non_blocking_phases_sync_with_callback` below.
     if let Some(skipped) = result.phases.iter().find(|p| !p.success) {
         warn!(
             phase = ?skipped.phase,
             "Lifecycle phase did not complete successfully; further phases were aborted"
         );
+    }
+
+    // #73: actually execute the non-blocking phases (postStart, postAttach)
+    // inside the container — not just log that we "would". The upstream
+    // reference CLI runs them in the background before returning; deacon's
+    // set-up previously stopped at the log line, so file side effects
+    // (e.g. `/tmp/postStart.flag`) were never observable to callers.
+    if !result.non_blocking_phases.is_empty() {
+        use deacon_core::docker::CliDocker;
+        debug!(
+            "Executing {} non-blocking phase(s) synchronously",
+            result.non_blocking_phases.len()
+        );
+        let docker = CliDocker::new();
+        result
+            .execute_non_blocking_phases_sync_with_callback(
+                &docker,
+                Some(crate::commands::shared::progress::make_progress_callback(
+                    &args.progress_tracker,
+                )),
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Non-blocking lifecycle phase execution failed in container '{}'",
+                    container.id
+                )
+            })?;
     }
 
     Ok(())
