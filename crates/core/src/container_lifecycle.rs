@@ -8,7 +8,7 @@ use crate::errors::{ConfigError, DeaconError, Result};
 use crate::lifecycle::LifecyclePhase;
 use crate::progress::{ProgressEvent, ProgressTracker};
 use crate::redaction::{redact_if_enabled, RedactionConfig};
-use crate::state::record_phase_executed;
+use crate::state::record_phase_executed_with_config_hash;
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use indexmap::IndexMap;
 use std::collections::HashMap;
@@ -508,6 +508,14 @@ pub struct ContainerLifecycleConfig {
     pub dotfiles: Option<DotfilesConfig>,
     /// Whether running in prebuild mode (skips dotfiles)
     pub is_prebuild: bool,
+    /// Resolved configuration hash stamped on lifecycle markers (#93).
+    ///
+    /// When `Some`, every marker the lifecycle runner writes records this
+    /// hash; subsequent reads via `read_all_markers_for_config` will drop
+    /// markers whose hash doesn't match the current config, forcing a
+    /// rerun. `None` writes legacy markers (no hash) — compatible with
+    /// older deacon installs.
+    pub config_hash: Option<String>,
 }
 
 /// Execute lifecycle commands in a container with full variable substitution
@@ -733,10 +741,11 @@ where
 
         // Per FR-002: Record marker for blocking phase on successful execution
         if phase_result.success {
-            if let Err(e) = record_phase_executed(
+            if let Err(e) = record_phase_executed_with_config_hash(
                 &workspace_folder,
                 LifecyclePhase::OnCreate,
                 updated_config.is_prebuild,
+                updated_config.config_hash.as_deref(),
             )
             .await
             {
@@ -768,10 +777,11 @@ where
 
         // Per FR-002: Record marker for blocking phase on successful execution
         if phase_result.success {
-            if let Err(e) = record_phase_executed(
+            if let Err(e) = record_phase_executed_with_config_hash(
                 &workspace_folder,
                 LifecyclePhase::UpdateContent,
                 updated_config.is_prebuild,
+                updated_config.config_hash.as_deref(),
             )
             .await
             {
@@ -804,10 +814,11 @@ where
 
             // Per FR-002: Record marker for blocking phase on successful execution
             if phase_result.success {
-                if let Err(e) = record_phase_executed(
+                if let Err(e) = record_phase_executed_with_config_hash(
                     &workspace_folder,
                     LifecyclePhase::PostCreate,
                     updated_config.is_prebuild,
+                    updated_config.config_hash.as_deref(),
                 )
                 .await
                 {
@@ -844,10 +855,11 @@ where
 
                 // Per FR-002: Record marker for blocking phase on successful execution
                 if phase_result.success {
-                    if let Err(e) = record_phase_executed(
+                    if let Err(e) = record_phase_executed_with_config_hash(
                         &workspace_folder,
                         LifecyclePhase::Dotfiles,
                         updated_config.is_prebuild,
+                        updated_config.config_hash.as_deref(),
                     )
                     .await
                     {
@@ -2609,9 +2621,13 @@ impl ContainerLifecycleResult {
                     // Runtime hooks (postStart, postAttach) always rerun on resume but still
                     // need their markers updated with new timestamps per data-model.md.
                     if phase_result.success {
-                        if let Err(e) =
-                            record_phase_executed(&spec.workspace_folder, spec.phase, spec.prebuild)
-                                .await
+                        if let Err(e) = record_phase_executed_with_config_hash(
+                            &spec.workspace_folder,
+                            spec.phase,
+                            spec.prebuild,
+                            spec.config.config_hash.as_deref(),
+                        )
+                        .await
                         {
                             warn!(
                                 "Failed to record marker for phase {}: {}",
@@ -2702,6 +2718,7 @@ mod tests {
             force_pty: false,
             dotfiles: None,
             is_prebuild: false,
+            config_hash: None,
         };
 
         assert_eq!(config.container_id, "test-container");
@@ -2827,6 +2844,7 @@ mod tests {
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
+                config_hash: None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
@@ -2890,6 +2908,7 @@ mod tests {
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
+                config_hash: None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
@@ -2967,6 +2986,7 @@ mod tests {
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
+                config_hash: None,
             },
             context: substitution_context,
             timeout: Duration::from_millis(100), // Very short timeout
@@ -3031,6 +3051,7 @@ mod tests {
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
+                config_hash: None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
@@ -3117,6 +3138,7 @@ mod tests {
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
+                config_hash: None,
             },
             context: substitution_context.clone(),
             timeout: Duration::from_secs(30),
@@ -3141,6 +3163,7 @@ mod tests {
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
+                config_hash: None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
@@ -3217,6 +3240,7 @@ mod tests {
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
+                config_hash: None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),
@@ -3299,6 +3323,7 @@ mod tests {
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
+                config_hash: None,
             },
             context: substitution_context.clone(),
             timeout: Duration::from_secs(30),
@@ -3323,6 +3348,7 @@ mod tests {
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
+                config_hash: None,
             },
             context: substitution_context,
             timeout: Duration::from_secs(30),

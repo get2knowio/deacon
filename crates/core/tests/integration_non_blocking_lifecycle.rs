@@ -46,6 +46,7 @@ async fn test_non_blocking_phases_are_deferred() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands with all phases
@@ -152,6 +153,7 @@ async fn test_skip_non_blocking_commands_behavior() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands with all phases
@@ -225,6 +227,7 @@ async fn test_non_blocking_phases_sync_execution() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands with all phases
@@ -348,6 +351,7 @@ async fn test_non_blocking_phase_command_failures_are_handled() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands with all phases
@@ -466,6 +470,7 @@ async fn test_non_blocking_phase_timeout_handling() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands
@@ -542,6 +547,7 @@ async fn test_non_blocking_phases_with_progress_streaming() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands with non-blocking phases

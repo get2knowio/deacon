@@ -344,6 +344,7 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands
@@ -442,6 +443,7 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands
@@ -509,6 +511,7 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands with a failing command
@@ -615,6 +618,7 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands

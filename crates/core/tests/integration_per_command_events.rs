@@ -77,6 +77,7 @@ async fn test_per_command_events_emitted() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Create lifecycle commands with multiple commands in a phase
