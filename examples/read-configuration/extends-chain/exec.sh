@@ -10,5 +10,5 @@ echo "== Extends chain via workspace-folder discovery (README: leaf directory) =
 echo "== Extends chain with explicit config path (README: target leaf config explicitly) ==" >&2
 cargo run -p deacon -- read-configuration \
 	--workspace-folder "$LEAF_DIR" \
-	--config "$LEAF_DIR/devcontainer.json" \
+	--config "$LEAF_DIR/.devcontainer.json" \
 	"$@" | jq .
