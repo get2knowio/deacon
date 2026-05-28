@@ -10,6 +10,7 @@ use super::helpers::{apply_user_mapping, handle_lockfile_post_build};
 use super::lifecycle::{execute_initialize_command, execute_lifecycle_commands, HostTrustArgs};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
+    merge_image_metadata_after_image_ready,
 };
 use super::ports::handle_container_port_events;
 use super::result::UpContainerInfo;
@@ -237,6 +238,18 @@ pub(crate) async fn execute_container_up(
     } else {
         None
     };
+
+    // Spec parity (#70): once the base/feature image is locally available,
+    // merge its `devcontainer.metadata` LABEL into the user config as the
+    // lower-precedence layer so containerEnv / remoteUser / lifecycle
+    // entries baked into the image actually contribute to the final
+    // configuration. For plain `image:` configs without features, the image
+    // may not be local yet — the helper falls through cleanly in that case
+    // and Docker will still apply the image's own ENV/USER instructions at
+    // container run time.
+    if let Some(image_ref) = config.image.clone() {
+        config = merge_image_metadata_after_image_ready(docker, &image_ref, config).await;
+    }
 
     // Merge security options from config and features
     debug!("Merging security options from config and features");

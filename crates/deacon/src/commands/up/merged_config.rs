@@ -201,51 +201,133 @@ pub(crate) fn extract_feature_metadata_from_resolved(
 
 /// Merge image metadata into the resolved configuration.
 ///
-/// Per FR-004: Configuration resolution MUST merge image metadata into the resolved configuration.
-///
-/// When a configuration specifies an image, that image may have metadata (labels, environment
-/// variables, etc.) that should be incorporated into the final resolved configuration.
-///
-/// This function performs basic image metadata merging:
-/// 1. Checks if an image is specified in the config
-/// 2. Optionally inspects the image (if available locally)
-/// 3. Merges image metadata with config (config takes precedence)
-///
-/// Note: Full Docker-based inspection requires runtime access and is deferred to container
-/// creation time. This implementation provides structural completeness for the T029 requirement.
+/// This is the call-site invoked during configuration resolution, before the
+/// image is built or pulled. The image isn't locally available yet, so the
+/// real merge happens later in [`merge_image_metadata_after_image_ready`]
+/// once the image has materialized. We keep this thin stub at the resolution
+/// stage so future enhancements (e.g. pre-pull) have a hook.
 pub(crate) async fn merge_image_metadata_into_config(
     config: DevContainerConfig,
     _workspace_folder: &Path,
 ) -> Result<DevContainerConfig> {
     if let Some(image_name) = &config.image {
-        debug!("Image-based configuration detected: {}", image_name);
-
-        // Image metadata merging happens in several places:
-        // 1. Features already merged their metadata via FeatureMerger
-        // 2. Container creation applies image metadata during docker.up()
-        // 3. The read-configuration command provides comprehensive metadata merge
-        //
-        // For the up command, we ensure that:
-        // - Config-specified values take precedence over image defaults
-        // - Image labels and metadata are preserved in container creation
-        // - Features-based metadata is already merged at this point
-        //
-        // Full docker image inspection would require:
-        // - Docker runtime access (docker inspect <image>)
-        // - Parsing image Config.Env, Config.Labels, Config.ExposedPorts
-        // - Merging with precedence: config > image metadata
-        //
-        // This is deferred to container creation where runtime is available
-
-        // Note: Image metadata (env vars, labels) are applied by Docker at container runtime
-        // The config.remote_env field preserves user-specified overrides
-
-        debug!("Image metadata merge prepared for: {}", image_name);
+        debug!(
+            "Image-based configuration detected: {} (metadata merge deferred to post-build)",
+            image_name
+        );
     } else {
         debug!("No image specified in configuration - skipping image metadata merge");
     }
 
     Ok(config)
+}
+
+/// Merge the image's `devcontainer.metadata` LABEL into the user config.
+///
+/// Per the upstream spec (`docs/specs/devcontainer-reference.md` § Image
+/// Metadata): when an image is used, the CLI MUST read the
+/// `devcontainer.metadata` LABEL — a JSON array of partial `devcontainer.json`
+/// entries — and merge each entry into the resolved configuration with
+/// **lower precedence than the user's devcontainer.json**.
+///
+/// This call site runs *after* the image is locally available (i.e. after
+/// `build_image_with_features` for feature builds, or after a pull/load for
+/// plain `image:` configs).
+///
+/// Behaviour (#70):
+/// - If the image cannot be inspected (not local, daemon unavailable, etc.),
+///   log a warn and return the config unchanged. The user's invocation still
+///   succeeds — the merge is best-effort lifting of metadata baked into the
+///   image. The container itself still runs with the image's own ENV/USER
+///   instructions, which Docker applies at run time.
+/// - If the LABEL is absent, return the config unchanged.
+/// - If the LABEL is present but malformed (not a JSON array, or entries
+///   that don't deserialize as `DevContainerConfig`), surface a warn with
+///   the parse error and return the config unchanged. We do not fail the
+///   `up` flow on a bad image label — the spec says image metadata is the
+///   *lower-precedence* layer, so a broken label simply contributes nothing.
+/// - On success, each entry is folded into the resolved config via the
+///   existing `ConfigMerger`, with the user's config winning on conflict.
+pub(crate) async fn merge_image_metadata_after_image_ready(
+    docker: &impl Docker,
+    image_ref: &str,
+    user_config: DevContainerConfig,
+) -> DevContainerConfig {
+    let info = match docker.inspect_image(image_ref).await {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            debug!(
+                "Image '{}' not locally available; image-metadata merge skipped (#70)",
+                image_ref
+            );
+            return user_config;
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to inspect image '{}' for devcontainer.metadata label; \
+                 proceeding without image-metadata merge: {}",
+                image_ref,
+                e
+            );
+            return user_config;
+        }
+    };
+
+    apply_image_metadata_label(
+        image_ref,
+        info.labels.get("devcontainer.metadata"),
+        user_config,
+    )
+}
+
+/// Pure helper: merge the given image-metadata label (raw JSON string) into
+/// `user_config`. Extracted from [`merge_image_metadata_after_image_ready`]
+/// so the parse + merge logic can be unit-tested without a Docker mock (#70).
+fn apply_image_metadata_label(
+    image_ref: &str,
+    label_value: Option<&String>,
+    user_config: DevContainerConfig,
+) -> DevContainerConfig {
+    use deacon_core::config::ConfigMerger;
+
+    let Some(label_json) = label_value else {
+        debug!(
+            "Image '{}' has no devcontainer.metadata label; nothing to merge (#70)",
+            image_ref
+        );
+        return user_config;
+    };
+
+    let entries: Vec<DevContainerConfig> = match serde_json::from_str(label_json) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "Image '{}' has a devcontainer.metadata label that is not a valid \
+                 JSON array of devcontainer entries; proceeding without merge: {}",
+                image_ref,
+                e
+            );
+            return user_config;
+        }
+    };
+
+    if entries.is_empty() {
+        return user_config;
+    }
+
+    debug!(
+        "Merging {} entry(ies) from image '{}' devcontainer.metadata label as the \
+         lower-precedence layer (#70)",
+        entries.len(),
+        image_ref
+    );
+
+    // Spec ordering: image metadata is lower precedence, user config is
+    // higher. ConfigMerger::merge_configs folds left-to-right with later
+    // entries winning, so push image entries first then the user config.
+    let mut chain: Vec<DevContainerConfig> = entries;
+    chain.push(user_config);
+    ConfigMerger::merge_configs(&chain)
 }
 
 #[cfg(test)]
@@ -524,5 +606,120 @@ mod tests {
         assert_eq!(deserialized[0].provenance.as_ref().unwrap().order, Some(0));
         assert_eq!(deserialized[1].provenance.as_ref().unwrap().order, Some(1));
         assert_eq!(deserialized[2].provenance.as_ref().unwrap().order, Some(2));
+    }
+}
+
+#[cfg(test)]
+mod image_metadata_merge_tests {
+    //! Spec parity (#70): the image's `devcontainer.metadata` LABEL is a
+    //! JSON array of partial devcontainer entries that MUST be merged with
+    //! the user's devcontainer.json as the *lower-precedence* layer (user
+    //! config wins on conflict).
+
+    use super::apply_image_metadata_label;
+    use deacon_core::config::DevContainerConfig;
+    use std::collections::HashMap;
+
+    fn user_config_with_env(pairs: &[(&str, &str)]) -> DevContainerConfig {
+        let mut container_env = HashMap::new();
+        for (k, v) in pairs {
+            container_env.insert((*k).to_string(), (*v).to_string());
+        }
+        DevContainerConfig {
+            container_env,
+            ..DevContainerConfig::default()
+        }
+    }
+
+    #[test]
+    fn image_metadata_container_env_merges_in_at_lower_precedence() {
+        // Image label declares two containerEnv keys, one of which the user
+        // also declares. After the merge:
+        //   - IMAGE_LAYER (image only) must be present
+        //   - CONFIG_LAYER (user only) must be present
+        //   - MERGED_LAYER (both) must take the user's value (user wins)
+        let label = r#"[{
+            "remoteUser": "root",
+            "containerEnv": {
+                "IMAGE_LAYER":  "from-image",
+                "MERGED_LAYER": "image-loses"
+            }
+        }]"#
+        .to_string();
+
+        let user =
+            user_config_with_env(&[("CONFIG_LAYER", "from-user"), ("MERGED_LAYER", "user-wins")]);
+
+        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+
+        assert_eq!(
+            merged.container_env.get("IMAGE_LAYER"),
+            Some(&"from-image".to_string()),
+            "image-only containerEnv key must survive the merge (#70)"
+        );
+        assert_eq!(
+            merged.container_env.get("CONFIG_LAYER"),
+            Some(&"from-user".to_string()),
+            "user containerEnv key must survive the merge"
+        );
+        assert_eq!(
+            merged.container_env.get("MERGED_LAYER"),
+            Some(&"user-wins".to_string()),
+            "on conflict, user devcontainer.json wins over image metadata (#70)"
+        );
+    }
+
+    #[test]
+    fn image_metadata_remote_user_only_applied_when_user_did_not_set_it() {
+        // Image declares remoteUser=root; user devcontainer.json leaves it unset.
+        // After merge, remoteUser should be "root" from the image layer.
+        let label = r#"[{ "remoteUser": "root" }]"#.to_string();
+        let user = DevContainerConfig::default();
+        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        assert_eq!(merged.remote_user.as_deref(), Some("root"));
+
+        // When the user explicitly sets remoteUser, the user wins.
+        let user = DevContainerConfig {
+            remote_user: Some("devuser".to_string()),
+            ..DevContainerConfig::default()
+        };
+        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        assert_eq!(merged.remote_user.as_deref(), Some("devuser"));
+    }
+
+    #[test]
+    fn missing_label_is_a_noop() {
+        let user = user_config_with_env(&[("X", "1")]);
+        let user_clone = user.clone();
+        let merged = apply_image_metadata_label("alpine:3.18", None, user);
+        assert_eq!(merged.container_env, user_clone.container_env);
+    }
+
+    #[test]
+    fn malformed_label_does_not_panic_and_returns_user_config_unchanged() {
+        // Spec parity (#70): a malformed image label must not break `up`.
+        // The user's config is the higher-precedence layer; we keep it
+        // as-is and log a warning (covered by tracing, not asserted here).
+        let user = user_config_with_env(&[("X", "1")]);
+        let user_clone = user.clone();
+        let label = r#"this is not JSON"#.to_string();
+        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        assert_eq!(merged.container_env, user_clone.container_env);
+
+        // Also handle "valid JSON but not an array of devcontainer entries".
+        let user = user_config_with_env(&[("X", "1")]);
+        let user_clone = user.clone();
+        let label = r#"{"oops": "not-an-array"}"#.to_string();
+        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        assert_eq!(merged.container_env, user_clone.container_env);
+    }
+
+    #[test]
+    fn empty_array_label_is_a_noop() {
+        let user = user_config_with_env(&[("X", "1")]);
+        let user_clone = user.clone();
+        let label = r#"[]"#.to_string();
+        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        assert_eq!(merged.container_env, user_clone.container_env);
     }
 }
