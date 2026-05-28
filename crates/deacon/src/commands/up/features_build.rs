@@ -75,6 +75,7 @@ pub(crate) async fn build_image_with_features(
     config: &DevContainerConfig,
     identity: &ContainerIdentity,
     _workspace_folder: &Path,
+    config_path: &Path,
     build_options: Option<&BuildOptions>,
 ) -> Result<FeatureBuildOutput> {
     use deacon_core::docker::CliDocker;
@@ -104,7 +105,7 @@ pub(crate) async fn build_image_with_features(
         });
     }
 
-    let staged = resolve_and_stage_features(config, identity).await?;
+    let staged = resolve_and_stage_features(config, identity, config_path).await?;
 
     // Generate Dockerfile
     let dockerfile_config = DockerfileConfig {
@@ -188,6 +189,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     base_dockerfile_content: &str,
     base_dockerfile_final_stage: &str,
     base_context_dir: &Path,
+    config_path: &Path,
     target: Option<&str>,
     build_options: Option<&BuildOptions>,
 ) -> Result<FeatureBuildOutput> {
@@ -226,7 +228,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         .into());
     }
 
-    let staged = resolve_and_stage_features(config, identity).await?;
+    let staged = resolve_and_stage_features(config, identity, config_path).await?;
 
     // Generate the feature-install stage targeting the user's final stage by
     // literal name (NOT via an ARG-driven FROM): a Dockerfile that prepends
@@ -333,38 +335,136 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
 /// installation plan, and stage feature directories into a deterministic temp
 /// directory so BuildKit can mount them as the
 /// `dev_containers_feature_content_source` build context.
+///
+/// `config_path` is the absolute path to the resolved `devcontainer.json`.
+/// It anchors local feature references (`./feature-X`, `../shared/foo`) so
+/// they resolve relative to the config file's directory per the spec,
+/// regardless of whether the config was auto-discovered or supplied via
+/// `--config` (#69).
 #[instrument(skip(config, identity))]
 async fn resolve_and_stage_features(
     config: &DevContainerConfig,
     identity: &ContainerIdentity,
+    config_path: &Path,
 ) -> Result<StagedFeatures> {
     let features_obj = config
         .features
         .as_object()
         .ok_or_else(|| DeaconError::Runtime("Features must be an object".to_string()))?;
 
-    // Create feature fetcher
+    // Anchor for local feature path resolution: the directory containing
+    // the resolved devcontainer.json (#69).
+    let config_dir = config_path
+        .parent()
+        .ok_or_else(|| {
+            DeaconError::Runtime(format!(
+                "Cannot determine parent directory of config file '{}'",
+                config_path.display()
+            ))
+        })?
+        .to_path_buf();
+
+    // Create feature fetcher (used for OCI refs only)
     let fetcher = default_fetcher()?;
 
-    // Parse and fetch features
+    // Parse, classify, and (for OCI refs) fetch features.
+    //
+    // Local references are resolved relative to `config_dir` and short-
+    // circuit the OCI fetcher entirely. We synthesize a `DownloadedFeature`
+    // pointing at the on-disk directory so the downstream staging pipeline
+    // (copy into BuildKit context + dependency resolution + Dockerfile
+    // generation) treats them identically to fetched features.
     let mut feature_refs: Vec<(String, FeatureRef)> = Vec::new();
     let mut feature_options_map: HashMap<String, HashMap<String, OptionValue>> = HashMap::new();
     // Canonical id (registry/namespace/name, no tag) → user-provided feature ID
     // (the key as it appears in `devcontainer.json`). The lockfile MUST be
     // keyed by the user-provided form to match upstream `generateLockfile`.
     let mut user_id_by_canonical: HashMap<String, String> = HashMap::new();
+    let mut downloaded_features: HashMap<String, DownloadedFeature> = HashMap::new();
 
     for (feature_id, feature_options) in features_obj.iter() {
-        let (registry_url, namespace, name, tag) =
-            parse_registry_reference(feature_id).map_err(|e| {
-                DeaconError::Runtime(format!("Invalid feature ID '{}': {}", feature_id, e))
+        let is_local = feature_id.starts_with("./") || feature_id.starts_with("../");
+
+        let (canonical_id, feature_ref) = if is_local {
+            // Resolve `./foo` and `../shared/foo` against the config file's
+            // directory (spec contract — *not* the workspace folder, *not*
+            // the CWD, regardless of how the config was loaded).
+            let resolved = config_dir.join(feature_id);
+            let canonical_path = resolved.canonicalize().map_err(|e| {
+                DeaconError::Runtime(format!(
+                    "Local feature path '{}' (resolved to '{}' relative to {}) is not accessible: {}",
+                    feature_id,
+                    resolved.display(),
+                    config_dir.display(),
+                    e
+                ))
             })?;
 
-        let feature_ref = FeatureRef::new(registry_url, namespace, name, tag);
-        let canonical_id = format!(
-            "{}/{}/{}",
-            feature_ref.registry, feature_ref.namespace, feature_ref.name
-        );
+            let metadata_path = canonical_path.join("devcontainer-feature.json");
+            if !metadata_path.exists() {
+                return Err(DeaconError::Runtime(format!(
+                    "Local feature at '{}' is missing devcontainer-feature.json (resolved from '{}' relative to {})",
+                    canonical_path.display(),
+                    feature_id,
+                    config_dir.display()
+                ))
+                .into());
+            }
+            let metadata =
+                deacon_core::features::parse_feature_metadata(&metadata_path).map_err(|e| {
+                    DeaconError::Runtime(format!(
+                        "Failed to parse local feature metadata at '{}': {}",
+                        metadata_path.display(),
+                        e
+                    ))
+                })?;
+
+            // Canonical id for local features: the absolute resolved path.
+            // Stable across re-runs from the same config, and uniquely
+            // distinguishes "./foo" from any OCI ref.
+            let canonical_id = format!("local:{}", canonical_path.display());
+
+            // Synthesize a DownloadedFeature pointing at the local dir.
+            // The digest field is reserved for OCI layer cache keys; for
+            // local features we use a deterministic marker derived from
+            // the absolute path so cache invariants don't trip on it.
+            let digest = format!("local:{}", canonical_path.display());
+            downloaded_features.insert(
+                canonical_id.clone(),
+                DownloadedFeature {
+                    path: canonical_path.clone(),
+                    metadata,
+                    digest,
+                },
+            );
+
+            // Build a placeholder FeatureRef — never used for fetching,
+            // but kept for downstream APIs that key on this struct. The
+            // `reference()` field surfaces the user-visible spelling for
+            // logs/errors.
+            let feature_ref = FeatureRef::new(
+                "local".to_string(),
+                "fs".to_string(),
+                canonical_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| feature_id.clone()),
+                None,
+            );
+            (canonical_id, feature_ref)
+        } else {
+            let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)
+                .map_err(|e| {
+                    DeaconError::Runtime(format!("Invalid feature ID '{}': {}", feature_id, e))
+                })?;
+
+            let feature_ref = FeatureRef::new(registry_url, namespace, name, tag);
+            let canonical_id = format!(
+                "{}/{}/{}",
+                feature_ref.registry, feature_ref.namespace, feature_ref.name
+            );
+            (canonical_id, feature_ref)
+        };
 
         user_id_by_canonical.insert(canonical_id.clone(), feature_id.clone());
 
@@ -391,10 +491,17 @@ async fn resolve_and_stage_features(
         feature_refs.push((canonical_id, feature_ref));
     }
 
-    // Download features
-    debug!("Downloading {} features", feature_refs.len());
-    let mut downloaded_features: HashMap<String, DownloadedFeature> = HashMap::new();
+    // Download remaining (OCI) features; local features are already staged
+    // in `downloaded_features` above.
+    debug!(
+        "Downloading {} OCI feature(s); {} local feature(s) already resolved",
+        feature_refs.len() - downloaded_features.len(),
+        downloaded_features.len()
+    );
     for (canonical_id, feature_ref) in &feature_refs {
+        if downloaded_features.contains_key(canonical_id) {
+            continue; // local feature — nothing to fetch
+        }
         let downloaded = fetcher.fetch_feature(feature_ref).await?;
         downloaded_features.insert(canonical_id.clone(), downloaded);
     }
@@ -813,5 +920,147 @@ mod lockfile_assembly_tests {
 
         let entry = lockfile.features.get(&user_id).unwrap();
         assert!(entry.depends_on.is_none());
+    }
+}
+
+#[cfg(test)]
+mod local_feature_resolution_tests {
+    //! Spec parity (#69): `./feature-X` and `../shared/feature` references in
+    //! a `devcontainer.json` resolve relative to the config file's directory,
+    //! not the workspace folder and not the CWD. These tests pin that
+    //! contract for both `up` and any future path that calls
+    //! `resolve_and_stage_features` with a config containing local features.
+    //!
+    //! Docker is not required for these tests — they exercise the parse
+    //! path that the issue's reproduction blew up on (`registry: "."`).
+
+    use super::*;
+    use deacon_core::container::ContainerIdentity;
+    use tempfile::TempDir;
+
+    /// Build a temp tree like the upstream reproduction:
+    ///   <root>/
+    ///     example/
+    ///       devcontainer.json     ← references "./feature-alpha"
+    ///       feature-alpha/
+    ///         devcontainer-feature.json
+    ///         install.sh
+    fn build_local_feature_workspace() -> TempDir {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let example = root.join("example");
+        std::fs::create_dir_all(&example).unwrap();
+
+        std::fs::write(
+            example.join("devcontainer.json"),
+            r#"{
+  "image": "alpine:3.18",
+  "features": { "./feature-alpha": {} }
+}
+"#,
+        )
+        .unwrap();
+
+        let feature_dir = example.join("feature-alpha");
+        std::fs::create_dir_all(&feature_dir).unwrap();
+        std::fs::write(
+            feature_dir.join("devcontainer-feature.json"),
+            r#"{
+  "id": "feature-alpha",
+  "version": "1.0.0",
+  "name": "Alpha"
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(feature_dir.join("install.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+
+        temp
+    }
+
+    #[tokio::test]
+    async fn local_feature_resolves_relative_to_config_dir() {
+        let temp = build_local_feature_workspace();
+        let config_path = temp.path().join("example").join("devcontainer.json");
+        let raw = std::fs::read_to_string(&config_path).unwrap();
+        let config: DevContainerConfig = serde_json::from_str(&raw).unwrap();
+
+        let identity = ContainerIdentity::new(temp.path(), &config);
+
+        let staged = resolve_and_stage_features(&config, &identity, &config_path)
+            .await
+            .expect("local feature should resolve successfully");
+
+        // The installation plan should contain exactly one feature, whose
+        // canonical id encodes the resolved absolute path.
+        assert_eq!(staged.plan.features.len(), 1);
+        let resolved = &staged.plan.features[0];
+        assert!(
+            resolved.id.starts_with("local:"),
+            "local feature canonical id should be 'local:<abs>', got {}",
+            resolved.id
+        );
+        assert!(
+            resolved.id.contains("feature-alpha"),
+            "canonical id should embed the local feature name, got {}",
+            resolved.id
+        );
+
+        // The staged tree must contain the feature's contents (install.sh).
+        // Walk just one level deep — each feature gets its own subdirectory
+        // under `features_source_dir`.
+        let mut staged_install_seen = false;
+        for sub in std::fs::read_dir(&staged.features_source_dir).unwrap() {
+            let sub = sub.unwrap();
+            if sub.path().join("install.sh").exists() {
+                staged_install_seen = true;
+                break;
+            }
+        }
+        assert!(
+            staged_install_seen,
+            "local feature contents (install.sh) should be copied into the BuildKit context"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_local_feature_path_surfaces_clear_error() {
+        // Spec parity (#69): a bad local path must produce a clear error
+        // naming both the user-provided reference and the resolution base,
+        // rather than the cryptic `registry: "."` OCI failure.
+        let temp = TempDir::new().unwrap();
+        let example = temp.path().join("example");
+        std::fs::create_dir_all(&example).unwrap();
+        let config_path = example.join("devcontainer.json");
+        std::fs::write(
+            &config_path,
+            r#"{
+  "image": "alpine:3.18",
+  "features": { "./missing-feature": {} }
+}
+"#,
+        )
+        .unwrap();
+        let raw = std::fs::read_to_string(&config_path).unwrap();
+        let config: DevContainerConfig = serde_json::from_str(&raw).unwrap();
+        let identity = ContainerIdentity::new(temp.path(), &config);
+
+        let err = resolve_and_stage_features(&config, &identity, &config_path)
+            .await
+            .err()
+            .expect("missing local feature path must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("./missing-feature"),
+            "error must include the user-provided reference, got: {msg}"
+        );
+        assert!(
+            msg.contains("not accessible"),
+            "error must explain the failure mode, got: {msg}"
+        );
+        assert!(
+            !msg.contains("registry"),
+            "error must NOT misclassify the local path as an OCI ref, got: {msg}"
+        );
     }
 }

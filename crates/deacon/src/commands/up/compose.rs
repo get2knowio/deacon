@@ -278,6 +278,7 @@ pub(crate) async fn execute_compose_up(
         &compose_manager,
         &mut project,
         workspace_folder,
+        config_path,
         workspace_hash,
     )
     .await?;
@@ -570,6 +571,7 @@ async fn install_features_for_compose(
     compose_manager: &ComposeManager,
     project: &mut ComposeProject,
     workspace_folder: &Path,
+    config_path: &Path,
     workspace_hash: &str,
 ) -> Result<Option<FeatureBuildOutput>> {
     // Nothing to install when features is missing or an empty object.
@@ -616,14 +618,20 @@ async fn install_features_for_compose(
             let mut synth_config = config.clone();
             synth_config.image = Some(base_image.clone());
 
-            build_image_with_features(&synth_config, &identity, workspace_folder, None)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Failed to build feature-extended image for compose service '{}'",
-                        project.service
-                    )
-                })?
+            build_image_with_features(
+                &synth_config,
+                &identity,
+                workspace_folder,
+                config_path,
+                None,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to build feature-extended image for compose service '{}'",
+                    project.service
+                )
+            })?
         }
         ServiceShape::Build {
             context,
@@ -688,6 +696,7 @@ async fn install_features_for_compose(
                 &modified_dockerfile,
                 &final_stage,
                 &context_path,
+                config_path,
                 target.as_deref(),
                 None,
             )
