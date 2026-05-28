@@ -497,6 +497,13 @@ pub enum Commands {
         #[arg(long, value_enum, default_value = "login-interactive-shell")]
         default_user_env_probe: DefaultUserEnvProbe,
         /// Command and arguments to execute inside the container (positional; required).
+        ///
+        /// `trailing_var_arg` + `allow_hyphen_values` ensure that flags belonging
+        /// to the target command (e.g. `deacon exec node --version`) are passed
+        /// through verbatim instead of being parsed as deacon's own options.
+        /// This matches the reference devcontainer CLI, where everything after
+        /// the command name is opaque.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
 
@@ -1710,6 +1717,64 @@ mod tests {
             Some(Commands::Exec { remote_env, .. }) => remote_env,
             other => panic!("expected Exec, got {:?}", other.is_some()),
         }
+    }
+
+    fn parse_exec_command(args: &[&str]) -> Vec<String> {
+        let cli = Cli::parse_from(args);
+        match cli.command {
+            Some(Commands::Exec { command, .. }) => command,
+            other => panic!("expected Exec, got {:?}", other.is_some()),
+        }
+    }
+
+    /// Trailing flags belonging to the target command must pass through verbatim
+    /// (no `--` separator required), matching the reference devcontainer CLI.
+    #[test]
+    fn test_exec_passes_trailing_flags_to_command() {
+        // `deacon exec --workspace-folder X node --version` -> command = [node, --version]
+        let command = parse_exec_command(&[
+            "deacon",
+            "exec",
+            "--workspace-folder",
+            "/tmp",
+            "node",
+            "--version",
+        ]);
+        assert_eq!(command, vec!["node".to_string(), "--version".to_string()]);
+
+        // Multiple trailing flags, including ones that look like deacon options.
+        let command = parse_exec_command(&[
+            "deacon",
+            "exec",
+            "--container-id",
+            "abc",
+            "ls",
+            "-la",
+            "--color=always",
+        ]);
+        assert_eq!(
+            command,
+            vec![
+                "ls".to_string(),
+                "-la".to_string(),
+                "--color=always".to_string()
+            ]
+        );
+    }
+
+    /// The explicit `--` separator form keeps working alongside the implicit one.
+    #[test]
+    fn test_exec_double_dash_separator_still_works() {
+        let command = parse_exec_command(&[
+            "deacon",
+            "exec",
+            "--container-id",
+            "abc",
+            "--",
+            "printenv",
+            "--help",
+        ]);
+        assert_eq!(command, vec!["printenv".to_string(), "--help".to_string()]);
     }
 
     /// BEAD-07-T01: --remote-env populates the remote_env field.
