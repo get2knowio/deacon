@@ -30,7 +30,7 @@ Deacon is in much better shape than the issue tracker suggests. The **spec itsel
 | `build` | Implemented | Feature integration TODOs at `build/mod.rs:1120,1285`; metadata label format needs update (§3.B.2) |
 | `exec` | Implemented | Recent signal-exit and home-fallback fixes landed |
 | `down` | Implemented | Not in upstream CLI — Deacon-original |
-| `read-configuration` | Implemented | Container-based reading deferred (`read_configuration.rs:33`, issue #268) |
+| `read-configuration` | Implemented | Container-based reading done (`--container-id`/`--id-label`; reads `devcontainer.metadata` off the container, issue #268) |
 | `run-user-commands` | Implemented | Container selection wiring incomplete (`run_user_commands.rs:32,36`, issue #269) |
 | `config` (substitute/merge-*) | Implemented | Deacon-original utility surface |
 | `templates apply` / `pull` | Implemented | `--omit-paths` missing |
@@ -56,7 +56,7 @@ The `crates/core/src/` module set is comprehensive: `config`, `features`, `conta
 | File | Note |
 |---|---|
 | `container.rs:1036` | Workspace-based container resolution (issue #270) |
-| `read_configuration.rs:33` | Container-based config reading (issue #268) |
+| ~~`read_configuration.rs:33`~~ | ~~Container-based config reading (issue #268)~~ — **done** (`--container-id`/`--id-label` + `devcontainer.metadata` read) |
 | `read_configuration.rs:467,507` | Feature metadata caching; `metadata.init` field |
 | `run_user_commands.rs:32,36,158` | Container selection wiring; collect lifecycle commands from extends/features |
 | `build/mod.rs:1120,1285` | Feature integration; `feature_set_digest` placeholder |
@@ -207,7 +207,7 @@ authoritative spec content (`SPEC.md`, `DATA-STRUCTURES.md`,
 9. **MSRV bump** to 1.82; update `rust-version` in workspace and document in CI.
 10. **Add `cargo-audit` + `cargo-deny` to CI**.
 11. **Resolve `run-user-commands` container-selection wiring** (`run_user_commands.rs:32,36`, issue #269).
-12. **Resolve `read-configuration` from-running-container path** (`read_configuration.rs:33`, issue #268).
+12. ~~**Resolve `read-configuration` from-running-container path** (issue #268).~~ **Done** — `read-configuration` accepts `--container-id`/`--id-label`, resolves the container, and reads the `devcontainer.metadata` label (`getImageMetadataFromContainer` parity).
 13. **Pick a Podman story**: either ship supported (own the items in §3.D) or explicitly mark experimental in help text + docs.
 14. **Add `CHANGELOG.md`** and start filling it (1.0.0-rc.1, 1.0.0-rc.2, … entries).
 
