@@ -7,10 +7,13 @@
 //! ## Supported Variables
 //!
 //! - `${localWorkspaceFolder}` - Canonical workspace path
-//! - `${localEnv:VAR}` - Host environment variable
+//! - `${localWorkspaceFolderBasename}` - Basename of the workspace path
+//! - `${localEnv:VAR}` / `${localEnv:VAR:default}` - Host env var with optional default
+//! - `${env:VAR}` / `${env:VAR:default}` - Alias for `localEnv:` per upstream spec
 //! - `${devcontainerId}` - Deterministic hash ID (first 12 chars of SHA256 of workspace path)
 //! - `${containerWorkspaceFolder}` - Container workspace path (available after container start)
-//! - `${containerEnv:VAR}` - Container environment variable (available after container start)
+//! - `${containerWorkspaceFolderBasename}` - Basename of the container workspace path
+//! - `${containerEnv:VAR}` / `${containerEnv:VAR:default}` - Container env var with optional default
 //!
 //! ## Variable Substitution Workflow
 //!
@@ -452,25 +455,44 @@ impl VariableSubstitution {
     fn resolve_variable(variable_expr: &str, context: &SubstitutionContext) -> Option<String> {
         match variable_expr {
             "localWorkspaceFolder" => Some(context.local_workspace_folder.clone()),
+            "localWorkspaceFolderBasename" => Some(
+                std::path::Path::new(&context.local_workspace_folder)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ),
             "devcontainerId" => Some(context.devcontainer_id.clone()),
             "containerWorkspaceFolder" => context.container_workspace_folder.clone(),
+            "containerWorkspaceFolderBasename" => {
+                context.container_workspace_folder.as_ref().map(|p| {
+                    std::path::Path::new(p)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                })
+            }
+            // Per containers.dev spec, `${env:VAR}` is an alias for
+            // `${localEnv:VAR}` (https://containers.dev/implementors/json_reference/).
+            expr if expr.starts_with("env:") => {
+                Some(resolve_env_with_default(&expr[4..], &context.local_env))
+            }
             expr if expr.starts_with("localEnv:") => {
-                let env_var = &expr[9..]; // Remove "localEnv:" prefix
-                Some(context.local_env.get(env_var).cloned().unwrap_or_default())
+                Some(resolve_env_with_default(&expr[9..], &context.local_env))
             }
             expr if expr.starts_with("containerEnv:") => {
-                let env_var = &expr[13..]; // Remove "containerEnv:" prefix
-                                           // Three-pass model per upstream (variableSubstitution.ts: `replaceWithContext`
-                                           // has NO case for containerEnv in pass 1; tokens fall through to the
-                                           // `default: return match` branch). When `container_env` is None we are in
-                                           // pass 1 (config load, pre-probe): leave the token literal so a later
-                                           // `containerSubstitute` pass can resolve it. Only when `container_env` is
-                                           // Some — pass 3, after the container env probe — do we resolve, returning
-                                           // empty string for missing vars (matching upstream `containerEnv[name] || ''`).
-                context
-                    .container_env
-                    .as_ref()
-                    .map(|env| env.get(env_var).cloned().unwrap_or_default())
+                let body = &expr[13..]; // Remove "containerEnv:" prefix
+                let (env_var, default) = split_env_default(body);
+                // Three-pass model per upstream (variableSubstitution.ts: `replaceWithContext`
+                // has NO case for containerEnv in pass 1; tokens fall through to the
+                // `default: return match` branch). When `container_env` is None we are in
+                // pass 1 (config load, pre-probe): leave the token literal so a later
+                // `containerSubstitute` pass can resolve it. Only when `container_env` is
+                // Some — pass 3, after the container env probe — do we resolve.
+                context.container_env.as_ref().map(|env| {
+                    env.get(env_var)
+                        .cloned()
+                        .unwrap_or_else(|| default.map(String::from).unwrap_or_default())
+                })
             }
             expr if expr.starts_with("feature:") => {
                 let feature_var = &expr[8..]; // Remove "feature:" prefix
@@ -486,7 +508,32 @@ impl VariableSubstitution {
             _ => None, // Unknown variable
         }
     }
+}
 
+/// Split an env-variable lookup body of the form `VAR` or `VAR:default` into
+/// the variable name and an optional fallback. The default may itself contain
+/// colons; only the *first* colon separates the name from the default.
+///
+/// Per upstream containers.dev, both `${localEnv:VAR:fallback}` and
+/// `${env:VAR:fallback}` resolve via this rule.
+fn split_env_default(body: &str) -> (&str, Option<&str>) {
+    match body.split_once(':') {
+        Some((name, default)) => (name, Some(default)),
+        None => (body, None),
+    }
+}
+
+/// Resolve `${localEnv:VAR}` / `${env:VAR}` (with optional default) against
+/// a host-env map. Missing without default yields empty string; missing with
+/// default yields the default string.
+fn resolve_env_with_default(body: &str, env: &std::collections::HashMap<String, String>) -> String {
+    let (name, default) = split_env_default(body);
+    env.get(name)
+        .cloned()
+        .unwrap_or_else(|| default.map(String::from).unwrap_or_default())
+}
+
+impl VariableSubstitution {
     /// Apply substitution to a JSON value recursively
     ///
     /// This method handles substitution in JSON values that may contain strings,
@@ -655,6 +702,82 @@ mod tests {
         assert!(report.replacements.contains_key(&format!("localEnv:{VAR}")));
 
         env::remove_var(VAR);
+        Ok(())
+    }
+
+    #[test]
+    fn test_local_workspace_folder_basename() -> anyhow::Result<()> {
+        // Per containers.dev json_reference, ${localWorkspaceFolderBasename}
+        // is the last path component of the workspace folder.
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?;
+        let mut report = SubstitutionReport::new();
+
+        let result = VariableSubstitution::substitute_string(
+            "name-${localWorkspaceFolderBasename}",
+            &context,
+            &mut report,
+        );
+
+        let expected_basename = temp_dir
+            .path()
+            .canonicalize()?
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(result, format!("name-{expected_basename}"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_env_alias_for_local_env() -> anyhow::Result<()> {
+        // `${env:VAR}` is the upstream-aligned alias for `${localEnv:VAR}`.
+        const VAR: &str = "DEACON_TEST_ENV_ALIAS";
+        env::set_var(VAR, "from-env-alias");
+
+        let temp_dir = TempDir::new()?;
+        let context = SubstitutionContext::new(temp_dir.path())?;
+        let mut report = SubstitutionReport::new();
+
+        let result = VariableSubstitution::substitute_string(
+            &format!("${{env:{VAR}}}"),
+            &context,
+            &mut report,
+        );
+
+        assert_eq!(result, "from-env-alias");
+        env::remove_var(VAR);
+        Ok(())
+    }
+
+    #[test]
+    fn test_local_env_with_default() -> anyhow::Result<()> {
+        // Per containers.dev, `${localEnv:VAR:default}` falls back to the
+        // default literal when VAR is unset. A set VAR ignores the default.
+        let temp_dir = TempDir::new()?;
+        let mut context = SubstitutionContext::new(temp_dir.path())?;
+        // Ensure clean slate: remove the keys from local_env, since
+        // SubstitutionContext::new captures the real env at construction.
+        context.local_env.remove("DEACON_TEST_DEFAULT_UNSET");
+        context
+            .local_env
+            .insert("DEACON_TEST_DEFAULT_SET".to_string(), "real-value".to_string());
+        let mut report = SubstitutionReport::new();
+
+        let unset = VariableSubstitution::substitute_string(
+            "${localEnv:DEACON_TEST_DEFAULT_UNSET:fallback-value}",
+            &context,
+            &mut report,
+        );
+        assert_eq!(unset, "fallback-value");
+
+        let set = VariableSubstitution::substitute_string(
+            "${localEnv:DEACON_TEST_DEFAULT_SET:fallback-value}",
+            &context,
+            &mut report,
+        );
+        assert_eq!(set, "real-value");
         Ok(())
     }
 
