@@ -1,0 +1,11 @@
+{
+	"name": "updateRemoteUserUID: true",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"remoteUser": "devuser",
+	"containerUser": "devuser",
+	"workspaceFolder": "/workspace",
+	"updateRemoteUserUID": true,
+	"postCreateCommand": "id -u > /tmp/uid && id -g > /tmp/gid && stat -c '%u' /workspace > /tmp/workspace.uid"
+}

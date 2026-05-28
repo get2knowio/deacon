@@ -1,0 +1,6 @@
+{
+	"id": "feature-alpha",
+	"version": "1.0.0",
+	"name": "Feature Alpha",
+	"description": "Independent feature; alphabetical default would install this first"
+}

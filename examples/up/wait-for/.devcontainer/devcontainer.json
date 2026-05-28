@@ -1,0 +1,11 @@
+{
+	"name": "Up waitFor (default updateContentCommand)",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"onCreateCommand": "sleep 1 && echo onCreate >> /tmp/lifecycle.log",
+	"updateContentCommand": "sleep 1 && echo updateContent >> /tmp/lifecycle.log",
+	"postCreateCommand": "sleep 1 && echo postCreate >> /tmp/lifecycle.log",
+	"postStartCommand": "echo postStart >> /tmp/lifecycle.log",
+	"postAttachCommand": "echo postAttach >> /tmp/lifecycle.log"
+}

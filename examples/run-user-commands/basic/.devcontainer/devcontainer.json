@@ -1,0 +1,11 @@
+{
+	"name": "Run User Commands Example",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"onCreateCommand": "echo onCreate > /tmp/onCreate.flag",
+	"updateContentCommand": "echo updateContent > /tmp/updateContent.flag",
+	"postCreateCommand": "echo postCreate > /tmp/postCreate.flag",
+	"postStartCommand": "echo postStart > /tmp/postStart.flag",
+	"postAttachCommand": "echo postAttach > /tmp/postAttach.flag"
+}

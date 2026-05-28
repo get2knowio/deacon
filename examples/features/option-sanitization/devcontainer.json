@@ -1,0 +1,13 @@
+{
+	"name": "Feature option sanitization",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"features": {
+		"./report": {
+			"my-string-option": "Hello, World!",
+			"another.weird-key": "x/y/z",
+			"flagOption": true
+		}
+	}
+}

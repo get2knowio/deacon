@@ -1,0 +1,4 @@
+{
+	"name": "Bravo (closes the cycle by extending alpha)",
+	"extends": "alpha.json"
+}

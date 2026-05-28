@@ -1,0 +1,6 @@
+{
+	"name": "Alpha (extends bravo, which extends alpha — cycle)",
+	"extends": "bravo.json",
+	"image": "alpine:3.18",
+	"remoteUser": "root"
+}

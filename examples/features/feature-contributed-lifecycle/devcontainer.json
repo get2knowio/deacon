@@ -1,0 +1,11 @@
+{
+	"name": "Feature-contributed lifecycle commands",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"features": {
+		"./monitor": {},
+		"./tooling": {}
+	},
+	"postCreateCommand": "echo user-postcreate >> /tmp/lifecycle.log"
+}

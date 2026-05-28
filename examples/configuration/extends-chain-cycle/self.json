@@ -1,0 +1,5 @@
+{
+	"name": "Self-extending (1-cycle)",
+	"extends": "self.json",
+	"image": "alpine:3.18"
+}

@@ -1,0 +1,8 @@
+{
+	"name": "Up userEnvProbe (default loginInteractiveShell)",
+	"image": "mcr.microsoft.com/devcontainers/base:debian",
+	"remoteUser": "vscode",
+	"workspaceFolder": "/workspace",
+	"userEnvProbe": "loginInteractiveShell",
+	"postCreateCommand": "echo $PATH > /tmp/probe.path && (echo \"PROBE_VAR=${PROBE_VAR:-<unset>}\") > /tmp/probe.var"
+}

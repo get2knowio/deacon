@@ -1,0 +1,11 @@
+{
+	"name": "Down: basic shutdown",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"shutdownAction": "stopContainer",
+	"mounts": [
+		"type=volume,source=deacon-down-demo,target=/data"
+	],
+	"postCreateCommand": "echo hello > /data/marker"
+}

@@ -1,0 +1,37 @@
+{
+	"id": "optional-paths-demo",
+	"version": "1.0.0",
+	"name": "Template with optionalPaths",
+	"description": "Demonstrates the spec's optionalPaths field: files the user can opt in or out of at apply time.",
+	"documentationURL": "https://example.com/docs/optional-paths",
+	"options": {
+		"projectName": {
+			"type": "string",
+			"default": "demo-app",
+			"description": "Project name used in generated files"
+		}
+	},
+	"files": [
+		".devcontainer/devcontainer.json",
+		"PROJECT_README.md",
+		"scripts/setup.sh",
+		"scripts/db-migrate.sh",
+		"docs/CONTRIBUTING.md",
+		".github/workflows/ci.yml"
+	],
+	"optionalPaths": [
+		"scripts/db-migrate.sh",
+		"docs/CONTRIBUTING.md",
+		".github/workflows/ci.yml"
+	],
+	"platforms": [
+		"linux",
+		"darwin"
+	],
+	"publisher": "deacon-examples",
+	"keywords": [
+		"template",
+		"optional",
+		"spec-fixture"
+	]
+}

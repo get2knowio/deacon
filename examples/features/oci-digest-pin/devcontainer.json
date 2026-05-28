@@ -1,0 +1,9 @@
+{
+	"name": "Feature ref pinned by @sha256 digest",
+	"image": "mcr.microsoft.com/devcontainers/base:alpine",
+	"workspaceFolder": "/workspace",
+	"remoteUser": "root",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1@sha256:REPLACE_WITH_REAL_DIGEST": {}
+	}
+}

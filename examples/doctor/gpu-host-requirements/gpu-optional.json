@@ -1,0 +1,7 @@
+{
+	"name": "GPU optional (string \"optional\")",
+	"image": "alpine:3.18",
+	"hostRequirements": {
+		"gpu": "optional"
+	}
+}
