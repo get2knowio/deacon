@@ -232,8 +232,15 @@ impl Mount {
             }
         }
 
-        // Add additional options
+        // Add additional options.
+        //
+        // Per #119, `external` is a deacon-internal marker (externally-
+        // managed volume — don't create/manage) and is not a valid Docker
+        // `--mount` option. Filter it out before handing to docker.
         for (key, value) in &self.options {
+            if key == "external" {
+                continue;
+            }
             if value.is_empty() {
                 mount_str.push_str(&format!(",{}", key));
             } else {
@@ -291,6 +298,11 @@ impl Mount {
                 "bind-propagation" | "tmpfs-size" | "tmpfs-mode" | "volume-driver"
                 | "volume-label" | "volume-nocopy" | "volume-opt" => {
                     debug!("Using Docker mount option: {}", key);
+                }
+                // Deacon-internal: externally-managed volume marker, filtered
+                // out before handing to docker. Per #119.
+                "external" => {
+                    debug!("external=... is a deacon-internal volume marker");
                 }
                 _ => {
                     warn!("Unknown mount option '{}' may not be supported", key);

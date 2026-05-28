@@ -22,12 +22,15 @@ fn test_normalized_mount_validation_bind_basic() {
 
 #[test]
 fn test_normalized_mount_validation_volume_with_external() {
+    // Per #119: external (externally-managed volume marker) is distinct
+    // from read_only.
     let result = NormalizedMount::parse("type=volume,source=myvolume,target=/data,external=true");
     assert!(result.is_ok());
     let mount = result.unwrap();
     assert_eq!(mount.source, "myvolume");
     assert_eq!(mount.target, "/data");
-    assert!(mount.read_only);
+    assert!(mount.external);
+    assert!(!mount.read_only);
 }
 
 #[test]

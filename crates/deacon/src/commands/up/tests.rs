@@ -218,12 +218,14 @@ fn test_normalized_mount_parse_bind() {
 
 #[test]
 fn test_normalized_mount_parse_volume_with_external() {
+    // Per #119: external is distinct from read_only.
     let mount =
         NormalizedMount::parse("type=volume,source=myvolume,target=/data,external=true").unwrap();
     assert!(matches!(mount.mount_type, MountType::Volume));
     assert_eq!(mount.source, "myvolume");
     assert_eq!(mount.target, "/data");
-    assert!(mount.read_only);
+    assert!(mount.external);
+    assert!(!mount.read_only);
     assert!(mount.consistency.is_none());
 }
 
@@ -260,11 +262,13 @@ fn test_normalized_mount_parse_with_consistency_consistent() {
 
 #[test]
 fn test_normalized_mount_parse_with_external_and_consistency() {
+    // Per #119: external is distinct from read_only.
     let mount = NormalizedMount::parse(
         "type=bind,source=/host/path,target=/container/path,external=true,consistency=cached",
     )
     .unwrap();
-    assert!(mount.read_only);
+    assert!(mount.external);
+    assert!(!mount.read_only);
     assert_eq!(mount.consistency, Some("cached".to_string()));
 }
 
@@ -275,8 +279,34 @@ fn test_normalized_mount_parse_with_consistency_before_external() {
         "type=bind,source=/host/path,target=/container/path,consistency=cached,external=true",
     )
     .unwrap();
-    assert!(mount.read_only);
+    assert!(mount.external);
+    assert!(!mount.read_only);
     assert_eq!(mount.consistency, Some("cached".to_string()));
+}
+
+#[test]
+fn test_normalized_mount_parse_readonly_bare() {
+    // Per #119: Docker's `readonly` bare keyword is accepted and is
+    // distinct from `external`.
+    let mount =
+        NormalizedMount::parse("type=bind,source=/host,target=/container,readonly").unwrap();
+    assert!(mount.read_only);
+    assert!(!mount.external);
+}
+
+#[test]
+fn test_normalized_mount_parse_ro_bare() {
+    let mount = NormalizedMount::parse("type=bind,source=/host,target=/container,ro").unwrap();
+    assert!(mount.read_only);
+    assert!(!mount.external);
+}
+
+#[test]
+fn test_normalized_mount_parse_readonly_and_external_are_distinct() {
+    let mount =
+        NormalizedMount::parse("type=volume,source=v,target=/data,external=true,readonly").unwrap();
+    assert!(mount.external);
+    assert!(mount.read_only);
 }
 
 #[test]
@@ -285,6 +315,7 @@ fn test_normalized_mount_to_spec_string_with_consistency() {
         mount_type: MountType::Bind,
         source: "/host/path".to_string(),
         target: "/container/path".to_string(),
+        external: false,
         read_only: false,
         consistency: Some("cached".to_string()),
     };
@@ -297,17 +328,36 @@ fn test_normalized_mount_to_spec_string_with_consistency() {
 }
 
 #[test]
-fn test_normalized_mount_to_spec_string_with_external_and_consistency() {
+fn test_normalized_mount_to_spec_string_does_not_emit_external() {
+    // Per #119: `external` is a deacon-internal flag, not a Docker
+    // `--mount` option. NormalizedMount keeps the bit on `.external`
+    // for downstream logic but doesn't round-trip it into the mount
+    // string handed to docker (docker rejects unknown options).
     let mount = NormalizedMount {
         mount_type: MountType::Bind,
         source: "/host/path".to_string(),
         target: "/container/path".to_string(),
-        read_only: true,
+        external: true,
+        read_only: false,
         consistency: Some("delegated".to_string()),
     };
     let spec_string = mount.to_spec_string();
-    assert!(spec_string.contains("external=true"));
+    assert!(!spec_string.contains("external"));
     assert!(spec_string.contains("consistency=delegated"));
+}
+
+#[test]
+fn test_normalized_mount_to_spec_string_emits_readonly() {
+    let mount = NormalizedMount {
+        mount_type: MountType::Bind,
+        source: "/host/path".to_string(),
+        target: "/container/path".to_string(),
+        external: false,
+        read_only: true,
+        consistency: None,
+    };
+    let spec_string = mount.to_spec_string();
+    assert!(spec_string.ends_with(",readonly"));
 }
 
 #[test]

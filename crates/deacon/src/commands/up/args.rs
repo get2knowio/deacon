@@ -24,8 +24,13 @@ pub struct NormalizedMount {
     pub mount_type: MountType,
     pub source: String,
     pub target: String,
-    /// Whether the mount is read-only (adds `:ro` suffix to the volume)
-    /// Parsed from CLI `external=true` for backward compatibility
+    /// Whether the volume is externally managed (not created by deacon). Per
+    /// the spec data model — distinct from read-only. CLI accepts
+    /// `external=true|false`.
+    pub external: bool,
+    /// Whether the mount is read-only. CLI accepts the Docker-aligned
+    /// `readonly` (bare), `readonly=true|false`, or `ro` (bare). Per #119,
+    /// distinct from `external`.
     pub read_only: bool,
     /// Mount consistency option (cached, consistent, delegated)
     /// Only applicable to bind mounts on macOS for performance tuning
@@ -42,11 +47,12 @@ pub enum MountType {
 impl NormalizedMount {
     /// Parse and validate a mount string from CLI.
     ///
-    /// Expected format: `type=(bind|volume),source=<path>,target=<path>[,external=(true|false)][,consistency=(cached|consistent|delegated)]`
+    /// Expected format: `type=(bind|volume),source=<path>,target=<path>[,external=(true|false)][,readonly|readonly=(true|false)|ro][,consistency=(cached|consistent|delegated)]`
     ///
-    /// Note: The `external` option in CLI maps to `read_only` field internally.
-    /// This maintains backward compatibility while using clearer naming in code.
-    /// The optional fields (external, consistency) can appear in any order.
+    /// Per #119, `readonly` (bare or `=true/false`) and `ro` (bare) are
+    /// Docker-aligned aliases for the read-only flag — distinct from
+    /// `external`, which marks externally-managed volumes per the spec data
+    /// model. Optional fields may appear in any order.
     ///
     /// Returns error if format is invalid or required fields are missing.
     pub fn parse(mount_str: &str) -> Result<Self> {
@@ -55,6 +61,7 @@ impl NormalizedMount {
         let mut source: Option<&str> = None;
         let mut target: Option<&str> = None;
         let mut external: Option<&str> = None;
+        let mut read_only_flag: Option<&str> = None;
         let mut consistency: Option<&str> = None;
 
         for part in mount_str.split(',') {
@@ -64,6 +71,8 @@ impl NormalizedMount {
                     "source" => source = Some(value),
                     "target" => target = Some(value),
                     "external" => external = Some(value),
+                    "readonly" => read_only_flag = Some(value),
+                    "ro" => read_only_flag = Some(value),
                     "consistency" => consistency = Some(value),
                     _ => {
                         return Err(DeaconError::Config(
@@ -78,15 +87,24 @@ impl NormalizedMount {
                     }
                 }
             } else {
-                return Err(
-                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                        message: format!(
-                            "Invalid mount format: '{}'. Expected key=value format",
-                            mount_str
-                        ),
-                    })
-                    .into(),
-                );
+                // Per Docker `--mount` syntax and #119, bare keywords
+                // `readonly` and `ro` set read-only on the mount.
+                match part {
+                    "readonly" | "ro" => {
+                        read_only_flag = Some("true");
+                    }
+                    _ => {
+                        return Err(DeaconError::Config(
+                            deacon_core::errors::ConfigError::Validation {
+                                message: format!(
+                                    "Invalid mount format: '{}'. Expected key=value format",
+                                    mount_str
+                                ),
+                            },
+                        )
+                        .into());
+                    }
+                }
             }
         }
 
@@ -136,7 +154,7 @@ impl NormalizedMount {
         };
 
         // Validate external value if provided
-        let read_only = match external {
+        let external_flag = match external {
             Some("true") => true,
             Some("false") | None => false,
             Some(val) => {
@@ -144,6 +162,22 @@ impl NormalizedMount {
                     DeaconError::Config(deacon_core::errors::ConfigError::Validation {
                         message: format!(
                         "Invalid mount format: '{}'. external must be 'true' or 'false', got: '{}'",
+                        mount_str, val
+                    ),
+                    })
+                    .into(),
+                )
+            }
+        };
+
+        let read_only = match read_only_flag {
+            Some("true") | Some("") => true,
+            Some("false") | None => false,
+            Some(val) => {
+                return Err(
+                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                        message: format!(
+                        "Invalid mount format: '{}'. readonly must be 'true' or 'false' (or bare), got: '{}'",
                         mount_str, val
                     ),
                     })
@@ -175,6 +209,7 @@ impl NormalizedMount {
             mount_type,
             source: source.to_string(),
             target: target.to_string(),
+            external: external_flag,
             read_only,
             consistency,
         })
@@ -194,8 +229,13 @@ impl NormalizedMount {
             format!("target={}", self.target),
         ];
 
+        // Per #119, `external` is a deacon-internal marker (externally-
+        // managed volume) — not a valid `docker --mount` option. It lives
+        // on NormalizedMount.external for downstream logic and is NOT
+        // round-tripped into the docker mount string.
+
         if self.read_only {
-            parts.push("external=true".to_string());
+            parts.push("readonly".to_string());
         }
 
         if let Some(ref consistency) = self.consistency {
