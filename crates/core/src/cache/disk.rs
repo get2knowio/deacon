@@ -105,14 +105,34 @@ where
         Ok(())
     }
 
-    /// Save the current index to disk
+    /// Save the current index to disk.
+    ///
+    /// Writes to a uniquely-named temp file in the same directory and renames it
+    /// into place, so the write is atomic. A plain `fs::write` truncates then
+    /// streams the new bytes; when two writers (or processes sharing a cache
+    /// dir) race, a shorter payload landing over a longer file leaves trailing
+    /// bytes — surfacing later as "trailing characters" JSON parse errors. The
+    /// rename makes each publish all-or-nothing (last writer wins, always valid).
     fn save_index(&self) -> Result<()> {
         let metadata_file = self.cache_dir.join("index.json");
         let content = serde_json::to_string_pretty(&self.index)
             .map_err(cache_serde_json("Failed to serialize cache index"))?;
 
-        fs::write(&metadata_file, content).map_err(cache_io(format!(
-            "Failed to write cache index: {:?}",
+        // Unique temp name (pid + monotonic counter) so concurrent writers don't
+        // clobber each other's staging file before the rename.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp_file =
+            self.cache_dir
+                .join(format!("index.json.tmp.{}.{}", std::process::id(), seq));
+
+        fs::write(&tmp_file, content).map_err(cache_io(format!(
+            "Failed to write cache index temp file: {:?}",
+            tmp_file
+        )))?;
+
+        fs::rename(&tmp_file, &metadata_file).map_err(cache_io(format!(
+            "Failed to publish cache index: {:?}",
             metadata_file
         )))?;
 
@@ -365,6 +385,66 @@ mod tests {
         );
         assert_eq!(cache.get(&"key1".to_string()), None);
         assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_save_index_is_atomic_and_leaves_no_temp_files() {
+        let temp_dir = TempDir::new().unwrap();
+        {
+            let mut cache: DiskCache<String, String> = DiskCache::new(temp_dir.path()).unwrap();
+            for i in 0..20 {
+                cache.set(format!("key{i}"), format!("value{i}")).unwrap();
+            }
+        }
+        // The published index must be valid JSON and the staging temp files must
+        // have been renamed away (no `index.json.tmp.*` left behind).
+        let index = temp_dir.path().join("index.json");
+        let content = std::fs::read_to_string(&index).unwrap();
+        serde_json::from_str::<serde_json::Value>(&content)
+            .expect("published index.json must be valid JSON");
+        let leftover_tmp: Vec<_> = std::fs::read_dir(temp_dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("index.json.tmp.")
+            })
+            .collect();
+        assert!(
+            leftover_tmp.is_empty(),
+            "no staging temp files should remain, found: {:?}",
+            leftover_tmp
+        );
+    }
+
+    #[test]
+    fn test_concurrent_writers_keep_index_parseable() {
+        // Reproduces the "trailing characters" corruption: multiple writers
+        // sharing a cache dir must never leave a half-overwritten index.json.
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().to_path_buf();
+        let handles: Vec<_> = (0..8)
+            .map(|t| {
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    let mut cache: DiskCache<String, String> = DiskCache::new(&dir).unwrap();
+                    for i in 0..50 {
+                        cache.set(format!("t{t}-k{i}"), format!("v{i}")).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        // After all the racing writers, the index must still parse cleanly and a
+        // fresh cache must load without a serialization error.
+        let content = std::fs::read_to_string(dir.join("index.json")).unwrap();
+        serde_json::from_str::<serde_json::Value>(&content)
+            .expect("index.json must remain valid JSON under concurrent writers");
+        let _cache: DiskCache<String, String> =
+            DiskCache::new(&dir).expect("reload must not fail to parse the index");
     }
 
     #[test]
