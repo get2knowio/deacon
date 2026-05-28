@@ -625,6 +625,36 @@ pub struct DevContainerConfig {
     /// Reference: [Container Configuration - securityOpt](https://containers.dev/implementors/json_reference/#security-opt)
     #[serde(default, rename = "securityOpt")]
     pub security_opt: Vec<String>,
+
+    /// Declarative secrets metadata.
+    ///
+    /// Maps each secret name to a metadata object (description /
+    /// documentationUrl). Per the upstream [declarative secrets spec](https://github.com/devcontainers/spec/blob/main/docs/specs/declarative-secrets.md)
+    /// this is metadata only — it does not contain secret *values*. Tools
+    /// (IDE prompts, CI dashboards) read it to know which secrets to
+    /// expect, and `read-configuration` must surface it intact (#72).
+    #[serde(default)]
+    pub secrets: Option<std::collections::HashMap<String, SecretMetadata>>,
+}
+
+/// Metadata describing a declarative secret entry.
+///
+/// Used as the value type for the top-level `secrets` map in
+/// `devcontainer.json`. Both fields are optional per the spec.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct SecretMetadata {
+    /// Human-readable description shown when prompting for the secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Optional documentation URL pointing the user at how to obtain the
+    /// secret value.
+    #[serde(
+        default,
+        rename = "documentationUrl",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub documentation_url: Option<String>,
 }
 
 impl DevContainerConfig {
@@ -1067,6 +1097,7 @@ impl Default for DevContainerConfig {
             init: None,
             cap_add: Vec::new(),
             security_opt: Vec::new(),
+            secrets: None,
         }
     }
 }
@@ -1249,6 +1280,31 @@ impl ConfigMerger {
             init: Self::merge_bool_or(base.init, overlay.init),
             cap_add: Self::union_arrays(&base.cap_add, &overlay.cap_add),
             security_opt: Self::union_arrays(&base.security_opt, &overlay.security_opt),
+
+            // secrets: key-level merge, leaf wins on conflict (matches
+            // containerEnv semantics; #72). Parent keys not redeclared in
+            // the overlay are preserved.
+            secrets: Self::merge_secrets(base.secrets.as_ref(), overlay.secrets.as_ref()),
+        }
+    }
+
+    /// Merge two optional secrets maps, with the overlay (leaf) winning
+    /// on duplicate keys.
+    fn merge_secrets(
+        base: Option<&HashMap<String, SecretMetadata>>,
+        overlay: Option<&HashMap<String, SecretMetadata>>,
+    ) -> Option<HashMap<String, SecretMetadata>> {
+        match (base, overlay) {
+            (None, None) => None,
+            (Some(b), None) => Some(b.clone()),
+            (None, Some(o)) => Some(o.clone()),
+            (Some(b), Some(o)) => {
+                let mut merged = b.clone();
+                for (k, v) in o {
+                    merged.insert(k.clone(), v.clone());
+                }
+                Some(merged)
+            }
         }
     }
 
@@ -4510,6 +4566,144 @@ mod tests {
             merged3.run_args,
             vec!["--network=host".to_string(), "--privileged".to_string()]
         );
+    }
+
+    #[test]
+    fn test_merge_secrets_leaf_wins_with_parent_passthrough() {
+        // Declarative secrets map (#72): leaf-wins on key conflict; parent
+        // keys not redeclared in the overlay are preserved.
+        let mut base_secrets = std::collections::HashMap::new();
+        base_secrets.insert(
+            "FROM_BASE".to_string(),
+            SecretMetadata {
+                description: Some("Only in base".to_string()),
+                documentation_url: None,
+            },
+        );
+        base_secrets.insert(
+            "OVERLAPPING".to_string(),
+            SecretMetadata {
+                description: Some("Base description".to_string()),
+                documentation_url: Some("https://example.com/base".to_string()),
+            },
+        );
+        let mut overlay_secrets = std::collections::HashMap::new();
+        overlay_secrets.insert(
+            "OVERLAPPING".to_string(),
+            SecretMetadata {
+                description: Some("Overlay description (wins)".to_string()),
+                documentation_url: Some("https://example.com/overlay".to_string()),
+            },
+        );
+        overlay_secrets.insert(
+            "FROM_OVERLAY".to_string(),
+            SecretMetadata {
+                description: Some("Only in overlay".to_string()),
+                documentation_url: None,
+            },
+        );
+
+        let base = DevContainerConfig {
+            secrets: Some(base_secrets),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            secrets: Some(overlay_secrets),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_two_configs(&base, &overlay);
+        let secrets = merged.secrets.expect("secrets must be preserved");
+        assert_eq!(
+            secrets.get("FROM_BASE").unwrap().description.as_deref(),
+            Some("Only in base")
+        );
+        assert_eq!(
+            secrets.get("FROM_OVERLAY").unwrap().description.as_deref(),
+            Some("Only in overlay")
+        );
+        assert_eq!(
+            secrets.get("OVERLAPPING").unwrap().description.as_deref(),
+            Some("Overlay description (wins)")
+        );
+
+        // Base-only and overlay-only secrets pass through.
+        let base_only = DevContainerConfig {
+            secrets: Some(std::collections::HashMap::from([(
+                "X".to_string(),
+                SecretMetadata::default(),
+            )])),
+            ..Default::default()
+        };
+        let overlay_empty = DevContainerConfig::default();
+        let merged_base_only = ConfigMerger::merge_two_configs(&base_only, &overlay_empty);
+        assert!(merged_base_only.secrets.unwrap().contains_key("X"));
+
+        let base_empty = DevContainerConfig::default();
+        let overlay_only = DevContainerConfig {
+            secrets: Some(std::collections::HashMap::from([(
+                "Y".to_string(),
+                SecretMetadata::default(),
+            )])),
+            ..Default::default()
+        };
+        let merged_overlay_only = ConfigMerger::merge_two_configs(&base_empty, &overlay_only);
+        assert!(merged_overlay_only.secrets.unwrap().contains_key("Y"));
+    }
+
+    #[test]
+    fn test_secrets_field_round_trip() {
+        // #72: a devcontainer.json with `secrets` must round-trip through
+        // serde without dropping the field. Captures both fields and
+        // verifies the camelCase wire format for documentationUrl.
+        let json = r#"{
+            "image": "alpine:3.18",
+            "secrets": {
+                "GITHUB_TOKEN": {
+                    "description": "PAT for GitHub API",
+                    "documentationUrl": "https://docs.github.com/.../personal-access-tokens"
+                },
+                "NPM_TOKEN": {
+                    "description": "npm registry token"
+                }
+            }
+        }"#;
+
+        let config: DevContainerConfig = serde_json::from_str(json).unwrap();
+        let secrets = config.secrets.as_ref().expect("secrets must be present");
+        assert_eq!(secrets.len(), 2);
+
+        let github = secrets.get("GITHUB_TOKEN").unwrap();
+        assert_eq!(github.description.as_deref(), Some("PAT for GitHub API"));
+        assert_eq!(
+            github.documentation_url.as_deref(),
+            Some("https://docs.github.com/.../personal-access-tokens")
+        );
+
+        let npm = secrets.get("NPM_TOKEN").unwrap();
+        assert_eq!(npm.description.as_deref(), Some("npm registry token"));
+        assert_eq!(npm.documentation_url, None);
+
+        // Serialize back and re-parse; the round-trip must preserve everything.
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(
+            serialized.contains(r#""documentationUrl":"https://docs.github.com"#),
+            "documentationUrl must be emitted in camelCase: {serialized}"
+        );
+        let reparsed: DevContainerConfig = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(config.secrets, reparsed.secrets);
+    }
+
+    #[test]
+    fn test_secrets_absent_serializes_as_null() {
+        // When `secrets` is absent from the source JSON, it stays None;
+        // `read-configuration` emits it as `null` so consumers can branch
+        // on presence (#72).
+        let json = r#"{ "image": "alpine:3.18" }"#;
+        let config: DevContainerConfig = serde_json::from_str(json).unwrap();
+        assert!(config.secrets.is_none());
+
+        let serialized = serde_json::to_value(&config).unwrap();
+        assert_eq!(serialized.get("secrets"), Some(&serde_json::Value::Null));
     }
 }
 
