@@ -164,12 +164,35 @@ pub(crate) async fn apply_user_mapping<R: deacon_core::docker::Docker + Send + S
     //      config field is absent)
     //   3. OS default: `true` on Linux, `false` elsewhere
     let os_default_update_uid = cfg!(target_os = "linux");
+    let effective_update_uid = config
+        .update_remote_user_uid
+        .unwrap_or(os_default_update_uid);
+
+    // Spec parity (#90): when the resolved remote user is `root` (or any
+    // user that will land at UID 0 inside the container), `updateRemoteUserUID`
+    // MUST be a no-op. Re-stamping root to the host's UID strips its
+    // privileges and breaks bind/volume mounts created by the daemon as
+    // UID 0. Upstream @devcontainers/cli skips this case unconditionally;
+    // we mirror that here. The check runs *before* host_uid lookup so we
+    // also short-circuit the host_user_info probe.
+    let remote_user_is_root = config
+        .remote_user
+        .as_deref()
+        .map(|u| u == "root")
+        .unwrap_or(false);
+    let effective_update_uid = if effective_update_uid && remote_user_is_root {
+        debug!(
+            "Resolved remoteUser is 'root'; skipping updateRemoteUserUID to preserve UID-0 privileges (#90)"
+        );
+        false
+    } else {
+        effective_update_uid
+    };
+
     let mut user_config = UserMappingConfig::new(
         config.remote_user.clone(),
         config.container_user.clone(),
-        config
-            .update_remote_user_uid
-            .unwrap_or(os_default_update_uid),
+        effective_update_uid,
     );
 
     // Add host user information if updateRemoteUserUID is enabled

@@ -40,3 +40,9 @@
 {"type":"container.create.begin","id":1,"timestamp":1766782913959,"name":"Dev Container with Features","image":"ubuntu:22.04"}
 {"type":"container.create.begin","id":1,"timestamp":1766784203519,"name":"Dev Container with Features","image":"ubuntu:22.04"}
 {"type":"container.create.end","id":4,"timestamp":1766784261959,"name":"Dev Container with Features","duration_ms":58439,"success":true,"container_id":"0c6829e4ca289707a3a0b7991c1085092059a48b87191c00c3f5d4da173cd4ad"}
+{"type":"container.create.begin","id":1,"timestamp":1779968677142,"name":"Down stop test","image":"alpine:3.18"}
+{"type":"container.create.end","id":2,"timestamp":1779968677427,"name":"Down stop test","duration_ms":277,"success":true,"container_id":"b61ce0b88cca86ed539c0df01d319dc621c181d7b61752856a0391e52d6ec670"}
+{"type":"lifecycle.phase.begin","id":3,"timestamp":1779968678248,"phase":"postCreate","commands":["true"]}
+{"type":"lifecycle.command.begin","id":4,"timestamp":1779968678248,"phase":"postCreate","command_id":"postCreate-1","command":"true"}
+{"type":"lifecycle.command.end","id":5,"timestamp":1779968678295,"phase":"postCreate","command_id":"postCreate-1","duration_ms":46,"success":true,"exit_code":0}
+{"type":"lifecycle.phase.end","id":6,"timestamp":1779968678295,"phase":"postCreate","duration_ms":47,"success":true}
