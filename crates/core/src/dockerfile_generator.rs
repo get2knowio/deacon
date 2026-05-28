@@ -220,7 +220,9 @@ impl DockerfileGenerator {
     /// non-underscore character with `_`. Without this the BuildKit `RUN`
     /// step crashes on options like `another.weird-key`:
     ///
-    ///     /bin/sh: ANOTHER.WEIRD-KEY=x/y/z: not found
+    /// ```text
+    /// /bin/sh: ANOTHER.WEIRD-KEY=x/y/z: not found
+    /// ```
     ///
     /// Option *values* are never sanitized — only keys (#88).
     fn build_environment_variables(feature: &ResolvedFeature) -> HashMap<String, String> {
