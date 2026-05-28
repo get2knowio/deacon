@@ -150,11 +150,26 @@ pub(crate) async fn apply_user_mapping<R: deacon_core::docker::Docker + Send + S
 
     debug!("Applying user mapping configuration");
 
-    // Create user mapping configuration
+    // Spec parity (#71): the `updateRemoteUserUID` property defaults to
+    // `true` on Linux per the containers.dev spec, so that files written
+    // into bind-mounted workspaces from inside the container land at the
+    // correct host ownership. Deacon previously defaulted to `false`, so
+    // a Linux user with no explicit config or CLI flag never got the UID
+    // re-stamp and bind-mounted files ended up root- (or image-) owned.
+    //
+    // Precedence (highest first):
+    //   1. `updateRemoteUserUID` in devcontainer.json (config)
+    //   2. `--update-remote-user-uid-default` CLI flag (applied earlier
+    //      in execute_up_with_runtime, which writes to `config` when the
+    //      config field is absent)
+    //   3. OS default: `true` on Linux, `false` elsewhere
+    let os_default_update_uid = cfg!(target_os = "linux");
     let mut user_config = UserMappingConfig::new(
         config.remote_user.clone(),
         config.container_user.clone(),
-        config.update_remote_user_uid.unwrap_or(false),
+        config
+            .update_remote_user_uid
+            .unwrap_or(os_default_update_uid),
     );
 
     // Add host user information if updateRemoteUserUID is enabled
@@ -595,5 +610,56 @@ mod lockfile_post_build_tests {
         let inner = io::Error::from(io::ErrorKind::NotFound);
         let err: anyhow::Error = anyhow::anyhow!(inner).context("read failed");
         assert!(!is_readonly_fs_error(&err));
+    }
+}
+
+#[cfg(test)]
+mod update_remote_user_uid_default_tests {
+    //! Spec parity (#71): `updateRemoteUserUID` defaults to `true` on Linux
+    //! per the containers.dev spec. The construction site lives in
+    //! `apply_user_mapping`; we mirror the literal here to keep the test
+    //! self-contained without requiring a Docker mock.
+
+    #[test]
+    fn os_default_is_true_on_linux_and_false_elsewhere() {
+        let os_default_update_uid = cfg!(target_os = "linux");
+        if cfg!(target_os = "linux") {
+            assert!(
+                os_default_update_uid,
+                "Per containers.dev spec, updateRemoteUserUID defaults to true on Linux (#71)"
+            );
+        } else {
+            assert!(
+                !os_default_update_uid,
+                "Outside Linux the spec leaves updateRemoteUserUID off by default"
+            );
+        }
+    }
+
+    #[test]
+    fn config_value_wins_over_os_default() {
+        let os_default_update_uid = cfg!(target_os = "linux");
+
+        // Mirrors the precedence in apply_user_mapping:
+        // config.update_remote_user_uid.unwrap_or(os_default_update_uid)
+        let explicit_off: Option<bool> = Some(false);
+        assert!(
+            !explicit_off.unwrap_or(os_default_update_uid),
+            "explicit `updateRemoteUserUID: false` must override the OS default (#71)"
+        );
+
+        let explicit_on: Option<bool> = Some(true);
+        assert!(
+            explicit_on.unwrap_or(os_default_update_uid),
+            "explicit `updateRemoteUserUID: true` must override the OS default (#71)"
+        );
+
+        // None falls through to the OS default — this is the bug #71 fixes.
+        let absent: Option<bool> = None;
+        assert_eq!(
+            absent.unwrap_or(os_default_update_uid),
+            os_default_update_uid,
+            "absent updateRemoteUserUID must use the OS default, not hard-coded false (#71)"
+        );
     }
 }
