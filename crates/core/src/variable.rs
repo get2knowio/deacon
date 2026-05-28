@@ -760,9 +760,10 @@ mod tests {
         // Ensure clean slate: remove the keys from local_env, since
         // SubstitutionContext::new captures the real env at construction.
         context.local_env.remove("DEACON_TEST_DEFAULT_UNSET");
-        context
-            .local_env
-            .insert("DEACON_TEST_DEFAULT_SET".to_string(), "real-value".to_string());
+        context.local_env.insert(
+            "DEACON_TEST_DEFAULT_SET".to_string(),
+            "real-value".to_string(),
+        );
         let mut report = SubstitutionReport::new();
 
         let unset = VariableSubstitution::substitute_string(
