@@ -23,7 +23,7 @@
     - `--workspace-folder <PATH>` Optional. Root used to discover config; also used to infer id-labels when locating a container.
     - `--config <PATH>` Optional. Explicit devcontainer.json path. For this subcommand, the filename is not strictly enforced.
     - `--override-config <PATH>` Optional. Override devcontainer.json path; required when no base config exists.
-    - `--mount-workspace-git-root` Optional boolean, default true. Influences workspace discovery/mount in workspace resolution.
+    - `--mount-workspace-git-root` Optional boolean, default true. Controls the workspace *mount source* (walks up to the enclosing git root when true so git operations inside the container work). Config discovery is anchored to `--workspace-folder` and is **not** affected by this flag (#67).
   - Container selection:
     - `--container-id <ID>` Optional. Target container ID; enables container-based substitutions and metadata reads.
     - `--id-label <name=value>` Optional, repeatable. Used to locate the container if `--container-id` is not provided. If neither `--container-id` nor `--id-label` is set, one is inferred from `--workspace-folder`.

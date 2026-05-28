@@ -92,33 +92,55 @@ pub(crate) async fn execute_container_up(
         );
     }
 
-    // Apply workspace mount consistency when using default workspace mount
+    // Build the default workspace mount.
+    //
+    // Spec parity (#67): the mount *source* is the enclosing git root when
+    // `--mount-workspace-git-root` is true (the default) so git operations
+    // inside the container work; otherwise the user's workspace folder. The
+    // mount *target* defaults to `/workspaces/<basename(source)>`, matching
+    // the upstream reference CLI.
+    //
+    // Discovery (`load_config`) has already used the user's workspace
+    // folder by this point — the git-root walk no longer affects which
+    // `.devcontainer/devcontainer.json` is loaded.
     if config.workspace_mount.is_none() {
-        let target_path = config.workspace_folder.clone().unwrap_or_else(|| {
-            format!(
-                "/workspaces/{}",
-                workspace_folder
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("workspace")
-            )
-        });
-        let source_path = workspace_folder
-            .canonicalize()
-            .with_context(|| {
+        let mount_source = if args.mount_workspace_git_root {
+            let git_root = deacon_core::workspace::find_git_repository_root(workspace_folder)?;
+            if git_root.is_none() {
+                info!(
+                    "Git root requested (--mount-workspace-git-root) but no git repository found at '{}'. Using workspace folder for the workspace mount source.",
+                    workspace_folder.display()
+                );
+            }
+            deacon_core::workspace::resolve_workspace_root(workspace_folder)?
+        } else {
+            workspace_folder.canonicalize().with_context(|| {
                 format!(
                     "Failed to canonicalize workspace folder '{}' for mounting: path does not exist or cannot be accessed",
                     workspace_folder.display()
                 )
             })?
-            .display()
-            .to_string();
-        if let Some(ref consistency) = args.workspace_mount_consistency {
-            config.workspace_mount = Some(format!(
-                "type=bind,source={},target={},consistency={}",
-                source_path, target_path, consistency
-            ));
-        }
+        };
+        let target_path = config.workspace_folder.clone().unwrap_or_else(|| {
+            format!(
+                "/workspaces/{}",
+                mount_source
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("workspace")
+            )
+        });
+        let consistency_suffix = args
+            .workspace_mount_consistency
+            .as_ref()
+            .map(|c| format!(",consistency={}", c))
+            .unwrap_or_default();
+        config.workspace_mount = Some(format!(
+            "type=bind,source={},target={}{}",
+            mount_source.display(),
+            target_path,
+            consistency_suffix
+        ));
     }
     if !args.forward_ports.is_empty() {
         use deacon_core::config::PortSpec;

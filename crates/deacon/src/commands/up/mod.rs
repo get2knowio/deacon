@@ -107,28 +107,24 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
     debug!("Starting up command execution");
     debug!("Up args: {:?}", args);
 
-    // Normalize workspace folder for git-root mounting when requested
+    // Normalize the workspace folder.
+    //
+    // Spec parity (#67): `--mount-workspace-git-root` controls only the
+    // *mount source* for the default workspace bind mount. Discovery of
+    // `.devcontainer/devcontainer.json` and `${localWorkspaceFolder}`
+    // substitution stay anchored at the user-provided `--workspace-folder`
+    // so that running deacon against a sub-project inside a larger git
+    // repository does not silently load the enclosing repo's devcontainer
+    // configuration. The git-root walk happens later, only when
+    // constructing the workspace mount source in `execute_container_up`.
     let mut args = args;
     if let Some(ws) = args.workspace_folder.clone() {
-        let resolved = if args.mount_workspace_git_root {
-            // Check if git root exists before resolving
-            let git_root_result = deacon_core::workspace::find_git_repository_root(&ws)?;
-            if git_root_result.is_none() {
-                // T016: Log fallback when git root requested but not found
-                info!(
-                    "Git root requested (--mount-workspace-git-root) but no git repository found at '{}'. Using workspace root instead.",
-                    ws.display()
-                );
-            }
-            deacon_core::workspace::resolve_workspace_root(&ws)?
-        } else {
-            ws.canonicalize().with_context(|| {
-                format!(
-                    "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
-                    ws.display()
-                )
-            })?
-        };
+        let resolved = ws.canonicalize().with_context(|| {
+            format!(
+                "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
+                ws.display()
+            )
+        })?;
         args.workspace_folder = Some(resolved);
     }
 

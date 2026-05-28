@@ -28,7 +28,7 @@
     - --config <path-to-devcontainer.json>
     - --override-config <path-to-devcontainer.json>
     - --id-label <name=value> (repeatable)
-    - --mount-workspace-git-root [boolean, default true]
+    - --mount-workspace-git-root [boolean, default true] — controls the workspace *mount source* only. Config discovery is anchored to `--workspace-folder` and is **not** affected by this flag (#67).
   - Logging/terminal:
     - --log-level <info|debug|trace> (default info)
     - --log-format <text|json> (default text)
