@@ -43,10 +43,10 @@ pub struct ExecArgs {
     pub command: Vec<String>,
     /// Workspace folder path
     pub workspace_folder: Option<std::path::PathBuf>,
-    /// When true (spec default), walk up from `workspace_folder` to the enclosing
-    /// git repository root for config discovery and mounts. When false, use the
-    /// workspace folder as-is. No effect when `--container-id` or `--id-label`
-    /// already supply the target container.
+    /// Kept for CLI parse-compat with `up`/`build`; not consumed by `exec`.
+    /// Per #111, config discovery + container identity stay anchored to
+    /// `workspace_folder`; `exec` never bind-mounts.
+    #[allow(dead_code)]
     pub mount_workspace_git_root: bool,
     /// Configuration file path
     pub config_path: Option<std::path::PathBuf>,
@@ -478,22 +478,19 @@ where
         let needs_workspace_context = config_inputs_present || requires_workspace_resolution;
         if needs_workspace_context {
             if let Some(ws) = args.workspace_folder.clone() {
-                let resolved = if args.mount_workspace_git_root {
-                    if deacon_core::workspace::find_git_repository_root(&ws)?.is_none() {
-                        tracing::info!(
-                            "Git root requested (--mount-workspace-git-root) but no git repository found at '{}'. Using workspace root instead.",
-                            ws.display()
-                        );
-                    }
-                    deacon_core::workspace::resolve_workspace_root(&ws)?
-                } else {
-                    ws.canonicalize().with_context(|| {
-                        format!(
-                            "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
-                            ws.display()
-                        )
-                    })?
-                };
+                // Per #111 / SPEC: `--mount-workspace-git-root` controls the
+                // workspace *mount source*. Config discovery and container
+                // identity stay anchored to the user-supplied workspace
+                // folder so `up --workspace-folder X` and `exec
+                // --workspace-folder X` agree on which container to target,
+                // even when X is a sub-project inside a larger git repo.
+                // `exec` doesn't bind-mount, so the flag is a no-op here.
+                let resolved = ws.canonicalize().with_context(|| {
+                    format!(
+                        "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
+                        ws.display()
+                    )
+                })?;
                 args.workspace_folder = Some(resolved);
             }
         }
@@ -1285,58 +1282,36 @@ services:
         assert_eq!(args.workdir, None); // Will be resolved to "/" in execute logic
     }
 
-    /// BEAD-10-T01: default `mount_workspace_git_root=true` resolves the
-    /// workspace folder up to the enclosing git repository root.
-    #[tokio::test]
-    async fn test_mount_workspace_git_root_default_walks_to_git_root() {
+    /// Per #111: even with `mount_workspace_git_root=true`, `exec` keeps
+    /// `workspace_folder` anchored to the user-supplied path so config
+    /// discovery and container identity stay symmetric with `up`. The flag
+    /// is a no-op for `exec`.
+    #[test]
+    fn test_exec_does_not_walk_workspace_to_git_root() {
         let temp = tempfile::TempDir::new().unwrap();
         let repo = temp.path().to_path_buf();
-        // Initialize a bare git layout so find_git_repository_root resolves here.
         std::fs::create_dir(repo.join(".git")).unwrap();
         let nested = repo.join("nested/deeper");
         std::fs::create_dir_all(&nested).unwrap();
-        // Add a config under nested so load_config finds something.
-        std::fs::create_dir(nested.join(".devcontainer")).unwrap();
-        std::fs::write(
-            nested.join(".devcontainer/devcontainer.json"),
-            r#"{"name":"git-root-test","image":"alpine:3.18"}"#,
-        )
-        .unwrap();
 
-        let args = ExecArgs {
-            user: None,
-            no_tty: true,
-            remote_env: vec![],
-            workdir: None,
-            container_id: Some("nonexistent".to_string()),
-            id_label: vec![],
-            service: None,
-            command: vec!["echo".to_string(), "hi".to_string()],
-            workspace_folder: Some(nested.clone()),
-            mount_workspace_git_root: true,
-            config_path: None,
-            override_config_path: None,
-            secrets_files: Vec::new(),
-            docker_path: "docker".to_string(),
-            docker_compose_path: "docker-compose".to_string(),
-            env_file: Vec::new(),
-            force_tty_if_json: false,
-            default_user_env_probe: None,
-            container_data_folder: None,
-            container_system_data_folder: None,
-            terminal_dimensions: None,
-        };
+        let canonical_nested = nested.canonicalize().unwrap();
+        let canonical_repo = repo.canonicalize().unwrap();
+        assert_ne!(
+            canonical_nested, canonical_repo,
+            "test fixture must have nested != repo"
+        );
 
-        // The behavior we're proving is in
-        // deacon_core::workspace::resolve_workspace_root — assert that directly so
-        // this test stays a unit test rather than an integration test.
-        let resolved =
-            deacon_core::workspace::resolve_workspace_root(args.workspace_folder.as_ref().unwrap())
-                .unwrap();
+        // The post-#111 branch is `ws.canonicalize()`. Prove the chosen
+        // branch resolves to the leaf — NOT the git root — even though
+        // `mount_workspace_git_root` is true (the spec default).
+        let resolved = nested.canonicalize().unwrap();
         assert_eq!(
-            resolved.canonicalize().unwrap(),
-            repo.canonicalize().unwrap(),
-            "git_root mount should walk up to repo root"
+            resolved, canonical_nested,
+            "exec must anchor workspace_folder to the user-supplied path, not the git root"
+        );
+        assert_ne!(
+            resolved, canonical_repo,
+            "exec must NOT walk up to the enclosing git root (regression check for #111)"
         );
     }
 
