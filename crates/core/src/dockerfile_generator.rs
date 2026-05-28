@@ -24,6 +24,66 @@ pub struct DockerfileConfig {
     pub target_stage: String,
     /// Directory where features are downloaded on the host
     pub features_source_dir: String,
+    /// Spec-required env vars surfaced to every feature's `install.sh`
+    /// (`_REMOTE_USER`, `_REMOTE_USER_HOME`, `_CONTAINER_USER`,
+    /// `_CONTAINER_USER_HOME`). Populated by the caller from the resolved
+    /// devcontainer.json. Per the [features spec](https://containers.dev/implementors/features/#installation-environment)
+    /// these MUST be available; missing ones default to empty strings so
+    /// install scripts can branch on `${_REMOTE_USER:-}` (#89).
+    pub feature_install_env: FeatureInstallEnv,
+}
+
+/// The four well-known env vars the features spec guarantees to every
+/// `install.sh`. See [`DockerfileConfig::feature_install_env`].
+#[derive(Debug, Clone, Default)]
+pub struct FeatureInstallEnv {
+    /// `_REMOTE_USER` — the user lifecycle commands run as.
+    pub remote_user: Option<String>,
+    /// `_REMOTE_USER_HOME` — that user's home directory.
+    pub remote_user_home: Option<String>,
+    /// `_CONTAINER_USER` — the container's default user.
+    pub container_user: Option<String>,
+    /// `_CONTAINER_USER_HOME` — that user's home directory.
+    pub container_user_home: Option<String>,
+}
+
+impl FeatureInstallEnv {
+    /// Resolve the four env vars from the user-provided config values.
+    ///
+    /// Spec rules (mirrors upstream `@devcontainers/cli`):
+    /// - `_REMOTE_USER` defaults to `_CONTAINER_USER` when not specified.
+    /// - `_CONTAINER_USER` defaults to the image's `USER` (caller is
+    ///   responsible for passing it in via `image_user`; we never assume
+    ///   `"root"` here so callers that can't inspect the image surface
+    ///   the gap rather than guessing).
+    /// - `_*_HOME` defaults to `/root` for `root`, `/home/<user>`
+    ///   otherwise. Callers that know the actual home dir from
+    ///   `getent passwd` may pass it directly.
+    pub fn resolve(
+        remote_user: Option<&str>,
+        container_user: Option<&str>,
+        image_user: Option<&str>,
+    ) -> Self {
+        let container = container_user.or(image_user);
+        let remote = remote_user.or(container);
+
+        let home_for = |u: Option<&str>| -> Option<String> {
+            u.map(|name| {
+                if name == "root" {
+                    "/root".to_string()
+                } else {
+                    format!("/home/{}", name)
+                }
+            })
+        };
+
+        Self {
+            remote_user: remote.map(String::from),
+            remote_user_home: home_for(remote),
+            container_user: container.map(String::from),
+            container_user_home: home_for(container),
+        }
+    }
 }
 
 impl Default for DockerfileConfig {
@@ -32,6 +92,7 @@ impl Default for DockerfileConfig {
             base_image: String::new(),
             target_stage: "dev_containers_target_stage".to_string(),
             features_source_dir: String::new(),
+            feature_install_env: FeatureInstallEnv::default(),
         }
     }
 }
@@ -186,6 +247,29 @@ impl DockerfileGenerator {
                     Self::format_env_var(key, value)
                 ));
             }
+        }
+
+        // Spec-required env vars surfaced to every install.sh (#89). These
+        // four are guaranteed by the features spec regardless of whether
+        // the feature itself declares them in `options`. Use the same
+        // `export … &&` form so they propagate through the chain alongside
+        // the option env vars. Empty values are still emitted so
+        // `${_REMOTE_USER:-}` in install.sh resolves to the empty string
+        // rather than the literal `<unset>`.
+        let install_env = &self.config.feature_install_env;
+        for (key, value) in [
+            ("_REMOTE_USER", install_env.remote_user.as_deref()),
+            ("_REMOTE_USER_HOME", install_env.remote_user_home.as_deref()),
+            ("_CONTAINER_USER", install_env.container_user.as_deref()),
+            (
+                "_CONTAINER_USER_HOME",
+                install_env.container_user_home.as_deref(),
+            ),
+        ] {
+            command.push_str(&format!(
+                "    export {} && \\\n",
+                Self::format_env_var(key, value.unwrap_or(""))
+            ));
         }
 
         // Execute the install script
@@ -453,6 +537,7 @@ mod tests {
             base_image: "ubuntu:22.04".to_string(),
             target_stage: "dev_containers_target_stage".to_string(),
             features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
         };
 
         let generator = DockerfileGenerator::new(config);
@@ -486,6 +571,7 @@ mod tests {
             base_image: "unused-for-this-path".to_string(),
             target_stage: "dev_containers_target_stage".to_string(),
             features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
         };
         let generator = DockerfileGenerator::new(config);
         let stage = generator
@@ -517,6 +603,7 @@ mod tests {
             base_image: "ubuntu:22.04".to_string(),
             target_stage: "dev_containers_target_stage".to_string(),
             features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
         };
 
         let generator = DockerfileGenerator::new(config);
@@ -544,6 +631,7 @@ mod tests {
             base_image: "ubuntu:22.04".to_string(),
             target_stage: "dev_containers_target_stage".to_string(),
             features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
         };
 
         let build_options = BuildOptions {
@@ -584,6 +672,7 @@ mod tests {
             base_image: "ubuntu:22.04".to_string(),
             target_stage: "dev_containers_target_stage".to_string(),
             features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
         };
 
         // Default options should not add any cache arguments

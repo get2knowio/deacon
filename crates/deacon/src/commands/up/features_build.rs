@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use deacon_core::build::BuildOptions;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
-use deacon_core::dockerfile_generator::{DockerfileConfig, DockerfileGenerator};
+use deacon_core::dockerfile_generator::{DockerfileConfig, DockerfileGenerator, FeatureInstallEnv};
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{
     FeatureDependencyResolver, InstallationPlan, OptionValue, ResolvedFeature,
@@ -107,11 +107,25 @@ pub(crate) async fn build_image_with_features(
 
     let staged = resolve_and_stage_features(config, identity, config_path).await?;
 
-    // Generate Dockerfile
+    // Generate Dockerfile.
+    //
+    // Spec parity (#89): surface `_REMOTE_USER`, `_REMOTE_USER_HOME`,
+    // `_CONTAINER_USER`, `_CONTAINER_USER_HOME` to every feature's
+    // `install.sh`. Resolved from the user config; we don't currently
+    // probe the image for its baked-in USER, so callers relying on that
+    // fallback should set `containerUser` explicitly. Empty values are
+    // still emitted so `${_REMOTE_USER:-}` resolves to "" rather than
+    // `<unset>`.
+    let feature_install_env = FeatureInstallEnv::resolve(
+        config.remote_user.as_deref(),
+        config.container_user.as_deref(),
+        None,
+    );
     let dockerfile_config = DockerfileConfig {
         base_image: base_image.clone(),
         target_stage: "dev_containers_target_stage".to_string(),
         features_source_dir: staged.features_source_dir.display().to_string(),
+        feature_install_env,
     };
 
     let generator = DockerfileGenerator::new(dockerfile_config.clone());
@@ -238,10 +252,16 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     // window is closed. The literal `FROM <stage>` form sidesteps that and
     // resolves directly to the previous stage in the same Dockerfile.
     let target_stage_name = "dev_containers_target_stage";
+    let feature_install_env = FeatureInstallEnv::resolve(
+        config.remote_user.as_deref(),
+        config.container_user.as_deref(),
+        None,
+    );
     let dockerfile_config = DockerfileConfig {
         base_image: base_dockerfile_final_stage.to_string(),
         target_stage: target_stage_name.to_string(),
         features_source_dir: staged.features_source_dir.display().to_string(),
+        feature_install_env,
     };
     let generator = DockerfileGenerator::new(dockerfile_config.clone());
     let feature_stage =
