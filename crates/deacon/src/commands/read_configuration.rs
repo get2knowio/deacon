@@ -213,6 +213,7 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     additional_features: Option<&str>,
     skip_feature_auto_mapping: bool,
     fetcher: &deacon_core::oci::FeatureFetcher<C>,
+    config_dir: &Path,
 ) -> Result<FeaturesConfiguration> {
     use anyhow::Context;
 
@@ -255,21 +256,60 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     }
     let features_map = features_map_opt.unwrap();
 
-    // Use provided fetcher to resolve features from registries
+    // Use provided fetcher to resolve features from registries.
+    // Local feature paths (`./`, `../`, or absolute) bypass the OCI fetch
+    // path and are read directly from disk — parity with the up flow
+    // (`features_build.rs`). Per #106.
     let mut resolved_features = Vec::with_capacity(features_map.len());
 
     for (feature_id, feature_value) in features_map {
-        let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
-        let feature_ref = FeatureRef::new(
-            registry_url.clone(),
-            namespace.clone(),
-            name.clone(),
-            tag.clone(),
-        );
-        let downloaded = fetcher
-            .fetch_feature(&feature_ref)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to fetch feature '{}': {}", feature_id, e))?;
+        let is_local = feature_id.starts_with("./")
+            || feature_id.starts_with("../")
+            || feature_id.starts_with('/');
+
+        let (canonical_id, source_string, downloaded_metadata) = if is_local {
+            let resolved = config_dir.join(feature_id);
+            let canonical_path = resolved.canonicalize().map_err(|e| {
+                anyhow::anyhow!(
+                    "Local feature path '{}' (resolved to '{}' relative to {}) is not accessible: {}",
+                    feature_id,
+                    resolved.display(),
+                    config_dir.display(),
+                    e
+                )
+            })?;
+            let metadata_path = canonical_path.join("devcontainer-feature.json");
+            if !metadata_path.exists() {
+                anyhow::bail!(
+                    "Local feature at '{}' is missing devcontainer-feature.json (resolved from '{}' relative to {})",
+                    canonical_path.display(),
+                    feature_id,
+                    config_dir.display()
+                );
+            }
+            let metadata =
+                deacon_core::features::parse_feature_metadata(&metadata_path).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to parse local feature metadata at '{}': {}",
+                        metadata_path.display(),
+                        e
+                    )
+                })?;
+            let canonical_id = format!("local:{}", canonical_path.display());
+            (canonical_id, feature_id.clone(), metadata)
+        } else {
+            let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
+            let feature_ref = FeatureRef::new(registry_url, namespace, name, tag);
+            let downloaded = fetcher
+                .fetch_feature(&feature_ref)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to fetch feature '{}': {}", feature_id, e))?;
+            (
+                downloaded.metadata.id.clone(),
+                feature_ref.reference(),
+                downloaded.metadata,
+            )
+        };
 
         // Extract per-feature options from config entry if present
         let options: HashMap<String, OptionValue> = match feature_value {
@@ -303,10 +343,10 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
         };
 
         resolved_features.push(ResolvedFeature {
-            id: downloaded.metadata.id.clone(),
-            source: feature_ref.reference(),
+            id: canonical_id,
+            source: source_string,
             options,
-            metadata: downloaded.metadata,
+            metadata: downloaded_metadata,
         });
     }
 
@@ -761,29 +801,53 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                 // does not carry the full FeatureMetadata blob (output schema only keeps the
                 // user-visible subset), so we look it up again via the same OCI fetcher used
                 // upstream — cached connections keep the cost low.
+                //
+                // Local features (canonical id `local:/abs/path/...`) skip
+                // the OCI path entirely: their metadata lives on disk at
+                // <abs-path>/devcontainer-feature.json. Per #106.
+                let downloaded_owned;
+                let metadata: &deacon_core::features::FeatureMetadata = if let Some(local_path) =
+                    feature.id.strip_prefix("local:")
+                {
+                    let metadata_path =
+                        std::path::Path::new(local_path).join("devcontainer-feature.json");
+                    let parsed =
+                        deacon_core::features::parse_feature_metadata(&metadata_path).map_err(
+                            |e| {
+                                anyhow::anyhow!(
+                                    "Failed to parse local feature metadata at '{}' for merged config: {}",
+                                    metadata_path.display(),
+                                    e
+                                )
+                            },
+                        )?;
+                    downloaded_owned = parsed;
+                    &downloaded_owned
+                } else {
+                    // Parse the feature reference - prefer the preserved source field if available
+                    let reference_to_parse = feature.source.as_ref().unwrap_or(&feature.id);
+                    let (registry_url, namespace, name, tag) =
+                        parse_registry_reference(reference_to_parse)?;
 
-                // Parse the feature reference - prefer the preserved source field if available
-                let reference_to_parse = feature.source.as_ref().unwrap_or(&feature.id);
-                let (registry_url, namespace, name, tag) =
-                    parse_registry_reference(reference_to_parse)?;
+                    // Use the provided fetcher with configured timeout and retries
+                    let feature_ref = deacon_core::oci::FeatureRef::new(
+                        registry_url.clone(),
+                        namespace.clone(),
+                        name.clone(),
+                        tag.clone(),
+                    );
 
-                // Use the provided fetcher with configured timeout and retries
-                let feature_ref = deacon_core::oci::FeatureRef::new(
-                    registry_url.clone(),
-                    namespace.clone(),
-                    name.clone(),
-                    tag.clone(),
-                );
+                    let downloaded = fetcher.fetch_feature(&feature_ref).await.map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed to fetch feature '{}' for merged config: {}",
+                            feature.id,
+                            e
+                        )
+                    })?;
 
-                let downloaded = fetcher.fetch_feature(&feature_ref).await.map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to fetch feature '{}' for merged config: {}",
-                        feature.id,
-                        e
-                    )
-                })?;
-
-                let metadata = &downloaded.metadata;
+                    downloaded_owned = downloaded.metadata;
+                    &downloaded_owned
+                };
 
                 // Collect this feature's entrypoint + lifecycle hooks (none of which live
                 // on DevContainerConfig) for the plural output arrays.
@@ -1243,12 +1307,22 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     let features_configuration_for_output = if args.include_features_configuration
         || (args.include_merged_configuration && args.container_id.is_none())
     {
+        // Anchor local-feature paths to the config file's directory; fall
+        // back to the workspace folder if --config wasn't supplied. Mirrors
+        // the up flow's anchor (`features_build.rs`).
+        let features_config_dir = args
+            .config_path
+            .as_deref()
+            .and_then(|p| p.parent())
+            .unwrap_or(workspace_folder)
+            .to_path_buf();
         Some(
             resolve_features_configuration(
                 &config,
                 args.additional_features.as_deref(),
                 args.skip_feature_auto_mapping,
                 &fetcher,
+                &features_config_dir,
             )
             .await?,
         )
@@ -1899,6 +1973,62 @@ API_KEY=another-secret
         assert!(result.is_ok());
 
         // With no container and no features, merged configuration equals the base config.
+    }
+
+    #[tokio::test]
+    async fn test_local_feature_path_not_treated_as_oci_ref() {
+        // Per #106: ./local-feature must NOT be fetched as
+        // https://./v2/devcontainers/local-feature/manifests/latest. Both
+        // --include-features-configuration and --include-merged-configuration
+        // (without container) should read the metadata from disk.
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = temp_dir.path();
+        let config_path = workspace.join("devcontainer.json");
+        let feature_dir = workspace.join("local-feature");
+        std::fs::create_dir(&feature_dir).unwrap();
+        std::fs::write(
+            feature_dir.join("devcontainer-feature.json"),
+            r#"{ "id": "local-feature", "version": "1.0.0", "name": "Local Feature" }"#,
+        )
+        .unwrap();
+        std::fs::write(feature_dir.join("install.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+
+        let config_content = r#"{
+            "name": "local-feat-test",
+            "image": "mcr.microsoft.com/devcontainers/base:debian",
+            "features": { "./local-feature": {} }
+        }"#;
+        std::fs::write(&config_path, config_content).unwrap();
+
+        let args = ReadConfigurationArgs {
+            include_features_configuration: true,
+            include_merged_configuration: true,
+            container_id: None,
+            id_label: vec![],
+            mount_workspace_git_root: true,
+            additional_features: None,
+            skip_feature_auto_mapping: false,
+            docker_path: "docker".to_string(),
+            docker_compose_path: "docker-compose".to_string(),
+            user_data_folder: None,
+            terminal_columns: None,
+            terminal_rows: None,
+            workspace_folder: Some(workspace.to_path_buf()),
+            config_path: Some(config_path),
+            override_config_path: None,
+            secrets_files: vec![],
+            redaction_config: RedactionConfig::default(),
+            secret_registry: SecretRegistry::new(),
+        };
+
+        // Pre-fix: this errored with a Connection failed for URL
+        // `https://./v2/devcontainers/local-feature/manifests/latest`. Post-fix:
+        // succeeds with the on-disk metadata.
+        let result = execute_read_configuration(args).await;
+        assert!(
+            result.is_ok(),
+            "expected local feature to resolve from disk; got {result:?}"
+        );
     }
 
     #[tokio::test]
