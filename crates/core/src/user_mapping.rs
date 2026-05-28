@@ -821,11 +821,72 @@ impl<T: Docker + Send + Sync> UserMapper for DockerUserMapper<T> {
             .exec_silent(container_id, &usermod_cmd, Some("root"))
             .await?;
         if !uid_result.success {
-            return Err(UserMappingError::CommandExecutionFailed {
-                command: format!("usermod -u {} -g {} {}", new_uid, new_gid, username),
-                error: uid_result.stderr.trim().to_string(),
+            debug!(
+                "usermod unavailable (likely BusyBox/Alpine), falling back to /etc/passwd + /etc/group edits: {}",
+                uid_result.stderr.trim()
+            );
+
+            // BusyBox / Alpine fallback: shadow-utils' `usermod` isn't
+            // present, so patch /etc/passwd and /etc/group directly with
+            // `awk`. This mirrors what the upstream @devcontainers/cli
+            // does on the same images. Home-directory chown happens
+            // separately via `set_workspace_ownership` / lifecycle.
+            //
+            // Why awk and not sed: passwd/group lines are fixed-position
+            // colon-separated records; awk is in BusyBox and avoids the
+            // regex-escaping hazards of sed when the username contains
+            // dots/dashes.
+            let passwd_script = format!(
+                "awk -F: -v OFS=: -v u={} -v nuid={} -v ngid={} \
+                 '{{ if ($1==u) {{ $3=nuid; $4=ngid }} print }}' \
+                 /etc/passwd > /etc/passwd.deacon.tmp && \
+                 mv /etc/passwd.deacon.tmp /etc/passwd",
+                username, new_uid, new_gid
+            );
+            let passwd_cmd = vec!["sh".to_string(), "-c".to_string(), passwd_script];
+            let passwd_result = self
+                .exec_silent(container_id, &passwd_cmd, Some("root"))
+                .await?;
+            if !passwd_result.success {
+                return Err(UserMappingError::CommandExecutionFailed {
+                    command: format!("/etc/passwd UID rewrite for {}", username),
+                    error: passwd_result.stderr.trim().to_string(),
+                }
+                .into());
             }
-            .into());
+
+            // Update the group entry by GID too (BusyBox groupmod likely
+            // already failed silently above). Match the group by name
+            // matching the user — common but not universal; if it doesn't
+            // match we skip silently and trust group_result above.
+            let group_script = format!(
+                "awk -F: -v OFS=: -v g={} -v ngid={} \
+                 '{{ if ($1==g) $3=ngid; print }}' \
+                 /etc/group > /etc/group.deacon.tmp && \
+                 mv /etc/group.deacon.tmp /etc/group",
+                username, new_gid
+            );
+            let group_cmd = vec!["sh".to_string(), "-c".to_string(), group_script];
+            let _ = self
+                .exec_silent(container_id, &group_cmd, Some("root"))
+                .await;
+
+            // Re-own the user's home directory so the rewritten UID/GID
+            // can read/write it. Best-effort — if the home dir doesn't
+            // exist (yet) we skip.
+            let chown_script = format!(
+                "if getent passwd {u} >/dev/null 2>&1; then \
+                   home=$(getent passwd {u} | cut -d: -f6); \
+                   [ -d \"$home\" ] && chown -R {uid}:{gid} \"$home\" || true; \
+                 fi",
+                u = username,
+                uid = new_uid,
+                gid = new_gid
+            );
+            let chown_cmd = vec!["sh".to_string(), "-c".to_string(), chown_script];
+            let _ = self
+                .exec_silent(container_id, &chown_cmd, Some("root"))
+                .await;
         }
 
         Ok(())
