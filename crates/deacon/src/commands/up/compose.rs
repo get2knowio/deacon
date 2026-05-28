@@ -54,6 +54,29 @@ pub(crate) async fn execute_compose_up(
     // Add env files from CLI args
     project.env_files = args.env_file.clone();
 
+    // Spec parity (#100): apply the same deacon identity labels the
+    // single-container path uses to every compose service. Without
+    // these, VS Code Dev Containers reconnect / `docker ps --filter
+    // label=devcontainer.local_folder=<abs>` / `deacon exec --id-label`
+    // all miss compose-managed containers.
+    let identity = ContainerIdentity::new(workspace_folder, config).with_config_file(config_path);
+    let identity_labels = identity.labels();
+    for (key, value) in &identity_labels {
+        project.deacon_labels.insert(key.clone(), value.clone());
+    }
+
+    // Spec parity (#100): apply the same deacon identity labels the
+    // single-container path uses to every compose service. Without
+    // these, VS Code Dev Containers reconnect / `docker ps --filter
+    // label=devcontainer.local_folder=<abs>` / `deacon exec --id-label`
+    // all miss compose-managed containers.
+    let identity = deacon_core::container::ContainerIdentity::new(workspace_folder, config)
+        .with_config_file(config_path);
+    let identity_labels = identity.labels();
+    for (key, value) in &identity_labels {
+        project.deacon_labels.insert(key.clone(), value.clone());
+    }
+
     // Apply default workspace mount for Compose when consistency is provided
     // Per FR-001: workspace_mount_consistency MUST apply to both Docker and Compose outputs
     // This mirrors the Docker behavior in execute_docker_up().
