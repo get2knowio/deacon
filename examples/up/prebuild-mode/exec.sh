@@ -25,11 +25,7 @@ run() {
 }
 
 extract_container_id() {
-	printf '%s' "$1" | "$PYTHON_BIN" - <<'PY'
-import json, sys
-data = json.load(sys.stdin)
-print(data.get("containerId", ""))
-PY
+	printf '%s' "$1" | "$PYTHON_BIN" -c 'import json, sys; data = json.load(sys.stdin); print(data.get("containerId", ""))'
 }
 
 cd "$SCRIPT_DIR"
