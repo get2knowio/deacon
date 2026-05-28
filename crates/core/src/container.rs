@@ -9,7 +9,7 @@ use crate::errors::{ContainerSelectorError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
 /// Container label schema for DevContainer identification
@@ -17,6 +17,13 @@ pub const LABEL_SOURCE: &str = "devcontainer.source";
 pub const LABEL_WORKSPACE_HASH: &str = "devcontainer.workspaceHash";
 pub const LABEL_CONFIG_HASH: &str = "devcontainer.configHash";
 pub const LABEL_NAME: &str = "devcontainer.name";
+
+/// Spec-mandated labels matching the upstream `@devcontainers/cli`
+/// convention (`src/spec-node/singleContainer.ts`). These are what VS
+/// Code's Dev Containers extension and parity tooling filter on when
+/// finding an existing container for a workspace (#68).
+pub const LABEL_LOCAL_FOLDER: &str = "devcontainer.local_folder";
+pub const LABEL_CONFIG_FILE: &str = "devcontainer.config_file";
 
 /// Source identifier for containers created by deacon
 pub const DEACON_SOURCE: &str = "deacon";
@@ -32,6 +39,14 @@ pub struct ContainerIdentity {
     pub name: Option<String>,
     /// Custom container name (overrides generated name)
     pub custom_name: Option<String>,
+    /// Absolute host path to the workspace folder. Emitted as the
+    /// `devcontainer.local_folder` label so VS Code's Dev Containers
+    /// extension and `docker ps --filter` queries can match this
+    /// container by workspace (#68).
+    pub local_folder: Option<PathBuf>,
+    /// Absolute host path to the resolved `devcontainer.json`. Emitted as
+    /// the `devcontainer.config_file` label (#68).
+    pub config_file: Option<PathBuf>,
 }
 
 /// Container creation result
@@ -97,6 +112,13 @@ impl ContainerIdentity {
         let config_hash = Self::hash_config(config);
         let name = config.name.clone();
 
+        // Canonicalize the workspace path for the `devcontainer.local_folder`
+        // label so consumers can do `docker ps --filter label=...=<abs>`
+        // reliably. If canonicalization fails (path no longer exists,
+        // permission), fall through to None — better to skip the label
+        // than emit a relative or symlinked one (#68).
+        let local_folder = workspace_path.canonicalize().ok();
+
         debug!(
             workspace_hash = %workspace_hash,
             config_hash = %config_hash,
@@ -110,7 +132,20 @@ impl ContainerIdentity {
             config_hash,
             name,
             custom_name,
+            local_folder,
+            config_file: None,
         }
+    }
+
+    /// Attach the resolved `devcontainer.json` path to this identity so
+    /// the `devcontainer.config_file` label can be emitted (#68).
+    pub fn with_config_file(mut self, config_file: impl Into<PathBuf>) -> Self {
+        let p = config_file.into();
+        // Canonicalize for the label; fall back to the raw path if the
+        // file has been deleted between load and container create (rare,
+        // but emit *something* useful rather than dropping the label).
+        self.config_file = Some(p.canonicalize().unwrap_or(p));
+        self
     }
 
     /// Generate a deterministic hash from the workspace path
@@ -180,6 +215,23 @@ impl ContainerIdentity {
 
         if let Some(ref name) = self.name {
             labels.insert(LABEL_NAME.to_string(), name.clone());
+        }
+
+        // Spec-mandated upstream labels (#68). Emitted as absolute paths
+        // so `docker ps --filter "label=devcontainer.local_folder=<abs>"`
+        // and the VS Code Dev Containers extension reconnect path both
+        // find this container by workspace.
+        if let Some(ref local_folder) = self.local_folder {
+            labels.insert(
+                LABEL_LOCAL_FOLDER.to_string(),
+                local_folder.display().to_string(),
+            );
+        }
+        if let Some(ref config_file) = self.config_file {
+            labels.insert(
+                LABEL_CONFIG_FILE.to_string(),
+                config_file.display().to_string(),
+            );
         }
 
         labels
@@ -303,6 +355,51 @@ mod tests {
         );
         assert_eq!(labels.get(LABEL_CONFIG_HASH), Some(&identity.config_hash));
         assert_eq!(labels.get(LABEL_NAME), Some(&"test-container".to_string()));
+
+        // #68: devcontainer.local_folder is the canonical absolute
+        // workspace path. devcontainer.config_file is only emitted once
+        // `with_config_file` has been called (see test below).
+        let expected_local_folder = workspace_path.canonicalize().unwrap().display().to_string();
+        assert_eq!(
+            labels.get(LABEL_LOCAL_FOLDER),
+            Some(&expected_local_folder),
+            "devcontainer.local_folder must be the canonical absolute workspace path"
+        );
+        assert!(
+            !labels.contains_key(LABEL_CONFIG_FILE),
+            "devcontainer.config_file is opt-in via with_config_file()"
+        );
+    }
+
+    #[test]
+    fn test_labels_include_config_file_when_set() {
+        // #68: VS Code Dev Containers reconnect filters on
+        // devcontainer.local_folder + devcontainer.config_file. Make sure
+        // both labels are present once `with_config_file` is wired in.
+        let temp_dir = TempDir::new().unwrap();
+        let workspace_path = temp_dir.path();
+        let devcontainer_dir = workspace_path.join(".devcontainer");
+        std::fs::create_dir_all(&devcontainer_dir).unwrap();
+        let config_file = devcontainer_dir.join("devcontainer.json");
+        std::fs::write(&config_file, r#"{"image":"alpine:3.18"}"#).unwrap();
+
+        let config = DevContainerConfig {
+            name: Some("with-cfg".to_string()),
+            image: Some("alpine:3.18".to_string()),
+            ..Default::default()
+        };
+
+        let identity =
+            ContainerIdentity::new(workspace_path, &config).with_config_file(config_file.clone());
+        let labels = identity.labels();
+
+        let expected_config_file = config_file.canonicalize().unwrap().display().to_string();
+        assert_eq!(
+            labels.get(LABEL_CONFIG_FILE),
+            Some(&expected_config_file),
+            "devcontainer.config_file must be the absolute path to the resolved devcontainer.json"
+        );
+        assert!(labels.contains_key(LABEL_LOCAL_FOLDER));
     }
 
     #[test]
