@@ -403,7 +403,11 @@ async fn resolve_and_stage_features(
     let mut downloaded_features: HashMap<String, DownloadedFeature> = HashMap::new();
 
     for (feature_id, feature_options) in features_obj.iter() {
-        let is_local = feature_id.starts_with("./") || feature_id.starts_with("../");
+        // Per #126: absolute paths are also valid local-feature locations
+        // (parity with read_configuration's local dispatch added in #109).
+        let is_local = feature_id.starts_with("./")
+            || feature_id.starts_with("../")
+            || feature_id.starts_with('/');
 
         let (canonical_id, feature_ref) = if is_local {
             // Resolve `./foo` and `../shared/foo` against the config file's
