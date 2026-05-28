@@ -134,6 +134,27 @@ cargo nextest run 'test(integration_)*'
 cargo test test_name -- --test-threads=1
 ```
 
+**Cross-Cutting Audits:**
+
+After fixing N concrete bugs that share a pattern, dispatch parallel `Explore` agents
+(one per pattern axis) to find more instances. The agents return precise file:line
+pointers without polluting the main context. PRs #125 (substitution gaps) and #127
+(local-feature dispatch) were direct outputs of this approach.
+
+Pattern axes worth re-running periodically:
+- Variable substitution coverage (any new `String` field on `DevContainerConfig` /
+  `FeatureMetadata` should be checked against `apply_variable_substitution`).
+- Workspace-folder resolution (any subcommand reading `--workspace-folder` should match
+  `up`'s pattern: keep user path for config + identity, walk git-root only for mount source).
+- State markers (any container reset / replace operation should clear markers).
+- Stdio contract (any `silent: false` `ExecConfig` on the `up` flow should set
+  `stdout_to_stderr: true`).
+- Local-feature dispatch (any code iterating feature IDs should handle `./`, `../`,
+  `/abs/path` prefixes before falling through to OCI parsing).
+
+VERIFY agent claims empirically before filing — the workspace-folder audit produced two
+false positives this session (see "Verified Non-Bugs" below).
+
 ## Code Patterns & Style
 
 **Error Handling:**
@@ -164,6 +185,12 @@ cargo test test_name -- --test-threads=1
 - Scripts MUST clean up all resources (containers, images, volumes)
 - Pin images to specific versions (e.g., `alpine:3.18` not `latest`)
 - Keep README and `exec.sh` in lockstep
+
+**Canary Patterns (`examples/*/exec.sh`):**
+- Config file MUST be at `.devcontainer.json` (root) or `.devcontainer/devcontainer.json`. Plain `devcontainer.json` at workspace root is NOT a spec discovery location and will fail config load.
+- When parsing `deacon up` stdout as JSON, use `python3 -c '...'`, NOT `python3 - <<'PY'`. The heredoc collides with the printf pipe for stdin and python ends up parsing its own script as JSON.
+- Don't `2>&1` inside `$( ... )` if you need to parse stdout — the result JSON is on stdout only; capturing stderr alongside breaks the parse.
+- When wrapping a command with env vars (e.g. `COMPOSE_PROFILES`), use `env VAR=value cmd`, not `wrapper VAR=value cmd` — the wrapper function sees `VAR=value` as a positional arg.
 
 ## Code Search & Refactoring with ast-grep
 
@@ -292,6 +319,21 @@ Before implementing any new subcommand or feature:
 
 Document this checklist in plan.md or PR description to prevent spec drift.
 
+**When adding a `String` / `Option<String>` field to `DevContainerConfig` or
+`FeatureMetadata`:**
+
+1. Does it hold a user-template string (image ref, env value, path, command) or a fixed
+   identifier (enum-like, service name)?
+2. If template: add it to `apply_variable_substitution` AND
+   `apply_variable_substitution_advanced` in `crates/core/src/config.rs`. Add a unit test
+   mirroring `test_substitution_covers_image_and_compose_file`. If the field lives on
+   `FeatureMetadata` instead, substitute at the read site (see PR #122 for the mount
+   pattern and PR #125 for the entrypoint / container_env pattern — both build a
+   `SubstitutionContext` anchored to the workspace folder with `devcontainerId` from
+   `compute_dev_container_id(&identity.labels())`).
+3. If fixed identifier: leave it out, and add a comment explaining why (see `wait_for`
+   for the pattern).
+
 ## Deferral Tracking
 
 When implementing complex features in phases (MVP-first approach):
@@ -326,6 +368,26 @@ When reviewing PRs, verify research.md deferrals have corresponding tasks.md ent
 - **Missing Nextest Config**: Adding integration tests without configuring test groups
 - **Suboptimal Test Grouping**: Using docker-exclusive when docker-shared would work
 - **Untracked Deferrals**: Documenting deferrals in research.md without corresponding tasks.md entries
+
+## Verified Non-Bugs (Don't Re-File)
+
+Things that LOOK like bugs but aren't, with rationale. Adding here prevents the
+rediscover-and-investigate loop:
+
+- **`ContainerIdentity::hash_workspace_path` walks to git root unconditionally**
+  (`crates/core/src/container.rs:152`). This is SYMMETRIC across `up`/`exec`/`down`/
+  `run_user_commands`, so identities match. The exec bug #111 was elsewhere (exec walked
+  the path BEFORE `load_config`, loading the wrong config). Confirmed empirically by
+  running `up --workspace-folder X` then `down --workspace-folder X` — same workspace_hash.
+- **`cap_add`, `security_opt`, `service`, `run_services`, `wait_for` not substituted.**
+  These hold enum-like / fixed identifiers, not user template strings. Per #124
+  acceptance criteria.
+- **`down` doesn't clear `.devcontainer-state/<phase>.json` markers.** Intentional —
+  markers should survive `down && up` for resume workflows. Markers are workspace-scoped,
+  not container-scoped; they get cleared on `up --remove-existing-container` (per #117).
+- **compose path doesn't call `clear_markers()` on `--remove-existing-container`**
+  (`commands/up/compose.rs:287`). Doesn't surface functionally because
+  `execute_compose_post_create` doesn't consult markers. Parity-only cleanup.
 
 ## Output Streams Contract
 
