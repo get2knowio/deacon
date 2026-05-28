@@ -652,7 +652,23 @@ pub async fn read_all_markers(
     workspace: &Path,
     prebuild: bool,
 ) -> Result<Vec<LifecyclePhaseState>> {
+    read_all_markers_for_config(workspace, prebuild, None).await
+}
+
+/// Read every marker for `workspace`, then drop any whose recorded
+/// `config_hash` doesn't match `current_config_hash`. Markers without a
+/// recorded hash (legacy from older deacon builds) are kept so we don't
+/// regress users upgrading deacon.
+///
+/// Caller passes `None` to skip the filter and read everything (#93).
+#[instrument(skip_all, fields(workspace = %workspace.display(), prebuild))]
+pub async fn read_all_markers_for_config(
+    workspace: &Path,
+    prebuild: bool,
+    current_config_hash: Option<&str>,
+) -> Result<Vec<LifecyclePhaseState>> {
     let mut markers = Vec::new();
+    let mut dropped = 0usize;
 
     for phase in LifecyclePhase::spec_order() {
         let path = if prebuild {
@@ -662,15 +678,33 @@ pub async fn read_all_markers(
         };
 
         if let Some(state) = read_phase_marker(&path).await? {
+            // Drop the marker when its recorded config hash differs from
+            // the current config — this forces a rerun, matching what the
+            // user expects after `--override-config` (or any other input
+            // that changes the resolved config). Markers without a
+            // recorded hash predate #93 and are kept as compatible.
+            if let (Some(current), Some(recorded)) = (current_config_hash, &state.config_hash) {
+                if current != recorded {
+                    debug!(
+                        "Dropping stale marker for phase {}: marker config_hash={} current={}",
+                        state.phase.as_str(),
+                        recorded,
+                        current
+                    );
+                    dropped += 1;
+                    continue;
+                }
+            }
             markers.push(state);
         }
     }
 
     debug!(
-        "Read {} markers from {} (prebuild={})",
+        "Read {} markers from {} (prebuild={}; {} dropped as stale)",
         markers.len(),
         workspace.display(),
-        prebuild
+        prebuild,
+        dropped
     );
 
     Ok(markers)
@@ -882,13 +916,33 @@ pub async fn record_phase_executed(
     phase: LifecyclePhase,
     prebuild: bool,
 ) -> Result<LifecyclePhaseState> {
+    record_phase_executed_with_config_hash(workspace, phase, prebuild, None).await
+}
+
+/// Record a phase as executed and stamp the marker with the resolved
+/// configuration hash so future runs can detect a config drift (#93).
+///
+/// Callers that have a `ContainerIdentity` available (i.e. `up` and the
+/// in-process lifecycle runner) should pass `Some(identity.config_hash)`.
+/// Callers without identity context can pass `None`; the marker is
+/// considered universally compatible in that case.
+#[instrument(skip_all, fields(workspace = %workspace.display(), phase = %phase.as_str(), prebuild))]
+pub async fn record_phase_executed_with_config_hash(
+    workspace: &Path,
+    phase: LifecyclePhase,
+    prebuild: bool,
+    config_hash: Option<&str>,
+) -> Result<LifecyclePhaseState> {
     let marker_path = if prebuild {
         prebuild_marker_path_for_phase(workspace, phase)
     } else {
         marker_path_for_phase(workspace, phase)
     };
 
-    let state = LifecyclePhaseState::new_executed(phase, marker_path.clone());
+    let mut state = LifecyclePhaseState::new_executed(phase, marker_path.clone());
+    if let Some(hash) = config_hash {
+        state = state.with_config_hash(hash);
+    }
     write_phase_marker(&marker_path, &state).await?;
 
     info!(

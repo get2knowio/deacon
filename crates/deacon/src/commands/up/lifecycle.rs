@@ -144,6 +144,7 @@ pub(crate) async fn execute_lifecycle_commands(
     cache_folder: &Option<PathBuf>,
     resolved_features: &[ResolvedFeature],
     prior_markers: Vec<LifecyclePhaseState>,
+    config_hash: Option<&str>,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
         execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
@@ -251,6 +252,7 @@ pub(crate) async fn execute_lifecycle_commands(
         force_pty,
         dotfiles: dotfiles_config,
         is_prebuild: args.prebuild,
+        config_hash: config_hash.map(String::from),
     };
 
     // Build lifecycle commands from configuration, respecting resume decisions
@@ -514,6 +516,7 @@ pub(crate) async fn execute_initialize_command(
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Execute only the initialize phase (host-side)

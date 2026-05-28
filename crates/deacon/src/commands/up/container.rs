@@ -574,12 +574,22 @@ pub(crate) async fn execute_container_up(
     // T014: Read prior lifecycle markers for resume decision logic
     // Per SC-002: On resume, skip onCreate, updateContent, postCreate, dotfiles; run postStart, postAttach
     // Per FR-004: On partial resume, skip completed phases, run remaining from earliest incomplete
-    let prior_markers = deacon_core::state::read_all_markers(workspace_folder, args.prebuild)
-        .await
-        .unwrap_or_else(|e| {
-            debug!("Failed to read prior lifecycle markers: {}", e);
-            Vec::new()
-        });
+    //
+    // Spec parity (#93): filter markers by the *current* config_hash so
+    // a re-invocation with a different `--override-config` (or any input
+    // that produces a different resolved config) reruns lifecycle from
+    // scratch. Markers without a recorded config_hash predate this
+    // change and remain compatible with any current hash.
+    let prior_markers = deacon_core::state::read_all_markers_for_config(
+        workspace_folder,
+        args.prebuild,
+        Some(&identity.config_hash),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        debug!("Failed to read prior lifecycle markers: {}", e);
+        Vec::new()
+    });
 
     debug!(
         "Prior lifecycle markers: {} markers loaded (prebuild={})",
@@ -599,6 +609,7 @@ pub(crate) async fn execute_container_up(
         cache_folder,
         resolved_features.as_deref().unwrap_or(&[]),
         prior_markers,
+        Some(&identity.config_hash),
     )
     .await?;
 

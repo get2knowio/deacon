@@ -207,6 +207,20 @@ pub struct LifecyclePhaseState {
     /// Timestamp when the marker was written (if available)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    /// Resolved-config hash at the time this marker was written.
+    ///
+    /// Per #93, re-invocations of `up` with a different `--override-config`
+    /// (or any other change that yields a different resolved config) MUST
+    /// rerun the lifecycle phases — the previous marker is stale relative
+    /// to the new effective config. Readers compare this field against
+    /// the current `ContainerIdentity::config_hash` and treat a mismatch
+    /// as a missing marker.
+    ///
+    /// Older markers (written before this field existed) deserialize with
+    /// `config_hash = None`; treated as compatible with any current hash
+    /// to avoid spuriously rerunning lifecycle for users upgrading deacon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_hash: Option<String>,
 }
 
 impl LifecyclePhaseState {
@@ -218,6 +232,7 @@ impl LifecyclePhaseState {
             reason: None,
             marker_path,
             timestamp: None,
+            config_hash: None,
         }
     }
 
@@ -229,6 +244,7 @@ impl LifecyclePhaseState {
             reason: None,
             marker_path,
             timestamp: Some(chrono::Utc::now()),
+            config_hash: None,
         }
     }
 
@@ -244,6 +260,7 @@ impl LifecyclePhaseState {
             reason: Some(reason.into()),
             marker_path,
             timestamp: None,
+            config_hash: None,
         }
     }
 
@@ -259,7 +276,16 @@ impl LifecyclePhaseState {
             reason: Some(reason.into()),
             marker_path,
             timestamp: None,
+            config_hash: None,
         }
+    }
+
+    /// Attach the resolved-config hash to this marker. Readers compare
+    /// the value against the current config to decide whether the marker
+    /// is still applicable (#93).
+    pub fn with_config_hash(mut self, config_hash: impl Into<String>) -> Self {
+        self.config_hash = Some(config_hash.into());
+        self
     }
 
     /// Mark this phase as executed (updates status and sets timestamp)

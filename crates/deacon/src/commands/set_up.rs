@@ -387,6 +387,7 @@ async fn execute_lifecycle_hooks(
         force_pty: false,
         dotfiles: build_dotfiles_config(args),
         is_prebuild: false,
+        config_hash: None,
     };
 
     let mut commands = ContainerLifecycleCommands::new();

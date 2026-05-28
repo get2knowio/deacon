@@ -41,6 +41,7 @@ async fn test_container_lifecycle_with_variable_substitution() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Define lifecycle commands with variable substitution
@@ -113,6 +114,7 @@ async fn test_container_lifecycle_with_skip_flags() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     let commands = ContainerLifecycleCommands::new()
@@ -169,6 +171,7 @@ fn test_container_lifecycle_config_validation() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     assert_eq!(config.container_id, "test-container");
@@ -234,6 +237,7 @@ async fn test_all_lifecycle_phases_ordering() {
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Define all 6 lifecycle phases

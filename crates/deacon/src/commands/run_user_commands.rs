@@ -162,6 +162,7 @@ async fn execute_lifecycle_commands(
         // run-user-commands does not install dotfiles - that is handled by `up` command
         dotfiles: None,
         is_prebuild: false,
+        config_hash: None,
     };
 
     // Build lifecycle commands from configuration using typed parser
