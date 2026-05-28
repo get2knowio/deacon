@@ -1,2 +1,2 @@
-FROM alpine:3.19
+FROM debian:bookworm-slim
 RUN echo "base dockerfile for feature install" > /base.txt

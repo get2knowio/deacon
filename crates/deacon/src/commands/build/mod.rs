@@ -448,7 +448,7 @@ async fn validate_buildkit_requirement(
 /// }
 /// ```
 #[instrument(skip(args))]
-pub async fn execute_build(args: BuildArgs) -> Result<()> {
+pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     info!("Starting build command execution");
     debug!("Build args: {:?}", args);
 
@@ -481,6 +481,15 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     for image_name in &args.image_names {
         deacon_core::docker::validate_image_tag(image_name)
             .with_context(|| format!("Invalid image name: {}", image_name))?;
+    }
+
+    // Drop duplicate `--image-name` values, preserving first-seen order. Passing
+    // the same tag twice is harmless to Docker (which dedups `-t`), but without
+    // this the emitted `imageName` array would echo the duplicate back to
+    // callers. Normalizing here keeps the result JSON clean for every path.
+    {
+        let mut seen = std::collections::HashSet::new();
+        args.image_names.retain(|name| seen.insert(name.clone()));
     }
 
     // Validate push/output mutual exclusivity early
@@ -727,8 +736,19 @@ pub async fn execute_build(args: BuildArgs) -> Result<()> {
     // config file. This matches `up`'s feature flow (`build_image_with_features`)
     // which also returns a `Lockfile` ready for `write_lockfile`.
     let (image_id, feature_lockfile) = if features_present {
-        apply_features_and_lockfile(&config, &result.image_id, &workspace_folder, &config_path)
-            .await?
+        // Layer features on top of the just-built image. We pass a real tag
+        // (the deterministic `deacon-build:<hash>` tag, always applied by
+        // `execute_docker_build`) rather than the bare `sha256:...` image ID:
+        // the feature-install Dockerfile uses `FROM ${_DEV_CONTAINERS_BASE_IMAGE}`,
+        // and BuildKit interprets a bare `sha256:<digest>` as the remote repo
+        // `docker.io/library/sha256:<digest>` (pull-access-denied), whereas a
+        // local tag resolves to the just-built image.
+        let base_ref = result
+            .tags
+            .first()
+            .cloned()
+            .unwrap_or_else(|| result.image_id.clone());
+        apply_features_and_lockfile(&config, &base_ref, &workspace_folder, &config_path).await?
     } else {
         (result.image_id, None)
     };
@@ -804,8 +824,20 @@ fn extract_build_config(
             options: HashMap::new(),
         });
     }
+    // Resolve the Dockerfile from either the top-level `dockerFile` field or the
+    // canonical nested `build.dockerfile` field (containers.dev json_reference).
+    // `up` already honors both (see commands/up/image_build.rs); mirror that here.
+    let build_dockerfile = config
+        .build
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .and_then(|o| o.get("dockerfile"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let dockerfile_opt = config.dockerfile.clone().or(build_dockerfile);
+
     // Check if we have a dockerfile specified
-    if let Some(dockerfile) = &config.dockerfile {
+    if let Some(dockerfile) = &dockerfile_opt {
         let dockerfile_path = workspace_folder.join(dockerfile);
         if !dockerfile_path.exists() {
             return Err(
@@ -2130,6 +2162,59 @@ mod tests {
         assert_eq!(
             build_config.options.get("BUILDKIT_INLINE_CACHE"),
             Some(&"1".to_string())
+        );
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_build_config_nested_build_dockerfile() {
+        // The canonical containers.dev form nests the Dockerfile under `build`:
+        //   "build": { "dockerfile": "Dockerfile" }
+        // `deacon build` must honor it just like the legacy top-level `dockerFile`
+        // field (parity with `up`'s image_build path).
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dockerfile_path = temp_dir.path().join("Dockerfile");
+        std::fs::write(&dockerfile_path, "FROM alpine:3.19\nLABEL test=1\n").unwrap();
+
+        let mut config = DevContainerConfig::default();
+        config.name = Some("test".to_string());
+        // No top-level `dockerFile` — only the nested `build.dockerfile`.
+        config.build = Some(serde_json::json!({
+            "dockerfile": "Dockerfile",
+            "context": ".",
+            "args": { "FOO": "bar" }
+        }));
+
+        let result = extract_build_config(&config, temp_dir.path());
+        assert!(
+            result.is_ok(),
+            "build.dockerfile should be recognized: {:?}",
+            result.err()
+        );
+        let build_config = result.unwrap();
+        assert_eq!(build_config.dockerfile, "Dockerfile");
+        assert_eq!(build_config.context, ".");
+        assert_eq!(build_config.options.get("FOO"), Some(&"bar".to_string()));
+    }
+
+    #[test]
+    fn test_image_name_dedup_preserves_first_seen_order() {
+        // Mirror the normalization in execute_build: duplicate `--image-name`
+        // values collapse to first-seen order.
+        let mut image_names = vec![
+            "myorg/dups:latest".to_string(),
+            "myorg/dups:latest".to_string(),
+            "myorg/other:v1".to_string(),
+            "myorg/dups:latest".to_string(),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        image_names.retain(|name| seen.insert(name.clone()));
+        assert_eq!(
+            image_names,
+            vec![
+                "myorg/dups:latest".to_string(),
+                "myorg/other:v1".to_string()
+            ]
         );
     }
 

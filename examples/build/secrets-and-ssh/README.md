@@ -25,7 +25,7 @@ This example aligns with:
 ## Files
 
 - `Dockerfile`: Demonstrates `--mount=type=secret` and `--mount=type=ssh` syntax
-- `devcontainer.json`: Basic DevContainer configuration
+- `.devcontainer.json`: Basic DevContainer configuration
 
 ## BuildKit Requirement
 

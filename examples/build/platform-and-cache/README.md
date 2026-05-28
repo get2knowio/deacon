@@ -25,7 +25,7 @@ This example aligns with:
 ## Files
 
 - `Dockerfile`: Simple Alpine image that shows platform detection
-- `devcontainer.json`: Basic DevContainer configuration
+- `.devcontainer.json`: Basic DevContainer configuration
 
 ## Run
 

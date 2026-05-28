@@ -26,7 +26,7 @@ This example aligns with:
 ## Files
 
 - `Dockerfile`: Simple Alpine-based image with ARG, ENV, and LABEL directives
-- `devcontainer.json`: DevContainer configuration with build context and arguments
+- `.devcontainer.json`: DevContainer configuration with build context and arguments
 
 ## Run
 

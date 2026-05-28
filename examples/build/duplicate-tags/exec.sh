@@ -3,24 +3,37 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEACON_BIN="${DEACON_BIN:-deacon}"
+IMAGE_TAG="myorg/dups:latest"
 
-run_expect_fail() {
+run() {
 	echo "+ $*" >&2
-	set +e
 	"$@"
-	code=$?
-	set -e
-	if [ $code -eq 0 ]; then
-		echo "Expected failure but command succeeded" >&2
-		exit 1
-	fi
-	echo "Received expected failure (exit $code)" >&2
 }
+
+cleanup() {
+	docker rmi -f "$IMAGE_TAG" >/dev/null 2>&1 || true
+	docker images --filter "reference=deacon-build:*" -q | xargs -r docker rmi -f >/dev/null 2>&1 || true
+}
+
+trap cleanup EXIT
 
 cd "$SCRIPT_DIR"
 
-echo "== Duplicate tags validation (README: expect error) ==" >&2
-run_expect_fail "$DEACON_BIN" build --workspace-folder "$SCRIPT_DIR" \
-	--image-name myorg/dups:latest \
-	--image-name myorg/dups:latest \
-	"$@"
+echo "== Duplicate tags are normalized (README: Usage) ==" >&2
+OUTPUT="$(run "$DEACON_BIN" build --workspace-folder "$SCRIPT_DIR" \
+	--image-name "$IMAGE_TAG" \
+	--image-name "$IMAGE_TAG" \
+	--output-format json "$@" 2>/dev/null)"
+
+echo "build output: ${OUTPUT}" >&2
+
+# The duplicate tag must collapse to a single string in `imageName`, not a
+# duplicated array. Parse with python to assert the exact shape.
+python3 -c '
+import json, sys
+data = json.loads(sys.argv[1])
+assert data["outcome"] == "success", data
+name = data["imageName"]
+assert name == "myorg/dups:latest", "expected single string imageName, got: %r" % (name,)
+print("OK: imageName de-duplicated to a single string")
+' "$OUTPUT"
