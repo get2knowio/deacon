@@ -856,6 +856,31 @@ impl FeatureDependencyResolver {
         let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
         let feature_ids: HashSet<String> = features.iter().map(|f| f.id.clone()).collect();
 
+        // Per spec (https://containers.dev/implementors/features/#dependson),
+        // `dependsOn`/`installsAfter` reference features by their canonical
+        // `id`. For local features our canonical lookup key is the absolute
+        // path (e.g. `local:/abs/path/feature-a`), but authors write the
+        // sibling's metadata id (`feature-a`). Build an alias map so both
+        // spellings resolve. The metadata id is overridden by a real
+        // `ResolvedFeature.id` collision so OCI features remain unambiguous.
+        let mut alias_to_canonical: HashMap<String, String> = HashMap::new();
+        for feature in features {
+            let meta_id = &feature.metadata.id;
+            if !meta_id.is_empty() && meta_id != &feature.id && !feature_ids.contains(meta_id) {
+                alias_to_canonical
+                    .entry(meta_id.clone())
+                    .or_insert_with(|| feature.id.clone());
+            }
+        }
+
+        let resolve_dep = |dep_id: &str| -> Option<String> {
+            if feature_ids.contains(dep_id) {
+                Some(dep_id.to_string())
+            } else {
+                alias_to_canonical.get(dep_id).cloned()
+            }
+        };
+
         // Initialize graph with all feature IDs
         for feature in features {
             graph.insert(feature.id.clone(), HashSet::new());
@@ -875,26 +900,32 @@ impl FeatureDependencyResolver {
 
             // Add installsAfter dependencies
             for after_id in &feature.metadata.installs_after {
-                if !feature_ids.contains(after_id) {
-                    warn!(
-                        "Feature '{}' depends on '{}' which is not in the feature set",
-                        feature.id, after_id
-                    );
-                    continue;
+                match resolve_dep(after_id) {
+                    Some(canonical) => {
+                        dependencies.insert(canonical);
+                    }
+                    None => {
+                        warn!(
+                            "Feature '{}' depends on '{}' which is not in the feature set",
+                            feature.id, after_id
+                        );
+                    }
                 }
-                dependencies.insert(after_id.clone());
             }
 
             // Add dependsOn dependencies (simplified - just extract string keys)
             for depend_id in feature.metadata.depends_on.keys() {
-                if !feature_ids.contains(depend_id) {
-                    warn!(
-                        "Feature '{}' depends on '{}' which is not in the feature set",
-                        feature.id, depend_id
-                    );
-                    continue;
+                match resolve_dep(depend_id) {
+                    Some(canonical) => {
+                        dependencies.insert(canonical);
+                    }
+                    None => {
+                        warn!(
+                            "Feature '{}' depends on '{}' which is not in the feature set",
+                            feature.id, depend_id
+                        );
+                    }
                 }
-                dependencies.insert(depend_id.clone());
             }
         }
 
@@ -2396,6 +2427,92 @@ mod tests {
         let mut ids = plan.feature_ids();
         ids.sort(); // Make test deterministic
         assert_eq!(ids, vec!["feature-a", "feature-b"]);
+    }
+
+    #[test]
+    fn test_local_feature_depends_on_resolves_by_metadata_id() {
+        // Local features get canonical IDs like `local:/abs/path/feature-a`,
+        // but dependsOn/installsAfter reference the metadata `id`
+        // (`feature-a`). Both must resolve. Per #102.
+        let mut depends_on_c = HashMap::new();
+        depends_on_c.insert("feature-a".to_string(), serde_json::Value::Bool(true));
+        depends_on_c.insert("feature-b".to_string(), serde_json::Value::Bool(true));
+        let feature_a =
+            create_local_feature("local:/tmp/feature-a", "feature-a", vec![], HashMap::new());
+        let feature_b =
+            create_local_feature("local:/tmp/feature-b", "feature-b", vec![], HashMap::new());
+        let feature_c = create_local_feature(
+            "local:/tmp/feature-c",
+            "feature-c",
+            vec!["feature-a".to_string()],
+            depends_on_c,
+        );
+
+        // Reverse order in input — feature-c first — to prove the dep graph
+        // (not input order) drives installation order.
+        let features = vec![feature_c, feature_b, feature_a];
+        let resolver = FeatureDependencyResolver::new(None);
+        let plan = resolver.resolve(&features).unwrap();
+        let ids = plan.feature_ids();
+
+        let pos_a = ids
+            .iter()
+            .position(|x| x == "local:/tmp/feature-a")
+            .unwrap();
+        let pos_b = ids
+            .iter()
+            .position(|x| x == "local:/tmp/feature-b")
+            .unwrap();
+        let pos_c = ids
+            .iter()
+            .position(|x| x == "local:/tmp/feature-c")
+            .unwrap();
+        assert!(
+            pos_a < pos_c,
+            "feature-a must install before feature-c (dependsOn): {ids:?}"
+        );
+        assert!(
+            pos_b < pos_c,
+            "feature-b must install before feature-c (dependsOn): {ids:?}"
+        );
+    }
+
+    fn create_local_feature(
+        canonical_id: &str,
+        metadata_id: &str,
+        installs_after: Vec<String>,
+        depends_on: HashMap<String, serde_json::Value>,
+    ) -> ResolvedFeature {
+        let metadata = FeatureMetadata {
+            id: metadata_id.to_string(),
+            version: None,
+            name: None,
+            description: None,
+            documentation_url: None,
+            license_url: None,
+            options: HashMap::new(),
+            container_env: HashMap::new(),
+            customizations: None,
+            mounts: vec![],
+            init: None,
+            privileged: None,
+            cap_add: vec![],
+            security_opt: vec![],
+            entrypoint: None,
+            installs_after,
+            depends_on,
+            on_create_command: None,
+            update_content_command: None,
+            post_create_command: None,
+            post_start_command: None,
+            post_attach_command: None,
+        };
+        ResolvedFeature {
+            id: canonical_id.to_string(),
+            source: canonical_id.to_string(),
+            options: HashMap::new(),
+            metadata,
+        }
     }
 
     #[test]
