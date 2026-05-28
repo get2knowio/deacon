@@ -13,7 +13,7 @@ Shows the environment variable merge order and precedence: shell-derived → con
 
 ## Files
 
-- `devcontainer.json` - Configuration with `remoteEnv` settings
+- `.devcontainer.json` - Configuration with `remoteEnv` settings
 - `check-env.sh` - Script to inspect environment variables
 
 ## Usage
@@ -58,7 +58,7 @@ Shows the environment variable merge order and precedence: shell-derived → con
 
 ### Merge Order (later sources override earlier)
 1. **Shell-derived**: Variables from shell initialization via `userEnvProbe`
-2. **Config remoteEnv**: Variables defined in `devcontainer.json`
+2. **Config remoteEnv**: Variables defined in `.devcontainer.json`
 3. **CLI --remote-env**: Variables passed on command line (highest precedence)
 
 ### Examples

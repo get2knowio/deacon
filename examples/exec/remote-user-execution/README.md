@@ -17,7 +17,7 @@ Commands run as the user specified by `remoteUser` in the dev container configur
 
 ## Files
 
-- `devcontainer.json` - Configuration with `remoteUser: node`
+- `.devcontainer.json` - Configuration with `remoteUser: node`
 - `user-check.sh` - Script to verify user identity and permissions
 - `shared-workspace/` - Directory to test permissions
 

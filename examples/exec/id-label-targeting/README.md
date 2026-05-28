@@ -13,7 +13,7 @@ Labels provide semantic targeting without needing to know container IDs. The `de
 
 ## Files
 
-- `devcontainer.json` - Configuration with custom labels
+- `.devcontainer.json` - Configuration with custom labels
 - `app.py` - Sample Python application
 
 ## Usage

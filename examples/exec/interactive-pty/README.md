@@ -13,7 +13,7 @@ PTY mode enables interactive programs that require terminal capabilities: shells
 
 ## Files
 
-- `devcontainer.json` - Configuration with Python and Node.js
+- `.devcontainer.json` - Configuration with Python and Node.js
 - `interactive-demo.py` - Python script demonstrating interactive input
 - `terminal-test.sh` - Script to test terminal capabilities
 
