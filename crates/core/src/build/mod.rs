@@ -160,30 +160,17 @@ impl BuildRequest {
     ///
     /// # Validation Rules
     ///
-    /// - Config filename must be `devcontainer.json` or `.devcontainer.json` when provided
     /// - `push` and `output` are mutually exclusive
     /// - BuildKit-only flags require BuildKit availability (checked separately)
     /// - All image names must be valid image references
+    ///
+    /// The `--config` path is accepted as-is (any filename); see spec parity
+    /// note in #65.
     ///
     /// # Errors
     ///
     /// Returns an error if validation fails with a descriptive message.
     pub fn validate(&self) -> Result<()> {
-        // Validate config file name if provided
-        if let Some(config_file) = &self.config_file {
-            let filename = config_file
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
-
-            if filename != "devcontainer.json" && filename != ".devcontainer.json" {
-                return Err(crate::errors::DeaconError::Runtime(format!(
-                    "Configuration file must be named 'devcontainer.json' or '.devcontainer.json', got '{}'",
-                    filename
-                )));
-            }
-        }
-
         // Validate push/output mutual exclusivity
         if self.push && self.output.is_some() {
             return Err(crate::errors::DeaconError::Runtime(
@@ -387,7 +374,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_request_validate_config_filename() {
+    fn test_build_request_accepts_any_config_filename() {
+        // Spec parity (#65): the upstream reference CLI does not enforce a
+        // filename allow-list on --config; deacon follows suit.
         let mut request = BuildRequest {
             workspace_folder: PathBuf::from("/workspace"),
             config_file: Some(PathBuf::from("/workspace/.devcontainer/devcontainer.json")),
@@ -404,12 +393,16 @@ mod tests {
             skip_persist_customizations: false,
         };
 
-        // Valid config file name
         assert!(request.validate().is_ok());
 
-        // Invalid config file name
         request.config_file = Some(PathBuf::from("/workspace/.devcontainer/config.json"));
-        assert!(request.validate().is_err());
+        assert!(
+            request.validate().is_ok(),
+            "Non-standard --config filenames must be accepted (spec parity)"
+        );
+
+        request.config_file = Some(PathBuf::from("/workspace/alpha.json"));
+        assert!(request.validate().is_ok());
     }
 
     #[test]

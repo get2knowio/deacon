@@ -49,22 +49,8 @@ pub async fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
     };
 
     let mut config_path = if let Some(path) = args.config_path {
-        // Validate filename per spec: must be devcontainer.json(c) or .devcontainer.json(c)
-        // The .jsonc extension is allowed for JSON with comments
-        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-            let valid_names = [
-                "devcontainer.json",
-                "devcontainer.jsonc",
-                ".devcontainer.json",
-                ".devcontainer.jsonc",
-            ];
-            if !valid_names.contains(&file_name) {
-                return Err(DeaconError::Config(ConfigError::Validation {
-                    message: "Filename must be devcontainer.json(c) or .devcontainer.json(c)"
-                        .to_string(),
-                }));
-            }
-        }
+        // Spec parity (#65): accept any --config filename; the loader will
+        // surface the usual file-not-found error if the path does not exist.
         path.to_path_buf()
     } else {
         match ConfigLoader::discover_config(&workspace_folder).await? {
