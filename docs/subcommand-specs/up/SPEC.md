@@ -109,8 +109,9 @@ END FUNCTION
 - Resolution Algorithm:
 ```pseudocode
 FUNCTION resolve_configuration(params, configFile, overrideConfig, providedIdLabels, additionalFeatures):
-    IF configFile specified AND file name not devcontainer.json/.devcontainer.json:
-        ERROR "Filename must be devcontainer.json or .devcontainer.json"
+    // configFile is accepted as a path with any filename, matching the
+    // upstream reference CLI; a non-existent path surfaces the usual
+    // file-not-found error from the loader (#65).
 
     workspace := workspaceFromPath(params.cliHost.path, params.cliHost.cwd OR workspaceFolder)
     candidateConfigPath :=

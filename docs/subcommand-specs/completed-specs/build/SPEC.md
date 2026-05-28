@@ -56,7 +56,7 @@
     - Compose configurations do not support `--platform`, `--push`, `--output`, `--cache-to`.
   - Deprecated: none.
 - Argument Validation Rules:
-  - `--config` filename must be `devcontainer.json` or `.devcontainer.json`; otherwise: error “Filename must be devcontainer.json or .devcontainer.json (...)”.
+  - `--config` is accepted as a path with any filename, matching the upstream reference CLI (#65). A non-existent path surfaces the usual file-not-found error from the loader.
   - `--label` and `--image-name` may be specified multiple times; order preserved.
   - `--additional-features` must be valid JSON mapping string->(string|boolean|object); on parse error: build error.
   - `--platform` value must match `os/arch` or `os/arch/variant`; otherwise: build error.
@@ -112,9 +112,8 @@ FUNCTION parse_command_arguments(args: CommandLineArgs) -> ParsedInput:
         RAISE InputError("--push true cannot be used with --output.")
     END IF
 
-    IF input.config_file AND NOT filename_is_devcontainer_json(input.config_file) THEN
-        RAISE InputError("Filename must be devcontainer.json or .devcontainer.json (...) ")
-    END IF
+    // input.config_file is accepted with any filename (#65); the loader
+    // will surface a file-not-found error if the path does not exist.
 
     IF input.additional_features_json THEN
         TRY
@@ -297,7 +296,7 @@ END FUNCTION
 
 ## 9. Error Handling Strategy
 - User Errors:
-  - Invalid `--config` filename → exit code 1, message: “Filename must be devcontainer.json or .devcontainer.json (...)”. Remediation: pass a proper path.
+  - Missing or unreadable `--config` path → exit code 1, message surfaced by the loader (e.g. file-not-found). Filename is not constrained (#65).
   - `--output` with `--push` → exit code 1, message: “--push true cannot be used with --output.” Remediation: choose one.
   - Compose with unsupported flags (`--platform`, `--push`, `--output`, `--cache-to`) → exit code 1, message: “... not supported.”
   - Invalid `--platform` value → exit code 1, message: “not supported/invalid platform”.
