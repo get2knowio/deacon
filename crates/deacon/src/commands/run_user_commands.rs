@@ -278,13 +278,38 @@ async fn execute_lifecycle_commands(
     let result = result?;
 
     debug!(
-        "User commands execution completed: {} blocking phases executed, {} non-blocking phases to execute",
+        "User commands execution completed: {} blocking phases executed, {} non-blocking phases queued",
         result.phases.len(),
         result.non_blocking_phases.len()
     );
 
-    // Log what non-blocking phases would be executed; do not block CLI
-    result.log_non_blocking_phases();
+    // #73: actually execute the non-blocking phases (postStart, postAttach)
+    // inside the container — not just log that we "would". The upstream
+    // reference CLI fires both phases before returning, so any flag/file
+    // side effects must be observable to the next `docker exec`. Previously
+    // deacon stopped at the log line and the side effects never landed.
+    //
+    // Phases are filtered to queue-or-skip *before* execution based on
+    // --skip-non-blocking-commands (see should_queue_phase_for_wait_for
+    // above), so an empty `non_blocking_phases` here means we have nothing
+    // to do.
+    if !result.non_blocking_phases.is_empty() {
+        use deacon_core::docker::CliDocker;
+        debug!(
+            "Executing {} non-blocking phase(s) synchronously",
+            result.non_blocking_phases.len()
+        );
+        let docker = CliDocker::new();
+        result
+            .execute_non_blocking_phases_sync_with_callback(
+                &docker,
+                Some(crate::commands::shared::progress::make_progress_callback(
+                    &args.progress_tracker,
+                )),
+            )
+            .await
+            .context("Non-blocking lifecycle phase execution failed")?;
+    }
 
     info!("Lifecycle commands execution completed");
     Ok(())
