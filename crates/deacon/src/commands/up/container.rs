@@ -92,56 +92,69 @@ pub(crate) async fn execute_container_up(
         );
     }
 
-    // Build the default workspace mount.
+    // Apply workspace mount consistency when using default workspace mount.
     //
-    // Spec parity (#67): the mount *source* is the enclosing git root when
-    // `--mount-workspace-git-root` is true (the default) so git operations
-    // inside the container work; otherwise the user's workspace folder. The
-    // mount *target* defaults to `/workspaces/<basename(source)>`, matching
-    // the upstream reference CLI.
-    //
-    // Discovery (`load_config`) has already used the user's workspace
-    // folder by this point — the git-root walk no longer affects which
-    // `.devcontainer/devcontainer.json` is loaded.
+    // We keep the behavior tight: only inject `config.workspace_mount` here
+    // when the user explicitly requested a consistency mode. Container
+    // identity (computed later) hashes the entire config — so injecting a
+    // mount string here that depends on host paths would change the
+    // workspace+config hash and break `deacon up` ↔ `deacon exec`
+    // reconnection. The default mount (without consistency) is built later
+    // by `Docker::create_container` from the `workspace_path` argument; #67
+    // re-anchors that argument to the git root via `workspace_mount_source`
+    // below.
     if config.workspace_mount.is_none() {
-        let mount_source = if args.mount_workspace_git_root {
-            let git_root = deacon_core::workspace::find_git_repository_root(workspace_folder)?;
-            if git_root.is_none() {
-                info!(
-                    "Git root requested (--mount-workspace-git-root) but no git repository found at '{}'. Using workspace folder for the workspace mount source.",
-                    workspace_folder.display()
-                );
-            }
-            deacon_core::workspace::resolve_workspace_root(workspace_folder)?
-        } else {
-            workspace_folder.canonicalize().with_context(|| {
+        if let Some(ref consistency) = args.workspace_mount_consistency {
+            let target_path = config.workspace_folder.clone().unwrap_or_else(|| {
                 format!(
-                    "Failed to canonicalize workspace folder '{}' for mounting: path does not exist or cannot be accessed",
-                    workspace_folder.display()
+                    "/workspaces/{}",
+                    workspace_folder
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("workspace")
                 )
-            })?
-        };
-        let target_path = config.workspace_folder.clone().unwrap_or_else(|| {
-            format!(
-                "/workspaces/{}",
-                mount_source
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("workspace")
-            )
-        });
-        let consistency_suffix = args
-            .workspace_mount_consistency
-            .as_ref()
-            .map(|c| format!(",consistency={}", c))
-            .unwrap_or_default();
-        config.workspace_mount = Some(format!(
-            "type=bind,source={},target={}{}",
-            mount_source.display(),
-            target_path,
-            consistency_suffix
-        ));
+            });
+            let source_path = workspace_folder
+                .canonicalize()
+                .with_context(|| {
+                    format!(
+                        "Failed to canonicalize workspace folder '{}' for mounting: path does not exist or cannot be accessed",
+                        workspace_folder.display()
+                    )
+                })?
+                .display()
+                .to_string();
+            config.workspace_mount = Some(format!(
+                "type=bind,source={},target={},consistency={}",
+                source_path, target_path, consistency
+            ));
+        }
     }
+
+    // Spec parity (#67): the workspace mount *source* is the enclosing git
+    // root when `--mount-workspace-git-root=true` (default), so git
+    // operations inside the container work even when the user passes a
+    // sub-project directory as `--workspace-folder`. Discovery already used
+    // the user's path (above, in `load_config`) — this only affects the
+    // bind mount source. When git-root walking is disabled, fall back to
+    // the canonicalized workspace folder.
+    let workspace_mount_source: PathBuf = if args.mount_workspace_git_root {
+        if deacon_core::workspace::find_git_repository_root(workspace_folder)?.is_none() {
+            info!(
+                "Git root requested (--mount-workspace-git-root) but no git repository found at '{}'. Using workspace folder for the workspace mount source.",
+                workspace_folder.display()
+            );
+        }
+        deacon_core::workspace::resolve_workspace_root(workspace_folder)?
+    } else {
+        workspace_folder.canonicalize().with_context(|| {
+            format!(
+                "Failed to canonicalize workspace folder '{}' for mounting: path does not exist or cannot be accessed",
+                workspace_folder.display()
+            )
+        })?
+    };
+
     if !args.forward_ports.is_empty() {
         use deacon_core::config::PortSpec;
         debug!(
@@ -422,12 +435,19 @@ pub(crate) async fn execute_container_up(
         debug!("GPU mode: {:?}", args.gpu_mode);
     }
 
-    // Create container using DockerLifecycle trait
+    // Create container using DockerLifecycle trait.
+    //
+    // We pass `workspace_mount_source` (#67), not the raw workspace folder,
+    // so the default workspace bind mount inside
+    // `Docker::create_container` sources from the git root when
+    // `--mount-workspace-git-root=true`. Container identity has already
+    // been computed from the user's workspace folder above, so this only
+    // affects the bind mount and not workspace+config hashing.
     let container_result = docker
         .up(
             &identity,
             &config,
-            workspace_folder,
+            &workspace_mount_source,
             args.remove_existing_container,
             args.gpu_mode,
             &merged_security,
