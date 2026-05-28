@@ -354,10 +354,19 @@ pub struct MergedMounts {
 ///
 /// # Precedence
 /// Config mounts override feature mounts for same target path
-#[instrument(skip(config_mounts, features))]
+///
+/// # Variable substitution
+/// When `substitution_context` is `Some(_)`, feature-provided mount values
+/// (including `source`, `target`, and other string fields) are run through
+/// variable substitution before parsing — per #122 and the spec rule that
+/// variables expand in any string value. Callers from production paths
+/// should pass `Some(&context)` so tokens like `${devcontainerId}` resolve.
+/// Tests may pass `None` to skip substitution.
+#[instrument(skip(config_mounts, features, substitution_context))]
 pub fn merge_mounts(
     config_mounts: &[serde_json::Value],
     features: &[crate::features::ResolvedFeature],
+    substitution_context: Option<&crate::variable::SubstitutionContext>,
 ) -> Result<MergedMounts> {
     use std::collections::HashMap;
 
@@ -369,6 +378,23 @@ pub fn merge_mounts(
     // Process feature mounts in installation order
     for feature in features {
         for mount_value in &feature.metadata.mounts {
+            // Per #122, substitute variables (e.g. `${devcontainerId}`) in
+            // the mount value before stringifying — feature mounts must
+            // round-trip through substitution like every other string in
+            // the resolved config.
+            let substituted_mount_value: serde_json::Value;
+            let mount_value = if let Some(ctx) = substitution_context {
+                let mut report = crate::variable::SubstitutionReport::new();
+                substituted_mount_value =
+                    crate::variable::VariableSubstitution::substitute_json_value(
+                        mount_value,
+                        ctx,
+                        &mut report,
+                    );
+                &substituted_mount_value
+            } else {
+                mount_value
+            };
             let mount_str = crate::features::feature_mount_to_string(mount_value).map_err(|e| {
                 warn!(
                     feature_id = %feature.id,
@@ -1456,7 +1482,7 @@ mod merge_mounts_tests {
         let config_mounts: Vec<serde_json::Value> = vec![];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 0);
     }
 
@@ -1469,7 +1495,7 @@ mod merge_mounts_tests {
         ];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 2);
         assert!(result
             .mounts
@@ -1494,7 +1520,7 @@ mod merge_mounts_tests {
             ),
         ];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 2);
         assert!(result
             .mounts
@@ -1515,7 +1541,7 @@ mod merge_mounts_tests {
             vec!["type=volume,source=cache,target=/cache".to_string()],
         )];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 2);
         assert!(result
             .mounts
@@ -1538,7 +1564,7 @@ mod merge_mounts_tests {
             vec!["type=volume,source=feature-data,target=/data".to_string()],
         )];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert_eq!(
             result.mounts[0],
@@ -1561,7 +1587,7 @@ mod merge_mounts_tests {
             ),
         ];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert_eq!(result.mounts[0], "type=volume,source=vol2,target=/shared");
     }
@@ -1588,7 +1614,7 @@ mod merge_mounts_tests {
             ),
         ];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 3);
         assert!(result
             .mounts
@@ -1618,7 +1644,7 @@ mod merge_mounts_tests {
             ),
         ];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert_eq!(
             result.mounts[0],
@@ -1636,7 +1662,7 @@ mod merge_mounts_tests {
         )];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         // The mount should be normalized - exact format depends on implementation
         // but should contain the target path
@@ -1651,7 +1677,7 @@ mod merge_mounts_tests {
         )];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert!(result.mounts[0].contains("target=/container/path"));
         assert!(result.mounts[0].contains("ro"));
@@ -1663,13 +1689,46 @@ mod merge_mounts_tests {
         let config_mounts = vec![serde_json::Value::String("myvolume:/data".to_string())];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert!(result.mounts[0].contains("target=/data"));
         assert!(result.mounts[0].contains("myvolume"));
     }
 
     // ==================== Edge Cases ====================
+
+    #[test]
+    fn test_merge_mounts_feature_mount_with_devcontainer_id_substitution() {
+        // Per #122: feature mount sources containing variables (e.g.
+        // ${devcontainerId}, used by docker-in-docker for its volume name)
+        // must be substituted before being handed to Docker. Without
+        // substitution, Docker rejects the volume name as containing
+        // invalid characters (literal '$').
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut ctx = crate::variable::SubstitutionContext::new(temp.path()).unwrap();
+        ctx.devcontainer_id = "abc123def456".to_string();
+
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![create_feature_with_mounts(
+            "dind",
+            vec![
+                "type=volume,source=dind-var-lib-docker-${devcontainerId},target=/var/lib/docker"
+                    .to_string(),
+            ],
+        )];
+
+        let result = merge_mounts(&config_mounts, &features, Some(&ctx)).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        let mount = &result.mounts[0];
+        assert!(
+            mount.contains("dind-var-lib-docker-abc123def456"),
+            "expected substituted volume name; got: {mount}"
+        );
+        assert!(
+            !mount.contains("${devcontainerId}"),
+            "literal token must not survive into docker mount string"
+        );
+    }
 
     #[test]
     fn test_merge_mounts_empty_feature_mounts() {
@@ -1679,7 +1738,7 @@ mod merge_mounts_tests {
         )];
         let features = vec![create_feature_with_mounts("feature1", vec![])];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert_eq!(result.mounts[0], "type=bind,source=/host/data,target=/data");
     }
@@ -1697,7 +1756,7 @@ mod merge_mounts_tests {
             ],
         )];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 3);
         assert!(result
             .mounts
@@ -1718,7 +1777,7 @@ mod merge_mounts_tests {
         )];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert_eq!(result.mounts[0], "type=tmpfs,target=/tmp");
     }
@@ -1738,7 +1797,7 @@ mod merge_mounts_tests {
             ),
         ];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         // Both should be present since targets differ in case
         assert_eq!(result.mounts.len(), 2);
     }
@@ -1769,7 +1828,7 @@ mod merge_mounts_tests {
             ),
         ];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 4);
         // Config mounts should be present
         assert!(result
@@ -1796,7 +1855,7 @@ mod merge_mounts_tests {
         let config_mounts = vec![serde_json::Value::String("invalid-mount-spec".to_string())];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features);
+        let result = merge_mounts(&config_mounts, &features, None);
         assert!(result.is_err());
     }
 
@@ -1808,7 +1867,7 @@ mod merge_mounts_tests {
         )];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features);
+        let result = merge_mounts(&config_mounts, &features, None);
         assert!(result.is_err());
     }
 
@@ -1821,7 +1880,7 @@ mod merge_mounts_tests {
             vec!["invalid-mount".to_string()],
         )];
 
-        let result = merge_mounts(&config_mounts, &features);
+        let result = merge_mounts(&config_mounts, &features, None);
         assert!(result.is_err());
     }
 
@@ -1833,7 +1892,7 @@ mod merge_mounts_tests {
         )];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features);
+        let result = merge_mounts(&config_mounts, &features, None);
         assert!(result.is_err());
     }
 
@@ -1845,7 +1904,7 @@ mod merge_mounts_tests {
         )];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features);
+        let result = merge_mounts(&config_mounts, &features, None);
         assert!(result.is_err());
     }
 
@@ -1857,7 +1916,7 @@ mod merge_mounts_tests {
         )];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features);
+        let result = merge_mounts(&config_mounts, &features, None);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("config"));
@@ -1872,7 +1931,7 @@ mod merge_mounts_tests {
             vec!["type=bind,target=/container/path".to_string()], // Missing source
         )];
 
-        let result = merge_mounts(&config_mounts, &features);
+        let result = merge_mounts(&config_mounts, &features, None);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("my-feature"));
@@ -1890,7 +1949,7 @@ mod merge_mounts_tests {
         })];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert!(result.mounts[0].contains("type=bind"));
         assert!(result.mounts[0].contains("source=/host/path"));
@@ -1908,7 +1967,7 @@ mod merge_mounts_tests {
         })];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert!(result.mounts[0].contains("ro"));
     }
@@ -1924,7 +1983,7 @@ mod merge_mounts_tests {
         })];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert!(result.mounts[0].contains("consistency=cached"));
     }
@@ -1939,7 +1998,7 @@ mod merge_mounts_tests {
         })];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert!(result.mounts[0].contains("type=volume"));
         assert!(result.mounts[0].contains("source=myvolume"));
@@ -1955,7 +2014,7 @@ mod merge_mounts_tests {
         })];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert!(result.mounts[0].contains("type=tmpfs"));
         assert!(result.mounts[0].contains("target=/tmp"));
@@ -1975,7 +2034,7 @@ mod merge_mounts_tests {
         ];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 3);
         assert!(result.mounts.iter().any(|m| m.contains("target=/a")));
         assert!(result.mounts.iter().any(|m| m.contains("target=/b")));
@@ -1991,7 +2050,7 @@ mod merge_mounts_tests {
         })];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features);
+        let result = merge_mounts(&config_mounts, &features, None);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("type"));
@@ -2006,7 +2065,7 @@ mod merge_mounts_tests {
         })];
         let features = vec![];
 
-        let result = merge_mounts(&config_mounts, &features);
+        let result = merge_mounts(&config_mounts, &features, None);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("target"));
@@ -2025,7 +2084,7 @@ mod merge_mounts_tests {
             vec!["type=volume,source=vol1,target=/data".to_string()],
         )];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 1);
         assert!(result.mounts[0].contains("source=/host/override"));
         assert!(!result.mounts[0].contains("vol1"));
@@ -2052,7 +2111,7 @@ mod merge_mounts_tests {
             ),
         ];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 3);
         // The exact order may vary based on implementation, but all should be present
         assert!(result
@@ -2079,7 +2138,7 @@ mod merge_mounts_tests {
             ],
         )];
 
-        let result = merge_mounts(&config_mounts, &features).unwrap();
+        let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 3);
         // All mounts should be present
         assert!(result
