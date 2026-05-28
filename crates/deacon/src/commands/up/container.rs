@@ -575,6 +575,20 @@ pub(crate) async fn execute_container_up(
     // Per SC-002: On resume, skip onCreate, updateContent, postCreate, dotfiles; run postStart, postAttach
     // Per FR-004: On partial resume, skip completed phases, run remaining from earliest incomplete
     //
+    // Spec parity (#117): `--remove-existing-container` destroys and
+    // recreates the container. A new container has never had any lifecycle
+    // phase run on it, so wipe the workspace's prior markers before we
+    // build the invocation context — otherwise onCreate / updateContent /
+    // postCreate are silently skipped on the fresh container.
+    if args.remove_existing_container {
+        if let Err(e) = deacon_core::state::clear_markers(workspace_folder, args.prebuild).await {
+            debug!(
+                "Failed to clear lifecycle markers for --remove-existing-container: {}",
+                e
+            );
+        }
+    }
+
     // Spec parity (#93): filter markers by the *current* config_hash so
     // a re-invocation with a different `--override-config` (or any input
     // that produces a different resolved config) reruns lifecycle from
