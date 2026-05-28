@@ -312,6 +312,16 @@ async fn resolve_lockfile_from_config(config: &DevContainerConfig) -> Result<Loc
     let mut entries: HashMap<String, LockfileFeature> = HashMap::new();
 
     for (user_id, _opts) in features_obj.iter() {
+        // Per #126 — skip local features. Lockfile entries are OCI-only
+        // (`features_build.rs::build_lockfile_from_features` drops local
+        // features by design: there's no OCI identity to record). Without
+        // this gate, `upgrade` would try to OCI-fetch `./minimal-feature`
+        // and die with "Invalid feature ID".
+        if user_id.starts_with("./") || user_id.starts_with("../") || user_id.starts_with('/') {
+            debug!(feature = %user_id, "Skipping local feature (no OCI identity to lock)");
+            continue;
+        }
+
         let (registry, namespace, name, tag) = parse_registry_reference(user_id)
             .with_context(|| format!("Invalid feature ID '{}'", user_id))?;
         let feature_ref = FeatureRef::new(registry, namespace, name, tag);
@@ -567,6 +577,24 @@ mod tests {
     async fn resolve_lockfile_returns_empty_for_no_features() {
         let config = DevContainerConfig::default();
         let lockfile = resolve_lockfile_from_config(&config).await.unwrap();
+        assert!(lockfile.features.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_lockfile_skips_local_features() {
+        // Per #126: `upgrade` must not OCI-fetch local-path features.
+        // Pre-fix, ./, ../, and /abs/path entries flunked
+        // `parse_registry_reference` with "Invalid feature ID".
+        let config = DevContainerConfig {
+            features: serde_json::json!({
+                "./local-feature": {},
+                "../shared/another-local": {},
+                "/abs/path/feature": {},
+            }),
+            ..DevContainerConfig::default()
+        };
+        let lockfile = resolve_lockfile_from_config(&config).await.unwrap();
+        // All local features dropped (no OCI identity to lock); no entries.
         assert!(lockfile.features.is_empty());
     }
 
