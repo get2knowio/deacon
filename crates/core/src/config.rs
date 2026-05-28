@@ -704,6 +704,15 @@ impl DevContainerConfig {
 
         debug!("Applying variable substitution to DevContainer configuration");
 
+        // Substitute name
+        if let Some(ref name) = config.name {
+            config.name = Some(VariableSubstitution::substitute_string(
+                name,
+                context,
+                &mut report,
+            ));
+        }
+
         // Substitute workspace_folder
         if let Some(ref workspace_folder) = config.workspace_folder {
             config.workspace_folder = Some(VariableSubstitution::substitute_string(
@@ -747,6 +756,37 @@ impl DevContainerConfig {
                 )
             })
             .collect();
+
+        // Substitute remote_env values (per spec, variables expand inside any
+        // string value; remote_env values are strings — keys are not).
+        config.remote_env = config
+            .remote_env
+            .iter()
+            .map(|(key, value)| {
+                let substituted_value = value
+                    .as_ref()
+                    .map(|v| VariableSubstitution::substitute_string(v, context, &mut report));
+                (key.clone(), substituted_value)
+            })
+            .collect();
+
+        // Substitute container_user
+        if let Some(ref container_user) = config.container_user {
+            config.container_user = Some(VariableSubstitution::substitute_string(
+                container_user,
+                context,
+                &mut report,
+            ));
+        }
+
+        // Substitute remote_user
+        if let Some(ref remote_user) = config.remote_user {
+            config.remote_user = Some(VariableSubstitution::substitute_string(
+                remote_user,
+                context,
+                &mut report,
+            ));
+        }
 
         // Substitute lifecycle commands
         if let Some(ref cmd) = config.on_create_command {
@@ -855,6 +895,13 @@ impl DevContainerConfig {
 
         debug!("Applying advanced variable substitution to DevContainer configuration");
 
+        // Substitute name
+        if let Some(ref name) = config.name {
+            config.name = Some(VariableSubstitution::substitute_string_advanced(
+                name, context, options, report,
+            )?);
+        }
+
         // Substitute workspace_folder
         if let Some(ref workspace_folder) = config.workspace_folder {
             config.workspace_folder = Some(VariableSubstitution::substitute_string_advanced(
@@ -915,6 +962,26 @@ impl DevContainerConfig {
             }
         }
         config.remote_env = substituted_remote_env;
+
+        // Substitute container_user
+        if let Some(ref container_user) = config.container_user {
+            config.container_user = Some(VariableSubstitution::substitute_string_advanced(
+                container_user,
+                context,
+                options,
+                report,
+            )?);
+        }
+
+        // Substitute remote_user
+        if let Some(ref remote_user) = config.remote_user {
+            config.remote_user = Some(VariableSubstitution::substitute_string_advanced(
+                remote_user,
+                context,
+                options,
+                report,
+            )?);
+        }
 
         // Substitute lifecycle commands
         if let Some(ref on_create_command) = config.on_create_command {
@@ -3394,6 +3461,62 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_substitution_covers_name_remote_env_users() {
+        // Per #107 — apply_variable_substitution must expand variables in
+        // name, remoteEnv values, containerUser, remoteUser. Previously only
+        // workspace_folder/mount/run_args/container_env/lifecycle were
+        // covered, leaving these fields with literal `${...}` in
+        // read-configuration output.
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = temp_dir.path();
+        let basename = workspace.file_name().unwrap().to_string_lossy().to_string();
+        let mut context = SubstitutionContext::new(workspace).unwrap();
+        context
+            .local_env
+            .insert("MY_VAR".to_string(), "hello".to_string());
+
+        let mut config = DevContainerConfig {
+            name: Some("rc-${localWorkspaceFolderBasename}".to_string()),
+            container_user: Some("${localEnv:MY_VAR}".to_string()),
+            remote_user: Some("${localEnv:MY_VAR:fallback}".to_string()),
+            ..Default::default()
+        };
+        config.remote_env.insert(
+            "FROM_LOCAL".to_string(),
+            Some("${localEnv:MY_VAR:default}".to_string()),
+        );
+        config.remote_env.insert(
+            "WS".to_string(),
+            Some("${localWorkspaceFolderBasename}".to_string()),
+        );
+        // Literal unset → resolve via default branch
+        config.remote_env.insert(
+            "UNSET".to_string(),
+            Some("${localEnv:NOT_SET:fallback}".to_string()),
+        );
+
+        let (substituted, _) = config.apply_variable_substitution(&context);
+        assert_eq!(
+            substituted.name.as_deref(),
+            Some(format!("rc-{basename}").as_str())
+        );
+        assert_eq!(substituted.container_user.as_deref(), Some("hello"));
+        assert_eq!(substituted.remote_user.as_deref(), Some("hello"));
+        assert_eq!(
+            substituted.remote_env.get("FROM_LOCAL").unwrap().as_deref(),
+            Some("hello")
+        );
+        assert_eq!(
+            substituted.remote_env.get("WS").unwrap().as_deref(),
+            Some(basename.as_str())
+        );
+        assert_eq!(
+            substituted.remote_env.get("UNSET").unwrap().as_deref(),
+            Some("fallback")
+        );
     }
 
     #[test]
