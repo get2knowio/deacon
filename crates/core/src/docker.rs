@@ -3136,6 +3136,8 @@ mod tests {
             config_hash: "config456".to_string(),
             name: Some("test-dev".to_string()),
             custom_name: None,
+            local_folder: None,
+            config_file: None,
         };
 
         let config = DevContainerConfig {

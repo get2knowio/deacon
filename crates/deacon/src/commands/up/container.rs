@@ -146,12 +146,15 @@ pub(crate) async fn execute_container_up(
     let emit_progress_event =
         crate::commands::shared::progress::make_progress_callback(&args.progress_tracker);
 
-    // Create container identity for deterministic naming and labels
+    // Create container identity for deterministic naming and labels.
+    // Carry the resolved devcontainer.json path so the spec-mandated
+    // `devcontainer.config_file` label is applied at create time (#68).
     let identity = ContainerIdentity::new_with_custom_name(
         workspace_folder,
         &config,
         args.container_name.clone(),
-    );
+    )
+    .with_config_file(config_path);
     debug!("Container identity: {:?}", identity);
 
     // Initialize Docker client

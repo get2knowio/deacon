@@ -160,11 +160,13 @@ async fn execute_down_all(identity: &ContainerIdentity, args: &DownArgs) -> Resu
 
     let docker = CliDocker::new();
 
-    // Build label selector from identity
-    let label_selector = format!(
-        "devcontainer.local_folder={},devcontainer.config_file={}",
-        identity.workspace_hash, identity.config_hash
-    );
+    // Build label selector from identity. The values here are hashes,
+    // so use the hash-labeled keys (#68 — previously this combined hash
+    // *values* with path-shaped *names* and matched nothing). Containers
+    // created by deacon get both this hash pair and the spec-mandated
+    // `devcontainer.local_folder` / `devcontainer.config_file` path
+    // labels emitted by `ContainerIdentity::labels()`.
+    let label_selector = identity.label_selector();
 
     debug!("Label selector: {}", label_selector);
 
