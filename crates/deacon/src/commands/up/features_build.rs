@@ -537,8 +537,28 @@ async fn resolve_and_stage_features(
         });
     }
 
-    // Resolve dependencies
-    let override_order = config.override_feature_install_order.clone();
+    // Resolve dependencies.
+    //
+    // The user expresses `overrideFeatureInstallOrder` with the feature
+    // IDs *as written in devcontainer.json* (e.g. `./feature-charlie`,
+    // `ghcr.io/foo/bar:1`). Internally we key every feature by its
+    // *canonical* ID (`local:<abs path>` for local features, the
+    // registry/namespace/name triple for OCI refs). Translate the
+    // override list to canonical form before handing it to the
+    // resolver — otherwise `validate_override_order` complains that the
+    // user-given path "does not exist in feature set" (#69 follow-up).
+    let canonical_by_user: HashMap<String, String> = user_id_by_canonical
+        .iter()
+        .map(|(canon, user)| (user.clone(), canon.clone()))
+        .collect();
+    let override_order = config.override_feature_install_order.clone().map(|order| {
+        order
+            .into_iter()
+            .map(|user_id| {
+                canonical_by_user.get(&user_id).cloned().unwrap_or(user_id) // unknown ids surface in the validate step with the user form
+            })
+            .collect::<Vec<_>>()
+    });
     let resolver = FeatureDependencyResolver::new(override_order);
     let installation_plan = resolver.resolve(&resolved_features)?;
 
@@ -646,6 +666,22 @@ fn build_lockfile_from_features(
             );
             continue;
         };
+
+        // Local features (`./foo`, `../shared/bar`) have no fetchable
+        // OCI identity — their canonical id is `local:<abs path>` and
+        // their FeatureRef is a synthetic placeholder. They MUST NOT be
+        // recorded in the lockfile: the lockfile's `resolved` schema
+        // demands a `registry/path@sha256:...` form, and a local
+        // checkout's content can change underneath us anyway. Upstream
+        // `@devcontainers/cli` excludes local features from the lockfile
+        // for the same reasons (#69 follow-up).
+        if canonical_id.starts_with("local:") {
+            debug!(
+                feature = %canonical_id,
+                "Skipping lockfile entry for local feature (no OCI identity to record)"
+            );
+            continue;
+        }
 
         let user_id = user_id_by_canonical
             .get(canonical_id)
