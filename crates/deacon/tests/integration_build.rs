@@ -206,7 +206,11 @@ fn test_build_image_reference_with_features_tags_final_image() {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains(r#""outcome":"success"#), "stdout: {}", stdout);
+    assert!(
+        stdout.contains(r#""outcome":"success"#),
+        "stdout: {}",
+        stdout
+    );
 
     // The named tag must contain the feature's marker file.
     let run = std::process::Command::new("docker")
@@ -217,8 +221,7 @@ fn test_build_image_reference_with_features_tags_final_image() {
         .args(["rmi", "-f", image_tag])
         .output();
     assert!(
-        run.status.success()
-            && String::from_utf8_lossy(&run.stdout).contains("installed"),
+        run.status.success() && String::from_utf8_lossy(&run.stdout).contains("installed"),
         "--image-name should resolve to the feature-extended image; stdout={:?} stderr={:?}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
