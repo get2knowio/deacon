@@ -8,8 +8,25 @@ use std::fs;
 use tempfile::TempDir;
 
 #[test]
-fn test_selector_requirement_no_selectors() {
-    // When no selector flags are provided (only --config), should fail with exact message
+fn test_selector_requirement_no_selectors_no_config() {
+    // When no selector flags AND no --config are provided, fail with the
+    // updated exact message that lists --config as an accepted selector
+    // (spec parity #66).
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.arg("read-configuration");
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Missing required argument: One of --container-id, --id-label, --workspace-folder, or --config is required.",
+        ));
+}
+
+#[test]
+fn test_selector_requirement_with_only_config() {
+    // Spec parity (#66): --config alone is sufficient. The upstream
+    // reference CLI accepts an explicit config path without any workspace
+    // selector; deacon now matches.
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("devcontainer.json");
     fs::write(&config_path, r#"{"name": "test", "image": "ubuntu:22.04"}"#).unwrap();
@@ -19,12 +36,7 @@ fn test_selector_requirement_no_selectors() {
         .arg("--config")
         .arg(&config_path);
 
-    // Should fail because --config alone does not satisfy the selector requirement
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "Missing required argument: One of --container-id, --id-label or --workspace-folder is required.",
-        ));
+    cmd.assert().success();
 }
 
 #[test]

@@ -43,13 +43,13 @@
   - Other:
     - `--user-data-folder <PATH>` Accepted but not used by this subcommand (present for parity).
 - Flag Taxonomy:
-  - Required vs Optional: At least one of `--container-id`, `--id-label`, or `--workspace-folder` is required. All others are optional.
+  - Required vs Optional: At least one of `--container-id`, `--id-label`, `--workspace-folder`, or `--config` is required (#66). All others are optional.
   - Paired requirements: `--terminal-columns` implies `--terminal-rows` and vice versa.
   - Mutually exclusive: None enforced by this subcommand.
   - Deprecated: None.
 - Argument Validation Rules:
   - `--id-label` must match `<name>=<value>`; regex `/.+=.+/` (value must be non-empty). Multiple occurrences allowed.
-  - If none of `--container-id`, `--id-label`, or `--workspace-folder` are present: error “Missing required argument: One of --container-id, --id-label or --workspace-folder is required.”
+  - If none of `--container-id`, `--id-label`, `--workspace-folder`, or `--config` are present: error “Missing required argument: One of --container-id, --id-label, --workspace-folder, or --config is required.” When `--config` is supplied alone, the workspace defaults to the config file’s parent directory for substitution purposes.
   - `--additional-features` must parse as JSON object mapping string->(string|boolean|object); on parse error: command error.
   - For this subcommand, `--config` filename is not strictly validated; it is treated as a path and read as-is.
 
@@ -243,7 +243,7 @@ END FUNCTION
 
 ## 9. Error Handling Strategy
 - User Errors:
-  - Missing required selector: Exit 1; message: “Missing required argument: One of --container-id, --id-label or --workspace-folder is required.” Remediation: provide one.
+  - Missing required selector: Exit 1; message: “Missing required argument: One of --container-id, --id-label, --workspace-folder, or --config is required.” Remediation: provide one (#66).
   - Invalid `--id-label` format: Exit 1; message: “Unmatched argument format: id-label must match <name>=<value>.” Remediation: correct format.
   - Config not found when requested: Exit 1; message includes resolved path. Remediation: adjust `--config`/`--workspace-folder`/`--override-config`.
   - Malformed JSON in `--additional-features` or config file: Exit 1; message indicates parse/validation failure.

@@ -863,15 +863,18 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         args.secrets_files.len()
     );
 
-    // Selector validation per spec (§2, §9):
-    // At least one of --container-id, --id-label, or --workspace-folder is required.
-    // Note: --config alone does NOT satisfy this requirement.
+    // Selector validation:
+    // At least one of --container-id, --id-label, --workspace-folder, or
+    // --config is required. Spec parity (#66): the upstream reference CLI
+    // accepts `--config <path>` on its own — `read-configuration` can parse
+    // a config file without any workspace context. We mirror that here.
     let has_container_id = args.container_id.is_some();
     let has_id_label = !args.id_label.is_empty();
     let has_workspace_folder = args.workspace_folder.is_some();
-    if !has_container_id && !has_id_label && !has_workspace_folder {
+    let has_config = args.config_path.is_some();
+    if !has_container_id && !has_id_label && !has_workspace_folder && !has_config {
         anyhow::bail!(
-            "Missing required argument: One of --container-id, --id-label or --workspace-folder is required."
+            "Missing required argument: One of --container-id, --id-label, --workspace-folder, or --config is required."
         );
     }
 
@@ -907,8 +910,24 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         && args.workspace_folder.is_none()
         && args.override_config_path.is_none();
 
-    // Determine workspace folder
-    let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
+    // Determine workspace folder.
+    //
+    // Spec parity (#66): when only `--config` is provided (no
+    // `--workspace-folder`), default workspace to the directory containing
+    // the config file. This matches the upstream reference CLI behavior of
+    // accepting `--config` on its own and keeps `${localWorkspaceFolder}`
+    // substitutions meaningful.
+    let config_parent_workspace = args
+        .workspace_folder
+        .is_none()
+        .then(|| args.config_path.as_deref().and_then(|p| p.parent()))
+        .flatten()
+        .map(|p| p.to_path_buf());
+    let workspace_folder = args
+        .workspace_folder
+        .as_deref()
+        .or(config_parent_workspace.as_deref())
+        .unwrap_or(Path::new("."));
 
     // Load configuration using shared helper (aligns with up/exec behavior)
     let (config, substitution_report) = if container_only_mode {
