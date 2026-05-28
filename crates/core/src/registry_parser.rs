@@ -110,17 +110,28 @@ fn parse_namespace_and_name<'a>(parts: &[&'a str]) -> (String, &'a str) {
     (namespace, name_and_tag)
 }
 
-/// Parse name and tag from a name[:tag] or name[@digest] string
+/// Parse name and tag from a name[:tag] or name[:tag]@digest string
 ///
-/// Handles both tag and digest references:
+/// Handles tag, digest, and combined tag+digest references:
 /// - `node:18` -> ("node", Some("18"))
 /// - `node@sha256:abc123` -> ("node", Some("sha256:abc123"))
+/// - `node:18@sha256:abc123` -> ("node", Some("sha256:abc123"))
 /// - `node` -> ("node", None)
+///
+/// When both a tag and a digest are present (`name:tag@digest`), the digest is
+/// authoritative per the OCI distribution spec and the tag is informational, so
+/// the tag is stripped from the name — otherwise it would leak into the
+/// repository path (e.g. `.../git:1/manifests/sha256:...`, which 404s).
 pub fn parse_name_and_tag(name_and_tag: &str) -> (&str, Option<&str>) {
-    // Check for digest reference first (name@sha256:...)
+    // Check for digest reference first (name[:tag]@sha256:...)
     if let Some(at_pos) = name_and_tag.find('@') {
-        let name = &name_and_tag[..at_pos];
+        let name_part = &name_and_tag[..at_pos];
         let digest = &name_and_tag[at_pos + 1..];
+        // Drop any tag from the name portion; the digest takes precedence.
+        let name = match name_part.rfind(':') {
+            Some(colon_pos) => &name_part[..colon_pos],
+            None => name_part,
+        };
         return (name, Some(digest));
     }
     if let Some(colon_pos) = name_and_tag.rfind(':') {
@@ -194,5 +205,34 @@ mod tests {
             parse_name_and_tag("myfeature:latest"),
             ("myfeature", Some("latest"))
         );
+    }
+
+    #[test]
+    fn test_parse_name_and_tag_digest_forms() {
+        // Bare digest (no tag).
+        assert_eq!(
+            parse_name_and_tag("node@sha256:abc123"),
+            ("node", Some("sha256:abc123"))
+        );
+        // Combined tag + digest: the tag must be dropped from the name, and the
+        // digest wins. Otherwise the tag leaks into the repository path.
+        assert_eq!(
+            parse_name_and_tag("git:1@sha256:abc123"),
+            ("git", Some("sha256:abc123"))
+        );
+    }
+
+    #[test]
+    fn test_parse_registry_reference_tag_and_digest() {
+        // ghcr.io/devcontainers/features/git:1@sha256:DIGEST must resolve to the
+        // repository devcontainers/features/git (no `:1`) with the digest as the
+        // reference, so the manifest URL is
+        // https://ghcr.io/v2/devcontainers/features/git/manifests/sha256:DIGEST
+        let (registry, namespace, name, tag) =
+            parse_registry_reference("ghcr.io/devcontainers/features/git:1@sha256:abc123").unwrap();
+        assert_eq!(registry, "ghcr.io");
+        assert_eq!(namespace, "devcontainers/features");
+        assert_eq!(name, "git");
+        assert_eq!(tag, Some("sha256:abc123".to_string()));
     }
 }
