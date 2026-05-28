@@ -45,7 +45,10 @@ sed -i.tmp "s|@sha256:REPLACE_WITH_REAL_DIGEST|@${DIGEST}|" devcontainer.json
 rm -f devcontainer.json.tmp
 
 echo "== Scenario 2: read-configuration shows the pinned ref ==" >&2
+# The config lives at the workspace root as devcontainer.json (not a spec
+# discovery location), so point --config at it explicitly — same as Scenario 3.
 cfg="$(run "$DEACON_BIN" read-configuration --workspace-folder "$SCRIPT_DIR" \
+	--config "$SCRIPT_DIR/devcontainer.json" \
 	--include-features-configuration 2>/dev/null)"
 if ! printf '%s' "$cfg" | grep -q "$DIGEST"; then
 	echo "FAIL: digest not present in resolved configuration" >&2
