@@ -588,12 +588,33 @@ async fn resolve_and_stage_features(
         installation_plan.levels.len()
     );
 
-    // Collect combined env from feature metadata in plan order so later features win
+    // Collect combined env from feature metadata in plan order so later
+    // features win. Per #124 — feature container_env values may legally
+    // reference `${devcontainerId}`, `${localWorkspaceFolder}`, etc. and
+    // must be substituted before being baked into the BuildKit image.
+    let substitution_context = {
+        let config_dir = config_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let mut ctx = deacon_core::variable::SubstitutionContext::new(config_dir)?;
+        let id_labels: Vec<(String, String)> = identity.labels().into_iter().collect();
+        ctx.devcontainer_id = deacon_core::container::compute_dev_container_id(&id_labels);
+        ctx
+    };
+    let mut substitution_report = deacon_core::variable::SubstitutionReport::new();
     let mut combined_env = HashMap::new();
     for level in &installation_plan.levels {
         for feature_id in level {
             if let Some(feature) = installation_plan.get_feature(feature_id) {
-                combined_env.extend(feature.metadata.container_env.clone());
+                for (key, value) in &feature.metadata.container_env {
+                    let substituted_value =
+                        deacon_core::variable::VariableSubstitution::substitute_string(
+                            value,
+                            &substitution_context,
+                            &mut substitution_report,
+                        );
+                    combined_env.insert(key.clone(), substituted_value);
+                }
             }
         }
     }
