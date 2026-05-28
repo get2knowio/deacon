@@ -18,7 +18,9 @@ run_profile() {
 	local label="$2"
 	echo "== ${label} ==" >&2
 	if [ -n "$profile_env" ]; then
-		run COMPOSE_PROFILES="$profile_env" "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container "${EXTRA_ARGS[@]}"
+		# `run VAR=value cmd` doesn't propagate VAR to the child — `run`
+		# sees VAR=value as a positional arg. Use `env` to set the var.
+		run env COMPOSE_PROFILES="$profile_env" "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container "${EXTRA_ARGS[@]}"
 	else
 		run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container "${EXTRA_ARGS[@]}"
 	fi
