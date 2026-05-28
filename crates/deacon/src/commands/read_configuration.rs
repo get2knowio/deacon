@@ -573,6 +573,58 @@ fn collect_entry_from_feature_metadata(
 /// arrays (`entrypoints`, `onCreateCommands`, ...) collected from each metadata source. See
 /// `devcontainers/cli/src/spec-node/imageMetadata.ts::mergeConfiguration`.
 #[instrument(skip_all)]
+/// Parse the `devcontainer.metadata` LABEL off `image_ref` into a vec of
+/// partial config entries, best-effort. Returns an empty vec on any
+/// failure (image not local, daemon unreachable, label absent, JSON
+/// malformed) so the surrounding merge path is unaffected by transient
+/// image inspection issues (#91).
+async fn parse_image_metadata_entries(
+    docker: &deacon_core::docker::CliDocker,
+    image_ref: &str,
+) -> Vec<deacon_core::config::DevContainerConfig> {
+    use deacon_core::docker::Docker;
+
+    let info = match docker.inspect_image(image_ref).await {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            debug!(
+                "Image '{}' not locally available; mergedConfiguration will not include image metadata",
+                image_ref
+            );
+            return Vec::new();
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to inspect image '{}' for devcontainer.metadata label; proceeding without it: {}",
+                image_ref,
+                e
+            );
+            return Vec::new();
+        }
+    };
+
+    let Some(label_json) = info.labels.get("devcontainer.metadata") else {
+        debug!(
+            "Image '{}' has no devcontainer.metadata label; nothing to merge",
+            image_ref
+        );
+        return Vec::new();
+    };
+
+    match serde_json::from_str::<Vec<deacon_core::config::DevContainerConfig>>(label_json) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!(
+                "Image '{}' has a devcontainer.metadata label that is not a valid JSON array of devcontainer entries; proceeding without it: {}",
+                image_ref,
+                e
+            );
+            Vec::new()
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
     base_config: &deacon_core::config::DevContainerConfig,
     container_info: Option<&deacon_core::docker::ContainerInfo>,
@@ -580,6 +632,7 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
     features_config: Option<&FeaturesConfiguration>,
     secrets: Option<&SecretsCollection>,
     fetcher: &deacon_core::oci::FeatureFetcher<C>,
+    image_metadata_entries: &[deacon_core::config::DevContainerConfig],
 ) -> Result<serde_json::Value> {
     debug!(
         "Computing merged configuration: has_container={:?}, has_features={}",
@@ -809,40 +862,92 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         }
 
         // Merge base config with derived feature metadata (for non-collected fields).
-        let merged = deacon_core::config::ConfigMerger::merge_configs(&[
-            base_config.clone(),
-            substituted_derived,
-        ]);
+        // Image metadata entries (from the image's `devcontainer.metadata` LABEL,
+        // #91) come BEFORE the base config — they are the lower-precedence
+        // layer per the spec, so the user's devcontainer.json wins on conflict.
+        // Features-derived metadata wraps in on top.
+        let mut chain: Vec<deacon_core::config::DevContainerConfig> = Vec::new();
+        chain.extend(image_metadata_entries.iter().cloned());
+        chain.push(base_config.clone());
+        chain.push(substituted_derived);
+        let merged = deacon_core::config::ConfigMerger::merge_configs(&chain);
         let merged_json = serde_json::to_value(&merged)?;
 
+        // Surface image-metadata entries in the plural-collected-arrays
+        // (entrypoints, onCreateCommands, …) too, ordered before features
+        // and base per upstream getDevcontainerMetadata precedence.
+        let mut combined_metadata_entries: Vec<serde_json::Map<String, serde_json::Value>> =
+            Vec::new();
+        for entry in image_metadata_entries {
+            let entry_json = serde_json::to_value(entry)?;
+            let collected = collect_entry_from_config_json(&entry_json);
+            if !collected.is_empty() {
+                combined_metadata_entries.push(collected);
+            }
+            if let Some(c) = entry_json.get("customizations") {
+                if let serde_json::Value::Object(map) = c {
+                    if !map.is_empty() {
+                        customizations_entries.insert(0, c.clone());
+                    }
+                }
+            }
+        }
+        combined_metadata_entries.extend(metadata_entries);
+
         debug!(
-            "Features-based merged configuration computed successfully ({} metadata entries, {} customizations entries)",
-            metadata_entries.len(),
+            "Features-based merged configuration computed successfully ({} image entries, {} feature/base entries, {} customizations entries)",
+            image_metadata_entries.len(),
+            combined_metadata_entries.len(),
             customizations_entries.len()
         );
-        let shaped = apply_upstream_merge_shape(merged_json, &metadata_entries);
+        let shaped = apply_upstream_merge_shape(merged_json, &combined_metadata_entries);
         Ok(apply_customizations_shape(shaped, &customizations_entries))
     } else {
-        // No container and no features: still apply the upstream output shape so that
-        // user-authored lifecycle commands surface as the plural arrays. Customizations
-        // from the base config (if any) collapse to a single-entry per-tool array.
+        // No container and no features. Image metadata (if any) still
+        // contributes its containerEnv / remoteUser / lifecycle entries —
+        // this is the most common path: `read-configuration` against a
+        // simple `image:`-only devcontainer.json after `up` has built or
+        // pulled the image. (#91)
         debug!(
-            "No metadata sources available; merged config equals base config (shape-normalized)"
+            "No container or features-based metadata; folding {} image-metadata entries into base config",
+            image_metadata_entries.len()
         );
-        let base_json = serde_json::to_value(base_config)?;
-        let base_entry = collect_entry_from_config_json(&base_json);
-        let entries = if base_entry.is_empty() {
-            Vec::new()
-        } else {
-            vec![base_entry]
-        };
-        let customizations_entries: Vec<serde_json::Value> = match &base_config.customizations {
-            serde_json::Value::Object(map) if !map.is_empty() => {
-                vec![base_config.customizations.clone()]
+        let mut chain: Vec<deacon_core::config::DevContainerConfig> = Vec::new();
+        chain.extend(image_metadata_entries.iter().cloned());
+        chain.push(base_config.clone());
+        let merged = deacon_core::config::ConfigMerger::merge_configs(&chain);
+        let merged_json = serde_json::to_value(&merged)?;
+
+        let mut entries: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
+        for entry in image_metadata_entries {
+            let entry_json = serde_json::to_value(entry)?;
+            let collected = collect_entry_from_config_json(&entry_json);
+            if !collected.is_empty() {
+                entries.push(collected);
             }
-            _ => Vec::new(),
-        };
-        let shaped = apply_upstream_merge_shape(base_json, &entries);
+        }
+        let base_entry = collect_entry_from_config_json(&merged_json);
+        if !base_entry.is_empty() {
+            entries.push(base_entry);
+        }
+
+        let mut customizations_entries: Vec<serde_json::Value> = Vec::new();
+        for entry in image_metadata_entries {
+            if let Some(c) = serde_json::to_value(entry)?.get("customizations") {
+                if let serde_json::Value::Object(map) = c {
+                    if !map.is_empty() {
+                        customizations_entries.push(c.clone());
+                    }
+                }
+            }
+        }
+        if let serde_json::Value::Object(map) = &base_config.customizations {
+            if !map.is_empty() {
+                customizations_entries.push(base_config.customizations.clone());
+            }
+        }
+
+        let shaped = apply_upstream_merge_shape(merged_json, &entries);
         Ok(apply_customizations_shape(shaped, &customizations_entries))
     }
 }
@@ -1151,12 +1256,73 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         None
     };
 
-    // Compute merged configuration if requested
-    // Per spec: mergedConfiguration = mergeConfiguration(base_config, imageMetadata)
-    // where imageMetadata comes from container OR features
+    // Compute merged configuration if requested.
+    //
+    // Per spec: mergedConfiguration = mergeConfiguration(base_config,
+    // imageMetadata). Image metadata may come from any of:
+    //
+    // - A running container's `devcontainer.metadata` label (container path)
+    // - Feature manifests (features-derived metadata path)
+    // - The `devcontainer.metadata` LABEL baked into the image referenced
+    //   by `config.image` (best-effort image inspect; #91). Without this
+    //   path, `read-configuration --include-merged-configuration` against
+    //   an image-based config without `--container-id` silently drops the
+    //   image's metadata entries — exactly the gap the spec flags.
     let merged_configuration = if args.include_merged_configuration {
         // We may need features for merged config computation even if not outputting them
         let features_for_merge = features_configuration_for_output.as_ref();
+
+        // Best-effort image-metadata fetch: only when (a) no container
+        // already provides the label, and (b) `config.image` is set. A
+        // missing image (not pulled, no daemon, unreadable label) leaves
+        // image_metadata_entries empty and the merge falls through to
+        // the existing branches — matches upstream's "best-effort"
+        // semantics for the metadata layer.
+        // Resolution order:
+        //   1. `config.image` (literal image-based devcontainer.json).
+        //   2. The image of the workspace's running container, found by
+        //      identity-label lookup. Covers `build.dockerfile` configs
+        //      where `config.image` is None — at read-config time we
+        //      don't know the built image tag, but we can find it via
+        //      the container that `up` created.
+        let image_metadata_entries: Vec<deacon_core::config::DevContainerConfig> =
+            if container_info.is_none() {
+                use deacon_core::docker::Docker;
+                let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
+                let image_ref: Option<String> = if let Some(image) = config.image.as_deref() {
+                    Some(image.to_string())
+                } else if let Ok(canonical_workspace) = workspace_folder.canonicalize() {
+                    // For `build.dockerfile` configs `config.image` is None at
+                    // read-config time. Find the workspace's container via the
+                    // spec-mandated `devcontainer.local_folder` label (#80) —
+                    // the workspaceHash/configHash pair drifts whenever `up`
+                    // mutates the config mid-flight (workspace_mount injection,
+                    // image-metadata merge, etc.), so read-config can never
+                    // reconstruct an identical hash. The path label is stable.
+                    let label_selector = format!(
+                        "devcontainer.source=deacon,devcontainer.local_folder={}",
+                        canonical_workspace.display()
+                    );
+                    match docker.list_containers(Some(&label_selector)).await {
+                        Ok(containers) if !containers.is_empty() => {
+                            match docker.inspect_container(&containers[0].id).await {
+                                Ok(Some(info)) => Some(info.image),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(image_ref) = image_ref {
+                    parse_image_metadata_entries(&docker, &image_ref).await
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
 
         Some(
             compute_merged_configuration(
@@ -1166,6 +1332,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                 features_for_merge,
                 secrets.as_ref(),
                 &fetcher,
+                &image_metadata_entries,
             )
             .await?,
         )
@@ -1866,6 +2033,7 @@ API_KEY=another-secret
             None,
             None,
             &fetcher,
+            &[],
         )
         .await
         .unwrap();
@@ -1916,6 +2084,7 @@ API_KEY=another-secret
             None,
             None,
             &fetcher,
+            &[],
         )
         .await
         .unwrap();
@@ -1973,6 +2142,7 @@ API_KEY=another-secret
             None,
             None,
             &fetcher,
+            &[],
         )
         .await
         .unwrap();
@@ -2019,9 +2189,10 @@ API_KEY=another-secret
         let fetcher =
             deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
 
-        let merged = compute_merged_configuration(&base_config, None, None, None, None, &fetcher)
-            .await
-            .unwrap();
+        let merged =
+            compute_merged_configuration(&base_config, None, None, None, None, &fetcher, &[])
+                .await
+                .unwrap();
 
         assert_eq!(
             merged.get("onCreateCommands"),
@@ -2086,6 +2257,7 @@ API_KEY=another-secret
             None,
             None,
             &fetcher,
+            &[],
         )
         .await
         .unwrap();
@@ -2159,6 +2331,7 @@ API_KEY=another-secret
             None,
             None,
             &fetcher,
+            &[],
         )
         .await
         .unwrap();
@@ -2193,9 +2366,10 @@ API_KEY=another-secret
         let fetcher =
             deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
 
-        let merged = compute_merged_configuration(&base_config, None, None, None, None, &fetcher)
-            .await
-            .unwrap();
+        let merged =
+            compute_merged_configuration(&base_config, None, None, None, None, &fetcher, &[])
+                .await
+                .unwrap();
 
         assert_eq!(
             merged.get("customizations"),
@@ -2217,9 +2391,10 @@ API_KEY=another-secret
         let fetcher =
             deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
 
-        let merged = compute_merged_configuration(&base_config, None, None, None, None, &fetcher)
-            .await
-            .unwrap();
+        let merged =
+            compute_merged_configuration(&base_config, None, None, None, None, &fetcher, &[])
+                .await
+                .unwrap();
 
         assert!(
             merged.get("customizations").is_none(),
@@ -2385,6 +2560,7 @@ API_KEY=another-secret
             None,
             None,
             &fetcher,
+            &[],
         )
         .await
         .unwrap();
@@ -2454,6 +2630,7 @@ API_KEY=another-secret
             None,
             None,
             &fetcher,
+            &[],
         )
         .await
         .unwrap();
