@@ -1389,9 +1389,15 @@ async fn apply_features_and_lockfile(
     let mut identity = ContainerIdentity::new(workspace_folder, &synth_config);
     identity.workspace_hash = format!("{}-build", identity.workspace_hash);
 
-    let feature_build = build_image_with_features(&synth_config, &identity, workspace_folder, None)
-        .await
-        .context("Failed to build feature-extended image from build output")?;
+    let feature_build = build_image_with_features(
+        &synth_config,
+        &identity,
+        workspace_folder,
+        config_path,
+        None,
+    )
+    .await
+    .context("Failed to build feature-extended image from build output")?;
 
     info!(
         feature_image = %feature_build.image_tag,
