@@ -636,28 +636,37 @@ mod update_remote_user_uid_default_tests {
         }
     }
 
+    /// Pure helper that mirrors the precedence chain in
+    /// `apply_user_mapping::UserMappingConfig::new(...,
+    /// config.update_remote_user_uid.unwrap_or(os_default))`. Extracted so
+    /// the test can exercise the chain without an `Option` literal —
+    /// clippy's `unnecessary_literal_unwrap` lint rejects
+    /// `Some(true).unwrap_or(...)` even when the literal is structural.
+    fn effective_update_uid(config_value: Option<bool>, os_default: bool) -> bool {
+        config_value.unwrap_or(os_default)
+    }
+
     #[test]
     fn config_value_wins_over_os_default() {
         let os_default_update_uid = cfg!(target_os = "linux");
 
-        // Mirrors the precedence in apply_user_mapping:
-        // config.update_remote_user_uid.unwrap_or(os_default_update_uid)
-        let explicit_off: Option<bool> = Some(false);
+        // Explicit `updateRemoteUserUID: false` must override the OS default.
         assert!(
-            !explicit_off.unwrap_or(os_default_update_uid),
+            !effective_update_uid(Some(false), os_default_update_uid),
             "explicit `updateRemoteUserUID: false` must override the OS default (#71)"
         );
 
-        let explicit_on: Option<bool> = Some(true);
+        // Explicit `updateRemoteUserUID: true` must override the OS default
+        // (matters on non-Linux platforms where the default is false).
         assert!(
-            explicit_on.unwrap_or(os_default_update_uid),
+            effective_update_uid(Some(true), os_default_update_uid),
             "explicit `updateRemoteUserUID: true` must override the OS default (#71)"
         );
 
-        // None falls through to the OS default — this is the bug #71 fixes.
-        let absent: Option<bool> = None;
+        // None falls through to the OS default — this is the bug #71 fixes:
+        // deacon previously used `unwrap_or(false)` here.
         assert_eq!(
-            absent.unwrap_or(os_default_update_uid),
+            effective_update_uid(None, os_default_update_uid),
             os_default_update_uid,
             "absent updateRemoteUserUID must use the OS default, not hard-coded false (#71)"
         );
