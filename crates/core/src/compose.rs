@@ -47,6 +47,13 @@ pub struct ComposeProject {
     /// image, so the subsequent `docker compose up` runs the extended image instead of
     /// the original `image:` declared in the compose file.
     pub service_image_override: Option<String>,
+    /// Deacon-applied container labels — emitted into the injection
+    /// overlay under each service's `labels:` block so every container
+    /// in the project (primary + runServices) carries the spec-mandated
+    /// `devcontainer.local_folder`, `devcontainer.config_file`, etc.
+    /// Per #100. Populated by the up flow from
+    /// `ContainerIdentity::labels()`.
+    pub deacon_labels: IndexMap<String, String>,
 }
 
 /// Mount specification for Docker Compose volumes
@@ -800,6 +807,7 @@ impl ComposeManager {
             external_volumes: Vec::new(), // Will be populated via populate_external_volumes()
             override_command: config.override_command,
             service_image_override: None,
+            deacon_labels: IndexMap::new(), // Populated by the up flow from ContainerIdentity (#100)
         })
     }
 
@@ -1226,6 +1234,7 @@ impl ComposeProject {
             && self.additional_env.is_empty()
             && !override_cmd
             && self.service_image_override.is_none()
+            && self.deacon_labels.is_empty()
         {
             return None;
         }
@@ -1281,11 +1290,33 @@ impl ComposeProject {
             }
         }
 
+        // Per #100: emit deacon labels on the primary service plus every
+        // run_services entry, so external tooling (VS Code Dev
+        // Containers reconnect, `docker ps --filter`, `deacon exec
+        // --id-label`) finds compose-managed containers via the
+        // standard `devcontainer.*` keys.
+        if !self.deacon_labels.is_empty() {
+            yaml.push_str("    labels:\n");
+            for (key, value) in &self.deacon_labels {
+                let escaped = escape_yaml_value(value);
+                yaml.push_str(&format!("      {}: {}\n", key, escaped));
+            }
+            for svc in &self.run_services {
+                yaml.push_str(&format!("  {}:\n", svc));
+                yaml.push_str("    labels:\n");
+                for (key, value) in &self.deacon_labels {
+                    let escaped = escape_yaml_value(value);
+                    yaml.push_str(&format!("      {}: {}\n", key, escaped));
+                }
+            }
+        }
+
         debug!(
-            "Generated compose injection override for service '{}': {} env vars, {} mounts, override_command={}",
+            "Generated compose injection override for service '{}': {} env vars, {} mounts, {} labels, override_command={}",
             self.service,
             self.additional_env.len(),
             self.additional_mounts.len(),
+            self.deacon_labels.len(),
             override_cmd,
         );
 
@@ -1610,6 +1641,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let services = project.get_all_services();
@@ -1687,6 +1719,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let all_services = project.get_all_services();
@@ -1713,6 +1746,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let all_services = project.get_all_services();
@@ -1827,6 +1861,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         // No mounts or env, should return None
@@ -1852,6 +1887,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1892,6 +1928,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1926,6 +1963,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1958,6 +1996,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -1990,6 +2029,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -2025,6 +2065,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: None,
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let override_yaml = project
@@ -2053,6 +2094,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(false),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         assert!(project.generate_injection_override().is_none());
@@ -2077,6 +2119,7 @@ mod tests {
             external_volumes: Vec::new(),
             override_command: Some(true),
             service_image_override: None,
+            deacon_labels: IndexMap::new(),
         };
 
         let override_yaml = project.generate_injection_override().unwrap();
@@ -2486,6 +2529,7 @@ mod tests {
             external_volumes: vec![],
             override_command: Some(false),
             service_image_override: Some("deacon-features:abc123".into()),
+            deacon_labels: IndexMap::new(),
         };
         let yaml = project
             .generate_injection_override()
@@ -2518,6 +2562,7 @@ mod tests {
             external_volumes: vec![],
             override_command: Some(false),
             service_image_override: Some("img:tag".into()),
+            deacon_labels: IndexMap::new(),
         };
         assert!(project.generate_injection_override().is_some());
     }
@@ -2539,6 +2584,7 @@ mod tests {
             external_volumes: vec![],
             override_command: Some(false),
             service_image_override: Some(r#"weird"tag"#.into()),
+            deacon_labels: IndexMap::new(),
         };
         let yaml = project.generate_injection_override().unwrap();
         assert!(yaml.contains(r#"image: "weird\"tag""#));
