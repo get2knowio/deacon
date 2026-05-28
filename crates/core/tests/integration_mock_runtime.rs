@@ -72,6 +72,7 @@ async fn test_exec_with_mock_docker_success() -> Result<()> {
         interactive: true,
         detach: false,
         silent: false,
+        stdout_to_stderr: false,
         terminal_size: None,
     };
 
@@ -128,6 +129,7 @@ async fn test_exec_with_mock_docker_failure() -> Result<()> {
         interactive: false,
         detach: false,
         silent: false,
+        stdout_to_stderr: false,
         terminal_size: None,
     };
 
@@ -173,6 +175,7 @@ async fn test_exec_with_tty_flag_capture() -> Result<()> {
         interactive: true,
         detach: false,
         silent: false,
+        stdout_to_stderr: false,
         terminal_size: None,
     };
 
@@ -197,6 +200,7 @@ async fn test_exec_with_tty_flag_capture() -> Result<()> {
         interactive: false,
         detach: false,
         silent: false,
+        stdout_to_stderr: false,
         terminal_size: None,
     };
 
@@ -588,6 +592,7 @@ async fn test_docker_daemon_unavailable_error() -> Result<()> {
         interactive: false,
         detach: false,
         silent: false,
+        stdout_to_stderr: false,
         terminal_size: None,
     };
 

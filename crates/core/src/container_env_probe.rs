@@ -416,6 +416,7 @@ impl ContainerEnvironmentProber {
             interactive: false,
             detach: false,
             silent: true, // Suppress output for shell detection probes
+            stdout_to_stderr: false,
             terminal_size: None,
         };
 
@@ -483,6 +484,7 @@ impl ContainerEnvironmentProber {
             interactive: false,
             detach: false,
             silent: true, // Suppress output for environment probes
+            stdout_to_stderr: false,
             terminal_size: None,
         };
 
@@ -734,6 +736,7 @@ where
                 interactive: false,
                 detach: false,
                 silent: true,
+                stdout_to_stderr: false,
                 terminal_size: None,
             },
         )

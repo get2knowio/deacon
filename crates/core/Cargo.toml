@@ -21,7 +21,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 jsonc-parser = { version = "0.32", default-features = false, features = ["preserve_order"] }
 regex = "1.0"
-tokio = { version = "1.0", features = ["rt", "process", "macros", "io-util", "fs"] }
+tokio = { version = "1.0", features = ["rt", "process", "macros", "io-util", "io-std", "fs"] }
 once_cell.workspace = true
 # Use rustls for a pure-Rust TLS stack to simplify cross-compilation (musl, aarch64) and avoid OpenSSL toolchain requirements.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

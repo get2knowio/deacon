@@ -540,6 +540,7 @@ impl<T: Docker> DockerUserMapper<T> {
             interactive: false,
             detach: false,
             silent: true,
+            stdout_to_stderr: false,
             terminal_size: None,
         };
         self.docker.exec(container_id, command, config).await
@@ -976,6 +977,7 @@ impl<T: Docker + Send + Sync> UserMapper for DockerUserMapper<T> {
             interactive: false,
             detach: false,
             silent: true,
+            stdout_to_stderr: false,
             terminal_size: None,
         };
         let result = self.docker.exec(container_id, command, config).await?;

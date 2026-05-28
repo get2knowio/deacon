@@ -450,6 +450,11 @@ pub struct ExecConfig {
     pub detach: bool,
     /// Whether to suppress stdout/stderr (for internal probe commands)
     pub silent: bool,
+    /// Route the child's stdout into deacon's stderr instead of stdout. Used
+    /// for lifecycle commands during `up` so the result JSON stays the sole
+    /// stdout content (per the streams contract in CLAUDE.md). Ignored when
+    /// `silent` is true (no inheritance in that path). #113.
+    pub stdout_to_stderr: bool,
     /// Optional terminal size hint when allocating a PTY
     pub terminal_size: Option<TerminalSize>,
 }
@@ -1514,8 +1519,13 @@ impl Docker for CliRuntime {
                 stderr,
             })
         } else {
-            // Inherit stdio for real-time display (user-facing commands)
-            // Output cannot be captured in this mode, but user sees it immediately
+            // Inherit stdio for real-time display (user-facing commands).
+            // For lifecycle commands during `up` (stdout_to_stderr=true) the
+            // child's stdout is piped and forwarded to deacon's stderr so the
+            // final result JSON stays the sole stdout content. #113.
+            if config.stdout_to_stderr {
+                cmd.stdout(std::process::Stdio::piped());
+            }
             let mut child = cmd.spawn().map_err(|e| {
                 // Detect PTY-specific errors when PTY was requested
                 if config.tty {
@@ -1531,6 +1541,18 @@ impl Docker for CliRuntime {
                 }
                 DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e))
             })?;
+
+            // Forward child stdout to deacon's stderr when stdout_to_stderr
+            // is set. Lifecycle output remains live-streamed, but it lands on
+            // stderr so the result JSON on stdout stays single-document. #113.
+            if config.stdout_to_stderr {
+                if let Some(mut stdout) = child.stdout.take() {
+                    tokio::spawn(async move {
+                        let mut stderr = tokio::io::stderr();
+                        let _ = tokio::io::copy(&mut stdout, &mut stderr).await;
+                    });
+                }
+            }
 
             let exit_status = child.wait().await.map_err(|e| {
                 // Detect PTY-specific errors when PTY was requested
@@ -3073,6 +3095,7 @@ mod tests {
             interactive: true,
             detach: false,
             silent: false,
+            stdout_to_stderr: false,
             terminal_size: None,
         };
 
@@ -3125,6 +3148,7 @@ mod tests {
             interactive: false,
             detach: false,
             silent: false,
+            stdout_to_stderr: false,
             terminal_size: None,
         };
 

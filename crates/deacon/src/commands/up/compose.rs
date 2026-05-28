@@ -557,6 +557,7 @@ pub(crate) async fn execute_compose_post_create(
                         interactive: false,
                         detach: false,
                         silent: false,
+                        stdout_to_stderr: true,
                         terminal_size: None,
                     },
                 )

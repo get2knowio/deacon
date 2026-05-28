@@ -137,6 +137,7 @@ pub fn build_exec_config(
         interactive: true,
         detach: false,
         silent: false,
+        stdout_to_stderr: false,
         terminal_size,
     }
 }
