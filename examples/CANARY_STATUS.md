@@ -52,7 +52,7 @@ listed.
 | build/secrets-and-ssh | ✅ pass | 2026-05-29 | ssh needs `SSH_AUTH_SOCK` (allow-fail) |
 | build/unwritable-output | ✅ pass | 2026-05-29 | asserts error |
 | compose/multiple-compose-files | ✅ pass | 2026-05-29 | |
-| compose/multiservice-down | ✅ pass | 2026-05-29 | compose `down`/`stopCompose` + `--remove`/`--volumes`; needs the `stop_project` fix (#153) |
+| compose/multiservice-down | ✅ pass | 2026-05-29 `f29a1a3` | compose `down`/`stopCompose` + `--remove`/`--volumes`; needs the `stop_project` fix (#153). `runServices` dropped — unset now brings up ALL services (#156, PR #157) |
 | compose/run-services | ✅ pass | 2026-05-29 | `runServices` selectivity (app+worker up, idle down) (new) |
 | configuration/extends-chain-cycle | ✅ pass | 2026-05-29 | asserts cycle errors |
 | configuration/secrets-declarative | ✅ pass | 2026-05-29 | |
@@ -72,7 +72,7 @@ listed.
 | exec/user-env-probe-modes | ✅ pass | 2026-05-29 | camelCase `--default-user-env-probe` values (#148); git-root flag (#149) |
 | exec/workspace-folder-discovery | ✅ pass | 2026-05-29 | git-root mount flag (#149) |
 | features/contributed-options | ✅ pass | 2026-05-29 | feature-contributed mount/entrypoint/init/capAdd reach the container (new) |
-| features/dependency-ordering | ✅ pass | 2026-05-29 | auto install order via `installsAfter`+`dependsOn` (no override) (new) |
+| features/dependency-ordering | ✅ pass | 2026-05-29 `f29a1a3` | auto install order via `installsAfter`+`dependsOn` (no override); now uses local-path `dependsOn` form `./feature-lib` (#155, PR #158) |
 | features/feature-contributed-lifecycle | ✅ pass | 2026-05-29 | |
 | features/feature-env-injection | ✅ pass | 2026-05-29 | |
 | features/local-feature | ✅ pass | 2026-05-29 | local `./` feature install + option override (new) |
