@@ -20,3 +20,8 @@ cd "$SCRIPT_DIR"
 
 echo "== Compose service build with feature (README: Usage) ==" >&2
 run "$DEACON_BIN" build --workspace-folder "$SCRIPT_DIR" --image-name "$IMAGE_TAG" --output-format json "$@"
+
+echo "== Verify feature artifact in the named image (README: Verify) ==" >&2
+# The --image-name must resolve to the feature-extended image, so /hello.txt
+# (written by the local feature's install.sh) must be present.
+run docker run --rm "$IMAGE_TAG" cat /hello.txt
