@@ -49,7 +49,7 @@ Output:
   "remoteWorkspaceFolder": "/workspace",
   "configuration": {
     "name": "Configuration Output Example",
-    "image": "alpine:3.18",
+    "image": "debian:bookworm-slim",
     "remoteUser": "root",
     "workspaceFolder": "/workspace",
     "remoteEnv": {

@@ -20,14 +20,17 @@ This example demonstrates all available lifecycle hooks in the Dev Container spe
 
 ### 2. updateContentCommand
 **When**: Runs after onCreate and on every subsequent container start
-**Format**: Array of commands (runs sequentially)
+**Format**: Array (exec/argv form — the array is a single command with
+arguments and is **not** run through a shell). To chain multiple shell
+commands, invoke a shell explicitly (`["bash", "-c", "… && …"]`) or use the
+string form.
 **Use Case**: Update cached content, refresh dependencies
 
 ```json
 "updateContentCommand": [
-  "echo 'Updating content...'",
-  "mkdir -p /tmp/updates",
-  "date > /tmp/updates/last-update.txt"
+  "bash",
+  "-c",
+  "echo 'Updating content...' && mkdir -p /tmp/updates && date > /tmp/updates/last-update.txt"
 ]
 ```
 
@@ -54,13 +57,16 @@ This example demonstrates all available lifecycle hooks in the Dev Container spe
 
 ### 5. postAttachCommand
 **When**: Runs every time a tool attaches to the container
-**Format**: Array of commands (runs sequentially)
+**Format**: Array (exec/argv form — a single command with arguments, not run
+through a shell; use `["bash", "-c", "…"]` for shell features such as
+`$(whoami)`)
 **Use Case**: Display welcome messages, show environment info
 
 ```json
 "postAttachCommand": [
-  "echo 'Welcome!'",
-  "echo 'User: $(whoami)'"
+  "bash",
+  "-c",
+  "echo 'Welcome!' && echo \"User: $(whoami)\""
 ]
 ```
 
@@ -68,11 +74,11 @@ This example demonstrates all available lifecycle hooks in the Dev Container spe
 
 ```
 Container Creation (first time):
-  1. onCreateCommand    (parallel execution)
-  2. updateContentCommand  (sequential execution)
-  3. postCreateCommand
-  4. postStartCommand   (parallel execution)
-  5. postAttachCommand  (sequential execution)
+  1. onCreateCommand    (object form → named commands run in parallel)
+  2. updateContentCommand  (array → single exec/argv command)
+  3. postCreateCommand     (string → run in a shell)
+  4. postStartCommand   (object form → named commands run in parallel)
+  5. postAttachCommand  (array → single exec/argv command)
 
 Container Restart (subsequent starts):
   1. updateContentCommand
@@ -142,7 +148,7 @@ docker exec <container-id> curl --version
 {
   "outcome": "success",
   "containerId": "<container-id>",
-  "remoteUser": "devuser",
+  "remoteUser": "root",
   "remoteWorkspaceFolder": "/workspace"
 }
 ```
