@@ -409,6 +409,12 @@ impl ComposeCommand {
         self.execute(&["down"]).await
     }
 
+    /// Stop containers without removing them (`docker compose stop`).
+    #[instrument(skip(self))]
+    pub async fn stop(&self) -> Result<String> {
+        self.execute(&["stop"]).await
+    }
+
     /// Stop and remove containers with additional flags
     #[instrument(skip(self))]
     pub async fn down_with_flags(&self, flags: &[&str]) -> Result<String> {
@@ -961,7 +967,11 @@ impl ComposeManager {
 
         debug!("Stopping compose project {}", project.name);
 
-        command.down().await?;
+        // `docker compose stop` — stop the services but keep the containers so
+        // `down` (the default `stopCompose` action, without `--remove`) mirrors
+        // single-container `down`: stopped-but-present, resumable on next `up`.
+        // Removal is reserved for `down --remove` (-> down_project).
+        command.stop().await?;
 
         debug!("Compose project {} stopped successfully", project.name);
         Ok(())

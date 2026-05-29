@@ -423,3 +423,137 @@ RUN echo "app service" > /tmp/app.txt
         "Build output should indicate compose service build"
     );
 }
+
+/// Regression: `down` on a Compose project with the default `stopCompose`
+/// action (no `--remove`) must STOP the services, not remove them — mirroring
+/// single-container `down`. Previously `stop_project` called
+/// `docker compose down`, deleting the containers.
+#[test]
+fn test_compose_down_stops_but_keeps_containers() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_compose_down_stops_but_keeps_containers: Docker not available");
+        return;
+    }
+    let temp_dir = TempDir::new().unwrap();
+
+    // Single service, labeled so we can find it without the project name.
+    let compose_config = r#"services:
+  app:
+    image: alpine:3.19
+    command: sleep infinity
+    labels:
+      - "deacon.test=compose-stop"
+"#;
+    fs::write(temp_dir.path().join("docker-compose.yml"), compose_config).unwrap();
+    let devcontainer = r#"{
+  "name": "Compose Stop Test",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/",
+  "shutdownAction": "stopCompose",
+  "overrideCommand": false
+}"#;
+    fs::write(temp_dir.path().join(".devcontainer.json"), devcontainer).unwrap();
+
+    let count = |status: &str| -> usize {
+        let mut args = vec![
+            "ps".to_string(),
+            "-a".to_string(),
+            "--filter".to_string(),
+            "label=deacon.test=compose-stop".to_string(),
+            "-q".to_string(),
+        ];
+        if !status.is_empty() {
+            args.push("--filter".to_string());
+            args.push(format!("status={}", status));
+        }
+        let out = std::process::Command::new("docker")
+            .args(&args)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    };
+    let cleanup = || {
+        let ids = std::process::Command::new("docker")
+            .args([
+                "ps",
+                "-a",
+                "--filter",
+                "label=deacon.test=compose-stop",
+                "-q",
+            ])
+            .output()
+            .unwrap();
+        for id in String::from_utf8_lossy(&ids.stdout).split_whitespace() {
+            let _ = std::process::Command::new("docker")
+                .args(["rm", "-f", id])
+                .output();
+        }
+    };
+
+    cleanup();
+
+    // deacon's workspace-state cache lives under `std::env::temp_dir()` (shared
+    // across processes). Isolate this test's state via a per-test TMPDIR so a
+    // concurrent docker test can't clobber the shared state index and make our
+    // `down` lose the saved compose project. `up` and `down` must share it.
+    let state_home = temp_dir.path().join("state-home");
+    fs::create_dir_all(&state_home).unwrap();
+
+    let up = Command::cargo_bin("deacon")
+        .unwrap()
+        .env("TMPDIR", &state_home)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .arg("--remove-existing-container")
+        .output()
+        .unwrap();
+    assert!(
+        up.status.success(),
+        "compose up failed: {}",
+        String::from_utf8_lossy(&up.stderr)
+    );
+    assert_eq!(count("running"), 1, "service should be running after up");
+
+    let down = Command::cargo_bin("deacon")
+        .unwrap()
+        .env("TMPDIR", &state_home)
+        .arg("down")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+    let down_ok = down.status.success();
+
+    // `down` blocks until `docker compose stop` returns, but under heavy
+    // parallel docker load the container's transition to "exited" can lag the
+    // CLI return slightly — poll briefly for it to settle.
+    let mut running = count("running");
+    for _ in 0..20 {
+        if running == 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        running = count("running");
+    }
+    let present = count("");
+    cleanup();
+
+    assert!(
+        down_ok,
+        "compose down failed: {}",
+        String::from_utf8_lossy(&down.stderr)
+    );
+    assert_eq!(
+        present, 1,
+        "stopCompose down (no --remove) must keep the container present"
+    );
+    assert_eq!(
+        running, 0,
+        "stopCompose down (no --remove) must stop the container"
+    );
+}
