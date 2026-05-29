@@ -637,30 +637,18 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
 
     // PR-4c: feature installation during build.
     //
-    // Dockerfile- and image-reference-based builds support features via a
-    // post-build layering pass (we run the base build, then layer a
-    // feature-install stage on top of the resulting image using
-    // `build_image_with_features` — the same helper the `up` command uses,
-    // which also produces a lockfile). Image-reference builds already route
-    // through `execute_docker_build` (synthetic `FROM <image>` Dockerfile),
-    // which applies the deterministic `deacon-build:<hash>` tag, so the same
-    // post-build pass at the end of this function handles them transparently.
-    //
-    // Compose builds still fail fast: they're a workspace-of-services and
-    // layering features onto a targeted service's image needs the compose
-    // integration path (the `up` compose flow); that work is tracked separately.
+    // Feature installation is supported for all configuration shapes:
+    // - Dockerfile and image-reference builds layer features via a post-build
+    //   pass (run the base build → `deacon-build:<hash>` tagged image →
+    //   `build_image_with_features` FROMs that tag). See below.
+    // - Compose builds resolve the target service's shape and build a
+    //   feature-extended image via `execute_compose_build_with_features`
+    //   (the same `resolve_compose_feature_image` helper the `up` flow uses).
     let features_present = !config.features.is_null()
         && config
             .features
             .as_object()
             .is_some_and(|obj| !obj.is_empty());
-    if features_present && config.uses_compose() {
-        return Err(anyhow!(
-            "Feature installation during build is not yet supported for Docker Compose \
-             configurations. Use a Dockerfile- or image-based build, or run \
-             'deacon up' which supports all configurations."
-        ));
-    }
 
     // Check cache if not forced (skip cache if pushing or exporting).
     // When features are present we deliberately skip the cache check: the
@@ -696,7 +684,21 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
 
     // Dispatch to appropriate build function based on configuration type
     let result = if config.uses_compose() {
-        execute_compose_build(&config, &args, &workspace_folder, &labels, &config_hash).await
+        if features_present {
+            // Compose + features: build the feature-extended image for the target
+            // service directly (shape-aware), tag it, and write the lockfile.
+            execute_compose_build_with_features(
+                &config,
+                &args,
+                &workspace_folder,
+                &config_path,
+                &labels,
+                &config_hash,
+            )
+            .await
+        } else {
+            execute_compose_build(&config, &args, &workspace_folder, &labels, &config_hash).await
+        }
     } else if config.image.is_some() {
         execute_image_reference_build(&config, &args, &workspace_folder, &labels).await
     } else {
@@ -738,7 +740,11 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     // feature install stages on top, then write the lockfile next to the
     // config file. This matches `up`'s feature flow (`build_image_with_features`)
     // which also returns a `Lockfile` ready for `write_lockfile`.
-    let (image_id, feature_lockfile) = if features_present {
+    // Compose + features is fully handled in the dispatch above
+    // (`execute_compose_build_with_features` already built, tagged, and wrote the
+    // lockfile), so only the Dockerfile / image-reference shapes need this
+    // generic post-build layering pass.
+    let (image_id, feature_lockfile) = if features_present && !config.uses_compose() {
         // Layer features on top of the just-built image. We pass a real tag
         // (the deterministic `deacon-build:<hash>` tag, always applied by
         // `execute_docker_build`) rather than the bare `sha256:...` image ID:
@@ -1309,6 +1315,104 @@ async fn execute_compose_build(
         image_id: format!("{}-{}", project.name, service),
         tags: image_names,
         build_duration,
+        metadata,
+        config_hash: config_hash.to_string(),
+    })
+}
+
+/// Execute a Compose build that also installs declared features.
+///
+/// Unlike `execute_compose_build` (a plain `docker compose build`), this resolves
+/// the target service's shape (`image:` vs `build:`) and builds a
+/// feature-extended image via the same helper `up` uses
+/// (`resolve_compose_feature_image`), then tags that image with the
+/// deterministic `deacon-build:<hash>` tag plus any `--image-name`s and writes
+/// the feature lockfile next to the config.
+#[instrument(skip(config, args, workspace_folder, config_path, labels))]
+async fn execute_compose_build_with_features(
+    config: &DevContainerConfig,
+    args: &BuildArgs,
+    workspace_folder: &Path,
+    config_path: &Path,
+    labels: &[(String, String)],
+    config_hash: &str,
+) -> Result<BuildResult> {
+    use crate::commands::up::compose::resolve_compose_feature_image;
+    use deacon_core::compose::ComposeManager;
+    use deacon_core::container::ContainerIdentity;
+    use deacon_core::lockfile::{get_lockfile_path, write_lockfile};
+
+    let service = config
+        .service
+        .as_ref()
+        .ok_or_else(|| anyhow!("Docker Compose configuration must specify a service"))?;
+
+    let compose_manager = ComposeManager::new();
+    let project = compose_manager.create_project(config, workspace_folder)?;
+    if !compose_manager
+        .validate_service_exists(&project, service)
+        .await?
+    {
+        return Err(anyhow!(
+            "Service '{}' not found in Docker Compose configuration",
+            service
+        ));
+    }
+
+    // Namespace the produced image by workspace (+ `-build`) so it does not
+    // collide with `up`'s compose feature image on the same host.
+    let identity = ContainerIdentity::new(workspace_folder, config);
+    let workspace_hash = format!("{}-build", identity.workspace_hash);
+
+    let feature_build = resolve_compose_feature_image(
+        config,
+        &compose_manager,
+        &project,
+        workspace_folder,
+        config_path,
+        &workspace_hash,
+    )
+    .await?
+    .ok_or_else(|| anyhow!("Compose feature build produced no image (no features declared?)"))?;
+
+    // Tag the feature-extended image with the deterministic tag + user image names
+    // so `--image-name` resolves to the image with features installed.
+    let deterministic_tag = format!("deacon-build:{}", &config_hash[..12.min(config_hash.len())]);
+    let mut all_tags = vec![deterministic_tag];
+    all_tags.extend(args.image_names.clone());
+    for tag in &all_tags {
+        retag_image(&feature_build.image_tag, tag).await?;
+    }
+
+    // Write the feature lockfile next to the config (best-effort on read-only FS).
+    let lockfile_path = get_lockfile_path(config_path);
+    match write_lockfile(&lockfile_path, &feature_build.lockfile, true).await {
+        Ok(()) => debug!("Wrote feature lockfile to '{}'", lockfile_path.display()),
+        Err(e) => {
+            let e = anyhow::Error::from(e);
+            if is_readonly_filesystem_error(&e) {
+                warn!(
+                    path = %lockfile_path.display(),
+                    error = %e,
+                    "Lockfile write skipped (read-only workspace); continuing"
+                );
+            } else {
+                return Err(e).with_context(|| {
+                    format!("Failed to write lockfile to '{}'", lockfile_path.display())
+                });
+            }
+        }
+    }
+
+    let mut metadata = HashMap::new();
+    for (key, value) in labels {
+        metadata.insert(key.clone(), value.clone());
+    }
+
+    Ok(BuildResult {
+        image_id: feature_build.image_tag,
+        tags: all_tags,
+        build_duration: 0.0,
         metadata,
         config_hash: config_hash.to_string(),
     })

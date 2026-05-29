@@ -292,3 +292,110 @@ fn compose_features_build_shape_installs_feature() {
         String::from_utf8_lossy(&feature_exec.stderr)
     );
 }
+
+/// `deacon build` on a compose config with features must produce a
+/// feature-extended image for the target service and tag it with
+/// `--image-name`. Regression guard for `execute_compose_build_with_features`.
+///
+/// Uses a local feature (no OCI pull) writing a deterministic marker; asserts
+/// the named image contains it (i.e. `--image-name` resolves to the
+/// feature-extended image, not the bare base).
+#[test]
+fn build_compose_with_features_tags_final_image() {
+    if !is_docker_available() {
+        eprintln!("Skipping build_compose_with_features_tags_final_image: Docker not available");
+        return;
+    }
+
+    let temp_dir = TempDir::new().expect("tempdir");
+    let workspace = temp_dir.path();
+
+    // build-shape compose service on a bash-capable base.
+    fs::write(
+        workspace.join("Dockerfile"),
+        "FROM debian:bookworm-slim\nRUN echo base > /base.txt\nCMD [\"sleep\", \"infinity\"]\n",
+    )
+    .expect("write Dockerfile");
+    fs::write(
+        workspace.join("docker-compose.yml"),
+        "services:\n  app:\n    build:\n      context: .\n      dockerfile: Dockerfile\n    command: [\"sleep\", \"infinity\"]\n",
+    )
+    .expect("write compose");
+
+    let dc_dir = workspace.join(".devcontainer");
+    fs::create_dir_all(&dc_dir).expect("create .devcontainer");
+    // Local feature (resolved relative to the config dir) writing a marker.
+    let feat = dc_dir.join("features/marker");
+    fs::create_dir_all(&feat).expect("create feature dir");
+    fs::write(
+        feat.join("devcontainer-feature.json"),
+        r#"{ "id": "marker", "version": "1.0.0", "name": "Marker" }"#,
+    )
+    .expect("write feature json");
+    fs::write(
+        feat.join("install.sh"),
+        "#!/usr/bin/env bash\nset -e\necho installed > /compose-feature-marker.txt\n",
+    )
+    .expect("write install.sh");
+    fs::write(
+        dc_dir.join("devcontainer.json"),
+        r#"{
+  "name": "build-compose-features",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "remoteUser": "root",
+  "features": { "./features/marker": {} }
+}"#,
+    )
+    .expect("write devcontainer.json");
+
+    let image_tag = "deacon-test/compose-features:latest";
+    let out = Command::cargo_bin("deacon")
+        .expect("deacon binary")
+        .current_dir(workspace)
+        .args([
+            "build",
+            "--workspace-folder",
+            workspace.to_str().unwrap(),
+            "--image-name",
+            image_tag,
+            "--output-format",
+            "json",
+        ])
+        .env("DEACON_LOG", "warn")
+        .output()
+        .expect("spawn deacon build");
+
+    if !out.status.success() {
+        // Docker unavailable / not permitted is the only acceptable failure.
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("Docker") || stderr.contains("permission denied"),
+            "deacon build (compose+features) failed unexpectedly: {}",
+            stderr
+        );
+        return;
+    }
+
+    let run = StdCommand::new("docker")
+        .args([
+            "run",
+            "--rm",
+            image_tag,
+            "cat",
+            "/compose-feature-marker.txt",
+        ])
+        .output()
+        .expect("docker run");
+    let _ = StdCommand::new("docker")
+        .args(["rmi", "-f", image_tag])
+        .output();
+
+    assert!(
+        run.status.success() && String::from_utf8_lossy(&run.stdout).contains("installed"),
+        "--image-name should resolve to the feature-extended compose image; \
+         stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+}

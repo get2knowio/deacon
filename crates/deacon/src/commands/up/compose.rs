@@ -598,6 +598,40 @@ async fn install_features_for_compose(
     config_path: &Path,
     workspace_hash: &str,
 ) -> Result<Option<FeatureBuildOutput>> {
+    let output = match resolve_compose_feature_image(
+        config,
+        compose_manager,
+        project,
+        workspace_folder,
+        config_path,
+        workspace_hash,
+    )
+    .await?
+    {
+        Some(o) => o,
+        None => return Ok(None),
+    };
+
+    // `up` rewrites the target service's `image:` line to the extended tag so
+    // the container runs with features installed.
+    project.service_image_override = Some(output.image_tag.clone());
+    Ok(Some(output))
+}
+
+/// Resolve (and build) the feature-extended image for a compose service, without
+/// mutating the project. Shared by `up` (which then sets
+/// `service_image_override` to run the extended image) and `build` (which tags
+/// the produced image for the user and writes the lockfile). Returns `None` when
+/// the config declares no features.
+#[instrument(skip(config, compose_manager, project, workspace_folder))]
+pub(crate) async fn resolve_compose_feature_image(
+    config: &DevContainerConfig,
+    compose_manager: &ComposeManager,
+    project: &ComposeProject,
+    workspace_folder: &Path,
+    config_path: &Path,
+    workspace_hash: &str,
+) -> Result<Option<FeatureBuildOutput>> {
     // Nothing to install when features is missing or an empty object.
     let features_obj = match config.features.as_object() {
         Some(o) if !o.is_empty() => o,
@@ -755,10 +789,9 @@ async fn install_features_for_compose(
         service = %project.service,
         extended_image = %output.image_tag,
         feature_count = output.resolved_features.len(),
-        "Feature-extended image ready; rewriting compose service image"
+        "Feature-extended image ready"
     );
 
-    project.service_image_override = Some(output.image_tag.clone());
     Ok(Some(output))
 }
 

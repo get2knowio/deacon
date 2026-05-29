@@ -7,9 +7,8 @@ use crate::commands::shared::{load_config, ConfigLoadArgs, ConfigLoadResult};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle_with_progress_callback, AggregatedLifecycleCommand,
+    aggregate_lifecycle_commands, execute_container_lifecycle_with_progress_callback,
     ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
-    LifecycleCommandSource, LifecycleCommandValue,
 };
 use deacon_core::lifecycle::{should_queue_phase_for_wait_for, wait_for_phase, LifecyclePhase};
 use deacon_core::variable::SubstitutionContext;
@@ -164,35 +163,56 @@ async fn execute_lifecycle_commands(
         config_hash: None,
     };
 
-    // Build lifecycle commands from configuration using typed parser
+    // Resolve declared features (fail-fast) so feature-contributed lifecycle
+    // commands are aggregated alongside the config's, matching `up`. Local
+    // feature paths (`./`, `../`, `/abs`) resolve relative to the config's
+    // directory. If a declared feature cannot be resolved (missing local path,
+    // OCI fetch error, dependency cycle), we propagate the error rather than
+    // silently running a partial set of hooks.
+    let config_dir = if let Some(cfg) = args.config_path.as_deref() {
+        if cfg.is_dir() {
+            cfg.to_path_buf()
+        } else {
+            cfg.parent().unwrap_or(workspace_folder).to_path_buf()
+        }
+    } else {
+        let dc = workspace_folder.join(".devcontainer");
+        if dc.is_dir() {
+            dc
+        } else {
+            workspace_folder.to_path_buf()
+        }
+    };
+    let fetcher =
+        deacon_core::oci::default_fetcher().context("Failed to initialize OCI feature fetcher")?;
+    let resolved_features = crate::commands::shared::feature_resolver::resolve_features_ordered(
+        config,
+        &config_dir,
+        &fetcher,
+    )
+    .await
+    .context("Failed to resolve features for lifecycle command aggregation")?;
+    if !resolved_features.is_empty() {
+        debug!(
+            feature_count = resolved_features.len(),
+            "Aggregating feature-contributed lifecycle commands"
+        );
+    }
+
+    // Build lifecycle commands: feature-contributed commands (in install order)
+    // first, then the config's command, per `aggregate_lifecycle_commands` —
+    // identical to the `up` flow.
     let mut commands = ContainerLifecycleCommands::new();
 
-    // Helper to parse a JSON value into a LifecycleCommandList
-    let parse_phase_command =
-        |json_val: &serde_json::Value, phase_name: &str| -> Result<Option<LifecycleCommandList>> {
-            let parsed = LifecycleCommandValue::from_json_value(json_val)
-                .with_context(|| format!("Failed to parse {} command", phase_name))?;
-            match parsed {
-                Some(cmd) if !cmd.is_empty() => Ok(Some(LifecycleCommandList {
-                    commands: vec![AggregatedLifecycleCommand {
-                        command: cmd,
-                        source: LifecycleCommandSource::Config,
-                    }],
-                })),
-                _ => Ok(None),
-            }
-        };
-
-    // TODO(012): This only collects lifecycle commands from the user's devcontainer.json config.
-    // Feature-defined lifecycle commands (onCreateCommand, etc.) are not aggregated here.
-    // The `up` command uses `aggregate_lifecycle_commands()` which includes features.
-    // To reach parity, we need resolved features from image metadata (container labels).
-
-    // Handle different lifecycle phases based on configuration
-    // Note: initializeCommand is intentionally omitted here. It is a host-side command
-    // that runs before container creation and belongs only in the `up` workflow.
-
+    // initializeCommand is intentionally omitted: it is a host-side command that
+    // runs before container creation and belongs only to the `up` workflow.
     let wait_for = wait_for_phase(config.wait_for.as_deref())?;
+
+    // Aggregate a phase's commands (features + config); `None` when empty.
+    let aggregate = |phase: LifecyclePhase| -> Result<Option<LifecycleCommandList>> {
+        let list = aggregate_lifecycle_commands(phase, &resolved_features, config)?;
+        Ok((!list.commands.is_empty()).then_some(list))
+    };
 
     // Phase 1: onCreate (container)
     if should_queue_phase_for_wait_for(
@@ -200,10 +220,8 @@ async fn execute_lifecycle_commands(
         wait_for,
         LifecyclePhase::OnCreate,
     ) {
-        if let Some(ref on_create) = config.on_create_command {
-            if let Some(cmd_list) = parse_phase_command(on_create, "onCreateCommand")? {
-                commands = commands.with_on_create(cmd_list);
-            }
+        if let Some(list) = aggregate(LifecyclePhase::OnCreate)? {
+            commands = commands.with_on_create(list);
         }
     }
 
@@ -213,10 +231,8 @@ async fn execute_lifecycle_commands(
         wait_for,
         LifecyclePhase::UpdateContent,
     ) {
-        if let Some(ref update_content) = config.update_content_command {
-            if let Some(cmd_list) = parse_phase_command(update_content, "updateContentCommand")? {
-                commands = commands.with_update_content(cmd_list);
-            }
+        if let Some(list) = aggregate(LifecyclePhase::UpdateContent)? {
+            commands = commands.with_update_content(list);
         }
     }
 
@@ -233,10 +249,8 @@ async fn execute_lifecycle_commands(
             LifecyclePhase::PostCreate,
         )
     {
-        if let Some(ref post_create) = config.post_create_command {
-            if let Some(cmd_list) = parse_phase_command(post_create, "postCreateCommand")? {
-                commands = commands.with_post_create(cmd_list);
-            }
+        if let Some(list) = aggregate(LifecyclePhase::PostCreate)? {
+            commands = commands.with_post_create(list);
         }
     }
 
@@ -249,10 +263,8 @@ async fn execute_lifecycle_commands(
             LifecyclePhase::PostStart,
         )
     {
-        if let Some(ref post_start) = config.post_start_command {
-            if let Some(cmd_list) = parse_phase_command(post_start, "postStartCommand")? {
-                commands = commands.with_post_start(cmd_list);
-            }
+        if let Some(list) = aggregate(LifecyclePhase::PostStart)? {
+            commands = commands.with_post_start(list);
         }
 
         // Phase 5: postAttach (container, non-blocking, can be skipped)
@@ -263,10 +275,8 @@ async fn execute_lifecycle_commands(
                 LifecyclePhase::PostAttach,
             )
         {
-            if let Some(ref post_attach) = config.post_attach_command {
-                if let Some(cmd_list) = parse_phase_command(post_attach, "postAttachCommand")? {
-                    commands = commands.with_post_attach(cmd_list);
-                }
+            if let Some(list) = aggregate(LifecyclePhase::PostAttach)? {
+                commands = commands.with_post_attach(list);
             }
         }
     }
