@@ -67,7 +67,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "5m", terminate-after = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id)'
+filter = 'binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path)'
 test-group = 'docker-exclusive'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
@@ -149,7 +149,7 @@ priority = 100
 retries = 0
 slow-timeout = "30s"
 # Exclude: smoke, parity, Docker-dependent tests, testcontainers-based tests
-default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build))'
+default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build))'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -168,7 +168,7 @@ filter = 'binary(=up_dotfiles)'
 test-group = 'docker-exclusive'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id)'
+filter = 'binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path)'
 test-group = 'docker-exclusive'
 
 # Build consistency tests use Docker buildx and can conflict with parallel builds

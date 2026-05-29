@@ -1886,11 +1886,20 @@ impl ContainerOps for CliRuntime {
         // Reference: DevContainer spec "overrideCommand".
         let override_cmd = config.override_command.unwrap_or(true);
         if override_cmd {
-            // Use a portable keep-alive: prefer 'sleep infinity' (GNU coreutils),
-            // fall back to 'tail -f /dev/null' for BusyBox/Alpine images.
+            // Portable keep-alive: prefer `sleep infinity` (GNU coreutils), fall
+            // back to `tail -f /dev/null` (BusyBox/Alpine, where `sleep infinity`
+            // is rejected). Prepend a standard PATH first: some features (e.g.
+            // `node`, via nvm) replace the image's `PATH` with their own bin dir,
+            // which would otherwise drop `/usr/bin`+`/bin` and make the bare
+            // `sleep`/`tail` here resolve to "not found" (exit 127 → the
+            // container dies before any lifecycle command can run).
             args.push("/bin/sh".to_string());
             args.push("-c".to_string());
-            args.push("sleep infinity || tail -f /dev/null".to_string());
+            args.push(
+                "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}\"; \
+                 sleep infinity || tail -f /dev/null"
+                    .to_string(),
+            );
         }
 
         // Execute container create command
