@@ -1,0 +1,9 @@
+{
+	"name": "Compose multiservice down",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"runServices": ["db"],
+	"workspaceFolder": "/",
+	"shutdownAction": "stopCompose",
+	"overrideCommand": false
+}

@@ -1,0 +1,9 @@
+{
+	"name": "Feature-contributed container options",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"features": {
+		"./probe-feature": {}
+	}
+}

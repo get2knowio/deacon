@@ -1,0 +1,7 @@
+{
+	"id": "lib",
+	"version": "1.0.0",
+	"name": "Lib",
+	"description": "Soft-depends on base via installsAfter.",
+	"installsAfter": ["base"]
+}

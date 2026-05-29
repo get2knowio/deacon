@@ -54,5 +54,5 @@ deacon down --workspace-folder . --all --remove
 
 - `shutdownAction`: <https://containers.dev/implementors/json_reference/>
 - Compose teardown (`stopCompose`) is covered by
-  `examples/compose/multiservice-basic/` and is the natural follow-up to
+  `examples/compose/multiservice-down/` and is the natural follow-up to
   this single-container example.

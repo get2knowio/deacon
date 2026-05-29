@@ -1,0 +1,6 @@
+{
+	"name": "Workspace trust gate",
+	"image": "alpine:3.18",
+	"workspaceFolder": "/workspace",
+	"initializeCommand": "touch ./initialize-ran.marker"
+}

@@ -1,0 +1,19 @@
+services:
+  app:
+    image: alpine:3.18
+    command: sleep infinity
+    labels:
+      - "canary.group=runsvc"
+      - "canary.svc=app"
+  worker:
+    image: alpine:3.18
+    command: sleep infinity
+    labels:
+      - "canary.group=runsvc"
+      - "canary.svc=worker"
+  idle:
+    image: alpine:3.18
+    command: sleep infinity
+    labels:
+      - "canary.group=runsvc"
+      - "canary.svc=idle"

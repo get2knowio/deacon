@@ -23,9 +23,13 @@ pass, so they don't have to be re-evaluated from scratch every session.
 Last broad sweep: **2026-05-29** (against `main` including PRs #129/#131/#132/
 #134/#139/#143/#144/#145 and this session's #147/#148/#149/#150/#151). Every
 row is currently ✅ — the last `❓`/`⚠️` rows (`down/basic`, the `exec/*` and
-`up/*` fixtures) were unblocked by those five PRs. The four top-level runners
-(`build/`, `exec/`, `read-configuration/`, `up/`) just iterate their children
-and aren't listed.
+`up/*` fixtures) were unblocked by those five PRs. A later pass added Tier 1–3
+**coverage** canaries (compose `down`, feature dependency ordering, local /
+contributed-option features, lockfile, `outdated`/`upgrade`, `config
+substitute`, `doctor`, `runServices`, workspace-trust) — one of which surfaced
+the compose-`stopCompose` fix (#153). The four top-level runners (`build/`,
+`exec/`, `read-configuration/`, `up/`) just iterate their children and aren't
+listed.
 
 | Canary | Status | Verified | Notes |
 |---|---|---|---|
@@ -48,8 +52,13 @@ and aren't listed.
 | build/secrets-and-ssh | ✅ pass | 2026-05-29 | ssh needs `SSH_AUTH_SOCK` (allow-fail) |
 | build/unwritable-output | ✅ pass | 2026-05-29 | asserts error |
 | compose/multiple-compose-files | ✅ pass | 2026-05-29 | |
+| compose/multiservice-down | ✅ pass | 2026-05-29 | compose `down`/`stopCompose` + `--remove`/`--volumes`; needs the `stop_project` fix (#153) |
+| compose/run-services | ✅ pass | 2026-05-29 | `runServices` selectivity (app+worker up, idle down) (new) |
 | configuration/extends-chain-cycle | ✅ pass | 2026-05-29 | asserts cycle errors |
 | configuration/secrets-declarative | ✅ pass | 2026-05-29 | |
+| configuration/substitute | ✅ pass | 2026-05-29 | `config substitute`: localEnv/localWorkspaceFolderBasename, `--dry-run` (new) |
+| configuration/workspace-trust | ✅ pass | 2026-05-29 | host `initializeCommand` trust gate: `DEACON_NO_PROMPT` denies, `--trust-workspace` allows (new) |
+| doctor/diagnostics | ✅ pass | 2026-05-29 | plain `doctor`, `--json`, `--bundle` (new) |
 | doctor/gpu-host-requirements | ✅ pass | 2026-05-29 | |
 | doctor/host-requirements-failure | ✅ pass | 2026-05-29 | |
 | down/basic | ✅ pass | 2026-05-29 | `--all` now sweeps by `devcontainer.local_folder` + idempotent down on gone container (#147) |
@@ -62,11 +71,16 @@ and aren't listed.
 | exec/remote-user-execution | ✅ pass | 2026-05-29 | git-root mount flag (#149) |
 | exec/user-env-probe-modes | ✅ pass | 2026-05-29 | camelCase `--default-user-env-probe` values (#148); git-root flag (#149) |
 | exec/workspace-folder-discovery | ✅ pass | 2026-05-29 | git-root mount flag (#149) |
+| features/contributed-options | ✅ pass | 2026-05-29 | feature-contributed mount/entrypoint/init/capAdd reach the container (new) |
+| features/dependency-ordering | ✅ pass | 2026-05-29 | auto install order via `installsAfter`+`dependsOn` (no override) (new) |
 | features/feature-contributed-lifecycle | ✅ pass | 2026-05-29 | |
 | features/feature-env-injection | ✅ pass | 2026-05-29 | |
+| features/local-feature | ✅ pass | 2026-05-29 | local `./` feature install + option override (new) |
+| features/lockfile | ✅ pass | 2026-05-29 | lockfile generate / `--frozen-lockfile` pass + mismatch fail; needs ghcr (new) |
 | features/oci-digest-pin | ✅ pass | 2026-05-29 | `name:tag@digest` parsing (#131) |
 | features/option-sanitization | ✅ pass | 2026-05-29 | |
 | features/override-install-order | ✅ pass | 2026-05-29 | |
+| outdated/basic | ✅ pass | 2026-05-29 | `outdated --output json` + `--fail-on-outdated`; needs ghcr (new) |
 | read-configuration/basic | ✅ pass | 2026-05-29 | |
 | read-configuration/compose | ✅ pass | 2026-05-29 | |
 | read-configuration/extends-chain | ✅ pass | 2026-05-29 | |
@@ -105,3 +119,4 @@ and aren't listed.
 | up/wait-for | ✅ pass | 2026-05-29 | |
 | up/with-features | ✅ pass | 2026-05-29 | canary python fix (#144) |
 | up/workspace-mount | ✅ pass | 2026-05-29 | |
+| upgrade/basic | ✅ pass | 2026-05-29 | `upgrade --dry-run` + lockfile write; needs ghcr (new) |

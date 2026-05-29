@@ -1,0 +1,16 @@
+services:
+  app:
+    image: alpine:3.18
+    command: sleep infinity
+    labels:
+      - "canary.group=msdown"
+  db:
+    image: alpine:3.18
+    command: sleep infinity
+    labels:
+      - "canary.group=msdown"
+    volumes:
+      - msdown-data:/data
+
+volumes:
+  msdown-data:
