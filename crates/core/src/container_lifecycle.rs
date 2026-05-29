@@ -1922,6 +1922,23 @@ where
 /// 1. Clones the dotfiles repository into the container
 /// 2. Executes the install script (custom or auto-detected install.sh/setup.sh)
 ///
+/// Expand a leading `~` / `~/…` in a container-side path to `home_dir`.
+///
+/// `git clone` (and the other dotfiles commands) receive the target path as a
+/// literal argv element, so the shell never expands `~`. A bare `~` maps to
+/// the home directory; `~/x` maps to `home_dir/x`. Anything else (including
+/// `~otheruser`, which we can't resolve without a passwd lookup) is returned
+/// unchanged.
+fn expand_container_tilde(path: &str, home_dir: &str) -> String {
+    if path == "~" {
+        home_dir.to_string()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        format!("{}/{}", home_dir, rest)
+    } else {
+        path.to_string()
+    }
+}
+
 /// # Arguments
 ///
 /// * `dotfiles_config` - Configuration for dotfiles (repository, target path, install command)
@@ -1987,15 +2004,23 @@ where
         .user
         .clone()
         .unwrap_or_else(|| "root".to_string());
-    let default_target_path = if user == "root" {
-        "/root/.dotfiles".to_string()
+    // The container-side home directory for the resolved user. Used both for
+    // the default target and to expand a leading `~` in a user-supplied path.
+    let home_dir = if user == "root" {
+        "/root".to_string()
     } else {
-        format!("/home/{}/.dotfiles", user)
+        format!("/home/{}", user)
     };
+    let default_target_path = format!("{}/.dotfiles", home_dir);
 
+    // git clone receives the target path as a literal argv element, so it does
+    // NOT perform shell tilde expansion. Expand a leading `~`/`~/…` ourselves
+    // to the user's home — otherwise `--dotfiles-target-path ~/x` clones into a
+    // literal `~` directory relative to cwd and fails with a permission error.
     let target_path = dotfiles_config
         .target_path
         .clone()
+        .map(|p| expand_container_tilde(&p, &home_dir))
         .unwrap_or(default_target_path);
 
     debug!(
@@ -2745,6 +2770,30 @@ mod tests {
         assert!(config.use_login_shell);
         assert!(config.dotfiles.is_none());
         assert!(!config.is_prebuild);
+    }
+
+    #[test]
+    fn test_expand_container_tilde() {
+        // Bare `~` → home dir.
+        assert_eq!(expand_container_tilde("~", "/home/vscode"), "/home/vscode");
+        // `~/…` → home dir joined with the remainder.
+        assert_eq!(
+            expand_container_tilde("~/.config/dotfiles-custom", "/home/vscode"),
+            "/home/vscode/.config/dotfiles-custom"
+        );
+        assert_eq!(expand_container_tilde("~/x", "/root"), "/root/x");
+        // Absolute paths are untouched.
+        assert_eq!(
+            expand_container_tilde("/opt/dotfiles", "/home/vscode"),
+            "/opt/dotfiles"
+        );
+        // A `~` not at the start, or `~otheruser`, is left literal (we can't
+        // resolve another user's home without a passwd lookup).
+        assert_eq!(
+            expand_container_tilde("~otheruser/x", "/home/vscode"),
+            "~otheruser/x"
+        );
+        assert_eq!(expand_container_tilde("/a/~/b", "/home/vscode"), "/a/~/b");
     }
 
     #[test]
