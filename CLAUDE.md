@@ -224,6 +224,7 @@ current code before "implementing" a deferral.
 - Keep README and `exec.sh` in lockstep
 
 **Canary Patterns (`examples/*/exec.sh`):**
+- **Cross-session memory: `examples/CANARY_STATUS.md`.** Before re-running canaries, check it — `✅` rows verified at the current `main` rarely need re-running; focus on `❓`/changed/`✗` areas. After running any canary, update its row (status + date + short commit). It also records which canaries are known `⚠️ fixture` (won't pass as-is, not a deacon bug) or `🚫 deferred`, so they aren't re-investigated each session.
 - Config file MUST be at `.devcontainer.json` (root) or `.devcontainer/devcontainer.json`. Plain `devcontainer.json` at workspace root is NOT a spec discovery location and will fail config load.
 - When parsing `deacon up` stdout as JSON, use `python3 -c '...'`, NOT `python3 - <<'PY'`. The heredoc collides with the printf pipe for stdin and python ends up parsing its own script as JSON.
 - Don't `2>&1` inside `$( ... )` if you need to parse stdout — the result JSON is on stdout only; capturing stderr alongside breaks the parse.
