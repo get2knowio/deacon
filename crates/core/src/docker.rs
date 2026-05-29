@@ -612,6 +612,24 @@ pub trait Docker {
         config: ExecConfig,
     ) -> Result<ExecResult>;
 
+    /// Like [`exec`](Self::exec), but when output is streamed (non-silent) each
+    /// stdout/stderr line is prefixed with `line_prefix` and forwarded to
+    /// deacon's stderr. Used to attribute concurrent parallel-lifecycle output
+    /// (e.g. `[build] ...`, `[install] ...`).
+    ///
+    /// The default implementation ignores the prefix and delegates to `exec`,
+    /// which is sufficient for mocks and runtimes that don't stream live output.
+    async fn exec_with_line_prefix(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+        line_prefix: &str,
+    ) -> Result<ExecResult> {
+        let _ = line_prefix;
+        self.exec(container_id, command, config).await
+    }
+
     /// Stop a container with optional timeout
     async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()>;
 }
@@ -1069,6 +1087,63 @@ impl CliRuntime {
     }
 }
 
+/// Build the `exec` CLI argument vector from an [`ExecConfig`]. Shared by the
+/// plain `exec` path and the line-prefixed streaming path.
+fn build_exec_args(container_id: &str, command: &[String], config: &ExecConfig) -> Vec<String> {
+    let mut args = vec!["exec".to_string()];
+
+    if config.tty {
+        args.push("-t".to_string());
+    }
+    if config.interactive {
+        args.push("-i".to_string());
+    }
+    if config.detach {
+        args.push("-d".to_string());
+    }
+    if let Some(ref user) = config.user {
+        args.push("-u".to_string());
+        args.push(user.clone());
+    }
+    if let Some(ref workdir) = config.working_dir {
+        args.push("-w".to_string());
+        args.push(workdir.clone());
+    }
+    for (k, v) in &config.env {
+        args.push("-e".to_string());
+        args.push(format!("{}={}", k, v));
+    }
+
+    // Note: '--sig-proxy' is not supported by 'docker exec' (only 'docker run').
+
+    args.push(container_id.to_string());
+    for cmd_part in command {
+        args.push(cmd_part.clone());
+    }
+    args
+}
+
+/// Spawn a task that reads `reader` line-by-line and writes each line to
+/// deacon's stderr prefixed with `prefix` (e.g. `[build] `). One `write_all`
+/// per line keeps each prefixed line intact when multiple forwarders interleave.
+fn spawn_prefixed_forwarder<R>(reader: R, prefix: String) -> tokio::task::JoinHandle<()>
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let mut lines = BufReader::new(reader).lines();
+        let mut err = tokio::io::stderr();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let mut buf = Vec::with_capacity(prefix.len() + line.len() + 1);
+            buf.extend_from_slice(prefix.as_bytes());
+            buf.extend_from_slice(line.as_bytes());
+            buf.push(b'\n');
+            let _ = err.write_all(&buf).await;
+        }
+    })
+}
+
 impl Docker for CliRuntime {
     #[instrument(skip(self))]
     async fn ping(&self) -> Result<()> {
@@ -1412,49 +1487,7 @@ impl Docker for CliRuntime {
     ) -> Result<ExecResult> {
         debug!("Executing command in container: {}", container_id);
 
-        let mut args = vec!["exec".to_string()];
-
-        // Add TTY and interactive flags
-        if config.tty {
-            args.push("-t".to_string());
-        }
-        if config.interactive {
-            args.push("-i".to_string());
-        }
-
-        // Add detach flag
-        if config.detach {
-            args.push("-d".to_string());
-        }
-
-        // Add user if specified
-        if let Some(ref user) = config.user {
-            args.push("-u".to_string());
-            args.push(user.clone());
-        }
-
-        // Add working directory if specified
-        if let Some(ref workdir) = config.working_dir {
-            args.push("-w".to_string());
-            args.push(workdir.clone());
-        }
-
-        // Add environment variables
-        for (k, v) in &config.env {
-            args.push("-e".to_string());
-            args.push(format!("{}={}", k, v));
-        }
-
-        // Note: '--sig-proxy' is not supported by 'docker exec' (only 'docker run').
-        // Do not add it here to avoid 'unknown flag: --sig-proxy' errors.
-
-        // Add container ID
-        args.push(container_id.to_string());
-
-        // Add the command and arguments
-        for cmd_part in command {
-            args.push(cmd_part.clone());
-        }
+        let args = build_exec_args(container_id, command, &config);
 
         debug!("Runtime exec args: {:?}", args);
 
@@ -1581,6 +1614,58 @@ impl Docker for CliRuntime {
                 stderr: String::new(),
             })
         }
+    }
+
+    #[instrument(skip(self, line_prefix))]
+    async fn exec_with_line_prefix(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+        line_prefix: &str,
+    ) -> Result<ExecResult> {
+        // A PTY merges stdout/stderr and is incompatible with separate piped
+        // line forwarding; fall back to the normal inherited-stdio path.
+        if config.tty {
+            return self.exec(container_id, command, config).await;
+        }
+
+        let args = build_exec_args(container_id, command, &config);
+        debug!("Runtime exec (line-prefixed) args: {:?}", args);
+
+        let mut cmd = tokio::process::Command::new(&self.runtime_path);
+        cmd.args(&args);
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| DockerError::CLIError(format!("Failed to spawn runtime exec: {}", e)))?;
+
+        // Forward both streams to deacon's stderr (lifecycle output never goes to
+        // stdout, which is reserved for result JSON), prefixing each line so
+        // concurrent parallel-command output stays attributable in real time.
+        let mut forwarders = Vec::new();
+        if let Some(out) = child.stdout.take() {
+            forwarders.push(spawn_prefixed_forwarder(out, line_prefix.to_string()));
+        }
+        if let Some(err) = child.stderr.take() {
+            forwarders.push(spawn_prefixed_forwarder(err, line_prefix.to_string()));
+        }
+
+        let exit_status = child.wait().await.map_err(|e| {
+            DockerError::CLIError(format!("Failed to wait for runtime exec: {}", e))
+        })?;
+        for f in forwarders {
+            let _ = f.await;
+        }
+
+        Ok(ExecResult {
+            exit_code: resolve_exit_code(exit_status),
+            success: exit_status.success(),
+            stdout: String::new(),
+            stderr: String::new(),
+        })
     }
 
     #[instrument(skip(self))]

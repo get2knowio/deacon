@@ -180,6 +180,27 @@ impl Docker for ContainerRuntimeImpl {
         }
     }
 
+    async fn exec_with_line_prefix(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+        line_prefix: &str,
+    ) -> Result<ExecResult> {
+        match self {
+            Self::Docker(runtime) => {
+                runtime
+                    .exec_with_line_prefix(container_id, command, config, line_prefix)
+                    .await
+            }
+            Self::Podman(runtime) => {
+                runtime
+                    .exec_with_line_prefix(container_id, command, config, line_prefix)
+                    .await
+            }
+        }
+    }
+
     async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()> {
         match self {
             Self::Docker(runtime) => runtime.stop_container(container_id, timeout).await,
@@ -367,6 +388,18 @@ impl Docker for DockerRuntime {
         self.docker.exec(container_id, command, config).await
     }
 
+    async fn exec_with_line_prefix(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+        line_prefix: &str,
+    ) -> Result<ExecResult> {
+        self.docker
+            .exec_with_line_prefix(container_id, command, config, line_prefix)
+            .await
+    }
+
     async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()> {
         self.docker.stop_container(container_id, timeout).await
     }
@@ -505,6 +538,18 @@ impl Docker for PodmanRuntime {
         config: ExecConfig,
     ) -> Result<ExecResult> {
         self.runtime.exec(container_id, command, config).await
+    }
+
+    async fn exec_with_line_prefix(
+        &self,
+        container_id: &str,
+        command: &[String],
+        config: ExecConfig,
+        line_prefix: &str,
+    ) -> Result<ExecResult> {
+        self.runtime
+            .exec_with_line_prefix(container_id, command, config, line_prefix)
+            .await
     }
 
     async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()> {

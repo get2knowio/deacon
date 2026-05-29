@@ -1811,7 +1811,18 @@ where
                                     stderr: String::new(),
                                 };
                             }
-                            match docker.exec(container_id, &command_args, exec_config).await {
+                            // Prefix each output line with `[key]` so concurrent
+                            // parallel-command output is attributable in real time.
+                            let line_prefix = format!("[{}] ", key);
+                            match docker
+                                .exec_with_line_prefix(
+                                    container_id,
+                                    &command_args,
+                                    exec_config,
+                                    &line_prefix,
+                                )
+                                .await
+                            {
                                 Ok(result) => ParallelCommandResult {
                                     key,
                                     exit_code: result.exit_code,
