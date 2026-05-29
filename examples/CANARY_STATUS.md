@@ -80,6 +80,7 @@ listed.
 | features/oci-digest-pin | ✅ pass | 2026-05-29 | `name:tag@digest` parsing (#131) |
 | features/option-sanitization | ✅ pass | 2026-05-29 | |
 | features/override-install-order | ✅ pass | 2026-05-29 | |
+| observability/json-logs | ✅ pass | 2026-05-29 | Output Streams Contract: `--log-format json` stdout=1 JSON doc, stderr=JSON log lines, no log leakage to stdout; hermetic (read-configuration, no Docker) (new) |
 | outdated/basic | ✅ pass | 2026-05-29 | `outdated --output json` + `--fail-on-outdated`; needs ghcr (new) |
 | read-configuration/basic | ✅ pass | 2026-05-29 | |
 | read-configuration/compose | ✅ pass | 2026-05-29 | |
