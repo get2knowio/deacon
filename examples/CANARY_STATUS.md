@@ -21,8 +21,11 @@ pass, so they don't have to be re-evaluated from scratch every session.
 - `❓ unverified` — not evaluated this cycle.
 
 Last broad sweep: **2026-05-29** (against `main` including PRs #129/#131/#132/
-#134/#139/#143/#144/#145). The four top-level runners (`build/`, `exec/`,
-`read-configuration/`, `up/`) just iterate their children and aren't listed.
+#134/#139/#143/#144/#145 and this session's #147/#148/#149/#150/#151). Every
+row is currently ✅ — the last `❓`/`⚠️` rows (`down/basic`, the `exec/*` and
+`up/*` fixtures) were unblocked by those five PRs. The four top-level runners
+(`build/`, `exec/`, `read-configuration/`, `up/`) just iterate their children
+and aren't listed.
 
 | Canary | Status | Verified | Notes |
 |---|---|---|---|
