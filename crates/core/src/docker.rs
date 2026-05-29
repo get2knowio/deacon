@@ -1276,7 +1276,13 @@ impl Docker for CliRuntime {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("No such object") || stderr.contains("No such container") {
+            // A missing container is not an error for callers, who treat
+            // `None` as "already gone". Match case-insensitively: Docker has
+            // emitted both "Error: No such object" and "error: no such
+            // object" across versions (and Podman uses lowercase).
+            let stderr_lower = stderr.to_ascii_lowercase();
+            if stderr_lower.contains("no such object") || stderr_lower.contains("no such container")
+            {
                 return Ok(None);
             }
             return Err(

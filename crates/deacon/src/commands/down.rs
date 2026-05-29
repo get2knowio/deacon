@@ -160,13 +160,17 @@ async fn execute_down_all(identity: &ContainerIdentity, args: &DownArgs) -> Resu
 
     let docker = CliDocker::new();
 
-    // Build label selector from identity. The values here are hashes,
-    // so use the hash-labeled keys (#68 — previously this combined hash
-    // *values* with path-shaped *names* and matched nothing). Containers
-    // created by deacon get both this hash pair and the spec-mandated
-    // `devcontainer.local_folder` / `devcontainer.config_file` path
-    // labels emitted by `ContainerIdentity::labels()`.
-    let label_selector = identity.label_selector();
+    // `--all` sweeps *every* container for this workspace, including stale
+    // ones created under an older/different config. Match on the durable,
+    // spec-canonical `devcontainer.local_folder` label (the workspace path)
+    // rather than the config-pinned `source`+`workspace_hash`+`config_hash`
+    // selector used to find the single current container — otherwise a
+    // container whose config has drifted (different `config_hash`) would
+    // never be swept, defeating the purpose of `--all`. Fall back to the
+    // strict selector if the workspace path could not be canonicalized.
+    let label_selector = identity
+        .workspace_label_selector()
+        .unwrap_or_else(|| identity.label_selector());
 
     debug!("Label selector: {}", label_selector);
 
@@ -188,7 +192,13 @@ async fn execute_down_all(identity: &ContainerIdentity, args: &DownArgs) -> Resu
     // Get timeout value (use provided or default to 30)
     let stop_timeout = args.timeout.or(Some(30));
 
-    // Stop and optionally remove each container
+    // Stop and optionally remove each container. `--all` is a best-effort
+    // sweep across potentially many containers, so a per-container failure
+    // must NOT abort the whole sweep — log it and keep going, then fail at
+    // the end only if a container genuinely survived. Errors that just mean
+    // "the container is already gone" (e.g. a `--rm` container auto-removed
+    // on stop, or a concurrent removal) are treated as success.
+    let mut failures = 0usize;
     for container in containers {
         debug!("Processing container: {}", container.id);
 
@@ -198,7 +208,15 @@ async fn execute_down_all(identity: &ContainerIdentity, args: &DownArgs) -> Resu
                 "Stopping container {} with timeout: {:?}",
                 container.id, stop_timeout
             );
-            docker.stop_container(&container.id, stop_timeout).await?;
+            if let Err(e) = docker.stop_container(&container.id, stop_timeout).await {
+                if is_already_gone(&e) {
+                    debug!("Container {} already gone while stopping", container.id);
+                } else {
+                    warn!("Failed to stop container {}: {}", container.id, e);
+                    failures += 1;
+                    continue;
+                }
+            }
         } else {
             debug!(
                 "Container {} is not running (state: {})",
@@ -209,12 +227,41 @@ async fn execute_down_all(identity: &ContainerIdentity, args: &DownArgs) -> Resu
         // Remove if requested
         if args.remove || args.force || args.volumes {
             debug!("Removing container {}", container.id);
-            remove_container_with_options(&docker, &container.id, args).await?;
+            if let Err(e) = remove_container_with_options(&docker, &container.id, args).await {
+                if is_already_gone(&e) {
+                    debug!("Container {} already removed", container.id);
+                } else {
+                    warn!("Failed to remove container {}: {}", container.id, e);
+                    failures += 1;
+                }
+            }
+        }
+    }
+
+    if failures > 0 {
+        anyhow::bail!("{} container(s) could not be torn down by --all", failures);
+    }
+
+    // The current workspace's container was just swept (if it had one), so
+    // drop its saved state — otherwise a subsequent plain `down` would read
+    // state pointing at a now-removed container. Best-effort: a missing state
+    // entry is fine.
+    if args.remove || args.force || args.volumes {
+        if let Ok(mut state_manager) = StateManager::new() {
+            state_manager.remove_workspace_state(&identity.workspace_hash);
         }
     }
 
     info!("All matching containers processed successfully");
     Ok(())
+}
+
+/// Returns true if a Docker error simply means the container is already gone
+/// (concurrently removed, auto-removed via `--rm` on stop, or never existed).
+/// Such errors are benign for a teardown whose goal is the container's absence.
+fn is_already_gone(err: &impl std::fmt::Display) -> bool {
+    let msg = err.to_string().to_ascii_lowercase();
+    msg.contains("no such container") || msg.contains("already in progress")
 }
 
 /// Execute down for single container configurations
