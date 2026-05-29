@@ -20,7 +20,7 @@ use super::types::{
     DownloadedFeature, DownloadedTemplate, FeatureRef, Manifest, PublishResult, TagList,
     TemplateRef,
 };
-use super::utils::{classify_network_error, get_features_cache_dir};
+use super::utils::{classify_network_error, get_features_cache_dir, verify_content_digest};
 
 /// Feature fetcher for OCI registries
 pub struct FeatureFetcher<C: HttpClient> {
@@ -349,6 +349,21 @@ impl<C: HttpClient> FeatureFetcher<C> {
         let mut hasher = Sha256::new();
         hasher.update(&manifest_data);
         let digest = format!("{:x}", hasher.finalize());
+
+        // If the reference is digest-pinned (e.g. `feature@sha256:...`, surfaced
+        // here as the tag), the returned manifest MUST hash to that digest.
+        // Otherwise the registry could serve a different manifest than the one
+        // the caller pinned.
+        if let Some(expected_hex) = feature_ref.tag().strip_prefix("sha256:") {
+            if !digest.eq_ignore_ascii_case(expected_hex) {
+                return Err(FeatureError::IntegrityMismatch {
+                    context: format!("manifest for {}", feature_ref.reference()),
+                    expected: format!("sha256:{}", expected_hex),
+                    actual: format!("sha256:{}", digest),
+                }
+                .into());
+            }
+        }
 
         // Parse the manifest JSON
         let manifest: serde_json::Value =
@@ -964,6 +979,10 @@ impl<C: HttpClient> FeatureFetcher<C> {
         )
         .await?;
 
+        // Verify the downloaded blob hashes to the manifest's declared digest
+        // before extraction (see download_layer for rationale).
+        verify_content_digest(&layer_data, digest, &format!("layer blob {}", blob_url))?;
+
         Ok(layer_data)
     }
 
@@ -1018,6 +1037,11 @@ impl<C: HttpClient> FeatureFetcher<C> {
             classify_network_error,
         )
         .await?;
+
+        // Verify the downloaded blob hashes to the digest declared in the
+        // manifest before we extract and execute its contents. The registry is
+        // not trusted to return correct bytes for a digest-addressed URL.
+        verify_content_digest(&layer_data, digest, &format!("layer blob {}", blob_url))?;
 
         Ok(layer_data)
     }

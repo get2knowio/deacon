@@ -94,13 +94,50 @@ async fn check_git_available() -> Result<()> {
     }
 }
 
+/// Validate a dotfiles repository URL before handing it to `git clone`.
+///
+/// Guards against argument/transport injection: a URL beginning with `-` would
+/// be parsed by git as an option, and the `ext::` transport runs an arbitrary
+/// command as the remote helper. We reject both rather than relying on the
+/// ambient `GIT_ALLOW_PROTOCOL` environment. This matters today only for the
+/// user-supplied `--dotfiles-repository` flag, but keeps the path safe if a
+/// future change ever sources the URL from workspace config.
+fn validate_repo_url(repo_url: &str) -> Result<()> {
+    let trimmed = repo_url.trim();
+    if trimmed.is_empty() {
+        return Err(GitError::InvalidUrl("repository URL is empty".to_string()).into());
+    }
+    if trimmed.starts_with('-') {
+        return Err(GitError::InvalidUrl(format!(
+            "repository URL must not begin with '-': {}",
+            trimmed
+        ))
+        .into());
+    }
+    // Detect a `scheme::` transport prefix (e.g. `ext::`, `fd::`).
+    if let Some((scheme, _)) = trimmed.split_once("::") {
+        if scheme.eq_ignore_ascii_case("ext") {
+            return Err(GitError::InvalidUrl(format!(
+                "unsupported git transport '{}::' in repository URL",
+                scheme
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// Clone a git repository to the target directory
 #[instrument]
 async fn clone_repository(repo_url: &str, target: &Path, _options: &DotfilesOptions) -> Result<()> {
     info!("Starting to clone dotfiles repository: {}", repo_url);
 
+    validate_repo_url(repo_url)?;
+
     let output = Command::new("git")
         .arg("clone")
+        // `--` terminates option parsing so a URL can never be treated as a flag.
+        .arg("--")
         .arg(repo_url)
         .arg(target)
         .output()
@@ -432,19 +469,25 @@ pub async fn execute_dotfiles_phase(config: &DotfilesPhaseConfig) -> Result<Dotf
         target.display()
     );
 
+    // If the dotfiles source is workspace-resident, require an explicit trust
+    // opt-in BEFORE we clone and exec any host shell from it. This gates every
+    // host-side exec path uniformly: the auto-detected install.sh/setup.sh run
+    // inside apply_dotfiles AND a custom install command below. (Gating here
+    // rather than per-exec-site avoids the asymmetry where an auto-detected
+    // script could run ungated — see HostTrustSource.)
+    if let HostTrustSource::WorkspaceSourced { workspace, policy } = &config.host_trust {
+        let decision = check_workspace_trust(workspace, policy.clone()).await?;
+        decision_to_result(decision)?;
+    }
+
     // Execute dotfiles with custom install command if provided
     let options = DotfilesOptions::default();
     let result = apply_dotfiles(&repository, target, &options).await?;
 
-    // If custom install command was provided and no script was auto-detected,
-    // execute the custom command (gated by workspace trust when the command
-    // came from a workspace-resident source — see HostTrustSource).
+    // If a custom install command was provided and no script was auto-detected,
+    // execute the custom command (trust already enforced above).
     if let Some(ref custom_cmd) = config.install_command {
         if !result.script_executed {
-            if let HostTrustSource::WorkspaceSourced { workspace, policy } = &config.host_trust {
-                let decision = check_workspace_trust(workspace, policy.clone()).await?;
-                decision_to_result(decision)?;
-            }
             info!("Executing custom dotfiles install command: {}", custom_cmd);
             execute_custom_install_command(target, custom_cmd).await?;
         }
@@ -457,11 +500,11 @@ pub async fn execute_dotfiles_phase(config: &DotfilesPhaseConfig) -> Result<Dotf
 ///
 /// Trust boundary note: `command` is interpreted as shell by `bash -c`,
 /// which is the design intent (it accepts pipelines, redirects, etc.).
-/// The trust gate is the *source* of the command — currently
-/// `--dotfiles-install-command` (CLI, user opt-in) — not this exec
-/// layer. If a future caller plumbs through devcontainer.json's
-/// dotfiles config, that path needs the workspace-trust check (audit
-/// gap #3 / spec §12) before reaching here.
+/// The trust gate is the *source* of the command, enforced by the caller
+/// (`execute_dotfiles_phase`) before any host shell runs: `UserCliFlag`
+/// sources are pre-trusted, while `WorkspaceSourced` sources go through
+/// [`check_workspace_trust`]. This exec layer assumes that gate has
+/// already passed.
 ///
 /// `target` is passed through `current_dir`, which is a syscall argument
 /// (not a shell interpolation), so no quoting is needed for the path.
@@ -790,6 +833,34 @@ mod tests {
         // Check that files were cloned
         let cloned_bashrc = target_path.join(".bashrc");
         assert!(cloned_bashrc.exists());
+    }
+
+    #[test]
+    fn test_validate_repo_url_accepts_common_forms() {
+        assert!(validate_repo_url("https://github.com/user/dotfiles").is_ok());
+        assert!(validate_repo_url("git@github.com:user/dotfiles.git").is_ok());
+        assert!(validate_repo_url("ssh://git@github.com/user/dotfiles.git").is_ok());
+        assert!(validate_repo_url("git://github.com/user/dotfiles.git").is_ok());
+    }
+
+    #[test]
+    fn test_validate_repo_url_rejects_leading_dash() {
+        // Would be parsed by git as an option (e.g. --upload-pack=...).
+        assert!(validate_repo_url("--upload-pack=touch /tmp/pwned").is_err());
+        assert!(validate_repo_url("-oProxyCommand=evil").is_err());
+    }
+
+    #[test]
+    fn test_validate_repo_url_rejects_ext_transport() {
+        // The ext:: transport executes an arbitrary command as the remote helper.
+        assert!(validate_repo_url("ext::sh -c 'touch /tmp/pwned'").is_err());
+        assert!(validate_repo_url("EXT::sh -c whoami").is_err());
+    }
+
+    #[test]
+    fn test_validate_repo_url_rejects_empty() {
+        assert!(validate_repo_url("").is_err());
+        assert!(validate_repo_url("   ").is_err());
     }
 
     #[test]

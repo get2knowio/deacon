@@ -124,9 +124,21 @@ pub enum FeatureError {
     #[error("Feature download error: {message}")]
     Download { message: String },
 
-    /// Feature extraction error  
+    /// Feature extraction error
     #[error("Feature extraction error: {message}")]
     Extraction { message: String },
+
+    /// Content integrity verification failed
+    ///
+    /// Raised when downloaded bytes (a manifest or layer blob) do not hash to
+    /// the digest declared in the manifest, a digest-pinned reference, or the
+    /// lockfile. Fail closed: never trust content that fails this check.
+    #[error("Integrity verification failed for {context}: expected {expected}, computed {actual}")]
+    IntegrityMismatch {
+        context: String,
+        expected: String,
+        actual: String,
+    },
 
     /// Feature installation error (generic installation failure)
     #[error("Feature installation error: {message}")]

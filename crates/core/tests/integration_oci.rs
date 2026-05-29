@@ -61,7 +61,15 @@ echo "Test feature installed successfully"
 async fn test_oci_feature_fetch_with_mock_client() {
     // Create test data
     let tar_data = create_test_feature_tar();
-    let layer_digest = "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+    // The layer digest MUST be the real sha256 of the blob bytes — the fetcher
+    // now verifies downloaded content against the manifest's declared digest,
+    // so a placeholder digest would (correctly) be rejected.
+    let layer_digest = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&tar_data);
+        format!("sha256:{:x}", hasher.finalize())
+    };
 
     // Create the manifest JSON
     let manifest_json = format!(
@@ -133,6 +141,64 @@ async fn test_oci_feature_fetch_with_mock_client() {
     let cached_feature = fetcher.fetch_feature(&feature_ref).await.unwrap();
     assert_eq!(cached_feature.metadata.id, "test-feature");
     assert_eq!(cached_feature.path, downloaded_feature.path);
+}
+
+/// Security regression: a registry that serves blob bytes which do not match
+/// the manifest's declared layer digest must be rejected, not extracted and
+/// executed. Guards the content-integrity verification in `download_layer`.
+#[tokio::test]
+async fn test_oci_feature_fetch_rejects_tampered_blob() {
+    let tar_data = create_test_feature_tar();
+
+    // Manifest claims a digest the served bytes will NOT hash to.
+    let claimed_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    let manifest_json = format!(
+        r#"{{
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "layers": [
+                {{
+                    "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                    "size": {},
+                    "digest": "{}"
+                }}
+            ]
+        }}"#,
+        tar_data.len(),
+        claimed_digest
+    );
+
+    let feature_ref = FeatureRef::new(
+        "ghcr.io".to_string(),
+        "test".to_string(),
+        "feature".to_string(),
+        Some("1.0.0".to_string()),
+    );
+
+    let temp_dir = TempDir::new().unwrap();
+    let mock_client = MockHttpClient::new();
+    let fetcher = FeatureFetcher::with_cache_dir(mock_client, temp_dir.path().to_path_buf());
+
+    let manifest_url = "https://ghcr.io/v2/test/feature/manifests/1.0.0";
+    let blob_url = format!("https://ghcr.io/v2/test/feature/blobs/{}", claimed_digest);
+
+    fetcher
+        .client()
+        .add_response(manifest_url.to_string(), Bytes::from(manifest_json))
+        .await;
+    // Serve the (mismatched) tar bytes at the claimed-digest URL.
+    fetcher
+        .client()
+        .add_response(blob_url, Bytes::from(tar_data))
+        .await;
+
+    let result = fetcher.fetch_feature(&feature_ref).await;
+    let err = result.expect_err("tampered blob must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Integrity verification failed"),
+        "expected integrity error, got: {msg}"
+    );
 }
 
 #[tokio::test]
