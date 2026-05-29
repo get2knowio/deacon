@@ -158,14 +158,29 @@ fn integration_exec_pty_behavior_unaffected_by_force_tty_if_json() {
         false, // stdout_is_tty=false
     );
 
-    // With force_tty_if_json=true, should force PTY allocation
+    // A PTY cannot be allocated without a real terminal on stdin — `docker
+    // exec -it` against a piped/redirected stdin is rejected by the daemon.
+    // So force_tty_if_json must NOT conjure a PTY in a non-TTY environment.
     assert!(
-        exec_config.tty,
-        "force_tty_if_json=true should allocate PTY"
+        !exec_config.tty,
+        "force_tty_if_json=true must NOT allocate a PTY when stdin is not a terminal"
     );
 
-    // Test 3: force_tty_if_json=true takes precedence over no_tty=true
-    // This verifies that exec uses compute_should_use_tty which checks force_tty first
+    // But force_tty DOES bypass the stdout-is-a-tty requirement: an
+    // interactive user (stdin tty) whose stdout is captured still gets a PTY.
+    let exec_config_stdin_tty = build_exec_config(
+        &args_with_force,
+        "/".to_string(),
+        HashMap::new(),
+        true,  // stdin_is_tty=true
+        false, // stdout_is_tty=false (e.g. captured by a JSON consumer)
+    );
+    assert!(
+        exec_config_stdin_tty.tty,
+        "force_tty_if_json=true should allocate a PTY when stdin is a terminal even if stdout is captured"
+    );
+
+    // Test 3: explicit no_tty=true wins even over force_tty_if_json=true
     let args_no_tty_override = ExecArgs {
         user: None,
         no_tty: true, // Explicit no-TTY
@@ -190,18 +205,19 @@ fn integration_exec_pty_behavior_unaffected_by_force_tty_if_json() {
         terminal_dimensions: None,
     };
 
+    // Even with stdin as a terminal, an explicit --no-tty disables the PTY.
     let exec_config = build_exec_config(
         &args_no_tty_override,
         "/".to_string(),
         HashMap::new(),
-        false,
-        false,
+        true, // stdin_is_tty=true
+        true, // stdout_is_tty=true
     );
 
-    // Per compute_should_use_tty: force_tty takes precedence over no_tty
+    // Per compute_should_use_tty: explicit no_tty wins over force_tty.
     assert!(
-        exec_config.tty,
-        "force_tty takes precedence over no_tty in exec"
+        !exec_config.tty,
+        "explicit --no-tty must disable the PTY even when force_tty_if_json is set"
     );
 
     // Test 4: no_tty=true without force should disable PTY even with TTY environment
