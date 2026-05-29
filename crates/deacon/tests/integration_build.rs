@@ -145,6 +145,89 @@ fn test_build_with_image_config() {
     }
 }
 
+/// Image-reference config + features: `build` now layers the declared features
+/// on top of the base image (post-build pass), and the user-supplied
+/// `--image-name` must resolve to the *feature-extended* image — not the
+/// pre-feature base. Regression guard for the retag step in `execute_build`.
+#[test]
+fn test_build_image_reference_with_features_tags_final_image() {
+    let temp_dir = TempDir::new().unwrap();
+
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+
+    // Local feature (resolved relative to the config dir) that drops a marker
+    // file during install.
+    let feature_dir = temp_dir.path().join(".devcontainer/features/marker");
+    fs::create_dir_all(&feature_dir).unwrap();
+    fs::write(
+        feature_dir.join("devcontainer-feature.json"),
+        r#"{ "id": "marker", "version": "1.0.0", "name": "Marker" }"#,
+    )
+    .unwrap();
+    fs::write(
+        feature_dir.join("install.sh"),
+        "#!/usr/bin/env bash\nset -e\necho installed > /feature-marker.txt\n",
+    )
+    .unwrap();
+
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        r#"{
+    "name": "Image Ref With Features",
+    "image": "debian:bookworm-slim",
+    "remoteUser": "root",
+    "features": { "./features/marker": {} }
+}
+"#,
+    )
+    .unwrap();
+
+    let image_tag = "deacon-test/imgref-features:latest";
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let assert = cmd
+        .current_dir(&temp_dir)
+        .arg("build")
+        .arg("--image-name")
+        .arg(image_tag)
+        .arg("--output-format")
+        .arg("json")
+        .assert();
+
+    let output = assert.get_output();
+    if !output.status.success() {
+        // Docker unavailable / not permitted: ensure it failed for that reason.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Docker") || stderr.contains("permission denied"),
+            "Expected Docker-related error, got: {}",
+            stderr
+        );
+        return;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(r#""outcome":"success"#),
+        "stdout: {}",
+        stdout
+    );
+
+    // The named tag must contain the feature's marker file.
+    let run = std::process::Command::new("docker")
+        .args(["run", "--rm", image_tag, "cat", "/feature-marker.txt"])
+        .output()
+        .expect("docker run");
+    let _ = std::process::Command::new("docker")
+        .args(["rmi", "-f", image_tag])
+        .output();
+    assert!(
+        run.status.success() && String::from_utf8_lossy(&run.stdout).contains("installed"),
+        "--image-name should resolve to the feature-extended image; stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
 #[test]
 fn test_build_command_flags() {
     let temp_dir = TempDir::new().unwrap();

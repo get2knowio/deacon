@@ -1,6 +1,6 @@
 {
   "name": "image-reference-with-features",
-  "image": "alpine:3.19",
+  "image": "debian:bookworm-slim",
   "features": { "./features/hello": {} },
   "remoteUser": "root"
 }

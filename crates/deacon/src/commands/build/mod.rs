@@ -637,24 +637,27 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
 
     // PR-4c: feature installation during build.
     //
-    // Dockerfile-based builds support features via a post-build layering pass
-    // (we run the user's `docker build`, then layer a feature-install stage
-    // on top of the resulting image using `build_image_with_features` —
-    // the same helper the `up` command uses, which also produces a lockfile).
+    // Dockerfile- and image-reference-based builds support features via a
+    // post-build layering pass (we run the base build, then layer a
+    // feature-install stage on top of the resulting image using
+    // `build_image_with_features` — the same helper the `up` command uses,
+    // which also produces a lockfile). Image-reference builds already route
+    // through `execute_docker_build` (synthetic `FROM <image>` Dockerfile),
+    // which applies the deterministic `deacon-build:<hash>` tag, so the same
+    // post-build pass at the end of this function handles them transparently.
     //
-    // Compose and image-reference builds still fail fast: they need different
-    // integration patterns (compose-build is workspace-of-services, image-ref
-    // wraps a pre-built upstream image with a synthetic Dockerfile) and the
-    // work to support each is tracked separately.
+    // Compose builds still fail fast: they're a workspace-of-services and
+    // layering features onto a targeted service's image needs the compose
+    // integration path (the `up` compose flow); that work is tracked separately.
     let features_present = !config.features.is_null()
         && config
             .features
             .as_object()
             .is_some_and(|obj| !obj.is_empty());
-    if features_present && (config.uses_compose() || config.image.is_some()) {
+    if features_present && config.uses_compose() {
         return Err(anyhow!(
-            "Feature installation during build is not yet supported for compose or \
-             image-reference configurations. Use a Dockerfile-based build, or run \
+            "Feature installation during build is not yet supported for Docker Compose \
+             configurations. Use a Dockerfile- or image-based build, or run \
              'deacon up' which supports all configurations."
         ));
     }
@@ -748,7 +751,20 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             .first()
             .cloned()
             .unwrap_or_else(|| result.image_id.clone());
-        apply_features_and_lockfile(&config, &base_ref, &workspace_folder, &config_path).await?
+        let (feature_image, lockfile) =
+            apply_features_and_lockfile(&config, &base_ref, &workspace_folder, &config_path)
+                .await?;
+
+        // Re-point the base build's tags (the deterministic `deacon-build:<hash>`
+        // tag plus any `--image-name`s) at the feature-extended image. Without
+        // this, `--image-name` would still resolve to the pre-feature base image
+        // and the installed features would be invisible to consumers that pull
+        // the named tag.
+        for tag in &result.tags {
+            retag_image(&feature_image, tag).await?;
+        }
+
+        (feature_image, lockfile)
     } else {
         (result.image_id, None)
     };
@@ -1346,9 +1362,10 @@ async fn execute_image_reference_build(
         escaped_metadata
     ));
 
-    // TODO: Apply features if specified in config
-    // This would require feature resolution and installation script generation
-    // For now, image-reference builds with features are a future enhancement
+    // Features (if any) are layered on top of this base by the post-build
+    // `apply_features_and_lockfile` pass in `execute_build`: this synthetic
+    // image is tagged `deacon-build:<hash>` by `execute_docker_build` below,
+    // and that tag becomes the `FROM` base for the feature-install stage.
 
     let dockerfile_path = temp_dir.join("Dockerfile");
     tokio::fs::write(&dockerfile_path, dockerfile_content).await?;
@@ -1372,6 +1389,39 @@ async fn execute_image_reference_build(
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
     result
+}
+
+/// Apply `target` as an additional tag on the local image `source`
+/// (`docker tag source target`).
+///
+/// Used after the post-build feature pass to re-point the base build's tags at
+/// the feature-extended image, so `--image-name` resolves to the image that
+/// actually contains the installed features.
+async fn retag_image(source: &str, target: &str) -> Result<()> {
+    let output = tokio::process::Command::new("docker")
+        .args(["tag", source, target])
+        .output()
+        .await
+        .map_err(|e| {
+            DeaconError::Docker(DockerError::CLIError(format!(
+                "Failed to run 'docker tag {} {}': {}",
+                source, target, e
+            )))
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DeaconError::Docker(DockerError::CLIError(format!(
+            "Failed to tag '{}' as '{}': {}",
+            source,
+            target,
+            stderr.trim()
+        )))
+        .into());
+    }
+
+    debug!("Re-tagged feature image '{}' as '{}'", source, target);
+    Ok(())
 }
 
 /// PR-4c: layer features on top of the just-built image and write the
