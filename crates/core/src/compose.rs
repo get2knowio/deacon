@@ -942,10 +942,14 @@ impl ComposeManager {
         gpu_mode: crate::gpu::GpuMode,
     ) -> Result<()> {
         let command = self.get_command(project);
-        let services = project.get_all_services();
+        // Per spec, `runServices` defaults to all services: an empty selection
+        // means we pass no service names to `compose up`, so Compose starts
+        // every service. An explicit `runServices` scopes the up to
+        // primary ∪ runServices.
+        let services = project.up_service_selection();
 
         debug!(
-            "Starting compose project {} with services: {:?}, gpu_mode: {:?}",
+            "Starting compose project {} with services: {:?} (empty = all), gpu_mode: {:?}",
             project.name, services, gpu_mode
         );
 
@@ -1222,6 +1226,23 @@ impl ComposeProject {
         let mut services = vec![self.service.clone()];
         services.extend(self.run_services.clone());
         services
+    }
+
+    /// Service names to pass to `docker compose up`.
+    ///
+    /// Per the containers.dev spec, `runServices` *"defaults to all services"*.
+    /// When `run_services` is empty (unset) we return an empty list so that
+    /// Compose brings up **all** services in the project — this mirrors the
+    /// reference `@devcontainers/cli`, which omits service arguments to `up`
+    /// when `runServices` is undefined. When `run_services` is set we scope to
+    /// the explicit selection (primary service ∪ `runServices`) via
+    /// [`Self::get_all_services`].
+    pub fn up_service_selection(&self) -> Vec<String> {
+        if self.run_services.is_empty() {
+            Vec::new()
+        } else {
+            self.get_all_services()
+        }
     }
 
     /// Generate inline compose override YAML for mount/env injection.
