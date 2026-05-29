@@ -555,7 +555,16 @@ async fn resolve_and_stage_features(
 
         resolved_features.push(ResolvedFeature {
             id: canonical_id.clone(),
-            source: reference.clone(),
+            // Record the features-object reference AS WRITTEN (e.g. `./feature-lib`
+            // for locals, or the OCI ref string) so dependency resolution can match
+            // `dependsOn`/`installsAfter` keys that use the features-object syntax
+            // (issue #155). Local features carry a synthetic empty FeatureRef whose
+            // `reference()` is NOT the user path, so prefer the user-facing id and
+            // fall back to the normalized reference only when it's unavailable.
+            source: user_id_by_canonical
+                .get(canonical_id)
+                .cloned()
+                .unwrap_or_else(|| reference.clone()),
             options,
             metadata: downloaded.metadata.clone(),
         });

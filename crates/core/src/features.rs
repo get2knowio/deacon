@@ -763,6 +763,31 @@ impl InstallationPlan {
     }
 }
 
+/// Strip a trailing OCI version/tag (`:tag`) from a feature reference, if present.
+///
+/// Used for tag-insensitive matching of `dependsOn`/`installsAfter` keys against
+/// resolved feature ids/sources. Only the LAST `:`-separated segment is treated as
+/// a tag, and only when it does not contain a `/` (so a registry port such as
+/// `localhost:5000/owner/feat` is not mistaken for a tag). The `:tag` separator
+/// also must come after the final `/` in the reference. Strings without a tag are
+/// returned unchanged.
+fn strip_oci_tag(reference: &str) -> &str {
+    match reference.rfind(':') {
+        Some(colon) => {
+            let tag = &reference[colon + 1..];
+            let after_last_slash = reference.rfind('/').map(|s| colon > s).unwrap_or(true);
+            // A tag never contains '/'; the colon must be after the last path
+            // separator to be a tag rather than a registry-port delimiter.
+            if !tag.is_empty() && !tag.contains('/') && after_last_slash {
+                &reference[..colon]
+            } else {
+                reference
+            }
+        }
+        None => reference,
+    }
+}
+
 /// Feature dependency resolver that builds DAG and performs topological sort
 #[derive(Debug)]
 pub struct FeatureDependencyResolver {
@@ -873,12 +898,57 @@ impl FeatureDependencyResolver {
             }
         }
 
+        // Per spec (https://containers.dev/implementors/features/#installation-order),
+        // `dependsOn`/`installsAfter` keys use "the same syntax as the `features`
+        // object". That means besides the canonical `id` and the metadata-`id`
+        // alias, a key may be the *features-object reference form* that was used to
+        // fetch the feature — i.e. `ResolvedFeature.source`. This covers:
+        //   * local relative/absolute paths (`./feature-lib`, `../x`, `/abs`), and
+        //   * full/partial OCI refs (`ghcr.io/owner/repo/feat:1`).
+        //
+        // For OCI refs we also match tag-insensitively: a key without a version/tag
+        // should match a candidate whose only difference is the trailing `:tag`
+        // (and vice versa). Local paths are compared as exact strings since they use
+        // identical syntax on both sides.
+
+        // Map each candidate `source` (and its tag-stripped form) to a canonical id.
+        let mut source_to_canonical: HashMap<String, String> = HashMap::new();
+        let mut source_notag_to_canonical: HashMap<String, String> = HashMap::new();
+        for feature in features {
+            source_to_canonical
+                .entry(feature.source.clone())
+                .or_insert_with(|| feature.id.clone());
+            let src_notag = strip_oci_tag(&feature.source);
+            source_notag_to_canonical
+                .entry(src_notag.to_string())
+                .or_insert_with(|| feature.id.clone());
+            // Also index the canonical id without its tag so a tagless dep key can
+            // match an `id` that carries a tag.
+            let id_notag = strip_oci_tag(&feature.id);
+            source_notag_to_canonical
+                .entry(id_notag.to_string())
+                .or_insert_with(|| feature.id.clone());
+        }
+
         let resolve_dep = |dep_id: &str| -> Option<String> {
+            // 1. Exact canonical id.
             if feature_ids.contains(dep_id) {
-                Some(dep_id.to_string())
-            } else {
-                alias_to_canonical.get(dep_id).cloned()
+                return Some(dep_id.to_string());
             }
+            // 2. Metadata-id alias.
+            if let Some(canonical) = alias_to_canonical.get(dep_id) {
+                return Some(canonical.clone());
+            }
+            // 3. Exact features-object reference (source) form.
+            if let Some(canonical) = source_to_canonical.get(dep_id) {
+                return Some(canonical.clone());
+            }
+            // 4. Tag-insensitive OCI ref match (key and/or candidate without tag).
+            let dep_notag = strip_oci_tag(dep_id);
+            if let Some(canonical) = source_notag_to_canonical.get(dep_notag) {
+                return Some(canonical.clone());
+            }
+            None
         };
 
         // Initialize graph with all feature IDs
@@ -913,17 +983,23 @@ impl FeatureDependencyResolver {
                 }
             }
 
-            // Add dependsOn dependencies (simplified - just extract string keys)
+            // Add dependsOn dependencies. `dependsOn` is a HARD dependency: per
+            // spec the referenced feature MUST be installed. An unresolvable key
+            // is therefore a hard error (no silent fallback) rather than a warn.
             for depend_id in feature.metadata.depends_on.keys() {
                 match resolve_dep(depend_id) {
                     Some(canonical) => {
                         dependencies.insert(canonical);
                     }
                     None => {
-                        warn!(
-                            "Feature '{}' depends on '{}' which is not in the feature set",
-                            feature.id, depend_id
-                        );
+                        return Err(FeatureError::DependencyResolution {
+                            message: format!(
+                                "Feature '{}' has a 'dependsOn' entry '{}' that does not \
+                                 resolve to any feature in the set (checked canonical id, \
+                                 metadata id, and features-object reference form)",
+                                feature.id, depend_id
+                            ),
+                        });
                     }
                 }
             }
@@ -2423,10 +2499,129 @@ mod tests {
         let resolver = FeatureDependencyResolver::new(None);
         let plan = resolver.resolve(&features).unwrap();
 
-        // Should succeed but warn about missing dependency
+        // Should succeed but warn about missing dependency (installsAfter is soft).
         let mut ids = plan.feature_ids();
         ids.sort(); // Make test deterministic
         assert_eq!(ids, vec!["feature-a", "feature-b"]);
+    }
+
+    #[test]
+    fn test_depends_on_resolves_by_local_path_source() {
+        // Author writes the dependsOn key using the *features-object reference
+        // form* (a local relative path) rather than the canonical local: id.
+        // The dependency must still resolve via `ResolvedFeature.source`. Per #155.
+        let mut depends_on_app = HashMap::new();
+        depends_on_app.insert("./feature-lib".to_string(), serde_json::Value::Bool(true));
+
+        // lib: canonical id `local:/abs/feature-lib`, source `./feature-lib`.
+        let lib = ResolvedFeature {
+            id: "local:/abs/feature-lib".to_string(),
+            source: "./feature-lib".to_string(),
+            metadata: FeatureMetadata {
+                id: "lib".to_string(),
+                ..Default::default()
+            },
+            options: HashMap::new(),
+        };
+        // app depends on lib by its local path reference.
+        let app = ResolvedFeature {
+            id: "local:/abs/feature-app".to_string(),
+            source: "./feature-app".to_string(),
+            metadata: FeatureMetadata {
+                id: "app".to_string(),
+                depends_on: depends_on_app,
+                ..Default::default()
+            },
+            options: HashMap::new(),
+        };
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let graph = resolver
+            .build_dependency_graph(&[lib.clone(), app.clone()])
+            .expect("graph builds");
+
+        // An edge from app -> lib (canonical id) must exist.
+        let app_deps = graph
+            .get("local:/abs/feature-app")
+            .expect("app node present");
+        assert!(
+            app_deps.contains("local:/abs/feature-lib"),
+            "expected app to depend on lib via local-path source, got {:?}",
+            app_deps
+        );
+
+        // And the full resolve must order lib before app.
+        let order = resolver.resolve(&[app, lib]).unwrap().feature_ids();
+        let pos_lib = order
+            .iter()
+            .position(|x| x == "local:/abs/feature-lib")
+            .unwrap();
+        let pos_app = order
+            .iter()
+            .position(|x| x == "local:/abs/feature-app")
+            .unwrap();
+        assert!(pos_app > pos_lib);
+    }
+
+    #[test]
+    fn test_unresolvable_depends_on_is_hard_error() {
+        // A dependsOn key that matches no feature (by id, metadata id, or
+        // features-object reference form) must be a HARD error. Per #155.
+        let mut depends_on = HashMap::new();
+        depends_on.insert(
+            "./does-not-exist".to_string(),
+            serde_json::Value::Bool(true),
+        );
+        let app = ResolvedFeature {
+            id: "local:/abs/feature-app".to_string(),
+            source: "./feature-app".to_string(),
+            metadata: FeatureMetadata {
+                id: "app".to_string(),
+                depends_on,
+                ..Default::default()
+            },
+            options: HashMap::new(),
+        };
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let err = resolver
+            .build_dependency_graph(&[app])
+            .expect_err("unresolvable dependsOn must error");
+        match err {
+            FeatureError::DependencyResolution { message } => {
+                assert!(
+                    message.contains("dependsOn") && message.contains("./does-not-exist"),
+                    "unexpected error message: {message}"
+                );
+            }
+            other => panic!("expected DependencyResolution error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_unresolvable_installs_after_is_soft_skip() {
+        // installsAfter is a SOFT dependency: an unresolvable entry is warned and
+        // skipped, not an error. Per #155.
+        let app = ResolvedFeature {
+            id: "local:/abs/feature-app".to_string(),
+            source: "./feature-app".to_string(),
+            metadata: FeatureMetadata {
+                id: "app".to_string(),
+                installs_after: vec!["./does-not-exist".to_string()],
+                ..Default::default()
+            },
+            options: HashMap::new(),
+        };
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let graph = resolver
+            .build_dependency_graph(&[app])
+            .expect("unresolvable installsAfter must not error");
+        let deps = graph.get("local:/abs/feature-app").expect("app present");
+        assert!(
+            deps.is_empty(),
+            "expected no edge for skipped installsAfter"
+        );
     }
 
     #[test]
