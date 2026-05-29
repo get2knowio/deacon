@@ -1,0 +1,9 @@
+{
+	"id": "app",
+	"version": "1.0.0",
+	"name": "App",
+	"description": "Hard-depends on lib via dependsOn.",
+	"dependsOn": {
+		"lib": {}
+	}
+}

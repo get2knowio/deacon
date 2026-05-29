@@ -1,0 +1,11 @@
+{
+	"name": "Local feature install",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"features": {
+		"./hello-feature": {
+			"greeting": "bonjour"
+		}
+	}
+}

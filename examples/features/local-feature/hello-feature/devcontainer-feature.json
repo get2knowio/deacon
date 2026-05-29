@@ -1,0 +1,13 @@
+{
+	"id": "hello",
+	"version": "1.0.0",
+	"name": "Hello (local)",
+	"description": "A local (./path) feature that writes a marker and honors an option, proving the local-feature install path (not OCI).",
+	"options": {
+		"greeting": {
+			"type": "string",
+			"default": "hello",
+			"description": "Greeting word baked into the marker file"
+		}
+	}
+}

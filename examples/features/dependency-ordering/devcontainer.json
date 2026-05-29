@@ -1,0 +1,11 @@
+{
+	"name": "Feature dependency ordering",
+	"image": "alpine:3.18",
+	"remoteUser": "root",
+	"workspaceFolder": "/workspace",
+	"features": {
+		"./feature-app": {},
+		"./feature-base": {},
+		"./feature-lib": {}
+	}
+}

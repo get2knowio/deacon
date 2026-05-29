@@ -1,0 +1,8 @@
+{
+	"name": "subst-${localEnv:CANARY_TOKEN}",
+	"image": "alpine:3.18",
+	"workspaceFolder": "/wf/${localWorkspaceFolderBasename}",
+	"containerEnv": {
+		"GREETING": "hi-${localEnv:CANARY_TOKEN}"
+	}
+}
