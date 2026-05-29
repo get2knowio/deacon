@@ -21,6 +21,9 @@ pub(crate) fn classify_network_error(error: &FeatureError) -> RetryDecision {
         FeatureError::Parsing { .. }
         | FeatureError::Validation { .. }
         | FeatureError::Extraction { .. }
+        // Integrity failures are deterministic for given bytes; retrying the
+        // same registry response cannot help, so fail fast.
+        | FeatureError::IntegrityMismatch { .. }
         | FeatureError::Installation { .. }
         | FeatureError::InstallationFailed { .. }
         | FeatureError::NotFound { .. }
@@ -94,6 +97,53 @@ pub fn canonical_id(manifest: &Manifest) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(&manifest_json);
     Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+/// Verify that the SHA256 digest of `data` matches the `expected` OCI digest.
+///
+/// `expected` is an OCI content descriptor digest in `algorithm:hex` form
+/// (e.g. `sha256:<64 hex chars>`). Only `sha256` is supported; any other
+/// algorithm is rejected rather than silently accepted (no silent fallback per
+/// the project's fail-fast principle). The hex comparison is case-insensitive.
+///
+/// On any mismatch — malformed digest, unsupported algorithm, or content that
+/// does not hash to the expected value — returns [`FeatureError::IntegrityMismatch`]
+/// so callers fail closed before trusting downloaded bytes. `context` is a short
+/// human-readable description of what is being verified (e.g. the blob URL or
+/// reference) for diagnostics.
+pub(crate) fn verify_content_digest(data: &[u8], expected: &str, context: &str) -> Result<()> {
+    let (algorithm, expected_hex) =
+        expected
+            .split_once(':')
+            .ok_or_else(|| FeatureError::IntegrityMismatch {
+                context: context.to_string(),
+                expected: expected.to_string(),
+                actual: "<malformed digest: missing 'algorithm:' prefix>".to_string(),
+            })?;
+
+    if !algorithm.eq_ignore_ascii_case("sha256") {
+        return Err(FeatureError::IntegrityMismatch {
+            context: context.to_string(),
+            expected: expected.to_string(),
+            actual: format!("<unsupported digest algorithm: {}>", algorithm),
+        }
+        .into());
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let actual_hex = format!("{:x}", hasher.finalize());
+
+    if !actual_hex.eq_ignore_ascii_case(expected_hex) {
+        return Err(FeatureError::IntegrityMismatch {
+            context: context.to_string(),
+            expected: expected.to_string(),
+            actual: format!("sha256:{}", actual_hex),
+        }
+        .into());
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -215,6 +265,56 @@ mod tests {
         let result = retry_async(&config, op, classify_network_error).await;
         assert_eq!(result.unwrap(), 42);
         assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn verify_content_digest_accepts_matching_sha256() {
+        // sha256("hello world") = b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
+        let data = b"hello world";
+        let expected = "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        assert!(verify_content_digest(data, expected, "test blob").is_ok());
+    }
+
+    #[test]
+    fn verify_content_digest_is_case_insensitive_on_hex() {
+        let data = b"hello world";
+        let expected = "sha256:B94D27B9934D3E08A52E52D7DA7DABFAC484EFE37A5380EE9088F7ACE2EFCDE9";
+        assert!(verify_content_digest(data, expected, "test blob").is_ok());
+    }
+
+    #[test]
+    fn verify_content_digest_rejects_tampered_content() {
+        let data = b"tampered payload";
+        let expected = "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        let err = verify_content_digest(data, expected, "test blob").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                crate::errors::DeaconError::Feature(FeatureError::IntegrityMismatch { .. })
+            ),
+            "expected IntegrityMismatch, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn verify_content_digest_rejects_unsupported_algorithm() {
+        let data = b"hello world";
+        let err = verify_content_digest(data, "sha512:deadbeef", "test blob").unwrap_err();
+        assert!(matches!(
+            err,
+            crate::errors::DeaconError::Feature(FeatureError::IntegrityMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn verify_content_digest_rejects_malformed_digest() {
+        let data = b"hello world";
+        let err = verify_content_digest(data, "no-prefix-here", "test blob").unwrap_err();
+        assert!(matches!(
+            err,
+            crate::errors::DeaconError::Feature(FeatureError::IntegrityMismatch { .. })
+        ));
     }
 
     /// Sanity: classifier returns the expected decisions for boundary cases.
