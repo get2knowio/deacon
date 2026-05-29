@@ -112,9 +112,17 @@ make test-nextest                 # Complete parallel suite with all tests
 
 **When adding new integration tests:**
 1. Identify resource requirements (docker exclusive vs shared, filesystem heavy, etc.)
-2. Add override rules to ALL profiles in `.config/nextest.toml`
+2. Add override rules to ALL profiles in `.config/nextest.toml`. A new docker-exclusive
+   test BINARY must be added in 3 spots (mirror `run_user_commands_prebuild`): the
+   `[profile.default]` override filter, the `[profile.dev-fast]` `default-filter`
+   exclusion, and the `[profile.dev-fast]` override filter. When two in-flight PRs add
+   binaries to the same filter line, expect a `nextest.toml` conflict — resolve to the
+   UNION of both `binary(=…)` clauses.
 3. Prefer most permissive group that ensures correctness (docker-shared over docker-exclusive when safe)
-4. Verify with `make test-nextest` to ensure no race conditions
+4. Verify with `make test-nextest` to ensure no race conditions. Tip: `cargo nextest run <substr>`
+   filters by TEST NAME; to target a binary use a filterset: `cargo nextest run -E 'binary(=NAME)'`.
+   Docker-gated tests that build feature images should assert the artifact is in the produced
+   image (`docker run <tag> cat <marker>`), not just the JSON `outcome`.
 
 **Code Quality:**
 ```bash
@@ -123,6 +131,10 @@ cargo clippy --all-targets -- -D warnings  # Lint with zero tolerance
 make dev-fast                     # Fast loop: fmt + clippy + fast tests
 make release-check                # Full quality gate
 ```
+Before pushing, run the FULL workspace gate — `cargo fmt --all -- --check` and
+`cargo clippy --all-targets --all-features -- -D warnings`. Running clippy with only
+`-p deacon` (or skipping `--all-features`) misses fmt drift in new test files and lints in
+`deacon-core`, which then fail the CI `Lint (fmt + clippy)` job.
 
 **Running Single Tests:**
 ```bash
@@ -151,9 +163,20 @@ Pattern axes worth re-running periodically:
   `stdout_to_stderr: true`).
 - Local-feature dispatch (any code iterating feature IDs should handle `./`, `../`,
   `/abs/path` prefixes before falling through to OCI parsing).
+- Feature resolution (any subcommand that needs resolved features should reuse
+  `commands/shared/feature_resolver::resolve_features_ordered` rather than re-implementing
+  the local/OCI + dependency-order loop; `read-configuration` keeps its own richer variant
+  for `--additional-features`/auto-mapping/registry grouping).
+- Config-relative vs workspace-relative paths: `dockerComposeFile` resolves against the
+  **workspace folder**; local feature paths (`./…`) resolve against the **config dir**
+  (`config_path.parent()` or `<workspace>/.devcontainer`); a plain `devcontainer.json` at
+  the workspace root is NOT a discovery location.
 
 VERIFY agent claims empirically before filing — the workspace-folder audit produced two
-false positives this session (see "Verified Non-Bugs" below).
+false positives this session (see "Verified Non-Bugs" below). Auditing also surfaces the
+opposite: several tracked deferrals (005 T022–T026, read-config container reading #268, the
+mergedConfiguration `inspect_image` labels) were already implemented — confirm against
+current code before "implementing" a deferral.
 
 ## Code Patterns & Style
 
@@ -162,6 +185,20 @@ false positives this session (see "Verified Non-Bugs" below).
 - `anyhow` only at binary boundaries with `.context()` for diagnostics
 - Never use `unwrap()`/unchecked `expect` in runtime paths; propagate with `Result` and context
 - Avoid blocking calls inside async functions; prefer `tokio` async IO or spawn bounded blocking tasks
+
+**Misc durable patterns:**
+- Files that can be written by concurrent processes/threads (e.g. the disk-cache
+  `index.json`) MUST be written atomically: serialize to a unique temp file then
+  `fs::rename` into place. A plain `fs::write` truncates-then-streams and a shorter
+  payload over a longer file leaves trailing bytes → flaky "trailing characters" JSON
+  parse errors. See `cache/disk.rs::save_index`.
+- `exec`'s positional `command: Vec<String>` uses `#[arg(trailing_var_arg, allow_hyphen_values)]`
+  so `deacon exec node --version` passes `--version` to the command, not clap. Any new
+  subcommand that runs an arbitrary user command should do the same.
+- To extend a trait used by many impls/runtimes with a new method, give it a default impl
+  that delegates to an existing method (e.g. `Docker::exec_with_line_prefix` defaults to
+  `exec`). Mocks and delegating runtimes then need no change; only override where the new
+  behavior matters (and in the enum/wrapper runtimes that must forward it).
 
 **Logging:**
 - Use `tracing` spans for workflows: `config.resolve`, `feature.install`, `lifecycle.run`
@@ -191,6 +228,8 @@ false positives this session (see "Verified Non-Bugs" below).
 - When parsing `deacon up` stdout as JSON, use `python3 -c '...'`, NOT `python3 - <<'PY'`. The heredoc collides with the printf pipe for stdin and python ends up parsing its own script as JSON.
 - Don't `2>&1` inside `$( ... )` if you need to parse stdout — the result JSON is on stdout only; capturing stderr alongside breaks the parse.
 - When wrapping a command with env vars (e.g. `COMPOSE_PROFILES`), use `env VAR=value cmd`, not `wrapper VAR=value cmd` — the wrapper function sees `VAR=value` as a positional arg.
+- A feature's `install.sh` with `#!/usr/bin/env bash` fails on `alpine` bases (no bash, exit 127). Feature canaries should use a bash-capable base (`debian:bookworm-slim`); this is an example-fixture fix, not a deacon bug.
+- Running canaries INSIDE this monorepo: `up` mounts the **git root** (`/workspaces/deacon`) to the container `workspaceFolder` (intended `--mount-workspace-git-root` default), so files the example keeps next to its config land under `/workspace/examples/<area>/<name>/…`, not `/workspace/…`. Pass `--mount-workspace-git-root false` on the example's `up` to mount the workspace folder directly. Not a deacon bug.
 
 ## Code Search & Refactoring with ast-grep
 
@@ -333,6 +372,23 @@ Document this checklist in plan.md or PR description to prevent spec drift.
    `compute_dev_container_id(&identity.labels())`).
 3. If fixed identifier: leave it out, and add a comment explaining why (see `wait_for`
    for the pattern).
+
+**Dockerfile location parity:** the canonical containers.dev form is nested
+`build.dockerfile`; the top-level `dockerFile` is legacy. Any code resolving the Dockerfile
+must accept BOTH (see `extract_build_config` in `commands/build/mod.rs` and `up`'s
+`image_build.rs`).
+
+**Build feature installation (`deacon build`):** all four config shapes install features
+and the user `--image-name` must resolve to the FEATURE-EXTENDED image, not the base:
+- Dockerfile / image-reference: build the base (tagged `deacon-build:<hash>`), then the
+  post-build pass layers features via `apply_features_and_lockfile`. The base must be a
+  real tag — a bare `sha256:` digest makes BuildKit treat `FROM` as a remote repo (404).
+- Compose: `execute_compose_build_with_features` resolves the service shape and reuses
+  `up::compose::resolve_compose_feature_image` (shared with `up`).
+- After layering, re-tag the feature image with the deterministic tag + every
+  `--image-name` (`retag_image`). Otherwise `--image-name` points at the pre-feature base
+  and the installed features are invisible — and canaries that only check the JSON outcome
+  (not image contents) won't catch it, so verify with `docker run <tag> cat <marker>`.
 
 ## Deferral Tracking
 
