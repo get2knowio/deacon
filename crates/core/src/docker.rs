@@ -1178,7 +1178,12 @@ impl Docker for CliRuntime {
             label_selector
         );
 
-        let mut args: Vec<String> = vec!["ps", "--all", "--format", "{{json .}}"]
+        // `--no-trunc` so `.ID` is the full 64-char container ID, matching what
+        // `create`/`run` return. Without it `docker ps` emits the short 12-char
+        // form, so the reconnect/reuse path would report a different-looking
+        // `containerId` than the original create (a spec-fidelity inconsistency,
+        // and it breaks naive ID equality checks).
+        let mut args: Vec<String> = vec!["ps", "--all", "--no-trunc", "--format", "{{json .}}"]
             .into_iter()
             .map(|s| s.to_string())
             .collect();
