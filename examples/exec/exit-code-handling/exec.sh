@@ -26,7 +26,7 @@ trap cleanup EXIT
 cd "$SCRIPT_DIR"
 
 echo "== Start dev container ==" >&2
-run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container "$@"
+run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container --mount-workspace-git-root false "$@"
 
 echo "== Success (Exit 0) ==" >&2
 run "$DEACON_BIN" exec --workspace-folder "$SCRIPT_DIR" true

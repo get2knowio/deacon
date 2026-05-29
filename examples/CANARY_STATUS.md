@@ -50,15 +50,15 @@ Last broad sweep: **2026-05-29** (against `main` including PRs #129/#131/#132/
 | doctor/gpu-host-requirements | ✅ pass | 2026-05-29 | |
 | doctor/host-requirements-failure | ✅ pass | 2026-05-29 | |
 | down/basic | ✅ pass | 2026-05-29 | `--all` now sweeps by `devcontainer.local_folder` + idempotent down on gone container (#147) |
-| exec/container-id-targeting | ⚠️ fixture | 2026-05-29 | git-root mount: `/workspace/test-script.sh` lands under `/workspace/examples/...`; pass with `--mount-workspace-git-root false` |
-| exec/exit-code-handling | ⚠️ fixture | 2026-05-29 | git-root mount (`/workspace/*.sh`) |
-| exec/id-label-targeting | ⚠️ fixture | 2026-05-29 | git-root mount (`/workspace/app.py`) |
+| exec/container-id-targeting | ✅ pass | 2026-05-29 | baked `--mount-workspace-git-root false` into the example's `up` (#149) |
+| exec/exit-code-handling | ✅ pass | 2026-05-29 | baked `--mount-workspace-git-root false` (#149) |
+| exec/id-label-targeting | ✅ pass | 2026-05-29 | non-spec `containerLabels`→`runArgs --label`; git-root mount flag (#149) |
 | exec/interactive-pty | ✅ pass | 2026-05-29 | |
-| exec/non-interactive-streaming | ⚠️ fixture | 2026-05-29 | git-root mount (`/workspace/generate-output.sh`) |
-| exec/remote-env-variables | ⚠️ fixture | 2026-05-29 | git-root mount (`/workspace/check-env.sh`) |
-| exec/remote-user-execution | ⚠️ fixture | 2026-05-29 | git-root mount (`/workspace/user-check.sh`) |
-| exec/user-env-probe-modes | ⚠️ fixture | 2026-05-29 | git-root mount (`/workspace/probe-test.sh`) |
-| exec/workspace-folder-discovery | ⚠️ fixture | 2026-05-29 | `node --version` passthrough fixed (#132); `/workspace/src/main.js` still hits git-root mount |
+| exec/non-interactive-streaming | ✅ pass | 2026-05-29 | PTY-on-non-tty + JSON stream fixes (#148); `xxd`→`od`, git-root flag (#149) |
+| exec/remote-env-variables | ✅ pass | 2026-05-29 | git-root mount flag (#149) |
+| exec/remote-user-execution | ✅ pass | 2026-05-29 | git-root mount flag (#149) |
+| exec/user-env-probe-modes | ✅ pass | 2026-05-29 | camelCase `--default-user-env-probe` values (#148); git-root flag (#149) |
+| exec/workspace-folder-discovery | ✅ pass | 2026-05-29 | git-root mount flag (#149) |
 | features/feature-contributed-lifecycle | ✅ pass | 2026-05-29 | |
 | features/feature-env-injection | ✅ pass | 2026-05-29 | |
 | features/oci-digest-pin | ✅ pass | 2026-05-29 | `name:tag@digest` parsing (#131) |

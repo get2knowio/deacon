@@ -27,7 +27,7 @@ trap cleanup EXIT
 cd "$SCRIPT_DIR"
 
 echo "== Start dev container ==" >&2
-run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container "$@"
+run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container --mount-workspace-git-root false "$@"
 
 echo "== Separate stdout/stderr to files (README: Separate Streams) ==" >&2
 run "$DEACON_BIN" exec --workspace-folder "$SCRIPT_DIR" bash /workspace/generate-output.sh \
@@ -43,7 +43,7 @@ run "$DEACON_BIN" exec --workspace-folder "$SCRIPT_DIR" bash /workspace/generate
 
 echo "== Binary-safe operation (README: Binary-Safe Operation) ==" >&2
 run "$DEACON_BIN" exec --workspace-folder "$SCRIPT_DIR" cat /workspace/data/sample.bin \
-	| xxd | head -n 5
+	| od -An -tx1 | head -n 5
 
 echo "== Process substitution (README: Process Substitution) ==" >&2
 cat <(run "$DEACON_BIN" exec --workspace-folder "$SCRIPT_DIR" bash /workspace/generate-output.sh)
@@ -56,8 +56,11 @@ set -e
 echo "Build exit code: $EXIT_CODE" >&2
 
 echo "== JSON output streaming (README: JSON Output) ==" >&2
+# No `| head` here: with a non-terminal stdin the command streams without a
+# PTY, and truncating a live stream with `head` would SIGPIPE the producer
+# (exit 141) under `set -o pipefail`. Matches the README's JSON example.
 run "$DEACON_BIN" exec --workspace-folder "$SCRIPT_DIR" --log-format json \
-	bash /workspace/generate-output.sh | head -n 5
+	bash /workspace/generate-output.sh
 
 echo "== Large output streaming (README: Large Output Streaming) ==" >&2
 run "$DEACON_BIN" exec --workspace-folder "$SCRIPT_DIR" bash -c 'for i in {1..50}; do echo "Line $i"; done' | wc -l

@@ -63,5 +63,7 @@ Labels must follow the format `name=value`:
 ## Notes
 
 - The `devcontainer.local_folder` label uses absolute paths
-- Custom labels defined in `containerLabels` are also searchable
+- Custom labels added via `runArgs` (`--label key=value`) are also searchable
+  (the spec has no `containerLabels` property; `runArgs` is the supported way
+  to attach arbitrary container labels)
 - Labels are more stable than container IDs across recreations

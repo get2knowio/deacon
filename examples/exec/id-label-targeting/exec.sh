@@ -26,7 +26,7 @@ trap cleanup EXIT
 cd "$SCRIPT_DIR"
 
 echo "== Start dev container (README: step 1) ==" >&2
-run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container "$@"
+run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container --mount-workspace-git-root false "$@"
 
 echo "== Execute using workspace label (README: step 2) ==" >&2
 run "$DEACON_BIN" exec --id-label "devcontainer.local_folder=${SCRIPT_DIR}" python3 /workspace/app.py
