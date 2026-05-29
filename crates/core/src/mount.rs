@@ -1497,12 +1497,16 @@ mod merge_mounts_tests {
 
         let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 2);
-        assert!(result
-            .mounts
-            .contains(&"type=bind,source=/host/data,target=/data".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=cache,target=/cache".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=bind,source=/host/data,target=/data".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=cache,target=/cache".to_string())
+        );
     }
 
     #[test]
@@ -1522,12 +1526,16 @@ mod merge_mounts_tests {
 
         let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 2);
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol1,target=/vol1".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol2,target=/vol2".to_string())
+        );
     }
 
     #[test]
@@ -1543,12 +1551,16 @@ mod merge_mounts_tests {
 
         let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 2);
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=cache,target=/cache".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=bind,source=/host/data,target=/data".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=cache,target=/cache".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=bind,source=/host/data,target=/data".to_string())
+        );
     }
 
     // ==================== Precedence Tests ====================
@@ -1616,15 +1628,21 @@ mod merge_mounts_tests {
 
         let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 3);
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=override-shared,target=/shared".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol1,target=/vol1".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol2,target=/vol2".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=override-shared,target=/shared".to_string())
+        );
     }
 
     #[test]
@@ -1758,15 +1776,21 @@ mod merge_mounts_tests {
 
         let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 3);
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=tmpfs,target=/tmp".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol1,target=/vol1".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol2,target=/vol2".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=tmpfs,target=/tmp".to_string())
+        );
     }
 
     #[test]
@@ -1831,20 +1855,28 @@ mod merge_mounts_tests {
         let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 4);
         // Config mounts should be present
-        assert!(result
-            .mounts
-            .contains(&"type=bind,source=/host/workspace,target=/workspace".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=bind,source=/host/override,target=/data".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=bind,source=/host/workspace,target=/workspace".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=bind,source=/host/override,target=/data".to_string())
+        );
         // Feature2's cache should override feature1's cache
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=cache2,target=/cache".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=cache2,target=/cache".to_string())
+        );
         // Feature2's tmpfs should be present
-        assert!(result
-            .mounts
-            .contains(&"type=tmpfs,target=/tmp".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=tmpfs,target=/tmp".to_string())
+        );
     }
 
     // ==================== Error Handling Tests ====================
@@ -2114,15 +2146,21 @@ mod merge_mounts_tests {
         let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 3);
         // The exact order may vary based on implementation, but all should be present
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol3,target=/vol3".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol1,target=/vol1".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol2,target=/vol2".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol3,target=/vol3".to_string())
+        );
     }
 
     #[test]
@@ -2141,14 +2179,20 @@ mod merge_mounts_tests {
         let result = merge_mounts(&config_mounts, &features, None).unwrap();
         assert_eq!(result.mounts.len(), 3);
         // All mounts should be present
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol1,target=/vol1".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol2,target=/vol2".to_string()));
-        assert!(result
-            .mounts
-            .contains(&"type=volume,source=vol3,target=/vol3".to_string()));
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol1,target=/vol1".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol2,target=/vol2".to_string())
+        );
+        assert!(
+            result
+                .mounts
+                .contains(&"type=volume,source=vol3,target=/vol3".to_string())
+        );
     }
 }

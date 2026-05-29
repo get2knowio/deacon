@@ -35,9 +35,9 @@
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle_with_progress_callback, AggregatedLifecycleCommand,
-    ContainerLifecycleCommands, ContainerLifecycleConfig, DotfilesConfig, LifecycleCommandList,
-    LifecycleCommandSource, LifecycleCommandValue,
+    AggregatedLifecycleCommand, ContainerLifecycleCommands, ContainerLifecycleConfig,
+    DotfilesConfig, LifecycleCommandList, LifecycleCommandSource, LifecycleCommandValue,
+    execute_container_lifecycle_with_progress_callback,
 };
 use deacon_core::docker::{CliDocker, ContainerInfo, Docker, ExecConfig};
 use deacon_core::variable::SubstitutionContext;

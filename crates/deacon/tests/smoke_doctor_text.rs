@@ -72,7 +72,8 @@ fn test_doctor_text_mode_basic() {
         assert!(
             has_host_info || has_docker_info,
             "Doctor text output should contain host or docker information. Got stdout: '{}', stderr: '{}'",
-            doctor_stdout, doctor_stderr
+            doctor_stdout,
+            doctor_stderr
         );
 
         println!("Doctor text mode basic test passed");

@@ -778,9 +778,6 @@ RUN --mount=type=secret,id=mytoken \
 
 #[test]
 fn test_build_secret_env_source() {
-    // Set up environment variable with secret
-    std::env::set_var("TEST_BUILD_SECRET_ENV", "my-env-secret-value");
-
     // Create a temporary directory with Dockerfile
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = r#"# syntax=docker/dockerfile:1
@@ -812,6 +809,7 @@ RUN --mount=type=secret,id=envtoken \
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     let assert = cmd
         .current_dir(&temp_dir)
+        .env("TEST_BUILD_SECRET_ENV", "my-env-secret-value")
         .arg("build")
         .arg("--build-secret")
         .arg("id=envtoken,env=TEST_BUILD_SECRET_ENV")
@@ -835,9 +833,6 @@ RUN --mount=type=secret,id=envtoken \
             "Secret value leaked in stderr!"
         );
     }
-
-    // Clean up
-    std::env::remove_var("TEST_BUILD_SECRET_ENV");
 }
 
 #[test]

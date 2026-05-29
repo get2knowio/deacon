@@ -4,17 +4,17 @@
 //! for the exec command, targeting the correct workspace container.
 
 use crate::commands::shared::{
-    load_config, resolve_env_and_user, ConfigLoadArgs, ConfigLoadResult, NormalizedRemoteEnv,
-    TerminalDimensions,
+    ConfigLoadArgs, ConfigLoadResult, NormalizedRemoteEnv, TerminalDimensions, load_config,
+    resolve_env_and_user,
 };
 use anyhow::{Context, Result};
+use deacon_core::IndexMap;
 use deacon_core::compose::{ComposeManager, ComposeProject};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::{CliDocker, Docker, TerminalSize};
 use deacon_core::errors::{ConfigError, DeaconError};
-use deacon_core::IndexMap;
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -524,7 +524,7 @@ where
         // 3. Workspace-based resolution (default)
         let container_id = if args.container_id.is_some() || !args.id_label.is_empty() {
             // Use ContainerSelector for direct ID or label-based lookup and validate format early
-            use deacon_core::container::{resolve_container, ContainerSelector};
+            use deacon_core::container::{ContainerSelector, resolve_container};
 
             let selector = ContainerSelector::new(
                 args.container_id.clone(),
@@ -948,10 +948,12 @@ mod tests {
         let result = resolve_target_container_by_labels(&mock_docker, &search_labels).await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("No running container found matching labels"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No running container found matching labels")
+        );
     }
 
     #[tokio::test]

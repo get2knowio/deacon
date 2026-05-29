@@ -1,6 +1,6 @@
 //! Unit tests for the up command.
 
-use super::args::{normalize_and_validate_args, MountType, NormalizedMount, UpArgs};
+use super::args::{MountType, NormalizedMount, UpArgs, normalize_and_validate_args};
 use super::result::UpResult;
 use crate::commands::shared::NormalizedRemoteEnv;
 use deacon_core::config::DevContainerConfig;

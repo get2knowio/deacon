@@ -154,7 +154,9 @@ pub enum UserMappingError {
     #[error("Insufficient permissions to create user '{username}' - container must run as root")]
     InsufficientPermissions { username: String },
 
-    #[error("User '{username}' already exists with different UID {existing_uid}, cannot update to {target_uid}")]
+    #[error(
+        "User '{username}' already exists with different UID {existing_uid}, cannot update to {target_uid}"
+    )]
     UserExistsWithDifferentUid {
         username: String,
         existing_uid: u32,

@@ -1,8 +1,8 @@
-use deacon::commands::exec::{execute_exec_with_docker, ExecArgs};
+use deacon::commands::exec::{ExecArgs, execute_exec_with_docker};
 use deacon::commands::shared::resolve_env_and_user;
+use deacon_core::IndexMap;
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::mock::{MockContainer, MockDocker};
-use deacon_core::IndexMap;
 use std::collections::HashMap;
 
 #[tokio::test]

@@ -7,7 +7,7 @@
 //! References: subcommand-specs/*/SPEC.md "Container Lifecycle Management"
 
 use crate::errors::{ConfigError, DeaconError, Result};
-use crate::redaction::{redact_if_enabled, RedactionConfig};
+use crate::redaction::{RedactionConfig, redact_if_enabled};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -1585,9 +1585,10 @@ mod tests {
 
         // Prebuild skips postCreate, dotfiles, postStart, postAttach
         assert!(ctx.should_skip_phase(LifecyclePhase::OnCreate).is_none());
-        assert!(ctx
-            .should_skip_phase(LifecyclePhase::UpdateContent)
-            .is_none());
+        assert!(
+            ctx.should_skip_phase(LifecyclePhase::UpdateContent)
+                .is_none()
+        );
         assert_eq!(
             ctx.should_skip_phase(LifecyclePhase::PostCreate),
             Some("prebuild mode")
@@ -1614,9 +1615,10 @@ mod tests {
 
         // skip-post-create skips postCreate, dotfiles, postStart, postAttach
         assert!(ctx.should_skip_phase(LifecyclePhase::OnCreate).is_none());
-        assert!(ctx
-            .should_skip_phase(LifecyclePhase::UpdateContent)
-            .is_none());
+        assert!(
+            ctx.should_skip_phase(LifecyclePhase::UpdateContent)
+                .is_none()
+        );
         assert_eq!(
             ctx.should_skip_phase(LifecyclePhase::PostCreate),
             Some("--skip-post-create flag")

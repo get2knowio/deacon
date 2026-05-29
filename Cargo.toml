@@ -3,18 +3,25 @@ members = [
     "crates/deacon",
     "crates/core"
 ]
-resolver = "2"
+# resolver "3" enables the MSRV-aware dependency resolver (Rust 1.84+), so
+# `cargo update` will not select dependency versions whose own rust-version
+# exceeds our declared MSRV below.
+resolver = "3"
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
+# Not published to crates.io (consumer CLI distributed as prebuilt binaries);
+# see each crate's `publish = false`. Point docs at the repo rather than docs.rs.
 license = "MIT"
 authors = ["get2knowio <dev@get2know.io>"]
 repository = "https://github.com/get2knowio/deacon"
 homepage = "https://github.com/get2knowio/deacon"
-documentation = "https://docs.rs/deacon-core"
+documentation = "https://github.com/get2knowio/deacon"
 keywords = ["devcontainer", "containers", "docker", "development", "cli"]
 categories = ["command-line-utilities", "development-tools"]
-rust-version = "1.82"
+# Minimum Supported Rust Version. Verified in CI by a dedicated job pinned to
+# this exact toolchain. edition 2024 requires >= 1.85.
+rust-version = "1.85"
 
 [workspace.dependencies]
 # Pin a version alongside the path so cargo-deny does not flag it as a wildcard dep.
@@ -28,6 +35,42 @@ tracing-error = "0.2"
 color-eyre = "0.6"
 once_cell = "1.21"
 shell-words = "1.1"
+# Shared across both member crates — declared once here to prevent version
+# drift. tokio carries the union of the features each crate needs.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "process", "macros", "fs", "io-std", "io-util"] }
+futures = "0.3"
+tar = "0.4"
+sha2 = "0.10"
+regex = "1.10"
+zip = "2.4"
+# Shared dev-dependencies.
+tempfile = "3.12"
+assert_cmd = "2.0"
+testcontainers = "0.27"
+# Scoped, serialized env-var mutation for tests (sets vars for a closure/future
+# then restores them). Encapsulates the edition-2024 `unsafe` env calls behind a
+# safe API and serializes via an internal lock, so test code stays unsafe-free.
+temp-env = { version = "0.3.6", features = ["async_closure"] }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# `deny` (not `forbid`) so the rare, reviewed exceptions mandated by edition
+# 2024 — wrapping std::env::set_var/remove_var in test code — can opt in via a
+# scoped `#[allow(unsafe_code)]`. Production code remains unsafe-free; `deny`
+# still turns any unguarded `unsafe` into a compile error.
+unsafe_code = "deny"
+
+[profile.dev]
+# Lighter debug info than the default (2) for faster incremental links. Was
+# previously a global `-C debuginfo=1` rustflag in .cargo/config.toml, which
+# also applied to release builds; scoping it here keeps release lean.
+debug = 1
+
+[profile.release]
+# Distributed CLI binary: optimize size and runtime over compile time.
+# `strip = true` uses rustc's cross-platform stripping (replaces the fragile
+# per-target shell `strip || true` in the release workflow).
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -83,7 +83,7 @@ impl NormalizedMount {
                                 ),
                             },
                         )
-                        .into())
+                        .into());
                     }
                 }
             } else {
@@ -149,7 +149,7 @@ impl NormalizedMount {
                         ),
                     })
                     .into(),
-                )
+                );
             }
         };
 
@@ -157,17 +157,15 @@ impl NormalizedMount {
         let external_flag = match external {
             Some("true") => true,
             Some("false") | None => false,
-            Some(val) => {
-                return Err(
-                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                        message: format!(
+            Some(val) => return Err(DeaconError::Config(
+                deacon_core::errors::ConfigError::Validation {
+                    message: format!(
                         "Invalid mount format: '{}'. external must be 'true' or 'false', got: '{}'",
                         mount_str, val
                     ),
-                    })
-                    .into(),
-                )
-            }
+                },
+            )
+            .into()),
         };
 
         let read_only = match read_only_flag {

@@ -3,14 +3,14 @@
 //! This module provides execution of lifecycle commands in an existing container
 //! without going through the full `up` workflow.
 
-use crate::commands::shared::{load_config, ConfigLoadArgs, ConfigLoadResult};
+use crate::commands::shared::{ConfigLoadArgs, ConfigLoadResult, load_config};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
-    aggregate_lifecycle_commands, execute_container_lifecycle_with_progress_callback,
     ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
+    aggregate_lifecycle_commands, execute_container_lifecycle_with_progress_callback,
 };
-use deacon_core::lifecycle::{should_queue_phase_for_wait_for, wait_for_phase, LifecyclePhase};
+use deacon_core::lifecycle::{LifecyclePhase, should_queue_phase_for_wait_for, wait_for_phase};
 use deacon_core::variable::SubstitutionContext;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -70,7 +70,7 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
         // 2. --id-label (label-based lookup)
         // 3. workspace-based discovery
         if args.container_id.is_some() || !args.id_label.is_empty() {
-            use deacon_core::container::{resolve_container, ContainerSelector};
+            use deacon_core::container::{ContainerSelector, resolve_container};
 
             let selector = ContainerSelector::new(
                 args.container_id.clone(),

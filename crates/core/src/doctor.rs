@@ -14,12 +14,12 @@ use tracing::{debug, info, warn};
 
 /// Macro for printing redacted output
 macro_rules! println_redacted {
-    ($config:expr, $fmt:expr) => {
+    ($config:expr_2021, $fmt:expr_2021) => {
         let output = format!($fmt);
         let redacted = crate::redaction::redact_if_enabled(&output, $config);
         println!("{}", redacted);
     };
-    ($config:expr, $fmt:expr, $($arg:tt)*) => {
+    ($config:expr_2021, $fmt:expr_2021, $($arg:tt)*) => {
         let output = format!($fmt, $($arg)*);
         let redacted = crate::redaction::redact_if_enabled(&output, $config);
         println!("{}", redacted);

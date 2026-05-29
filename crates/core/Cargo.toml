@@ -10,6 +10,7 @@ documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
+publish = false
 description = "Core library for deacon — DevContainer configuration resolution, OCI feature/template fetching, container runtime abstraction (Docker/Podman), lifecycle execution, and lockfile management."
 
 [dependencies]
@@ -17,16 +18,16 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0", features = ["preserve_order"] }
+serde.workspace = true
+serde_json.workspace = true
 jsonc-parser = { version = "0.32", default-features = false, features = ["preserve_order"] }
-regex = "1.0"
-tokio = { version = "1.0", features = ["rt", "process", "macros", "io-util", "io-std", "fs"] }
+regex.workspace = true
+tokio.workspace = true
 once_cell.workspace = true
 # Use rustls for a pure-Rust TLS stack to simplify cross-compilation (musl, aarch64) and avoid OpenSSL toolchain requirements.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-tar = "0.4"
-sha2 = "0.10"
+tar.workspace = true
+sha2.workspace = true
 bytes = "1.0"
 async-trait = "0.1"
 linked-hash-map = "0.5"
@@ -54,6 +55,7 @@ assert_cmd = "2.0"
 tokio-test = "0.4"
 wiremock = "0.6"
 testcontainers = "0.27"
+temp-env.workspace = true
 
 [lints]
 workspace = true

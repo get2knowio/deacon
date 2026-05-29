@@ -3,7 +3,7 @@
 mod common;
 
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle, ContainerLifecycleCommands, ContainerLifecycleConfig,
+    ContainerLifecycleCommands, ContainerLifecycleConfig, execute_container_lifecycle,
 };
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;

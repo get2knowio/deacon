@@ -44,7 +44,7 @@ mod utils;
 // Re-export public types
 pub use auth::{RegistryAuth, RegistryCredentials};
 pub use client::{HttpClient, MockHttpClient, ReqwestClient};
-pub use fetcher::{default_fetcher, default_fetcher_with_config, FeatureFetcher};
+pub use fetcher::{FeatureFetcher, default_fetcher, default_fetcher_with_config};
 pub use types::{
     CollectionFeature, CollectionMetadata, CollectionSourceInfo, CollectionTemplate,
     DownloadedFeature, DownloadedTemplate, FeatureRef, HttpResponse, Layer, Manifest,
@@ -220,8 +220,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_integration_with_manifest_fetch() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         // Mock client that fails first N attempts
         #[derive(Debug, Clone)]
@@ -371,8 +371,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_gives_up_after_max_attempts() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         // Mock client that always fails
         #[derive(Debug, Clone)]
@@ -700,8 +700,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_collection_metadata_upload_failure() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         // Mock client that always fails PUT requests for blob upload
         #[derive(Debug, Clone)]
@@ -814,8 +814,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_collection_metadata_retry_success() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         // Mock client that fails first 2 attempts then succeeds
         #[derive(Debug, Clone)]
@@ -940,8 +940,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_collection_metadata_authentication_error() {
-        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         // Mock client that returns authentication error
         #[derive(Debug, Clone)]

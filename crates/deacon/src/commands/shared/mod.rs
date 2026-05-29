@@ -8,7 +8,7 @@ pub mod remote_env;
 pub mod terminal;
 pub mod workspace;
 
-pub use config_loader::{load_config, ConfigLoadArgs, ConfigLoadResult};
+pub use config_loader::{ConfigLoadArgs, ConfigLoadResult, load_config};
 pub use env_user::resolve_env_and_user;
 pub use remote_env::NormalizedRemoteEnv;
 pub use terminal::TerminalDimensions;

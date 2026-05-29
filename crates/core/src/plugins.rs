@@ -397,8 +397,8 @@ impl Plugin for NoOpPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Test plugin that tracks initialization order
     #[derive(Debug)]

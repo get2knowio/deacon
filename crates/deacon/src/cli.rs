@@ -1046,17 +1046,25 @@ impl Cli {
             && stderr_is_tty
             && !json_format;
 
-        // Set environment variable for log level before initializing logging
-        if std::env::var_os("DEACON_LOG").is_none() && std::env::var_os("RUST_LOG").is_none() {
-            // In spinner sessions, prefer quieter default unless user overrode via flag/env
-            if spinner_eligible {
-                log_level = "warn";
-            }
-            std::env::set_var(
-                "RUST_LOG",
-                format!("deacon={},deacon_core={}", log_level, log_level),
-            );
-        }
+        // Compute the default log directive used only when the user has set
+        // neither DEACON_LOG nor RUST_LOG. We pass it directly to the logging
+        // initializer rather than mutating the process environment: env
+        // mutation is `unsafe` under edition 2024 and unsound once the async
+        // runtime's worker threads exist.
+        let default_log_directive =
+            if std::env::var_os("DEACON_LOG").is_none() && std::env::var_os("RUST_LOG").is_none() {
+                // In spinner sessions, prefer a quieter default unless the user
+                // overrode it via flag/env.
+                if spinner_eligible {
+                    log_level = "warn";
+                }
+                Some(format!(
+                    "deacon={level},deacon_core={level}",
+                    level = log_level
+                ))
+            } else {
+                None
+            };
         // Create redaction configuration from CLI flags so it can be threaded into the
         // logging initializer below. The redaction layer needs to be wired up at init
         // time — otherwise registered secrets can still leak into tracing output.
@@ -1066,7 +1074,11 @@ impl Cli {
             deacon_core::redaction::RedactionConfig::default()
         };
 
-        deacon_core::logging::init_with_redaction(log_format, Some(redaction_config.clone()))?;
+        deacon_core::logging::init_with_redaction_and_directive(
+            log_format,
+            Some(redaction_config.clone()),
+            default_log_directive.as_deref(),
+        )?;
 
         // Emit logs to help with testing and log-level verification
         tracing::debug!("CLI initialized with log level: {}", log_level);
@@ -1074,7 +1086,9 @@ impl Cli {
 
         // Warn if redaction is disabled
         if self.no_redact {
-            tracing::warn!("Secret redaction is DISABLED via --no-redact flag. This may expose sensitive information in logs and output. Use only for debugging purposes!");
+            tracing::warn!(
+                "Secret redaction is DISABLED via --no-redact flag. This may expose sensitive information in logs and output. Use only for debugging purposes!"
+            );
         }
 
         // Get global secret registry
@@ -1086,8 +1100,8 @@ impl Cli {
         // Prefer spinner emitter in eligible sessions; otherwise fall back to core helper
         let progress_tracker = if spinner_eligible {
             // Build a tracker with SpinnerEmitter
-            use deacon_core::progress::get_cache_dir;
             use deacon_core::progress::ProgressTracker;
+            use deacon_core::progress::get_cache_dir;
             let cache_dir = get_cache_dir()?;
             let emitter: Box<dyn deacon_core::progress::ProgressEmitter> =
                 Box::new(SpinnerEmitter::new());
@@ -1148,7 +1162,7 @@ impl Cli {
                 ignore_host_requirements,
                 env_file,
             }) => {
-                use crate::commands::up::{execute_up, UpArgs};
+                use crate::commands::up::{UpArgs, execute_up};
 
                 // Mutual exclusivity check (mirrors devcontainers/cli).
                 if no_lockfile && frozen_lockfile {
@@ -1316,7 +1330,7 @@ impl Cli {
                 no_lockfile,
                 frozen_lockfile,
             }) => {
-                use crate::commands::build::{execute_build, BuildArgs};
+                use crate::commands::build::{BuildArgs, execute_build};
 
                 // Mutual exclusivity check (mirrors devcontainers/cli).
                 if no_lockfile && frozen_lockfile {
@@ -1376,7 +1390,7 @@ impl Cli {
                 default_user_env_probe,
                 command,
             }) => {
-                use crate::commands::exec::{execute_exec, ExecArgs};
+                use crate::commands::exec::{ExecArgs, execute_exec};
 
                 // Exec attaches to an interactive shell. If a spinner-based progress tracker
                 // was initialized earlier (eligible session), drop it now to avoid the spinner
@@ -1428,7 +1442,7 @@ impl Cli {
                 user_data_folder,
             }) => {
                 use crate::commands::read_configuration::{
-                    execute_read_configuration, ReadConfigurationArgs,
+                    ReadConfigurationArgs, execute_read_configuration,
                 };
 
                 let args = ReadConfigurationArgs {
@@ -1457,7 +1471,7 @@ impl Cli {
             }
             #[cfg(feature = "full")]
             Some(Commands::Config { command }) => {
-                use crate::commands::config::{execute_config, ConfigArgs};
+                use crate::commands::config::{ConfigArgs, execute_config};
 
                 let args = ConfigArgs {
                     command,
@@ -1472,7 +1486,7 @@ impl Cli {
             }
             #[cfg(feature = "full")]
             Some(Commands::Templates { command }) => {
-                use crate::commands::templates::{execute_templates, TemplatesArgs};
+                use crate::commands::templates::{TemplatesArgs, execute_templates};
 
                 let args = TemplatesArgs {
                     command,
@@ -1490,7 +1504,7 @@ impl Cli {
                 feature,
                 target_version,
             }) => {
-                use crate::commands::upgrade::{execute_upgrade, UpgradeArgs};
+                use crate::commands::upgrade::{UpgradeArgs, execute_upgrade};
 
                 let args = UpgradeArgs {
                     workspace_folder: self.workspace_folder,
@@ -1515,7 +1529,7 @@ impl Cli {
                 id_label,
             }) => {
                 use crate::commands::run_user_commands::{
-                    execute_run_user_commands, RunUserCommandsArgs,
+                    RunUserCommandsArgs, execute_run_user_commands,
                 };
 
                 let args = RunUserCommandsArgs {
@@ -1552,7 +1566,7 @@ impl Cli {
                 container_data_folder,
                 container_system_data_folder,
             }) => {
-                use crate::commands::set_up::{execute_set_up, SetUpArgs};
+                use crate::commands::set_up::{SetUpArgs, execute_set_up};
 
                 let args = SetUpArgs {
                     container_id,
@@ -1583,7 +1597,7 @@ impl Cli {
                 force,
                 timeout,
             }) => {
-                use crate::commands::down::{execute_down, DownArgs};
+                use crate::commands::down::{DownArgs, execute_down};
 
                 let args = DownArgs {
                     remove,
@@ -1625,7 +1639,7 @@ impl Cli {
                 output,
                 fail_on_outdated,
             }) => {
-                use crate::commands::outdated::{run as run_outdated, OutdatedArgs};
+                use crate::commands::outdated::{OutdatedArgs, run as run_outdated};
 
                 // Determine workspace folder precedence: explicit flag -> global flag -> current_dir
                 let wf = if let Some(wf) = workspace_folder {
@@ -1693,9 +1707,9 @@ mod tests {
         let cli = Cli::parse_from(["deacon", "--log-format", "json"]);
         assert!(cli.is_json_log_format());
         assert!(!cli.force_tty_if_json); // user didn't pass the explicit flag
-                                         // The dispatch site ORs these two together; the test of that wiring
-                                         // is here at the source of truth (cli.is_json_log_format()) since
-                                         // dispatch is async and harder to unit-test in isolation.
+        // The dispatch site ORs these two together; the test of that wiring
+        // is here at the source of truth (cli.is_json_log_format()) since
+        // dispatch is async and harder to unit-test in isolation.
         let effective_force_tty = cli.force_tty_if_json || cli.is_json_log_format();
         assert!(effective_force_tty);
     }

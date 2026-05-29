@@ -14,7 +14,7 @@ use std::path::Path;
 
 use deacon_core::config::DevContainerConfig;
 use deacon_core::features::{
-    parse_feature_metadata, FeatureDependencyResolver, OptionValue, ResolvedFeature,
+    FeatureDependencyResolver, OptionValue, ResolvedFeature, parse_feature_metadata,
 };
 use deacon_core::oci::{FeatureFetcher, FeatureRef, HttpClient};
 use deacon_core::registry_parser::parse_registry_reference;
@@ -27,6 +27,9 @@ use deacon_core::registry_parser::parse_registry_reference;
 /// - **Fails fast**: any unresolvable feature (missing local path, missing
 ///   `devcontainer-feature.json`, OCI fetch error, dependency cycle) is
 ///   propagated with context rather than silently dropped.
+// Only reachable through `full`-gated CLI dispatch (e.g. run-user-commands), so
+// it is dead code in a `--no-default-features` MVP build; tests still exercise it.
+#[cfg_attr(not(feature = "full"), allow(dead_code))]
 pub(crate) async fn resolve_features_ordered<C: HttpClient>(
     config: &DevContainerConfig,
     config_dir: &Path,

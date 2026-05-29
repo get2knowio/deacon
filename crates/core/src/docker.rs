@@ -1820,13 +1820,11 @@ impl ContainerOps for CliRuntime {
             crate::features::EntrypointChain::None => {
                 // Use image default entrypoint
             }
-            crate::features::EntrypointChain::Single(ref path) => {
+            crate::features::EntrypointChain::Single(path) => {
                 args.push("--entrypoint".to_string());
                 args.push(path.clone());
             }
-            crate::features::EntrypointChain::Chained {
-                ref wrapper_path, ..
-            } => {
+            crate::features::EntrypointChain::Chained { wrapper_path, .. } => {
                 args.push("--entrypoint".to_string());
                 args.push(wrapper_path.clone());
             }
@@ -1873,7 +1871,9 @@ impl ContainerOps for CliRuntime {
             }
             crate::gpu::GpuMode::Detect => {
                 // This should never happen - Detect mode should be resolved upstream
-                warn!("GpuMode::Detect passed to docker.rs - this indicates a bug. Skipping GPU flags.");
+                warn!(
+                    "GpuMode::Detect passed to docker.rs - this indicates a bug. Skipping GPU flags."
+                );
             }
         }
 
@@ -3022,14 +3022,18 @@ mod tests {
 
         // Check exposed ports
         assert_eq!(container.exposed_ports.len(), 2);
-        assert!(container
-            .exposed_ports
-            .iter()
-            .any(|p| p.port == 3000 && p.protocol == "tcp"));
-        assert!(container
-            .exposed_ports
-            .iter()
-            .any(|p| p.port == 8080 && p.protocol == "tcp"));
+        assert!(
+            container
+                .exposed_ports
+                .iter()
+                .any(|p| p.port == 3000 && p.protocol == "tcp")
+        );
+        assert!(
+            container
+                .exposed_ports
+                .iter()
+                .any(|p| p.port == 8080 && p.protocol == "tcp")
+        );
 
         // Check port mappings
         assert_eq!(container.port_mappings.len(), 2);
@@ -3744,9 +3748,11 @@ mod tests {
         let image_pos = args.iter().position(|a| a == "ubuntu:22.04").unwrap();
         assert!(image_pos > 0, "Image should not be the first argument");
         // No runArgs-related strings should be present
-        assert!(!args
-            .iter()
-            .any(|a| a.starts_with("--memory") || a.starts_with("--cpus")));
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.starts_with("--memory") || a.starts_with("--cpus"))
+        );
     }
 
     /// BEAD-6-T01: a normal exit code is passed through verbatim.

@@ -364,16 +364,20 @@ fn test_port_event_redaction() {
 
     assert_eq!(events.len(), 1);
     let event = &events[0];
-    assert!(event
-        .label
-        .as_ref()
-        .unwrap()
-        .contains("secret-port-token-123"));
-    assert!(event
-        .description
-        .as_ref()
-        .unwrap()
-        .contains("secret-port-token-123"));
+    assert!(
+        event
+            .label
+            .as_ref()
+            .unwrap()
+            .contains("secret-port-token-123")
+    );
+    assert!(
+        event
+            .description
+            .as_ref()
+            .unwrap()
+            .contains("secret-port-token-123")
+    );
 
     // The actual redaction test would require capturing stdout from emit_port_event
     // which is complex in unit tests. The functionality is tested through the

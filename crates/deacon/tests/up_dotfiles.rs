@@ -79,7 +79,9 @@ fn single_container_fixture() -> PathBuf {
 #[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
 fn test_dotfiles_installation_with_custom_command() {
     if !can_run_dotfiles_tests() {
-        eprintln!("Skipping test_dotfiles_installation_with_custom_command: Docker or network not available");
+        eprintln!(
+            "Skipping test_dotfiles_installation_with_custom_command: Docker or network not available"
+        );
         return;
     }
 

@@ -5,7 +5,7 @@
 
 use crate::cli::TemplateCommands;
 use anyhow::Result;
-use deacon_core::oci::{default_fetcher, TemplateRef};
+use deacon_core::oci::{TemplateRef, default_fetcher};
 use deacon_core::registry_parser::parse_registry_reference;
 use std::path::PathBuf;
 use tracing::{debug, info, instrument, warn};
@@ -97,7 +97,7 @@ async fn execute_templates_apply(
     dry_run: bool,
 ) -> Result<()> {
     use deacon_core::features::OptionValue;
-    use deacon_core::templates::{apply_template, parse_template_metadata, ApplyOptions};
+    use deacon_core::templates::{ApplyOptions, apply_template, parse_template_metadata};
     use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
@@ -183,9 +183,10 @@ async fn execute_templates_apply(
                         "false" => OptionValue::Boolean(false),
                         _ => {
                             return Err(anyhow::anyhow!(
-                            "Invalid boolean value '{}' for option '{}'. Use 'true' or 'false'.",
-                            value, key
-                        ))
+                                "Invalid boolean value '{}' for option '{}'. Use 'true' or 'false'.",
+                                value,
+                                key
+                            ));
                         }
                     }
                 }

@@ -1,4 +1,4 @@
-use deacon::commands::exec::{execute_exec_with_docker, ExecArgs};
+use deacon::commands::exec::{ExecArgs, execute_exec_with_docker};
 use deacon_core::docker::mock::{MockContainer, MockDocker, MockExecResponse};
 
 #[tokio::test]

@@ -1,5 +1,6 @@
-[build]
-rustflags = ["-C", "debuginfo=1"]
+# Dev build tuning lives in [profile.dev] in the workspace Cargo.toml (debug = 1
+# for faster incremental links). Keeping it profile-scoped avoids emitting debug
+# info into release builds, which the release profile then strips anyway.
 
 [term]
 quiet = false

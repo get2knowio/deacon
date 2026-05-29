@@ -185,7 +185,7 @@ pub fn normalize_config_json(raw: &str) -> anyhow::Result<Value> {
 
 /// Extract a subset of keys that define the effective devcontainer behavior.
 fn extract_core_config(v: &Value) -> Value {
-    use serde_json::{json, Map};
+    use serde_json::{Map, json};
     let mut out = Map::new();
     let obj = match v.as_object() {
         Some(o) => o,

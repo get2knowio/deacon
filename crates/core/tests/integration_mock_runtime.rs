@@ -9,7 +9,7 @@ use anyhow::Result;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle_with_docker, ContainerLifecycleCommands, ContainerLifecycleConfig,
+    ContainerLifecycleCommands, ContainerLifecycleConfig, execute_container_lifecycle_with_docker,
 };
 use deacon_core::docker::mock::{MockContainer, MockDocker, MockDockerConfig, MockExecResponse};
 use deacon_core::docker::{Docker, ExecConfig};

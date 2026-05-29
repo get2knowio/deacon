@@ -3,8 +3,8 @@
 mod common;
 
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle_with_docker, ContainerLifecycleCommands, ContainerLifecycleConfig,
-    LifecycleCommandValue,
+    ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandValue,
+    execute_container_lifecycle_with_docker,
 };
 use deacon_core::docker::mock::{MockDocker, MockDockerConfig, MockExecResponse};
 use deacon_core::variable::SubstitutionContext;
@@ -497,14 +497,18 @@ async fn test_non_blocking_phase_timeout_handling() {
 
     // Verify that timeout errors are properly aggregated
     assert_eq!(final_result.background_errors.len(), 1); // postStart should timeout
-    assert!(final_result
-        .background_errors
-        .iter()
-        .any(|err| err.contains("timed out")));
-    assert!(final_result
-        .background_errors
-        .iter()
-        .any(|err| err.contains("postStart")));
+    assert!(
+        final_result
+            .background_errors
+            .iter()
+            .any(|err| err.contains("timed out"))
+    );
+    assert!(
+        final_result
+            .background_errors
+            .iter()
+            .any(|err| err.contains("postStart"))
+    );
 
     println!("✓ Non-blocking phase timeouts are properly handled");
     println!(

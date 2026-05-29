@@ -224,9 +224,9 @@ jobs:
       - name: Prepare packaging files (Unix)
         if: runner.os != 'Windows'
         run: |
+          # The binary is already stripped by `strip = true` in [profile.release]
+          # (rustc's built-in, cross-platform stripping), so no shell `strip` here.
           cp README.md LICENSE target/${{ matrix.target }}/release/
-          # Attempt to strip (ignore failures on unsupported formats)
-          strip target/${{ matrix.target }}/release/deacon || true
       - name: Prepare packaging files (Windows)
         if: runner.os == 'Windows'
         run: |

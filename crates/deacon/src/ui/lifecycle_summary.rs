@@ -737,24 +737,30 @@ mod tests {
                 .collect::<Vec<_>>(),
             false,
         );
-        assert!(all_executed
-            .summary
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("complete"));
-        assert!(all_executed
-            .summary
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("6 executed"));
-        assert!(all_executed
-            .summary
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("0 skipped"));
+        assert!(
+            all_executed
+                .summary
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("complete")
+        );
+        assert!(
+            all_executed
+                .summary
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("6 executed")
+        );
+        assert!(
+            all_executed
+                .summary
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("0 skipped")
+        );
 
         // Mixed executed and skipped
         let mixed = LifecycleSummary::from_phase_states(
@@ -791,18 +797,22 @@ mod tests {
             ],
             false,
         );
-        assert!(mixed
-            .summary
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("2 executed"));
-        assert!(mixed
-            .summary
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("4 skipped"));
+        assert!(
+            mixed
+                .summary
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("2 executed")
+        );
+        assert!(
+            mixed
+                .summary
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("4 skipped")
+        );
 
         // With failure
         let with_failure = LifecycleSummary::from_phase_states(
@@ -820,18 +830,22 @@ mod tests {
             ],
             true,
         );
-        assert!(with_failure
-            .summary
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("incomplete"));
-        assert!(with_failure
-            .summary
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("1 failed"));
+        assert!(
+            with_failure
+                .summary
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("incomplete")
+        );
+        assert!(
+            with_failure
+                .summary
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("1 failed")
+        );
     }
 
     // =========================================================================
@@ -894,12 +908,14 @@ mod tests {
 
         // Summary should reflect resumed phases
         assert_eq!(summary.summary.resumed_count, 4);
-        assert!(summary
-            .summary
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("resumed"));
+        assert!(
+            summary
+                .summary
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("resumed")
+        );
     }
 
     #[test]
@@ -964,12 +980,14 @@ mod tests {
         }
 
         assert_eq!(summary.summary.resumed_count, 0);
-        assert!(summary
-            .summary
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("complete"));
+        assert!(
+            summary
+                .summary
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("complete")
+        );
     }
 
     #[test]

@@ -32,7 +32,7 @@ use std::process::Output;
 use thiserror::Error;
 
 use crate::errors::{DockerError, Result};
-use crate::retry::{retry_async, RetryConfig, RetryDecision};
+use crate::retry::{RetryConfig, RetryDecision, retry_async};
 
 /// Classification of a failed `docker build` / `docker buildx build` invocation.
 ///
@@ -239,9 +239,16 @@ pub fn classify_retry_decision(error: &DockerSubprocessError) -> RetryDecision {
 /// failure so a single test run can observe both the failure and recovery
 /// branches.
 ///
-/// Production code paths never set this variable. Mirrors the env-var-driven
-/// fail-N-times approach referenced in issue #17.
-pub const DEACON_TEST_DOCKER_FAIL_N: &str = "DEACON_TEST_DOCKER_FAIL_N";
+/// Test-only seam: the number of synthetic transient failures the next
+/// `run_build_with_retry` should inject before letting the real subprocess
+/// run. Replaces the former `DEACON_TEST_DOCKER_FAIL_N` env var so the hook no
+/// longer mutates the process environment (which is `unsafe` and racy under
+/// edition 2024). Production builds never reference it — `take_forced_failure`
+/// is compiled to a no-op outside `cfg(test)`. Mirrors the fail-N-times
+/// approach referenced in issue #17.
+#[cfg(test)]
+pub(crate) static FORCED_TRANSIENT_FAILURES: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
 
 /// Run a `docker` subprocess (typically `docker buildx build ...`) with
 /// retry-on-transient. The caller passes the runtime binary path and the
@@ -295,21 +302,37 @@ pub async fn run_build_with_retry(runtime_path: &Path, args: &[String]) -> Resul
 }
 
 /// Pull-and-decrement the test-hook counter. Returns `Some(stderr)` if a
-/// forced failure should be injected, else `None`. Always `None` outside
-/// tests because production code does not set the env var.
+/// forced failure should be injected, else `None`. Compiled to an
+/// unconditional `None` outside `cfg(test)`, so production code never injects.
 fn take_forced_failure() -> Option<String> {
-    let raw = std::env::var(DEACON_TEST_DOCKER_FAIL_N).ok()?;
-    let n: u32 = raw.parse().ok()?;
-    if n == 0 {
-        return None;
+    #[cfg(test)]
+    {
+        use std::sync::atomic::Ordering;
+        // Atomically claim one synthetic failure if any remain. Lock-free CAS
+        // loop so concurrent attempts can't double-consume the counter.
+        let mut remaining = FORCED_TRANSIENT_FAILURES.load(Ordering::SeqCst);
+        while remaining > 0 {
+            match FORCED_TRANSIENT_FAILURES.compare_exchange_weak(
+                remaining,
+                remaining - 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    return Some(format!(
+                        "synthetic transient failure: TLS handshake timeout (remaining was {})",
+                        remaining
+                    ));
+                }
+                Err(actual) => remaining = actual,
+            }
+        }
+        None
     }
-    // Decrement so the next attempt proceeds normally once we've consumed
-    // the configured failure count.
-    std::env::set_var(DEACON_TEST_DOCKER_FAIL_N, (n - 1).to_string());
-    Some(format!(
-        "synthetic transient failure: TLS handshake timeout (DEACON_TEST_DOCKER_FAIL_N={})",
-        n
-    ))
+    #[cfg(not(test))]
+    {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -504,24 +527,25 @@ mod tests {
     // run_build_with_retry — integration-style tests
     //
     // These exercise the retry loop end-to-end using the
-    // DEACON_TEST_DOCKER_FAIL_N env-var hook so we can simulate transient
+    // FORCED_TRANSIENT_FAILURES atomic hook so we can simulate transient
     // failures without needing a real Docker daemon. They mirror the
-    // env-var-driven fail-N-times pattern referenced in issue #17 and the
-    // shape of the existing OCI retry tests in oci/utils.rs.
+    // fail-N-times pattern referenced in issue #17 and the shape of the
+    // existing OCI retry tests in oci/utils.rs.
     //
-    // Tests serialize on the global env var via a mutex.
+    // Tests serialize on the global counter via a mutex.
     // ------------------------------------------------------------------
 
+    use std::sync::atomic::Ordering;
     use tokio::sync::Mutex;
 
     // tokio Mutex is async-aware: holding the guard across `.await` is safe
     // (sidesteps `clippy::await_holding_lock`). We serialize on the global
-    // env var via this lock because tests in this module mutate
-    // `DEACON_TEST_DOCKER_FAIL_N` and observe its post-state.
-    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
+    // counter via this lock because tests in this module mutate
+    // `FORCED_TRANSIENT_FAILURES` and observe its post-state.
+    static HOOK_LOCK: Mutex<()> = Mutex::const_new(());
 
     fn clear_fail_hook() {
-        std::env::remove_var(DEACON_TEST_DOCKER_FAIL_N);
+        FORCED_TRANSIENT_FAILURES.store(0, Ordering::SeqCst);
     }
 
     /// The retry loop recovers once the synthetic transient failure counter
@@ -530,10 +554,10 @@ mod tests {
     /// subprocess succeeds on the recovery attempt (no Docker daemon required).
     #[tokio::test]
     async fn run_build_recovers_after_transient_failures() {
-        let _guard = ENV_LOCK.lock().await;
+        let _guard = HOOK_LOCK.lock().await;
         clear_fail_hook();
         // Two synthetic transient failures, then real subprocess succeeds.
-        std::env::set_var(DEACON_TEST_DOCKER_FAIL_N, "2");
+        FORCED_TRANSIENT_FAILURES.store(2, Ordering::SeqCst);
 
         let result =
             run_build_with_retry(std::path::Path::new("/usr/bin/true"), &[] as &[String]).await;
@@ -544,10 +568,7 @@ mod tests {
             result
         );
         // Counter should be drained.
-        assert_eq!(
-            std::env::var(DEACON_TEST_DOCKER_FAIL_N).ok().as_deref(),
-            Some("0")
-        );
+        assert_eq!(FORCED_TRANSIENT_FAILURES.load(Ordering::SeqCst), 0);
         clear_fail_hook();
     }
 
@@ -555,11 +576,11 @@ mod tests {
     /// up and surfaces a `DockerError::CLIError` with the last stderr.
     #[tokio::test]
     async fn run_build_gives_up_after_exhausting_retries() {
-        let _guard = ENV_LOCK.lock().await;
+        let _guard = HOOK_LOCK.lock().await;
         clear_fail_hook();
         // Network profile is 3 retries (4 attempts total). 10 forced failures
         // guarantees exhaustion.
-        std::env::set_var(DEACON_TEST_DOCKER_FAIL_N, "10");
+        FORCED_TRANSIENT_FAILURES.store(10, Ordering::SeqCst);
 
         let result =
             run_build_with_retry(std::path::Path::new("/usr/bin/true"), &[] as &[String]).await;
@@ -576,17 +597,14 @@ mod tests {
             err
         );
         // After 4 attempts (initial + 3 retries) the counter should be 10-4 = 6.
-        assert_eq!(
-            std::env::var(DEACON_TEST_DOCKER_FAIL_N).ok().as_deref(),
-            Some("6")
-        );
+        assert_eq!(FORCED_TRANSIENT_FAILURES.load(Ordering::SeqCst), 6);
         clear_fail_hook();
     }
 
     /// First attempt succeeds (no failures injected) — no retries, no env hook.
     #[tokio::test]
     async fn run_build_succeeds_on_first_attempt_without_hook() {
-        let _guard = ENV_LOCK.lock().await;
+        let _guard = HOOK_LOCK.lock().await;
         clear_fail_hook();
 
         let result =

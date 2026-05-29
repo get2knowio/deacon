@@ -8,7 +8,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::time::Instant;
-use tracing::{span, Span};
+use tracing::{Span, span};
 
 /// Canonical span names for core workflows
 pub mod spans {
@@ -209,7 +209,7 @@ impl TimedSpan {
 /// Macro to create and enter a standardized span with automatic timing
 #[macro_export]
 macro_rules! timed_span {
-    ($span_fn:expr) => {{
+    ($span_fn:expr_2021) => {{
         let span = $span_fn;
         $crate::observability::TimedSpan::new(span)
     }};

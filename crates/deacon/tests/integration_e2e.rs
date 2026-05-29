@@ -470,8 +470,11 @@ fn test_e2e_plugin_customizations() {
     // This tests that the configuration is preserved correctly
     let settings = &vscode_config["settings"];
     let python_path = settings["python.defaultInterpreterPath"].as_str().unwrap();
-    assert!(python_path.contains("${localWorkspaceFolder}") || !python_path.contains("${"), 
-            "Python path should be preserved as-is since customizations variable substitution is not yet implemented: {}", python_path);
+    assert!(
+        python_path.contains("${localWorkspaceFolder}") || !python_path.contains("${"),
+        "Python path should be preserved as-is since customizations variable substitution is not yet implemented: {}",
+        python_path
+    );
 
     println!("✅ Plugin customizations test completed successfully");
 }
@@ -559,7 +562,8 @@ fn test_e2e_lifecycle_simulation() {
     assert!(
         has_config_logs || json.is_object(),
         "Should have configuration processing logs or valid JSON output. Stderr: {:?}, Stdout: {:?}",
-        stderr_content, stdout_content
+        stderr_content,
+        stdout_content
     );
 
     println!("✅ Lifecycle simulation test completed successfully");

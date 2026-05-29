@@ -5,10 +5,10 @@
 
 use assert_cmd::Command;
 use deacon_core::{
-    lifecycle::{run_phase, ExecutionContext, LifecycleCommands, LifecyclePhase},
+    lifecycle::{ExecutionContext, LifecycleCommands, LifecyclePhase, run_phase},
     redaction::{
-        add_global_secret, global_registry, redact_if_enabled, RedactingWriter, RedactionConfig,
-        SecretRegistry,
+        RedactingWriter, RedactionConfig, SecretRegistry, add_global_secret, global_registry,
+        redact_if_enabled,
     },
 };
 use serde_json::json;

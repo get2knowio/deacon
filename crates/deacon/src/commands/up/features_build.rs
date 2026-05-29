@@ -17,7 +17,7 @@ use deacon_core::features::{
     FeatureDependencyResolver, InstallationPlan, OptionValue, ResolvedFeature,
 };
 use deacon_core::lockfile::{Lockfile, LockfileFeature};
-use deacon_core::oci::{default_fetcher, DownloadedFeature, FeatureRef};
+use deacon_core::oci::{DownloadedFeature, FeatureRef, default_fetcher};
 use deacon_core::registry_parser::parse_registry_reference;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

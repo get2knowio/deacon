@@ -55,13 +55,12 @@ fn find_container(name: &str) -> Option<String> {
         ])
         .output()
         .ok()?;
-    let id = String::from_utf8_lossy(&output.stdout)
+    String::from_utf8_lossy(&output.stdout)
         .lines()
         .next()
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(str::to_string);
-    id
+        .map(str::to_string)
 }
 
 /// Removes the named container on drop so cleanup runs even if an assertion
@@ -80,7 +79,9 @@ impl Drop for ContainerGuard {
 #[test]
 fn test_run_user_commands_prebuild_stops_after_update_content() {
     if !is_docker_available() {
-        eprintln!("Skipping test_run_user_commands_prebuild_stops_after_update_content: Docker not available");
+        eprintln!(
+            "Skipping test_run_user_commands_prebuild_stops_after_update_content: Docker not available"
+        );
         return;
     }
 

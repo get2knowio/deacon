@@ -322,10 +322,12 @@ mod tests {
         let result = detect_gpu_capability("nonexistent-docker-binary-xyz").await;
         assert!(!result.available);
         assert!(result.probe_error.is_some());
-        assert!(result
-            .probe_error
-            .unwrap()
-            .contains("Failed to execute runtime info command"));
+        assert!(
+            result
+                .probe_error
+                .unwrap()
+                .contains("Failed to execute runtime info command")
+        );
     }
 
     // Note: Integration tests with real Docker commands should be in

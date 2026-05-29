@@ -41,7 +41,7 @@
 //! ```
 
 use crate::errors::{GitError, Result};
-use crate::trust::{check_workspace_trust, decision_to_result, WorkspaceTrustPolicy};
+use crate::trust::{WorkspaceTrustPolicy, check_workspace_trust, decision_to_result};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 use tracing::{debug, info, instrument, warn};

@@ -255,7 +255,7 @@ fn test_buildkit_options_detection_empty() {
 /// Test that require_buildkit_for_options passes when no options require BuildKit
 #[tokio::test(flavor = "current_thread")]
 async fn test_require_buildkit_for_options_passes_when_empty() {
-    use deacon_core::build::buildkit::{require_buildkit_for_options, BuildKitOptions};
+    use deacon_core::build::buildkit::{BuildKitOptions, require_buildkit_for_options};
 
     let options = BuildKitOptions::default();
     let result = require_buildkit_for_options(&options).await;

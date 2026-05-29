@@ -447,7 +447,7 @@ impl ContainerEnvironmentProber {
                     crate::errors::InternalError::Generic {
                         message: "None mode should be handled earlier".to_string(),
                     },
-                ))
+                ));
             }
             ContainerProbeMode::LoginShell => "-lc",
             ContainerProbeMode::InteractiveShell => "-ic",
