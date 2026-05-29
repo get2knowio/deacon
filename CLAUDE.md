@@ -535,12 +535,23 @@ GitHub Actions runs on every PR:
 - Tests: `make test-nextest-fast` (Ubuntu), `make test-nextest-ci` (full)
 - Smoke tests: `make test-nextest-smoke` (serial with Docker)
 - Coverage: Minimum threshold enforced via cargo-llvm-cov
+- PR title: must follow Conventional Commits (`.github/workflows/pr-title.yml`)
+
+**PR Title Conventional-Commit Types (CI-enforced):**
+The "Validate PR title follows Conventional Commits" check (amannn/action-semantic-pull-request)
+allows ONLY these types: `feat`, `fix`, `perf`, `docs`, `refactor`, `ci`, `build`,
+`chore`. **`test` and `style` are NOT allowed** and will fail the check / block merge.
+Use `chore` for test-only or tooling PRs (e.g. `chore(tests): …`). The squash merge
+uses the PR **title**, not the commit subject — so a commit may say `test(up): …` as
+long as the PR title is an allowed type. Editing the title (`gh pr edit <n> --title …`)
+re-triggers the check.
 
 **Common CI Failures:**
 - Trailing whitespace anywhere (run `cargo fmt --all`)
 - Clippy warnings (run `cargo clippy --all-targets -- -D warnings`)
 - Doctest failures (missing trait imports, missing Default implementations)
 - Test race conditions (reclassify to more conservative nextest group)
+- PR title using a disallowed type (`test`/`style`) — retitle to `chore`
 
 ## Debugging Tips
 
