@@ -6,6 +6,7 @@
 //! - Error emits proper JSON with error details
 
 use assert_cmd::Command;
+use tempfile::TempDir;
 
 #[test]
 fn test_up_invalid_mount_format_fails_validation() {
@@ -95,9 +96,50 @@ fn test_up_missing_workspace_and_id_label_fails() {
 
 #[test]
 fn test_up_json_output_structure_on_missing_config() {
-    // When config is missing, we should get a proper error JSON on stdout
-    // (not testing in this simple version as it requires more complex setup)
-    // This is a placeholder for the JSON structure validation
+    // Spec contract (specs/001-up-gap-spec/contracts/up.md; up/SPEC.md §10):
+    // on error, `up` writes exactly one JSON document to STDOUT shaped
+    // `{ outcome: "error", message, description }` and exits 1. All logs go to
+    // stderr. This mirrors the reference @devcontainers/cli outcome object, so
+    // it is v1 spec-parity — not merely an exit-code check. Hermetic: the error
+    // fires during config discovery, so no Docker is required.
+    let temp_dir = TempDir::new().unwrap();
+
+    let assert = Command::cargo_bin("deacon")
+        .expect("failed to find deacon binary for tests - ensure 'cargo build' has been run")
+        .current_dir(temp_dir.path())
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .arg("--log-level")
+        .arg("error")
+        .assert()
+        .failure()
+        .code(1);
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+
+    // stdout must be a single, parseable JSON document (not log noise).
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("up error stdout is not valid JSON ({e}): {stdout:?}"));
+
+    assert_eq!(
+        parsed["outcome"], "error",
+        "error payload must carry outcome=error: {stdout}"
+    );
+    assert!(
+        parsed
+            .get("message")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.is_empty()),
+        "error payload must include a non-empty string `message`: {stdout}"
+    );
+    assert!(
+        parsed
+            .get("description")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.is_empty()),
+        "error payload must include a non-empty string `description`: {stdout}"
+    );
 }
 
 // Note: Full integration tests that actually create containers and verify JSON output
