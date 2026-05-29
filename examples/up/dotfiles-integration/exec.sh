@@ -38,27 +38,27 @@ cd "$SCRIPT_DIR"
 
 echo "== Basic Dotfiles Integration (default repository) ==" >&2
 out_basic="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
-	--dotfiles-repository "https://github.com/codespaces/dotfiles" \
+	--dotfiles-repository "https://github.com/holman/dotfiles" \
 	"$@")"
 cleanup_container "$(extract_container_id "$out_basic")"
 
 echo "== Custom Install Command ==" >&2
 out_custom_install="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
-	--dotfiles-repository "https://github.com/codespaces/dotfiles" \
+	--dotfiles-repository "https://github.com/holman/dotfiles" \
 	--dotfiles-install-command "echo 'custom install command executed'" \
 	"$@")"
 cleanup_container "$(extract_container_id "$out_custom_install")"
 
 echo "== Custom Target Path ==" >&2
 out_custom_target="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
-	--dotfiles-repository "https://github.com/codespaces/dotfiles" \
+	--dotfiles-repository "https://github.com/holman/dotfiles" \
 	--dotfiles-target-path "~/.config/dotfiles-custom" \
 	"$@")"
 cleanup_container "$(extract_container_id "$out_custom_target")"
 
 echo "== All Options Combined ==" >&2
 out_all="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
-	--dotfiles-repository "https://github.com/codespaces/dotfiles" \
+	--dotfiles-repository "https://github.com/holman/dotfiles" \
 	--dotfiles-install-command "echo 'custom install command executed'" \
 	--dotfiles-target-path "~/.config/dotfiles-custom" \
 	"$@")"

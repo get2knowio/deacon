@@ -81,15 +81,15 @@ Last broad sweep: **2026-05-29** (against `main` including PRs #129/#131/#132/
 | up/basic-image | ✅ pass | 2026-05-29 | |
 | up/compose-basic | ✅ pass | 2026-05-29 | |
 | up/compose-profiles | ✅ pass | 2026-05-29 | |
-| up/configuration-output | ⚠️ fixture | 2026-05-29 | alpine + git feature needs bash → exit 127 |
+| up/configuration-output | ✅ pass | 2026-05-29 | base switched alpine→debian:bookworm-slim (git feature needs bash) (#151) |
 | up/container-user-vs-remote-user | ✅ pass | 2026-05-29 | |
 | up/dockerfile-build | ✅ pass | 2026-05-29 | |
-| up/dotfiles-integration | ⚠️ fixture | 2026-05-29 | clones a GitHub repo → needs network/auth |
+| up/dotfiles-integration | ✅ pass | 2026-05-29 | repo URL `codespaces/dotfiles` (404)→`holman/dotfiles` (#151); `~` target-path expansion (#150) |
 | up/gpu-modes | ✅ pass | 2026-05-29 | GPU `all` failure expected on non-GPU hosts (tolerated) |
 | up/id-labels-reconnect | ✅ pass | 2026-05-29 | full-ID on reconnect (#143) |
 | up/image-metadata-merge | ✅ pass | 2026-05-29 | |
 | up/initialize-command | ✅ pass | 2026-05-29 | |
-| up/lifecycle-hooks | ⚠️ fixture | 2026-05-29 | `remoteUser: devuser` runs `apt-get` → permission denied |
+| up/lifecycle-hooks | ✅ pass | 2026-05-29 | non-existent `devuser`→root (apt needs root); array hooks→argv `["bash","-c",…]` (#151) |
 | up/override-command | ✅ pass | 2026-05-29 | |
 | up/ports-config | ✅ pass | 2026-05-29 | |
 | up/prebuild-mode | ✅ pass | 2026-05-29 | keep-alive PATH fix (#145) |
