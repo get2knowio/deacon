@@ -48,7 +48,7 @@ deacon exec --workspace-folder . bash /workspace/generate-output.sh \
 ```bash
 # Read binary file and pipe through exec without corruption
 deacon exec --workspace-folder . cat /workspace/data/sample.bin \
-  | xxd | head -n 5
+  | od -An -tx1 | head -n 5
 ```
 
 ### Process Substitution
@@ -66,9 +66,10 @@ EXIT_CODE=$?
 echo "Build exit code: $EXIT_CODE"
 ```
 
-### JSON Output (Forces PTY but streams continuously)
+### JSON Output (streams continuously; non-PTY when non-interactive)
 ```bash
-# Even with JSON, output streams continuously
+# Even with JSON, output streams continuously. A PTY is only allocated when
+# stdin is an interactive terminal — piped/redirected stdin streams without one.
 deacon exec --workspace-folder . --log-format json \
   bash /workspace/generate-output.sh
 ```

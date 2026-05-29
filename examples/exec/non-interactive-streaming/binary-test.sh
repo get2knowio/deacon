@@ -10,7 +10,7 @@ if [ -f /workspace/data/sample.bin ]; then
     
     # Output first 16 bytes in hex
     echo "First 16 bytes (hex):" >&2
-    xxd -l 16 /workspace/data/sample.bin >&2
+    od -An -tx1 -N 16 /workspace/data/sample.bin >&2
 fi
 
 # Test 2: Generate and output binary data

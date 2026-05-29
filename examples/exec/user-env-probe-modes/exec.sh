@@ -26,7 +26,7 @@ trap cleanup EXIT
 cd "$SCRIPT_DIR"
 
 echo "== Start dev container (README: Prerequisites) ==" >&2
-run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container "$@"
+run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container --mount-workspace-git-root false "$@"
 
 echo "== Default probe: loginInteractiveShell (README: Test Default Probe) ==" >&2
 run "$DEACON_BIN" exec --workspace-folder "$SCRIPT_DIR" bash /workspace/probe-test.sh
