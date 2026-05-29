@@ -49,7 +49,7 @@ Last broad sweep: **2026-05-29** (against `main` including PRs #129/#131/#132/
 | configuration/secrets-declarative | ✅ pass | 2026-05-29 | |
 | doctor/gpu-host-requirements | ✅ pass | 2026-05-29 | |
 | doctor/host-requirements-failure | ✅ pass | 2026-05-29 | |
-| down/basic | ❓ unverified | — | not run in the 2026-05-29 sweep |
+| down/basic | ✅ pass | 2026-05-29 | `--all` now sweeps by `devcontainer.local_folder` + idempotent down on gone container (#147) |
 | exec/container-id-targeting | ⚠️ fixture | 2026-05-29 | git-root mount: `/workspace/test-script.sh` lands under `/workspace/examples/...`; pass with `--mount-workspace-git-root false` |
 | exec/exit-code-handling | ⚠️ fixture | 2026-05-29 | git-root mount (`/workspace/*.sh`) |
 | exec/id-label-targeting | ⚠️ fixture | 2026-05-29 | git-root mount (`/workspace/app.py`) |

@@ -249,6 +249,27 @@ impl ContainerIdentity {
             self.config_hash
         )
     }
+
+    /// Build a broad, workspace-scoped label selector for sweeping *all*
+    /// containers belonging to this workspace — regardless of config drift.
+    ///
+    /// Unlike [`label_selector`](Self::label_selector) (which pins
+    /// `source` + `workspace_hash` + `config_hash` to find the one container
+    /// matching the *current* config), this matches purely on the
+    /// spec-canonical `devcontainer.local_folder` label. That is the durable
+    /// "which workspace does this container belong to" identity used by the
+    /// VS Code Dev Containers extension and the reference CLI, so it also
+    /// catches genuinely *stale* containers created under an older/different
+    /// config (different `config_hash`). Used by `down --all`.
+    ///
+    /// Returns `None` when the workspace path could not be canonicalized at
+    /// identity-construction time (so no reliable `local_folder` is known) —
+    /// callers should fall back to [`label_selector`](Self::label_selector).
+    pub fn workspace_label_selector(&self) -> Option<String> {
+        self.local_folder
+            .as_ref()
+            .map(|p| format!("{}={}", LABEL_LOCAL_FOLDER, p.display()))
+    }
 }
 
 fn canonicalize_json(value: &mut Value) {
@@ -422,6 +443,35 @@ mod tests {
             LABEL_WORKSPACE_HASH, identity.workspace_hash
         )));
         assert!(selector.contains(&format!("{}={}", LABEL_CONFIG_HASH, identity.config_hash)));
+    }
+
+    #[test]
+    fn test_workspace_label_selector_matches_local_folder() {
+        let temp_dir = TempDir::new().unwrap();
+        let workspace_path = temp_dir.path();
+
+        let config = DevContainerConfig {
+            name: Some("test".to_string()),
+            image: Some("ubuntu:20.04".to_string()),
+            ..Default::default()
+        };
+
+        let identity = ContainerIdentity::new(workspace_path, &config);
+        let selector = identity
+            .workspace_label_selector()
+            .expect("local_folder should be set for an existing temp dir");
+
+        let expected_local_folder = workspace_path.canonicalize().unwrap().display().to_string();
+        assert_eq!(
+            selector,
+            format!("{}={}", LABEL_LOCAL_FOLDER, expected_local_folder),
+            "workspace_label_selector must pin only devcontainer.local_folder so it sweeps stale containers across config drift"
+        );
+
+        // It must NOT include the config-pinned hash labels — otherwise a
+        // container created under an older config would never be swept.
+        assert!(!selector.contains(LABEL_CONFIG_HASH));
+        assert!(!selector.contains(LABEL_WORKSPACE_HASH));
     }
 
     #[test]

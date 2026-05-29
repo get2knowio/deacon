@@ -148,3 +148,121 @@ fn test_down_after_up_idempotent() {
         );
     }
 }
+
+/// Test `down --all` sweeps *every* container carrying this workspace's
+/// `devcontainer.local_folder` label — including a stale container that was
+/// NOT created by deacon (no `source`/hash labels) and whose config never
+/// matched. Regression test for `--all` over-pinning on `config_hash`.
+#[test]
+fn test_down_all_sweeps_stale_by_local_folder() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_down_all_sweeps_stale_by_local_folder: Docker not available");
+        return;
+    }
+    let temp_dir = TempDir::new().unwrap();
+    // Canonical workspace path — matches what deacon writes to the
+    // devcontainer.local_folder label and what we filter on below.
+    let workspace = temp_dir.path().canonicalize().unwrap();
+
+    let devcontainer_config = r#"{
+    "name": "Down All Stale Test",
+    "image": "alpine:3.19",
+    "workspaceFolder": "/workspace"
+}"#;
+    fs::create_dir(workspace.join(".devcontainer")).unwrap();
+    fs::write(
+        workspace.join(".devcontainer/devcontainer.json"),
+        devcontainer_config,
+    )
+    .unwrap();
+
+    // Bring up the deacon-managed container.
+    let up_output = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("up")
+        .arg("--skip-post-create")
+        .arg("--skip-non-blocking-commands")
+        .arg("--workspace-folder")
+        .arg(&workspace)
+        .output()
+        .unwrap();
+    assert!(
+        up_output.status.success(),
+        "Up failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+
+    // Create a *stale* container that only carries the workspace's
+    // local_folder label (simulating a container from an older deacon run
+    // whose state file / config no longer matches).
+    let local_folder_label = format!("devcontainer.local_folder={}", workspace.display());
+    let stale = std::process::Command::new("docker")
+        .args([
+            "run",
+            "-d",
+            "--rm",
+            "--label",
+            &local_folder_label,
+            "alpine:3.19",
+            "sleep",
+            "300",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        stale.status.success(),
+        "Failed to create stale container: {}",
+        String::from_utf8_lossy(&stale.stderr)
+    );
+    let stale_id = String::from_utf8_lossy(&stale.stdout).trim().to_string();
+
+    // Count containers with this workspace label before sweep (expect >= 2).
+    let count_label = || -> usize {
+        let out = std::process::Command::new("docker")
+            .args([
+                "ps",
+                "-a",
+                "--filter",
+                &format!("label={}", local_folder_label),
+                "-q",
+            ])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    };
+    assert!(
+        count_label() >= 2,
+        "expected at least the deacon container + stale container before sweep"
+    );
+
+    // Sweep everything with --all --remove.
+    let down_output = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("down")
+        .arg("--workspace-folder")
+        .arg(&workspace)
+        .arg("--all")
+        .arg("--remove")
+        .arg("--force")
+        .output()
+        .unwrap();
+
+    let remaining = count_label();
+    // Best-effort cleanup of the stale container regardless of assertion outcome.
+    let _ = std::process::Command::new("docker")
+        .args(["rm", "-f", &stale_id])
+        .output();
+
+    assert!(
+        down_output.status.success(),
+        "down --all failed: {}",
+        String::from_utf8_lossy(&down_output.stderr)
+    );
+    assert_eq!(
+        remaining, 0,
+        "down --all --remove must sweep ALL containers labeled for this workspace (including the stale, non-deacon one); {remaining} remained"
+    );
+}
