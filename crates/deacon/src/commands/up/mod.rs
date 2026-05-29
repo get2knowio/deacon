@@ -18,7 +18,7 @@
 //! - `helpers` - Utility functions
 
 mod args;
-mod compose;
+pub(crate) mod compose;
 mod container;
 // `dotfiles` module deleted: dotfiles execution is now integrated into
 // `deacon_core::container_lifecycle::execute_dotfiles_in_container`, which
