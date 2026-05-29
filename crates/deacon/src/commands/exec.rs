@@ -75,21 +75,28 @@ pub struct ExecArgs {
     pub terminal_dimensions: Option<TerminalDimensions>,
 }
 
-/// Compute whether we should allocate a PTY for exec.
+/// Compute whether we should allocate a PTY for `exec`.
+///
 /// Rules:
-/// - If `force_tty` is true, always allocate a PTY.
-/// - Otherwise, allocate a PTY only if `!no_tty` AND both stdin and stdout are TTYs.
+/// - Explicit `--no-tty` always wins: never allocate a PTY.
+/// - A PTY requires a real terminal on **stdin**. `docker exec -it` against a
+///   piped/redirected stdin is rejected by the daemon ("cannot attach stdin to
+///   a TTY-enabled container because stdin is not a terminal"), so `exec` can
+///   never use a PTY when stdin isn't a terminal — even under `force_tty`.
+/// - `force_tty` (e.g. JSON log format auto-forcing) bypasses only the
+///   *stdout*-is-a-terminal requirement, so an interactive user whose stdout is
+///   being captured (a JSON consumer) still gets a PTY.
+/// - Otherwise, allocate a PTY only when both stdin and stdout are TTYs.
 pub(crate) fn compute_should_use_tty(
     force_tty: bool,
     no_tty: bool,
     stdin_is_tty: bool,
     stdout_is_tty: bool,
 ) -> bool {
-    if force_tty {
-        true
-    } else {
-        !no_tty && stdin_is_tty && stdout_is_tty
+    if no_tty || !stdin_is_tty {
+        return false;
     }
+    force_tty || stdout_is_tty
 }
 
 fn map_config_error(err: DeaconError) -> anyhow::Error {
@@ -1051,9 +1058,19 @@ mod tests {
 
     #[test]
     fn test_compute_should_use_tty_variants() {
-        // When forced, always true
-        assert!(compute_should_use_tty(true, false, false, false));
-        // When not forced, need !no_tty and both stdin/stdout TTY
+        // A PTY is impossible without a terminal on stdin — even when forced.
+        // Regression: force_tty used to return `true` unconditionally, which
+        // made `exec --log-format json | consumer` fail with "cannot attach
+        // stdin to a TTY-enabled container because stdin is not a terminal".
+        assert!(!compute_should_use_tty(true, false, false, false));
+        assert!(!compute_should_use_tty(true, false, false, true));
+        // force_tty bypasses only the stdout-is-a-tty requirement: an
+        // interactive user (stdin tty) whose stdout is captured still gets a PTY.
+        assert!(compute_should_use_tty(true, false, true, false));
+        assert!(compute_should_use_tty(true, false, true, true));
+        // Explicit --no-tty always wins, even over force_tty.
+        assert!(!compute_should_use_tty(true, true, true, true));
+        // When not forced, need !no_tty and BOTH stdin/stdout to be TTYs.
         assert!(compute_should_use_tty(false, false, true, true));
         assert!(!compute_should_use_tty(false, true, true, true));
         assert!(!compute_should_use_tty(false, false, false, true));

@@ -7,9 +7,17 @@ use deacon_core::container_env_probe::ContainerProbeMode;
 /// CLI-facing probe enum (value_enum for clap) to map into core probe mode
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum DefaultUserEnvProbe {
+    #[value(name = "none")]
     None,
+    // The spec and the upstream devcontainer CLI use camelCase probe-mode
+    // names (matching the `userEnvProbe` config values), and so does this
+    // flag's own help text. Make camelCase the canonical/displayed value and
+    // keep the derived kebab-case spelling as an alias for back-compat.
+    #[value(name = "loginInteractiveShell", alias = "login-interactive-shell")]
     LoginInteractiveShell,
+    #[value(name = "interactiveShell", alias = "interactive-shell")]
     InteractiveShell,
+    #[value(name = "loginShell", alias = "login-shell")]
     LoginShell,
 }
 
@@ -242,7 +250,7 @@ pub enum Commands {
         /// Default user environment probe mode when config omits userEnvProbe.
         /// Allowed values: `none`, `loginInteractiveShell`, `interactiveShell`, `loginShell`.
         /// Default: `loginInteractiveShell`.
-        #[arg(long, value_enum, default_value = "login-interactive-shell")]
+        #[arg(long, value_enum, default_value = "loginInteractiveShell")]
         default_user_env_probe: DefaultUserEnvProbe,
 
         // Mounts and environment
@@ -494,7 +502,7 @@ pub enum Commands {
         /// Default user environment probe mode when config omits `userEnvProbe`.
         /// Allowed values: `none`, `loginInteractiveShell`, `interactiveShell`, `loginShell`.
         /// Default: `loginInteractiveShell` (collects shell-initialized environment where possible).
-        #[arg(long, value_enum, default_value = "login-interactive-shell")]
+        #[arg(long, value_enum, default_value = "loginInteractiveShell")]
         default_user_env_probe: DefaultUserEnvProbe,
         /// Command and arguments to execute inside the container (positional; required).
         ///
@@ -879,7 +887,7 @@ pub struct Cli {
         long,
         global = true,
         value_enum,
-        default_value = "login-interactive-shell"
+        default_value = "loginInteractiveShell"
     )]
     pub default_user_env_probe: DefaultUserEnvProbe,
 
