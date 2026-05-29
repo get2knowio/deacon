@@ -15,8 +15,10 @@ run() {
 extract_container_id() {
 	local json_out=""
 	if command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-		json_out="$(printf '%s' "$1" | "$PYTHON_BIN" -c 'import json, sys; lines = [ln.strip() for ln in sys.stdin.read().splitlines() if ln.strip()]; if lines:; try:; data = json.loads(lines[-1]); cid = data.get("containerId", ""); if cid:; print(cid); sys.exit(0); except json.JSONDecodeError:; pass; sys.exit(0)'
-)" || json_out=""
+		# `deacon up` prints a single (pretty-printed) JSON document on stdout;
+		# parse it whole and read containerId. On any parse error python exits
+		# non-zero and the `|| json_out=""` below falls back to docker discovery.
+		json_out="$(printf '%s' "$1" | "$PYTHON_BIN" -c 'import json, sys; print(json.load(sys.stdin).get("containerId", ""))')" || json_out=""
 		if [ -n "$json_out" ]; then
 			printf '%s' "$json_out"
 			return 0
