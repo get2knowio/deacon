@@ -172,3 +172,14 @@ DEACON_LOG_FORMAT=json deacon config substitute --workspace-folder . --output-fo
 - `DEACON_LOG_FORMAT=json` controls the logging format for observability
 - All standardized spans follow the pattern `<domain>.<action>` (e.g., `config.resolve`, `feature.install`)
 - The `workspace_id` is a deterministic 8-character hash for workspace correlation across operations
+
+## Canary (`exec.sh`)
+
+`exec.sh` asserts the Output Streams Contract hermetically (via
+`read-configuration`, no Docker required):
+
+1. `--log-format json` → stdout is a single valid JSON document.
+2. `--log-format json --log-level debug` → stderr is newline-delimited JSON log
+   objects (each with a `timestamp`), and stdout stays a clean JSON document
+   (logs never leak onto stdout).
+3. Default text mode → the result is on stdout with no JSON-log leakage.
