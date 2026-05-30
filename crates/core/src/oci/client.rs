@@ -41,22 +41,6 @@ pub trait HttpClient: Send + Sync {
         url: &str,
         headers: HashMap<String, String>,
     ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// PUT request with data and headers
-    async fn put_with_headers(
-        &self,
-        url: &str,
-        data: Bytes,
-        headers: HashMap<String, String>,
-    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// POST request with data and headers, returns full response with headers
-    async fn post_with_headers(
-        &self,
-        url: &str,
-        data: Bytes,
-        headers: HashMap<String, String>,
-    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 /// Default HTTP client implementation using reqwest
@@ -480,114 +464,6 @@ impl HttpClient for ReqwestClient {
 
         Ok(response.status().as_u16())
     }
-
-    async fn put_with_headers(
-        &self,
-        url: &str,
-        data: Bytes,
-        mut headers: HashMap<String, String>,
-    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
-        // Add authentication header if available
-        let credentials = self.get_credentials_for_url(url);
-        if let Some(auth_header) = credentials.to_auth_header() {
-            headers.insert("Authorization".to_string(), auth_header);
-        }
-
-        let mut request = self.client.put(url).body(data);
-        for (key, value) in headers {
-            request = request.header(&key, &value);
-        }
-
-        let response = request.send().await.map_err(|e| {
-            // Improve error messages for common network issues
-            if e.is_timeout() {
-                format!("Request timeout for URL: {}. Check network connectivity.", url)
-            } else if e.is_connect() {
-                format!(
-                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
-                    url
-                )
-            } else if e.is_request() {
-                format!("Request error for URL: {}: {}", url, e)
-            } else {
-                format!("Network error for URL: {}: {}", url, e)
-            }
-        })?;
-
-        // Handle 401 authentication errors
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(format!("Authentication failed for URL: {}", url).into());
-        }
-
-        // Handle other HTTP errors
-        if !response.status().is_success() {
-            return Err(format!("HTTP {} for URL: {}", response.status(), url).into());
-        }
-
-        let bytes = response.bytes().await?;
-        Ok(bytes)
-    }
-
-    async fn post_with_headers(
-        &self,
-        url: &str,
-        data: Bytes,
-        mut headers: HashMap<String, String>,
-    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
-        // Add authentication header if available
-        let credentials = self.get_credentials_for_url(url);
-        if let Some(auth_header) = credentials.to_auth_header() {
-            headers.insert("Authorization".to_string(), auth_header);
-        }
-
-        let mut request = self.client.post(url).body(data);
-        for (key, value) in headers {
-            request = request.header(&key, &value);
-        }
-
-        let response = request.send().await.map_err(|e| {
-            // Improve error messages for common network issues
-            if e.is_timeout() {
-                format!("Request timeout for URL: {}. Check network connectivity.", url)
-            } else if e.is_connect() {
-                format!(
-                    "Connection failed for URL: {}. Check if the registry is accessible and network connectivity is available.",
-                    url
-                )
-            } else if e.is_request() {
-                format!("Request error for URL: {}: {}", url, e)
-            } else {
-                format!("Network error for URL: {}: {}", url, e)
-            }
-        })?;
-
-        let status = response.status().as_u16();
-
-        // Extract headers
-        let mut response_headers = HashMap::new();
-        for (key, value) in response.headers() {
-            if let Ok(value_str) = value.to_str() {
-                response_headers.insert(key.to_string(), value_str.to_string());
-            }
-        }
-
-        // Handle 401 authentication errors
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(format!("Authentication failed for URL: {}", url).into());
-        }
-
-        // Handle other HTTP errors
-        if !response.status().is_success() {
-            return Err(format!("HTTP {} for URL: {}", response.status(), url).into());
-        }
-
-        let bytes = response.bytes().await?;
-        Ok(HttpResponse {
-            status,
-            headers: response_headers,
-            body: bytes,
-        })
-    }
 }
 
 /// Mock HTTP client for testing
@@ -685,44 +561,5 @@ impl HttpClient for MockHttpClient {
             .get(url)
             .copied()
             .ok_or_else(|| format!("No mock HEAD response for URL: {}", url).into())
-    }
-
-    async fn put_with_headers(
-        &self,
-        url: &str,
-        _data: Bytes,
-        _headers: HashMap<String, String>,
-    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
-        let responses = self.responses.lock().await;
-        responses
-            .get(url)
-            .cloned()
-            .ok_or_else(|| format!("No mock response for URL: {}", url).into())
-    }
-
-    async fn post_with_headers(
-        &self,
-        url: &str,
-        _data: Bytes,
-        _headers: HashMap<String, String>,
-    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
-        // Check for response with headers first
-        let response_with_headers = self.response_with_headers.lock().await;
-        if let Some(response) = response_with_headers.get(url) {
-            return Ok(response.clone());
-        }
-        drop(response_with_headers);
-
-        // Fall back to simple response
-        let responses = self.responses.lock().await;
-        responses
-            .get(url)
-            .cloned()
-            .map(|body| HttpResponse {
-                status: 200,
-                headers: HashMap::new(),
-                body,
-            })
-            .ok_or_else(|| format!("No mock response for URL: {}", url).into())
     }
 }

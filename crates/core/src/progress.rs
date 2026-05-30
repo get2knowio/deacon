@@ -137,25 +137,6 @@ pub enum ProgressEvent {
     },
 
     /// OCI registry operation events
-    #[serde(rename = "oci.publish.begin")]
-    OciPublishBegin {
-        id: u64,
-        timestamp: u64,
-        registry: String,
-        repository: String,
-        tag: String,
-    },
-    #[serde(rename = "oci.publish.end")]
-    OciPublishEnd {
-        id: u64,
-        timestamp: u64,
-        registry: String,
-        repository: String,
-        tag: String,
-        duration_ms: u64,
-        success: bool,
-        digest: Option<String>,
-    },
     #[serde(rename = "oci.fetch.begin")]
     OciFetchBegin {
         id: u64,
@@ -203,8 +184,6 @@ impl ProgressEvent {
             ProgressEvent::LifecycleCommandEnd { id, .. } => *id,
             ProgressEvent::ScanBegin { id, .. } => *id,
             ProgressEvent::ScanEnd { id, .. } => *id,
-            ProgressEvent::OciPublishBegin { id, .. } => *id,
-            ProgressEvent::OciPublishEnd { id, .. } => *id,
             ProgressEvent::OciFetchBegin { id, .. } => *id,
             ProgressEvent::OciFetchEnd { id, .. } => *id,
         }
@@ -241,8 +220,6 @@ impl ProgressEvent {
             ProgressEvent::LifecycleCommandEnd { timestamp, .. } => *timestamp,
             ProgressEvent::ScanBegin { timestamp, .. } => *timestamp,
             ProgressEvent::ScanEnd { timestamp, .. } => *timestamp,
-            ProgressEvent::OciPublishBegin { timestamp, .. } => *timestamp,
-            ProgressEvent::OciPublishEnd { timestamp, .. } => *timestamp,
             ProgressEvent::OciFetchBegin { timestamp, .. } => *timestamp,
             ProgressEvent::OciFetchEnd { timestamp, .. } => *timestamp,
         }

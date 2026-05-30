@@ -109,21 +109,6 @@ pub struct DownloadedTemplate {
     pub digest: String,
 }
 
-/// Result of publishing an artifact to an OCI registry
-#[derive(Debug, Clone)]
-pub struct PublishResult {
-    /// Registry URL where the artifact was published
-    pub registry: String,
-    /// Repository name
-    pub repository: String,
-    /// Tag used for publishing
-    pub tag: String,
-    /// Digest of the published manifest
-    pub digest: String,
-    /// Size of the published artifact in bytes
-    pub size: u64,
-}
-
 /// OCI manifest structure (minimal)
 #[derive(Debug, Deserialize, Serialize)]
 #[allow(dead_code)]
