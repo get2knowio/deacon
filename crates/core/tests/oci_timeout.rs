@@ -117,44 +117,6 @@ impl HttpClient for SlowMockHttpClient {
 
         Ok(404)
     }
-
-    async fn put_with_headers(
-        &self,
-        url: &str,
-        _data: Bytes,
-        _headers: HashMap<String, String>,
-    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
-        let responses = self.responses.lock().await;
-
-        if let Some((delay, _)) = responses.get(url) {
-            // Simulate slow response
-            sleep(*delay).await;
-            return Ok(Bytes::new());
-        }
-
-        Err(format!("No mock response for URL: {}", url).into())
-    }
-
-    async fn post_with_headers(
-        &self,
-        url: &str,
-        _data: Bytes,
-        _headers: HashMap<String, String>,
-    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let responses = self.responses.lock().await;
-
-        if let Some((delay, response)) = responses.get(url) {
-            // Simulate slow response
-            sleep(*delay).await;
-            return Ok(HttpResponse {
-                status: 200,
-                headers: HashMap::new(),
-                body: response.clone(),
-            });
-        }
-
-        Err(format!("No mock response for URL: {}", url).into())
-    }
 }
 
 #[tokio::test]
