@@ -376,7 +376,7 @@ fn parse_resource_string(s: &str) -> Result<u64> {
             return Err(ConfigError::Validation {
                 message: format!("Unknown unit: {}", unit),
             }
-            .into())
+            .into());
         }
     };
 
@@ -2639,7 +2639,9 @@ impl ConfigLoader {
                 }));
             }
             (None, None) => {
-                debug!("Neither 'image' nor 'dockerFile' specified - this may be intended for extends or compose configurations");
+                debug!(
+                    "Neither 'image' nor 'dockerFile' specified - this may be intended for extends or compose configurations"
+                );
             }
             _ => {
                 // Valid: exactly one is specified
@@ -3468,11 +3470,13 @@ mod tests {
         }
 
         // Check container env substitution
-        assert!(config
-            .container_env
-            .get("WORKSPACE_ROOT")
-            .unwrap()
-            .starts_with(workspace_canonical_str));
+        assert!(
+            config
+                .container_env
+                .get("WORKSPACE_ROOT")
+                .unwrap()
+                .starts_with(workspace_canonical_str)
+        );
 
         // Check mounts substitution
         if !config.mounts.is_empty() {

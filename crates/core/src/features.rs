@@ -1050,7 +1050,7 @@ impl FeatureDependencyResolver {
         let mut queue: VecDeque<String> = VecDeque::new();
         let mut zero_degree_nodes: Vec<String> = in_degree
             .iter()
-            .filter(|(_, &degree)| degree == 0)
+            .filter(|&(_, &degree)| degree == 0)
             .map(|(node, _)| node.clone())
             .collect();
         zero_degree_nodes.sort(); // Lexicographic ordering for determinism - tie-breaks independent features
@@ -1145,7 +1145,7 @@ impl FeatureDependencyResolver {
             // Find all nodes with zero in-degree (can be processed in parallel)
             let mut current_level: Vec<String> = in_degree
                 .iter()
-                .filter(|(_, &degree)| degree == 0)
+                .filter(|&(_, &degree)| degree == 0)
                 .map(|(node, _)| node.clone())
                 .collect();
 
@@ -2006,12 +2006,16 @@ mod tests {
             default: Some(true),
             description: None,
         };
-        assert!(bool_option
-            .validate_value(&OptionValue::Boolean(false))
-            .is_ok());
-        assert!(bool_option
-            .validate_value(&OptionValue::String("test".to_string()))
-            .is_err());
+        assert!(
+            bool_option
+                .validate_value(&OptionValue::Boolean(false))
+                .is_ok()
+        );
+        assert!(
+            bool_option
+                .validate_value(&OptionValue::String("test".to_string()))
+                .is_err()
+        );
 
         let enum_option = FeatureOption::String {
             default: None,
@@ -2019,12 +2023,16 @@ mod tests {
             r#enum: Some(vec!["value1".to_string(), "value2".to_string()]),
             proposals: None,
         };
-        assert!(enum_option
-            .validate_value(&OptionValue::String("value1".to_string()))
-            .is_ok());
-        assert!(enum_option
-            .validate_value(&OptionValue::String("invalid".to_string()))
-            .is_err());
+        assert!(
+            enum_option
+                .validate_value(&OptionValue::String("value1".to_string()))
+                .is_ok()
+        );
+        assert!(
+            enum_option
+                .validate_value(&OptionValue::String("invalid".to_string()))
+                .is_err()
+        );
     }
 
     #[test]
@@ -2037,15 +2045,21 @@ mod tests {
         };
 
         // Pass-through types should be accepted even for Boolean option
-        assert!(bool_option
-            .validate_value(&OptionValue::Number(serde_json::Number::from(42)))
-            .is_ok());
-        assert!(bool_option
-            .validate_value(&OptionValue::Array(vec![]))
-            .is_ok());
-        assert!(bool_option
-            .validate_value(&OptionValue::Object(serde_json::Map::new()))
-            .is_ok());
+        assert!(
+            bool_option
+                .validate_value(&OptionValue::Number(serde_json::Number::from(42)))
+                .is_ok()
+        );
+        assert!(
+            bool_option
+                .validate_value(&OptionValue::Array(vec![]))
+                .is_ok()
+        );
+        assert!(
+            bool_option
+                .validate_value(&OptionValue::Object(serde_json::Map::new()))
+                .is_ok()
+        );
         assert!(bool_option.validate_value(&OptionValue::Null).is_ok());
 
         let string_option = FeatureOption::String {
@@ -2056,15 +2070,21 @@ mod tests {
         };
 
         // Pass-through types should also be accepted for String option
-        assert!(string_option
-            .validate_value(&OptionValue::Number(serde_json::Number::from(42)))
-            .is_ok());
-        assert!(string_option
-            .validate_value(&OptionValue::Array(vec![]))
-            .is_ok());
-        assert!(string_option
-            .validate_value(&OptionValue::Object(serde_json::Map::new()))
-            .is_ok());
+        assert!(
+            string_option
+                .validate_value(&OptionValue::Number(serde_json::Number::from(42)))
+                .is_ok()
+        );
+        assert!(
+            string_option
+                .validate_value(&OptionValue::Array(vec![]))
+                .is_ok()
+        );
+        assert!(
+            string_option
+                .validate_value(&OptionValue::Object(serde_json::Map::new()))
+                .is_ok()
+        );
         assert!(string_option.validate_value(&OptionValue::Null).is_ok());
     }
 

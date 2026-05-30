@@ -5,19 +5,20 @@
 //! - `execute_compose_post_create` - Post-create lifecycle for compose
 //! - `handle_compose_shutdown` - Shutdown handling for compose
 
+use super::ENV_LOG_FORMAT;
 use super::args::{MountType, NormalizedMount, UpArgs};
 use super::features_build::{
-    build_image_with_features, build_image_with_features_from_dockerfile, FeatureBuildOutput,
+    FeatureBuildOutput, build_image_with_features, build_image_with_features_from_dockerfile,
 };
 use super::helpers::handle_lockfile_post_build;
-use super::lifecycle::{execute_initialize_command, resolve_force_pty, HostTrustArgs};
+use super::lifecycle::{HostTrustArgs, execute_initialize_command, resolve_force_pty};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
 };
 use super::ports::handle_port_events;
 use super::result::{EffectiveMount, UpContainerInfo};
-use super::ENV_LOG_FORMAT;
 use anyhow::{Context, Result};
+use deacon_core::IndexMap;
 use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject, ServiceShape};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
@@ -26,7 +27,6 @@ use deacon_core::docker::ExecConfig;
 use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ComposeState, StateManager};
-use deacon_core::IndexMap;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;

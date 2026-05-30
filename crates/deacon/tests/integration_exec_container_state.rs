@@ -4,7 +4,7 @@
 //! which returns containers regardless of state. Exec must fail fast with
 //! "Dev container is not running." if the resolved container is stopped/exited.
 
-use deacon::commands::exec::{execute_exec_with_docker, ExecArgs};
+use deacon::commands::exec::{ExecArgs, execute_exec_with_docker};
 use deacon_core::docker::mock::{MockContainer, MockDocker};
 
 fn make_args(container_id: Option<String>, id_label: Vec<String>) -> ExecArgs {

@@ -19,10 +19,10 @@ use std::process::Command as StdCommand;
 /// Test that EnrichedMergedConfiguration includes featureMetadata when features are present.
 #[test]
 fn test_enriched_config_serializes_feature_metadata() {
+    use deacon_core::config::DevContainerConfig;
     use deacon_core::config::merge::{
         EnrichedMergedConfiguration, FeatureMetadataEntry, MergedDevContainerConfig, Provenance,
     };
-    use deacon_core::config::DevContainerConfig;
 
     // Create a base merged configuration
     let base_config = DevContainerConfig {
@@ -124,10 +124,10 @@ fn test_enriched_config_serializes_feature_metadata() {
 /// with an empty or minimal metadata placeholder so consumers see a complete list."
 #[test]
 fn test_all_features_have_metadata_entries_even_if_empty() {
+    use deacon_core::config::DevContainerConfig;
     use deacon_core::config::merge::{
         EnrichedMergedConfiguration, FeatureMetadataEntry, MergedDevContainerConfig,
     };
-    use deacon_core::config::DevContainerConfig;
 
     let base_config = DevContainerConfig {
         name: Some("minimal-test".to_string()),
@@ -272,8 +272,8 @@ fn test_feature_metadata_uses_camel_case_field_names() {
 /// Per spec: "skip_serializing_if = Option::is_none" ensures clean output.
 #[test]
 fn test_no_feature_metadata_when_empty() {
-    use deacon_core::config::merge::{EnrichedMergedConfiguration, MergedDevContainerConfig};
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::{EnrichedMergedConfiguration, MergedDevContainerConfig};
 
     let base_config = DevContainerConfig {
         name: Some("no-features".to_string()),
@@ -302,10 +302,10 @@ fn test_no_feature_metadata_when_empty() {
 /// Per spec: "Ordering from the user configuration/lockfile must be preserved."
 #[test]
 fn test_feature_metadata_preserves_declaration_order() {
+    use deacon_core::config::DevContainerConfig;
     use deacon_core::config::merge::{
         EnrichedMergedConfiguration, FeatureMetadataEntry, MergedDevContainerConfig,
     };
-    use deacon_core::config::DevContainerConfig;
 
     let base_config = DevContainerConfig {
         name: Some("ordering-test".to_string()),
@@ -369,10 +369,10 @@ fn test_feature_metadata_preserves_declaration_order() {
 /// Verifies serialization produces parseable JSON that preserves all data.
 #[test]
 fn test_enriched_config_json_roundtrip() {
+    use deacon_core::config::DevContainerConfig;
     use deacon_core::config::merge::{
         EnrichedMergedConfiguration, FeatureMetadataEntry, MergedDevContainerConfig, Provenance,
     };
-    use deacon_core::config::DevContainerConfig;
 
     let base_config = DevContainerConfig {
         name: Some("roundtrip-test".to_string()),

@@ -50,8 +50,7 @@ fn test_doctor_command_bundle_creation() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
-        stdout.contains("Support bundle created")
-            || stderr.contains("Support bundle created"),
+        stdout.contains("Support bundle created") || stderr.contains("Support bundle created"),
         "Unexpected stdout, failed var.contains(Support bundle created)\n--- stdout ---\n{}\n--- stderr ---\n{}",
         stdout,
         stderr

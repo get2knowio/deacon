@@ -10,8 +10,8 @@ use tracing::{debug, info};
 
 use deacon_core::config::{ConfigLoader, DiscoveryResult};
 use deacon_core::errors::{ConfigError, DeaconError};
-use deacon_core::observability::{config_resolve_span, TimedSpan};
-use deacon_core::redaction::{redact_if_enabled, RedactionConfig};
+use deacon_core::observability::{TimedSpan, config_resolve_span};
+use deacon_core::redaction::{RedactionConfig, redact_if_enabled};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::variable::{SubstitutionContext, SubstitutionOptions};
 

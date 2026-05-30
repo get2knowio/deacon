@@ -103,15 +103,21 @@ UNUSED_SECRET=ignored-value
     );
 
     // Verify substitution report shows the secret substitutions
-    assert!(substitution_report
-        .replacements
-        .contains_key("localEnv:DB_PASSWORD"));
-    assert!(substitution_report
-        .replacements
-        .contains_key("localEnv:API_URL"));
-    assert!(substitution_report
-        .replacements
-        .contains_key("localEnv:SECRET_TOKEN"));
+    assert!(
+        substitution_report
+            .replacements
+            .contains_key("localEnv:DB_PASSWORD")
+    );
+    assert!(
+        substitution_report
+            .replacements
+            .contains_key("localEnv:API_URL")
+    );
+    assert!(
+        substitution_report
+            .replacements
+            .contains_key("localEnv:SECRET_TOKEN")
+    );
 
     // Verify redaction works
     let registry = secrets.redaction_registry();

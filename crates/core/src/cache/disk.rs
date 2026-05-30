@@ -1,6 +1,6 @@
 //! Disk-based cache implementation with TTL support
 
-use super::{hash_key, Cache, CacheStats, Result, TtlEntry};
+use super::{Cache, CacheStats, Result, TtlEntry, hash_key};
 use crate::errors::CacheError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -2,7 +2,7 @@
 
 use deacon_core::features::FeatureOption;
 use deacon_core::templates::{
-    apply_template, parse_template_metadata, ApplyOptions, PlannedAction,
+    ApplyOptions, PlannedAction, apply_template, parse_template_metadata,
 };
 use std::fs;
 use std::path::Path;

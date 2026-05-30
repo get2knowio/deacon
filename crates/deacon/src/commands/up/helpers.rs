@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::DeaconError;
-use deacon_core::lockfile::{get_lockfile_path, write_lockfile, Lockfile};
+use deacon_core::lockfile::{Lockfile, get_lockfile_path, write_lockfile};
 use std::io;
 use std::path::Path;
 use tracing::{debug, info, instrument, warn};
@@ -145,7 +145,7 @@ pub(crate) async fn apply_user_mapping<R: deacon_core::docker::Docker + Send + S
     workspace_folder: &Path,
 ) -> Result<()> {
     use deacon_core::user_mapping::{
-        get_host_user_info, DockerUserMapper, UserMappingConfig, UserMappingService,
+        DockerUserMapper, UserMappingConfig, UserMappingService, get_host_user_info,
     };
 
     debug!("Applying user mapping configuration");
@@ -460,7 +460,7 @@ fn sort_json_object(value: &mut serde_json::Value) {
 #[cfg(test)]
 mod lockfile_post_build_tests {
     use super::*;
-    use deacon_core::lockfile::{read_lockfile, LockfileFeature};
+    use deacon_core::lockfile::{LockfileFeature, read_lockfile};
     use std::collections::HashMap;
     use tempfile::TempDir;
 

@@ -33,8 +33,8 @@ pub fn alpine_sleep_with_labels(labels: &[(&str, &str)]) -> ContainerRequest<Gen
 
 /// Start an Alpine container asynchronously.
 /// The container is automatically cleaned up when the returned handle is dropped.
-pub async fn start_alpine_container(
-) -> Result<ContainerAsync<GenericImage>, testcontainers::TestcontainersError> {
+pub async fn start_alpine_container()
+-> Result<ContainerAsync<GenericImage>, testcontainers::TestcontainersError> {
     alpine_sleep_image().start().await
 }
 

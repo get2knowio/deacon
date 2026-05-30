@@ -5,7 +5,7 @@
 
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
-    aggregate_lifecycle_commands, LifecycleCommandSource, LifecycleCommandValue,
+    LifecycleCommandSource, LifecycleCommandValue, aggregate_lifecycle_commands,
 };
 use deacon_core::features::{FeatureMetadata, ResolvedFeature};
 use deacon_core::lifecycle::LifecyclePhase;

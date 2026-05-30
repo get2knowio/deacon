@@ -544,8 +544,10 @@ mod tests {
         let dockerfile = generator.generate(&plan).unwrap();
 
         assert!(dockerfile.contains("ARG _DEV_CONTAINERS_BASE_IMAGE=ubuntu:22.04"));
-        assert!(dockerfile
-            .contains("FROM ${_DEV_CONTAINERS_BASE_IMAGE} AS dev_containers_target_stage"));
+        assert!(
+            dockerfile
+                .contains("FROM ${_DEV_CONTAINERS_BASE_IMAGE} AS dev_containers_target_stage")
+        );
         assert!(dockerfile.contains("RUN mkdir -p /tmp/dev-container-features"));
         assert!(dockerfile.contains("RUN --mount=type=bind"));
         assert!(dockerfile.contains("VERSION=\"20\""));

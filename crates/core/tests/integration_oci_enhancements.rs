@@ -6,8 +6,8 @@
 use bytes::Bytes;
 use deacon_core::features::FeatureMetadata;
 use deacon_core::oci::{
-    semver_utils, CollectionFeature, CollectionMetadata, CollectionSourceInfo, FeatureFetcher,
-    FeatureRef, MockHttpClient, TagList,
+    CollectionFeature, CollectionMetadata, CollectionSourceInfo, FeatureFetcher, FeatureRef,
+    MockHttpClient, TagList, semver_utils,
 };
 use std::collections::HashMap;
 use tempfile::TempDir;

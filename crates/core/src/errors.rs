@@ -333,7 +333,9 @@ pub enum ContainerSelectorError {
     InvalidLabelFormat,
 
     /// At least one selector is required (container_id, id_labels, or workspace_folder)
-    #[error("Missing required argument: One of --container-id, --id-label or --workspace-folder is required.")]
+    #[error(
+        "Missing required argument: One of --container-id, --id-label or --workspace-folder is required."
+    )]
     NoSelector,
 }
 
@@ -597,9 +599,11 @@ mod tests {
         };
         // thiserror automatically provides the conversion
         let anyhow_error = anyhow::Error::from(config_error);
-        assert!(anyhow_error
-            .to_string()
-            .contains("Failed to parse configuration file"));
+        assert!(
+            anyhow_error
+                .to_string()
+                .contains("Failed to parse configuration file")
+        );
 
         let deacon_error = DeaconError::Docker(DockerError::NotInstalled);
         let anyhow_error = anyhow::Error::from(deacon_error);

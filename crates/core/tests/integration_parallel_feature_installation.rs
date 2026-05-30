@@ -164,22 +164,20 @@ fn test_resource_conflict_detection() {
 #[test]
 fn test_concurrency_limit_env_var() {
     // Test that environment variable is respected
-    std::env::set_var("DEACON_FEATURE_INSTALL_CONCURRENCY", "4");
+    temp_env::with_var("DEACON_FEATURE_INSTALL_CONCURRENCY", Some("4"), || {
+        // Create features that would use the concurrency limit
+        let features = vec![
+            create_test_feature("feature-1", vec![]),
+            create_test_feature("feature-2", vec![]),
+        ];
 
-    // Create features that would use the concurrency limit
-    let features = vec![
-        create_test_feature("feature-1", vec![]),
-        create_test_feature("feature-2", vec![]),
-    ];
+        let resolver = FeatureDependencyResolver::new(None);
+        let plan = resolver.resolve(&features).unwrap();
 
-    let resolver = FeatureDependencyResolver::new(None);
-    let plan = resolver.resolve(&features).unwrap();
-
-    // Features should be able to run in parallel (same level)
-    assert_eq!(plan.levels.len(), 1);
-    assert_eq!(plan.levels[0].len(), 2);
-
-    std::env::remove_var("DEACON_FEATURE_INSTALL_CONCURRENCY");
+        // Features should be able to run in parallel (same level)
+        assert_eq!(plan.levels.len(), 1);
+        assert_eq!(plan.levels[0].len(), 2);
+    });
 }
 
 #[test]

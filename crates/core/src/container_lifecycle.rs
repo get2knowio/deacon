@@ -7,7 +7,7 @@ use crate::docker::{CliDocker, Docker, ExecConfig};
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::lifecycle::LifecyclePhase;
 use crate::progress::{ProgressEvent, ProgressTracker};
-use crate::redaction::{redact_if_enabled, RedactionConfig};
+use crate::redaction::{RedactionConfig, redact_if_enabled};
 use crate::state::record_phase_executed_with_config_hash;
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use indexmap::IndexMap;
@@ -173,14 +173,12 @@ impl LifecycleCommandValue {
                                 match elem {
                                     serde_json::Value::String(s) => strings.push(s.clone()),
                                     _ => {
-                                        return Err(DeaconError::Config(
-                                            ConfigError::Validation {
-                                                message: format!(
-                                                    "Lifecycle command object entry '{}' contains array with non-string element at index {}",
-                                                    key, idx
-                                                ),
-                                            },
-                                        ));
+                                        return Err(DeaconError::Config(ConfigError::Validation {
+                                            message: format!(
+                                                "Lifecycle command object entry '{}' contains array with non-string element at index {}",
+                                                key, idx
+                                            ),
+                                        }));
                                     }
                                 }
                             }

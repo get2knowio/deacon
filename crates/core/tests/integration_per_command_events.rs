@@ -6,8 +6,8 @@
 mod common;
 
 use deacon_core::container_lifecycle::{
-    execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
-    ContainerLifecycleConfig,
+    ContainerLifecycleCommands, ContainerLifecycleConfig,
+    execute_container_lifecycle_with_progress_callback,
 };
 use deacon_core::progress::{ProgressEvent, ProgressTracker};
 use deacon_core::variable::SubstitutionContext;

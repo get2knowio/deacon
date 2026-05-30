@@ -5,7 +5,7 @@
 //! Note: These tests rely on Unix-specific host detection mechanisms.
 #![cfg(unix)]
 
-use deacon::commands::up::{execute_up, UpArgs};
+use deacon::commands::up::{UpArgs, execute_up};
 use deacon_core::config::{HostRequirements, ResourceSpec};
 use deacon_core::errors::{ConfigError, DeaconError};
 use std::fs;

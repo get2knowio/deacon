@@ -6,7 +6,7 @@
 //! Note: These tests use Unix-specific APIs and are only compiled on Unix systems.
 #![cfg(unix)]
 
-use deacon_core::lifecycle::{run_phase, ExecutionContext, LifecycleCommands, LifecyclePhase};
+use deacon_core::lifecycle::{ExecutionContext, LifecycleCommands, LifecyclePhase, run_phase};
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;

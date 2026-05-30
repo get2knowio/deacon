@@ -98,7 +98,8 @@ fn test_config_resolve_span_json_logging() {
                 .is_some()
     });
 
-    assert!(has_duration,
+    assert!(
+        has_duration,
         "Expected duration timing in config.resolve span (time.busy or duration_ms). Config spans: {:?}",
         config_resolve_spans
     );

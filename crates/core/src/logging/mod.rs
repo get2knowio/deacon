@@ -9,7 +9,7 @@
 use crate::redaction::RedactionConfig;
 use anyhow::Result;
 use std::sync::Once;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub mod redaction_layer;
 
@@ -70,9 +70,24 @@ pub fn init_with_redaction(
     format: Option<&str>,
     redaction_config: Option<RedactionConfig>,
 ) -> Result<()> {
+    init_with_redaction_and_directive(format, redaction_config, None)
+}
+
+/// Initialize logging like [`init_with_redaction`], but with an explicit
+/// default filter directive.
+///
+/// `default_directive` is the env-filter spec (e.g. `"deacon=info,deacon_core=info"`)
+/// applied only when neither `DEACON_LOG` nor `RUST_LOG` is set in the
+/// environment. This lets callers supply a computed default without mutating
+/// the process environment (which is `unsafe` under edition 2024).
+pub fn init_with_redaction_and_directive(
+    format: Option<&str>,
+    redaction_config: Option<RedactionConfig>,
+    default_directive: Option<&str>,
+) -> Result<()> {
     let redaction_config = redaction_config.unwrap_or_default();
     INIT.call_once(|| {
-        let filter = create_env_filter(None);
+        let filter = create_env_filter(default_directive);
 
         // Determine format from parameter or environment variable
         let env_format = std::env::var("DEACON_LOG_FORMAT").ok();
@@ -129,8 +144,11 @@ pub fn init(format: Option<&str>) -> Result<()> {
     init_with_redaction(format, None)
 }
 
-/// Create an EnvFilter based on environment variables
-fn create_env_filter(_logging_spec: Option<&str>) -> EnvFilter {
+/// Create an EnvFilter from environment variables, falling back to a caller-
+/// supplied default directive.
+///
+/// Precedence: `DEACON_LOG` > `RUST_LOG` > `default_directive` > `"info"`.
+fn create_env_filter(default_directive: Option<&str>) -> EnvFilter {
     if let Ok(deacon_log) = std::env::var("DEACON_LOG") {
         // Use DEACON_LOG environment variable
         EnvFilter::try_new(&deacon_log).unwrap_or_else(|_| {
@@ -140,9 +158,14 @@ fn create_env_filter(_logging_spec: Option<&str>) -> EnvFilter {
             );
             EnvFilter::new("info")
         })
-    } else {
-        // Fall back to standard RUST_LOG or default (info)
+    } else if std::env::var_os("RUST_LOG").is_some() {
+        // Honor a user-set RUST_LOG.
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
+    } else if let Some(directive) = default_directive {
+        // Caller-computed default (no env override present).
+        EnvFilter::try_new(directive).unwrap_or_else(|_| EnvFilter::new("info"))
+    } else {
+        EnvFilter::new("info")
     }
 }
 
@@ -225,14 +248,14 @@ mod tests {
     #[test]
     fn test_env_filter_with_env_vars() {
         // Test with DEACON_LOG environment variable
-        std::env::set_var("DEACON_LOG", "trace");
-        let _filter = create_env_filter(None);
-        std::env::remove_var("DEACON_LOG");
+        temp_env::with_var("DEACON_LOG", Some("trace"), || {
+            let _filter = create_env_filter(None);
+        });
 
         // Test with RUST_LOG fallback
-        std::env::set_var("RUST_LOG", "warn");
-        let _filter = create_env_filter(None);
-        std::env::remove_var("RUST_LOG");
+        temp_env::with_var("RUST_LOG", Some("warn"), || {
+            let _filter = create_env_filter(None);
+        });
     }
 
     #[test]

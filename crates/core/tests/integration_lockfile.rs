@@ -4,8 +4,8 @@
 //! reading, writing, and merging lockfiles in real filesystem scenarios.
 
 use deacon_core::lockfile::{
-    get_lockfile_path, merge_lockfile_features, read_lockfile, write_lockfile, Lockfile,
-    LockfileFeature,
+    Lockfile, LockfileFeature, get_lockfile_path, merge_lockfile_features, read_lockfile,
+    write_lockfile,
 };
 use std::collections::HashMap;
 use tempfile::TempDir;
@@ -445,13 +445,19 @@ async fn test_real_world_scenario() {
         .expect("Lockfile should exist");
 
     assert_eq!(read_lockfile.features.len(), 3);
-    assert!(read_lockfile
-        .features
-        .contains_key("ghcr.io/devcontainers/features/node"));
-    assert!(read_lockfile
-        .features
-        .contains_key("ghcr.io/devcontainers/features/docker-in-docker"));
-    assert!(read_lockfile
-        .features
-        .contains_key("ghcr.io/devcontainers/features/git"));
+    assert!(
+        read_lockfile
+            .features
+            .contains_key("ghcr.io/devcontainers/features/node")
+    );
+    assert!(
+        read_lockfile
+            .features
+            .contains_key("ghcr.io/devcontainers/features/docker-in-docker")
+    );
+    assert!(
+        read_lockfile
+            .features
+            .contains_key("ghcr.io/devcontainers/features/git")
+    );
 }

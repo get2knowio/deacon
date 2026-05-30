@@ -13,8 +13,8 @@
 use std::collections::HashMap;
 
 use deacon_core::features::{
-    build_entrypoint_chain, generate_wrapper_script, EntrypointChain, FeatureMetadata, OptionValue,
-    ResolvedFeature,
+    EntrypointChain, FeatureMetadata, OptionValue, ResolvedFeature, build_entrypoint_chain,
+    generate_wrapper_script,
 };
 
 /// Helper to create a ResolvedFeature with an optional entrypoint.

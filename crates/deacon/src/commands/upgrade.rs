@@ -24,14 +24,14 @@
 
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
-use deacon_core::lockfile::{get_lockfile_path, write_lockfile, Lockfile, LockfileFeature};
-use deacon_core::oci::{default_fetcher, DownloadedFeature, FeatureRef};
+use deacon_core::lockfile::{Lockfile, LockfileFeature, get_lockfile_path, write_lockfile};
+use deacon_core::oci::{DownloadedFeature, FeatureRef, default_fetcher};
 use deacon_core::registry_parser::parse_registry_reference;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{debug, info, instrument, warn};
 
-use crate::commands::shared::{load_config, ConfigLoadArgs};
+use crate::commands::shared::{ConfigLoadArgs, load_config};
 
 /// Arguments for the `upgrade` command. Mirrors the spec's CLI surface
 /// (`docs/subcommand-specs/upgrade/SPEC.md` §2).
@@ -212,12 +212,14 @@ async fn pin_feature_in_config_file(
             config_path.display()
         )),
         1 => {
-            tokio::fs::write(config_path, updated).await.with_context(|| {
-                format!(
-                    "Failed to write pinned devcontainer config to '{}'",
-                    config_path.display()
-                )
-            })?;
+            tokio::fs::write(config_path, updated)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to write pinned devcontainer config to '{}'",
+                        config_path.display()
+                    )
+                })?;
             debug!(
                 feature = %feature,
                 target_version = %target_version,
@@ -298,7 +300,7 @@ async fn resolve_lockfile_from_config(config: &DevContainerConfig) -> Result<Loc
         None => {
             return Ok(Lockfile {
                 features: HashMap::new(),
-            })
+            });
         }
     };
 
@@ -503,9 +505,10 @@ mod tests {
         // Spec §2 mandates this exact summary string so existing CI
         // scripts that grep for it keep working.
         assert!(err.to_string().contains("Invalid version 'v1'"));
-        assert!(err
-            .to_string()
-            .contains("Must be in the form of 'x', 'x.y', or 'x.y.z'"));
+        assert!(
+            err.to_string()
+                .contains("Must be in the form of 'x', 'x.y', or 'x.y.z'")
+        );
     }
 
     // =========================================================================

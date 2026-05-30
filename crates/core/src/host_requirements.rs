@@ -803,10 +803,12 @@ mod tests {
             evaluator.evaluate_requirements_with_gpu_availability(&requirements, None, Some(true));
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Expected 'optional'"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Expected 'optional'")
+        );
     }
 
     #[test]
@@ -844,7 +846,10 @@ mod tests {
             }
             Err(e) => {
                 // In some test environments, this might fail, which is acceptable
-                eprintln!("Real disk space check failed for temp dir (expected in some test environments): {}", e);
+                eprintln!(
+                    "Real disk space check failed for temp dir (expected in some test environments): {}",
+                    e
+                );
             }
         }
     }

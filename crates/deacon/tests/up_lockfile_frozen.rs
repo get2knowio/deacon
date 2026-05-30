@@ -12,8 +12,8 @@
 use deacon::commands::up::UpArgs;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::lockfile::{
-    get_lockfile_path, read_lockfile, validate_lockfile_against_config, write_lockfile, Lockfile,
-    LockfileFeature, LockfileValidationResult,
+    Lockfile, LockfileFeature, LockfileValidationResult, get_lockfile_path, read_lockfile,
+    validate_lockfile_against_config, write_lockfile,
 };
 use std::collections::HashMap;
 use std::fs;

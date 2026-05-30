@@ -1,6 +1,6 @@
+use deacon_core::IndexMap;
 use deacon_core::container_env_probe::{ContainerEnvironmentProber, ContainerProbeMode};
 use deacon_core::docker::Docker;
-use deacon_core::IndexMap;
 use std::collections::HashMap;
 use tracing::warn;
 

@@ -195,32 +195,33 @@ async fn test_config_discovery_order() -> anyhow::Result<()> {
 #[test]
 fn test_env_variable_substitution() -> anyhow::Result<()> {
     // Set a test environment variable
-    env::set_var("DEACON_TEST_VAR", "test_value_123");
+    temp_env::with_var(
+        "DEACON_TEST_VAR",
+        Some("test_value_123"),
+        || -> anyhow::Result<()> {
+            let temp_workspace = TempDir::new()?;
+            let workspace = temp_workspace.path();
+            let context = SubstitutionContext::new(workspace)?;
 
-    let temp_workspace = TempDir::new()?;
-    let workspace = temp_workspace.path();
-    let context = SubstitutionContext::new(workspace)?;
+            // Test localEnv substitution
+            let input = "Value: ${localEnv:DEACON_TEST_VAR}";
+            let mut report = deacon_core::variable::SubstitutionReport::new();
+            let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
-    // Test localEnv substitution
-    let input = "Value: ${localEnv:DEACON_TEST_VAR}";
-    let mut report = deacon_core::variable::SubstitutionReport::new();
-    let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+            assert_eq!(result, "Value: test_value_123");
+            assert!(report.replacements.contains_key("localEnv:DEACON_TEST_VAR"));
 
-    assert_eq!(result, "Value: test_value_123");
-    assert!(report.replacements.contains_key("localEnv:DEACON_TEST_VAR"));
+            // Test missing environment variable
+            let input = "Missing: ${localEnv:NONEXISTENT_VAR}";
+            let mut report = deacon_core::variable::SubstitutionReport::new();
+            let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
-    // Test missing environment variable
-    let input = "Missing: ${localEnv:NONEXISTENT_VAR}";
-    let mut report = deacon_core::variable::SubstitutionReport::new();
-    let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+            assert_eq!(result, "Missing: ");
+            assert!(report.replacements.contains_key("localEnv:NONEXISTENT_VAR"));
 
-    assert_eq!(result, "Missing: ");
-    assert!(report.replacements.contains_key("localEnv:NONEXISTENT_VAR"));
+            println!("✅ Environment variable substitution test passed");
 
-    // Clean up
-    env::remove_var("DEACON_TEST_VAR");
-
-    println!("✅ Environment variable substitution test passed");
-
-    Ok(())
+            Ok(())
+        },
+    )
 }

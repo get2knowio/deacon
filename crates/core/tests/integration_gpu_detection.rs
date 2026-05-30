@@ -2,7 +2,7 @@
 //!
 //! These tests verify that GPU detection works correctly with real Docker runtime.
 
-use deacon_core::gpu::{detect_gpu_capability, HostGpuCapability};
+use deacon_core::gpu::{HostGpuCapability, detect_gpu_capability};
 
 /// Test GPU detection with Docker runtime.
 ///

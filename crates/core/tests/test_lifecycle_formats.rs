@@ -408,8 +408,8 @@ async fn test_parallel_execution_is_concurrent_async() {
 /// results" semantics in both host-side (JoinSet) and container-side (join_all).
 #[tokio::test]
 async fn test_parallel_execution_waits_for_all_on_failure() {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
     use tokio::task::JoinSet;
 
@@ -459,8 +459,8 @@ async fn test_parallel_execution_waits_for_all_on_failure() {
 /// pattern (container-side execution path).
 #[tokio::test]
 async fn test_parallel_async_execution_waits_for_all_on_failure() {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     let slow_task_completed = Arc::new(AtomicBool::new(false));

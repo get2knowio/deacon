@@ -288,9 +288,9 @@ impl EnvironmentProber {
         mut cmd: Command,
         timeout: Duration,
     ) -> std::io::Result<std::process::Output> {
+        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::mpsc;
-        use std::sync::Arc;
         use std::thread;
 
         let (tx, rx) = mpsc::channel();

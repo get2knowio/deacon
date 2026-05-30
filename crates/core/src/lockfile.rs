@@ -243,7 +243,7 @@ pub async fn read_lockfile(path: &Path) -> Result<Option<Lockfile>> {
             return Err(LockfileError::Io {
                 path: path.to_path_buf(),
                 source,
-            })
+            });
         }
     };
 
@@ -1095,25 +1095,33 @@ mod tests {
 
     #[test]
     fn test_validate_sha256_digest() {
-        assert!(validate_sha256_digest(
-            "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-        )
-        .is_ok());
-        assert!(validate_sha256_digest(
-            "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd"
-        )
-        .is_ok());
+        assert!(
+            validate_sha256_digest(
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_sha256_digest(
+                "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd"
+            )
+            .is_ok()
+        );
 
         assert!(validate_sha256_digest("no-prefix").is_err());
         assert!(validate_sha256_digest("sha256:tooshort").is_err());
-        assert!(validate_sha256_digest(
-            "sha256:1111111111111111111111111111111111111111111111111111111111111111111"
-        )
-        .is_err()); // too long
-        assert!(validate_sha256_digest(
-            "sha256:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
-        )
-        .is_err()); // invalid hex
+        assert!(
+            validate_sha256_digest(
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111111"
+            )
+            .is_err()
+        ); // too long
+        assert!(
+            validate_sha256_digest(
+                "sha256:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            )
+            .is_err()
+        ); // invalid hex
     }
 
     #[test]

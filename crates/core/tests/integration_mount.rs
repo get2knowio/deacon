@@ -57,11 +57,13 @@ fn test_mount_parsing_from_config() {
     // Verify fourth mount (with variable substitution placeholder)
     let mount4 = &mounts[3];
     assert_eq!(mount4.mount_type, MountType::Bind);
-    assert!(mount4
-        .source
-        .as_ref()
-        .unwrap()
-        .contains("${localWorkspaceFolder}"));
+    assert!(
+        mount4
+            .source
+            .as_ref()
+            .unwrap()
+            .contains("${localWorkspaceFolder}")
+    );
     assert_eq!(mount4.target, "/workspaces/src");
 }
 
@@ -283,11 +285,13 @@ async fn test_mount_from_fixture_config() {
 
     let mount = &mounts[0];
     assert_eq!(mount.mount_type, MountType::Bind);
-    assert!(mount
-        .source
-        .as_ref()
-        .unwrap()
-        .contains("${localWorkspaceFolder}"));
+    assert!(
+        mount
+            .source
+            .as_ref()
+            .unwrap()
+            .contains("${localWorkspaceFolder}")
+    );
     assert_eq!(mount.target, "/usr/local/cargo");
     assert_eq!(mount.consistency, Some(MountConsistency::Cached));
 }

@@ -12,7 +12,7 @@
 //! - T023: Test fail-fast behavior when feature command fails
 
 use assert_cmd::Command;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::process::Command as StdCommand;
 use tempfile::TempDir;

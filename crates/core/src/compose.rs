@@ -350,7 +350,9 @@ impl ComposeCommand {
             }
             crate::gpu::GpuMode::Detect => {
                 // This should never happen - Detect mode should be resolved upstream
-                warn!("GpuMode::Detect passed to compose.rs - this indicates a bug. Skipping GPU flags.");
+                warn!(
+                    "GpuMode::Detect passed to compose.rs - this indicates a bug. Skipping GPU flags."
+                );
             }
         }
 
@@ -391,7 +393,9 @@ impl ComposeCommand {
                 );
             }
 
-            warn!("Security options from devcontainer.json cannot be applied dynamically to Docker Compose services.");
+            warn!(
+                "Security options from devcontainer.json cannot be applied dynamically to Docker Compose services."
+            );
             warn!("Please add these options to your docker-compose.yml service definition.");
         }
 
@@ -1560,13 +1564,11 @@ fn derive_project_name(base_path: &Path) -> String {
         .to_string();
 
     // Ensure first character is a lowercase letter or number
-    let final_name = match sanitized.chars().next() {
+    match sanitized.chars().next() {
         Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => sanitized,
         Some(_) => format!("d{}", sanitized),
         None => FALLBACK.to_string(),
-    };
-
-    final_name
+    }
 }
 
 #[cfg(test)]
@@ -2106,8 +2108,11 @@ mod tests {
             .expect("override command should produce override yaml even with no env/mounts");
 
         assert!(override_yaml.contains("services:\n  app:\n"));
-        assert!(override_yaml
-            .contains("command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]"));
+        assert!(
+            override_yaml.contains(
+                "command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]"
+            )
+        );
     }
 
     #[test]
@@ -2157,8 +2162,11 @@ mod tests {
 
         let override_yaml = project.generate_injection_override().unwrap();
 
-        assert!(override_yaml
-            .contains("command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]"));
+        assert!(
+            override_yaml.contains(
+                "command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]"
+            )
+        );
         assert!(override_yaml.contains("environment:"));
         assert!(override_yaml.contains("FOO: \"bar\""));
         // command must appear before environment (matches struct field order in yaml)

@@ -1,6 +1,6 @@
 //! Integration tests for feature metadata parsing
 
-use deacon_core::features::{parse_feature_metadata, FeatureOption, OptionValue};
+use deacon_core::features::{FeatureOption, OptionValue, parse_feature_metadata};
 use std::path::Path;
 
 #[test]
@@ -97,20 +97,28 @@ fn test_option_value_validation_with_fixtures() {
     let version_option = metadata.options.get("version").unwrap();
 
     // Valid value should pass
-    assert!(version_option
-        .validate_value(&OptionValue::String("stable".to_string()))
-        .is_ok());
-    assert!(version_option
-        .validate_value(&OptionValue::String("latest".to_string()))
-        .is_ok());
+    assert!(
+        version_option
+            .validate_value(&OptionValue::String("stable".to_string()))
+            .is_ok()
+    );
+    assert!(
+        version_option
+            .validate_value(&OptionValue::String("latest".to_string()))
+            .is_ok()
+    );
 
     // Invalid value should fail
-    assert!(version_option
-        .validate_value(&OptionValue::String("invalid".to_string()))
-        .is_err());
+    assert!(
+        version_option
+            .validate_value(&OptionValue::String("invalid".to_string()))
+            .is_err()
+    );
 
     // Type mismatch should fail
-    assert!(version_option
-        .validate_value(&OptionValue::Boolean(true))
-        .is_err());
+    assert!(
+        version_option
+            .validate_value(&OptionValue::Boolean(true))
+            .is_err()
+    );
 }

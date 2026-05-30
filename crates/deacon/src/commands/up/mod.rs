@@ -43,18 +43,18 @@ pub use result::{EffectiveMount, UpContainerInfo, UpError, UpResult, UpSuccess};
 #[allow(unused_imports)]
 pub use crate::commands::shared::NormalizedRemoteEnv;
 
-use crate::commands::shared::{load_config, ConfigLoadArgs, ConfigLoadResult};
+use crate::commands::shared::{ConfigLoadArgs, ConfigLoadResult, load_config};
 use anyhow::{Context, Result};
+use deacon_core::IndexMap;
 use deacon_core::container::{ContainerIdentity, ContainerSelector};
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::lockfile::{
-    get_lockfile_path, read_lockfile, validate_lockfile_against_config, LockfileValidationResult,
+    LockfileValidationResult, get_lockfile_path, read_lockfile, validate_lockfile_against_config,
 };
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::state::StateManager;
-use deacon_core::IndexMap;
 use tracing::{debug, info, instrument, warn};
 
 // Internal imports from submodules
@@ -156,7 +156,9 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
                     error
                 );
             } else {
-                warn!("GPU mode 'detect' specified but no GPU runtime found. Proceeding without GPU acceleration.");
+                warn!(
+                    "GPU mode 'detect' specified but no GPU runtime found. Proceeding without GPU acceleration."
+                );
             }
             deacon_core::gpu::GpuMode::None
         }
@@ -402,7 +404,9 @@ pub(crate) async fn execute_up_with_runtime(
                 if evaluation.requirements_met {
                     debug!("Host requirements validation passed");
                 } else if args.ignore_host_requirements {
-                    warn!("Host requirements not met, but proceeding due to --ignore-host-requirements flag");
+                    warn!(
+                        "Host requirements not met, but proceeding due to --ignore-host-requirements flag"
+                    );
                 }
                 debug!("Host evaluation: {:?}", evaluation);
             }

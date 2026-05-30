@@ -6,7 +6,7 @@
 //! Spec: docs/subcommand-specs/read-configuration/SPEC.md
 //! Implementation: specs/001-read-config-parity/spec.md
 
-use crate::commands::shared::{load_config, ConfigLoadArgs, TerminalDimensions};
+use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerSelector;
@@ -15,7 +15,7 @@ use deacon_core::features::{
     FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger, OptionValue, ResolvedFeature,
 };
 use deacon_core::io::Output;
-use deacon_core::oci::{default_fetcher_with_config, FeatureRef};
+use deacon_core::oci::{FeatureRef, default_fetcher_with_config};
 use deacon_core::redaction::{RedactionConfig, SecretRegistry};
 use deacon_core::registry_parser::parse_registry_reference;
 use deacon_core::secrets::SecretsCollection;
@@ -1260,13 +1260,15 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                 // If merged configuration is requested, we need container metadata, so fail
                 if args.include_merged_configuration {
                     return Err(anyhow::anyhow!(
-                            "Dev container not found. Container ID or labels did not match any running containers. \
+                        "Dev container not found. Container ID or labels did not match any running containers. \
                              Cannot compute merged configuration without container metadata."
-                        ));
+                    ));
                 }
 
                 // Otherwise, succeed with devcontainerId substituted but no container-specific variables
-                debug!("Proceeding without container-specific substitutions (merged config not requested)");
+                debug!(
+                    "Proceeding without container-specific substitutions (merged config not requested)"
+                );
                 (config_after_before, Some(id_labels), None, None, None)
             }
         }
@@ -3121,10 +3123,12 @@ API_KEY=another-secret
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to parse --additional-features JSON"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to parse --additional-features JSON")
+        );
     }
 
     #[tokio::test]
@@ -3163,10 +3167,12 @@ API_KEY=another-secret
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("--additional-features must be a JSON object"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("--additional-features must be a JSON object")
+        );
     }
 
     #[tokio::test]

@@ -498,9 +498,11 @@ mod tests {
             security.conflicts[0].conflict_type,
             SecurityConflictType::PrivilegedConflict
         );
-        assert!(security.conflicts[0]
-            .description
-            .contains("conflicting-feature"));
+        assert!(
+            security.conflicts[0]
+                .description
+                .contains("conflicting-feature")
+        );
     }
 
     #[test]
@@ -550,9 +552,11 @@ mod tests {
             SecurityConflictType::SecurityOptConflict
         );
         assert!(security.conflicts[0].description.contains("seccomp"));
-        assert!(security.conflicts[0]
-            .description
-            .contains("feature-with-seccomp"));
+        assert!(
+            security.conflicts[0]
+                .description
+                .contains("feature-with-seccomp")
+        );
     }
 
     #[test]

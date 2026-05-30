@@ -9,7 +9,6 @@ use deacon_core::oci::{
     ReqwestClient,
 };
 use std::collections::HashMap;
-use std::env;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
@@ -374,83 +373,78 @@ async fn test_auth_failure_permanent() {
 
 #[tokio::test]
 async fn test_environment_variable_auth() {
-    // Clean up any existing environment variables first
-    env::remove_var("DEACON_REGISTRY_TOKEN");
-    env::remove_var("DEACON_REGISTRY_USER");
-    env::remove_var("DEACON_REGISTRY_PASS");
+    // Clean baseline: TOKEN absent; USER/PASS present during the awaited body.
+    temp_env::async_with_vars(
+        [
+            ("DEACON_REGISTRY_TOKEN", None),
+            ("DEACON_REGISTRY_USER", Some("env_user")),
+            ("DEACON_REGISTRY_PASS", Some("env_pass")),
+        ],
+        async {
+            // Create authentication config manually to avoid environment variable interference
+            let mut auth = RegistryAuth::new();
+            auth.set_default_credentials(RegistryCredentials::Basic {
+                username: "env_user".to_string(),
+                password: "env_pass".to_string(),
+            });
 
-    // Test that authentication is loaded from environment variables
-    env::set_var("DEACON_REGISTRY_USER", "env_user");
-    env::set_var("DEACON_REGISTRY_PASS", "env_pass");
+            // Create a client with explicit auth config
+            let client_result = ReqwestClient::with_auth_config(auth);
+            assert!(client_result.is_ok(), "Client creation should succeed");
 
-    // Create authentication config manually to avoid environment variable interference
-    let mut auth = RegistryAuth::new();
-    auth.set_default_credentials(RegistryCredentials::Basic {
-        username: "env_user".to_string(),
-        password: "env_pass".to_string(),
-    });
+            let client = client_result.unwrap();
 
-    // Create a client with explicit auth config
-    let client_result = ReqwestClient::with_auth_config(auth);
-    assert!(client_result.is_ok(), "Client creation should succeed");
-
-    let client = client_result.unwrap();
-
-    // Verify that the credentials were loaded
-    let creds = client.auth().get_credentials("any.registry");
-    match creds {
-        RegistryCredentials::Basic { username, password } => {
-            assert_eq!(username, "env_user");
-            assert_eq!(password, "env_pass");
-        }
-        _ => panic!("Expected basic credentials from authentication config"),
-    }
-
-    // Clean up environment
-    env::remove_var("DEACON_REGISTRY_USER");
-    env::remove_var("DEACON_REGISTRY_PASS");
+            // Verify that the credentials were loaded
+            let creds = client.auth().get_credentials("any.registry");
+            match creds {
+                RegistryCredentials::Basic { username, password } => {
+                    assert_eq!(username, "env_user");
+                    assert_eq!(password, "env_pass");
+                }
+                _ => panic!("Expected basic credentials from authentication config"),
+            }
+        },
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_environment_variable_token_auth() {
-    // Clean up any existing environment variables first
-    env::remove_var("DEACON_REGISTRY_TOKEN");
-    env::remove_var("DEACON_REGISTRY_USER");
-    env::remove_var("DEACON_REGISTRY_PASS");
+    // Clean baseline: USER/PASS absent; TOKEN present during the awaited body.
+    temp_env::async_with_vars(
+        [
+            ("DEACON_REGISTRY_TOKEN", Some("env_token_123")),
+            ("DEACON_REGISTRY_USER", None),
+            ("DEACON_REGISTRY_PASS", None),
+        ],
+        async {
+            // Create authentication config manually to avoid environment variable interference
+            let mut auth = RegistryAuth::new();
+            auth.set_default_credentials(RegistryCredentials::Bearer {
+                token: "env_token_123".to_string(),
+            });
 
-    // Test that token authentication is loaded from environment variables
-    env::set_var("DEACON_REGISTRY_TOKEN", "env_token_123");
+            // Create a client with explicit auth config
+            let client_result = ReqwestClient::with_auth_config(auth);
+            assert!(client_result.is_ok(), "Client creation should succeed");
 
-    // Create authentication config manually to avoid environment variable interference
-    let mut auth = RegistryAuth::new();
-    auth.set_default_credentials(RegistryCredentials::Bearer {
-        token: "env_token_123".to_string(),
-    });
+            let client = client_result.unwrap();
 
-    // Create a client with explicit auth config
-    let client_result = ReqwestClient::with_auth_config(auth);
-    assert!(client_result.is_ok(), "Client creation should succeed");
-
-    let client = client_result.unwrap();
-
-    // Verify that the token credentials were loaded
-    let creds = client.auth().get_credentials("any.registry");
-    match creds {
-        RegistryCredentials::Bearer { token } => {
-            assert_eq!(token, "env_token_123");
-        }
-        _ => panic!("Expected bearer credentials from authentication config"),
-    }
-
-    // Clean up environment
-    env::remove_var("DEACON_REGISTRY_TOKEN");
+            // Verify that the token credentials were loaded
+            let creds = client.auth().get_credentials("any.registry");
+            match creds {
+                RegistryCredentials::Bearer { token } => {
+                    assert_eq!(token, "env_token_123");
+                }
+                _ => panic!("Expected bearer credentials from authentication config"),
+            }
+        },
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_custom_ca_bundle() {
-    // Clean up any existing environment variables first
-    env::remove_var("DEACON_CUSTOM_CA_BUNDLE");
-
     // Create a temporary CA bundle file
     let temp_dir = TempDir::new().unwrap();
     let ca_bundle_path = temp_dir.path().join("ca-bundle.pem");
@@ -465,28 +459,29 @@ async fn test_custom_ca_bundle() {
                    -----END CERTIFICATE-----\n";
     std::fs::write(&ca_bundle_path, dummy_ca).unwrap();
 
-    // Set environment variable
-    env::set_var("DEACON_CUSTOM_CA_BUNDLE", &ca_bundle_path);
+    // Set environment variable for the duration of the client creation.
+    temp_env::async_with_vars(
+        [("DEACON_CUSTOM_CA_BUNDLE", Some(ca_bundle_path.as_os_str()))],
+        async {
+            // Note: We can't easily test the actual CA loading without setting up a real HTTPS server
+            // with a custom CA, but we can test that the client creation succeeds when the file exists
+            let client_result = ReqwestClient::new();
 
-    // Note: We can't easily test the actual CA loading without setting up a real HTTPS server
-    // with a custom CA, but we can test that the client creation succeeds when the file exists
-    let client_result = ReqwestClient::new();
-
-    // Always clean up environment variable
-    env::remove_var("DEACON_CUSTOM_CA_BUNDLE");
-
-    // The client creation might fail due to invalid cert format, but it should at least
-    // attempt to read the file (which means our code path is working)
-    if let Err(e) = client_result {
-        let error_msg = e.to_string();
-        assert!(
-            error_msg.contains("certificate")
-                || error_msg.contains("pem")
-                || error_msg.contains("builder"),
-            "Error should be related to certificate parsing or client building: {}",
-            error_msg
-        );
-    }
+            // The client creation might fail due to invalid cert format, but it should at least
+            // attempt to read the file (which means our code path is working)
+            if let Err(e) = client_result {
+                let error_msg = e.to_string();
+                assert!(
+                    error_msg.contains("certificate")
+                        || error_msg.contains("pem")
+                        || error_msg.contains("builder"),
+                    "Error should be related to certificate parsing or client building: {}",
+                    error_msg
+                );
+            }
+        },
+    )
+    .await;
 }
 
 /// Helper wrapper to use AuthMockHttpClient with the FeatureFetcher

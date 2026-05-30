@@ -7,7 +7,7 @@
 use super::args::UpArgs;
 use super::features_build::build_image_with_features;
 use super::helpers::{apply_user_mapping, handle_lockfile_post_build};
-use super::lifecycle::{execute_initialize_command, execute_lifecycle_commands, HostTrustArgs};
+use super::lifecycle::{HostTrustArgs, execute_initialize_command, execute_lifecycle_commands};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
     merge_image_metadata_after_image_ready,
@@ -16,6 +16,7 @@ use super::ports::handle_container_port_events;
 use super::result::UpContainerInfo;
 use crate::commands::shared::resolve_env_and_user;
 use anyhow::{Context, Result};
+use deacon_core::IndexMap;
 use deacon_core::build::BuildOptions;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
@@ -27,7 +28,6 @@ use deacon_core::features::{
 use deacon_core::mount::merge_mounts;
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ContainerState, StateManager};
-use deacon_core::IndexMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
 
@@ -407,7 +407,7 @@ pub(crate) async fn execute_container_up(
                 "No entrypoints found in features or config"
             );
         }
-        deacon_core::features::EntrypointChain::Single(ref path) => {
+        deacon_core::features::EntrypointChain::Single(path) => {
             info!(
                 entrypoint = %path,
                 feature_count = features_slice.len(),
@@ -415,8 +415,8 @@ pub(crate) async fn execute_container_up(
             );
         }
         deacon_core::features::EntrypointChain::Chained {
-            ref wrapper_path,
-            ref entrypoints,
+            wrapper_path,
+            entrypoints,
         } => {
             info!(
                 wrapper_path = %wrapper_path,

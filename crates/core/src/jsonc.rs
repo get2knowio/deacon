@@ -13,7 +13,7 @@
 //! `Map` itself is also order-preserving.
 
 use crate::errors::{ConfigError, DeaconError, Result};
-use jsonc_parser::{parse_to_value, JsonValue, ParseOptions};
+use jsonc_parser::{JsonValue, ParseOptions, parse_to_value};
 use serde_json::{Map, Number, Value};
 
 /// Parse a JSONC string into a `serde_json::Value`.

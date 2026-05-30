@@ -149,9 +149,9 @@ pub(crate) fn verify_content_digest(data: &[u8], expected: &str, context: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::retry::{retry_async, JitterStrategy, RetryConfig, RetryDecision};
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use crate::retry::{JitterStrategy, RetryConfig, RetryDecision, retry_async};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
     /// Tight test profile: same classifier behavior, but with millisecond delays

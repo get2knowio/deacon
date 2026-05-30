@@ -687,33 +687,35 @@ mod tests {
     #[test]
     fn test_detect_runtime_default() {
         // Clear environment variable for test
-        std::env::remove_var("DEACON_RUNTIME");
-        assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
+        temp_env::with_var_unset("DEACON_RUNTIME", || {
+            assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
+        });
     }
 
     #[test]
     fn test_detect_runtime_cli_precedence() {
-        std::env::set_var("DEACON_RUNTIME", "podman");
-        assert_eq!(
-            RuntimeFactory::detect_runtime(Some(RuntimeKind::Docker)),
-            RuntimeKind::Docker
-        );
-        std::env::remove_var("DEACON_RUNTIME");
+        temp_env::with_var("DEACON_RUNTIME", Some("podman"), || {
+            assert_eq!(
+                RuntimeFactory::detect_runtime(Some(RuntimeKind::Docker)),
+                RuntimeKind::Docker
+            );
+        });
     }
 
     #[test]
     fn test_detect_runtime_env_var() {
-        std::env::set_var("DEACON_RUNTIME", "podman");
-        assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Podman);
+        temp_env::with_var("DEACON_RUNTIME", Some("podman"), || {
+            assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Podman);
+        });
 
-        std::env::set_var("DEACON_RUNTIME", "docker");
-        assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
+        temp_env::with_var("DEACON_RUNTIME", Some("docker"), || {
+            assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
+        });
 
         // Invalid env var should fall back to default
-        std::env::set_var("DEACON_RUNTIME", "invalid");
-        assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
-
-        std::env::remove_var("DEACON_RUNTIME");
+        temp_env::with_var("DEACON_RUNTIME", Some("invalid"), || {
+            assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
+        });
     }
 
     #[test]

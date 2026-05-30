@@ -22,7 +22,7 @@ fn test_feature_metadata_entry_serialization_with_all_fields() {
         ),
         options: Some(serde_json::json!({"version": "20"})),
         installs_after: Some(vec![
-            "ghcr.io/devcontainers/features/common-utils:1".to_string()
+            "ghcr.io/devcontainers/features/common-utils:1".to_string(),
         ]),
         depends_on: None,
         mounts: None,
@@ -193,8 +193,8 @@ fn test_label_set_from_service() {
 /// Test that EnrichedMergedConfiguration serializes with feature metadata.
 #[test]
 fn test_enriched_merged_configuration_with_feature_metadata() {
-    use deacon_core::config::merge::MergedDevContainerConfig;
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::MergedDevContainerConfig;
 
     let base_merged = MergedDevContainerConfig {
         config: DevContainerConfig {
@@ -250,8 +250,8 @@ fn test_enriched_merged_configuration_with_feature_metadata() {
 /// Test that EnrichedMergedConfiguration without features has no featureMetadata field.
 #[test]
 fn test_enriched_merged_configuration_no_features() {
-    use deacon_core::config::merge::MergedDevContainerConfig;
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::MergedDevContainerConfig;
 
     let base_merged = MergedDevContainerConfig {
         config: DevContainerConfig {
@@ -330,8 +330,8 @@ fn test_feature_metadata_entry_json_roundtrip() {
 /// Test JSON roundtrip for EnrichedMergedConfiguration.
 #[test]
 fn test_enriched_merged_configuration_json_roundtrip() {
-    use deacon_core::config::merge::MergedDevContainerConfig;
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::MergedDevContainerConfig;
 
     let base_merged = MergedDevContainerConfig {
         config: DevContainerConfig {
@@ -366,8 +366,8 @@ fn test_enriched_merged_configuration_json_roundtrip() {
 /// when metadata/labels are added, without unrelated drift.
 #[test]
 fn test_enriched_differs_from_base_only_by_enrichment() {
-    use deacon_core::config::merge::MergedDevContainerConfig;
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::MergedDevContainerConfig;
 
     // Create base configuration
     let base_config = DevContainerConfig {
@@ -419,8 +419,8 @@ fn test_enriched_differs_from_base_only_by_enrichment() {
 /// Per spec: JSON schema compliance including required keys.
 #[test]
 fn test_enriched_schema_compliance() {
-    use deacon_core::config::merge::MergedDevContainerConfig;
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::MergedDevContainerConfig;
 
     let base = DevContainerConfig {
         name: Some("schema-test".to_string()),
@@ -481,8 +481,8 @@ fn test_enriched_schema_compliance() {
 /// Per spec: deterministic ordering for stable diffs.
 #[test]
 fn test_field_ordering_consistency() {
-    use deacon_core::config::merge::MergedDevContainerConfig;
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::MergedDevContainerConfig;
 
     let config = DevContainerConfig {
         name: Some("ordering-test".to_string()),
@@ -571,8 +571,8 @@ fn test_camel_case_field_naming() {
 /// when serializing mergedConfiguration outputs"
 #[test]
 fn test_enriched_merged_configuration_preserves_feature_declaration_order() {
-    use deacon_core::config::merge::MergedDevContainerConfig;
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::MergedDevContainerConfig;
 
     // Create config with features in non-alphabetical order
     let config = DevContainerConfig {
@@ -649,8 +649,8 @@ fn test_enriched_merged_configuration_preserves_feature_declaration_order() {
 /// Empty options should not cause features to be reordered or filtered.
 #[test]
 fn test_feature_order_with_mixed_empty_and_populated_metadata() {
-    use deacon_core::config::merge::MergedDevContainerConfig;
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::MergedDevContainerConfig;
 
     let config = DevContainerConfig {
         name: Some("mixed-metadata".to_string()),
@@ -715,8 +715,8 @@ fn test_feature_order_with_mixed_empty_and_populated_metadata() {
 /// Test that feature order survives JSON serialization roundtrip in EnrichedMergedConfiguration.
 #[test]
 fn test_enriched_merged_configuration_order_survives_roundtrip() {
-    use deacon_core::config::merge::MergedDevContainerConfig;
     use deacon_core::config::DevContainerConfig;
+    use deacon_core::config::merge::MergedDevContainerConfig;
 
     let config = DevContainerConfig {
         name: Some("roundtrip-test".to_string()),

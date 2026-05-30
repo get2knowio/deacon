@@ -58,14 +58,11 @@ fn test_integration_cli_debug_logging() {
 #[test]
 fn test_deacon_log_environment_variable() {
     // Test that DEACON_LOG environment variable is respected
-    std::env::set_var("DEACON_LOG", "trace");
-
-    // Initialize logging without explicit spec - should use DEACON_LOG
-    let result = logging::init(None);
-    assert!(result.is_ok());
-
-    // Clean up
-    std::env::remove_var("DEACON_LOG");
+    temp_env::with_var("DEACON_LOG", Some("trace"), || {
+        // Initialize logging without explicit spec - should use DEACON_LOG
+        let result = logging::init(None);
+        assert!(result.is_ok());
+    });
 }
 
 #[test]

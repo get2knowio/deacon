@@ -45,11 +45,7 @@ fn compose_service_container_id(workspace: &Path, service: &str) -> Option<Strin
         return None;
     }
     let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id)
-    }
+    if id.is_empty() { None } else { Some(id) }
 }
 
 fn docker_inspect_state_running(container_id: &str) -> Option<bool> {

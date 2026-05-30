@@ -131,10 +131,12 @@ async fn test_oci_feature_fetch_with_mock_client() {
         Some("1.0.0".to_string())
     );
     assert!(downloaded_feature.path.exists());
-    assert!(downloaded_feature
-        .path
-        .join("devcontainer-feature.json")
-        .exists());
+    assert!(
+        downloaded_feature
+            .path
+            .join("devcontainer-feature.json")
+            .exists()
+    );
     assert!(downloaded_feature.path.join("install.sh").exists());
 
     // Test caching - fetch the same feature again

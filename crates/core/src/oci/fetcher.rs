@@ -11,9 +11,9 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
 
 use crate::errors::{FeatureError, Result};
-use crate::features::{parse_feature_metadata, FeatureMetadata};
+use crate::features::{FeatureMetadata, parse_feature_metadata};
 use crate::progress::{ProgressEvent, ProgressTracker};
-use crate::retry::{retry_async, RetryConfig};
+use crate::retry::{RetryConfig, retry_async};
 
 use super::client::{HttpClient, ReqwestClient};
 use super::types::{

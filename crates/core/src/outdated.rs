@@ -5,7 +5,7 @@
 //! for Dev Container Features.
 
 use crate::lockfile;
-use crate::oci::{default_fetcher, FeatureRef};
+use crate::oci::{FeatureRef, default_fetcher};
 use crate::semver_utils;
 use semver::Version;
 

@@ -6,8 +6,8 @@
 pub mod result;
 
 use crate::cli::{BuildKitOption, OutputFormat};
-use crate::commands::shared::{load_config, ConfigLoadArgs, TerminalDimensions};
-use anyhow::{anyhow, Context, Result};
+use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
+use anyhow::{Context, Result, anyhow};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
@@ -592,7 +592,9 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
                 if evaluation.requirements_met {
                     debug!("Host requirements validation passed");
                 } else if args.ignore_host_requirements {
-                    warn!("Host requirements not met, but proceeding due to --ignore-host-requirements flag");
+                    warn!(
+                        "Host requirements not met, but proceeding due to --ignore-host-requirements flag"
+                    );
                 }
                 debug!("Host evaluation: {:?}", evaluation);
             }
@@ -2448,24 +2450,28 @@ mod tests {
 
         // Verify advanced args are structured correctly
         assert_eq!(args.cache_from.len(), 2);
-        assert!(args
-            .cache_from
-            .contains(&"registry://example.com/cache".to_string()));
-        assert!(args
-            .cache_from
-            .contains(&"type=local,src=/tmp/cache".to_string()));
+        assert!(
+            args.cache_from
+                .contains(&"registry://example.com/cache".to_string())
+        );
+        assert!(
+            args.cache_from
+                .contains(&"type=local,src=/tmp/cache".to_string())
+        );
 
         assert_eq!(args.cache_to.len(), 1);
-        assert!(args
-            .cache_to
-            .contains(&"registry://example.com/cache:latest".to_string()));
+        assert!(
+            args.cache_to
+                .contains(&"registry://example.com/cache:latest".to_string())
+        );
 
         assert_eq!(args.buildkit, Some(BuildKitOption::Auto));
 
         assert_eq!(args.secret.len(), 2);
-        assert!(args
-            .secret
-            .contains(&"id=mypassword,src=./password.txt".to_string()));
+        assert!(
+            args.secret
+                .contains(&"id=mypassword,src=./password.txt".to_string())
+        );
         assert!(args.secret.contains(&"id=mykey,env=SSH_KEY".to_string()));
 
         // SSH defaults currently only contain explicitly provided entries
@@ -2476,38 +2482,43 @@ mod tests {
     #[test]
     fn test_buildkit_detection() {
         // Test BuildKit Auto mode with DOCKER_BUILDKIT=1
-        std::env::set_var("DOCKER_BUILDKIT", "1");
-        assert!(should_use_buildkit(Some(&BuildKitOption::Auto)));
+        temp_env::with_var("DOCKER_BUILDKIT", Some("1"), || {
+            assert!(should_use_buildkit(Some(&BuildKitOption::Auto)));
+        });
 
         // Test BuildKit Auto mode with DOCKER_BUILDKIT=true
-        std::env::set_var("DOCKER_BUILDKIT", "true");
-        assert!(should_use_buildkit(Some(&BuildKitOption::Auto)));
+        temp_env::with_var("DOCKER_BUILDKIT", Some("true"), || {
+            assert!(should_use_buildkit(Some(&BuildKitOption::Auto)));
+        });
 
         // Test BuildKit Auto mode with DOCKER_BUILDKIT=0
-        std::env::set_var("DOCKER_BUILDKIT", "0");
-        assert!(!should_use_buildkit(Some(&BuildKitOption::Auto)));
+        temp_env::with_var("DOCKER_BUILDKIT", Some("0"), || {
+            assert!(!should_use_buildkit(Some(&BuildKitOption::Auto)));
+        });
 
         // Test BuildKit Auto mode with DOCKER_BUILDKIT=false
-        std::env::set_var("DOCKER_BUILDKIT", "false");
-        assert!(!should_use_buildkit(Some(&BuildKitOption::Auto)));
+        temp_env::with_var("DOCKER_BUILDKIT", Some("false"), || {
+            assert!(!should_use_buildkit(Some(&BuildKitOption::Auto)));
+        });
 
         // Test BuildKit Never mode (should always be false)
-        std::env::set_var("DOCKER_BUILDKIT", "1");
-        assert!(!should_use_buildkit(Some(&BuildKitOption::Never)));
+        temp_env::with_var("DOCKER_BUILDKIT", Some("1"), || {
+            assert!(!should_use_buildkit(Some(&BuildKitOption::Never)));
+        });
 
         // Test None (default) mode - should respect env var
-        std::env::set_var("DOCKER_BUILDKIT", "1");
-        assert!(should_use_buildkit(None));
+        temp_env::with_var("DOCKER_BUILDKIT", Some("1"), || {
+            assert!(should_use_buildkit(None));
+        });
 
-        std::env::set_var("DOCKER_BUILDKIT", "0");
-        assert!(!should_use_buildkit(None));
+        temp_env::with_var("DOCKER_BUILDKIT", Some("0"), || {
+            assert!(!should_use_buildkit(None));
+        });
 
         // Test None with no env var (should default to false)
-        std::env::remove_var("DOCKER_BUILDKIT");
-        assert!(!should_use_buildkit(None));
-
-        // Clean up
-        std::env::remove_var("DOCKER_BUILDKIT");
+        temp_env::with_var_unset("DOCKER_BUILDKIT", || {
+            assert!(!should_use_buildkit(None));
+        });
     }
 
     #[test]
@@ -2758,42 +2769,44 @@ mod tests {
         assert_eq!(args_with_ssh.buildkit, None);
 
         // Test behavior with DOCKER_BUILDKIT unset (should default to false)
-        std::env::remove_var("DOCKER_BUILDKIT");
-        assert!(
-            !should_use_buildkit(args_with_ssh.buildkit.as_ref()),
-            "should_use_buildkit should return false when DOCKER_BUILDKIT is unset and buildkit is None"
-        );
+        temp_env::with_var_unset("DOCKER_BUILDKIT", || {
+            assert!(
+                !should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+                "should_use_buildkit should return false when DOCKER_BUILDKIT is unset and buildkit is None"
+            );
+        });
 
         // Test behavior with DOCKER_BUILDKIT=1 (should return true)
-        std::env::set_var("DOCKER_BUILDKIT", "1");
-        assert!(
-            should_use_buildkit(args_with_ssh.buildkit.as_ref()),
-            "should_use_buildkit should return true when DOCKER_BUILDKIT=1 and buildkit is None"
-        );
+        temp_env::with_var("DOCKER_BUILDKIT", Some("1"), || {
+            assert!(
+                should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+                "should_use_buildkit should return true when DOCKER_BUILDKIT=1 and buildkit is None"
+            );
+        });
 
         // Test behavior with DOCKER_BUILDKIT=true (should return true)
-        std::env::set_var("DOCKER_BUILDKIT", "true");
-        assert!(
-            should_use_buildkit(args_with_ssh.buildkit.as_ref()),
-            "should_use_buildkit should return true when DOCKER_BUILDKIT=true and buildkit is None"
-        );
+        temp_env::with_var("DOCKER_BUILDKIT", Some("true"), || {
+            assert!(
+                should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+                "should_use_buildkit should return true when DOCKER_BUILDKIT=true and buildkit is None"
+            );
+        });
 
         // Test behavior with DOCKER_BUILDKIT=0 (should return false)
-        std::env::set_var("DOCKER_BUILDKIT", "0");
-        assert!(
-            !should_use_buildkit(args_with_ssh.buildkit.as_ref()),
-            "should_use_buildkit should return false when DOCKER_BUILDKIT=0 and buildkit is None"
-        );
+        temp_env::with_var("DOCKER_BUILDKIT", Some("0"), || {
+            assert!(
+                !should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+                "should_use_buildkit should return false when DOCKER_BUILDKIT=0 and buildkit is None"
+            );
+        });
 
         // Test behavior with DOCKER_BUILDKIT=false (should return false)
-        std::env::set_var("DOCKER_BUILDKIT", "false");
-        assert!(
-            !should_use_buildkit(args_with_ssh.buildkit.as_ref()),
-            "should_use_buildkit should return false when DOCKER_BUILDKIT=false and buildkit is None"
-        );
-
-        // Clean up - remove the env var
-        std::env::remove_var("DOCKER_BUILDKIT");
+        temp_env::with_var("DOCKER_BUILDKIT", Some("false"), || {
+            assert!(
+                !should_use_buildkit(args_with_ssh.buildkit.as_ref()),
+                "should_use_buildkit should return false when DOCKER_BUILDKIT=false and buildkit is None"
+            );
+        });
 
         // Test explicit Never option with SSH
         let args_ssh_never = BuildArgs {
@@ -3129,10 +3142,12 @@ mod tests {
         let spec = "id=test,stdin,src=/path/to/file";
         let result = BuildSecret::parse(spec);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("cannot specify 'value-stdin' or 'stdin' flag with 'src' or 'env'"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cannot specify 'value-stdin' or 'stdin' flag with 'src' or 'env'")
+        );
     }
 
     #[test]
@@ -3140,10 +3155,12 @@ mod tests {
         let spec = "id=test,value-stdin,env=MY_VAR";
         let result = BuildSecret::parse(spec);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("cannot specify 'value-stdin' or 'stdin' flag with 'src' or 'env'"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cannot specify 'value-stdin' or 'stdin' flag with 'src' or 'env'")
+        );
     }
 
     #[test]
@@ -3151,10 +3168,12 @@ mod tests {
         let spec = "src=/path/to/file";
         let result = BuildSecret::parse(spec);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("must specify 'id'"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must specify 'id'")
+        );
     }
 
     #[test]
@@ -3170,10 +3189,12 @@ mod tests {
         let spec = "id=test,src=/path,env=VAR";
         let result = BuildSecret::parse(spec);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("cannot specify both"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cannot specify both")
+        );
     }
 
     #[test]
@@ -3181,10 +3202,12 @@ mod tests {
         let spec = "id=test,unknown=value";
         let result = BuildSecret::parse(spec);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unknown build secret parameter"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown build secret parameter")
+        );
     }
 
     #[test]
@@ -3192,10 +3215,12 @@ mod tests {
         let spec = "id=test,invalid";
         let result = BuildSecret::parse(spec);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unknown build secret parameter"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown build secret parameter")
+        );
     }
 
     #[test]
@@ -3212,14 +3237,15 @@ mod tests {
     #[test]
     fn test_build_secret_validate_missing_env() {
         // Make sure this env var doesn't exist
-        std::env::remove_var("NONEXISTENT_SECRET_VAR_12345");
-        let secret = BuildSecret {
-            id: "test".to_string(),
-            source: BuildSecretSource::Env("NONEXISTENT_SECRET_VAR_12345".to_string()),
-        };
-        let result = secret.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("is not set"));
+        temp_env::with_var_unset("NONEXISTENT_SECRET_VAR_12345", || {
+            let secret = BuildSecret {
+                id: "test".to_string(),
+                source: BuildSecretSource::Env("NONEXISTENT_SECRET_VAR_12345".to_string()),
+            };
+            let result = secret.validate();
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("is not set"));
+        });
     }
 
     #[test]
@@ -3245,14 +3271,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_secret_read_from_env() {
-        std::env::set_var("TEST_BUILD_SECRET_12345", "secret_value_here");
-        let secret = BuildSecret {
-            id: "test".to_string(),
-            source: BuildSecretSource::Env("TEST_BUILD_SECRET_12345".to_string()),
-        };
-        let value = secret.read_value().await.unwrap();
-        assert_eq!(value, "secret_value_here");
-        std::env::remove_var("TEST_BUILD_SECRET_12345");
+        temp_env::async_with_vars(
+            [("TEST_BUILD_SECRET_12345", Some("secret_value_here"))],
+            async {
+                let secret = BuildSecret {
+                    id: "test".to_string(),
+                    source: BuildSecretSource::Env("TEST_BUILD_SECRET_12345".to_string()),
+                };
+                let value = secret.read_value().await.unwrap();
+                assert_eq!(value, "secret_value_here");
+            },
+        )
+        .await;
     }
 
     #[tokio::test]

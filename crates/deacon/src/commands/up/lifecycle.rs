@@ -12,18 +12,18 @@ use super::{ENV_FORCE_TTY_IF_JSON, ENV_LOG_FORMAT};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
-    aggregate_lifecycle_commands, AggregatedLifecycleCommand, DotfilesConfig, LifecycleCommandList,
-    LifecycleCommandSource, LifecycleCommandValue,
+    AggregatedLifecycleCommand, DotfilesConfig, LifecycleCommandList, LifecycleCommandSource,
+    LifecycleCommandValue, aggregate_lifecycle_commands,
 };
 use deacon_core::features::ResolvedFeature;
 use deacon_core::lifecycle::{
-    should_queue_phase_for_wait_for, should_run_dotfiles_for_wait_for, wait_for_phase,
     InvocationContext, InvocationFlags, LifecyclePhase, LifecyclePhaseState,
+    should_queue_phase_for_wait_for, should_run_dotfiles_for_wait_for, wait_for_phase,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tracing::{debug, info, instrument, span, warn, Level};
+use tracing::{Level, debug, info, instrument, span, warn};
 
 /// Resolve PTY preference for lifecycle commands based on flag, environment, and JSON mode
 ///
@@ -99,7 +99,10 @@ pub(crate) fn build_invocation_context(
 
     debug!(
         "Built invocation context: mode={:?}, flags={{skip_post_create={}, prebuild={}}}, prior_markers={}",
-        ctx.mode, ctx.flags.skip_post_create, ctx.flags.prebuild, ctx.prior_markers.len()
+        ctx.mode,
+        ctx.flags.skip_post_create,
+        ctx.flags.prebuild,
+        ctx.prior_markers.len()
     );
 
     ctx
@@ -147,8 +150,8 @@ pub(crate) async fn execute_lifecycle_commands(
     config_hash: Option<&str>,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
-        execute_container_lifecycle_with_progress_callback, ContainerLifecycleCommands,
-        ContainerLifecycleConfig,
+        ContainerLifecycleCommands, ContainerLifecycleConfig,
+        execute_container_lifecycle_with_progress_callback,
     };
     use deacon_core::variable::SubstitutionContext;
 

@@ -626,7 +626,6 @@ impl VariableSubstitution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
     use tempfile::TempDir;
 
     #[test]
@@ -635,9 +634,11 @@ mod tests {
         let context = SubstitutionContext::new(temp_dir.path())?;
 
         // Should have canonical path
-        assert!(context
-            .local_workspace_folder
-            .contains(temp_dir.path().file_name().unwrap().to_str().unwrap()));
+        assert!(
+            context
+                .local_workspace_folder
+                .contains(temp_dir.path().file_name().unwrap().to_str().unwrap())
+        );
 
         // Should have environment variables
         assert!(!context.local_env.is_empty());
@@ -689,20 +690,18 @@ mod tests {
     fn test_local_env_substitution() -> anyhow::Result<()> {
         // Use a unique env var to avoid interference with other tests running in parallel.
         const VAR: &str = "DEACON_TEST_LOCAL_ENV_SUBST";
-        env::set_var(VAR, "test_value");
+        temp_env::with_var(VAR, Some("test_value"), || -> anyhow::Result<()> {
+            let temp_dir = TempDir::new()?;
+            let context = SubstitutionContext::new(temp_dir.path())?;
+            let mut report = SubstitutionReport::new();
 
-        let temp_dir = TempDir::new()?;
-        let context = SubstitutionContext::new(temp_dir.path())?;
-        let mut report = SubstitutionReport::new();
+            let input = &format!("Value: ${{localEnv:{VAR}}}");
+            let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
-        let input = &format!("Value: ${{localEnv:{VAR}}}");
-        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
-
-        assert_eq!(result, "Value: test_value");
-        assert!(report.replacements.contains_key(&format!("localEnv:{VAR}")));
-
-        env::remove_var(VAR);
-        Ok(())
+            assert_eq!(result, "Value: test_value");
+            assert!(report.replacements.contains_key(&format!("localEnv:{VAR}")));
+            Ok(())
+        })
     }
 
     #[test]
@@ -734,21 +733,20 @@ mod tests {
     fn test_env_alias_for_local_env() -> anyhow::Result<()> {
         // `${env:VAR}` is the upstream-aligned alias for `${localEnv:VAR}`.
         const VAR: &str = "DEACON_TEST_ENV_ALIAS";
-        env::set_var(VAR, "from-env-alias");
+        temp_env::with_var(VAR, Some("from-env-alias"), || -> anyhow::Result<()> {
+            let temp_dir = TempDir::new()?;
+            let context = SubstitutionContext::new(temp_dir.path())?;
+            let mut report = SubstitutionReport::new();
 
-        let temp_dir = TempDir::new()?;
-        let context = SubstitutionContext::new(temp_dir.path())?;
-        let mut report = SubstitutionReport::new();
+            let result = VariableSubstitution::substitute_string(
+                &format!("${{env:{VAR}}}"),
+                &context,
+                &mut report,
+            );
 
-        let result = VariableSubstitution::substitute_string(
-            &format!("${{env:{VAR}}}"),
-            &context,
-            &mut report,
-        );
-
-        assert_eq!(result, "from-env-alias");
-        env::remove_var(VAR);
-        Ok(())
+            assert_eq!(result, "from-env-alias");
+            Ok(())
+        })
     }
 
     #[test]
@@ -807,31 +805,31 @@ mod tests {
         let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
         assert_eq!(result, "Value: ${unknownVariable}");
-        assert!(report
-            .unknown_variables
-            .contains(&"unknownVariable".to_string()));
+        assert!(
+            report
+                .unknown_variables
+                .contains(&"unknownVariable".to_string())
+        );
 
         Ok(())
     }
 
     #[test]
     fn test_multiple_variables_in_string() -> anyhow::Result<()> {
-        env::set_var("TEST_VAR", "test");
+        temp_env::with_var("TEST_VAR", Some("test"), || -> anyhow::Result<()> {
+            let temp_dir = TempDir::new()?;
+            let context = SubstitutionContext::new(temp_dir.path())?;
+            let mut report = SubstitutionReport::new();
 
-        let temp_dir = TempDir::new()?;
-        let context = SubstitutionContext::new(temp_dir.path())?;
-        let mut report = SubstitutionReport::new();
+            let input = "${localWorkspaceFolder}/src/${localEnv:TEST_VAR}/${devcontainerId}";
+            let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
-        let input = "${localWorkspaceFolder}/src/${localEnv:TEST_VAR}/${devcontainerId}";
-        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
-
-        assert!(result.contains(&context.local_workspace_folder));
-        assert!(result.contains("test"));
-        assert!(result.contains(&context.devcontainer_id));
-        assert_eq!(report.replacements.len(), 3);
-
-        env::remove_var("TEST_VAR");
-        Ok(())
+            assert!(result.contains(&context.local_workspace_folder));
+            assert!(result.contains("test"));
+            assert!(result.contains(&context.devcontainer_id));
+            assert_eq!(report.replacements.len(), 3);
+            Ok(())
+        })
     }
 
     #[test]
@@ -887,9 +885,11 @@ mod tests {
 
         // Should be left unchanged because the regex will match "${localWorkspaceFolder${invalid" which is unknown
         assert_eq!(result, input);
-        assert!(report
-            .unknown_variables
-            .contains(&"localWorkspaceFolder${invalid".to_string()));
+        assert!(
+            report
+                .unknown_variables
+                .contains(&"localWorkspaceFolder${invalid".to_string())
+        );
 
         Ok(())
     }
@@ -926,10 +926,12 @@ mod tests {
         assert_eq!(context1.devcontainer_id.len(), 12);
 
         // ID should be hexadecimal
-        assert!(context1
-            .devcontainer_id
-            .chars()
-            .all(|c| c.is_ascii_hexdigit()));
+        assert!(
+            context1
+                .devcontainer_id
+                .chars()
+                .all(|c| c.is_ascii_hexdigit())
+        );
 
         Ok(())
     }
@@ -961,9 +963,11 @@ mod tests {
 
         // Should be left unchanged when container workspace folder is not available
         assert_eq!(result, "${containerWorkspaceFolder}/src");
-        assert!(report
-            .unknown_variables
-            .contains(&"containerWorkspaceFolder".to_string()));
+        assert!(
+            report
+                .unknown_variables
+                .contains(&"containerWorkspaceFolder".to_string())
+        );
 
         Ok(())
     }
@@ -1034,54 +1038,60 @@ mod tests {
     /// pass 1 still resolves the local-side tokens.
     #[test]
     fn test_container_env_three_pass_composition() -> anyhow::Result<()> {
-        env::set_var("BEAD8_LOCAL", "from-local");
-        let temp_dir = TempDir::new()?;
+        temp_env::with_var(
+            "BEAD8_LOCAL",
+            Some("from-local"),
+            || -> anyhow::Result<()> {
+                let temp_dir = TempDir::new()?;
 
-        // Pass 1: container_env is None
-        let pass1_ctx = SubstitutionContext::new(temp_dir.path())?;
-        let mut report1 = SubstitutionReport::new();
-        let input = "${localEnv:BEAD8_LOCAL}/${containerEnv:NODE_ENV}";
-        let after_pass1 = VariableSubstitution::substitute_string(input, &pass1_ctx, &mut report1);
-        assert_eq!(after_pass1, "from-local/${containerEnv:NODE_ENV}");
+                // Pass 1: container_env is None
+                let pass1_ctx = SubstitutionContext::new(temp_dir.path())?;
+                let mut report1 = SubstitutionReport::new();
+                let input = "${localEnv:BEAD8_LOCAL}/${containerEnv:NODE_ENV}";
+                let after_pass1 =
+                    VariableSubstitution::substitute_string(input, &pass1_ctx, &mut report1);
+                assert_eq!(after_pass1, "from-local/${containerEnv:NODE_ENV}");
 
-        // Pass 3: container_env populated
-        let mut container_env = HashMap::new();
-        container_env.insert("NODE_ENV".to_string(), "production".to_string());
-        let pass3_ctx =
-            SubstitutionContext::new(temp_dir.path())?.with_container_env(container_env);
-        let mut report3 = SubstitutionReport::new();
-        let after_pass3 =
-            VariableSubstitution::substitute_string(&after_pass1, &pass3_ctx, &mut report3);
-        assert_eq!(after_pass3, "from-local/production");
-
-        env::remove_var("BEAD8_LOCAL");
-        Ok(())
+                // Pass 3: container_env populated
+                let mut container_env = HashMap::new();
+                container_env.insert("NODE_ENV".to_string(), "production".to_string());
+                let pass3_ctx =
+                    SubstitutionContext::new(temp_dir.path())?.with_container_env(container_env);
+                let mut report3 = SubstitutionReport::new();
+                let after_pass3 =
+                    VariableSubstitution::substitute_string(&after_pass1, &pass3_ctx, &mut report3);
+                assert_eq!(after_pass3, "from-local/production");
+                Ok(())
+            },
+        )
     }
 
     #[test]
     fn test_mixed_container_and_local_variables() -> anyhow::Result<()> {
-        env::set_var("TEST_LOCAL", "local_value");
+        temp_env::with_var(
+            "TEST_LOCAL",
+            Some("local_value"),
+            || -> anyhow::Result<()> {
+                let temp_dir = TempDir::new()?;
+                let mut container_env = HashMap::new();
+                container_env.insert("TEST_CONTAINER".to_string(), "container_value".to_string());
 
-        let temp_dir = TempDir::new()?;
-        let mut container_env = HashMap::new();
-        container_env.insert("TEST_CONTAINER".to_string(), "container_value".to_string());
+                let context = SubstitutionContext::new(temp_dir.path())?
+                    .with_container_workspace_folder("/workspaces/test".to_string())
+                    .with_container_env(container_env);
+                let mut report = SubstitutionReport::new();
 
-        let context = SubstitutionContext::new(temp_dir.path())?
-            .with_container_workspace_folder("/workspaces/test".to_string())
-            .with_container_env(container_env);
-        let mut report = SubstitutionReport::new();
+                let input = "${localWorkspaceFolder} -> ${containerWorkspaceFolder}, ${localEnv:TEST_LOCAL} vs ${containerEnv:TEST_CONTAINER}";
+                let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
-        let input = "${localWorkspaceFolder} -> ${containerWorkspaceFolder}, ${localEnv:TEST_LOCAL} vs ${containerEnv:TEST_CONTAINER}";
-        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
-
-        assert!(result.contains(&context.local_workspace_folder));
-        assert!(result.contains("/workspaces/test"));
-        assert!(result.contains("local_value"));
-        assert!(result.contains("container_value"));
-        assert_eq!(report.replacements.len(), 4);
-
-        env::remove_var("TEST_LOCAL");
-        Ok(())
+                assert!(result.contains(&context.local_workspace_folder));
+                assert!(result.contains("/workspaces/test"));
+                assert!(result.contains("local_value"));
+                assert!(result.contains("container_value"));
+                assert_eq!(report.replacements.len(), 4);
+                Ok(())
+            },
+        )
     }
 
     #[test]
@@ -1142,34 +1152,37 @@ mod tests {
 
     #[test]
     fn test_nested_variable_substitution() -> anyhow::Result<()> {
-        let temp_dir = TempDir::new()?;
-        env::set_var("NESTED_TEST_VAR", "localWorkspaceFolder");
+        temp_env::with_var(
+            "NESTED_TEST_VAR",
+            Some("localWorkspaceFolder"),
+            || -> anyhow::Result<()> {
+                let temp_dir = TempDir::new()?;
 
-        let mut context = SubstitutionContext::new(temp_dir.path())?;
-        context.add_feature_var(
-            "dynamicVar".to_string(),
-            "${localEnv:NESTED_TEST_VAR}".to_string(),
-        );
+                let mut context = SubstitutionContext::new(temp_dir.path())?;
+                context.add_feature_var(
+                    "dynamicVar".to_string(),
+                    "${localEnv:NESTED_TEST_VAR}".to_string(),
+                );
 
-        let mut report = SubstitutionReport::new();
-        let options = SubstitutionOptions::default();
+                let mut report = SubstitutionReport::new();
+                let options = SubstitutionOptions::default();
 
-        // This should resolve ${feature:dynamicVar} -> ${localEnv:NESTED_TEST_VAR} -> localWorkspaceFolder -> actual path
-        let input = "${feature:dynamicVar}/src";
-        let result = VariableSubstitution::substitute_string_advanced(
-            input,
-            &context,
-            &options,
-            &mut report,
-        )?;
+                // This should resolve ${feature:dynamicVar} -> ${localEnv:NESTED_TEST_VAR} -> localWorkspaceFolder -> actual path
+                let input = "${feature:dynamicVar}/src";
+                let result = VariableSubstitution::substitute_string_advanced(
+                    input,
+                    &context,
+                    &options,
+                    &mut report,
+                )?;
 
-        // Should resolve to the literal string "localWorkspaceFolder/src" since the nested resolution
-        // would resolve to the variable name, not the value
-        assert_eq!(result, "localWorkspaceFolder/src");
-        assert!(report.passes > 1);
-
-        env::remove_var("NESTED_TEST_VAR");
-        Ok(())
+                // Should resolve to the literal string "localWorkspaceFolder/src" since the nested resolution
+                // would resolve to the variable name, not the value
+                assert_eq!(result, "localWorkspaceFolder/src");
+                assert!(report.passes > 1);
+                Ok(())
+            },
+        )
     }
 
     #[test]
@@ -1280,9 +1293,11 @@ mod tests {
         let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
         assert_eq!(result, "Path: ${feature:unknownVar}");
-        assert!(report
-            .unknown_variables
-            .contains(&"feature:unknownVar".to_string()));
+        assert!(
+            report
+                .unknown_variables
+                .contains(&"feature:unknownVar".to_string())
+        );
 
         Ok(())
     }
@@ -1325,10 +1340,12 @@ mod tests {
 
         if let Some(paths) = result["paths"].as_array() {
             assert_eq!(paths.len(), 2);
-            assert!(paths[0]
-                .as_str()
-                .unwrap()
-                .starts_with(&context.local_workspace_folder));
+            assert!(
+                paths[0]
+                    .as_str()
+                    .unwrap()
+                    .starts_with(&context.local_workspace_folder)
+            );
         }
 
         if let Some(config) = result["config"].as_object() {
@@ -1369,10 +1386,12 @@ mod tests {
 
         // Should hit max depth and generate warning
         assert!(report.has_cycles());
-        assert!(report
-            .cycle_warnings
-            .iter()
-            .any(|w| w.contains("maximum depth")));
+        assert!(
+            report
+                .cycle_warnings
+                .iter()
+                .any(|w| w.contains("maximum depth"))
+        );
 
         Ok(())
     }

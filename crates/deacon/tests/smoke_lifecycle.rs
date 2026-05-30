@@ -834,7 +834,9 @@ fn test_lifecycle_phase_order_sc001() {
     println!(
         "SC-001 verification passed: All lifecycle phases executed exactly once in correct order"
     );
-    println!("Execution order verified: onCreate -> updateContent -> postCreate -> postStart -> postAttach");
+    println!(
+        "Execution order verified: onCreate -> updateContent -> postCreate -> postStart -> postAttach"
+    );
 }
 
 /// Test SC-001 with dotfiles: Verify dotfiles phase executes between postCreate and postStart
@@ -1007,9 +1009,13 @@ echo "$seq,$ts" > /tmp/lifecycle_order_dotfiles
                         assert!(
                             ts >= pc_ts && ts <= ps_ts,
                             "Dotfiles (ts={}) should execute between postCreate (ts={}) and postStart (ts={})",
-                            ts, pc_ts, ps_ts
+                            ts,
+                            pc_ts,
+                            ps_ts
                         );
-                        println!("Dotfiles executed at correct position: postCreate <= dotfiles <= postStart");
+                        println!(
+                            "Dotfiles executed at correct position: postCreate <= dotfiles <= postStart"
+                        );
                         dotfiles_executed = true;
                     }
                 }
