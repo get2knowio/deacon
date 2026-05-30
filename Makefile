@@ -1,18 +1,8 @@
 # Convenience build/test targets for deacon
 # Use `make help` to list targets.
-#
-# MVP Mode (default): Only up, exec, down, read-configuration commands
-# Full Mode: All commands (build, features, templates, doctor, outdated, etc.)
-#
-# To build/test full CLI, use: make build-full, make test-full, etc.
 
 # Use bash for slightly more robust scripting in recipes
 SHELL := /usr/bin/env bash
-
-# Feature flags for MVP vs Full builds
-# MVP is default (--no-default-features), Full includes all commands
-MVP_FLAGS := --no-default-features
-FULL_FLAGS :=
 
 # Optional: override nextest concurrency from the command line
 # Usage examples:
@@ -49,26 +39,20 @@ install-nextest: ## Install cargo-nextest if missing (auto)
 help: ## Show this help
 	@echo "Deacon Makefile - Available Targets"
 	@echo ""
-	@echo "MVP Mode (default): up, exec, down, read-configuration commands only"
-	@echo "Full Mode (*-full): All commands including build, features, templates, etc."
+	@echo "Build & Run:"
+	@grep -E '^(build|run):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
-	@echo "Build & Run (MVP default):"
-	@grep -E '^(build|build-full|run|run-full):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
-	@echo ""
-	@echo "Testing - MVP (default):"
+	@echo "Testing:"
 	@grep -E '^(test|test-fast|dev-fast):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
-	@echo "Testing - Full CLI:"
-	@grep -E '^(test-full|test-fast-full|dev-fast-full):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
-	@echo ""
 	@echo "Testing - Parallel (cargo-nextest):"
-	@grep -E '^(test-nextest-fast|test-nextest-fast-full|test-nextest-unit|test-nextest-docker|test-nextest-long-running|test-nextest-smoke|test-nextest|test-nextest-ci|test-nextest-bg|test-nextest-audit):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@grep -E '^(test-nextest-fast|test-nextest-unit|test-nextest-docker|test-nextest-long-running|test-nextest-smoke|test-nextest|test-nextest-ci|test-nextest-bg|test-nextest-audit):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
 	@echo "Testing - Other:"
 	@grep -E '^(test-non-smoke|test-smoke|test-parity|test-parity-all|parity):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
 	@echo "Code Quality:"
-	@grep -E '^(fmt|clippy|clippy-full|coverage):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@grep -E '^(fmt|clippy|coverage):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
 	@echo "Release Management:"
 	@grep -E '^(release-check|release-run|release-assets|macos-artifact):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
@@ -79,94 +63,52 @@ help: ## Show this help
 	@echo "For detailed nextest usage, see: docs/testing/nextest.md"
 	@echo "For timing artifact details, see: artifacts/nextest/README.md"
 
-build: ## Build MVP (release) - up, exec, down, read-configuration only
-	cargo build --release $(MVP_FLAGS)
+build: ## Build CLI (release)
+	cargo build --release
 
-build-full: ## Build full CLI (release) - all commands
-	cargo build --release $(FULL_FLAGS)
+run: ## Run CLI
+	cargo run -- --help
 
-run: ## Run MVP CLI
-	cargo run $(MVP_FLAGS) -- --help
+test: ## Run tests
+	cargo test -- --test-threads=1
 
-run-full: ## Run full CLI
-	cargo run $(FULL_FLAGS) -- --help
-
-test: ## Run MVP tests
-	cargo test $(MVP_FLAGS) -- --test-threads=1
-
-test-full: ## Run all tests (full CLI)
-	cargo test $(FULL_FLAGS) -- --test-threads=1
-
-test-fast: ## Fast MVP tests: unit + bins + examples + doctests (no integration suites)
+test-fast: ## Fast tests: unit + bins + examples + doctests (no integration suites)
 	@set -euo pipefail; \
 	# Run unit/bins/examples in parallel (faster) \
-	cargo test --workspace --lib --bins --examples $(MVP_FLAGS); \
+	cargo test --workspace --lib --bins --examples; \
 	# Run doctests separately \
-	cargo test --doc $(MVP_FLAGS)
+	cargo test --doc
 
-test-fast-full: ## Fast tests for full CLI
-	@set -euo pipefail; \
-	cargo test --workspace --lib --bins --examples $(FULL_FLAGS); \
-	cargo test --doc $(FULL_FLAGS)
-
-dev-fast: ## Fast local loop: fmt-check + clippy + fast MVP tests
+dev-fast: ## Fast local loop: fmt-check + clippy + fast tests
 	@set -euo pipefail; \
 	cargo fmt --all && cargo fmt --all -- --check; \
-	cargo clippy --all-targets $(MVP_FLAGS) -- -D warnings; \
+	cargo clippy --all-targets -- -D warnings; \
 	$(MAKE) test-fast
 
-dev-fast-full: ## Fast local loop for full CLI
-	@set -euo pipefail; \
-	cargo fmt --all && cargo fmt --all -- --check; \
-	cargo clippy --all-targets $(FULL_FLAGS) -- -D warnings; \
-	$(MAKE) test-fast-full
-
-test-nextest-fast: install-nextest ## Run fast MVP tests with cargo-nextest (excludes smoke/parity/docker)
+test-nextest-fast: install-nextest ## Run fast tests with cargo-nextest (excludes smoke/parity/docker)
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \
 	mkdir -p artifacts/nextest; \
-	echo "Running nextest with dev-fast profile (MVP)..."; \
+	echo "Running nextest with dev-fast profile..."; \
 	start_time=$$(date +%s); \
-	if cargo nextest run --profile dev-fast $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none --cargo-quiet $(MVP_FLAGS); then \
+	if cargo nextest run --profile dev-fast $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none --cargo-quiet; then \
 		end_time=$$(date +%s); \
 		duration=$$((end_time - start_time)); \
 		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
-		echo "{\"profile\":\"dev-fast-mvp\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":0}" > artifacts/nextest/dev-fast-timing.json; \
+		echo "{\"profile\":\"dev-fast\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":0}" > artifacts/nextest/dev-fast-timing.json; \
 		echo "✓ Tests passed in $${duration}s. Timing data: artifacts/nextest/dev-fast-timing.json"; \
 	else \
 		exit_code=$$?; \
 		end_time=$$(date +%s); \
 		duration=$$((end_time - start_time)); \
 		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
-		echo "{\"profile\":\"dev-fast-mvp\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":$$exit_code}" > artifacts/nextest/dev-fast-timing.json; \
+		echo "{\"profile\":\"dev-fast\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":$$exit_code}" > artifacts/nextest/dev-fast-timing.json; \
 		echo "✗ Tests failed after $${duration}s. Timing data: artifacts/nextest/dev-fast-timing.json"; \
 		exit $$exit_code; \
 	fi
 
-test-nextest-fast-full: install-nextest ## Run fast tests for full CLI with cargo-nextest
-	@set -euo pipefail; \
-	./scripts/nextest/assert-installed.sh; \
-	mkdir -p artifacts/nextest; \
-	echo "Running nextest with dev-fast profile (full)..."; \
-	start_time=$$(date +%s); \
-	if cargo nextest run --profile dev-fast $(THREAD_ARGS) --success-output never --failure-output immediate --show-progress none $(FULL_FLAGS); then \
-		end_time=$$(date +%s); \
-		duration=$$((end_time - start_time)); \
-		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
-		echo "{\"profile\":\"dev-fast-full\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":0}" > artifacts/nextest/dev-fast-full-timing.json; \
-		echo "✓ Tests passed in $${duration}s. Timing data: artifacts/nextest/dev-fast-full-timing.json"; \
-	else \
-		exit_code=$$?; \
-		end_time=$$(date +%s); \
-		duration=$$((end_time - start_time)); \
-		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
-		echo "{\"profile\":\"dev-fast-full\",\"duration_seconds\":$$duration,\"timestamp_utc\":\"$$timestamp\",\"exit_code\":$$exit_code}" > artifacts/nextest/dev-fast-full-timing.json; \
-		echo "✗ Tests failed after $${duration}s. Timing data: artifacts/nextest/dev-fast-full-timing.json"; \
-		exit $$exit_code; \
-	fi
-
-test-nextest-unit: install-nextest ## Run only MVP unit tests with nextest (super fast)
-	cargo nextest run --profile unit $(MVP_FLAGS)
+test-nextest-unit: install-nextest ## Run only unit tests with nextest (super fast)
+	cargo nextest run --profile unit
 
 test-nextest-docker: install-nextest ## Run only docker integration tests
 	@./scripts/nextest/run-docker-profile.sh $(THREAD_ARGS)
@@ -268,7 +210,7 @@ test-nextest-mvp-integration: install-nextest ## Run MVP integration tests (smok
 	mkdir -p artifacts/nextest; \
 	echo "Running MVP integration tests (smoke + parity + core Docker)..."; \
 	start_time=$$(date +%s); \
-	if cargo nextest run --profile mvp-integration $(THREAD_ARGS) $(MVP_FLAGS) $(OUTPUT_ARGS); then \
+	if cargo nextest run --profile mvp-integration $(THREAD_ARGS) $(OUTPUT_ARGS); then \
 		end_time=$$(date +%s); \
 		duration=$$((end_time - start_time)); \
 		timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
@@ -384,11 +326,8 @@ test-podman: ## Run Podman runtime tests via Makefile
 fmt: ## Format all code
 	cargo fmt --all
 
-clippy: ## Run clippy on MVP with warnings as errors
-	cargo clippy --all-targets $(MVP_FLAGS) -- -D warnings
-
-clippy-full: ## Run clippy on full CLI with warnings as errors
-	cargo clippy --all-targets $(FULL_FLAGS) -- -D warnings
+clippy: ## Run clippy with warnings as errors
+	cargo clippy --all-targets -- -D warnings
 
 coverage: ## Generate coverage report
 	cargo llvm-cov --workspace --open

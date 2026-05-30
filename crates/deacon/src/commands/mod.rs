@@ -2,24 +2,17 @@
 //!
 //! This module contains implementations for all CLI subcommands.
 
-#[cfg(feature = "full")]
 pub mod build;
-#[cfg(feature = "full")]
 pub mod config;
 pub mod down;
 pub mod exec;
-#[cfg(feature = "full")]
 pub mod outdated;
 pub mod read_configuration;
-#[cfg(feature = "full")]
 pub mod run_user_commands;
-#[cfg(feature = "full")]
 pub mod set_up;
 pub mod shared;
-#[cfg(feature = "full")]
 pub mod templates;
 pub mod up;
-#[cfg(feature = "full")]
 pub mod upgrade;
 
 /// Re-export the UpResult type to preserve the stdout JSON contract for the up command.

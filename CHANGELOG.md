@@ -9,6 +9,16 @@ The 1.0 release is being assembled across a series of PRs tracked in
 
 ## [Unreleased]
 
+### Changed
+
+- Build the entire in-scope consumer CLI surface as a single binary. Removed the
+  `default = ["full"]` / `full = []` Cargo feature gate from the `deacon` crate
+  along with all ~55 `#[cfg(feature = "full")]` / `#[cfg_attr(not(feature = "full"), …)]`
+  attributes, and dropped the MVP-vs-full split from CI (`ci.yml`), the release
+  workflow (`release.yml`), and the `Makefile`. `--no-default-features` is now a
+  no-op. Subcommands such as `build`, `doctor`, `templates`, `outdated`, and
+  `run-user-commands` are always compiled in.
+
 ### Added
 - `cargo-deny` security gate in CI (`.github/workflows/ci.yml` `security` job),
   running on PR/push plus a daily 07:00 UTC schedule. Policy defined in

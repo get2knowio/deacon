@@ -14,16 +14,6 @@ publish = false
 description = "Rust implementation of the Development Containers CLI (containers.dev). Consumer-side commands: up, down, exec, build, read-configuration, run-user-commands, set-up, upgrade, templates apply, doctor."
 readme = "../../README.md"
 
-[features]
-default = ["full"]
-# `full` is a compile-gate marker, not a dependency toggle: it carries no
-# optional deps, it only flips `#[cfg(feature = "full")]` blocks in cli.rs /
-# main.rs that register the non-MVP subcommands (build, features, templates,
-# doctor, outdated, …). Building with `--no-default-features` yields the MVP
-# surface (up, exec, down, read-configuration); the test/release workflows use
-# that to validate the MVP build.
-full = []
-
 [dependencies]
 deacon-core.workspace = true
 clap.workspace = true

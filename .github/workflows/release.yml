@@ -17,7 +17,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   # MVP-only build: excludes non-MVP subcommands (build, features, templates, doctor, outdated, etc.)
-  RELEASE_FEATURE_FLAGS: --no-default-features
 
 jobs:
   verify:
@@ -41,9 +40,9 @@ jobs:
       - name: Fmt check
         run: cargo fmt --all -- --check
       - name: Clippy (deny warnings, MVP features)
-        run: cargo clippy --all-targets --no-default-features -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
       - name: Unit tests (MVP features only, no Docker-dependent tests)
-        run: cargo test --workspace --no-default-features --lib -- --test-threads=1
+        run: cargo test --workspace --lib -- --test-threads=1
 
   create-release:
     name: Create Release
@@ -192,17 +191,17 @@ jobs:
             ${{ runner.os }}-${{ matrix.target }}-cargo-
       - name: Build (musl)
         if: contains(matrix.target, 'musl')
-        run: cross build --release --target ${{ matrix.target }} $RELEASE_FEATURE_FLAGS
+        run: cross build --release --target ${{ matrix.target }}
       - name: Build (standard)
         if: ${{ !contains(matrix.target, 'musl') && matrix.target != 'aarch64-unknown-linux-gnu' }}
-        run: cargo build --release --target ${{ matrix.target }} $RELEASE_FEATURE_FLAGS
+        run: cargo build --release --target ${{ matrix.target }}
       - name: Build (standard, aarch64 gnu)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --release --target ${{ matrix.target }} $RELEASE_FEATURE_FLAGS
+        run: cargo build --release --target ${{ matrix.target }}
       - name: Smoke run (Unix native)
         if: runner.os != 'Windows' && !contains(matrix.target, 'aarch64') && !contains(matrix.target, 'arm')
         run: |

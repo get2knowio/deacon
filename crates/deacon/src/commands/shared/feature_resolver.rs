@@ -29,7 +29,6 @@ use deacon_core::registry_parser::parse_registry_reference;
 ///   propagated with context rather than silently dropped.
 // Only reachable through `full`-gated CLI dispatch (e.g. run-user-commands), so
 // it is dead code in a `--no-default-features` MVP build; tests still exercise it.
-#[cfg_attr(not(feature = "full"), allow(dead_code))]
 pub(crate) async fn resolve_features_ordered<C: HttpClient>(
     config: &DevContainerConfig,
     config_dir: &Path,

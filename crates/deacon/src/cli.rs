@@ -374,7 +374,6 @@ pub enum Commands {
     },
 
     /// Build development container image
-    #[cfg(feature = "full")]
     Build {
         /// Build without cache
         #[arg(long)]
@@ -551,7 +550,6 @@ pub enum Commands {
     },
 
     /// Configuration management commands
-    #[cfg(feature = "full")]
     Config {
         /// Config subcommand
         #[command(subcommand)]
@@ -559,7 +557,6 @@ pub enum Commands {
     },
 
     /// Template management commands
-    #[cfg(feature = "full")]
     Templates {
         /// Template subcommand
         #[command(subcommand)]
@@ -571,7 +568,6 @@ pub enum Commands {
     /// stdout instead of writing to disk.
     ///
     /// See `docs/subcommand-specs/upgrade/SPEC.md` for the authoritative behavior.
-    #[cfg(feature = "full")]
     Upgrade {
         /// Print the generated lockfile JSON to stdout instead of writing it
         /// to disk. Spec §2.
@@ -599,7 +595,6 @@ pub enum Commands {
     /// a JSON snapshot of the resulting configuration.
     ///
     /// See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
-    #[cfg(feature = "full")]
     SetUp {
         /// Target container ID (required). The container must already exist.
         #[arg(long)]
@@ -645,7 +640,6 @@ pub enum Commands {
     },
 
     /// Run user-defined lifecycle commands
-    #[cfg(feature = "full")]
     #[allow(clippy::enum_variant_names)]
     RunUserCommands {
         /// Skip postCreate lifecycle phase
@@ -694,7 +688,6 @@ pub enum Commands {
     /// Environment diagnostics and support bundle creation
     ///
     /// Collects system information for troubleshooting and support
-    #[cfg(feature = "full")]
     Doctor {
         /// Output in JSON format
         #[arg(long)]
@@ -718,7 +711,6 @@ pub enum Commands {
     /// `--output json` is specified a compact JSON map is written to stdout and
     /// all logs/diagnostic messages are sent to stderr. This ensures deterministic
     /// machine-readable behavior for CI and tooling.
-    #[cfg(feature = "full")]
     Outdated {
         /// Workspace folder to inspect (default: current directory)
         #[arg(long, value_name = "PATH")]
@@ -733,7 +725,6 @@ pub enum Commands {
 }
 
 /// Template management subcommands
-#[cfg(feature = "full")]
 #[derive(Debug, Clone, Subcommand)]
 pub enum TemplateCommands {
     /// Apply template to current project
@@ -764,7 +755,6 @@ pub enum TemplateCommands {
 }
 
 /// Configuration management subcommands
-#[cfg(feature = "full")]
 #[derive(Debug, Clone, Subcommand)]
 pub enum ConfigCommands {
     /// Apply variable substitution to configuration and preview results
@@ -1302,7 +1292,6 @@ impl Cli {
                     }
                 }
             }
-            #[cfg(feature = "full")]
             Some(Commands::Build {
                 no_cache,
                 platform,
@@ -1469,7 +1458,6 @@ impl Cli {
                 execute_read_configuration(args).await?;
                 Ok(())
             }
-            #[cfg(feature = "full")]
             Some(Commands::Config { command }) => {
                 use crate::commands::config::{ConfigArgs, execute_config};
 
@@ -1484,7 +1472,6 @@ impl Cli {
 
                 execute_config(args).await
             }
-            #[cfg(feature = "full")]
             Some(Commands::Templates { command }) => {
                 use crate::commands::templates::{TemplatesArgs, execute_templates};
 
@@ -1496,7 +1483,6 @@ impl Cli {
 
                 execute_templates(args).await
             }
-            #[cfg(feature = "full")]
             Some(Commands::Upgrade {
                 dry_run,
                 docker_path,
@@ -1518,7 +1504,6 @@ impl Cli {
 
                 execute_upgrade(args).await
             }
-            #[cfg(feature = "full")]
             Some(Commands::RunUserCommands {
                 skip_post_create,
                 skip_post_attach,
@@ -1551,7 +1536,6 @@ impl Cli {
 
                 execute_run_user_commands(args).await
             }
-            #[cfg(feature = "full")]
             Some(Commands::SetUp {
                 container_id,
                 config,
@@ -1633,7 +1617,6 @@ impl Cli {
                     execute_down(args).await
                 }
             }
-            #[cfg(feature = "full")]
             Some(Commands::Outdated {
                 workspace_folder,
                 output,
@@ -1661,7 +1644,6 @@ impl Cli {
                 run_outdated(args).await
             }
 
-            #[cfg(feature = "full")]
             Some(Commands::Doctor { json, bundle }) => {
                 // Create a DoctorContext for doctor command
                 let context = deacon_core::doctor::DoctorContext {
@@ -2007,7 +1989,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "full")]
     fn test_global_flags_with_subcommand() {
         let cli = Cli::parse_from([
             "deacon",

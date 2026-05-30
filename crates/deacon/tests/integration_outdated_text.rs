@@ -1,4 +1,3 @@
-#![cfg(feature = "full")]
 // T039: CLI integration test for text output (User Story 1)
 //
 // Tests human-readable text table rendering and ordering
