@@ -69,7 +69,7 @@ fn test_subcommand_not_implemented() {
         .failure()
         .code(1)
         .stderr(predicate::str::contains(
-            "No devcontainer.json found in workspace",
+            "Failed to resolve workspace path",
         ));
 
     // Build command is now implemented and should try to find config
@@ -138,7 +138,7 @@ fn test_debug_logging_with_subcommand() {
         .failure()
         .code(1)
         .stderr(predicate::str::contains(
-            "No devcontainer.json found in workspace",
+            "Failed to resolve workspace path",
         ));
 
     // Note: The actual debug log "CLI initialized with log level: debug"
