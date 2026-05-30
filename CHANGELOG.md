@@ -9,6 +9,18 @@ The 1.0 release is being assembled across a series of PRs tracked in
 
 ## [Unreleased]
 
+### Changed
+
+- Minimum Supported Rust Version (MSRV) raised from 1.85 to **1.95**. Direct and
+  transitive dependencies (e.g. `sysinfo` 0.39, `testcontainers` 0.27, `etcetera`)
+  now require a newer rustc than 1.85, and the MSRV-aware resolver could no longer
+  keep `Cargo.lock` compatible with 1.85 without impractical downgrades. The CI
+  `MSRV (cargo check)` job now pins `dtolnay/rust-toolchain@1.95`, and `Cargo.lock`
+  was regenerated. Restores the green MSRV gate (was failing on `main`). Also
+  allows the `clippy::collapsible_if` lint workspace-wide, which clippy 1.95
+  newly raises on `if cond { if let .. {} }` (suggesting let-chains); the nested
+  form is kept for readability rather than churning ~60 call sites.
+
 ### Added
 - `cargo-deny` security gate in CI (`.github/workflows/ci.yml` `security` job),
   running on PR/push plus a daily 07:00 UTC schedule. Policy defined in

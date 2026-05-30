@@ -20,8 +20,10 @@ documentation = "https://github.com/get2knowio/deacon"
 keywords = ["devcontainer", "containers", "docker", "development", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 # Minimum Supported Rust Version. Verified in CI by a dedicated job pinned to
-# this exact toolchain. edition 2024 requires >= 1.85.
-rust-version = "1.85"
+# this exact toolchain. edition 2024 requires >= 1.85; raised to 1.95 because
+# direct/transitive dependencies (e.g. sysinfo 0.39, testcontainers 0.27) now
+# require a newer rustc than 1.85, and pinning them down is no longer practical.
+rust-version = "1.95"
 
 [workspace.dependencies]
 # Pin a version alongside the path so cargo-deny does not flag it as a wildcard dep.
@@ -60,6 +62,14 @@ temp-env = { version = "0.3.6", features = ["async_closure"] }
 # scoped `#[allow(unsafe_code)]`. Production code remains unsafe-free; `deny`
 # still turns any unguarded `unsafe` into a compile error.
 unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# clippy 1.95 expanded `collapsible_if` to also flag `if cond { if let .. {} }`
+# and suggest collapsing into a let-chain (`if cond && let .. {}`). The codebase
+# deliberately keeps the nested form in many places for readability; adopting
+# let-chains everywhere is a large, churny rewrite out of scope for the MSRV
+# bump. Allow the lint so `cargo clippy -D warnings` stays green on 1.95.
+collapsible_if = "allow"
 
 [profile.dev]
 # Lighter debug info than the default (2) for faster incremental links. Was
