@@ -20,7 +20,6 @@ pub mod spans {
     pub const CONTAINER_CREATE: &str = "container.create";
     pub const LIFECYCLE_RUN: &str = "lifecycle.run";
     pub const REGISTRY_PULL: &str = "registry.pull";
-    pub const REGISTRY_PUBLISH: &str = "registry.publish";
 }
 
 /// Common field names for structured logging
@@ -159,17 +158,6 @@ pub fn registry_pull_span(registry_ref: &str) -> Span {
         target: "deacon_core::observability",
         tracing::Level::INFO,
         spans::REGISTRY_PULL,
-        duration_ms = tracing::field::Empty,
-        r#ref = %registry_ref
-    )
-}
-
-/// Start a span for registry publish operations
-pub fn registry_publish_span(registry_ref: &str) -> Span {
-    span!(
-        target: "deacon_core::observability",
-        tracing::Level::INFO,
-        spans::REGISTRY_PUBLISH,
         duration_ms = tracing::field::Empty,
         r#ref = %registry_ref
     )

@@ -21,6 +21,19 @@ The 1.0 release is being assembled across a series of PRs tracked in
   newly raises on `if cond { if let .. {} }` (suggesting let-chains); the nested
   form is kept for readability rather than churning ~60 call sites.
 
+### Removed
+
+- Removed out-of-scope feature-authoring (OCI publish/upload) code from
+  `deacon-core`. Per the consumer-only constitution (§II), the publish/upload
+  implementation was unreachable from any binary (every caller was a test) and
+  has been deleted: `publish_feature`, `publish_template`,
+  `publish_feature_multi_tag`, `publish_collection_metadata`, the
+  `upload_blob`/`upload_manifest` helpers, the `PublishResult` type, the
+  `OciPublish*` progress events, the `registry.publish` span, and the
+  publish-only `HttpClient::put_with_headers` / `post_with_headers` trait
+  methods (with their impls and mocks). The consumer-side fetch/pull/install
+  path is unchanged.
+
 ### Added
 - `cargo-deny` security gate in CI (`.github/workflows/ci.yml` `security` job),
   running on PR/push plus a daily 07:00 UTC schedule. Policy defined in
