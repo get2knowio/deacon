@@ -68,9 +68,7 @@ fn test_subcommand_not_implemented() {
         .assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains(
-            "Failed to resolve workspace path",
-        ));
+        .stderr(predicate::str::contains("Failed to resolve workspace path"));
 
     // Build command is now implemented and should try to find config
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -137,9 +135,7 @@ fn test_debug_logging_with_subcommand() {
         .assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains(
-            "Failed to resolve workspace path",
-        ));
+        .stderr(predicate::str::contains("Failed to resolve workspace path"));
 
     // Note: The actual debug log "CLI initialized with log level: debug"
     // should appear in stderr when running with RUST_LOG=debug, but it's hard
