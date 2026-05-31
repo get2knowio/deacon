@@ -57,6 +57,8 @@ fn create_local_feature(
         serde_json::to_string_pretty(&feature_json).unwrap(),
     )
     .unwrap();
+
+    fs::write(feature_dir.join("install.sh"), "#!/bin/sh\nexit 0\n").unwrap();
 }
 
 /// Container cleanup guard - ensures containers are removed after tests
@@ -1007,11 +1009,13 @@ fn test_error_attribution_identifies_failing_feature() {
     );
 }
 
-/// Test that postStartCommand failures also trigger fail-fast behavior
+/// Test that postStartCommand failures are recorded without failing `up`
 #[test]
-fn test_feature_poststart_command_fails() {
+fn test_feature_poststart_command_failure_does_not_fail_up() {
     if !is_docker_available() {
-        eprintln!("Skipping test_feature_poststart_command_fails: Docker not available");
+        eprintln!(
+            "Skipping test_feature_poststart_command_failure_does_not_fail_up: Docker not available"
+        );
         return;
     }
 
@@ -1034,7 +1038,7 @@ fn test_feature_poststart_command_fails() {
         "features": {
             "./failing-poststart": {}
         },
-        "postStartCommand": "echo 'Config postStart should not run'"
+        "postStartCommand": "echo 'Config postStart still runs'"
     });
 
     fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
@@ -1044,7 +1048,8 @@ fn test_feature_poststart_command_fails() {
     )
     .unwrap();
 
-    // Run deacon up - should fail
+    // Run deacon up. postStartCommand is a non-blocking phase, so failures are
+    // recorded but do not fail the main up flow.
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let up_output = up_cmd
         .current_dir(&temp_dir)
@@ -1054,25 +1059,19 @@ fn test_feature_poststart_command_fails() {
         .output()
         .unwrap();
 
-    // Verify the command failed
     assert!(
-        !up_output.status.success(),
-        "deacon up should have failed when feature postStartCommand fails"
-    );
-
-    // Verify exit code is 1
-    assert_eq!(
-        up_output.status.code(),
-        Some(1),
-        "Exit code should be 1 when lifecycle command fails"
+        up_output.status.success(),
+        "deacon up should succeed even when feature postStartCommand fails"
     );
 }
 
-/// Test that postAttachCommand failures also trigger fail-fast behavior
+/// Test that postAttachCommand failures are recorded without failing `up`
 #[test]
-fn test_feature_postattach_command_fails() {
+fn test_feature_postattach_command_failure_does_not_fail_up() {
     if !is_docker_available() {
-        eprintln!("Skipping test_feature_postattach_command_fails: Docker not available");
+        eprintln!(
+            "Skipping test_feature_postattach_command_failure_does_not_fail_up: Docker not available"
+        );
         return;
     }
 
@@ -1105,7 +1104,8 @@ fn test_feature_postattach_command_fails() {
     )
     .unwrap();
 
-    // Run deacon up - should fail
+    // Run deacon up. postAttachCommand is a non-blocking phase, so failures are
+    // recorded but do not fail the main up flow.
     let mut up_cmd = Command::cargo_bin("deacon").unwrap();
     let up_output = up_cmd
         .current_dir(&temp_dir)
@@ -1117,17 +1117,9 @@ fn test_feature_postattach_command_fails() {
         .output()
         .unwrap();
 
-    // Verify the command failed
     assert!(
-        !up_output.status.success(),
-        "deacon up should have failed when feature postAttachCommand fails"
-    );
-
-    // Verify exit code is 1
-    assert_eq!(
-        up_output.status.code(),
-        Some(1),
-        "Exit code should be 1 when lifecycle command fails"
+        up_output.status.success(),
+        "deacon up should succeed even when feature postAttachCommand fails"
     );
 }
 

@@ -1,4 +1,3 @@
-#![cfg(feature = "full")]
 //! Integration tests for templates CLI commands (consumer: pull, apply)
 
 use assert_cmd::Command;

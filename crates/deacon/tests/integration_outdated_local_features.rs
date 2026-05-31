@@ -1,4 +1,3 @@
-#![cfg(feature = "full")]
 // Integration test for filtering out local/non-OCI feature references
 //
 // Per spec §9 and §14: Invalid/legacy feature identifiers (local paths, unknown schemes)

@@ -1,4 +1,3 @@
-#![cfg(feature = "full")]
 //! Integration tests for compose overrideCommand support (Bead 13).
 //!
 //! Covers BEAD-13-T01, T02, T04 from .maverick/plans/consumer-pt2/briefing.md:

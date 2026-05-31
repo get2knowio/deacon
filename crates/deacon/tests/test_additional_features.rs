@@ -1,4 +1,3 @@
-#![cfg(feature = "full")]
 //! Integration tests for additional features CLI functionality
 //!
 //! Tests the complete workflow of CLI feature injection and feature install order override.

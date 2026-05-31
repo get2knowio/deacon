@@ -148,7 +148,7 @@ jobs:
         tool: cargo-nextest
 
     - name: Run MVP fast tests
-      run: cargo nextest run --profile dev-fast --no-default-features
+      run: cargo nextest run --profile dev-fast
 
   test-integration:
     name: Test (MVP integration)

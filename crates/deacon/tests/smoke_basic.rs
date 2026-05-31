@@ -1,4 +1,3 @@
-#![cfg(feature = "full")]
 //! Smoke test suite for the most important CLI flows we support today
 //!
 //! Scenarios covered:

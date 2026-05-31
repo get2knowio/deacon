@@ -1,4 +1,3 @@
-#![cfg(feature = "full")]
 //! Smoke tests for doctor command text mode
 //!
 //! Scenarios covered:

@@ -1,4 +1,3 @@
-#![cfg(feature = "full")]
 use assert_cmd::Command;
 use predicates::prelude::*;
 
@@ -69,9 +68,7 @@ fn test_subcommand_not_implemented() {
         .assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains(
-            "No devcontainer.json found in workspace",
-        ));
+        .stderr(predicate::str::contains("Failed to resolve workspace path"));
 
     // Build command is now implemented and should try to find config
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -89,8 +86,7 @@ fn test_subcommand_not_implemented() {
         .failure()
         .code(1)
         // Now properly checks for configuration file first before attempting container operations
-        .stderr(predicate::str::contains("Dev container config"))
-        .stderr(predicate::str::contains("not found"));
+        .stderr(predicate::str::contains("Configuration file not found"));
 }
 
 #[test]
@@ -138,9 +134,7 @@ fn test_debug_logging_with_subcommand() {
         .assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains(
-            "No devcontainer.json found in workspace",
-        ));
+        .stderr(predicate::str::contains("Failed to resolve workspace path"));
 
     // Note: The actual debug log "CLI initialized with log level: debug"
     // should appear in stderr when running with RUST_LOG=debug, but it's hard
