@@ -332,6 +332,29 @@ clippy: ## Run clippy with warnings as errors
 coverage: ## Generate coverage report
 	cargo llvm-cov --workspace --open
 
+.PHONY: install-cargo-bloat
+install-cargo-bloat: ## Install cargo-bloat if missing (auto)
+	@set -euo pipefail; \
+	if command -v cargo-bloat >/dev/null 2>&1; then \
+	  echo "cargo-bloat already installed: $$(cargo bloat --version)"; \
+	else \
+	  echo "Installing cargo-bloat (locked)..."; \
+	  cargo install cargo-bloat --locked; \
+	  echo "Installed cargo-bloat: $$(cargo bloat --version)"; \
+	fi
+
+# Binary-size analysis of the release `deacon` binary (full CLI surface).
+# Override the row count with N=...; e.g. `make bloat N=50`.
+BLOAT_N ?= 30
+
+.PHONY: bloat
+bloat: install-cargo-bloat ## Show largest functions in the release binary (N=30)
+	cargo bloat --release -p deacon -n $(BLOAT_N)
+
+.PHONY: bloat-crates
+bloat-crates: install-cargo-bloat ## Show size contribution per crate in the release binary (N=30)
+	cargo bloat --release -p deacon --crates -n $(BLOAT_N)
+
 clean: ## Clean build artifacts and Docker resources (for docker-in-docker devcontainer)
 	cargo clean
 	@# Docker cleanup (safe no-ops if docker unavailable)

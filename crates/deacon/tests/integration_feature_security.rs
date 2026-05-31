@@ -24,6 +24,14 @@ fn docker_available() -> bool {
         .unwrap_or(false)
 }
 
+fn normalize_capability(capability: &str) -> String {
+    let uppercase = capability.to_uppercase();
+    uppercase
+        .strip_prefix("CAP_")
+        .unwrap_or(&uppercase)
+        .to_string()
+}
+
 /// Container cleanup guard
 struct ContainerGuard {
     container_ids: std::cell::RefCell<Vec<String>>,
@@ -362,12 +370,13 @@ fn test_feature_capabilities_applied() {
         .collect();
 
     // Verify NET_ADMIN and NET_RAW are present (normalized to uppercase)
-    let has_net_admin = cap_add_strings
+    let normalized_caps: Vec<String> = cap_add_strings
         .iter()
-        .any(|c| c.to_uppercase() == "NET_ADMIN");
-    let has_net_raw = cap_add_strings
-        .iter()
-        .any(|c| c.to_uppercase() == "NET_RAW");
+        .map(|capability| normalize_capability(capability))
+        .collect();
+
+    let has_net_admin = normalized_caps.iter().any(|c| c == "NET_ADMIN");
+    let has_net_raw = normalized_caps.iter().any(|c| c == "NET_RAW");
 
     assert!(
         has_net_admin,
@@ -490,7 +499,7 @@ echo "Installing feature..."
 
     let cap_add_strings: Vec<String> = cap_add
         .iter()
-        .filter_map(|v| v.as_str().map(|s| s.to_uppercase()))
+        .filter_map(|v| v.as_str().map(normalize_capability))
         .collect();
 
     let has_net_admin = cap_add_strings.contains(&"NET_ADMIN".to_string());

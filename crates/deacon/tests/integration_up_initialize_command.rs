@@ -70,16 +70,13 @@ fn test_initialize_command_array_syntax() {
     let marker1_path = temp_dir.path().join("init_marker1.txt");
     let marker2_path = temp_dir.path().join("init_marker2.txt");
 
-    // Create a devcontainer.json with initializeCommand as array
+    // Create a devcontainer.json with initializeCommand as exec-form array
     let devcontainer_config = format!(
         r#"{{
     "name": "Initialize Command Array Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
-    "initializeCommand": [
-        "echo 'first' > {}",
-        "echo 'second' > {}"
-    ],
+    "initializeCommand": ["sh", "-c", "echo 'first' > {} && echo 'second' > {}"],
     "postCreateCommand": "echo 'Container created'"
 }}"#,
         marker1_path.display(),
