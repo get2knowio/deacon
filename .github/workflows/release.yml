@@ -377,7 +377,7 @@ jobs:
             exit 0
           }
       - name: Attest release artifacts
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             deacon-*.tar.gz
