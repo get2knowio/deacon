@@ -118,10 +118,12 @@ impl PortForwardingManager {
             }
         }
 
-        // Add appPort if specified
+        // Add appPort if specified (single value or array)
         if let Some(app_port) = &config.app_port {
-            if let Some(port_num) = app_port.primary_port() {
-                ports.insert(port_num, app_port);
+            for port_spec in app_port.specs() {
+                if let Some(port_num) = port_spec.primary_port() {
+                    ports.insert(port_num, port_spec);
+                }
             }
         }
 
@@ -336,6 +338,7 @@ impl PortForwardingManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AppPort;
     use std::collections::HashMap;
 
     #[test]
@@ -346,7 +349,7 @@ mod tests {
             PortSpec::Number(3000),
             PortSpec::String("8080:8080".to_string()),
         ];
-        config.app_port = Some(PortSpec::Number(4000));
+        config.app_port = Some(AppPort::Single(PortSpec::Number(4000)));
 
         let ports = PortForwardingManager::collect_configured_ports(&config);
 

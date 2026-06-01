@@ -16,7 +16,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # MVP-only build: excludes non-MVP subcommands (build, features, templates, doctor, outdated, etc.)
 
 jobs:
   verify:
@@ -39,9 +38,9 @@ jobs:
             ${{ runner.os }}-verify-
       - name: Fmt check
         run: cargo fmt --all -- --check
-      - name: Clippy (deny warnings, MVP features)
+      - name: Clippy (deny warnings)
         run: cargo clippy --all-targets -- -D warnings
-      - name: Unit tests (MVP features only, no Docker-dependent tests)
+      - name: Unit tests (no Docker-dependent tests)
         run: cargo test --workspace --lib -- --test-threads=1
 
   create-release:

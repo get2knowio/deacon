@@ -6,6 +6,7 @@
 pub mod result;
 
 use crate::cli::{BuildKitOption, OutputFormat};
+use crate::commands::shared::build_resolution::resolve_devcontainer_build_config;
 use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
 use anyhow::{Context, Result, anyhow};
 use deacon_core::config::DevContainerConfig;
@@ -325,10 +326,14 @@ impl BuildSecret {
 /// Build configuration extracted from DevContainer config
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildConfig {
-    /// Dockerfile path (relative to context)
+    /// Dockerfile path as specified by config
     pub dockerfile: String,
+    /// Resolved Dockerfile path
+    pub dockerfile_path: PathBuf,
     /// Build context path
     pub context: String,
+    /// Directory containing the active devcontainer config
+    pub context_folder: PathBuf,
     /// Build target (optional)
     pub target: Option<String>,
     /// Build options/args
@@ -630,7 +635,7 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     }
 
     // Extract build configuration
-    let build_config = extract_build_config(&config, &workspace_folder)?;
+    let build_config = extract_build_config(&config, &config_path)?;
     debug!("Build config: {:?}", build_config);
 
     // Calculate configuration hash for caching
@@ -827,10 +832,9 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
 }
 
 /// Extract build configuration from DevContainer config
-fn extract_build_config(
-    config: &DevContainerConfig,
-    workspace_folder: &Path,
-) -> Result<BuildConfig> {
+fn extract_build_config(config: &DevContainerConfig, config_path: &Path) -> Result<BuildConfig> {
+    let config_folder = config_path.parent().unwrap_or_else(|| Path::new("."));
+
     // Check if this is a compose-based configuration
     if config.uses_compose() {
         // For compose mode, we use the service name as a placeholder
@@ -843,86 +847,36 @@ fn extract_build_config(
 
         return Ok(BuildConfig {
             dockerfile: format!("compose-service-{}", service),
+            dockerfile_path: config_folder.join(format!("compose-service-{}", service)),
             context: ".".to_string(),
+            context_folder: config_folder.to_path_buf(),
             target: None,
             options: HashMap::new(),
         });
     }
-    // Resolve the Dockerfile from either the top-level `dockerFile` field or the
-    // canonical nested `build.dockerfile` field (containers.dev json_reference).
-    // `up` already honors both (see commands/up/image_build.rs); mirror that here.
-    let build_dockerfile = config
-        .build
-        .as_ref()
-        .and_then(|v| v.as_object())
-        .and_then(|o| o.get("dockerfile"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let dockerfile_opt = config.dockerfile.clone().or(build_dockerfile);
 
-    // Check if we have a dockerfile specified
-    if let Some(dockerfile) = &dockerfile_opt {
-        let dockerfile_path = workspace_folder.join(dockerfile);
-        if !dockerfile_path.exists() {
-            return Err(
-                DeaconError::Config(deacon_core::errors::ConfigError::NotFound {
-                    path: dockerfile_path.to_string_lossy().to_string(),
-                })
-                .into(),
-            );
-        }
+    if let Some(resolved) = resolve_devcontainer_build_config(config, config_path)? {
+        return Ok(BuildConfig {
+            dockerfile: resolved.dockerfile,
+            dockerfile_path: resolved.dockerfile_path,
+            context: resolved.context,
+            context_folder: resolved.context_folder,
+            target: resolved.target,
+            options: resolved.options,
+        });
+    }
 
-        let mut build_config = BuildConfig {
-            dockerfile: dockerfile.clone(),
-            context: ".".to_string(),
-            target: None,
-            options: HashMap::new(),
-        };
-
-        // Parse build configuration if present
-        if let Some(build_value) = &config.build {
-            if let Some(build_obj) = build_value.as_object() {
-                // Extract context
-                if let Some(context) = build_obj.get("context").and_then(|v| v.as_str()) {
-                    build_config.context = context.to_string();
-                }
-
-                // Extract target
-                if let Some(target) = build_obj.get("target").and_then(|v| v.as_str()) {
-                    build_config.target = Some(target.to_string());
-                }
-
-                // Extract build options/args
-                if let Some(options) = build_obj.get("options").and_then(|v| v.as_object()) {
-                    for (key, value) in options {
-                        let val_str = value
-                            .as_str()
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| value.to_string());
-                        build_config.options.insert(key.clone(), val_str);
-                    }
-                }
-
-                // Extract build args (upstream-compatible: build.args)
-                if let Some(args_obj) = build_obj.get("args").and_then(|v| v.as_object()) {
-                    for (key, value) in args_obj {
-                        let val_str = value
-                            .as_str()
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| value.to_string());
-                        build_config.options.insert(key.clone(), val_str);
-                    }
-                }
-            }
-        }
-
-        Ok(build_config)
-    } else if let Some(image) = &config.image {
+    if let Some(image) = &config.image {
         // For image-reference mode, create a build config that will generate a Dockerfile
         // Actual image-reference build will be handled by execute_image_reference_build
         Ok(BuildConfig {
             dockerfile: format!("image-reference-{}", image.replace([':', '/'], "-")),
+            dockerfile_path: config_folder.join(format!(
+                "image-reference-{}",
+                image.replace([':', '/'], "-")
+            )),
             context: ".".to_string(),
+            context_folder: config_folder.to_path_buf(),
             target: None,
             options: HashMap::new(),
         })
@@ -938,7 +892,7 @@ fn extract_build_config(
 }
 
 /// Calculate configuration hash for caching
-fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) -> Result<String> {
+fn calculate_config_hash(build_config: &BuildConfig, _workspace_folder: &Path) -> Result<String> {
     use sha2::{Digest, Sha256};
 
     let mut hasher = Sha256::new();
@@ -959,16 +913,14 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
     }
 
     // Hash dockerfile content
-    let dockerfile_path = workspace_folder
-        .join(&build_config.context)
-        .join(&build_config.dockerfile);
+    let dockerfile_path = build_config.dockerfile_path.clone();
     if dockerfile_path.exists() {
         let dockerfile_content = std::fs::read_to_string(&dockerfile_path)?;
         hasher.update(dockerfile_content.as_bytes());
     }
 
     // Hash selected build context files (limit count for performance)
-    let context_path = workspace_folder.join(&build_config.context);
+    let context_path = build_config.context_folder.join(&build_config.context);
     if context_path.exists() {
         let mut build_affecting_files = Vec::new();
 
@@ -990,7 +942,7 @@ fn calculate_config_hash(build_config: &BuildConfig, workspace_folder: &Path) ->
                             if !is_non_build_affecting_file(file_name) {
                                 if let Ok(metadata) = std::fs::metadata(&path) {
                                     build_affecting_files.push((
-                                        path.strip_prefix(workspace_folder)
+                                        path.strip_prefix(&context_path)
                                             .unwrap_or(&path)
                                             .to_string_lossy()
                                             .to_string(),
@@ -1206,7 +1158,9 @@ fn create_build_inputs(result: &BuildResult, _workspace_folder: &Path) -> Result
         feature_set_digest: None, // TODO: Implement when features are integrated
         build_config: BuildConfig {
             dockerfile: "Dockerfile".to_string(), // Would be extracted from actual config
+            dockerfile_path: PathBuf::from("Dockerfile"),
             context: ".".to_string(),
+            context_folder: PathBuf::from("."),
             target: None,
             options: HashMap::new(),
         },
@@ -1479,7 +1433,9 @@ async fn execute_image_reference_build(
     // Create a BuildConfig for this temporary Dockerfile
     let build_config = BuildConfig {
         dockerfile: "Dockerfile".to_string(),
-        context: temp_dir.to_string_lossy().to_string(),
+        dockerfile_path,
+        context: ".".to_string(),
+        context_folder: temp_dir.to_path_buf(),
         target: None,
         options: HashMap::new(),
     };
@@ -1664,8 +1620,8 @@ async fn execute_docker_build(
         debug!("Building Docker image");
 
         // Prepare build context
-        let context_path = workspace_folder.join(&build_config.context);
-        let dockerfile_path = context_path.join(&build_config.dockerfile);
+        let context_path = build_config.context_folder.join(&build_config.context);
+        let dockerfile_path = build_config.dockerfile_path.clone();
 
         // Prepare docker build arguments
         let mut build_args = vec!["build".to_string()];
@@ -2294,8 +2250,9 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let dockerfile_path = temp_dir.path().join("Dockerfile");
         std::fs::write(&dockerfile_path, "FROM alpine:3.19\nLABEL test=1\n").unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
 
-        let result = extract_build_config(&config, temp_dir.path());
+        let result = extract_build_config(&config, &config_path);
         assert!(result.is_ok());
         let build_config = result.unwrap();
         assert_eq!(build_config.dockerfile, "Dockerfile");
@@ -2310,7 +2267,7 @@ mod tests {
             }
         }));
 
-        let result = extract_build_config(&config, temp_dir.path());
+        let result = extract_build_config(&config, &config_path);
         assert!(result.is_ok());
         let build_config = result.unwrap();
         assert_eq!(build_config.context, "docker");
@@ -2331,6 +2288,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let dockerfile_path = temp_dir.path().join("Dockerfile");
         std::fs::write(&dockerfile_path, "FROM alpine:3.19\nLABEL test=1\n").unwrap();
+        let config_path = temp_dir.path().join("devcontainer.json");
 
         let mut config = DevContainerConfig::default();
         config.name = Some("test".to_string());
@@ -2341,7 +2299,7 @@ mod tests {
             "args": { "FOO": "bar" }
         }));
 
-        let result = extract_build_config(&config, temp_dir.path());
+        let result = extract_build_config(&config, &config_path);
         assert!(
             result.is_ok(),
             "build.dockerfile should be recognized: {:?}",
@@ -2351,6 +2309,29 @@ mod tests {
         assert_eq!(build_config.dockerfile, "Dockerfile");
         assert_eq!(build_config.context, ".");
         assert_eq!(build_config.options.get("FOO"), Some(&"bar".to_string()));
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_build_config_resolves_dockerfile_relative_to_config_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_dir = temp_dir.path().join(".devcontainer");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(config_dir.join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+        std::fs::write(temp_dir.path().join("Dockerfile"), "FROM busybox:1.36\n").unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+
+        let mut config = DevContainerConfig::default();
+        config.name = Some("test".to_string());
+        config.build = Some(serde_json::json!({
+            "dockerfile": "Dockerfile",
+            "context": ".."
+        }));
+
+        let build_config = extract_build_config(&config, &config_path).unwrap();
+        assert_eq!(build_config.dockerfile_path, config_dir.join("Dockerfile"));
+        assert_eq!(build_config.context_folder, config_dir);
+        assert_eq!(build_config.context, "..");
     }
 
     #[test]
@@ -2376,9 +2357,12 @@ mod tests {
 
     #[test]
     fn test_config_hash_calculation() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let build_config = BuildConfig {
             dockerfile: "Dockerfile".to_string(),
+            dockerfile_path: temp_dir.path().join("Dockerfile"),
             context: ".".to_string(),
+            context_folder: temp_dir.path().to_path_buf(),
             target: Some("dev".to_string()),
             options: {
                 let mut map = HashMap::new();
@@ -2388,7 +2372,6 @@ mod tests {
             },
         };
 
-        let temp_dir = tempfile::tempdir().unwrap();
         let dockerfile_path = temp_dir.path().join("Dockerfile");
         std::fs::write(&dockerfile_path, "FROM alpine:3.19\n").unwrap();
 
@@ -2842,14 +2825,15 @@ mod tests {
 
     #[test]
     fn test_config_hash_with_context_files() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let build_config = BuildConfig {
             dockerfile: "Dockerfile".to_string(),
+            dockerfile_path: temp_dir.path().join("Dockerfile"),
             context: ".".to_string(),
+            context_folder: temp_dir.path().to_path_buf(),
             target: None,
             options: HashMap::new(),
         };
-
-        let temp_dir = tempfile::tempdir().unwrap();
 
         // Create Dockerfile
         std::fs::write(temp_dir.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
@@ -2883,14 +2867,15 @@ mod tests {
 
     #[test]
     fn test_config_hash_recursive_directory_traversal() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let build_config = BuildConfig {
             dockerfile: "Dockerfile".to_string(),
+            dockerfile_path: temp_dir.path().join("Dockerfile"),
             context: ".".to_string(),
+            context_folder: temp_dir.path().to_path_buf(),
             target: None,
             options: HashMap::new(),
         };
-
-        let temp_dir = tempfile::tempdir().unwrap();
 
         // Create Dockerfile
         std::fs::write(temp_dir.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
@@ -2922,14 +2907,15 @@ mod tests {
 
     #[test]
     fn test_config_hash_excludes_devcontainer_directory() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let build_config = BuildConfig {
             dockerfile: "Dockerfile".to_string(),
+            dockerfile_path: temp_dir.path().join("Dockerfile"),
             context: ".".to_string(),
+            context_folder: temp_dir.path().to_path_buf(),
             target: None,
             options: HashMap::new(),
         };
-
-        let temp_dir = tempfile::tempdir().unwrap();
 
         // Create Dockerfile
         std::fs::write(temp_dir.path().join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
@@ -2991,7 +2977,9 @@ mod tests {
             feature_set_digest: Some("features_hash".to_string()),
             build_config: BuildConfig {
                 dockerfile: "Dockerfile".to_string(),
+                dockerfile_path: PathBuf::from("Dockerfile"),
                 context: ".".to_string(),
+                context_folder: PathBuf::from("."),
                 target: None,
                 options: HashMap::new(),
             },

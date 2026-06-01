@@ -1,5 +1,6 @@
 //! Shared helpers for command implementations.
 
+pub(crate) mod build_resolution;
 pub mod config_loader;
 pub mod env_user;
 pub mod feature_resolver;

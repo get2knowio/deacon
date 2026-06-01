@@ -460,9 +460,7 @@ pub(crate) async fn execute_up_with_runtime(
     // Build image from Dockerfile if needed (when no image specified but build object present)
     // T007: Pass build_options to apply cache-from/cache-to/buildx settings
     if config.image.is_none() && !config.uses_compose() {
-        if let Some(build_config) =
-            extract_build_config_from_devcontainer(&config, &workspace_folder)?
-        {
+        if let Some(build_config) = extract_build_config_from_devcontainer(&config, &config_path)? {
             info!("Building image from Dockerfile configuration");
             let built_image_id = build_image_from_config(&build_config, &build_options).await?;
 
