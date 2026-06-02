@@ -83,10 +83,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=${{ steps.get_version.outputs.version }}
+          # Mark prerelease tags (e.g. v0.2.0-rc.1) so they are not flagged as "latest".
+          PRERELEASE_FLAG=""
+          case "$VERSION" in
+            *-*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
           # Create release if it doesn't exist
           if ! gh release view "$VERSION" >/dev/null 2>&1; then
             # Use GitHub auto-generated notes for a descriptive changelog
-            gh release create "$VERSION" -t "Release $VERSION" --generate-notes --verify-tag
+            gh release create "$VERSION" -t "Release $VERSION" --generate-notes --verify-tag $PRERELEASE_FLAG
           fi
           # Upload rustc version provenance snippet
           gh release upload "$VERSION" RUSTC_VERSION.txt --clobber
