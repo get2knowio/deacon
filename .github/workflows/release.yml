@@ -454,6 +454,10 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
+        with:
+          # Auto-create the Pages site if it isn't enabled yet (uses the
+          # job's pages: write permission). Avoids 'Get Pages site failed'.
+          enablement: true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
