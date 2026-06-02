@@ -25,16 +25,44 @@ fn is_docker_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Helper to get the fixture path for feature-and-dotfiles
-fn feature_dotfiles_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// Copy a `fixtures/devcontainer-up/<name>` fixture into a fresh TempDir.
+///
+/// These tests run a real `deacon up`. If the workspace folder lived inside
+/// this repo, `up` would walk to the git root and bind-mount `/workspaces/...`
+/// into the container — container-side writes (and historically a `chown` for
+/// `remoteUser: root`) would then corrupt the host repo's ownership. Running
+/// from a TempDir outside the repo keeps the workspace fully hermetic.
+fn copy_fixture_to_temp(name: &str) -> tempfile::TempDir {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap()
         .join("fixtures")
         .join("devcontainer-up")
-        .join("feature-and-dotfiles")
+        .join(name);
+    let temp = tempfile::TempDir::new().unwrap();
+    copy_dir_contents(&src, temp.path());
+    temp
+}
+
+/// Recursively copy the contents of `src` into `dest`.
+fn copy_dir_contents(src: &std::path::Path, dest: &std::path::Path) {
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let target = dest.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            std::fs::create_dir_all(&target).unwrap();
+            copy_dir_contents(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// Helper to get a hermetic (TempDir-backed) feature-and-dotfiles fixture.
+fn feature_dotfiles_fixture() -> tempfile::TempDir {
+    copy_fixture_to_temp("feature-and-dotfiles")
 }
 
 #[test]
@@ -50,7 +78,8 @@ fn test_prebuild_stops_after_update_content() {
     // 3. Stops execution (does NOT run postCreateCommand)
     // 4. Emits success JSON with containerId
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
 
     let config_path = fixture_path.join("devcontainer.json");
 
@@ -84,7 +113,8 @@ fn test_prebuild_rerun_executes_update_content_again() {
     // 2. DOES rerun updateContentCommand
     // 3. Still stops before postCreate
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     // First prebuild run
@@ -125,7 +155,8 @@ fn test_prebuild_does_not_run_post_create() {
 
     // This test verifies lifecycle boundary: prebuild must NOT run postCreateCommand
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -157,7 +188,8 @@ fn test_prebuild_skip_post_attach_honored() {
     // Verify that prebuild implies skip-post-attach behavior
     // (postAttach should never run during prebuild, even if specified)
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -185,7 +217,8 @@ fn test_prebuild_with_features_metadata_merge() {
     // Verify that features are installed and metadata is merged before updateContent
     // in prebuild mode, and that the merged config includes feature metadata
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -216,14 +249,8 @@ fn test_prebuild_without_update_content_command() {
     // does not define updateContentCommand (no-op lifecycle hook)
 
     // Use single-container fixture which has no updateContentCommand
-    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("fixtures")
-        .join("devcontainer-up")
-        .join("single-container");
+    let _fixture = copy_fixture_to_temp("single-container");
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();

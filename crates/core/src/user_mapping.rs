@@ -367,21 +367,36 @@ impl<T: UserMapper> UserMappingService<T> {
             result.home_created = true;
         }
 
-        // Set workspace ownership if specified
+        // Set workspace ownership if specified.
+        //
+        // Skip when the target user is root (uid 0): chowning the workspace to
+        // root is a no-op for access (root can already read/write everything)
+        // and, because the workspace is a bind mount of a host directory,
+        // `chown 0:0` inside the container rewrites the HOST directory's owner
+        // to root — corrupting the developer's workspace (e.g. `remoteUser:
+        // root` fixtures flipping the repo to root:root). Only adjust ownership
+        // for a real, non-root target user.
         if let Some(ref workspace_path) = config.workspace_path {
-            debug!(
-                "Setting workspace ownership: {} -> {}:{}",
-                workspace_path, result.user_info.uid, result.user_info.gid
-            );
-            self.user_mapper
-                .set_workspace_ownership(
-                    container_id,
-                    workspace_path,
-                    result.user_info.uid,
-                    result.user_info.gid,
-                )
-                .await?;
-            result.workspace_ownership_adjusted = true;
+            if result.user_info.uid == 0 {
+                debug!(
+                    "Skipping workspace ownership adjustment for {}: target user is root (uid 0)",
+                    workspace_path
+                );
+            } else {
+                debug!(
+                    "Setting workspace ownership: {} -> {}:{}",
+                    workspace_path, result.user_info.uid, result.user_info.gid
+                );
+                self.user_mapper
+                    .set_workspace_ownership(
+                        container_id,
+                        workspace_path,
+                        result.user_info.uid,
+                        result.user_info.gid,
+                    )
+                    .await?;
+                result.workspace_ownership_adjusted = true;
+            }
         }
 
         debug!(
@@ -1152,6 +1167,65 @@ mod tests {
         assert!(!result.home_created);
         assert!(!result.workspace_ownership_adjusted);
         assert_eq!(result.user_info.username, "root");
+    }
+
+    #[tokio::test]
+    async fn test_workspace_ownership_skipped_for_root() {
+        // remoteUser: root resolves to uid 0. The workspace must NOT be chowned:
+        // on a bind mount, `chown 0:0 <workspace>` rewrites the host directory
+        // to root:root (e.g. flipping the repo workspace to root ownership).
+        let root_user = UserInfo::new(
+            "root".to_string(),
+            0,
+            0,
+            "/root".to_string(),
+            "/bin/bash".to_string(),
+        );
+        let mapper = MockUserMapper::new().with_user(root_user);
+        let service = UserMappingService::new(mapper);
+
+        let config = UserMappingConfig::new(Some("root".to_string()), None, false)
+            .with_workspace_path("/workspace".to_string());
+
+        let result = service
+            .apply_user_mapping("container123", &config)
+            .await
+            .unwrap();
+
+        assert_eq!(result.user_info.uid, 0);
+        assert!(
+            !result.workspace_ownership_adjusted,
+            "workspace ownership must not be adjusted for a root target user"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_workspace_ownership_adjusted_for_nonroot() {
+        // A real, non-root remote user still gets the workspace ownership
+        // adjustment (the legitimate use case the guard preserves).
+        let dev_user = UserInfo::new(
+            "devuser".to_string(),
+            1000,
+            1000,
+            "/home/devuser".to_string(),
+            "/bin/bash".to_string(),
+        );
+        let mapper = MockUserMapper::new().with_user(dev_user);
+        let service = UserMappingService::new(mapper);
+
+        let config = UserMappingConfig::new(Some("devuser".to_string()), None, false)
+            .with_workspace_path("/workspace".to_string());
+
+        let result = service
+            .apply_user_mapping("container123", &config)
+            .await
+            .unwrap();
+
+        assert_eq!(result.user_info.uid, 1000);
+        assert!(
+            result.workspace_ownership_adjusted,
+            "workspace ownership should be adjusted for a non-root target user"
+        );
     }
 
     #[tokio::test]
