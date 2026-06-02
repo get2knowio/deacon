@@ -51,28 +51,49 @@ fn can_run_dotfiles_tests() -> bool {
     is_docker_available() && is_network_available()
 }
 
-/// Helper to get the fixture path for feature-and-dotfiles
-fn feature_dotfiles_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// Copy a `fixtures/devcontainer-up/<name>` fixture into a fresh TempDir.
+///
+/// These tests run a real `deacon up`. If the workspace folder lived inside
+/// this repo, `up` would walk to the git root and bind-mount `/workspaces/...`
+/// into the container — container-side writes (and historically a `chown` for
+/// `remoteUser: root`) would then corrupt the host repo's ownership. Running
+/// from a TempDir outside the repo keeps the workspace fully hermetic.
+fn copy_fixture_to_temp(name: &str) -> tempfile::TempDir {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap()
         .join("fixtures")
         .join("devcontainer-up")
-        .join("feature-and-dotfiles")
+        .join(name);
+    let temp = tempfile::TempDir::new().unwrap();
+    copy_dir_contents(&src, temp.path());
+    temp
 }
 
-/// Helper to get the single-container fixture path
-fn single_container_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("fixtures")
-        .join("devcontainer-up")
-        .join("single-container")
+/// Recursively copy the contents of `src` into `dest`.
+fn copy_dir_contents(src: &std::path::Path, dest: &std::path::Path) {
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let target = dest.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            std::fs::create_dir_all(&target).unwrap();
+            copy_dir_contents(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// Helper to get a hermetic (TempDir-backed) feature-and-dotfiles fixture.
+fn feature_dotfiles_fixture() -> tempfile::TempDir {
+    copy_fixture_to_temp("feature-and-dotfiles")
+}
+
+/// Helper to get a hermetic (TempDir-backed) single-container fixture.
+fn single_container_fixture() -> tempfile::TempDir {
+    copy_fixture_to_temp("single-container")
 }
 
 #[test]
@@ -88,17 +109,11 @@ fn test_dotfiles_installation_with_custom_command() {
     // Verify that dotfiles are cloned and custom install command is executed
     // Uses fixture with features to ensure dotfiles run in correct lifecycle order
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
-
-    // Clean up any existing state to ensure fresh lifecycle execution
-    // The workspace resolves to the git root, so clean markers there
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let git_root = manifest_dir.parent().unwrap().parent().unwrap();
-    let state_dir = git_root.join(".devcontainer-state");
-    if state_dir.exists() {
-        let _ = std::fs::remove_dir_all(&state_dir);
-    }
+    // The TempDir workspace is always fresh, so no pre-existing lifecycle
+    // markers need clearing.
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
@@ -131,7 +146,8 @@ fn test_dotfiles_idempotency_on_rerun() {
     // Verify that running up again with same dotfiles config does not fail
     // Even if dotfiles target directory already exists from previous run
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     // First run: install dotfiles
@@ -179,7 +195,8 @@ fn test_dotfiles_auto_detected_install_script() {
     // Verify that install script is auto-detected when no custom command provided
     // Should detect and run install.sh or setup.sh from dotfiles repo
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -210,7 +227,8 @@ fn test_dotfiles_custom_target_path() {
     // Verify that --dotfiles-target-path is respected
     // Dotfiles should be cloned to specified path instead of default
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -245,7 +263,8 @@ fn test_dotfiles_invalid_repository_error() {
 
     // Verify that invalid dotfiles repository URL produces clear error JSON
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -279,7 +298,8 @@ fn test_dotfiles_install_script_failure_error() {
     // Verify that dotfiles install script failure produces error JSON
     // Uses custom install command that intentionally fails
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -312,7 +332,8 @@ fn test_dotfiles_without_features() {
     // Verify dotfiles work on simple fixture without features
     // Ensures dotfiles module is not dependent on features module
 
-    let fixture_path = single_container_fixture();
+    let _fixture = single_container_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -344,7 +365,8 @@ fn test_dotfiles_with_prebuild_mode() {
     // Dotfiles should NOT be installed during prebuild (CI image creation)
     // Only features and updateContent run in prebuild
 
-    let fixture_path = feature_dotfiles_fixture();
+    let _fixture = feature_dotfiles_fixture();
+    let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
