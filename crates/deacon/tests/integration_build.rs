@@ -17,7 +17,13 @@ LABEL deacon.test=integration
 RUN echo "Building test image"
 "#;
 
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     // Create a devcontainer.json configuration
     let devcontainer_config = r#"{
@@ -32,7 +38,7 @@ RUN echo "Building test image"
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -82,7 +88,7 @@ fn test_build_with_missing_dockerfile() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -112,7 +118,7 @@ fn test_build_with_image_config() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -152,7 +158,7 @@ fn test_build_with_image_config() {
 fn test_build_image_reference_with_features_tags_final_image() {
     let temp_dir = TempDir::new().unwrap();
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
 
     // Local feature (resolved relative to the config dir) that drops a marker
     // file during install.
@@ -232,7 +238,13 @@ fn test_build_command_flags() {
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\nLABEL test=1\n";
 
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Test Build Container",
@@ -240,7 +252,7 @@ fn test_build_command_flags() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -286,7 +298,13 @@ fn test_build_command_advanced_flags() {
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\nLABEL test=1\n";
 
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Test Build Container Advanced",
@@ -294,7 +312,7 @@ fn test_build_command_advanced_flags() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -359,7 +377,13 @@ LABEL test=cache_test
 RUN echo "Building with cache test"
 "#;
 
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     // Create a devcontainer.json configuration
     let devcontainer_config = r#"{
@@ -372,7 +396,7 @@ RUN echo "Building with cache test"
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -471,7 +495,13 @@ LABEL test=force_test
 RUN echo "Testing force flag"
 "#;
 
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Force Test Container",
@@ -479,7 +509,7 @@ RUN echo "Testing force flag"
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -552,7 +582,13 @@ fn test_build_with_non_affecting_file_changes() {
 RUN echo "Testing non-affecting changes"
 "#;
 
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Non-Affecting Changes Test",
@@ -560,7 +596,7 @@ RUN echo "Testing non-affecting changes"
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -632,7 +668,13 @@ COPY main.py /app/
 RUN echo "Testing affecting changes"
 "#;
 
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Affecting Changes Test",
@@ -640,7 +682,7 @@ RUN echo "Testing affecting changes"
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -709,7 +751,13 @@ RUN --mount=type=secret,id=mytoken \
     echo "Secret was accessed successfully"
 "#;
 
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     // Create a secret file
     let secret_file = temp_dir.path().join("token.txt");
@@ -725,7 +773,7 @@ RUN --mount=type=secret,id=mytoken \
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -786,7 +834,13 @@ RUN --mount=type=secret,id=envtoken \
     echo "Secret from env was mounted"
 "#;
 
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Test Env Secret Container",
@@ -797,7 +851,7 @@ RUN --mount=type=secret,id=envtoken \
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -838,7 +892,13 @@ RUN --mount=type=secret,id=envtoken \
 fn test_build_secret_validation_duplicate_id() {
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\n";
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let secret_file = temp_dir.path().join("token.txt");
     fs::write(&secret_file, "secret1\n").unwrap();
@@ -849,7 +909,7 @@ fn test_build_secret_validation_duplicate_id() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -877,7 +937,13 @@ fn test_build_secret_validation_duplicate_id() {
 fn test_build_secret_validation_missing_file() {
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\n";
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Test Missing Secret File",
@@ -885,7 +951,7 @@ fn test_build_secret_validation_missing_file() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -911,7 +977,13 @@ fn test_build_secret_validation_missing_file() {
 fn test_build_secret_requires_buildkit() {
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\n";
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let secret_file = temp_dir.path().join("token.txt");
     fs::write(&secret_file, "secret\n").unwrap();
@@ -922,7 +994,7 @@ fn test_build_secret_requires_buildkit() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -951,7 +1023,13 @@ fn test_push_and_output_mutual_exclusivity() {
     // Create a temporary directory with a simple Dockerfile
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\nLABEL test=1\n";
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Test Mutual Exclusivity",
@@ -959,7 +1037,7 @@ fn test_push_and_output_mutual_exclusivity() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -987,7 +1065,13 @@ fn test_push_requires_buildkit() {
     // Create a temporary directory with a simple Dockerfile
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\nLABEL test=1\n";
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Test Push Requires BuildKit",
@@ -995,7 +1079,7 @@ fn test_push_requires_buildkit() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -1035,7 +1119,13 @@ fn test_output_requires_buildkit() {
     // Create a temporary directory with a simple Dockerfile
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\nLABEL test=1\n";
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Test Output Requires BuildKit",
@@ -1043,7 +1133,7 @@ fn test_output_requires_buildkit() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -1081,7 +1171,13 @@ fn test_platform_requires_buildkit() {
     // Create a temporary directory with a simple Dockerfile
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\nLABEL test=1\n";
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Test Platform Requires BuildKit",
@@ -1089,7 +1185,7 @@ fn test_platform_requires_buildkit() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -1135,7 +1231,13 @@ fn test_cache_to_requires_buildkit() {
     // Create a temporary directory with a simple Dockerfile
     let temp_dir = TempDir::new().unwrap();
     let dockerfile_content = "FROM alpine:3.19\nLABEL test=1\n";
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile resolves relative to the devcontainer.json location
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Test Cache-To Requires BuildKit",
@@ -1143,7 +1245,7 @@ fn test_cache_to_requires_buildkit() {
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
