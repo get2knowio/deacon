@@ -26,8 +26,9 @@ fn test_progress_json_output() {
     .unwrap();
 
     // Create a simple Dockerfile
+    // dockerFile resolves relative to the devcontainer.json location
     std::fs::write(
-        workspace_path.join("Dockerfile"),
+        devcontainer_dir.join("Dockerfile"),
         "FROM ubuntu:20.04\nRUN echo 'Hello from test build'\n",
     )
     .unwrap();

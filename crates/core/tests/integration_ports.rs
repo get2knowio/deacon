@@ -3,7 +3,7 @@
 //! Tests the complete workflow of port configuration, Docker container inspection,
 //! and port event emission with attribute resolution.
 
-use deacon_core::config::{DevContainerConfig, OnAutoForward, PortAttributes, PortSpec};
+use deacon_core::config::{AppPort, DevContainerConfig, OnAutoForward, PortAttributes, PortSpec};
 use deacon_core::docker::{ContainerInfo, ExposedPort, PortMapping};
 use deacon_core::ports::{PortEvent, PortForwardingManager};
 use std::collections::HashMap;
@@ -45,7 +45,7 @@ fn test_port_event_generation_with_attributes() {
         PortSpec::Number(3000),
         PortSpec::String("8080:8080".to_string()),
     ];
-    config.app_port = Some(PortSpec::Number(4000));
+    config.app_port = Some(AppPort::Single(PortSpec::Number(4000)));
     config.ports_attributes = ports_attributes;
     config.other_ports_attributes = Some(PortAttributes {
         label: Some("Default Service".to_string()),

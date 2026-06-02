@@ -46,14 +46,20 @@ fn smoke_build_json_then_text() {
 LABEL test=smoke
 RUN echo "Smoke test image"
 "#;
-    fs::write(tmp.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile is resolved relative to the devcontainer.json location, so the
+    // Dockerfile lives alongside the config under .devcontainer/.
+    fs::create_dir(tmp.path().join(".devcontainer")).unwrap();
+    fs::write(
+        tmp.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     let devcontainer_config = r#"{
     "name": "Smoke Build Test",
     "dockerFile": "Dockerfile"
 }
 "#;
-    fs::create_dir(tmp.path().join(".devcontainer")).unwrap();
     fs::write(
         tmp.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,
@@ -311,16 +317,22 @@ LABEL environment=$BUILD_ENV
 LABEL deacon.test=smoke
 RUN echo "Building with version: $BUILD_VERSION, env: $BUILD_ENV"
 "#;
-    fs::write(temp_dir.path().join("Dockerfile"), dockerfile_content).unwrap();
+    // dockerFile is resolved relative to the devcontainer.json location, so the
+    // Dockerfile lives alongside the config under .devcontainer/.
+    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        dockerfile_content,
+    )
+    .unwrap();
 
     // Create devcontainer.json with dockerFile
     let devcontainer_config = r#"{
-    "name": "Build Args Test Container", 
+    "name": "Build Args Test Container",
     "dockerFile": "Dockerfile"
 }
 "#;
 
-    fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
     fs::write(
         temp_dir.path().join(".devcontainer/devcontainer.json"),
         devcontainer_config,

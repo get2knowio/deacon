@@ -432,6 +432,58 @@ pub fn derive_container_workspace_folder(mounts: &[Mount]) -> Option<String> {
     longest_bind_mount.map(|mount| mount.destination.clone())
 }
 
+/// Convert a single port specification into a docker `-p` value.
+///
+/// A bare port number (or numeric string) publishes to the same port on the
+/// host (`N` -> `N:N`); an explicit `HOST:CONTAINER` string is passed through
+/// unchanged. Returns `None` for an unparseable spec (logged and skipped),
+/// matching the fail-soft behavior of upstream port handling.
+fn port_spec_to_publish_arg(port_spec: &crate::config::PortSpec, source: &str) -> Option<String> {
+    match port_spec {
+        crate::config::PortSpec::Number(port) => Some(format!("{}:{}", port, port)),
+        crate::config::PortSpec::String(spec) => {
+            if spec.contains(':') {
+                // Already has host:container mapping
+                Some(spec.clone())
+            } else {
+                // Single port string, map to same port
+                match spec.parse::<u16>() {
+                    Ok(port) => Some(format!("{}:{}", port, port)),
+                    Err(_) => {
+                        warn!("Invalid port specification in {}: {}", source, spec);
+                        None
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Build the ordered list of docker `run` arguments that publish ports from a
+/// config's `forwardPorts` and `appPort` fields.
+///
+/// Both fields publish host bindings via `-p`; `forwardPorts` entries come
+/// first (in declaration order) followed by `appPort`. Invalid specs are
+/// skipped. Reference: containers.dev `forwardPorts` / `appPort`.
+fn port_publish_args(config: &DevContainerConfig) -> Vec<String> {
+    let mut args = Vec::new();
+    for port_spec in &config.forward_ports {
+        if let Some(port_arg) = port_spec_to_publish_arg(port_spec, "forwardPorts") {
+            args.push("-p".to_string());
+            args.push(port_arg);
+        }
+    }
+    if let Some(app_port) = &config.app_port {
+        for port_spec in app_port.specs() {
+            if let Some(port_arg) = port_spec_to_publish_arg(port_spec, "appPort") {
+                args.push("-p".to_string());
+                args.push(port_arg);
+            }
+        }
+    }
+    args
+}
+
 /// Configuration for executing commands in containers
 
 #[derive(Debug, Clone)]
@@ -1830,33 +1882,10 @@ impl ContainerOps for CliRuntime {
             }
         }
 
-        // Add port forwarding from forwardPorts configuration
-        for port_spec in &config.forward_ports {
-            let port_arg = match port_spec {
-                crate::config::PortSpec::Number(port) => {
-                    // Simple port number - forward to same port on host
-                    format!("{}:{}", port, port)
-                }
-                crate::config::PortSpec::String(spec) => {
-                    // Port string should be validated already, but handle edge cases
-                    if spec.contains(':') {
-                        // Already has host:container mapping
-                        spec.clone()
-                    } else {
-                        // Single port string, map to same port
-                        match spec.parse::<u16>() {
-                            Ok(port) => format!("{}:{}", port, port),
-                            Err(_) => {
-                                warn!("Invalid port specification in forwardPorts: {}", spec);
-                                continue;
-                            }
-                        }
-                    }
-                }
-            };
-            args.push("-p".to_string());
-            args.push(port_arg);
-        }
+        // Add published ports from forwardPorts and appPort configuration.
+        // Both map to docker `-p host:container` bindings; a bare port number
+        // publishes to the same port on the host.
+        args.extend(port_publish_args(config));
 
         // Add GPU flags based on GPU mode
         // Note: GpuMode::Detect is resolved to All or None by the caller (e.g., in up.rs)
@@ -3797,5 +3826,94 @@ mod tests {
         // SIGKILL = 9
         let status = std::process::ExitStatus::from_raw(9);
         assert_eq!(resolve_exit_code(status), 137);
+    }
+
+    #[test]
+    fn test_port_spec_to_publish_arg_variants() {
+        use crate::config::PortSpec;
+
+        // Bare number publishes to the same host port.
+        assert_eq!(
+            port_spec_to_publish_arg(&PortSpec::Number(3000), "forwardPorts"),
+            Some("3000:3000".to_string())
+        );
+        // Numeric string behaves like a bare number.
+        assert_eq!(
+            port_spec_to_publish_arg(&PortSpec::String("8080".to_string()), "appPort"),
+            Some("8080:8080".to_string())
+        );
+        // Explicit host:container mapping passes through unchanged.
+        assert_eq!(
+            port_spec_to_publish_arg(&PortSpec::String("8080:80".to_string()), "forwardPorts"),
+            Some("8080:80".to_string())
+        );
+        // Unparseable spec is skipped.
+        assert_eq!(
+            port_spec_to_publish_arg(&PortSpec::String("nope".to_string()), "appPort"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_port_publish_args_includes_app_port() {
+        use crate::config::{AppPort, PortSpec};
+
+        let config = DevContainerConfig {
+            forward_ports: vec![
+                PortSpec::Number(3000),
+                PortSpec::String("9000:90".to_string()),
+            ],
+            app_port: Some(AppPort::Single(PortSpec::Number(8080))),
+            ..Default::default()
+        };
+
+        // forwardPorts entries come first (in order), then appPort.
+        assert_eq!(
+            port_publish_args(&config),
+            vec![
+                "-p",
+                "3000:3000", //
+                "-p",
+                "9000:90", //
+                "-p",
+                "8080:8080",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_port_publish_args_app_port_only() {
+        use crate::config::{AppPort, PortSpec};
+
+        let config = DevContainerConfig {
+            app_port: Some(AppPort::Single(PortSpec::String("5000:5001".to_string()))),
+            ..Default::default()
+        };
+
+        assert_eq!(port_publish_args(&config), vec!["-p", "5000:5001"]);
+    }
+
+    #[test]
+    fn test_port_publish_args_app_port_array() {
+        use crate::config::{AppPort, PortSpec};
+
+        let config = DevContainerConfig {
+            app_port: Some(AppPort::Multiple(vec![
+                PortSpec::Number(8080),
+                PortSpec::String("9000:90".to_string()),
+            ])),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            port_publish_args(&config),
+            vec!["-p", "8080:8080", "-p", "9000:90"]
+        );
+    }
+
+    #[test]
+    fn test_port_publish_args_empty_when_no_ports() {
+        let config = DevContainerConfig::default();
+        assert!(port_publish_args(&config).is_empty());
     }
 }

@@ -139,6 +139,34 @@ impl PortSpec {
     }
 }
 
+/// Application port(s) to publish for the container.
+///
+/// Per the containers.dev spec, `appPort` may be a single port (number or
+/// `HOST:CONTAINER` string) or an array of ports. Both shapes are accepted and
+/// normalized via [`AppPort::specs`]; serialization round-trips the original
+/// shape (a single value stays a scalar, an array stays an array).
+///
+/// Reference: [Port Configuration - appPort](https://containers.dev/implementors/json_reference/#app-port)
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum AppPort {
+    /// A single port (number or `HOST:CONTAINER` string).
+    Single(PortSpec),
+    /// A list of ports.
+    Multiple(Vec<PortSpec>),
+}
+
+impl AppPort {
+    /// View the configured port(s) as a slice, regardless of whether the source
+    /// JSON was a single value or an array.
+    pub fn specs(&self) -> &[PortSpec] {
+        match self {
+            AppPort::Single(spec) => std::slice::from_ref(spec),
+            AppPort::Multiple(specs) => specs.as_slice(),
+        }
+    }
+}
+
 /// Action to take when a port is auto-forwarded.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -529,7 +557,7 @@ pub struct DevContainerConfig {
     /// Primary application port.
     ///
     /// Reference: [Port Configuration - appPort](https://containers.dev/implementors/json_reference/#app-port)
-    pub app_port: Option<PortSpec>,
+    pub app_port: Option<AppPort>,
 
     /// Attributes for specific ports.
     ///
@@ -2694,13 +2722,15 @@ impl ConfigLoader {
             valid_ports.insert(port_spec.as_string());
         }
 
-        // Add app_port if specified
+        // Add app_port if specified (single value or array)
         if let Some(app_port) = &config.app_port {
-            if let Some(port_num) = app_port.primary_port() {
-                valid_ports.insert(port_num.to_string());
-                valid_ports.insert(format!("{}/tcp", port_num));
+            for port_spec in app_port.specs() {
+                if let Some(port_num) = port_spec.primary_port() {
+                    valid_ports.insert(port_num.to_string());
+                    valid_ports.insert(format!("{}/tcp", port_num));
+                }
+                valid_ports.insert(port_spec.as_string());
             }
-            valid_ports.insert(app_port.as_string());
         }
 
         // Check each port attribute reference
@@ -3671,6 +3701,69 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_app_port_deserialize_single_and_array() {
+        // Single number
+        let single_num: AppPort = serde_json::from_str("3000").unwrap();
+        assert_eq!(single_num, AppPort::Single(PortSpec::Number(3000)));
+        assert_eq!(single_num.specs(), &[PortSpec::Number(3000)]);
+
+        // Single string mapping
+        let single_str: AppPort = serde_json::from_str("\"8080:80\"").unwrap();
+        assert_eq!(
+            single_str,
+            AppPort::Single(PortSpec::String("8080:80".to_string()))
+        );
+
+        // Array of mixed numbers and strings
+        let multi: AppPort = serde_json::from_str(r#"[3000, "8080:80"]"#).unwrap();
+        assert_eq!(
+            multi,
+            AppPort::Multiple(vec![
+                PortSpec::Number(3000),
+                PortSpec::String("8080:80".to_string()),
+            ])
+        );
+        assert_eq!(
+            multi.specs(),
+            &[
+                PortSpec::Number(3000),
+                PortSpec::String("8080:80".to_string())
+            ]
+        );
+
+        // Serialization round-trips the original shape (scalar stays scalar,
+        // array stays array).
+        assert_eq!(serde_json::to_string(&single_num).unwrap(), "3000");
+        assert_eq!(
+            serde_json::to_string(&multi).unwrap(),
+            r#"[3000,"8080:80"]"#
+        );
+    }
+
+    #[tokio::test]
+    async fn test_config_with_app_port_array() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "image": "node:18",
+            "appPort": [3000, "8080:80"]
+        }"#;
+
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+
+        assert_eq!(
+            config.app_port,
+            Some(AppPort::Multiple(vec![
+                PortSpec::Number(3000),
+                PortSpec::String("8080:80".to_string()),
+            ]))
+        );
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_config_with_ports_and_attributes() -> anyhow::Result<()> {
         let config_content = r#"{
@@ -3702,7 +3795,10 @@ mod tests {
 
         assert_eq!(config.name, Some("Test Container".to_string()));
         assert_eq!(config.forward_ports.len(), 2);
-        assert_eq!(config.app_port, Some(PortSpec::Number(3000)));
+        assert_eq!(
+            config.app_port,
+            Some(AppPort::Single(PortSpec::Number(3000)))
+        );
 
         // Check port attributes
         assert_eq!(config.ports_attributes.len(), 2);
