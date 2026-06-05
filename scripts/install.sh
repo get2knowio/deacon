@@ -230,6 +230,26 @@ extract_archive() {
     esac
 }
 
+# Strip macOS quarantine so Gatekeeper doesn't block an unsigned binary.
+#
+# Browser/Finder downloads tag files with com.apple.quarantine, which makes
+# Gatekeeper refuse to run an un-notarized binary ("Apple could not verify
+# 'deacon' is free of malware"). curl/wget downloads are NOT quarantined, so
+# for a piped install this is usually a no-op — but it's cheap insurance and
+# covers binaries that arrived via a quarantining path.
+strip_quarantine() {
+    local path="$1"
+    local os="$2"
+
+    [[ "$os" == "macos" ]] || return 0
+    has_cmd xattr || return 0
+
+    if xattr -p com.apple.quarantine "$path" >/dev/null 2>&1; then
+        xattr -d com.apple.quarantine "$path" 2>/dev/null || true
+        info "Removed macOS quarantine attribute"
+    fi
+}
+
 # Get default installation directory
 get_default_install_dir() {
     # Prefer ~/.local/bin if it exists or can be created
@@ -365,6 +385,7 @@ main() {
     info "Installing binary to: $binary_path"
     cp "$src_binary" "$binary_path"
     chmod +x "$binary_path"
+    strip_quarantine "$binary_path" "$os"
 
     echo ""
     success "Deacon $version has been installed successfully!"
