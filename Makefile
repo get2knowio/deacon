@@ -319,9 +319,9 @@ test-podman: ## Run Podman runtime tests via Makefile
 	@set -euo pipefail; \
 	# Start podman socket and run the same Podman test used in CI
 	sudo systemctl start podman.socket || true; \
-	DEACON_RUNTIME=podman cargo test --verbose --test integration_runtime_selection -- --test-threads=1
+	DEACON_CONTAINER_RUNTIME=podman cargo test --verbose --test integration_runtime_selection -- --test-threads=1
 	# Verify a basic help command to assert binary runtime behavior
-	DEACON_RUNTIME=podman cargo run -- --runtime podman --help || echo "Help command succeeded"
+	DEACON_CONTAINER_RUNTIME=podman cargo run -- --runtime podman --help || echo "Help command succeeded"
 
 fmt: ## Format all code
 	cargo fmt --all

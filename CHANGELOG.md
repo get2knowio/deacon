@@ -9,7 +9,18 @@ The 1.0 release is being assembled across a series of PRs tracked in
 
 ## [Unreleased]
 
+### Added
+
+- `DEACON_OVERRIDE_CONFIG` environment variable as an alternative to the
+  `--override-config` flag (the explicit flag takes precedence). Uses clap-native
+  `env` support, so `--help` advertises it.
+
 ### Changed
+
+- **Breaking:** the container runtime environment variable is now
+  `DEACON_CONTAINER_RUNTIME` (previously `DEACON_RUNTIME`), aligning the variable
+  with the name `doctor` already reported. `DEACON_RUNTIME` is no longer
+  recognized; use `DEACON_CONTAINER_RUNTIME` (or the `--runtime` flag).
 
 - Build the entire in-scope consumer CLI surface as a single binary. Removed the
   `default = ["full"]` / `full = []` Cargo feature gate from the `deacon` crate
@@ -48,7 +59,7 @@ The 1.0 release is being assembled across a series of PRs tracked in
   `deny.toml`.
 - `CHANGELOG.md` (this file) and `docs/ROADMAP_TO_1.0.md` (1.0 readiness
   report and roadmap).
-- One-time WARN when `--runtime podman` (or `DEACON_RUNTIME=podman`) is
+- One-time WARN when `--runtime podman` (or `DEACON_CONTAINER_RUNTIME=podman`) is
   selected, surfacing Podman's experimental status without spamming.
 - Smoke tests covering `run-user-commands --container-id` and
   `run-user-commands --id-label` paths.

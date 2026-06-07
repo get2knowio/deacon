@@ -147,7 +147,7 @@ deacon --runtime docker up
 deacon --runtime podman up
 
 # Or via environment variable
-DEACON_RUNTIME=docker deacon up
+DEACON_CONTAINER_RUNTIME=docker deacon up
 ```
 
 ## Runtime Configuration

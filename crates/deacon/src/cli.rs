@@ -802,8 +802,16 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
-    /// Override configuration file path (highest precedence)
-    #[arg(long, global = true, value_name = "PATH")]
+    /// Override configuration file path (highest precedence).
+    ///
+    /// Also settable via the `DEACON_OVERRIDE_CONFIG` environment variable
+    /// (the flag takes precedence over the env var).
+    #[arg(
+        long,
+        global = true,
+        value_name = "PATH",
+        env = "DEACON_OVERRIDE_CONFIG"
+    )]
     pub override_config: Option<PathBuf>,
 
     /// Secrets file path (KEY=VALUE format, can be specified multiple times)
@@ -827,7 +835,7 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     pub plugin: Vec<String>,
 
-    /// Container runtime to use (docker or podman [experimental]; can be set via DEACON_RUNTIME env var)
+    /// Container runtime to use (docker or podman [experimental]; can be set via DEACON_CONTAINER_RUNTIME env var)
     #[arg(long, global = true, value_enum)]
     pub runtime: Option<RuntimeOption>,
 
@@ -2004,5 +2012,41 @@ mod tests {
         assert_eq!(cli.terminal_columns, Some(120));
         assert_eq!(cli.terminal_rows, Some(30));
         assert!(matches!(cli.command, Some(Commands::Build { .. })));
+    }
+
+    #[test]
+    fn test_override_config_flag_parses() {
+        let cli = Cli::parse_from(["deacon", "--override-config", "/tmp/o.json"]);
+        assert_eq!(cli.override_config, Some(PathBuf::from("/tmp/o.json")));
+    }
+
+    #[test]
+    fn test_override_config_defaults_none() {
+        temp_env::with_var_unset("DEACON_OVERRIDE_CONFIG", || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.override_config, None);
+        });
+    }
+
+    #[test]
+    fn test_override_config_reads_env_var() {
+        temp_env::with_var("DEACON_OVERRIDE_CONFIG", Some("/tmp/from-env.json"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(
+                cli.override_config,
+                Some(PathBuf::from("/tmp/from-env.json"))
+            );
+        });
+    }
+
+    #[test]
+    fn test_override_config_flag_beats_env_var() {
+        temp_env::with_var("DEACON_OVERRIDE_CONFIG", Some("/tmp/from-env.json"), || {
+            let cli = Cli::parse_from(["deacon", "--override-config", "/tmp/from-flag.json"]);
+            assert_eq!(
+                cli.override_config,
+                Some(PathBuf::from("/tmp/from-flag.json"))
+            );
+        });
     }
 }

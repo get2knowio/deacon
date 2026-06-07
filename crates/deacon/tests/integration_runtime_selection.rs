@@ -35,7 +35,8 @@ fn test_runtime_flag_invalid() -> Result<()> {
 #[test]
 fn test_runtime_env_var_docker() -> Result<()> {
     let mut cmd = Command::cargo_bin("deacon")?;
-    cmd.env("DEACON_RUNTIME", "docker").args(["up", "--help"]);
+    cmd.env("DEACON_CONTAINER_RUNTIME", "docker")
+        .args(["up", "--help"]);
     cmd.assert().success();
     Ok(())
 }
@@ -43,7 +44,8 @@ fn test_runtime_env_var_docker() -> Result<()> {
 #[test]
 fn test_runtime_env_var_podman() -> Result<()> {
     let mut cmd = Command::cargo_bin("deacon")?;
-    cmd.env("DEACON_RUNTIME", "podman").args(["up", "--help"]);
+    cmd.env("DEACON_CONTAINER_RUNTIME", "podman")
+        .args(["up", "--help"]);
     cmd.assert().success();
     Ok(())
 }
@@ -52,7 +54,7 @@ fn test_runtime_env_var_podman() -> Result<()> {
 fn test_runtime_flag_precedence_over_env() -> Result<()> {
     // CLI flag should override environment variable
     let mut cmd = Command::cargo_bin("deacon")?;
-    cmd.env("DEACON_RUNTIME", "podman")
+    cmd.env("DEACON_CONTAINER_RUNTIME", "podman")
         .args(["--runtime", "docker", "up", "--help"]);
     cmd.assert().success();
     Ok(())
@@ -62,7 +64,8 @@ fn test_runtime_flag_precedence_over_env() -> Result<()> {
 fn test_runtime_env_var_invalid_fallback() -> Result<()> {
     // Invalid env var should fall back to docker (default)
     let mut cmd = Command::cargo_bin("deacon")?;
-    cmd.env("DEACON_RUNTIME", "invalid").args(["up", "--help"]);
+    cmd.env("DEACON_CONTAINER_RUNTIME", "invalid")
+        .args(["up", "--help"]);
     cmd.assert().success();
     Ok(())
 }
@@ -76,7 +79,7 @@ fn test_runtime_selection_help_shows_options() -> Result<()> {
         .stdout(str::contains("--runtime"))
         .stdout(str::contains("docker"))
         .stdout(str::contains("podman"))
-        .stdout(str::contains("DEACON_RUNTIME"));
+        .stdout(str::contains("DEACON_CONTAINER_RUNTIME"));
     Ok(())
 }
 
@@ -100,7 +103,7 @@ fn test_up_command_with_podman_runtime() -> Result<()> {
 
     let mut cmd = Command::cargo_bin("deacon")?;
     cmd.current_dir(temp_dir.path())
-        .env("DEACON_RUNTIME", "podman")
+        .env("DEACON_CONTAINER_RUNTIME", "podman")
         .args([
             "--workspace-folder",
             temp_dir.path().to_str().unwrap(),

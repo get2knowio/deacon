@@ -81,12 +81,12 @@ pub struct RuntimeFactory;
 impl RuntimeFactory {
     /// Detect runtime from CLI flag, environment variable, or default
     ///
-    /// Precedence: CLI flag > DEACON_RUNTIME env var > default (docker).
+    /// Precedence: CLI flag > `DEACON_CONTAINER_RUNTIME` env var > default (docker).
     /// Selecting Podman emits a one-time experimental-status WARN.
     pub fn detect_runtime(cli_runtime: Option<RuntimeKind>) -> RuntimeKind {
         let selected = if let Some(runtime) = cli_runtime {
             runtime
-        } else if let Some(env_runtime) = std::env::var("DEACON_RUNTIME")
+        } else if let Some(env_runtime) = std::env::var("DEACON_CONTAINER_RUNTIME")
             .ok()
             .and_then(|v| v.parse().ok())
         {
@@ -686,15 +686,14 @@ mod tests {
 
     #[test]
     fn test_detect_runtime_default() {
-        // Clear environment variable for test
-        temp_env::with_var_unset("DEACON_RUNTIME", || {
+        temp_env::with_var_unset("DEACON_CONTAINER_RUNTIME", || {
             assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
         });
     }
 
     #[test]
     fn test_detect_runtime_cli_precedence() {
-        temp_env::with_var("DEACON_RUNTIME", Some("podman"), || {
+        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("podman"), || {
             assert_eq!(
                 RuntimeFactory::detect_runtime(Some(RuntimeKind::Docker)),
                 RuntimeKind::Docker
@@ -704,16 +703,16 @@ mod tests {
 
     #[test]
     fn test_detect_runtime_env_var() {
-        temp_env::with_var("DEACON_RUNTIME", Some("podman"), || {
+        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("podman"), || {
             assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Podman);
         });
 
-        temp_env::with_var("DEACON_RUNTIME", Some("docker"), || {
+        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("docker"), || {
             assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
         });
 
         // Invalid env var should fall back to default
-        temp_env::with_var("DEACON_RUNTIME", Some("invalid"), || {
+        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("invalid"), || {
             assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
         });
     }
