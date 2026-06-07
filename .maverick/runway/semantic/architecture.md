@@ -34,7 +34,7 @@ examples/        — Runnable demos with exec.sh scripts
 
 ## Key Abstractions
 
-- **`ContainerRuntime` trait** (`runtime.rs`) — Composition trait; `RuntimeFactory` detects runtime from CLI flag > `DEACON_RUNTIME` env > default docker
+- **`ContainerRuntime` trait** (`runtime.rs`) — Composition trait; `RuntimeFactory` detects runtime from CLI flag > `DEACON_CONTAINER_RUNTIME` env > default docker
 - **`HttpClient` trait** — OCI HTTP ops (HEAD=existence, GET=download, POST=auth); `ReqwestClient` production, `MockHttpClient`/`AuthMockHttpClient` for tests
 - **`ConfigLoader::load_with_extends()`** — Full config resolution including all `extends` chains; never use single-file loading
 - **`DockerfileGenerator`** — Features baked into build phase via BuildKit `FEATURE_CONTENT_SOURCE` context

@@ -70,7 +70,7 @@ make release-check        # Full quality gate
 
 - **Docker** — default, production-ready
 - **Podman** — in development (via `RuntimeKind` enum + `RuntimeFactory`)
-- Detection: CLI flag > `DEACON_RUNTIME` env > default
+- Detection: CLI flag > `DEACON_CONTAINER_RUNTIME` env > default
 
 ## AI Tooling
 
