@@ -84,7 +84,7 @@ jobs:
     # Pin to the declared MSRV (rust-version in [workspace.package]). If this
     # job fails, either fix the offending code or bump rust-version in lockstep.
     - name: Install MSRV toolchain (1.95)
-      uses: dtolnay/rust-toolchain@1.95
+      uses: dtolnay/rust-toolchain@1.100
 
     - name: Cache cargo registry and target
       uses: actions/cache@v5
