@@ -33,6 +33,12 @@ A fast, focused Rust CLI for developers who use [dev containers](https://contain
 curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash
 ```
 
+While only pre-release builds are published, install the latest pre-release with:
+
+```bash
+curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash -s -- --prerelease
+```
+
 <details>
 <summary>Other installation methods</summary>
 
@@ -63,14 +69,18 @@ cargo build --release
 ```
 
 ### Installer Options
-The install script supports these environment variables:
-- `DEACON_VERSION` — Specific version (default: latest)
+The install script supports a `--prerelease` flag and these environment variables:
+- `--prerelease` (or `DEACON_PRERELEASE=true`) — Install the latest release including pre-releases
+- `DEACON_VERSION` — Specific version (default: latest stable)
 - `DEACON_INSTALL_DIR` — Install directory (default: `~/.local/bin`)
 - `DEACON_FORCE=true` — Overwrite existing binary without prompt
 
 ```bash
-# Install specific version
-curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_VERSION=0.2.0 bash
+# Install a specific version
+curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_VERSION=0.2.0-rc.2 bash
+
+# Install the latest pre-release
+curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash -s -- --prerelease
 ```
 
 </details>
