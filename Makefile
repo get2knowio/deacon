@@ -470,7 +470,7 @@ parity: test-parity ## Alias for test-parity
 clean-branches: ## Delete local and remote branches fully merged into the default branch
 	set -euo pipefail; \
 	# Determine default branch from origin/HEAD, fallback to 'main' if undetectable. \
-	default_branch=$$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|origin/||'); \
+	default_branch=$$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|origin/||') || true; \
 	if [[ -z "$${default_branch:-}" ]]; then \
 	  default_branch=$$(git remote show origin | sed -n 's/.*HEAD branch: //p'); \
 	fi; \
@@ -481,7 +481,7 @@ clean-branches: ## Delete local and remote branches fully merged into the defaul
 	git checkout "$${default_branch}"; \
 	# Identify remote branches fully merged into origin/<default_branch> (exclude HEAD and default). \
 	remote_merged=$$(git for-each-ref 'refs/remotes/origin/*' --merged "refs/remotes/origin/$${default_branch}" --format='%(refname:short)' \
-	  | grep -E '^origin/.\+' \
+	  | grep -E '^origin/.+' \
 	  | grep -vE "^origin/(HEAD|$${default_branch})$$" \
 	  | sort -u || true); \
 	echo "Merged remote branches to delete:"; echo "$${remote_merged:-<none>}"; \
