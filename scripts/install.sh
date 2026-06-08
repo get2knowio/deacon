@@ -5,8 +5,16 @@
 # Usage:
 #   curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash
 #
+#   # Install the latest pre-release (e.g. an -rc.N build):
+#   curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash -s -- --prerelease
+#
+# Flags:
+#   --prerelease        - Install the latest release including pre-releases
+#                         (otherwise only stable releases are considered)
+#
 # Environment variables:
 #   DEACON_VERSION      - Version to install (e.g., "0.1.4" or "v0.1.4"), defaults to latest
+#   DEACON_PRERELEASE   - Set to "true" for the same effect as --prerelease
 #   DEACON_INSTALL_DIR  - Installation directory, defaults to ~/.local/bin or /usr/local/bin
 #   DEACON_FORCE        - Set to "true" to overwrite existing installation without prompt
 #   DEACON_NO_MODIFY_PATH - Set to "true" to skip PATH modification suggestions
@@ -164,6 +172,30 @@ get_latest_version() {
     echo "$version"
 }
 
+# Get the newest release version from GitHub, including pre-releases.
+# The /releases list is newest-first, so the first tag_name is the most
+# recent release (stable or pre-release).
+get_latest_prerelease() {
+    local url="https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=10"
+    local version
+
+    if has_cmd curl; then
+        version=$(curl -fsSL "$url" | grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+    elif has_cmd wget; then
+        version=$(wget -qO- "$url" | grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+    else
+        error "Neither curl nor wget found. Please install one of them."
+        exit 1
+    fi
+
+    if [[ -z "$version" ]]; then
+        error "Failed to fetch latest pre-release version from GitHub"
+        exit 1
+    fi
+
+    echo "$version"
+}
+
 # Download a file
 download() {
     local url="$1"
@@ -275,6 +307,29 @@ main() {
     echo -e "${BOLD}Deacon Installer${NC}"
     echo ""
 
+    # Parse arguments. Pre-release can also be requested via DEACON_PRERELEASE=true
+    # (handy when piping `curl ... | bash` without `-s --`).
+    local prerelease="${DEACON_PRERELEASE:-false}"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --prerelease)
+                prerelease="true"
+                shift
+                ;;
+            -h|--help)
+                echo "Usage: install.sh [--prerelease]"
+                echo "  --prerelease   Install the latest release including pre-releases"
+                echo "See the header of this script for supported environment variables."
+                exit 0
+                ;;
+            *)
+                error "Unknown argument: $1"
+                echo "Run with --help for usage." >&2
+                exit 1
+                ;;
+        esac
+    done
+
     # Detect platform
     local os arch libc target ext
     os=$(detect_os)
@@ -289,8 +344,13 @@ main() {
     # Determine version to install
     local version="${DEACON_VERSION:-}"
     if [[ -z "$version" ]]; then
-        info "Fetching latest version..."
-        version=$(get_latest_version)
+        if [[ "$prerelease" == "true" ]]; then
+            info "Fetching latest version (including pre-releases)..."
+            version=$(get_latest_prerelease)
+        else
+            info "Fetching latest version..."
+            version=$(get_latest_version)
+        fi
     fi
 
     # Normalize version (ensure it starts with 'v')
