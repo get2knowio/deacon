@@ -415,7 +415,7 @@ jobs:
           cp scripts/pages/index.html _site/index.html
 
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
         with:
           # Auto-create the Pages site if it isn't enabled yet (uses the
           # job's pages: write permission). Avoids 'Get Pages site failed'.
