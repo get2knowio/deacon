@@ -1,0 +1,53 @@
+name: Deploy Pages
+
+# Publishes the install script and landing page to GitHub Pages whenever they
+# change on main, decoupling install.sh delivery from binary releases. The
+# release workflow also deploys these on tag pushes; both share the `pages`
+# concurrency group so they never race.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/install.sh'
+      - 'scripts/pages/index.html'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy install script to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Prepare Pages content
+        run: |
+          mkdir -p _site
+          cp scripts/install.sh _site/install.sh
+          cp scripts/pages/index.html _site/index.html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
