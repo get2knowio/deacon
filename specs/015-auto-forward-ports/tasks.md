@@ -186,15 +186,15 @@ description: "Task list for Dynamic User-Space Port Forwarding (up --auto-forwar
 
 ## Deferred Work
 
-Per research.md Decision 7 and the spec's Out-of-Scope/Assumptions. A spec is NOT complete while these remain; track until resolved (Constitution Principle I).
+Per research.md Decision 7 and the spec's Out-of-Scope/Assumptions. A spec is NOT complete while these remain; track until resolved (Constitution Principle I). Each is tracked by a GitHub issue capturing its hidden gotchas + recommended path forward.
 
-- [ ] T054 [Deferral] Windows detach/signaling path (job objects / equivalent of `setsid`+`kill`). **Decision**: research.md Decision 1/7; gated by T008. **Acceptance**: `up --auto-forward` detaches and is reaped correctly on Windows hosts.
-- [ ] T055 [Deferral] Persistent in-container multiplexing relay agent (one `docker exec`, many streams). **Decision**: research.md Decision 3/7. **Acceptance**: relay throughput no longer pays a `docker exec` per connection; same external behavior.
-- [ ] T056 [Deferral] Event-driven detection (netlink/inotify) replacing the ~1 s poll. **Decision**: research.md Decision 2/7. **Acceptance**: forwards appear with lower latency and lower idle CPU; SC-002 still met.
-- [ ] T057 [Deferral] `0.0.0.0`/LAN exposure option. **Decision**: spec Out of Scope. **Acceptance**: an explicit opt-in binds non-loopback with documented security review.
-- [ ] T058 [Deferral] UDP forwarding. **Decision**: FR-003 (TCP-only v1). **Acceptance**: UDP listeners detected and relayed.
-- [ ] T059 [Deferral] `openBrowser`/`openPreview` auto-open actions. **Decision**: FR-017, spec Out of Scope. **Acceptance**: those `onAutoForward` values trigger host browser/preview.
-- [ ] T060 [Deferral] Configurable poll interval / standalone `forward` subcommand / `exec --auto-forward` attach. **Decision**: FR-004, spec Out of Scope. **Acceptance**: evaluated against demand; added without breaking the v1 boolean surface.
+- [ ] T054 [Deferral] Windows detach/signaling path (job objects / equivalent of `setsid`+`kill`). **Decision**: research.md Decision 1/7; gated by T008. **Acceptance**: `up --auto-forward` detaches and is reaped correctly on Windows hosts. **Issue**: get2knowio/deacon#189.
+- [ ] T055 [Deferral] Persistent in-container multiplexing relay agent (one `docker exec`, many streams). **Decision**: research.md Decision 3/7. **Acceptance**: relay throughput no longer pays a `docker exec` per connection; same external behavior. **Issue**: get2knowio/deacon#190.
+- [ ] T056 [Deferral] Event-driven detection (netlink/inotify) replacing the ~1 s poll. **Decision**: research.md Decision 2/7. **Acceptance**: forwards appear with lower latency and lower idle CPU; SC-002 still met. **Issue**: folded into get2knowio/deacon#194 (adaptive polling recommended over netlink/eBPF, which has no real push primitive and reintroduces the in-container-agent problem of #190).
+- [ ] T057 [Deferral] `0.0.0.0`/LAN exposure option. **Decision**: spec Out of Scope. **Acceptance**: an explicit opt-in binds non-loopback with documented security review. **Issue**: get2knowio/deacon#191.
+- [ ] T058 [Deferral] UDP forwarding. **Decision**: FR-003 (TCP-only v1). **Acceptance**: UDP listeners detected and relayed. **Issue**: get2knowio/deacon#192.
+- [ ] T059 [Deferral] `openBrowser`/`openPreview` auto-open actions. **Decision**: FR-017, spec Out of Scope. **Acceptance**: those `onAutoForward` values trigger host browser/preview. **Issue**: get2knowio/deacon#193.
+- [ ] T060 [Deferral] Configurable poll interval / standalone `forward` subcommand / `exec --auto-forward` attach. **Decision**: FR-004, spec Out of Scope. **Acceptance**: evaluated against demand; added without breaking the v1 boolean surface. **Issue**: get2knowio/deacon#194.
 
 ---
 
