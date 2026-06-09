@@ -1,0 +1,7 @@
+{
+	"name": "auto-forward",
+	"image": "alpine:3.18",
+	"overrideCommand": true,
+	"forwardPorts": [3000],
+	"postStartCommand": "sh -c '(while true; do echo deacon-forward-ok | nc -l -p 3000; done) >/dev/null 2>&1 & sleep 1'"
+}

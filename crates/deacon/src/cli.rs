@@ -353,6 +353,13 @@ pub enum Commands {
         /// Format: PORT or HOST_PORT:CONTAINER_PORT
         #[arg(long = "forward-port")]
         forward_ports: Vec<String>,
+        /// Start a detached, user-space port forwarder for the container.
+        ///
+        /// Dynamically forwards container TCP ports to loopback host ports
+        /// (reaching even 127.0.0.1-bound servers that `-p` cannot), returns
+        /// control to the shell, and tears down on `down`. Unix-only in v1.
+        #[arg(long)]
+        auto_forward: bool,
 
         // Lifecycle
         /// Automatically shut down when process exits
@@ -721,6 +728,32 @@ pub enum Commands {
         /// Fail CI with exit code 2 when any outdated feature is detected
         #[arg(long)]
         fail_on_outdated: bool,
+    },
+
+    /// Internal: the detached port-forwarder process for `up --auto-forward`.
+    ///
+    /// NOT part of the user-facing surface. `up --auto-forward` re-exec's the
+    /// deacon binary with this hidden subcommand to spawn a detached forwarder.
+    /// End users MUST NOT invoke it directly; its arguments may change between
+    /// releases without notice.
+    ///
+    /// Note: `--user-data-folder`, `--config`, and `--docker-path` are read
+    /// from the global flags (the re-exec passes them on the command line).
+    #[command(name = "__forward-daemon", hide = true)]
+    ForwardDaemon {
+        /// Full id of the container to forward.
+        #[arg(long)]
+        container_id: String,
+        /// Canonical workspace path of the owning devcontainer.
+        #[arg(long)]
+        workspace: PathBuf,
+        /// Declared port spec to forward eagerly (repeatable). Format: PORT,
+        /// HOST:CONTAINER, or "service:port" for a compose service.
+        #[arg(long = "declared-port")]
+        declared_port: Vec<String>,
+        /// Emit machine-readable PORT_EVENT lines as ports come and go.
+        #[arg(long)]
+        ports_events: bool,
     },
 }
 
@@ -1155,6 +1188,7 @@ impl Cli {
                 update_remote_user_uid_default,
                 ports_events,
                 forward_ports,
+                auto_forward,
                 shutdown,
                 container_name,
                 ignore_host_requirements,
@@ -1198,6 +1232,7 @@ impl Cli {
                     ports_events,
                     shutdown,
                     forward_ports,
+                    auto_forward,
                     container_name,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
@@ -1599,6 +1634,7 @@ impl Cli {
                     timeout,
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    user_data_folder: self.user_data_folder.clone(),
                     docker_path: self.docker_path.clone(),
                     docker_compose_path: self.docker_compose_path.clone(),
                 };
@@ -1665,6 +1701,25 @@ impl Cli {
                     Ok(()) => Ok(()),
                     Err(e) => Err(e.into()),
                 }
+            }
+            Some(Commands::ForwardDaemon {
+                container_id,
+                workspace,
+                declared_port,
+                ports_events,
+            }) => {
+                crate::commands::forward_daemon::run_forward_daemon(
+                    crate::commands::forward_daemon::ForwardDaemonArgs {
+                        container_id,
+                        workspace,
+                        user_data_folder: self.user_data_folder.clone(),
+                        declared_ports: declared_port,
+                        config_path: self.config.clone(),
+                        ports_events,
+                        docker_path: self.docker_path.clone(),
+                    },
+                )
+                .await
             }
             None => {
                 // No subcommand provided - show help-like message

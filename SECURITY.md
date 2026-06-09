@@ -86,6 +86,37 @@ disk, never a partial one.
 This trust check is **deacon-specific**: the upstream
 [containers.dev spec](https://containers.dev) does not mandate it.
 
+## Dynamic port forwarding (`up --auto-forward`)
+
+`up --auto-forward` (a deacon extension; see
+`docs/subcommand-specs/up/SPEC.md` §2.1) introduces two new host-side
+surfaces, both opt-in behind the flag:
+
+- **A persistent host process** — a detached forwarder
+  (`__forward-daemon`) survives `up` and runs until the container is torn
+  down or vanishes. It is single-owner per container (pid marker), reaped
+  on `down`/replace, and self-exits when its container is gone, so it does
+  not silently accumulate. Its only privileged action is `docker exec`
+  into the user's own container — the same capability the `exec`
+  subcommand already exposes — to read `/proc/net/tcp{,6}` and run a relay
+  program. It never executes workspace-sourced host shell, so it is not a
+  new host-trust vector.
+- **Bound host ports** — for each forward the daemon binds a TCP listener.
+  These binds are **always `127.0.0.1` (loopback) only** — never
+  `0.0.0.0`/LAN — so forwarded container services are reachable only from
+  the local host, not the network. Privileged container ports (<1024)
+  always remap to an unprivileged host port, so the forwarder never needs
+  host root. Allocations are recorded in a host-global
+  `{user_data_folder}/forwarded_ports.json` registry written atomically
+  under an advisory file lock; every host port is unique file-wide.
+
+Mitigations: loopback-only binds, no host root, `docker exec` is standard
+consumer behavior, and the whole feature is off unless `--auto-forward` is
+passed. LAN/`0.0.0.0` exposure is explicitly out of scope for v1 and would
+require a separate, documented opt-in. Reviewers evaluating whether
+forwarding warrants opt-in beyond the flag itself should weigh that it
+only ever exposes the user's own container to the user's own loopback.
+
 ## Security-relevant CI gates
 
 - `cargo-deny` (advisories + bans + licenses + sources) runs on every PR

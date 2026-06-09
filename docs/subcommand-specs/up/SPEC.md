@@ -68,6 +68,10 @@
     - --include-configuration [boolean]
     - --include-merged-configuration [boolean]
     - --user-data-folder <path> (persisted host state)
+  - Port forwarding:
+    - --ports-events [boolean, default false] (emit `PORT_EVENT:` lines)
+    - --forward-port <PORT|HOST:CONTAINER> (repeatable)
+    - --auto-forward [boolean, default false] — **deacon extension**; see §2.1.
   - Deprecated: none (TS reference has no deprecations for up).
 - Validation Rules:
   - At least one of: --workspace-folder or --id-label is required.
@@ -79,6 +83,53 @@
     - --expect-existing-container prevents building/creating a new one; errors if missing.
     - --remove-existing-container forces removal before (re)create.
     - --skip-post-create and --prebuild are mutually shaping lifecycle execution order; see lifecycle section.
+
+### 2.1 `--auto-forward` (deacon extension: dynamic user-space port forwarding)
+
+`--auto-forward` is a **deacon-specific consumer extension**, not mandated by the
+upstream containers.dev spec. It is modeled on the VS Code Dev Containers
+forwarding experience and reuses spec vocabulary (`forwardPorts`, `appPort`,
+`portsAttributes.onAutoForward`, compose `"service:port"`).
+
+- **Model**: when set, `up` starts a **detached, host-side forwarder process**
+  (the deacon binary re-exec'd with a hidden `__forward-daemon` subcommand) for
+  the (primary) container, then returns control to the shell. The forwarder
+  polls the container's TCP LISTEN sockets (`/proc/net/tcp{,6}` via `docker
+  exec`, ~1 s) and, for each detected or declared port, binds a
+  `127.0.0.1:<host-port>` listener that relays bytes into the container's
+  network namespace over `docker exec -i`. Because `docker exec` shares the
+  container netns, this reaches **`127.0.0.1`-bound** servers that static `-p`
+  publishing cannot.
+- **Declared vs auto-detected**: declared ports (`forwardPorts`/`appPort`/
+  `--forward-port`) are forwarded **eagerly** (host port reserved at `up` time)
+  and are **suppressed from static `-p`** so Docker and the daemon never contend
+  for the same host port. Undeclared listening ports are forwarded **lazily**
+  when observed and withdrawn when they stop.
+- **Loopback / TCP only**: host binds are always `127.0.0.1` (never
+  `0.0.0.0`/LAN); TCP only. Privileged container ports (<1024) always remap to a
+  free host port ≥1024 (no host root required); the actual host port is always
+  reported.
+- **Attributes**: `portsAttributes[port].onAutoForward` is honored —
+  `ignore` (not forwarded), `silent` (forwarded, no human mapping line),
+  `notify` (forwarded + line). `otherPortsAttributes` is the default for
+  undeclared ports (else `notify`). `openBrowser`/`openPreview` are treated as
+  `notify` in v1.
+- **Compose**: a `"service:port"` declared port forwards to the named compose
+  service over the project network; auto-detection stays scoped to the primary
+  service.
+- **Best-effort**: if the forwarder cannot start (or no in-container relay —
+  embedded/`socat`/`nc`/bash `/dev/tcp` — is available), `up` prints a clear
+  warning and still exits `0` with the container running. Nothing is silently
+  faked.
+- **Output contract**: per-port mappings go to **stderr** (the forwarder log);
+  the `up` result JSON on **stdout** is unchanged. With `--ports-events`, the
+  forwarder emits `PORT_EVENT:` forward/unforward lines.
+- **Lifecycle**: single forwarder per container (adopt-or-reuse via a pid
+  marker). Reaped on `down` and on `up --remove-existing-container`; self-exits
+  if its container vanishes. State lives under the user-data folder
+  (`forwarded_ports.json` registry + `forward_daemon_<id>.{pid,log}`).
+- **Platform**: Unix hosts only in v1; on a non-Unix build `--auto-forward`
+  warns that it is unsupported and the rest of `up` is unaffected.
 
 ## 3. Input Processing Pipeline
 ```pseudocode

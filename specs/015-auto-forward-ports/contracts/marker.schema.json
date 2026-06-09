@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://deacon/specs/015-auto-forward-ports/marker.schema.json",
+  "title": "forward_daemon_<container_id>.pid — single-owner forwarder marker",
+  "description": "Per-container record proving a live forwarder process owns this container. Lives at {user_data_folder}/forward_daemon_<container_id>.pid. NOTE: despite the `.pid` suffix (inherited from issue #186), the file holds this JSON object, not a bare pid integer. Read by `up --auto-forward` (adopt-or-reuse, FR-012) and by `down`/replace (reap, FR-013/FR-014). Removed on reap and on daemon self-exit.",
+  "type": "object",
+  "required": ["pid", "container_id", "workspace", "started_at", "log_path"],
+  "additionalProperties": false,
+  "properties": {
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Forwarder process id. Liveness is checked before adopting (FR-012) and to decide stale-pruning."
+    },
+    "container_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Full id of the owned container."
+    },
+    "workspace": {
+      "type": "string",
+      "description": "Canonical workspace path."
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC3339 timestamp the forwarder started (diagnostics only)."
+    },
+    "log_path": {
+      "type": "string",
+      "description": "Absolute path to this forwarder's per-container log file ({user_data_folder}/forward_daemon_<container_id>.log)."
+    }
+  },
+  "examples": [
+    {
+      "pid": 12345,
+      "container_id": "abc123def456",
+      "workspace": "/home/dev/app-a",
+      "started_at": "2026-06-08T14:03:22Z",
+      "log_path": "/home/dev/.deacon/forward_daemon_abc123def456.log"
+    }
+  ]
+}

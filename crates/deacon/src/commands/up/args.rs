@@ -420,6 +420,8 @@ pub struct UpArgs {
     // Port handling
     pub ports_events: bool,
     pub forward_ports: Vec<String>,
+    /// Start a detached user-space port forwarder (`--auto-forward`).
+    pub auto_forward: bool,
 
     // Lifecycle
     pub shutdown: bool,
@@ -497,6 +499,7 @@ impl Default for UpArgs {
             update_remote_user_uid_default: None,
             ports_events: false,
             forward_ports: Vec::new(),
+            auto_forward: false,
             shutdown: false,
             container_name: None,
             workspace_folder: None,

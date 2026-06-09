@@ -103,6 +103,35 @@ Verify installation:
 deacon --version
 ```
 
+## Auto-forward ports (`up --auto-forward`)
+
+A deacon extension (modeled on VS Code Dev Containers) that dynamically forwards
+container TCP ports to **loopback** host ports — including `127.0.0.1`-bound
+servers that static `-p` publishing cannot reach.
+
+```bash
+# Start the container and a detached forwarder, then return to the shell.
+deacon up --auto-forward
+#   stderr: Forwarding container 3000 -> http://127.0.0.1:3000 (web)
+curl http://127.0.0.1:3000        # reaches a loopback-only server in the container
+
+# Ports that start later (entrypoint / postStart / exec) are auto-detected
+# within ~1-2s; no extra flags needed. Multiple devcontainers get collision-free
+# host ports (the actual port is always reported, e.g. "(remapped; host 3000 in use)").
+
+deacon down                        # reaps the forwarder and releases its host ports
+```
+
+How it works: the forwarder polls the container's listening sockets and relays
+bytes via `docker exec` into the container's network namespace. Declared ports
+(`forwardPorts`/`appPort`/`--forward-port`) forward eagerly and are not also
+`-p` published; `portsAttributes.onAutoForward` (`ignore`/`silent`/`notify`) is
+honored; compose `"service:port"` declared ports are forwarded too.
+
+**Limits (v1):** loopback-only (never `0.0.0.0`/LAN), TCP only, Unix hosts only,
+and best-effort — if forwarding can't start you get a clear warning but `up`
+still succeeds. Forwarder logs: `~/.deacon/forward_daemon_<container_id>.log`.
+
 ## Shipped Commands
 
 | Command | Description |

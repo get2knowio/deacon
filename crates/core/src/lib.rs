@@ -36,6 +36,7 @@ pub mod oci;
 pub mod outdated;
 pub mod platform;
 pub mod plugins;
+pub mod port_forward;
 pub mod ports;
 pub mod progress;
 pub mod redaction;
