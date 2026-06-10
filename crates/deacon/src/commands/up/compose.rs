@@ -410,6 +410,22 @@ pub(crate) async fn execute_compose_up(
         }
     };
 
+    // Start the detached port forwarder for the primary service container if
+    // requested. Declared `"service:port"` specs relay over the compose network
+    // to the named service; auto-detection stays scoped to the primary service
+    // (FR-023). Best-effort (FR-002, FR-025).
+    if args.auto_forward {
+        let declared = super::forward::declared_port_specs(config, &args.forward_ports);
+        super::forward::spawn_or_adopt(
+            args,
+            &container_id,
+            workspace_folder,
+            config_path,
+            &declared,
+        )
+        .await;
+    }
+
     let remote_user = config
         .remote_user
         .clone()

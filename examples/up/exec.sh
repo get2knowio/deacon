@@ -20,6 +20,7 @@ DEFAULT_EXAMPLES=(
 	"id-labels-reconnect"
 	"remove-existing"
 	"gpu-modes"
+	"auto-forward"
 )
 
 if [ -n "${EXAMPLES_OVERRIDE:-}" ]; then

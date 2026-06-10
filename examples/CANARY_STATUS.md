@@ -96,6 +96,7 @@ listed.
 | set-up/basic | ✅ pass | 2026-05-29 | |
 | template-management/optional-paths | ✅ pass | 2026-05-29 | |
 | up/additional-mounts | ✅ pass | 2026-05-29 | |
+| up/auto-forward | ✅ pass | 2026-06-09 | `--auto-forward` loopback reach + multi-container collision-free (015) |
 | up/basic-image | ✅ pass | 2026-05-29 | |
 | up/compose-basic | ✅ pass | 2026-05-29 | |
 | up/compose-profiles | ✅ pass | 2026-05-29 | |

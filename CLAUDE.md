@@ -585,6 +585,8 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - Rust 1.70+ (Edition 2021) + okio (async runtime, JoinSet for parallel), serde/serde_json (JSON parsing), indexmap (ordered maps for object format), clap (CLI), tracing (logging) (012-fix-lifecycle-formats)
 - Rust 1.70+ (Edition 2021) + serde, tracing, thiserror, clap (existing — no new dependencies) (014-named-config-search)
 - N/A (filesystem-only config discovery) (014-named-config-search)
+- Rust, Edition 2024, MSRV 1.95 (`workspace.package` in root `Cargo.toml`); `unsafe_code = "deny"` workspace-wide. + `tokio` (rt/process/fs/io-util/net), `clap` (CLI), `serde`/`serde_json` (registry + marker JSON), `tracing` (daemon logging), `thiserror` (core domain errors), `anyhow` (binary boundary), `directories-next` (user-data folder), `libc` (already in core). **New (Unix-only):** `nix` (features `process`, `signal` — safe `setsid()`, `kill()`, `Pid`, process-liveness checks without raw `unsafe`); `fs2` (advisory `flock` on the registry, auto-released on process death). (015-auto-forward-ports)
+- Two host-side JSON files under the user-data folder (default `~/.deacon/`): a host-global `forwarded_ports.json` registry and per-container `forward_daemon_<container_id>.pid` markers; per-container `forward_daemon_<container_id>.log` log files. All writes use the temp-file + `fs::rename` atomic pattern (`crates/core/src/cache/disk.rs::save_index`). (015-auto-forward-ports)
 
 ## Recent Changes
 - 009-complete-feature-support: Added Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing

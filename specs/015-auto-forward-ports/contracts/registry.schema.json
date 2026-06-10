@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://deacon/specs/015-auto-forward-ports/registry.schema.json",
+  "title": "forwarded_ports.json — host-global port allocation registry",
+  "description": "Host-wide record of every active forwarded host port across all `deacon up --auto-forward` forwarders. Lives at {user_data_folder}/forwarded_ports.json. Written atomically (temp file + rename) under an advisory file lock. Every host_port is unique across the whole array.",
+  "type": "object",
+  "required": ["version", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version for forward-compatible evolution."
+    },
+    "entries": {
+      "type": "array",
+      "description": "One entry per active host-port allocation. host_port values MUST be unique across this array.",
+      "items": { "$ref": "#/definitions/entry" }
+    }
+  },
+  "definitions": {
+    "entry": {
+      "type": "object",
+      "required": ["host_port", "container_id", "container_port", "workspace", "pid"],
+      "additionalProperties": false,
+      "properties": {
+        "host_port": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Allocated loopback host port (always >= 1024; privileged ports are remapped per FR-009a). Unique across the registry."
+        },
+        "container_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Full id of the owning container."
+        },
+        "container_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Source TCP port inside the container."
+        },
+        "workspace": {
+          "type": "string",
+          "description": "Canonical workspace path of the owning devcontainer (for reporting/disambiguation)."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Process id of the owning forwarder; used to prune stale entries when the process is dead (FR-016)."
+        },
+        "label": {
+          "type": ["string", "null"],
+          "description": "Effective port label from portsAttributes, if any."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "version": 1,
+      "entries": [
+        { "host_port": 3000, "container_id": "abc123", "container_port": 3000, "workspace": "/home/dev/app-a", "pid": 12345, "label": "web" },
+        { "host_port": 3001, "container_id": "def456", "container_port": 3000, "workspace": "/home/dev/app-b", "pid": 12346, "label": null }
+      ]
+    }
+  ]
+}

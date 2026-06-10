@@ -24,6 +24,7 @@ mod container;
 // `deacon_core::container_lifecycle::execute_dotfiles_in_container`, which
 // runs in the spec-correct `postCreate -> dotfiles -> postStart` slot.
 pub(crate) mod features_build;
+mod forward;
 mod helpers;
 mod image_build;
 mod lifecycle;

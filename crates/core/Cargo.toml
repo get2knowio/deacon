@@ -45,9 +45,13 @@ bytesize = "2.0.1"
 semver = "1.0"
 blake3 = "1"
 futures = "0.3"
+# Advisory file locking for the host-global port-forward registry (cross-platform API).
+fs2.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+# Safe wrappers for setsid/kill/Pid used by the Unix forwarder daemon.
+nix.workspace = true
 
 [dev-dependencies]
 tempfile = "3.12"

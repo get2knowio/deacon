@@ -30,6 +30,8 @@ pub struct DownArgs {
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
     pub config_path: Option<PathBuf>,
+    /// Host-side user data folder (locates port-forward markers/registry).
+    pub user_data_folder: Option<PathBuf>,
     /// Path to docker executable
     #[allow(dead_code)] // Future: Will be used for custom docker executable path
     pub docker_path: String,
@@ -202,6 +204,17 @@ async fn execute_down_all(identity: &ContainerIdentity, args: &DownArgs) -> Resu
     for container in containers {
         debug!("Processing container: {}", container.id);
 
+        // Reap the port forwarder for this container before teardown (FR-013).
+        if let Err(e) =
+            deacon_core::port_forward::reap(args.user_data_folder.as_deref(), &container.id)
+        {
+            warn!(
+                container_id = %container.id,
+                error = %e,
+                "failed to reap port forwarder during down --all"
+            );
+        }
+
         // Only stop if container is running
         if container.state == "running" {
             debug!(
@@ -274,6 +287,19 @@ async fn execute_container_down(
     workspace_hash: &str,
 ) -> Result<()> {
     debug!("Shutting down container: {}", container_state.container_id);
+
+    // Reap the port forwarder (if any) before tearing the container down: stop
+    // its relays, release its host ports, and remove its marker (FR-013).
+    if let Err(e) = deacon_core::port_forward::reap(
+        args.user_data_folder.as_deref(),
+        &container_state.container_id,
+    ) {
+        warn!(
+            container_id = %container_state.container_id,
+            error = %e,
+            "failed to reap port forwarder during down"
+        );
+    }
 
     let docker = CliDocker::new();
 
@@ -546,6 +572,7 @@ mod tests {
             timeout: None,
             workspace_folder: Some(PathBuf::from("/test")),
             config_path: None,
+            user_data_folder: None,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
         };

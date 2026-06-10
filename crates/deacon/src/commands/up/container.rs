@@ -500,6 +500,40 @@ pub(crate) async fn execute_container_up(
         debug!("GPU mode: {:?}", args.gpu_mode);
     }
 
+    // When `--auto-forward` is set, declared ports are routed to the detached
+    // forwarder and must NOT also be statically `-p` published, so Docker and
+    // the daemon never contend for the same host port (FR-006). Capture the
+    // declared specs first (for the forwarder), then publish via a config clone
+    // with the ports stripped — the unmodified `config` is still used for the
+    // result/report so the stdout contract is unchanged (FR-010).
+    let auto_forward_declared: Vec<String> = if args.auto_forward {
+        crate::commands::up::forward::declared_port_specs(&config, &[])
+    } else {
+        Vec::new()
+    };
+    // When replacing an existing container, reap its forwarder first so its
+    // host ports are released before the replacement's forwarder allocates
+    // (FR-014). No-op when no forwarder marker exists.
+    if args.remove_existing_container {
+        crate::commands::up::forward::reap_existing_forwarders(
+            docker,
+            &identity,
+            args.user_data_folder.as_deref(),
+        )
+        .await;
+    }
+
+    let stripped_config;
+    let config_for_create: &DevContainerConfig = if args.auto_forward {
+        let mut c = config.clone();
+        c.forward_ports.clear();
+        c.app_port = None;
+        stripped_config = c;
+        &stripped_config
+    } else {
+        &config
+    };
+
     // Create container using DockerLifecycle trait.
     //
     // We pass `workspace_mount_source` (#67), not the raw workspace folder,
@@ -511,7 +545,7 @@ pub(crate) async fn execute_container_up(
     let container_result = docker
         .up(
             &identity,
-            &config,
+            config_for_create,
             &workspace_mount_source,
             args.remove_existing_container,
             args.gpu_mode,
@@ -680,6 +714,19 @@ pub(crate) async fn execute_container_up(
             &args.secret_registry,
         )
         .await?;
+    }
+
+    // Start the detached port forwarder if requested. Best-effort: a failure
+    // warns but never fails `up` (FR-002, FR-025).
+    if args.auto_forward {
+        crate::commands::up::forward::spawn_or_adopt(
+            args,
+            &container_result.container_id,
+            workspace_folder,
+            config_path,
+            &auto_forward_declared,
+        )
+        .await;
     }
 
     // Handle shutdown if requested
