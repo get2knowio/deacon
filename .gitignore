@@ -50,6 +50,10 @@ artifacts/nextest/full-timing.json
 # (lifecycle state + build cache written into the workspace folder)
 **/.devcontainer-state/
 **/.devcontainer/build-cache/
+# Feature lockfiles generated in-place when an example's up / feature install
+# runs. The intentionally-committed lockfile-demo lives at an example root (not
+# in a .devcontainer/ dir), so this scoped rule leaves it tracked.
+**/.devcontainer/devcontainer-lock.json
 
 # Beads / Dolt files (added by bd init)
 .dolt/
