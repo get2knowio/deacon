@@ -47,6 +47,13 @@ blake3 = "1"
 futures = "0.3"
 # Advisory file locking for the host-global port-forward registry (cross-platform API).
 fs2.workspace = true
+# Host-CA support (016): enumerate the OS trust store (pure-Rust, no aws-lc-rs —
+# preserves the ring-based pure-Rust TLS posture, see the reqwest 0.13/aws-lc-rs
+# memory note), parse DER certs for BasicConstraints/Subject/SPKI, and match the
+# corporate delta against Mozilla's bundled public roots by SPKI SHA-256.
+rustls-native-certs = "0.8"
+x509-parser = "0.18"
+webpki-roots = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -682,6 +682,27 @@ pub trait Docker {
         self.exec(container_id, command, config).await
     }
 
+    /// Like [`exec`](Self::exec), but streams `stdin` bytes to the command's
+    /// standard input. Used by host-CA injection to pipe a PEM bundle into
+    /// `sh -c 'cat > …'` over `docker exec -i` — no bind mount, so it works
+    /// against remote Docker contexts (016, FR-020).
+    ///
+    /// The default implementation returns a clear "not implemented" domain
+    /// error so existing mocks and delegating runtimes compile unchanged; real
+    /// runtimes ([`CliRuntime`]) override it.
+    async fn exec_with_stdin(
+        &self,
+        container_id: &str,
+        command: &[String],
+        stdin: &[u8],
+        config: &ExecConfig,
+    ) -> Result<ExecResult> {
+        let _ = (container_id, command, stdin, config);
+        Err(crate::errors::DeaconError::NotImplemented {
+            feature: "exec_with_stdin".to_string(),
+        })
+    }
+
     /// Stop a container with optional timeout
     async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()>;
 }
@@ -1677,6 +1698,61 @@ impl Docker for CliRuntime {
                 stderr: String::new(),
             })
         }
+    }
+
+    #[instrument(skip(self, command, stdin, config))]
+    async fn exec_with_stdin(
+        &self,
+        container_id: &str,
+        command: &[String],
+        stdin: &[u8],
+        config: &ExecConfig,
+    ) -> Result<ExecResult> {
+        use tokio::io::AsyncWriteExt;
+
+        // Force `-i` so the child actually receives a stdin pipe regardless of
+        // the caller's `interactive` flag, then build the rest of the args.
+        let mut config = config.clone();
+        config.interactive = true;
+        let args = build_exec_args(container_id, command, &config);
+        debug!("Runtime exec_with_stdin args: {:?}", args);
+
+        let mut cmd = tokio::process::Command::new(&self.runtime_path);
+        cmd.args(&args);
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| {
+            DockerError::CLIError(format!("Failed to spawn runtime exec (stdin): {}", e))
+        })?;
+
+        // Write the bytes to the child's stdin and close it so the inner
+        // `cat`/reader sees EOF. Take the handle so it drops (closing the pipe).
+        if let Some(mut child_stdin) = child.stdin.take() {
+            child_stdin
+                .write_all(stdin)
+                .await
+                .map_err(|e| DockerError::CLIError(format!("Failed to write exec stdin: {}", e)))?;
+            child_stdin.shutdown().await.ok();
+            drop(child_stdin);
+        }
+
+        let output = child.wait_with_output().await.map_err(|e| {
+            DockerError::CLIError(format!("Failed to wait for runtime exec (stdin): {}", e))
+        })?;
+
+        let exit_code = resolve_exit_code(output.status);
+        let success = output.status.success();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(ExecResult {
+            exit_code,
+            success,
+            stdout,
+            stderr,
+        })
     }
 
     #[instrument(skip(self, line_prefix))]
@@ -3318,6 +3394,8 @@ mod tests {
             custom_name: None,
             local_folder: None,
             config_file: None,
+            host_ca_bundle_path: None,
+            host_ca_subjects: None,
         };
 
         let config = DevContainerConfig {

@@ -11,6 +11,56 @@ use tracing::debug;
 
 use super::auth::{RegistryAuth, RegistryCredentials};
 use super::types::HttpResponse;
+use crate::host_ca::enumerate_host_roots;
+
+/// Layer the **host OS trust store** roots and the additive
+/// `DEACON_CUSTOM_CA_BUNDLE` onto a reqwest client builder, on top of the
+/// webpki public roots that `rustls-tls` already provides.
+///
+/// This is what makes deacon's own feature/template pulls "just work" behind a
+/// corporate TLS-intercepting proxy (016, US1): the resulting trust set is the
+/// **union** of webpki public roots + host roots + the custom bundle. Host-root
+/// enumeration failure is logged and tolerated (the webpki base still works for
+/// public registries) rather than failing every pull; individual host certs
+/// reqwest cannot parse are skipped.
+fn apply_host_and_custom_roots(
+    mut builder: reqwest::ClientBuilder,
+) -> std::result::Result<reqwest::ClientBuilder, Box<dyn std::error::Error + Send + Sync>> {
+    // Host OS trust store (union with the webpki base). Best-effort: a store
+    // read failure is logged and tolerated so public-registry pulls still work.
+    match enumerate_host_roots() {
+        Ok(ders) => {
+            let mut added = 0usize;
+            for der in &ders {
+                match reqwest::Certificate::from_der(der) {
+                    Ok(cert) => {
+                        builder = builder.add_root_certificate(cert);
+                        added += 1;
+                    }
+                    Err(e) => debug!("Skipping unparseable host root for HTTP client: {}", e),
+                }
+            }
+            debug!("Added {} host trust-store root(s) to HTTP client", added);
+        }
+        Err(e) => {
+            debug!(
+                "Host trust-store enumeration unavailable for HTTP client (continuing with public roots): {}",
+                e
+            );
+        }
+    }
+
+    // Additive custom CA bundle. The user explicitly pointed at this file, so a
+    // misconfiguration fails fast (unchanged from prior behavior — FR-002).
+    if let Ok(ca_bundle_path) = env::var("DEACON_CUSTOM_CA_BUNDLE") {
+        let ca_bundle = fs::read(&ca_bundle_path)?;
+        let cert = reqwest::Certificate::from_pem(&ca_bundle)?;
+        builder = builder.add_root_certificate(cert);
+        debug!("Added custom CA certificate from: {}", ca_bundle_path);
+    }
+
+    Ok(builder)
+}
 
 /// HTTP client trait for OCI registry operations
 #[async_trait::async_trait]
@@ -186,13 +236,9 @@ impl ReqwestClient {
             );
         }
 
-        // Configure custom CA certificates if specified
-        if let Ok(ca_bundle_path) = env::var("DEACON_CUSTOM_CA_BUNDLE") {
-            let ca_bundle = fs::read(&ca_bundle_path)?;
-            let cert = reqwest::Certificate::from_pem(&ca_bundle)?;
-            client_builder = client_builder.add_root_certificate(cert);
-            debug!("Added custom CA certificate from: {}", ca_bundle_path);
-        }
+        // Union the host OS trust store + additive DEACON_CUSTOM_CA_BUNDLE onto
+        // the webpki base so deacon's own pulls trust a corporate proxy CA (US1).
+        client_builder = apply_host_and_custom_roots(client_builder)?;
 
         // Build the client
         let client = client_builder.build()?;
@@ -212,8 +258,10 @@ impl ReqwestClient {
     ) -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let client_builder = reqwest::Client::builder();
 
-        // Note: We don't load custom CA certificates here since this method is for explicit config
-        // If CA certificates are needed, they should be handled by the caller
+        // Trust is consistent across every constructor: union the host OS trust
+        // store + additive DEACON_CUSTOM_CA_BUNDLE here too (US1) so an
+        // auth-configured client also validates a corporate proxy CA.
+        let client_builder = apply_host_and_custom_roots(client_builder)?;
 
         // Build the client
         let client = client_builder.build()?;
@@ -561,5 +609,58 @@ impl HttpClient for MockHttpClient {
             .get(url)
             .copied()
             .ok_or_else(|| format!("No mock HEAD response for URL: {}", url).into())
+    }
+}
+
+#[cfg(test)]
+mod host_ca_trust_tests {
+    use super::*;
+    use crate::host_ca::enumerate_host_roots;
+
+    /// A valid corporate CA PEM (shared with the host_ca discovery fixtures).
+    const CORPORATE_CA_PEM: &str = include_str!("../host_ca/test_fixtures/corporate_ca.pem");
+
+    #[test]
+    fn host_root_enumeration_succeeds() {
+        // US1: the same enumeration the HTTP client unions in. It must not
+        // error on a normal host; on a CA-equipped host the count is > 0.
+        let roots = enumerate_host_roots().expect("host root enumeration");
+        // Don't hard-require > 0 (minimal CI images may have an empty store),
+        // but where present the union is non-trivial.
+        if !roots.is_empty() {
+            assert!(reqwest::Certificate::from_der(&roots[0]).is_ok());
+        }
+    }
+
+    #[test]
+    fn client_builds_with_custom_bundle_additive() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let bundle = tmp.path().join("extra-roots.pem");
+        std::fs::write(&bundle, CORPORATE_CA_PEM).unwrap();
+
+        // temp-env serializes + restores the env var (edition-2024 safe).
+        temp_env::with_var(
+            "DEACON_CUSTOM_CA_BUNDLE",
+            Some(bundle.to_str().unwrap()),
+            || {
+                // The custom PEM is layered on top of host + webpki roots.
+                ReqwestClient::new().expect("client builds with additive custom bundle");
+                ReqwestClient::with_no_timeout()
+                    .expect("no-timeout client builds with additive custom bundle");
+            },
+        );
+    }
+
+    #[test]
+    fn unreadable_custom_bundle_fails_fast() {
+        // An explicitly-configured bundle path that can't be read must surface
+        // (No Silent Fallbacks) rather than silently degrade to host+webpki.
+        temp_env::with_var(
+            "DEACON_CUSTOM_CA_BUNDLE",
+            Some("/nonexistent/deacon/extra-roots.pem"),
+            || {
+                assert!(ReqwestClient::new().is_err());
+            },
+        );
     }
 }
