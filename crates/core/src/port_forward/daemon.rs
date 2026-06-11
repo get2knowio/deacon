@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::{
     DaemonMarker, DetectedPort, ForwardOrigin, ForwardSpec, PortForwardError,
@@ -47,6 +47,14 @@ pub struct DaemonConfig {
     pub ports_events: bool,
     /// Docker CLI path used for `exec`/`inspect`.
     pub docker_path: String,
+    /// Resolved browser program for `onAutoForward: openBrowser` auto-open
+    /// (`DEACON_BROWSER` > settings, resolved by the parent `up`); `None` ⇒ OS
+    /// default opener. See [`crate::browser`].
+    pub browser: Option<String>,
+    /// Master gate for browser auto-open. The parent `up` sets this from the
+    /// headless/CI/TTY check (the daemon's own stdio is `/dev/null`, so it can't
+    /// evaluate `is_terminal()` itself).
+    pub auto_open: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -207,13 +215,17 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
     );
 
     let mut active: HashMap<u16, ActiveForward> = HashMap::new();
+    // Container ports already browser-opened in this daemon's lifetime. Never
+    // cleared on withdraw, so `openBrowserOnce` holds across listener restarts
+    // within the session (resets only when the daemon/container is recreated).
+    let mut opened: HashSet<u16> = HashSet::new();
 
     // Eager-bind declared ports (Reserved → Active once the container listens).
     for spec in &declared {
         if spec.attributes.on_auto_forward == OnAutoForward::Ignore {
             continue;
         }
-        match start_forward(spec.clone(), relay_program, &config).await {
+        match start_forward(spec.clone(), relay_program, &config, &mut opened).await {
             Ok(af) => {
                 active.insert(spec.container_port, af);
             }
@@ -264,6 +276,7 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
 
         reconcile(
             &mut active,
+            &mut opened,
             &detected,
             &declared_ports,
             cfg.as_ref(),
@@ -291,6 +304,7 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
 /// listening (FR-004, FR-024). Declared ports stay reserved regardless.
 async fn reconcile(
     active: &mut HashMap<u16, ActiveForward>,
+    opened: &mut HashSet<u16>,
     detected: &[DetectedPort],
     declared_ports: &HashSet<u16>,
     cfg: Option<&DevContainerConfig>,
@@ -315,7 +329,7 @@ async fn reconcile(
             attributes,
             eager: false,
         };
-        match start_forward(spec, relay_program, config).await {
+        match start_forward(spec, relay_program, config, opened).await {
             Ok(af) => {
                 active.insert(d.port, af);
             }
@@ -343,11 +357,50 @@ async fn reconcile(
     }
 }
 
+/// Decide whether to open a browser for this action, given whether the
+/// container port has already been opened in this daemon's lifetime.
+/// `openBrowser` always opens; `openBrowserOnce` opens only the first time;
+/// everything else (including `openPreview`, which has no CLI analog) does not.
+fn should_open(action: &OnAutoForward, already_opened: bool) -> bool {
+    match action {
+        OnAutoForward::OpenBrowser => true,
+        OnAutoForward::OpenBrowserOnce => !already_opened,
+        _ => false,
+    }
+}
+
+/// Best-effort browser auto-open for a freshly-live forward. Inserts the port
+/// into `opened` BEFORE spawning so a broken browser binary can't retry on every
+/// poll tick. Never fails the daemon.
+async fn maybe_open_browser(
+    spec: &ForwardSpec,
+    host_port: u16,
+    config: &DaemonConfig,
+    opened: &mut HashSet<u16>,
+) {
+    if !config.auto_open
+        || !should_open(
+            &spec.attributes.on_auto_forward,
+            opened.contains(&spec.container_port),
+        )
+    {
+        return;
+    }
+    let scheme = spec.attributes.protocol.as_deref().unwrap_or("http");
+    let url = format!("{scheme}://{DEFAULT_DIAL_HOST}:{host_port}");
+    opened.insert(spec.container_port);
+    match crate::browser::open_url(config.browser.as_deref(), &url).await {
+        Ok(()) => info!(url = %url, "opened browser for forwarded port"),
+        Err(e) => debug!(error = %e, url = %url, "browser auto-open failed (best-effort)"),
+    }
+}
+
 /// Allocate + bind a host port, start the relay task, and report the mapping.
 async fn start_forward(
     spec: ForwardSpec,
     relay_program: relay::RelayProgram,
     config: &DaemonConfig,
+    opened: &mut HashSet<u16>,
 ) -> Result<ActiveForward> {
     let udf = config.user_data_folder.as_deref();
     let workspace = config.workspace.display().to_string();
@@ -380,6 +433,7 @@ async fn start_forward(
     ));
 
     report_forward(&spec, alloc.host_port, alloc.remapped, config.ports_events);
+    maybe_open_browser(&spec, alloc.host_port, config, opened).await;
 
     Ok(ActiveForward {
         spec,
@@ -486,17 +540,14 @@ fn resolve_attributes(cfg: Option<&DevContainerConfig>, port: u16) -> ResolvedPo
     ResolvedPortAttributes::default()
 }
 
-/// Convert a [`PortAttributes`] into [`ResolvedPortAttributes`], collapsing
-/// `openBrowser`/`openPreview` to `Notify` for v1 (auto-open is deferred).
+/// Convert a [`PortAttributes`] into [`ResolvedPortAttributes`], preserving the
+/// real `onAutoForward` action (so `openBrowser`/`openBrowserOnce` can drive
+/// auto-open) and carrying the `protocol` hint for the URL/PORT_EVENT scheme.
 fn to_resolved(pa: &PortAttributes) -> ResolvedPortAttributes {
-    let on_auto_forward = match pa.on_auto_forward {
-        Some(OnAutoForward::Ignore) => OnAutoForward::Ignore,
-        Some(OnAutoForward::Silent) => OnAutoForward::Silent,
-        _ => OnAutoForward::Notify,
-    };
     ResolvedPortAttributes {
         label: pa.label.clone(),
-        on_auto_forward,
+        on_auto_forward: pa.on_auto_forward.clone().unwrap_or(OnAutoForward::Notify),
+        protocol: pa.protocol.clone(),
     }
 }
 
@@ -547,7 +598,7 @@ fn report_unforward(af: &ActiveForward, ports_events: bool) {
 fn port_event(spec: &ForwardSpec, host_port: Option<u16>, forwarded: bool) -> PortEvent {
     PortEvent {
         port: spec.container_port,
-        protocol: None,
+        protocol: spec.attributes.protocol.clone(),
         label: spec.attributes.label.clone(),
         on_auto_forward: Some(spec.attributes.on_auto_forward.clone()),
         auto_forwarded: forwarded,
@@ -674,12 +725,45 @@ mod tests {
     }
 
     #[test]
-    fn open_browser_preview_collapse_to_notify() {
-        let cfg = config_with_attrs(vec![("3000", OnAutoForward::OpenBrowser)], None);
+    fn resolve_preserves_open_actions_and_protocol() {
+        // The real action is no longer collapsed to Notify (auto-open needs it).
+        for action in [
+            OnAutoForward::OpenBrowser,
+            OnAutoForward::OpenBrowserOnce,
+            OnAutoForward::OpenPreview,
+        ] {
+            let cfg = config_with_attrs(vec![("3000", action.clone())], None);
+            assert_eq!(resolve_attributes(Some(&cfg), 3000).on_auto_forward, action);
+        }
+        // protocol hint is carried through for the URL/PORT_EVENT scheme.
+        let mut cfg = DevContainerConfig::default();
+        let mut pa = attrs(None, OnAutoForward::OpenBrowser);
+        pa.protocol = Some("https".to_string());
+        cfg.ports_attributes.insert("3000".to_string(), pa);
         assert_eq!(
-            resolve_attributes(Some(&cfg), 3000).on_auto_forward,
-            OnAutoForward::Notify
+            resolve_attributes(Some(&cfg), 3000).protocol.as_deref(),
+            Some("https")
         );
+    }
+
+    #[test]
+    fn should_open_semantics() {
+        // openBrowser: always.
+        assert!(should_open(&OnAutoForward::OpenBrowser, false));
+        assert!(should_open(&OnAutoForward::OpenBrowser, true));
+        // openBrowserOnce: only the first time.
+        assert!(should_open(&OnAutoForward::OpenBrowserOnce, false));
+        assert!(!should_open(&OnAutoForward::OpenBrowserOnce, true));
+        // everything else (incl. openPreview): never opens.
+        for a in [
+            OnAutoForward::Notify,
+            OnAutoForward::Silent,
+            OnAutoForward::Ignore,
+            OnAutoForward::OpenPreview,
+        ] {
+            assert!(!should_open(&a, false));
+            assert!(!should_open(&a, true));
+        }
     }
 
     #[test]

@@ -6,16 +6,19 @@
 //! adopted rather than duplicated (FR-012). Forwarding is best-effort — any
 //! failure here warns loudly but never fails `up` (FR-025, FR-019).
 
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Stdio;
 
 use tracing::{info, warn};
 
+use deacon_core::browser::{DEACON_BROWSER, resolve_browser};
 use deacon_core::config::{DevContainerConfig, PortSpec};
 use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::Docker;
 use deacon_core::port_forward::daemon::pid_alive;
 use deacon_core::port_forward::{DaemonMarker, marker_path};
+use deacon_core::settings::Settings;
 
 use crate::commands::up::args::UpArgs;
 
@@ -113,6 +116,29 @@ pub async fn spawn_or_adopt(
     }
 }
 
+/// Resolve the auto-open browser program (machine-owner only). Precedence:
+/// `DEACON_BROWSER` env, then `settings.browser`, else `None` (OS default
+/// opener). Best-effort — a settings read error degrades to "no configured
+/// browser" and never fails `up`.
+pub(crate) fn resolve_browser_cli(user_data_folder: Option<&Path>) -> Option<String> {
+    let env = std::env::var(DEACON_BROWSER).ok();
+    let settings = Settings::load(user_data_folder).unwrap_or_default();
+    resolve_browser(env.as_deref(), &settings)
+}
+
+/// Whether to enable browser auto-open. Skip in CI / when `stderr` isn't a TTY,
+/// UNLESS a browser is explicitly configured — an explicit machine-owner choice
+/// signals intent (and is the lever hermetic tests use to force-enable).
+pub(crate) fn auto_open_enabled(browser_configured: bool) -> bool {
+    if browser_configured {
+        return true;
+    }
+    let ci = std::env::var("CI").is_ok()
+        || std::env::var("GITHUB_ACTIONS").is_ok()
+        || std::env::var("CONTINUOUS_INTEGRATION").is_ok();
+    !ci && std::io::stderr().is_terminal()
+}
+
 /// Read a live forwarder pid from the marker, if present and alive.
 pub fn live_forwarder_pid(user_data_folder: Option<&Path>, container_id: &str) -> Option<u32> {
     let path = marker_path(user_data_folder, container_id).ok()?;
@@ -154,6 +180,18 @@ fn spawn_daemon(
     }
     if args.ports_events {
         cmd.arg("--ports-events");
+    }
+
+    // Browser auto-open (onAutoForward: openBrowser) is machine-owner-resolved
+    // here (env > settings) and the headless/CI gate is decided here too — the
+    // daemon's stdio is /dev/null so it cannot evaluate `is_terminal()` itself.
+    // Adoption returns before this, so an adopted daemon keeps its own setting.
+    let browser = resolve_browser_cli(args.user_data_folder.as_deref());
+    if let Some(b) = &browser {
+        cmd.arg("--browser").arg(b);
+    }
+    if !auto_open_enabled(browser.is_some()) {
+        cmd.arg("--no-auto-open");
     }
 
     // Detach: the child re-opens its own stdio onto the per-container log, so

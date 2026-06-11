@@ -760,3 +760,153 @@ fn compose_service_port_is_forwarded() {
         "expected banner relayed from the db service, got: {body:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Browser auto-open (onAutoForward: openBrowser) — hermetic via a fake browser.
+// ---------------------------------------------------------------------------
+
+/// devcontainer.json declaring `port` with a given `onAutoForward` action, plus
+/// the loopback `nc` banner server (so the port actually forwards).
+fn server_config_on_auto_forward(port: u16, action: &str) -> String {
+    format!(
+        r#"{{
+  "name": "auto-forward-browser-test",
+  "image": "alpine:3.18",
+  "overrideCommand": true,
+  "forwardPorts": [{port}],
+  "portsAttributes": {{ "{port}": {{ "onAutoForward": "{action}" }} }},
+  "postStartCommand": "sh -c '(while true; do echo {SERVER_BANNER} | nc -l -p {port}; done) >/dev/null 2>&1 & sleep 1'"
+}}"#
+    )
+}
+
+/// Write a fake "browser": a host shell script that appends its first arg (the
+/// URL deacon passes) to a marker file. Returns `(script_path, marker_path)`.
+fn write_fake_browser(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let marker = dir.join("opened-urls.txt");
+    let script = dir.join("fake-browser.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (script, marker)
+}
+
+/// `up --auto-forward` with `DEACON_BROWSER` set to the fake browser script.
+fn run_up_with_browser(ws: &Path, udf: &Path, browser: &Path) -> UpOutcome {
+    let bin = env!("CARGO_BIN_EXE_deacon");
+    let out = StdCommand::new(bin)
+        .env("DEACON_BROWSER", browser)
+        .arg("--user-data-folder")
+        .arg(udf)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(ws)
+        .arg("--auto-forward")
+        .output()
+        .expect("run deacon up");
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    let container_id = serde_json::from_str::<Value>(&stdout).ok().and_then(|v| {
+        v.get("containerId")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
+    UpOutcome {
+        success: out.status.success(),
+        container_id,
+        stdout,
+        stderr,
+    }
+}
+
+fn marker_contains(marker: &Path, needle: &str, timeout: Duration) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if let Ok(s) = std::fs::read_to_string(marker) {
+            if s.contains(needle) {
+                return true;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    false
+}
+
+/// `onAutoForward: openBrowser` launches the configured browser at the forwarded
+/// loopback URL. The "browser" is a recording script (hermetic; no real browser
+/// or display needed). `DEACON_BROWSER` being set also force-enables auto-open
+/// despite the test having no TTY.
+#[test]
+fn auto_forward_opens_browser_for_openbrowser() {
+    if !is_docker_available() {
+        eprintln!("docker unavailable; skipping");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join(format!("ws-{}", unique()));
+    std::fs::create_dir_all(&ws).unwrap();
+    let udf = tmp.path().join("udf");
+    std::fs::create_dir_all(&udf).unwrap();
+    write_config(&ws, &server_config_on_auto_forward(3000, "openBrowser"));
+    let (script, marker) = write_fake_browser(&udf);
+
+    let up = run_up_with_browser(&ws, &udf, &script);
+    let cid = up.container_id.clone();
+    let result = (|| {
+        assert!(
+            up.success,
+            "up --auto-forward failed.\n--- stdout ---\n{}\n--- stderr ---\n{}",
+            up.stdout, up.stderr
+        );
+        let host_port = wait_for_host_port(&udf, 3000, Duration::from_secs(15))?;
+        let url = format!("http://127.0.0.1:{host_port}");
+        marker_contains(&marker, &url, Duration::from_secs(15)).then_some(url)
+    })();
+
+    teardown(&ws, &udf, cid.as_deref());
+
+    let url =
+        result.expect("openBrowser should have launched the fake browser at the loopback URL");
+    assert!(url.starts_with("http://127.0.0.1:"));
+}
+
+/// `onAutoForward: notify` must NOT open a browser even though one is configured.
+#[test]
+fn auto_forward_notify_does_not_open_browser() {
+    if !is_docker_available() {
+        eprintln!("docker unavailable; skipping");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join(format!("ws-{}", unique()));
+    std::fs::create_dir_all(&ws).unwrap();
+    let udf = tmp.path().join("udf");
+    std::fs::create_dir_all(&udf).unwrap();
+    write_config(&ws, &server_config_on_auto_forward(3000, "notify"));
+    let (script, marker) = write_fake_browser(&udf);
+
+    let up = run_up_with_browser(&ws, &udf, &script);
+    let cid = up.container_id.clone();
+    let opened = (|| {
+        if !up.success {
+            return false;
+        }
+        // Wait for the port to actually forward, then give any (erroneous) open
+        // a chance to land before asserting the marker stayed empty.
+        if wait_for_host_port(&udf, 3000, Duration::from_secs(15)).is_none() {
+            return false;
+        }
+        marker_contains(&marker, "http://127.0.0.1:", Duration::from_secs(3))
+    })();
+
+    teardown(&ws, &udf, cid.as_deref());
+
+    assert!(!opened, "notify must not open a browser");
+}

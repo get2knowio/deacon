@@ -117,6 +117,21 @@ require a separate, documented opt-in. Reviewers evaluating whether
 forwarding warrants opt-in beyond the flag itself should weigh that it
 only ever exposes the user's own container to the user's own loopback.
 
+- **Browser auto-open** — a forwarded port whose `onAutoForward` is
+  `openBrowser`/`openBrowserOnce` launches a host browser at the forwarded
+  **loopback** URL. The `onAutoForward` value is **workspace-requested**
+  (`devcontainer.json` can ask deacon to open a `127.0.0.1` URL, exactly like
+  the VS Code Dev Containers extension), but the **browser program itself is
+  machine-owner-only** — `DEACON_BROWSER` env var or the `browser` key in
+  `{user_data_folder}/settings.json`, never sourced from the workspace. So a
+  hostile workspace can never choose *which* program runs, only request that
+  the OS-default/owner-chosen browser open a loopback port. The URL is passed
+  as a non-shell argument (no shell interpolation of a workspace-influenced
+  URL), and the whole action is best-effort and suppressed in CI/non-TTY
+  sessions unless a browser is explicitly configured. No trust gate is applied
+  (the program is machine-owner-controlled, the same rationale as host-CA
+  injection).
+
 ## Corporate CA injection (`--inject-host-ca`)
 
 Behind a TLS-intercepting corporate proxy, dev containers need the corporate

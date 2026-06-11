@@ -86,6 +86,7 @@ mod tests {
     fn settings_with(host_ca: Option<&str>) -> Settings {
         Settings {
             host_ca: host_ca.map(String::from),
+            ..Default::default()
         }
     }
 
