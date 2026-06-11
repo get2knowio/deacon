@@ -38,6 +38,7 @@ use tracing::{debug, info, instrument, warn};
 #[instrument(skip(config, workspace_folder, args, state_manager, runtime))]
 pub(crate) async fn execute_compose_up(
     config: &DevContainerConfig,
+    identity: &ContainerIdentity,
     workspace_folder: &Path,
     args: &UpArgs,
     state_manager: &mut StateManager,
@@ -54,27 +55,16 @@ pub(crate) async fn execute_compose_up(
     // Add env files from CLI args
     project.env_files = args.env_file.clone();
 
-    // Spec parity (#100): apply the same deacon identity labels the
-    // single-container path uses to every compose service. Without
-    // these, VS Code Dev Containers reconnect / `docker ps --filter
-    // label=devcontainer.local_folder=<abs>` / `deacon exec --id-label`
-    // all miss compose-managed containers.
-    let identity = ContainerIdentity::new(workspace_folder, config).with_config_file(config_path);
-    let identity_labels = identity.labels();
-    for (key, value) in &identity_labels {
-        project.deacon_labels.insert(key.clone(), value.clone());
-    }
-
-    // Spec parity (#100): apply the same deacon identity labels the
-    // single-container path uses to every compose service. Without
-    // these, VS Code Dev Containers reconnect / `docker ps --filter
-    // label=devcontainer.local_folder=<abs>` / `deacon exec --id-label`
-    // all miss compose-managed containers.
-    let identity = deacon_core::container::ContainerIdentity::new(workspace_folder, config)
-        .with_config_file(config_path);
-    let identity_labels = identity.labels();
-    for (key, value) in &identity_labels {
-        project.deacon_labels.insert(key.clone(), value.clone());
+    // Spec parity (#100): stamp the same deacon identity labels the
+    // single-container path uses onto every compose service. Without these, VS
+    // Code Dev Containers reconnect / `docker ps --filter
+    // label=devcontainer.local_folder=<abs>` / `deacon exec --id-label` all
+    // miss compose-managed containers. The identity is the canonical
+    // (as-loaded) one computed by the caller (#187) — it must NOT be rebuilt
+    // from the post-substitution `config` here, or the stamped `configHash`
+    // could drift from what `exec`/`down` compute.
+    for (key, value) in identity.labels() {
+        project.deacon_labels.insert(key, value);
     }
 
     // Apply default workspace mount for Compose when consistency is provided

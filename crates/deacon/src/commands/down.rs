@@ -3,6 +3,7 @@
 //! Implements the `deacon down` subcommand for stopping development containers
 //! and compose projects according to their shutdown actions.
 
+use crate::commands::shared::canonical_reconnect_identity;
 use anyhow::Result;
 use deacon_core::compose::{ComposeManager, ComposeProject};
 use deacon_core::config::{ConfigLoader, DevContainerConfig, DiscoveryResult};
@@ -99,8 +100,9 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
 
     debug!("Loaded configuration: {:?}", config.name);
 
-    // Get workspace hash for state lookup
-    let identity = ContainerIdentity::new(workspace_folder, &config);
+    // Get workspace hash for state lookup. Built from the config as loaded so
+    // the label selector matches what `up` stamped (#187).
+    let identity = canonical_reconnect_identity(workspace_folder, &config, None, None);
     let workspace_hash = &identity.workspace_hash;
 
     debug!("Workspace hash: {}", workspace_hash);
@@ -505,9 +507,10 @@ async fn execute_compose_down(
 async fn execute_down_with_auto_discovery(workspace_folder: &Path, args: &DownArgs) -> Result<()> {
     debug!("Attempting auto-discovery of running containers/projects");
 
-    // Create a minimal identity just for workspace hash generation
+    // Create a minimal identity just for workspace hash generation (no config
+    // was discovered, so only the workspace hash is meaningful here).
     let config = DevContainerConfig::default();
-    let identity = ContainerIdentity::new(workspace_folder, &config);
+    let identity = canonical_reconnect_identity(workspace_folder, &config, None, None);
     let workspace_hash = &identity.workspace_hash;
 
     debug!("Auto-discovery workspace hash: {}", workspace_hash);
