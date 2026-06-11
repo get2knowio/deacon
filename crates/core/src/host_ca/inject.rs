@@ -213,7 +213,11 @@ fn outcome_from_exit(exit_code: i32, stderr: &str, set: &CorporateCaSet) -> Inje
 /// Orchestrate runtime injection: stream the PEM bundle into the container and
 /// run the install script, returning the mapped outcome. Logs every injected
 /// subject under the `ca.inject` span.
-#[instrument(skip(runtime, set), fields(container_id = %container_id, subject_count = set.count))]
+#[instrument(
+    name = "ca.inject",
+    skip(runtime, set),
+    fields(container_id = %container_id, subject_count = set.count, bundle_path = HOST_CA_BUNDLE_PATH, outcome = tracing::field::Empty)
+)]
 pub async fn inject_runtime<D: Docker>(
     runtime: &D,
     container_id: &str,
@@ -241,6 +245,7 @@ pub async fn inject_runtime<D: Docker>(
         .await?;
 
     let outcome = outcome_from_exit(result.exit_code, &result.stderr, set);
+    tracing::Span::current().record("outcome", outcome.mode.as_str());
 
     match &outcome.warning {
         Some(w) => warn!(outcome = outcome.mode.as_str(), "{}", w),
