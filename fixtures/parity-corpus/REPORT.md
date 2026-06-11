@@ -2,7 +2,10 @@
 
 Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 20 corpus configs.
 
-## Fixed in this PR (four real bugs)
+Source of truth: the official containers.dev spec and the reference CLI's
+behavior — not any deacon-authored spec doc.
+
+## Fixed in this PR (six real bugs)
 
 ### 1. `hostRequirements` hard-failed `up`/`build` (spec violation)
 
@@ -73,13 +76,34 @@ defer to the container-aware pass during `up` so we never bake a wrong default.
 Unit test `test_container_workspace_folder_seeded_from_explicit_workspace_folder`.
 (`crates/core/src/config.rs`.)
 
+### 5. `remoteEnv` `${containerEnv:VAR}` left literal at exec time
+
+A remoteEnv value like `"${containerEnv:PATH}:/custom/bin"` (the canonical
+PATH-append) is unresolvable at config-load (no container) and survived as a
+literal; `build_effective_env` then exported the literal template into the
+remote environment. **Fix:** resolve `${containerEnv:VAR}` against the probed
+container env when building the effective exec/lifecycle environment. Unit test
+`test_build_effective_env_resolves_container_env_refs`.
+(`crates/core/src/container_env_probe.rs`.)
+
+### 6. `forwardPorts` static-published + `appPort` bound to `0.0.0.0`
+
+The reference publishes **only `appPort`** via `docker -p`, binding numeric
+ports to **`127.0.0.1`** (loopback); `forwardPorts` are forwarding *hints* it
+never binds. deacon was statically publishing **`forwardPorts` too** (so a real
+config declaring common ports — 3000/8080/9229… — would **bomb `up` on a
+host-port conflict** the reference shrugs off) **and** binding bare ports to
+**`0.0.0.0`** (exposed on all interfaces, not loopback).
+
+This was the "exception" wrongly excused via a deacon-authored SPEC; re-judged
+against the reference it is a real divergence (and an over-exposure). **Fix:**
+publish only `appPort`; numeric → `127.0.0.1:N:N`, string → verbatim;
+`forwardPorts` are never statically bound (they are still forwarded by the
+`--auto-forward` daemon). Tests `test_port_publish_args_excludes_forward_ports`,
+`test_port_spec_to_publish_arg_variants`. (`crates/core/src/docker.rs`.)
+
 ## Open follow-ups (found, not yet fixed)
 
-- **`remoteEnv` `${containerEnv:VAR}` not resolved at exec time** (same class as
-  divergence A below). After fix #2 the container starts cleanly, but a remoteEnv
-  PATH-append (`/custom/bin`) is silently dropped at exec (the literal is applied
-  then overridden by the login shell). Non-bombing; needs `build_effective_env`
-  to resolve `${containerEnv:…}` against the probed container env.
 - **Divergence A (residual) — `${containerWorkspaceFolder}` without an explicit
   `workspaceFolder`.** Now fixed for the common case (workspaceFolder set, fix
   #4). The residual case — no `workspaceFolder`, `read-configuration` with no
@@ -91,14 +115,6 @@ Unit test `test_container_workspace_folder_seeded_from_explicit_workspace_folder
   child config with `extends` preserved (defers the merge to `up`); deacon
   eagerly merges via `load_with_extends` and drops `extends`. Functionally
   equivalent at `up`; differs only in read-config presentation.
-- **`forwardPorts` published via static `-p` at create (divergence, intentional
-  per SPEC §2.1).** deacon binds `forwardPorts`/`appPort` with `docker -p` by
-  default (`--auto-forward` suppresses this for the loopback daemon). The
-  reference treats `forwardPorts` as forwarding *hints* and never binds them, so
-  a real config declaring common ports (3000/8080/9229…) makes deacon `up`
-  **bomb on a host-port conflict** where the reference succeeds. Documented
-  design, but a real-world UX risk worth revisiting (e.g. fail-soft on bind
-  conflict for `forwardPorts`).
 - **Observation — `remoteWorkspaceFolder: "/workspaces"`** reported by `up` for
   image configs without an explicit `workspaceFolder` (spec default is
   `/workspaces/${localWorkspaceFolderBasename}`). Worth verifying against the
@@ -115,10 +131,9 @@ Unit test `test_container_workspace_folder_seeded_from_explicit_workspace_folder
   (`bind source path does not exist`) — docker-level, identical in the reference.
   (`mounts-bind-localenv` was adjusted to bind an existing path.) Confirms
   `${localWorkspaceFolder}`/`${localEnv:…}` are substituted in mount strings.
-- `forwardPorts`/`appPort` host-port already in use → `docker -p` bind conflict.
-  Environmental; see the `forwardPorts` divergence above. (`ports-mixed` uses
-  uncommon ports.) The `127.0.0.1:HOST:CONTAINER` host-IP form is passed through
-  to `-p` unchanged (loopback bind preserved, not silently widened to 0.0.0.0).
+- `appPort` host-port already in use → `docker -p` bind conflict (environmental;
+  `ports-mixed` uses uncommon ports). Note: after fix #6 `forwardPorts` are no
+  longer bound, so they cannot cause this.
 
 ## Corpus (20 configs)
 
