@@ -64,6 +64,9 @@ pub struct InjectionOutcome {
 fn install_core_script() -> String {
     format!(
         r#"
+# Belt-and-suspenders root check: the runtime wrapper already gates non-root
+# before this runs, and the build path is always root — but keep it so any
+# future direct caller of the core is still covered.
 if [ "$(id -u 2>/dev/null || echo 1)" != "0" ]; then
   echo "deacon: host-CA install needs root; falling back to env-var-only" 1>&2
   exit {not_root}

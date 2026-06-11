@@ -124,7 +124,13 @@ fn der_sequence_content(raw: &[u8]) -> Option<&[u8]> {
 
 /// SHA-256 over the SPKI **content** (matching the webpki anchor encoding).
 fn spki_content_hash(spki_raw: &[u8]) -> [u8; 32] {
-    let content = der_sequence_content(spki_raw).unwrap_or(spki_raw);
+    // A malformed SPKI header can't be matched against the content-only public
+    // set; hashing the full raw then diverges from webpki and the cert would be
+    // (conservatively) treated as corporate. Log it so the divergence is visible.
+    let content = der_sequence_content(spki_raw).unwrap_or_else(|| {
+        debug!("SPKI is not a definite-length SEQUENCE; hashing raw (may not match public set)");
+        spki_raw
+    });
     let mut hasher = Sha256::new();
     hasher.update(content);
     hasher.finalize().into()
@@ -168,12 +174,17 @@ fn public_spki_hashes() -> HashSet<[u8; 32]> {
 /// Render a DER cert as a PEM `CERTIFICATE` block (64-char base64 lines).
 fn der_to_pem(der: &[u8]) -> String {
     use base64::Engine;
+    // base64 STANDARD output is pure ASCII, so byte-index slicing is valid
+    // UTF-8 — no `unwrap`/`from_utf8` needed in this runtime path.
     let b64 = base64::engine::general_purpose::STANDARD.encode(der);
     let mut out = String::with_capacity(b64.len() + 64);
     out.push_str("-----BEGIN CERTIFICATE-----\n");
-    for chunk in b64.as_bytes().chunks(64) {
-        out.push_str(std::str::from_utf8(chunk).unwrap());
+    let mut i = 0;
+    while i < b64.len() {
+        let end = (i + 64).min(b64.len());
+        out.push_str(&b64[i..end]);
         out.push('\n');
+        i = end;
     }
     out.push_str("-----END CERTIFICATE-----\n");
     out

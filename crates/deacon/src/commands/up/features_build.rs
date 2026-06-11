@@ -13,12 +13,13 @@ use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::dockerfile_generator::{
     DockerfileConfig, DockerfileGenerator, FeatureInstallEnv, HOST_CA_BUILD_CONTEXT,
+    HOST_CA_MOUNT_TARGET,
 };
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{
     FeatureDependencyResolver, InstallationPlan, OptionValue, ResolvedFeature,
 };
-use deacon_core::host_ca::{CorporateCaSet, HOST_CA_BUNDLE_PATH, build_install_script};
+use deacon_core::host_ca::{CorporateCaSet, build_install_script};
 use deacon_core::lockfile::{Lockfile, LockfileFeature};
 use deacon_core::oci::{DownloadedFeature, FeatureRef, default_fetcher};
 use deacon_core::registry_parser::parse_registry_reference;
@@ -35,10 +36,9 @@ async fn stage_host_ca_context(temp_dir: &Path, set: &CorporateCaSet) -> Result<
     let dir = temp_dir.join("deacon-ca");
     tokio::fs::create_dir_all(&dir).await?;
     tokio::fs::write(dir.join("host-ca.crt"), set.pem_bundle.as_bytes()).await?;
-    // The script reads the bundle from the mount target inside the build and
-    // installs it to the canonical in-container path (HOST_CA_BUNDLE_PATH).
-    let _ = HOST_CA_BUNDLE_PATH;
-    let script = build_install_script(&format!("{}/host-ca.crt", "/tmp/deacon-ca"));
+    // The script reads the bundle from the build mount target (same constant the
+    // generated RUN step mounts it at) and installs it to the canonical path.
+    let script = build_install_script(&format!("{HOST_CA_MOUNT_TARGET}/host-ca.crt"));
     tokio::fs::write(dir.join("install.sh"), script.as_bytes()).await?;
     Ok(dir)
 }

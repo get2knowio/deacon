@@ -21,7 +21,8 @@ pub const HOST_CA_BUILD_CONTEXT: &str = "deacon_ca_source";
 
 /// In-build mount target for [`HOST_CA_BUILD_CONTEXT`]. The context dir holds
 /// `host-ca.crt` (the PEM bundle) and `install.sh` (the shared install script).
-const HOST_CA_MOUNT_TARGET: &str = "/tmp/deacon-ca";
+/// Public so the caller staging the context references the same path.
+pub const HOST_CA_MOUNT_TARGET: &str = "/tmp/deacon-ca";
 
 /// The deterministic CA-install `RUN` step emitted before the feature loop when
 /// build-time host-CA injection is enabled. Byte-stable text; the per-build
