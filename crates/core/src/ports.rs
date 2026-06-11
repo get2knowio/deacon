@@ -304,7 +304,11 @@ impl PortForwardingManager {
                         event.local_port.unwrap_or(event.port)
                     );
                 }
-                OnAutoForward::OpenBrowser => {
+                OnAutoForward::OpenBrowser | OnAutoForward::OpenBrowserOnce => {
+                    // `openBrowserOnce` differs from `openBrowser` only in an
+                    // editor-UX detail (open the browser the first time vs every
+                    // time). A headless CLI has no browser, so both are surfaced
+                    // the same way; the distinction is moot here.
                     info!(
                         "Port {} is now available - would open browser at {}://localhost:{}",
                         event.port,
