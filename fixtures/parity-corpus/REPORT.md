@@ -1,8 +1,8 @@
 # Parity corpus — findings
 
-Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 10 corpus configs.
+Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 20 corpus configs.
 
-## Fixed in this PR (two real `up` "bombs")
+## Fixed in this PR (four real bugs)
 
 ### 1. `hostRequirements` hard-failed `up`/`build` (spec violation)
 
@@ -47,23 +47,58 @@ redundant and harmful.
 `node-ts` config now does a full clean `up` (container runs, correct image PATH,
 postCreate succeeds). (`crates/core/src/docker.rs`.)
 
+### 3. `build.args` (and the rest of `build`) were never variable-substituted
+
+A config with `build.args.FROM_LOCAL_ENV = "${localEnv:USER}"` passed the
+**literal template** straight to `docker build` — the build received
+`${localEnv:USER}` instead of the resolved value, breaking arg-driven builds.
+`apply_variable_substitution` covered `image`, `mounts`, `containerEnv`, etc. but
+never touched the `build` object.
+
+**Fix:** recursively substitute the whole `build` JSON value (args / dockerfile /
+context / target / cacheFrom) in both `apply_variable_substitution` and the
+`_advanced` variant. Unit test `test_substitution_covers_build_args`; verified
+end-to-end (a build arg `${localEnv:USER}` now reaches the image as `vscode`).
+(`crates/core/src/config.rs`.)
+
+### 4. `${containerWorkspaceFolder}` left literal when `workspaceFolder` is set
+
+`containerEnv.APP_DIR = "${containerWorkspaceFolder}"` with `workspaceFolder:
+/srv/app` left the literal template; the reference resolves it to `/srv/app`.
+
+**Fix:** when the config sets an explicit (literal) `workspaceFolder`, seed the
+substitution context's `container_workspace_folder` from it (that *is* the
+container workspace folder, and it's correct for `up` too). When unset, we still
+defer to the container-aware pass during `up` so we never bake a wrong default.
+Unit test `test_container_workspace_folder_seeded_from_explicit_workspace_folder`.
+(`crates/core/src/config.rs`.)
+
 ## Open follow-ups (found, not yet fixed)
 
-- **`remoteEnv` `${containerEnv:VAR}` not resolved at exec time** (bug #2, same
-  class as the read-config gap below). After fix #2 the container starts cleanly,
-  but the remoteEnv PATH-append (`/custom/bin`) is silently dropped at exec (the
-  literal is applied then overridden by the login shell). Non-bombing; needs
-  `build_effective_env`/remoteEnv substitution to resolve `${containerEnv:…}`
-  against the probed container env.
-- **Tier-1 divergence A — `${containerWorkspaceFolder}` not substituted in
-  `read-configuration` without a container.** deacon leaves the literal; the
-  reference resolves it to the workspace path. (`universal-jsonc`.) Container
-  exists → it resolves correctly during `up`; only the no-container read-config
-  path leaks the literal.
-- **Tier-1 divergence B — `extends` output shape.** The reference returns the
-  *raw* child config with `extends` preserved (defers the merge to `up`); deacon
+- **`remoteEnv` `${containerEnv:VAR}` not resolved at exec time** (same class as
+  divergence A below). After fix #2 the container starts cleanly, but a remoteEnv
+  PATH-append (`/custom/bin`) is silently dropped at exec (the literal is applied
+  then overridden by the login shell). Non-bombing; needs `build_effective_env`
+  to resolve `${containerEnv:…}` against the probed container env.
+- **Divergence A (residual) — `${containerWorkspaceFolder}` without an explicit
+  `workspaceFolder`.** Now fixed for the common case (workspaceFolder set, fix
+  #4). The residual case — no `workspaceFolder`, `read-configuration` with no
+  container — still leaks the literal (`universal-jsonc`). The reference falls
+  back to the host workspace path; the spec-correct value would be
+  `/workspaces/<basename>`. Resolving it in the shared loader risks corrupting
+  `up`'s container-aware pass, so deferred pending a read-config-only seam.
+- **Divergence B — `extends` output shape.** The reference returns the *raw*
+  child config with `extends` preserved (defers the merge to `up`); deacon
   eagerly merges via `load_with_extends` and drops `extends`. Functionally
   equivalent at `up`; differs only in read-config presentation.
+- **`forwardPorts` published via static `-p` at create (divergence, intentional
+  per SPEC §2.1).** deacon binds `forwardPorts`/`appPort` with `docker -p` by
+  default (`--auto-forward` suppresses this for the loopback daemon). The
+  reference treats `forwardPorts` as forwarding *hints* and never binds them, so
+  a real config declaring common ports (3000/8080/9229…) makes deacon `up`
+  **bomb on a host-port conflict** where the reference succeeds. Documented
+  design, but a real-world UX risk worth revisiting (e.g. fail-soft on bind
+  conflict for `forwardPorts`).
 - **Observation — `remoteWorkspaceFolder: "/workspaces"`** reported by `up` for
   image configs without an explicit `workspaceFolder` (spec default is
   `/workspaces/${localWorkspaceFolderBasename}`). Worth verifying against the
@@ -76,3 +111,21 @@ postCreate succeeds). (`crates/core/src/docker.rs`.)
   environment (dind needs `--privileged`; identical failure, identical container
   ID → identity parity). Environmental, not a deacon defect. The `node-ts`
   fixture drops dind/`--init` to stay a reliable green entry.
+- A bind mount whose source path does not exist fails at `docker create`
+  (`bind source path does not exist`) — docker-level, identical in the reference.
+  (`mounts-bind-localenv` was adjusted to bind an existing path.) Confirms
+  `${localWorkspaceFolder}`/`${localEnv:…}` are substituted in mount strings.
+- `forwardPorts`/`appPort` host-port already in use → `docker -p` bind conflict.
+  Environmental; see the `forwardPorts` divergence above. (`ports-mixed` uses
+  uncommon ports.) The `127.0.0.1:HOST:CONTAINER` host-IP form is passed through
+  to `-p` unchanged (loopback bind preserved, not silently widened to 0.0.0.0).
+
+## Corpus (20 configs)
+
+image+features (`node-ts`, `python-features`, `go-minimal`, `dotnet-mounts`,
+`feature-order`), Dockerfile build (`dockerfile-build`, `build-args-subst`),
+compose (`compose-postgres`, `compose-array`), jsonc/kitchen-sink
+(`universal-jsonc`), lifecycle forms (`lifecycle-arrays`, `lifecycle-mixed`),
+extends (`extends-child`), substitution (`containerenv-subst`, `name-subst`,
+`workspacefolder-custom`), mounts (`mounts-bind-localenv`), ports (`ports-mixed`),
+user mapping (`user-mapping`), security (`init-privileged`).

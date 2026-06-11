@@ -764,6 +764,20 @@ impl DevContainerConfig {
             ));
         }
 
+        // Substitute build config: build.args / dockerfile / context / target /
+        // cacheFrom commonly carry `${localEnv:*}` / `${localWorkspaceFolder}`
+        // template strings (e.g. `"args": {"USER": "${localEnv:USER}"}`). The
+        // reference CLI substitutes these; deacon was passing the literal
+        // template straight to `docker build`. The whole JSON value is
+        // recursively substituted (string leaves only).
+        if let Some(ref build) = config.build {
+            config.build = Some(VariableSubstitution::substitute_json_value(
+                build,
+                context,
+                &mut report,
+            ));
+        }
+
         // Substitute workspace_folder
         if let Some(ref workspace_folder) = config.workspace_folder {
             config.workspace_folder = Some(VariableSubstitution::substitute_string(
@@ -970,6 +984,14 @@ impl DevContainerConfig {
                 context,
                 options,
                 report,
+            )?);
+        }
+
+        // Substitute build config (build.args / dockerfile / context / target /
+        // cacheFrom) — see apply_variable_substitution for rationale.
+        if let Some(ref build) = config.build {
+            config.build = Some(VariableSubstitution::substitute_json_value_with_options(
+                build, context, options, report,
             )?);
         }
 
@@ -2532,6 +2554,21 @@ impl ConfigLoader {
         // Apply variable substitution with secrets
         let mut substitution_context = crate::variable::SubstitutionContext::new(workspace_path)?;
 
+        // When the config sets an explicit `workspaceFolder`, that IS the
+        // container workspace folder, so `${containerWorkspaceFolder}` can be
+        // resolved now (matches the reference CLI, which resolves it to the
+        // configured folder). When unset we leave it for the container-aware
+        // pass during `up` (derived from the real mount target), so we don't
+        // bake a wrong default here.
+        if let Some(ref wf) = merged.workspace_folder {
+            // Only seed from a literal folder; if it carries its own `${...}`
+            // template, defer to the container-aware pass rather than seeding a
+            // template that would leak into `${containerWorkspaceFolder}`.
+            if !wf.trim().is_empty() && !wf.contains("${") {
+                substitution_context.container_workspace_folder = Some(wf.clone());
+            }
+        }
+
         // Add secrets to local environment for substitution
         if let Some(secrets) = secrets {
             for (key, value) in secrets.as_env_vars() {
@@ -3548,6 +3585,78 @@ mod tests {
             .unwrap();
         assert!(compose_file.ends_with("/compose.yml"));
         assert!(!compose_file.contains("${"));
+    }
+
+    #[test]
+    fn test_substitution_covers_build_args() {
+        // apply_variable_substitution must expand variables inside the `build`
+        // object (notably build.args), which flow straight into `docker build`.
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = temp_dir.path();
+        let mut context = SubstitutionContext::new(workspace).unwrap();
+        context
+            .local_env
+            .insert("USER".to_string(), "alice".to_string());
+
+        let config = DevContainerConfig {
+            build: Some(serde_json::json!({
+                "dockerfile": "Dockerfile",
+                "args": {
+                    "FROM_LOCAL_ENV": "${localEnv:USER}",
+                    "WS": "${localWorkspaceFolderBasename}",
+                    "LITERAL": "plain"
+                }
+            })),
+            ..Default::default()
+        };
+        let (substituted, _) = config.apply_variable_substitution(&context);
+        let args = substituted
+            .build
+            .as_ref()
+            .and_then(|b| b.get("args"))
+            .unwrap();
+        assert_eq!(
+            args.get("FROM_LOCAL_ENV").and_then(|v| v.as_str()),
+            Some("alice")
+        );
+        assert_eq!(args.get("LITERAL").and_then(|v| v.as_str()), Some("plain"));
+        // No unresolved templates remain anywhere in the build object.
+        assert!(!substituted.build.unwrap().to_string().contains("${"));
+    }
+
+    #[test]
+    fn test_container_workspace_folder_seeded_from_explicit_workspace_folder() {
+        // When the config sets an explicit (literal) workspaceFolder,
+        // `${containerWorkspaceFolder}` must resolve to it (matches the
+        // reference CLI) rather than leaking the literal template.
+        use crate::config::ConfigLoader;
+        let temp_dir = TempDir::new().unwrap();
+        let dc_dir = temp_dir.path().join(".devcontainer");
+        std::fs::create_dir_all(&dc_dir).unwrap();
+        let config_path = dc_dir.join("devcontainer.json");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "image": "debian:bookworm-slim",
+                "workspaceFolder": "/srv/app",
+                "containerEnv": { "APP_DIR": "${containerWorkspaceFolder}" }
+            }"#,
+        )
+        .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (config, _report) = rt
+            .block_on(ConfigLoader::load_with_overrides_and_substitution(
+                &config_path,
+                None,
+                None,
+                temp_dir.path(),
+            ))
+            .unwrap();
+        assert_eq!(
+            config.container_env.get("APP_DIR").map(String::as_str),
+            Some("/srv/app")
+        );
     }
 
     #[test]

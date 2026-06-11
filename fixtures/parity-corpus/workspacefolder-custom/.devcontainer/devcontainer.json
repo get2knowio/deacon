@@ -1,0 +1,9 @@
+{
+  "name": "Custom workspaceFolder",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "workspaceFolder": "/srv/app",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/srv/app,type=bind,consistency=cached",
+  "containerEnv": { "APP_DIR": "${containerWorkspaceFolder}" },
+  "postCreateCommand": "pwd && test -d /srv/app && echo workspace-ok",
+  "remoteUser": "vscode"
+}

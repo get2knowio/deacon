@@ -1,0 +1,5 @@
+{
+  "name": "Dev ${localWorkspaceFolderBasename}",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "remoteUser": "vscode"
+}

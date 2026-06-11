@@ -1,0 +1,14 @@
+{
+  "name": "Lifecycle mixed forms",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "onCreateCommand": "echo on-create-string",
+  "updateContentCommand": ["bash", "-c", "echo update-content-array"],
+  "postCreateCommand": {
+    "lint": ["bash", "-c", "echo lint"],
+    "deps": "echo deps"
+  },
+  "postStartCommand": ["echo", "post-start-array"],
+  "postAttachCommand": "echo post-attach-string",
+  "waitFor": "postCreateCommand",
+  "remoteUser": "vscode"
+}

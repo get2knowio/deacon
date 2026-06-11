@@ -1,0 +1,12 @@
+{
+  "name": "Mixed port specs",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "forwardPorts": [39001, "39002", "127.0.0.1:39080:39080"],
+  "appPort": [39004, "39006:39006"],
+  "portsAttributes": {
+    "39001": { "label": "web", "onAutoForward": "notify", "protocol": "http" },
+    "39002": { "label": "db", "onAutoForward": "silent" }
+  },
+  "otherPortsAttributes": { "onAutoForward": "ignore" },
+  "remoteUser": "vscode"
+}
