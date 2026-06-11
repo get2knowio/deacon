@@ -25,12 +25,47 @@ use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::Docker;
 use deacon_core::docker::ExecConfig;
 use deacon_core::errors::{DeaconError, DockerError};
+use deacon_core::host_ca::{CA_ENV_VARS, CorporateCaSet, HOST_CA_BUNDLE_PATH, inject_runtime};
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ComposeState, StateManager};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
+
+/// Resolve the primary service container ID, retrying with exponential backoff
+/// to absorb the brief window between `docker compose up` returning and the
+/// container appearing in `docker compose ps`. Shared by the host-CA injection
+/// step (before post-create) and the final result assembly.
+async fn resolve_primary_container_id_with_retry(
+    compose_manager: &ComposeManager,
+    project: &ComposeProject,
+) -> Result<String> {
+    let mut attempts = 0;
+    const MAX_ATTEMPTS: u32 = 10;
+    const INITIAL_DELAY_MS: u64 = 100;
+
+    loop {
+        match compose_manager.get_primary_container_id(project).await? {
+            Some(id) => break Ok(id),
+            None if attempts < MAX_ATTEMPTS => {
+                attempts += 1;
+                let delay = Duration::from_millis(INITIAL_DELAY_MS * 2u64.pow(attempts - 1));
+                debug!(
+                    "Waiting for container to be ready, attempt {}/{}, waiting {:?}",
+                    attempts, MAX_ATTEMPTS, delay
+                );
+                tokio::time::sleep(delay).await;
+            }
+            None => {
+                break Err(anyhow::anyhow!(
+                    "Failed to get primary container ID after starting compose project (tried {} times)",
+                    MAX_ATTEMPTS
+                ));
+            }
+        }
+    }
+}
 
 /// Execute up for Docker Compose configurations
 #[allow(clippy::needless_borrows_for_generic_args)] // config borrowed twice for serialization
@@ -46,6 +81,7 @@ pub(crate) async fn execute_compose_up(
     effective_env: &IndexMap<String, String>,
     config_path: &Path,
     runtime: &ContainerRuntimeImpl,
+    host_ca_set: Option<&CorporateCaSet>,
 ) -> Result<UpContainerInfo> {
     debug!("Starting Docker Compose project");
 
@@ -128,6 +164,18 @@ pub(crate) async fn execute_compose_up(
     // Apply remote env to compose services
     if !effective_env.is_empty() {
         project.additional_env = effective_env.clone();
+    }
+
+    // Host-CA env (016, T028): synthesize the six CA env vars into the primary
+    // service environment, insert-if-absent so user remoteEnv/containerEnv win
+    // (FR-024). Applied after the user env above so user values take precedence.
+    if host_ca_set.is_some() {
+        for name in CA_ENV_VARS {
+            project
+                .additional_env
+                .entry(name.to_string())
+                .or_insert_with(|| HOST_CA_BUNDLE_PATH.to_string());
+        }
     }
 
     // Per T006: Mount/env injection is now handled via ComposeManager::start_project()
@@ -243,6 +291,9 @@ pub(crate) async fn execute_compose_up(
                     external_volumes_preserved: None,
                     configuration,
                     merged_configuration,
+                    injected_ca_subjects: host_ca_set
+                        .map(|s| s.subjects.clone())
+                        .unwrap_or_default(),
                 });
             }
             Ok(false) => {
@@ -293,6 +344,7 @@ pub(crate) async fn execute_compose_up(
         workspace_folder,
         config_path,
         workspace_hash,
+        host_ca_set,
     )
     .await?;
 
@@ -320,6 +372,14 @@ pub(crate) async fn execute_compose_up(
         .await?;
 
     info!("Compose project {} started successfully", project.name);
+
+    // Host-CA runtime injection (016, T027): install the corporate CA into the
+    // primary service container BEFORE the compose post-create lifecycle hook.
+    if let Some(set) = host_ca_set {
+        let container_id =
+            resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
+        let _ = inject_runtime(runtime, &container_id, set).await?;
+    }
 
     // Save compose state for shutdown tracking
     let compose_state = ComposeState {
@@ -373,32 +433,7 @@ pub(crate) async fn execute_compose_up(
 
     // Collect container information for JSON output
     // Retry getting container ID with exponential backoff to handle race conditions
-    let container_id = {
-        let mut attempts = 0;
-        const MAX_ATTEMPTS: u32 = 10;
-        const INITIAL_DELAY_MS: u64 = 100;
-
-        loop {
-            match compose_manager.get_primary_container_id(&project).await? {
-                Some(id) => break id,
-                None if attempts < MAX_ATTEMPTS => {
-                    attempts += 1;
-                    let delay = Duration::from_millis(INITIAL_DELAY_MS * 2u64.pow(attempts - 1));
-                    debug!(
-                        "Waiting for container to be ready, attempt {}/{}, waiting {:?}",
-                        attempts, MAX_ATTEMPTS, delay
-                    );
-                    tokio::time::sleep(delay).await;
-                }
-                None => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to get primary container ID after starting compose project (tried {} times)",
-                        MAX_ATTEMPTS
-                    ));
-                }
-            }
-        }
-    };
+    let container_id = resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
 
     // Start the detached port forwarder for the primary service container if
     // requested. Declared `"service:port"` specs relay over the compose network
@@ -517,6 +552,7 @@ pub(crate) async fn execute_compose_up(
         external_volumes_preserved,
         configuration,
         merged_configuration,
+        injected_ca_subjects: host_ca_set.map(|s| s.subjects.clone()).unwrap_or_default(),
     })
 }
 
@@ -603,6 +639,7 @@ async fn install_features_for_compose(
     workspace_folder: &Path,
     config_path: &Path,
     workspace_hash: &str,
+    host_ca_set: Option<&CorporateCaSet>,
 ) -> Result<Option<FeatureBuildOutput>> {
     let output = match resolve_compose_feature_image(
         config,
@@ -611,6 +648,7 @@ async fn install_features_for_compose(
         workspace_folder,
         config_path,
         workspace_hash,
+        host_ca_set,
     )
     .await?
     {
@@ -637,6 +675,7 @@ pub(crate) async fn resolve_compose_feature_image(
     workspace_folder: &Path,
     config_path: &Path,
     workspace_hash: &str,
+    host_ca_set: Option<&CorporateCaSet>,
 ) -> Result<Option<FeatureBuildOutput>> {
     // Nothing to install when features is missing or an empty object.
     let features_obj = match config.features.as_object() {
@@ -688,6 +727,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 workspace_folder,
                 config_path,
                 None,
+                host_ca_set,
             )
             .await
             .with_context(|| {
@@ -763,6 +803,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 config_path,
                 target.as_deref(),
                 None,
+                host_ca_set,
             )
             .await
             .with_context(|| {

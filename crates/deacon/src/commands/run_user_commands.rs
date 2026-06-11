@@ -49,7 +49,7 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
 
     // Load configuration with override and secrets support via shared helper
     let ConfigLoadResult {
-        config,
+        mut config,
         workspace_folder,
         ..
     } = load_config(ConfigLoadArgs {
@@ -114,6 +114,28 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
     };
 
     info!("Found target container: {}", container_id);
+
+    // Host-CA reconnect (016, T033): re-apply the six CA env vars from the
+    // container's `devcontainer.deacon.hostCaBundlePath` label (no re-discovery,
+    // no activation re-resolve) into containerEnv, insert-if-absent so user
+    // values win. Mirrors `exec`.
+    {
+        let docker_client = deacon_core::docker::CliDocker::new();
+        if let Some(bundle_path) = crate::commands::shared::host_ca::read_host_ca_bundle_path(
+            &docker_client,
+            &container_id,
+        )
+        .await
+        {
+            for name in deacon_core::host_ca::CA_ENV_VARS {
+                config
+                    .container_env
+                    .entry(name.to_string())
+                    .or_insert_with(|| bundle_path.clone());
+            }
+            debug!("Re-applied host-CA env vars from container labels (no re-discovery)");
+        }
+    }
 
     // Execute lifecycle commands
     execute_lifecycle_commands(&container_id, &config, workspace_folder.as_path(), &args).await?;

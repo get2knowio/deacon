@@ -12,6 +12,7 @@ use anyhow::{Context, Result, anyhow};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+use deacon_core::host_ca::{CorporateCaSet, discover_corporate_set};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -75,6 +76,11 @@ pub struct BuildArgs {
     /// lifted into a shared helper before `build` can consume it.
     #[allow(dead_code)]
     pub frozen_lockfile: bool,
+
+    /// Resolved host-CA injection activation (016). Resolved at the CLI tier
+    /// from `--inject-host-ca` > `DEACON_INJECT_HOST_CA` > `settings.json`
+    /// (never the workspace — FR-015).
+    pub host_ca_activation: deacon_core::host_ca::HostCaActivation,
 }
 
 impl Default for BuildArgs {
@@ -114,6 +120,7 @@ impl Default for BuildArgs {
             skip_feature_auto_mapping: false,
             no_lockfile: false,
             frozen_lockfile: false,
+            host_ca_activation: deacon_core::host_ca::HostCaActivation::Off,
         }
     }
 }
@@ -353,6 +360,15 @@ pub struct BuildResult {
     pub metadata: HashMap<String, String>,
     /// Configuration hash for caching
     pub config_hash: String,
+    /// Subject DNs of corporate CAs injected at build time (016, FR-028).
+    /// Additive; omitted (and defaulted on read) when injection was off or
+    /// yielded zero certs so the default output stays byte-stable (FR-029).
+    #[serde(
+        rename = "injectedCaSubjects",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub injected_ca_subjects: Vec<String>,
 }
 
 /// Build metadata stored in cache
@@ -689,6 +705,20 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
         dockerfile: Some(build_config.dockerfile.clone()),
     })?;
 
+    // Host-CA discovery for build-time injection (016, T039). Activation is
+    // resolved at the CLI tier from machine-owner sources only (CLI flag > env >
+    // settings) — never from the workspace config (FR-015); see the guard in
+    // `resolve_host_ca_activation_cli`. Discover once and reuse for whichever
+    // feature-layering path runs. An empty set means "nothing to inject".
+    let host_ca_set: Option<CorporateCaSet> = if args.host_ca_activation.is_enabled() {
+        let span = tracing::info_span!("ca.discover", mode = args.host_ca_activation.mode_str());
+        let _guard = span.enter();
+        let set = discover_corporate_set(&args.host_ca_activation)?;
+        if set.is_empty() { None } else { Some(set) }
+    } else {
+        None
+    };
+
     // Dispatch to appropriate build function based on configuration type
     let result = if config.uses_compose() {
         if features_present {
@@ -701,6 +731,7 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
                 &config_path,
                 &labels,
                 &config_hash,
+                host_ca_set.as_ref(),
             )
             .await
         } else {
@@ -764,9 +795,14 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             .first()
             .cloned()
             .unwrap_or_else(|| result.image_id.clone());
-        let (feature_image, lockfile) =
-            apply_features_and_lockfile(&config, &base_ref, &workspace_folder, &config_path)
-                .await?;
+        let (feature_image, lockfile) = apply_features_and_lockfile(
+            &config,
+            &base_ref,
+            &workspace_folder,
+            &config_path,
+            host_ca_set.as_ref(),
+        )
+        .await?;
 
         // Re-point the base build's tags (the deterministic `deacon-build:<hash>`
         // tag plus any `--image-name`s) at the feature-extended image. Without
@@ -788,6 +824,10 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
         build_duration: build_duration.as_secs_f64(),
         metadata: result.metadata,
         config_hash: config_hash.clone(),
+        injected_ca_subjects: host_ca_set
+            .as_ref()
+            .map(|s| s.subjects.clone())
+            .unwrap_or_default(),
     };
 
     if let Some(path) = feature_lockfile {
@@ -1272,6 +1312,9 @@ async fn execute_compose_build(
         tags: image_names,
         build_duration,
         metadata,
+        // Non-features compose build generates no feature-layering Dockerfile,
+        // so build-time host-CA injection does not apply here (FR-018a).
+        injected_ca_subjects: Vec::new(),
         config_hash: config_hash.to_string(),
     })
 }
@@ -1292,6 +1335,7 @@ async fn execute_compose_build_with_features(
     config_path: &Path,
     labels: &[(String, String)],
     config_hash: &str,
+    host_ca_set: Option<&CorporateCaSet>,
 ) -> Result<BuildResult> {
     use crate::commands::up::compose::resolve_compose_feature_image;
     use deacon_core::compose::ComposeManager;
@@ -1327,6 +1371,7 @@ async fn execute_compose_build_with_features(
         workspace_folder,
         config_path,
         &workspace_hash,
+        host_ca_set,
     )
     .await?
     .ok_or_else(|| anyhow!("Compose feature build produced no image (no features declared?)"))?;
@@ -1371,6 +1416,7 @@ async fn execute_compose_build_with_features(
         build_duration: 0.0,
         metadata,
         config_hash: config_hash.to_string(),
+        injected_ca_subjects: host_ca_set.map(|s| s.subjects.clone()).unwrap_or_default(),
     })
 }
 
@@ -1511,6 +1557,7 @@ async fn apply_features_and_lockfile(
     built_image_id: &str,
     workspace_folder: &Path,
     config_path: &Path,
+    host_ca_set: Option<&CorporateCaSet>,
 ) -> Result<(String, Option<PathBuf>)> {
     use crate::commands::up::features_build::build_image_with_features;
     use deacon_core::container::ContainerIdentity;
@@ -1539,6 +1586,7 @@ async fn apply_features_and_lockfile(
         workspace_folder,
         config_path,
         None,
+        host_ca_set,
     )
     .await
     .context("Failed to build feature-extended image from build output")?;
@@ -1929,6 +1977,9 @@ async fn execute_docker_build(
             build_duration: 0.0, // Will be set by caller
             metadata,
             config_hash: config_hash.to_string(),
+            // Base build; feature-layering (and thus build-time host-CA
+            // injection) is applied by the post-build pass in `execute_build`.
+            injected_ca_subjects: Vec::new(),
         };
 
         debug!("Docker build completed successfully");
@@ -2519,6 +2570,7 @@ mod tests {
             tags: vec!["myapp:latest".to_string()],
             metadata,
             config_hash: "hash123secret".to_string(),
+            injected_ca_subjects: Vec::new(),
             build_duration: 1.5,
         };
 
@@ -2965,6 +3017,7 @@ mod tests {
                 map
             },
             config_hash: "hash123".to_string(),
+            injected_ca_subjects: Vec::new(),
         };
 
         let inputs = BuildInputs {

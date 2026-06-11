@@ -25,6 +25,9 @@ use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::features::{
     build_entrypoint_chain, generate_wrapper_script, merge_security_options,
 };
+use deacon_core::host_ca::{
+    CorporateCaSet, HOST_CA_BUNDLE_PATH, apply_ca_env_vars, inject_runtime,
+};
 use deacon_core::mount::merge_mounts;
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ContainerState, StateManager};
@@ -81,11 +84,20 @@ pub(crate) async fn execute_container_up(
     config_path: &Path,
     cache_folder: &Option<PathBuf>,
     build_options: &BuildOptions,
+    host_ca_set: Option<&CorporateCaSet>,
 ) -> Result<UpContainerInfo> {
     debug!("Starting traditional development container");
 
     // Merge CLI forward_ports into config
     let mut config = config.clone();
+
+    // Host-CA injection (016, T028): synthesize the six CA env vars into the
+    // container environment at create time, insert-if-absent so user
+    // containerEnv values win (FR-024). The canonical bundle is written by the
+    // runtime install step below; these vars point at it.
+    if host_ca_set.is_some() {
+        apply_ca_env_vars(&mut config.container_env, HOST_CA_BUNDLE_PATH);
+    }
 
     // Warn if workspace_mount_consistency is specified but workspace_mount is already defined
     if config.workspace_mount.is_some() && args.workspace_mount_consistency.is_some() {
@@ -255,6 +267,7 @@ pub(crate) async fn execute_container_up(
             workspace_folder,
             config_path,
             Some(build_options),
+            host_ca_set,
         )
         .await
         .with_context(|| "Failed to build feature-extended image")?;
@@ -604,6 +617,15 @@ pub(crate) async fn execute_container_up(
         container_result.image_id
     );
 
+    // Host-CA runtime injection (016, T026): stream the corporate bundle into
+    // the running container and install it into the distro trust store BEFORE
+    // any lifecycle hook runs, so onCreate/postCreate network calls trust the
+    // proxy CA. Runs only when discovery produced a non-empty set; degrades to
+    // env-var-only (already-set vars) on unsupported distro / non-root.
+    if let Some(set) = host_ca_set {
+        let _ = inject_runtime(runtime, &container_result.container_id, set).await?;
+    }
+
     // Save container state for shutdown tracking
     let container_state = ContainerState {
         container_id: container_result.container_id.clone(),
@@ -797,6 +819,7 @@ pub(crate) async fn execute_container_up(
         external_volumes_preserved: None,
         configuration,
         merged_configuration,
+        injected_ca_subjects: host_ca_set.map(|s| s.subjects.clone()).unwrap_or_default(),
     })
 }
 

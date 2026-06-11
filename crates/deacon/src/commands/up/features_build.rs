@@ -11,17 +11,37 @@ use anyhow::{Context, Result};
 use deacon_core::build::BuildOptions;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
-use deacon_core::dockerfile_generator::{DockerfileConfig, DockerfileGenerator, FeatureInstallEnv};
+use deacon_core::dockerfile_generator::{
+    DockerfileConfig, DockerfileGenerator, FeatureInstallEnv, HOST_CA_BUILD_CONTEXT,
+};
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{
     FeatureDependencyResolver, InstallationPlan, OptionValue, ResolvedFeature,
 };
+use deacon_core::host_ca::{CorporateCaSet, HOST_CA_BUNDLE_PATH, build_install_script};
 use deacon_core::lockfile::{Lockfile, LockfileFeature};
 use deacon_core::oci::{DownloadedFeature, FeatureRef, default_fetcher};
 use deacon_core::registry_parser::parse_registry_reference;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
+
+/// Stage the corporate-CA bundle + install script into a build-context dir for
+/// build-time host-CA injection (016, T038). The generated Dockerfile mounts
+/// this dir at `/tmp/deacon-ca` and runs `install.sh`, which copies
+/// `host-ca.crt` to the canonical path and updates the distro trust store.
+/// Deterministic content → byte-stable layer for a given CA set (FR-017).
+async fn stage_host_ca_context(temp_dir: &Path, set: &CorporateCaSet) -> Result<PathBuf> {
+    let dir = temp_dir.join("deacon-ca");
+    tokio::fs::create_dir_all(&dir).await?;
+    tokio::fs::write(dir.join("host-ca.crt"), set.pem_bundle.as_bytes()).await?;
+    // The script reads the bundle from the mount target inside the build and
+    // installs it to the canonical in-container path (HOST_CA_BUNDLE_PATH).
+    let _ = HOST_CA_BUNDLE_PATH;
+    let script = build_install_script(&format!("{}/host-ca.crt", "/tmp/deacon-ca"));
+    tokio::fs::write(dir.join("install.sh"), script.as_bytes()).await?;
+    Ok(dir)
+}
 
 /// Output from building an image with features
 #[derive(Debug, Clone)]
@@ -77,6 +97,7 @@ pub(crate) async fn build_image_with_features(
     _workspace_folder: &Path,
     config_path: &Path,
     build_options: Option<&BuildOptions>,
+    host_ca_set: Option<&CorporateCaSet>,
 ) -> Result<FeatureBuildOutput> {
     use deacon_core::docker::CliDocker;
 
@@ -121,11 +142,23 @@ pub(crate) async fn build_image_with_features(
         config.container_user.as_deref(),
         None,
     );
+
+    // Build-time host-CA injection (016, T038/T039): stage the bundle + script
+    // when a non-empty corporate set was supplied.
+    let host_ca_build_context = match host_ca_set {
+        Some(set) if !set.is_empty() => {
+            let dir = stage_host_ca_context(&staged.temp_dir, set).await?;
+            Some(dir.display().to_string())
+        }
+        _ => None,
+    };
+
     let dockerfile_config = DockerfileConfig {
         base_image: base_image.clone(),
         target_stage: "dev_containers_target_stage".to_string(),
         features_source_dir: staged.features_source_dir.display().to_string(),
         feature_install_env,
+        host_ca_build_context,
     };
 
     let generator = DockerfileGenerator::new(dockerfile_config.clone());
@@ -206,6 +239,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     config_path: &Path,
     target: Option<&str>,
     build_options: Option<&BuildOptions>,
+    host_ca_set: Option<&CorporateCaSet>,
 ) -> Result<FeatureBuildOutput> {
     use deacon_core::docker::CliDocker;
 
@@ -257,11 +291,18 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         config.container_user.as_deref(),
         None,
     );
+    // Build-time host-CA injection (016, T038): stage the bundle + script when a
+    // non-empty corporate set was supplied (compose `build:` shape).
+    let host_ca_dir = match host_ca_set {
+        Some(set) if !set.is_empty() => Some(stage_host_ca_context(&staged.temp_dir, set).await?),
+        _ => None,
+    };
     let dockerfile_config = DockerfileConfig {
         base_image: base_dockerfile_final_stage.to_string(),
         target_stage: target_stage_name.to_string(),
         features_source_dir: staged.features_source_dir.display().to_string(),
         feature_install_env,
+        host_ca_build_context: host_ca_dir.as_ref().map(|p| p.display().to_string()),
     };
     let generator = DockerfileGenerator::new(dockerfile_config.clone());
     let feature_stage =
@@ -311,6 +352,12 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         if !opts.is_default() {
             build_args.extend(opts.to_docker_args());
         }
+    }
+
+    // Build-time host-CA build context (016): mounted by the generated RUN step.
+    if let Some(ref ca_dir) = host_ca_dir {
+        build_args.push("--build-context".to_string());
+        build_args.push(format!("{}={}", HOST_CA_BUILD_CONTEXT, ca_dir.display()));
     }
 
     build_args.extend(vec![

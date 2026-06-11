@@ -374,6 +374,14 @@ pub enum Commands {
         #[arg(long)]
         ignore_host_requirements: bool,
 
+        /// Enable host-CA injection into the dev container (016).
+        ///
+        /// Omit the value for auto-discovery of corporate root CAs from the host
+        /// trust store; provide an absolute PEM path to inject that bundle
+        /// verbatim. Machine-owner controlled — never read from the workspace.
+        #[arg(long, num_args = 0..=1, default_missing_value = "auto", value_name = "PATH")]
+        inject_host_ca: Option<String>,
+
         // Compose
         /// Environment file(s) to pass to docker compose (can be repeated)
         #[arg(long)]
@@ -433,6 +441,12 @@ pub enum Commands {
         /// Ignore host requirements validation (log warnings instead of failing)
         #[arg(long)]
         ignore_host_requirements: bool,
+        /// Enable host-CA injection into the generated feature-layering
+        /// Dockerfile (016). Omit the value for auto-discovery; provide an
+        /// absolute PEM path to inject that bundle verbatim. Machine-owner
+        /// controlled — never read from the workspace.
+        #[arg(long, num_args = 0..=1, default_missing_value = "auto", value_name = "PATH")]
+        inject_host_ca: Option<String>,
         /// Environment file(s) to pass to docker compose (can be repeated)
         #[arg(long)]
         env_file: Vec<PathBuf>,
@@ -956,6 +970,33 @@ pub struct Cli {
     pub command: Option<Commands>,
 }
 
+/// Resolve the host-CA activation decision at the CLI tier (016, T013/T045).
+///
+/// Precedence: `--inject-host-ca` flag > `DEACON_INJECT_HOST_CA` env >
+/// `{user_data_folder}/settings.json` > Off.
+///
+/// **FR-015 trust boundary**: every input here is a machine-owner source —
+/// the CLI flag, the process environment, and the user-data settings file.
+/// **No workspace-resident value (devcontainer.json, anything under the
+/// workspace) is ever passed to this resolver.** Adding such a path would be a
+/// security regression (see SECURITY.md), so keep the three arguments below the
+/// only sources.
+fn resolve_host_ca_activation_cli(
+    flag: Option<String>,
+    user_data_folder: Option<&std::path::Path>,
+) -> Result<deacon_core::host_ca::HostCaActivation> {
+    use deacon_core::host_ca::{DEACON_INJECT_HOST_CA, resolve_host_ca_activation};
+    use deacon_core::settings::Settings;
+
+    let env = std::env::var(DEACON_INJECT_HOST_CA).ok();
+    let settings = Settings::load(user_data_folder)?;
+    Ok(resolve_host_ca_activation(
+        flag.as_deref(),
+        env.as_deref(),
+        &settings,
+    ))
+}
+
 impl Cli {
     fn normalized_terminal_dimensions(&self) -> Result<Option<TerminalDimensions>> {
         TerminalDimensions::new(self.terminal_columns, self.terminal_rows)
@@ -1192,6 +1233,7 @@ impl Cli {
                 shutdown,
                 container_name,
                 ignore_host_requirements,
+                inject_host_ca,
                 env_file,
             }) => {
                 use crate::commands::up::{UpArgs, execute_up};
@@ -1200,6 +1242,12 @@ impl Cli {
                 if no_lockfile && frozen_lockfile {
                     anyhow::bail!("--no-lockfile and --frozen-lockfile are mutually exclusive.");
                 }
+
+                // Machine-owner-only activation: flag > env > settings (FR-015).
+                let host_ca_activation = resolve_host_ca_activation_cli(
+                    inject_host_ca,
+                    self.user_data_folder.as_deref(),
+                )?;
 
                 let args = UpArgs {
                     id_label,
@@ -1259,6 +1307,7 @@ impl Cli {
                     force_tty_if_json: self.force_tty_if_json || json_format,
                     trust_workspace: self.trust_workspace,
                     trust_workspace_persist: self.trust_workspace_persist,
+                    host_ca_activation,
                 };
 
                 // Execute up and emit JSON output per contract (specs/001-up-gap-spec/contracts/up.md)
@@ -1305,6 +1354,12 @@ impl Cli {
                         if let Some(merged_config) = container_info.merged_configuration {
                             result = result.with_merged_configuration(merged_config);
                         }
+
+                        // Add injected corporate-CA subjects (016, FR-028). The
+                        // builder no-ops on an empty list, so the field stays
+                        // omitted for the unconfigured path (byte-stable output).
+                        result =
+                            result.with_injected_ca_subjects(container_info.injected_ca_subjects);
 
                         // Emit JSON to stdout
                         let json = serde_json::to_string_pretty(&result)?;
@@ -1361,6 +1416,7 @@ impl Cli {
                 skip_feature_auto_mapping,
                 no_lockfile,
                 frozen_lockfile,
+                inject_host_ca,
             }) => {
                 use crate::commands::build::{BuildArgs, execute_build};
 
@@ -1368,6 +1424,12 @@ impl Cli {
                 if no_lockfile && frozen_lockfile {
                     anyhow::bail!("--no-lockfile and --frozen-lockfile are mutually exclusive.");
                 }
+
+                // Machine-owner-only activation: flag > env > settings (FR-015).
+                let host_ca_activation = resolve_host_ca_activation_cli(
+                    inject_host_ca,
+                    self.user_data_folder.as_deref(),
+                )?;
 
                 let args = BuildArgs {
                     no_cache,
@@ -1404,6 +1466,7 @@ impl Cli {
                     skip_feature_auto_mapping,
                     no_lockfile,
                     frozen_lockfile,
+                    host_ca_activation,
                 };
 
                 execute_build(args).await?;
