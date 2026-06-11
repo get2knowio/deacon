@@ -1,0 +1,75 @@
+name: PR Type Label
+
+# Apply a conventional-commit *type* label to each PR derived from its title
+# (feat -> feature, fix -> fix, ...). GitHub's auto-generated release notes
+# (.github/release.yml) categorize PRs by label, NOT by title; the path-based
+# labeler (.github/labeler.yml) only ever emits file-shaped labels
+# (docs/ci/build/deps), so without this a `feat: ...` PR that also touches
+# docs/examples lands under "Documentation" instead of "Features". This bridges
+# the validated title type to the label the changelog categorizer expects.
+#
+# Runs on `edited` too, so retitling a PR re-syncs its type label. The label is
+# additive — it never removes the path-based labels — and Features/Fixes are
+# ordered before Documentation in release.yml, so the type label wins the
+# category.
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  type-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply label from conventional-commit type
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Header = everything before the first ':' (e.g. "feat(host-ca)!" / "fix").
+          header="${PR_TITLE%%:*}"
+          if [ "$header" = "$PR_TITLE" ]; then
+            echo "Title has no ':' separator — not conventional, skipping: '$PR_TITLE'"
+            exit 0
+          fi
+
+          # Leading lowercase type token.
+          type="$(printf '%s' "$header" | sed -nE 's/^([A-Za-z]+).*/\1/p' | tr '[:upper:]' '[:lower:]')"
+
+          # A trailing '!' on the header marks a breaking change.
+          case "$header" in
+            *"!") breaking=true ;;
+            *) breaking=false ;;
+          esac
+
+          # Map the conventional type to the changelog label (release.yml).
+          case "$type" in
+            feat)     label="feature" ;;
+            fix)      label="fix" ;;
+            perf)     label="perf" ;;
+            docs)     label="docs" ;;
+            refactor) label="refactor" ;;
+            ci)       label="ci" ;;
+            build)    label="build" ;;
+            chore)    label="chore" ;;
+            *)
+              echo "Unmapped or non-conventional type '$type' — skipping."
+              exit 0
+              ;;
+          esac
+
+          echo "Title type '$type' -> label '$label' (breaking=$breaking)"
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "$label"
+
+          if [ "$breaking" = "true" ]; then
+            echo "Breaking-change marker '!' present -> also adding 'breaking-change'"
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "breaking-change"
+          fi
