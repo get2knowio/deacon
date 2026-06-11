@@ -540,7 +540,7 @@ slow-timeout = { period = "5m", terminate-after = 1 }
 status-level = "pass"
 fail-fast = false
 # MVP integration tests: smoke, parity, and core integration tests for up/exec/down/read-configuration
-default-filter = 'binary(#smoke_*) | binary(#parity_*) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*)'
+default-filter = 'binary(#smoke_*) | binary(#parity_*) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_up_exec_identity) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*)'
 
 # Smoke test grouping
 [[profile.mvp-integration.overrides]]
@@ -567,8 +567,9 @@ test-group = 'parity-cli'
 
 # Docker integration grouping
 [[profile.mvp-integration.overrides]]
-filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(#integration_env_probe_*)'
+filter = 'binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_up_exec_identity) | binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.mvp-integration.overrides]]
 filter = 'binary(=integration_config)'

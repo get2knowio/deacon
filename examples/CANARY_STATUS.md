@@ -116,6 +116,7 @@ listed.
 | up/remove-existing | ✅ pass | 2026-05-29 | full-ID reuse (#143) |
 | up/security-options | ✅ pass | 2026-05-29 | |
 | up/skip-lifecycle | ✅ pass | 2026-05-29 | |
+| up/up-exec-down | ✅ pass | 2026-06-11 | compound-flow up→exec→run-user-commands→down by --workspace-folder (#187 configHash fix) |
 | up/update-remote-user-uid | ✅ pass | 2026-05-29 | |
 | up/user-env-probe-modes | ✅ pass | 2026-05-29 | |
 | up/wait-for | ✅ pass | 2026-05-29 | |

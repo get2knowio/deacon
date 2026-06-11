@@ -1,0 +1,6 @@
+{
+	"name": "up-exec-down",
+	"image": "alpine:3.18",
+	"overrideCommand": true,
+	"postCreateCommand": "echo up-exec-down-ok > /tmp/identity-marker"
+}

@@ -200,6 +200,17 @@ pub(crate) async fn execute_up_with_runtime(
 
     debug!("Loaded configuration: {:?}", config.name);
 
+    // Container identity must be reproducible by `exec` / `run-user-commands`
+    // (#187). Those commands resolve `up`'s container by hashing the config
+    // exactly as loaded — so the label hash MUST be derived from the
+    // as-loaded config, BEFORE any of up's runtime mutations: CLI `--mount`,
+    // image-metadata merge, feature merge, variable substitution, and
+    // especially the Dockerfile build (which replaces `build` with a
+    // `deacon-build:<hash>` image). Hashing the post-build/post-substitution
+    // config stamps a `devcontainer.configHash` label that `exec` can never
+    // reproduce, breaking `up` ↔ `exec` reconnection for Dockerfile configs.
+    let identity_config = config.clone();
+
     // T029: Check for disallowed features before any runtime operations
     check_for_disallowed_features(&config.features)?;
     debug!("Validated features - no disallowed features found");
@@ -471,8 +482,17 @@ pub(crate) async fn execute_up_with_runtime(
         }
     }
 
-    // Create container identity for state tracking
-    let identity = ContainerIdentity::new(workspace_folder.as_path(), &config);
+    // Create container identity for state tracking and labels. Built from the
+    // as-loaded `identity_config` (see snapshot above) so the stamped labels
+    // are reproducible by `exec`/`run-user-commands` (#187). The custom name
+    // and config-file path are part of the durable identity, so attach them
+    // here and thread the result into the create path rather than recomputing.
+    let identity = ContainerIdentity::new_with_custom_name(
+        workspace_folder.as_path(),
+        &identity_config,
+        args.container_name.clone(),
+    )
+    .with_config_file(config_path.as_path());
     let workspace_hash = identity.workspace_hash.clone();
 
     // Initialize state manager
@@ -494,6 +514,7 @@ pub(crate) async fn execute_up_with_runtime(
     } else {
         execute_container_up(
             &config,
+            &identity,
             workspace_folder.as_path(),
             &args,
             &mut state_manager,
