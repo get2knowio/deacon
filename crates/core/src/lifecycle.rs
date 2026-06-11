@@ -1440,6 +1440,37 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// Spec parity: `waitFor` accepts every containers.dev lifecycle-command
+    /// value and maps it to the right phase. Anchored to the spec's authoritative
+    /// set (not deacon's enum) so a future missing value fails the test rather
+    /// than silently rejecting a valid config (cf. the onAutoForward gap).
+    #[test]
+    fn test_wait_for_phase_accepts_all_spec_values() {
+        let cases = [
+            ("initializeCommand", LifecyclePhase::Initialize),
+            ("onCreateCommand", LifecyclePhase::OnCreate),
+            ("updateContentCommand", LifecyclePhase::UpdateContent),
+            ("postCreateCommand", LifecyclePhase::PostCreate),
+            ("postStartCommand", LifecyclePhase::PostStart),
+            ("postAttachCommand", LifecyclePhase::PostAttach),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(
+                wait_for_phase(Some(value)).unwrap(),
+                expected,
+                "waitFor {value:?} must map to {expected:?}"
+            );
+        }
+        // Missing waitFor defaults to updateContentCommand (spec default).
+        assert_eq!(wait_for_phase(None).unwrap(), LifecyclePhase::UpdateContent);
+        // An unknown value fails fast naming the allowed set.
+        let err = wait_for_phase(Some("bogusCommand"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Invalid waitFor value"));
+        assert!(err.contains("postAttachCommand"));
+    }
+
     #[test]
     fn test_lifecycle_phase_as_str() {
         assert_eq!(LifecyclePhase::Initialize.as_str(), "initialize");
