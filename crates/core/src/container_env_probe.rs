@@ -598,12 +598,37 @@ impl ContainerEnvironmentProber {
     ) -> HashMap<String, String> {
         let mut result = probed_env.clone();
 
-        // Apply config.remoteEnv (Option<String> -> String, None -> empty string)
+        // Apply config.remoteEnv (Option<String> -> String, None -> empty string).
+        //
+        // remoteEnv values may reference `${containerEnv:VAR}` (e.g. the
+        // canonical PATH-append `"${containerEnv:PATH}:/custom/bin"`). That
+        // reference is unresolvable at config-load time (no container yet), so
+        // it survives config substitution as a literal — it must be resolved
+        // HERE against the probed container env. Without this, the literal
+        // template would be exported into the remote environment.
         if let Some(remote) = config_remote_env {
+            // Lightweight context: only `${containerEnv:VAR}` resolution needs
+            // the probed env; the `${localEnv:…}` / workspace refs were already
+            // resolved during config substitution.
+            let ctx = crate::variable::SubstitutionContext {
+                local_workspace_folder: String::new(),
+                local_env: HashMap::new(),
+                devcontainer_id: String::new(),
+                container_workspace_folder: None,
+                container_env: Some(probed_env.clone()),
+                feature_vars: HashMap::new(),
+                template_options: None,
+            };
+            let mut report = crate::variable::SubstitutionReport::new();
             for (k, v_opt) in remote {
                 match v_opt {
                     Some(v) => {
-                        result.insert(k.clone(), v.clone());
+                        let resolved = crate::variable::VariableSubstitution::substitute_string(
+                            v,
+                            &ctx,
+                            &mut report,
+                        );
+                        result.insert(k.clone(), resolved);
                     }
                     None => {
                         // Explicit null in remoteEnv should result in empty string override
@@ -956,6 +981,41 @@ mod tests {
         assert_eq!(result.get("C"), Some(&"from_cli_c".to_string()));
         // KEEP should be preserved from probed since not overridden
         assert_eq!(result.get("KEEP"), Some(&"keep_me".to_string()));
+    }
+
+    #[test]
+    fn test_build_effective_env_resolves_container_env_refs() {
+        // remoteEnv values referencing ${containerEnv:VAR} must be resolved
+        // against the probed container env (the canonical PATH-append idiom).
+        let prober = ContainerEnvironmentProber::new();
+
+        let mut probed_env = HashMap::new();
+        probed_env.insert("PATH".to_string(), "/usr/local/bin:/usr/bin".to_string());
+
+        let mut config_remote_env: HashMap<String, Option<String>> = HashMap::new();
+        config_remote_env.insert(
+            "PATH".to_string(),
+            Some("${containerEnv:PATH}:/custom/bin".to_string()),
+        );
+        config_remote_env.insert(
+            "DERIVED".to_string(),
+            Some("prefix-${containerEnv:PATH}".to_string()),
+        );
+
+        let cli_env: IndexMap<String, String> = IndexMap::new();
+        let result = prober.build_effective_env(&probed_env, Some(&config_remote_env), &cli_env);
+
+        assert_eq!(
+            result.get("PATH"),
+            Some(&"/usr/local/bin:/usr/bin:/custom/bin".to_string()),
+            "remoteEnv ${{containerEnv:PATH}} must resolve against probed env"
+        );
+        assert_eq!(
+            result.get("DERIVED"),
+            Some(&"prefix-/usr/local/bin:/usr/bin".to_string())
+        );
+        // No unresolved template should remain.
+        assert!(!result.get("PATH").unwrap().contains("${"));
     }
 
     /// Spec parity: the `userEnvProbe` config field (deserialized via serde from
