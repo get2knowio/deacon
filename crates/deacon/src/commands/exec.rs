@@ -4,14 +4,13 @@
 //! for the exec command, targeting the correct workspace container.
 
 use crate::commands::shared::{
-    ConfigLoadArgs, ConfigLoadResult, NormalizedRemoteEnv, TerminalDimensions, load_config,
-    resolve_env_and_user,
+    ConfigLoadArgs, ConfigLoadResult, NormalizedRemoteEnv, TerminalDimensions,
+    canonical_reconnect_identity, load_config, resolve_env_and_user,
 };
 use anyhow::{Context, Result};
 use deacon_core::IndexMap;
 use deacon_core::compose::{ComposeManager, ComposeProject};
 use deacon_core::config::DevContainerConfig;
-use deacon_core::container::ContainerIdentity;
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::{CliDocker, Docker, TerminalSize};
 use deacon_core::errors::{ConfigError, DeaconError};
@@ -187,8 +186,11 @@ where
     // For single container configurations, use existing logic
     debug!("Configuration uses single container, resolving via container identity");
 
-    // Create container identity for this workspace/config
-    let identity = ContainerIdentity::new(workspace_folder, config);
+    // Create container identity for this workspace/config. Built from the
+    // config as loaded so it matches the label `up` stamped (#187); `exec`
+    // only resolves (never creates), so the custom name / config-file label
+    // are irrelevant here.
+    let identity = canonical_reconnect_identity(workspace_folder, config, None, None);
     debug!("Created container identity: {:?}", identity);
 
     // Find matching containers and only keep running ones

@@ -44,10 +44,12 @@ pub use result::{EffectiveMount, UpContainerInfo, UpError, UpResult, UpSuccess};
 #[allow(unused_imports)]
 pub use crate::commands::shared::NormalizedRemoteEnv;
 
-use crate::commands::shared::{ConfigLoadArgs, ConfigLoadResult, load_config};
+use crate::commands::shared::{
+    ConfigLoadArgs, ConfigLoadResult, canonical_reconnect_identity, load_config,
+};
 use anyhow::{Context, Result};
 use deacon_core::IndexMap;
-use deacon_core::container::{ContainerIdentity, ContainerSelector};
+use deacon_core::container::ContainerSelector;
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::lockfile::{
@@ -484,15 +486,16 @@ pub(crate) async fn execute_up_with_runtime(
 
     // Create container identity for state tracking and labels. Built from the
     // as-loaded `identity_config` (see snapshot above) so the stamped labels
-    // are reproducible by `exec`/`run-user-commands` (#187). The custom name
-    // and config-file path are part of the durable identity, so attach them
-    // here and thread the result into the create path rather than recomputing.
-    let identity = ContainerIdentity::new_with_custom_name(
+    // are reproducible by `exec`/`run-user-commands`/`down` (#187). The custom
+    // name and config-file path are part of the durable identity, so attach
+    // them here and thread the result into the create path (both the
+    // single-container and compose flavors) rather than recomputing.
+    let identity = canonical_reconnect_identity(
         workspace_folder.as_path(),
         &identity_config,
         args.container_name.clone(),
-    )
-    .with_config_file(config_path.as_path());
+        Some(config_path.as_path()),
+    );
     let workspace_hash = identity.workspace_hash.clone();
 
     // Initialize state manager
@@ -502,6 +505,7 @@ pub(crate) async fn execute_up_with_runtime(
     let container_info = if config.uses_compose() {
         execute_compose_up(
             &config,
+            &identity,
             workspace_folder.as_path(),
             &args,
             &mut state_manager,
