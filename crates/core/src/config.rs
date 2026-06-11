@@ -175,8 +175,10 @@ pub enum OnAutoForward {
     Silent,
     /// Show a notification when port is auto-forwarded  
     Notify,
-    /// Open the port in a browser when auto-forwarded
+    /// Open the port in a browser every time it is auto-forwarded
     OpenBrowser,
+    /// Open the port in a browser only the first time it is auto-forwarded
+    OpenBrowserOnce,
     /// Open the port in a preview panel when auto-forwarded
     OpenPreview,
     /// Ignore the port (don't auto-forward)
@@ -3824,6 +3826,29 @@ mod tests {
         assert_eq!(other_attrs.on_auto_forward, Some(OnAutoForward::Silent));
 
         Ok(())
+    }
+
+    /// Spec parity: `onAutoForward` accepts all six containers.dev values,
+    /// including `openBrowserOnce` (which previously failed to deserialize).
+    #[test]
+    fn test_on_auto_forward_accepts_all_spec_values() {
+        let cases = [
+            ("silent", OnAutoForward::Silent),
+            ("notify", OnAutoForward::Notify),
+            ("openBrowser", OnAutoForward::OpenBrowser),
+            ("openBrowserOnce", OnAutoForward::OpenBrowserOnce),
+            ("openPreview", OnAutoForward::OpenPreview),
+            ("ignore", OnAutoForward::Ignore),
+        ];
+        for (value, expected) in cases {
+            let json = format!(r#"{{ "onAutoForward": "{value}" }}"#);
+            let attrs: PortAttributes = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("onAutoForward {value:?} must parse: {e}"));
+            assert_eq!(attrs.on_auto_forward, Some(expected), "value {value:?}");
+            // Round-trips back to the same camelCase token.
+            let round = serde_json::to_value(&attrs).unwrap();
+            assert_eq!(round["onAutoForward"], value);
+        }
     }
 
     #[tokio::test]
