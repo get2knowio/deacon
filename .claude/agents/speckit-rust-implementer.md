@@ -30,7 +30,7 @@ You *do*:
 
 When you receive a speckit implementation request:
 
-1. **Locate and Study the Spec**: Find the relevant SPEC.md file in `docs/subcommand-specs/*/`. Read it completely before writing any code.
+1. **Locate and Study the Spec**: Find the relevant section of the containers.dev spec and confirm the reference CLI's behavior. Read it completely before writing any code.
 
 2. **Review the Task List**: Identify all tasks in tasks.md. Understand dependencies between tasks and plan your implementation order.
 

@@ -4,7 +4,7 @@
 //! applying configuration + image metadata, executing lifecycle hooks, and
 //! returning a JSON snapshot of the (optionally merged) configuration.
 //!
-//! See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
+//! See the containers.dev spec / reference CLI for the authoritative behavior.
 //!
 //! ## Scope (PR-6a + PR-6b + PR-6c)
 //!
@@ -48,7 +48,7 @@ use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
 
 /// Arguments for the `set-up` command. Mirrors the spec's CLI surface
-/// (`docs/subcommand-specs/set-up/SPEC.md` §2).
+/// (the containers.dev spec / reference CLI).
 #[derive(Debug, Clone)]
 pub struct SetUpArgs {
     /// Required: container id of the already-running container to set up.

@@ -2,7 +2,7 @@
 //!
 //! `deacon upgrade` regenerates `devcontainer-lock.json` from the currently
 //! resolved feature set, mirroring upstream `devcontainers/cli`'s `upgrade`
-//! command. See `docs/subcommand-specs/upgrade/SPEC.md` for the authoritative
+//! command. See the containers.dev spec / reference CLI for the authoritative
 //! behavior.
 //!
 //! ## Scope (PR-5a + PR-5b)
@@ -34,7 +34,7 @@ use tracing::{debug, info, instrument, warn};
 use crate::commands::shared::{ConfigLoadArgs, load_config};
 
 /// Arguments for the `upgrade` command. Mirrors the spec's CLI surface
-/// (`docs/subcommand-specs/upgrade/SPEC.md` §2).
+/// (the containers.dev spec / reference CLI).
 #[derive(Debug, Clone)]
 pub struct UpgradeArgs {
     /// Workspace folder. Required by spec §2; if omitted, defaults to the

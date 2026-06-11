@@ -37,9 +37,9 @@ Deacon is in much better shape than the issue tracker suggests. The **spec itsel
 | `outdated` | Implemented | Spec at "Phase 2"; works against feature lockfile concept |
 | `doctor` | Not present in reference CLI — Deacon-original | Not yet implemented per audit |
 
-### Specced but not implemented
-- **`set-up`** — `docs/subcommand-specs/set-up/SPEC.md` (373 lines, "Phase 2"). Reference CLI exposes this; it adopts an existing container as a dev container. **Required for parity.**
-- **`upgrade`** — `docs/subcommand-specs/upgrade/SPEC.md` (316 lines, "Phase 2"). Reference CLI graduated `upgrade` from experimental in v0.87.0 ([PR #1212](https://github.com/devcontainers/cli/pull/1212)). **Required for parity.**
+### Not yet implemented
+- **`set-up`** — the reference CLI exposes this; it adopts an existing container as a dev container. **Required for parity.**
+- **`upgrade`** — the reference CLI graduated `upgrade` from experimental in v0.87.0 ([PR #1212](https://github.com/devcontainers/cli/pull/1212)). **Required for parity.**
 
 ### Core library shape
 The `crates/core/src/` module set is comprehensive: `config`, `features`, `container_lifecycle`, `oci/*`, `compose`, `dotfiles`, `gpu`, `host_requirements`, `mount`, `secrets`, `redaction`, `variable`, `lockfile`, `state`, `workspace`, `cache/*`, `docker_retry`, `progress`, etc. The major abstractions called out in `CLAUDE.md` (`ContainerRuntime`, `HttpClient`, `ConfigLoader`, `FeatureInstaller`, `ContainerLifecycle`) are present and structured.
@@ -184,11 +184,11 @@ Constitution principle 9 mandates "Executable & Self-Verifying Examples" (every 
 (`MVP-ROADMAP.md`, `CLI_PARITY.md`, `PARITY_APPROACH.md`,
 `PARITY_PROMPT.md`) and the 1.4 MB `repomix-output-devcontainers-cli.xml`
 upstream-codebase snapshot have all been deleted, along with the
-per-subcommand `GAP.md` / `IMPLEMENTATION_STATUS.md` /
-`IMPLEMENTATION_CHECKLIST.md` / `SPEC_VS_IMPLEMENTATION.md` / `tasks/`
-pre-implementation artifacts under `docs/subcommand-specs/`. The
-authoritative spec content (`SPEC.md`, `DATA-STRUCTURES.md`,
-`DIAGRAMS.md` per command) is retained.
+per-subcommand pre-implementation artifacts that used to live under
+`docs/subcommand-specs/`. The deacon-authored spec docs were subsequently
+removed entirely: the only sources of truth are now the official
+[containers.dev specification](https://containers.dev) and the reference
+implementation (`@devcontainers/cli`).
 
 ---
 
@@ -197,8 +197,8 @@ authoritative spec content (`SPEC.md`, `DATA-STRUCTURES.md`,
 ### Tier 1 — Blockers (must ship)
 
 1. **Fix issue #1**: features must be installed during image build, not in the running container. Spec-parity bug.
-2. **Implement `set-up`** subcommand (spec at `docs/subcommand-specs/set-up/SPEC.md` is ready).
-3. **Implement `upgrade`** subcommand (spec at `docs/subcommand-specs/upgrade/SPEC.md` is ready).
+2. **Implement `set-up`** subcommand (per the reference CLI's behavior).
+3. **Implement `upgrade`** subcommand (per the reference CLI's behavior).
 4. **Lockfile graduation** (CLI parity §B.1): `--no-lockfile`, `--frozen-lockfile`, default-on writes on `up`/`build`. Touches `up`, `build`, and the existing `lockfile.rs`.
 5. **`devcontainer.metadata` label format** (CLI parity §B.2): always emit JSON array on `build`.
 6. **Migrate off `serde_yaml`** (deprecated) → `serde_yaml_ng`.
@@ -262,7 +262,7 @@ If the punchlist sequences well, a possible cadence:
 
 - **Lockfile semantics** (Tier 1 #4): the upstream graduation in v0.87.0 changed default behavior — existing Deacon users may be surprised by automatic `.devcontainer-lock.json` writes. Consider a one-time deprecation notice or opt-in flag for the 1.0-rc cycle.
 - **Podman commitment**: if we ship 1.0 with Podman marked supported, we own the bug surface (rootless, `userns`, SELinux). If we mark experimental, we leave a chunk of the dev-on-Linux market underserved. This is a product call, not an engineering one.
-- **`doctor` subcommand**: not in upstream CLI. We should decide whether this is a stable contract in 1.0 or whether we mark it `--unstable`. If stable, it needs a SPEC.md.
+- **`doctor` subcommand**: not in upstream CLI. We should decide whether this is a stable contract in 1.0 or whether we mark it `--unstable`. If stable, document its contract in the CLI `--help` and README (it is a deacon-specific extension, so the official spec doesn't cover it).
 - **`down` subcommand**: same — Deacon-original, no upstream contract to follow. Document the schema clearly so it's stable.
 - **Issue #1 root cause**: needs investigation before we can scope a fix. May touch `up/compose` install-into-build-shape work (already merged for compose; verify Dockerfile path).
 
@@ -273,4 +273,4 @@ If the punchlist sequences well, a possible cadence:
 - Reference CLI: `devcontainers/cli` HEAD ≈ v0.87.0 (May 2026). Subcommand surface in `src/spec-node/devContainersSpecCLI.ts`.
 - Spec pin: `devcontainers/spec@113500f4` (Aug 2025). Current HEAD `c95ffee` (May 2026) — doc-only deltas.
 - Rust ecosystem scan (May 2026): see embedded references for `serde_yaml` deprecation, RUSTSEC-2025-0120 (`json5`), CVE-2025-62518 (TARmageddon), Rust 2024 edition (1.85), `cargo-dist` v0.31, `cargo-zigbuild`, `oci-client`, `bollard`, `tokio` LTS lines.
-- Local audit: `crates/deacon/src/commands/*`, `crates/core/src/*`, `docs/subcommand-specs/**`, `.github/`, `examples/`.
+- Local audit: `crates/deacon/src/commands/*`, `crates/core/src/*`, `.github/`, `examples/`.

@@ -1,7 +1,7 @@
 //! Integration tests for read-configuration output structure compliance
 //!
 //! These tests verify that the JSON output from read-configuration matches
-//! the specification in docs/subcommand-specs/read-configuration/DATA-STRUCTURES.md
+//! the specification in the containers.dev spec / reference CLI
 
 use anyhow::Result;
 use assert_cmd::prelude::*;

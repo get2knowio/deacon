@@ -594,7 +594,7 @@ pub enum Commands {
     /// resolved Feature set. Use `--dry-run` to print the lockfile JSON to
     /// stdout instead of writing to disk.
     ///
-    /// See `docs/subcommand-specs/upgrade/SPEC.md` for the authoritative behavior.
+    /// See the containers.dev spec / reference CLI for the authoritative behavior.
     Upgrade {
         /// Print the generated lockfile JSON to stdout instead of writing it
         /// to disk. Spec §2.
@@ -621,7 +621,7 @@ pub enum Commands {
     /// configuration + image metadata, executing lifecycle hooks, and emitting
     /// a JSON snapshot of the resulting configuration.
     ///
-    /// See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
+    /// See the containers.dev spec / reference CLI for the authoritative behavior.
     SetUp {
         /// Target container ID (required). The container must already exist.
         #[arg(long)]

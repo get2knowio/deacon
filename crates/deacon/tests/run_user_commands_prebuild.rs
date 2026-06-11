@@ -1,6 +1,6 @@
 //! Integration test for `run-user-commands --prebuild` lifecycle boundary.
 //!
-//! Per `docs/subcommand-specs/run-user-commands/SPEC.md`, `--prebuild` stops
+//! Per the containers.dev spec / reference CLI, `--prebuild` stops
 //! after `onCreateCommand` and `updateContentCommand`, skipping postCreate,
 //! dotfiles, postStart, and postAttach (the same set as
 //! `core::lifecycle::LifecyclePhase::is_skipped_in_prebuild`).

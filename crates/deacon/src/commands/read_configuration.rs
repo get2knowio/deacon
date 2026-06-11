@@ -3,7 +3,7 @@
 //! Implements the `deacon read-configuration` subcommand for reading and displaying
 //! DevContainer configuration with variable substitution and extends resolution.
 //!
-//! Spec: docs/subcommand-specs/read-configuration/SPEC.md
+//! Spec: the containers.dev spec / reference CLI
 //! Implementation: specs/001-read-config-parity/spec.md
 
 use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
