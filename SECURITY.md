@@ -88,9 +88,9 @@ This trust check is **deacon-specific**: the upstream
 
 ## Dynamic port forwarding (`up --auto-forward`)
 
-`up --auto-forward` (a deacon extension; see
-`docs/subcommand-specs/up/SPEC.md` §2.1) introduces two new host-side
-surfaces, both opt-in behind the flag:
+`up --auto-forward` (a deacon-specific extension, not part of the
+containers.dev spec) introduces two new host-side surfaces, both opt-in
+behind the flag:
 
 - **A persistent host process** — a detached forwarder
   (`__forward-daemon`) survives `up` and runs until the container is torn

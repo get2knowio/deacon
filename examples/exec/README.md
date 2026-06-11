@@ -169,7 +169,7 @@ Some examples additionally require:
 
 ## Additional Resources
 
-- [Exec Subcommand Specification](../../docs/subcommand-specs/exec/SPEC.md)
+- [Exec Subcommand Specification](https://containers.dev/implementors/spec/)
 - [Dev Container Specification](https://containers.dev/implementors/spec)
 - Main README: [../../README.md](../../README.md)
 

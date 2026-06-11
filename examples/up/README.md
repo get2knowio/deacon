@@ -301,7 +301,7 @@ deacon up --workspace-folder . --log-format json
 ## Specification Reference
 
 For complete details on the `up` subcommand:
-- Specification: `docs/subcommand-specs/up/SPEC.md`
+- Specification: the containers.dev spec
 - Gap Analysis: `specs/001-up-gap-spec/spec.md`
 
 ## Contributing

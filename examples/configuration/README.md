@@ -1,6 +1,6 @@
 # Configuration Examples
 
-This directory contains comprehensive examples demonstrating DevContainer configuration capabilities as specified in the [DevContainer Specification](https://containers.dev/implementors/spec/) and implemented in the Deacon CLI per `docs/subcommand-specs/read-configuration/SPEC.md` and `docs/subcommand-specs/up/SPEC.md`.
+This directory contains comprehensive examples demonstrating DevContainer configuration capabilities as specified in the [DevContainer Specification](https://containers.dev/implementors/spec/) and implemented in the Deacon CLI per the containers.dev spec and the containers.dev spec.
 
 ## Overview
 
@@ -198,7 +198,7 @@ deacon config substitute --config devcontainer.json --strict-substitution
 
 These examples implement concepts from:
 
-- **[Configuration Resolution Workflow](https://containers.dev/implementors/spec/#configuration-resolution)**: See Read-Configuration SPEC: ../../docs/subcommand-specs/read-configuration/SPEC.md#4-configuration-resolution
+- **[Configuration Resolution Workflow](https://containers.dev/implementors/spec/#configuration-resolution)**: See Read-Configuration SPEC: the containers.dev spec
 - **[Extends](https://containers.dev/implementors/spec/#extends)**: Configuration inheritance
 - **[Variable Substitution](https://containers.dev/implementors/spec/#variables-in-devcontainer-json)**: Complete substitution syntax
 - **[Merge Logic](https://containers.dev/implementors/spec/#merge-logic)**: Deep merge for objects, replacement for arrays
@@ -218,7 +218,7 @@ These examples implement concepts from:
 ## Related Documentation
 
 - Main examples index: `../README.md`
-- CLI specifications: `../../docs/subcommand-specs/read-configuration/SPEC.md`, `../../docs/subcommand-specs/up/SPEC.md`
+- CLI specifications: the containers.dev spec, the containers.dev spec
 - DevContainer spec: https://containers.dev/implementors/spec/
 - Container lifecycle examples: `../container-lifecycle/`
 - Feature examples: `../feature-management/`

@@ -55,7 +55,7 @@ crates/
   deacon/          # CLI binary crate (main entrypoint)
   core/            # Shared library crate (config, docker, features, etc.)
 docs/
-  subcommand-specs/*/SPEC.md      # Authoritative specification
+  ARCHITECTURE.md                 # Cross-cutting architecture notes (deacon-specific)
 .github/
   workflows/       # CI and release automation
 ```
@@ -134,7 +134,7 @@ opted out of the fast loop.
 - **Documentation**: Add rustdoc comments for public APIs
 
 ## Architecture Guidelines
-- **Follow the CLI specification** in `docs/subcommand-specs/*/SPEC.md` as the source of truth
+- **Follow the [containers.dev specification](https://containers.dev) and the reference CLI** (`@devcontainers/cli`) as the source of truth
 - **Small, incremental changes** - avoid large refactors in single PRs
 - **Domain separation**: Keep CLI concerns in `crates/deacon`, shared logic in `crates/core`
 - **Trait abstractions**: Use traits for testability (Docker client, file system, etc.)
@@ -193,7 +193,7 @@ All capabilities are always available:
 ## Getting Help
 - **Issues**: Open a GitHub issue for bugs or feature requests
 - **Discussions**: Use GitHub Discussions for questions or ideas
-- **Specification**: Refer to `docs/subcommand-specs/*/SPEC.md` for architecture decisions
+- **Specification**: Refer to the [containers.dev spec](https://containers.dev) and the reference CLI for behavior; see `docs/ARCHITECTURE.md` for deacon-specific architecture
 
 ## Code of Conduct
 Be respectful, constructive, and collaborative in all interactions.

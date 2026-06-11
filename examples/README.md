@@ -366,7 +366,7 @@ deacon config substitute --workspace-folder . --output-format json 2>&1 \
 ```
 
 ### Notes
-Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in `docs/subcommand-specs/*/SPEC.md` Container Build section. Additional examples showcase Compose service targeting (`compose-service-target/`), image reference builds (`image-reference/`), multi-tag support with `--image-name`, registry push with `--push`, and OCI archive export with `--output`. See `docs/subcommand-specs/build/SPEC.md` for complete build parity documentation.
+Build examples demonstrate Dockerfile-based container builds with build arguments, platform targeting, cache control, and BuildKit features (secrets, SSH) as specified in the containers.dev spec Container Build section. Additional examples showcase Compose service targeting (`compose-service-target/`), image reference builds (`image-reference/`), multi-tag support with `--image-name`, registry push with `--push`, and OCI archive export with `--output`. See the containers.dev spec for complete build parity documentation.
 Specific build capability example directories (under `examples/build/`):
 
 - `basic-dockerfile/` – Minimal Dockerfile build
@@ -389,14 +389,14 @@ Specific build capability example directories (under `examples/build/`):
 - `unwritable-output/` – Failing fast on unwritable `--output` destination
 
 
-Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in `docs/subcommand-specs/*/SPEC.md` Lifecycle Execution Workflow. The `up` command now has full parity with the specification including: JSON output contract, all CLI flags (workspace/config/lifecycle/mount/env/cache/buildkit/dotfiles/security), validation rules, updateContentCommand execution, prebuild mode, ID labels, secrets handling with redaction, image metadata merging, feature-driven builds, compose parity (mount conversion, profiles, remote-env), UID/security options, and data folder management. See `docs/subcommand-specs/up/GAP.md` for complete implementation status (~95% specification compliance).
+Container lifecycle examples demonstrate the complete DevContainer lifecycle command execution workflow as specified in the containers.dev spec Lifecycle Execution Workflow. The `up` command now has full parity with the specification including: JSON output contract, all CLI flags (workspace/config/lifecycle/mount/env/cache/buildkit/dotfiles/security), validation rules, updateContentCommand execution, prebuild mode, ID labels, secrets handling with redaction, image metadata merging, feature-driven builds, compose parity (mount conversion, profiles, remote-env), UID/security options, and data folder management. See the containers.dev spec for complete implementation status (~95% specification compliance).
 
-Doctor examples demonstrate environment diagnostics including host requirements validation (CPU, memory, storage) and real disk space checking using platform-specific APIs as specified in `docs/subcommand-specs/*/SPEC.md` Host Requirements section.
+Doctor examples demonstrate environment diagnostics including host requirements validation (CPU, memory, storage) and real disk space checking using platform-specific APIs as specified in the containers.dev spec Host Requirements section.
 
-Exec examples demonstrate command execution semantics including working directory, user context, TTY allocation, and environment variable handling as specified in `docs/subcommand-specs/*/SPEC.md` Exec Command section.
+Exec examples demonstrate command execution semantics including working directory, user context, TTY allocation, and environment variable handling as specified in the containers.dev spec Exec Command section.
 
-Feature system examples demonstrate dependency resolution, parallel execution levels, digest-based caching, and lockfile support for reproducible builds as specified in `docs/subcommand-specs/*/SPEC.md` Feature Installation Workflow, Distribution & Caching sections, and lockfile specifications.
+Feature system examples demonstrate dependency resolution, parallel execution levels, digest-based caching, and lockfile support for reproducible builds as specified in the containers.dev spec Feature Installation Workflow, Distribution & Caching sections, and lockfile specifications.
 
-Observability examples demonstrate JSON logging, standardized tracing spans, and structured fields as specified in `docs/subcommand-specs/*/SPEC.md` Monitoring and Observability section.
+Observability examples demonstrate JSON logging, standardized tracing spans, and structured fields as specified in the containers.dev spec Monitoring and Observability section.
 
-Registry authentication examples demonstrate multiple authentication methods (environment variables, Docker config, command-line options) for push/pull operations with proper error handling and retry logic as specified in `docs/subcommand-specs/*/SPEC.md` OCI Registry Integration section.
+Registry authentication examples demonstrate multiple authentication methods (environment variables, Docker config, command-line options) for push/pull operations with proper error handling and retry logic as specified in the containers.dev spec OCI Registry Integration section.
