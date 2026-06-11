@@ -50,6 +50,7 @@ deacon up --workspace-folder .
 | Example | Description | Key Features |
 |---------|-------------|--------------|
 | [id-labels-reconnect/](id-labels-reconnect/) | Container reconnection | ID labels, container discovery, `--expect-existing-container` |
+| [up-exec-down/](up-exec-down/) | Compound-flow resolution | `up` → `exec`/`run-user-commands` → `down` by `--workspace-folder` (#187) |
 | [remove-existing/](remove-existing/) | Container replacement | `--remove-existing-container`, force recreation |
 
 ### GPU & Hardware

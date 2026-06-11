@@ -71,6 +71,7 @@ use tracing::{debug, info, instrument, warn};
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_container_up(
     config: &DevContainerConfig,
+    identity: &ContainerIdentity,
     workspace_folder: &Path,
     args: &UpArgs,
     state_manager: &mut StateManager,
@@ -182,15 +183,13 @@ pub(crate) async fn execute_container_up(
     let emit_progress_event =
         crate::commands::shared::progress::make_progress_callback(&args.progress_tracker);
 
-    // Create container identity for deterministic naming and labels.
-    // Carry the resolved devcontainer.json path so the spec-mandated
-    // `devcontainer.config_file` label is applied at create time (#68).
-    let identity = ContainerIdentity::new_with_custom_name(
-        workspace_folder,
-        &config,
-        args.container_name.clone(),
-    )
-    .with_config_file(config_path);
+    // Container identity (deterministic naming + labels, incl. the
+    // spec-mandated `devcontainer.config_file` label, #68) is computed by the
+    // caller from the as-loaded config and passed in, so the stamped
+    // `devcontainer.configHash` is reproducible by `exec`/`run-user-commands`
+    // (#187). It must NOT be recomputed from the post-mutation `config` here
+    // (CLI `--mount`, forward-ports, and the Dockerfile-built image would all
+    // perturb the hash and break `up` ↔ `exec` reconnection).
     debug!("Container identity: {:?}", identity);
 
     // Initialize Docker client
@@ -252,7 +251,7 @@ pub(crate) async fn execute_container_up(
         // `config_path` anchors local feature references (#69).
         let feature_build = build_image_with_features(
             &config,
-            &identity,
+            identity,
             workspace_folder,
             config_path,
             Some(build_options),
@@ -517,7 +516,7 @@ pub(crate) async fn execute_container_up(
     if args.remove_existing_container {
         crate::commands::up::forward::reap_existing_forwarders(
             docker,
-            &identity,
+            identity,
             args.user_data_folder.as_deref(),
         )
         .await;
@@ -544,7 +543,7 @@ pub(crate) async fn execute_container_up(
     // affects the bind mount and not workspace+config hashing.
     let container_result = docker
         .up(
-            &identity,
+            identity,
             config_for_create,
             &workspace_mount_source,
             args.remove_existing_container,

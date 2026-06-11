@@ -18,6 +18,7 @@ DEFAULT_EXAMPLES=(
 	"remote-env-secrets"
 	"configuration-output"
 	"id-labels-reconnect"
+	"up-exec-down"
 	"remove-existing"
 	"gpu-modes"
 	"auto-forward"
