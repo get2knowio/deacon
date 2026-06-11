@@ -958,6 +958,32 @@ mod tests {
         assert_eq!(result.get("KEEP"), Some(&"keep_me".to_string()));
     }
 
+    /// Spec parity: the `userEnvProbe` config field (deserialized via serde from
+    /// devcontainer.json) accepts every containers.dev value. Anchored to the
+    /// spec's authoritative set so a future missing variant fails here rather
+    /// than rejecting a valid config (cf. the onAutoForward gap). The `FromStr`
+    /// CLI path is covered separately by `test_parse_container_probe_mode_*`.
+    #[test]
+    fn test_user_env_probe_serde_accepts_all_spec_values() {
+        let cases = [
+            ("none", ContainerProbeMode::None),
+            ("loginShell", ContainerProbeMode::LoginShell),
+            (
+                "loginInteractiveShell",
+                ContainerProbeMode::LoginInteractiveShell,
+            ),
+            ("interactiveShell", ContainerProbeMode::InteractiveShell),
+        ];
+        for (value, expected) in cases {
+            let json = format!("\"{value}\"");
+            let parsed: ContainerProbeMode = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("userEnvProbe {value:?} must deserialize: {e}"));
+            assert_eq!(parsed, expected, "value {value:?}");
+            // Round-trips back to the same camelCase token.
+            assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+        }
+    }
+
     #[test]
     fn test_parse_container_probe_mode_valid_inputs() {
         // Valid variants map to expected enum
