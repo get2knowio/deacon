@@ -132,6 +132,38 @@ honored; compose `"service:port"` declared ports are forwarded too.
 and best-effort — if forwarding can't start you get a clear warning but `up`
 still succeeds. Forwarder logs: `~/.deacon/forward_daemon_<container_id>.log`.
 
+## Corporate CA injection (`--inject-host-ca`)
+
+On a machine behind a TLS-intercepting corporate proxy, dev containers need the
+corporate root CA to validate HTTPS. Two capabilities (opt-in for the second):
+
+- **Always on:** deacon's own feature/template pulls trust the host OS trust
+  store automatically — if your browser works behind the proxy, `deacon up` can
+  fetch features with no configuration. `DEACON_CUSTOM_CA_BUNDLE=/path.pem` is
+  still additive on top.
+- **Opt-in, machine-side:** inject the corporate CA into the container at build
+  and runtime so feature installs and `postCreateCommand` network calls succeed.
+
+```bash
+deacon up --inject-host-ca                      # auto-discover the corporate root CA delta
+deacon up --inject-host-ca /etc/corp/root.pem   # or inject a specific PEM bundle verbatim
+deacon build --inject-host-ca                    # build-time injection into the feature Dockerfile
+DEACON_INJECT_HOST_CA=auto deacon up             # env var (CI / one-shot)
+```
+
+Persist it for every `up`/`build` via `~/.deacon/settings.json`
+(`{ "hostCa": "auto" }`). Precedence: `--inject-host-ca` flag >
+`DEACON_INJECT_HOST_CA` > `settings.json` > off. Activation is **machine-owner
+controlled only** — nothing in `devcontainer.json` or the workspace can enable
+or redirect it (see [SECURITY.md](SECURITY.md#corporate-ca-injection---inject-host-ca)).
+
+When enabled, deacon installs the CA into the container trust store **before**
+any lifecycle hook and sets the standard CA env vars (`SSL_CERT_FILE`,
+`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`, `GIT_SSL_CAINFO`,
+`CURL_CA_BUNDLE`). On an unsupported distro or non-root container it warns and
+falls back to env-var-only. deacon never rewrites user-authored Dockerfiles —
+see SECURITY.md for the manual `ARG`/`COPY` convention.
+
 ## Shipped Commands
 
 | Command | Description |

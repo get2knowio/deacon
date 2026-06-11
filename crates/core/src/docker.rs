@@ -1729,11 +1729,23 @@ impl Docker for CliRuntime {
 
         // Write the bytes to the child's stdin and close it so the inner
         // `cat`/reader sees EOF. Take the handle so it drops (closing the pipe).
+        // A child that exits early (e.g. the non-root host-CA path drains and
+        // exits before reading everything) closes its stdin; treat the resulting
+        // BrokenPipe as success rather than an error.
         if let Some(mut child_stdin) = child.stdin.take() {
-            child_stdin
-                .write_all(stdin)
-                .await
-                .map_err(|e| DockerError::CLIError(format!("Failed to write exec stdin: {}", e)))?;
+            match child_stdin.write_all(stdin).await {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                    debug!("exec stdin closed early by child (broken pipe); continuing");
+                }
+                Err(e) => {
+                    return Err(DockerError::CLIError(format!(
+                        "Failed to write exec stdin: {}",
+                        e
+                    ))
+                    .into());
+                }
+            }
             child_stdin.shutdown().await.ok();
             drop(child_stdin);
         }

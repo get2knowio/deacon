@@ -105,6 +105,7 @@ listed.
 | up/dockerfile-build | ✅ pass | 2026-05-29 | |
 | up/dotfiles-integration | ✅ pass | 2026-05-29 | repo URL `codespaces/dotfiles` (404)→`holman/dotfiles` (#151); `~` target-path expansion (#150) |
 | up/gpu-modes | ✅ pass | 2026-05-29 | GPU `all` failure expected on non-GPU hosts (tolerated) |
+| up/host-ca | ✅ pass | 2026-06-11 | `--inject-host-ca` explicit bundle; debian-slim → env-var-only fallback (no `ca-certificates`), canonical bundle + CA env vars present (016) |
 | up/id-labels-reconnect | ✅ pass | 2026-05-29 | full-ID on reconnect (#143) |
 | up/image-metadata-merge | ✅ pass | 2026-05-29 | |
 | up/initialize-command | ✅ pass | 2026-05-29 | |

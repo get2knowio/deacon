@@ -718,6 +718,17 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     } else {
         None
     };
+    // FR-018a: build-time injection only happens when deacon generates a
+    // feature-layering Dockerfile. Shapes without features (image-only,
+    // compose-without-features, plain Dockerfile-without-features) generate no
+    // such Dockerfile, so log the skip — runtime injection (`deacon up`) covers
+    // them.
+    if host_ca_set.is_some() && !features_present {
+        info!(
+            "Build-time host-CA injection skipped: this config shape generates no \
+             feature-layering Dockerfile (FR-018a). Use `deacon up` for runtime injection."
+        );
+    }
 
     // Dispatch to appropriate build function based on configuration type
     let result = if config.uses_compose() {

@@ -22,6 +22,7 @@ DEFAULT_EXAMPLES=(
 	"remove-existing"
 	"gpu-modes"
 	"auto-forward"
+	"host-ca"
 )
 
 if [ -n "${EXAMPLES_OVERRIDE:-}" ]; then

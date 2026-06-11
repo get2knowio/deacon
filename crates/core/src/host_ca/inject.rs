@@ -112,9 +112,25 @@ exit {unsupported}
 
 /// The runtime install script: capture the bundle from stdin into the canonical
 /// path, then run the install core.
+///
+/// The non-root check runs FIRST and drains stdin before exiting, so (a) a
+/// non-root exec user can't fail on the unwritable `mkdir` under
+/// `/usr/local/share`, and (b) the streamed bundle is consumed (no broken-pipe
+/// on the writer side). Root then writes the canonical bundle unconditionally so
+/// the env-var-only fallback (unsupported distro) still has a real file.
 pub fn runtime_install_script() -> String {
     format!(
-        "set -e\nmkdir -p {dir}\ncat > {canonical}\nset +e\n{core}",
+        r#"if [ "$(id -u 2>/dev/null || echo 1)" != "0" ]; then
+  cat > /dev/null 2>/dev/null || true
+  echo "deacon: host-CA install needs root; falling back to env-var-only" 1>&2
+  exit {not_root}
+fi
+set -e
+mkdir -p {dir}
+cat > {canonical}
+set +e
+{core}"#,
+        not_root = EXIT_NOT_ROOT,
         dir = CANONICAL_DIR,
         canonical = CANONICAL,
         core = install_core_script(),
