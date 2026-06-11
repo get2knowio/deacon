@@ -1,0 +1,17 @@
+{
+  "name": "Dockerfile build",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "args": { "VARIANT": "bookworm", "NODE_VERSION": "20" },
+    "target": "dev",
+    "cacheFrom": "type=registry,ref=ghcr.io/example/cache"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "runArgs": ["--cap-add=NET_ADMIN"],
+  "containerEnv": { "BUILT_BY": "deacon" },
+  "postCreateCommand": "node --version",
+  "remoteUser": "node"
+}

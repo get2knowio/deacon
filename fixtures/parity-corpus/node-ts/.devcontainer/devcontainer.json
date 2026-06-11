@@ -1,0 +1,19 @@
+{
+  "name": "Node & TypeScript",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "forwardPorts": [3000, 9229],
+  "portsAttributes": { "3000": { "label": "Application", "onAutoForward": "openBrowserOnce" } },
+  "mounts": [ { "source": "devcontainer-cache", "target": "/cache", "type": "volume" } ],
+  "containerEnv": { "NODE_ENV": "development", "MY_VAR": "${localEnv:HOME}" },
+  "remoteEnv": { "PATH": "${containerEnv:PATH}:/custom/bin" },
+  "runArgs": ["--cap-add=SYS_PTRACE", "--security-opt", "seccomp=unconfined"],
+  "hostRequirements": { "cpus": 4, "memory": "8gb", "storage": "32gb" },
+  "customizations": { "vscode": { "extensions": ["dbaeumer.vscode-eslint"], "settings": { "editor.formatOnSave": true } } },
+  "postCreateCommand": { "install": "npm install", "build": "npm run build" },
+  "waitFor": "postCreateCommand",
+  "remoteUser": "node",
+  "updateRemoteUserUID": true
+}

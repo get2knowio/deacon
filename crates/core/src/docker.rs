@@ -1936,21 +1936,27 @@ impl ContainerOps for CliRuntime {
             args.push(mount_str.clone());
         }
 
-        // Apply containerEnv variables from configuration
+        // Apply containerEnv variables from configuration. Only `containerEnv`
+        // is baked onto the container at creation time.
         for (key, value) in &config.container_env {
             args.push("--env".to_string());
             args.push(format!("{}={}", key, value));
         }
 
-        // Apply remoteEnv variables (Dev Container spec: remote env should be available during shell/exec sessions)
-        // `None` values indicate removal; emulate by setting an empty value to override defaults.
-        for (key, value) in &config.remote_env {
-            args.push("--env".to_string());
-            match value {
-                Some(val) => args.push(format!("{}={}", key, val)),
-                None => args.push(format!("{}=", key)),
-            }
-        }
+        // NOTE: `remoteEnv` is intentionally NOT applied here. Per the
+        // containers.dev spec, `remoteEnv` defines variables for the *remote
+        // environment* of commands run inside the container (lifecycle hooks,
+        // `exec`), not container-creation env. It is applied at exec/lifecycle
+        // time via `build_effective_env`, where `${containerEnv:VAR}` references
+        // can actually be resolved against the live container.
+        //
+        // Baking it into `docker create --env` was a real bug: a value like
+        // `remoteEnv.PATH = "${containerEnv:PATH}:/custom/bin"` (the canonical
+        // PATH-append idiom) is unresolvable at creation, so the literal
+        // template was written as the container's PATH — leaving out
+        // `/usr/local/bin` and making the image entrypoint unrunnable
+        // (`exec: "docker-entrypoint.sh": executable file not found in $PATH`),
+        // so the container failed to start at all.
 
         // Add security options from merged security (config + features)
         args.extend(merged_security.to_docker_args());
@@ -3813,7 +3819,8 @@ mod tests {
         args.push("--name".to_string());
         args.push("test-container".to_string());
 
-        // containerEnv
+        // containerEnv only — remoteEnv is intentionally NOT a create-time env
+        // var (applied at exec/lifecycle time instead). Mirrors create_container.
         for (key, value) in &config.container_env {
             args.push("--env".to_string());
             args.push(format!("{}={}", key, value));
@@ -3854,6 +3861,43 @@ mod tests {
             cpu_pos,
             image_pos - 1,
             "runArgs should be immediately before image"
+        );
+    }
+
+    #[test]
+    fn test_remote_env_not_baked_into_create_args() {
+        // Regression: remoteEnv must NOT be applied as a container-create `--env`.
+        // A value like `PATH=${containerEnv:PATH}:/custom/bin` is unresolvable at
+        // creation, so baking it in wrote a literal template as the container's
+        // PATH and the image entrypoint could not be found, so the container
+        // failed to start. remoteEnv belongs to the exec/lifecycle environment.
+        let mut config = DevContainerConfig {
+            image: Some("node:20-bookworm-slim".to_string()),
+            ..Default::default()
+        };
+        config
+            .container_env
+            .insert("NODE_ENV".to_string(), "development".to_string());
+        config.remote_env.insert(
+            "PATH".to_string(),
+            Some("${containerEnv:PATH}:/custom/bin".to_string()),
+        );
+
+        let args = build_create_args(&config);
+        // containerEnv is present at create time.
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--env" && w[1] == "NODE_ENV=development"),
+            "containerEnv must be baked into create args"
+        );
+        // remoteEnv (and especially the unresolved template) is absent.
+        assert!(
+            !args.iter().any(|a| a.contains("${containerEnv:PATH}")),
+            "remoteEnv must not leak an unresolved template into create args: {args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a.contains("/custom/bin")),
+            "remoteEnv must not be applied as a create-time --env: {args:?}"
         );
     }
 

@@ -312,7 +312,7 @@ END FUNCTION
   - Lifecycle parallel command blocks (object form) execute commands concurrently with output buffering to avoid interleaving noise.
   - Background tasks can outlive main setup; finishBackgroundTasks is awaited before dispose when outcome is success.
 - Resource Limits:
-  - Respect host requirements (cpus, memory, storage, gpu) merged from metadata; `gpu-availability` constrains capability usage.
+  - Evaluate host requirements (cpus, memory, storage, gpu) merged from metadata; `gpu-availability` constrains capability usage. Per the containers.dev spec these are **advisory**: when the host does not meet them, emit a warning and proceed — never refuse to start (matches the reference CLI / VS Code). `--ignore-host-requirements` downgrades the warning to a debug log.
 - Optimizations:
   - Prefer reusing running container; only rebuild when needed.
   - Avoid extra image tagging when no features need extension.

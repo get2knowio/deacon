@@ -497,30 +497,37 @@ impl<F: FilesystemProvider> HostRequirementsEvaluator<F> {
         }
     }
 
-    /// Validate host requirements, returning an error if requirements are not met.
+    /// Evaluate host requirements, warning (never failing) when they are not met.
     ///
-    /// This is the main entry point for requirement validation. If `ignore_failures`
-    /// is true, unmet requirements will be logged as warnings instead of failing.
+    /// Per the containers.dev spec, `hostRequirements` are advisory: a tool
+    /// "will be presented with a warning if the requirements are not met" — it
+    /// does not refuse to start. This is the main entry point for requirement
+    /// evaluation; unmet requirements are logged as a warning and execution
+    /// proceeds. When `suppress_warning` is true the warning is downgraded to a
+    /// debug log (the `--ignore-host-requirements` flag).
     pub fn validate_requirements(
         &mut self,
         requirements: &HostRequirements,
         workspace_path: Option<&std::path::Path>,
-        ignore_failures: bool,
+        suppress_warning: bool,
     ) -> Result<HostRequirementsEvaluation> {
         self.validate_requirements_with_gpu_availability(
             requirements,
             workspace_path,
-            ignore_failures,
+            suppress_warning,
             None,
         )
     }
 
-    /// Validate host requirements with a known GPU availability result.
+    /// Evaluate host requirements (advisory) with a known GPU availability result.
+    ///
+    /// Unmet requirements never error: per spec they are advisory, so this warns
+    /// (or debug-logs when `suppress_warning` is set) and returns the evaluation.
     pub fn validate_requirements_with_gpu_availability(
         &mut self,
         requirements: &HostRequirements,
         workspace_path: Option<&std::path::Path>,
-        ignore_failures: bool,
+        suppress_warning: bool,
         gpu_available: Option<bool>,
     ) -> Result<HostRequirementsEvaluation> {
         let evaluation = self.evaluate_requirements_with_gpu_availability(
@@ -542,15 +549,17 @@ impl<F: FilesystemProvider> HostRequirementsEvaluator<F> {
             .map(|eval| eval.description.clone())
             .collect();
 
+            // Advisory per containers.dev spec: warn and proceed, never refuse
+            // to start. The reference CLI and VS Code behave the same way.
             let message = format!(
-                "Host requirements not met: {}",
+                "Host requirements not met: {}. Proceeding anyway (hostRequirements are advisory).",
                 failed_requirements.join(", ")
             );
 
-            if ignore_failures {
-                warn!("{}", message);
+            if suppress_warning {
+                debug!("{}", message);
             } else {
-                return Err(ConfigError::Validation { message }.into());
+                warn!("{}", message);
             }
         }
 
@@ -724,11 +733,12 @@ mod tests {
             gpu: None,
         };
 
-        // Should fail without ignore flag
+        // Advisory per spec: unmet requirements never error, regardless of the
+        // suppress-warning flag. Both calls succeed and report requirements_met=false.
         let result = evaluator.validate_requirements(&requirements, None, false);
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert!(!result.unwrap().requirements_met);
 
-        // Should succeed with ignore flag
         let result = evaluator.validate_requirements(&requirements, None, true);
         assert!(result.is_ok());
         let evaluation = result.unwrap();
@@ -891,15 +901,12 @@ mod tests {
             gpu: None,
         };
 
-        // Should fail without ignore flag
-        let result = evaluator.validate_requirements(&requirements, None, false);
-        assert!(result.is_err());
-
-        // Should succeed with ignore flag (but requirements_met will be false)
-        let result = evaluator.validate_requirements(&requirements, None, true);
-        assert!(result.is_ok());
-        let evaluation = result.unwrap();
-        assert!(!evaluation.requirements_met);
+        // Advisory per spec: never errors, whether or not the warning is suppressed.
+        for suppress_warning in [false, true] {
+            let result = evaluator.validate_requirements(&requirements, None, suppress_warning);
+            assert!(result.is_ok());
+            assert!(!result.unwrap().requirements_met);
+        }
     }
 
     #[test]
@@ -1019,7 +1026,8 @@ mod tests {
 
     #[test]
     fn test_low_disk_threshold_validation() {
-        // Test that low disk space properly fails validation
+        // Low disk space is reported as unmet but, per spec, is advisory: it
+        // must never error — only mark requirements_met=false and warn.
         let mut mock_provider = MockFilesystemProvider::new();
         mock_provider.set_available_space(".", 100_000_000); // 100MB available
 
@@ -1035,21 +1043,18 @@ mod tests {
             gpu: None,
         };
 
-        // Without ignore flag, should return error
-        let result = evaluator.validate_requirements(&requirements, None, false);
-        assert!(
-            result.is_err(),
-            "Should fail validation when storage requirement not met"
-        );
-
-        // With ignore flag, should succeed but mark as not met
-        let result = evaluator.validate_requirements(&requirements, None, true);
-        assert!(result.is_ok());
-        let evaluation = result.unwrap();
-        assert!(!evaluation.requirements_met);
-        assert!(evaluation.storage_evaluation.is_some());
-        let storage_eval = evaluation.storage_evaluation.unwrap();
-        assert!(!storage_eval.met);
+        // Advisory: succeeds and marks as not met whether or not the warning is suppressed.
+        for suppress_warning in [false, true] {
+            let result = evaluator.validate_requirements(&requirements, None, suppress_warning);
+            assert!(
+                result.is_ok(),
+                "hostRequirements are advisory; validation must not error (suppress_warning={suppress_warning})"
+            );
+            let evaluation = result.unwrap();
+            assert!(!evaluation.requirements_met);
+            let storage_eval = evaluation.storage_evaluation.unwrap();
+            assert!(!storage_eval.met);
+        }
     }
 
     #[test]

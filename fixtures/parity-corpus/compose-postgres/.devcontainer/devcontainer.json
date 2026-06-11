@@ -1,0 +1,14 @@
+{
+  "name": "App with Postgres",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "runServices": ["app", "db"],
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "forwardPorts": [5432, 8080],
+  "postCreateCommand": "echo ready",
+  "remoteUser": "vscode"
+}
