@@ -462,6 +462,11 @@ pub struct UpArgs {
     pub trust_workspace: bool,
     /// `--trust-workspace-persist` flag (one-shot + writes to the trust store).
     pub trust_workspace_persist: bool,
+
+    /// Resolved host-CA injection activation (016). Resolved at the CLI tier
+    /// from `--inject-host-ca` > `DEACON_INJECT_HOST_CA` > `settings.json`
+    /// (never the workspace — FR-015).
+    pub host_ca_activation: deacon_core::host_ca::HostCaActivation,
 }
 
 impl Default for UpArgs {
@@ -522,6 +527,7 @@ impl Default for UpArgs {
             force_tty_if_json: false,
             trust_workspace: false,
             trust_workspace_persist: false,
+            host_ca_activation: deacon_core::host_ca::HostCaActivation::Off,
         }
     }
 }

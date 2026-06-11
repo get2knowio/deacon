@@ -620,6 +620,18 @@ where
             config_remote_env = Some(resolved.remote_env.clone());
         }
 
+        // Host-CA reconnect (016, T032): if `up` injected a corporate CA, the
+        // container carries a `devcontainer.deacon.hostCaBundlePath` label.
+        // Re-apply the six CA env vars from that label (no re-discovery, no
+        // activation re-resolve), insert-if-absent so user --remote-env wins.
+        if let Some(bundle_path) =
+            crate::commands::shared::host_ca::read_host_ca_bundle_path(docker_client, &container_id)
+                .await
+        {
+            crate::commands::shared::host_ca::apply_ca_env_indexmap(&mut env_map, &bundle_path);
+            debug!("Re-applied host-CA env vars from container labels (no re-discovery)");
+        }
+
         // Config `userEnvProbe` wins when present; otherwise use the CLI/global default.
         let probe_mode = resolved_config
             .as_ref()

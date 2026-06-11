@@ -52,6 +52,7 @@ use deacon_core::IndexMap;
 use deacon_core::container::ContainerSelector;
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+use deacon_core::host_ca::{CorporateCaSet, HOST_CA_BUNDLE_PATH, discover_corporate_set};
 use deacon_core::lockfile::{
     LockfileValidationResult, get_lockfile_path, read_lockfile, validate_lockfile_against_config,
 };
@@ -490,12 +491,32 @@ pub(crate) async fn execute_up_with_runtime(
     // name and config-file path are part of the durable identity, so attach
     // them here and thread the result into the create path (both the
     // single-container and compose flavors) rather than recomputing.
+    // Host-CA discovery (016, US2/US3). Resolve the corporate set once — from a
+    // machine-owner-only activation (FR-015) — and reuse it for both build-time
+    // (generated Dockerfile RUN) and runtime (exec_with_stdin) injection. An
+    // empty set means "enabled but nothing to inject" → proceed without it.
+    let host_ca_set: Option<CorporateCaSet> = if args.host_ca_activation.is_enabled() {
+        let span = tracing::info_span!("ca.discover", mode = args.host_ca_activation.mode_str());
+        let _guard = span.enter();
+        let set = discover_corporate_set(&args.host_ca_activation)?;
+        if set.is_empty() { None } else { Some(set) }
+    } else {
+        None
+    };
+
     let identity = canonical_reconnect_identity(
         workspace_folder.as_path(),
         &identity_config,
         args.container_name.clone(),
         Some(config_path.as_path()),
     );
+    // Stamp informational CA labels (016, T029) so exec/run-user-commands can
+    // re-apply the CA env vars on reconnect. These do NOT feed the identity
+    // hashes (already computed) and do not affect the label selector.
+    let identity = match &host_ca_set {
+        Some(set) => identity.with_host_ca(HOST_CA_BUNDLE_PATH, &set.subjects),
+        None => identity,
+    };
     let workspace_hash = identity.workspace_hash.clone();
 
     // Initialize state manager
@@ -513,6 +534,7 @@ pub(crate) async fn execute_up_with_runtime(
             &cli_remote_env,
             config_path.as_path(),
             &runtime,
+            host_ca_set.as_ref(),
         )
         .await?
     } else {
@@ -528,6 +550,7 @@ pub(crate) async fn execute_up_with_runtime(
             config_path.as_path(),
             &cache_folder,
             &build_options,
+            host_ca_set.as_ref(),
         )
         .await?
     };

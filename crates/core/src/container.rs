@@ -25,6 +25,14 @@ pub const LABEL_NAME: &str = "devcontainer.name";
 pub const LABEL_LOCAL_FOLDER: &str = "devcontainer.local_folder";
 pub const LABEL_CONFIG_FILE: &str = "devcontainer.config_file";
 
+/// Informational labels recording where a corporate CA was injected (016) so
+/// `exec`/`run-user-commands` can re-apply the CA env vars on reconnect without
+/// re-discovering. These are deacon-specific and **MUST NOT** feed
+/// `workspace_hash`/`config_hash` (they are post-identity metadata, like
+/// `local_folder`).
+pub const LABEL_HOST_CA_BUNDLE_PATH: &str = "devcontainer.deacon.hostCaBundlePath";
+pub const LABEL_HOST_CA_SUBJECTS: &str = "devcontainer.deacon.hostCaSubjects";
+
 /// Source identifier for containers created by deacon
 pub const DEACON_SOURCE: &str = "deacon";
 
@@ -47,6 +55,15 @@ pub struct ContainerIdentity {
     /// Absolute host path to the resolved `devcontainer.json`. Emitted as
     /// the `devcontainer.config_file` label (#68).
     pub config_file: Option<PathBuf>,
+    /// In-container path of the injected corporate-CA bundle, when host-CA
+    /// injection was enabled for this `up` (016). Emitted as the
+    /// `devcontainer.deacon.hostCaBundlePath` label and read back on reconnect
+    /// to re-apply the CA env vars. Informational only — never feeds the
+    /// identity hashes.
+    pub host_ca_bundle_path: Option<String>,
+    /// Newline-joined subject DNs of the injected corporate CAs (016).
+    /// Informational; emitted as `devcontainer.deacon.hostCaSubjects`.
+    pub host_ca_subjects: Option<String>,
 }
 
 /// Container creation result
@@ -134,6 +151,8 @@ impl ContainerIdentity {
             custom_name,
             local_folder,
             config_file: None,
+            host_ca_bundle_path: None,
+            host_ca_subjects: None,
         }
     }
 
@@ -145,6 +164,17 @@ impl ContainerIdentity {
         // file has been deleted between load and container create (rare,
         // but emit *something* useful rather than dropping the label).
         self.config_file = Some(p.canonicalize().unwrap_or(p));
+        self
+    }
+
+    /// Attach corporate-CA injection metadata so the
+    /// `devcontainer.deacon.hostCaBundlePath`/`hostCaSubjects` labels are
+    /// emitted at create time (016). Set from the discovered `CorporateCaSet`
+    /// *before* `create_container`; informational, never feeds the identity
+    /// hashes (which were already computed in [`Self::new`]).
+    pub fn with_host_ca(mut self, bundle_path: impl Into<String>, subjects: &[String]) -> Self {
+        self.host_ca_bundle_path = Some(bundle_path.into());
+        self.host_ca_subjects = Some(subjects.join("\n"));
         self
     }
 
@@ -232,6 +262,15 @@ impl ContainerIdentity {
                 LABEL_CONFIG_FILE.to_string(),
                 config_file.display().to_string(),
             );
+        }
+
+        // Host-CA injection metadata (016). Informational; written after
+        // identity hashing, read back on reconnect to re-apply CA env vars.
+        if let Some(ref bundle_path) = self.host_ca_bundle_path {
+            labels.insert(LABEL_HOST_CA_BUNDLE_PATH.to_string(), bundle_path.clone());
+        }
+        if let Some(ref subjects) = self.host_ca_subjects {
+            labels.insert(LABEL_HOST_CA_SUBJECTS.to_string(), subjects.clone());
         }
 
         labels

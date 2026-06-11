@@ -117,6 +117,60 @@ require a separate, documented opt-in. Reviewers evaluating whether
 forwarding warrants opt-in beyond the flag itself should weigh that it
 only ever exposes the user's own container to the user's own loopback.
 
+## Corporate CA injection (`--inject-host-ca`)
+
+Behind a TLS-intercepting corporate proxy, dev containers need the corporate
+root CA to validate HTTPS. deacon ships two capabilities for this (016):
+
+- **Always-on (deacon's own client).** deacon's own OCI pulls trust the host
+  OS trust store (union of the bundled public roots + host roots, plus the
+  additive `DEACON_CUSTOM_CA_BUNDLE`). This changes only what *deacon* trusts
+  for its own requests; it injects nothing into containers.
+- **Opt-in, machine-side injection.** When enabled, deacon discovers the
+  corporate root CA delta on the host and installs it into the container — at
+  build time (a deterministic `RUN` step in the deacon-generated
+  feature-layering Dockerfile, before any feature `install.sh`) and at runtime
+  (streamed over `docker exec -i` into the distro trust store before any
+  lifecycle hook, plus six synthesized CA env vars: `SSL_CERT_FILE`,
+  `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`, `GIT_SSL_CAINFO`,
+  `CURL_CA_BUNDLE`).
+
+**Threat model — machine-owner controlled only.** Injection activation is
+read **only** from machine-owner sources, in precedence order:
+
+1. the `--inject-host-ca [PATH]` flag (on `up` and `build`),
+2. the `DEACON_INJECT_HOST_CA` environment variable,
+3. `{user_data_folder}/settings.json` (`{ "hostCa": "auto" | "<abs path>" }`).
+
+It is **never** read from the workspace — nothing in `devcontainer.json` or any
+workspace-resident file can enable, disable, or redirect injection (FR-015,
+SC-007). This mirrors the [workspace-trust gate](#workspace-trust-model-host-side-lifecycle-hooks):
+a hostile workspace cloned onto a corporate machine cannot trick deacon into
+trusting or installing an attacker-chosen CA. The CLI tier resolves activation
+via `resolve_host_ca_activation_cli`, which by contract receives only the three
+sources above; adding a workspace-sourced input there is a security regression
+and must be rejected in review.
+
+**Degraded paths never silent.** Unsupported distro / non-root → warn + the
+six CA env vars still point at the written bundle (env-var-only). Unreadable or
+non-PEM explicit bundle → fail fast naming the path. Zero corporate certs
+discovered → log and proceed without injection.
+
+**User-authored Dockerfiles are not rewritten.** deacon never edits a
+user-authored `Dockerfile`. If your own Dockerfile needs the CA at build time,
+mirror deacon's convention manually: declare a build context and copy the
+bundle before your network steps, e.g.
+
+```dockerfile
+# docker build --build-context corp_ca=/etc/corp ...
+RUN --mount=type=bind,from=corp_ca,target=/tmp/corp \
+    cp /tmp/corp/root.pem /usr/local/share/ca-certificates/corp.crt \
+    && update-ca-certificates
+```
+
+The settings file is **read-only** in this release; a `deacon settings get/set`
+command to manage it is tracked in issue #198.
+
 ## Security-relevant CI gates
 
 - `cargo-deny` (advisories + bans + licenses + sources) runs on every PR

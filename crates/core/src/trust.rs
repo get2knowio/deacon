@@ -118,22 +118,31 @@ impl TrustStore {
     }
 }
 
+/// Resolve the host-side user-data root directory. When `user_data_folder` is
+/// `None` we fall back to `~/.deacon/`. This is the single location all
+/// machine-level deacon state lives under (the trust store, the read-only
+/// `settings.json`, port-forward markers, …) so every consumer derives its
+/// path from here rather than re-resolving the home directory.
+pub fn user_data_root(user_data_folder: Option<&Path>) -> Result<PathBuf> {
+    match user_data_folder {
+        Some(p) => Ok(p.to_path_buf()),
+        None => {
+            let dirs = directories_next::BaseDirs::new().ok_or_else(|| {
+                DeaconError::Internal(crate::errors::InternalError::Generic {
+                    message: "Could not determine user home directory for user-data folder"
+                        .to_string(),
+                })
+            })?;
+            Ok(dirs.home_dir().join(".deacon"))
+        }
+    }
+}
+
 /// Derive the trust-store path under a `user_data_folder`. When
 /// `user_data_folder` is `None` we fall back to `~/.deacon/` as the default
 /// host-side user data root.
 pub fn trust_store_path(user_data_folder: Option<&Path>) -> Result<PathBuf> {
-    let base = match user_data_folder {
-        Some(p) => p.to_path_buf(),
-        None => {
-            let dirs = directories_next::BaseDirs::new().ok_or_else(|| {
-                DeaconError::Internal(crate::errors::InternalError::Generic {
-                    message: "Could not determine user home directory for trust store".to_string(),
-                })
-            })?;
-            dirs.home_dir().join(".deacon")
-        }
-    };
-    Ok(base.join("trusted_workspaces.json"))
+    Ok(user_data_root(user_data_folder)?.join("trusted_workspaces.json"))
 }
 
 /// Best-effort canonicalization. When the path does not exist yet we fall back

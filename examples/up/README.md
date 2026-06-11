@@ -59,6 +59,12 @@ deacon up --workspace-folder .
 |---------|-------------|--------------|
 | [gpu-modes/](gpu-modes/) | GPU mode handling | `--gpu-mode` flag, auto-detection, GPU resource requests |
 
+### Security & Networking
+
+| Example | Description | Key Features |
+|---------|-------------|--------------|
+| [host-ca/](host-ca/) | Corporate CA injection | `--inject-host-ca`, machine-owner activation, CA env vars, `injectedCaSubjects` |
+
 ## Common Usage Patterns
 
 ### 1. First-Time Setup

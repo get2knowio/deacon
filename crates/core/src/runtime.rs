@@ -201,6 +201,27 @@ impl Docker for ContainerRuntimeImpl {
         }
     }
 
+    async fn exec_with_stdin(
+        &self,
+        container_id: &str,
+        command: &[String],
+        stdin: &[u8],
+        config: &ExecConfig,
+    ) -> Result<ExecResult> {
+        match self {
+            Self::Docker(runtime) => {
+                runtime
+                    .exec_with_stdin(container_id, command, stdin, config)
+                    .await
+            }
+            Self::Podman(runtime) => {
+                runtime
+                    .exec_with_stdin(container_id, command, stdin, config)
+                    .await
+            }
+        }
+    }
+
     async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()> {
         match self {
             Self::Docker(runtime) => runtime.stop_container(container_id, timeout).await,
@@ -400,6 +421,18 @@ impl Docker for DockerRuntime {
             .await
     }
 
+    async fn exec_with_stdin(
+        &self,
+        container_id: &str,
+        command: &[String],
+        stdin: &[u8],
+        config: &ExecConfig,
+    ) -> Result<ExecResult> {
+        self.docker
+            .exec_with_stdin(container_id, command, stdin, config)
+            .await
+    }
+
     async fn stop_container(&self, container_id: &str, timeout: Option<u32>) -> Result<()> {
         self.docker.stop_container(container_id, timeout).await
     }
@@ -549,6 +582,18 @@ impl Docker for PodmanRuntime {
     ) -> Result<ExecResult> {
         self.runtime
             .exec_with_line_prefix(container_id, command, config, line_prefix)
+            .await
+    }
+
+    async fn exec_with_stdin(
+        &self,
+        container_id: &str,
+        command: &[String],
+        stdin: &[u8],
+        config: &ExecConfig,
+    ) -> Result<ExecResult> {
+        self.runtime
+            .exec_with_stdin(container_id, command, stdin, config)
             .await
     }
 

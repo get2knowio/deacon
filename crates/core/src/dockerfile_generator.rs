@@ -15,6 +15,29 @@ use tracing::{debug, instrument};
 /// This name is used in both the Dockerfile generation and build arguments
 const FEATURE_CONTENT_SOURCE: &str = "dev_containers_feature_content_source";
 
+/// Build context name carrying the corporate-CA bundle + install script for
+/// build-time host-CA injection (016). Mirrors [`FEATURE_CONTENT_SOURCE`].
+pub const HOST_CA_BUILD_CONTEXT: &str = "deacon_ca_source";
+
+/// In-build mount target for [`HOST_CA_BUILD_CONTEXT`]. The context dir holds
+/// `host-ca.crt` (the PEM bundle) and `install.sh` (the shared install script).
+/// Public so the caller staging the context references the same path.
+pub const HOST_CA_MOUNT_TARGET: &str = "/tmp/deacon-ca";
+
+/// The deterministic CA-install `RUN` step emitted before the feature loop when
+/// build-time host-CA injection is enabled. Byte-stable text; the per-build
+/// determinism + cache-busting comes from the mounted bundle/script content
+/// (BuildKit hashes the bind mount), exactly like the feature mounts.
+fn host_ca_run_step() -> String {
+    format!(
+        "# Host-CA injection (016): install the corporate CA before any feature install.\n\
+         RUN --mount=type=bind,from={ctx},target={target} \\\n    \
+         sh {target}/install.sh\n\n",
+        ctx = HOST_CA_BUILD_CONTEXT,
+        target = HOST_CA_MOUNT_TARGET,
+    )
+}
+
 /// Configuration for Dockerfile generation
 #[derive(Debug, Clone)]
 pub struct DockerfileConfig {
@@ -31,6 +54,12 @@ pub struct DockerfileConfig {
     /// these MUST be available; missing ones default to empty strings so
     /// install scripts can branch on `${_REMOTE_USER:-}` (#89).
     pub feature_install_env: FeatureInstallEnv,
+    /// When `Some(dir)`, build-time host-CA injection is enabled (016): the
+    /// generator emits a deterministic CA-install `RUN` step before the feature
+    /// loop, and [`DockerfileGenerator::generate_build_args`] passes
+    /// `--build-context deacon_ca_source=<dir>`. `dir` holds `host-ca.crt` and
+    /// `install.sh`. `None` ⇒ no build-time injection (output unchanged).
+    pub host_ca_build_context: Option<String>,
 }
 
 /// The four well-known env vars the features spec guarantees to every
@@ -93,6 +122,7 @@ impl Default for DockerfileConfig {
             target_stage: "dev_containers_target_stage".to_string(),
             features_source_dir: String::new(),
             feature_install_env: FeatureInstallEnv::default(),
+            host_ca_build_context: None,
         }
     }
 }
@@ -134,6 +164,14 @@ impl DockerfileGenerator {
 
         // Create temporary directory for features
         dockerfile.push_str("RUN mkdir -p /tmp/dev-container-features\n\n");
+
+        // Host-CA injection (016, T037): install the corporate CA into the
+        // distro trust store BEFORE any feature `install.sh` RUN-mount, so
+        // feature network calls trust the proxy CA. Deterministic + cache-keyed
+        // on the mounted bundle content (FR-017).
+        if self.config.host_ca_build_context.is_some() {
+            dockerfile.push_str(&host_ca_run_step());
+        }
 
         // Install features level by level
         for (level_idx, level) in plan.levels.iter().enumerate() {
@@ -188,6 +226,14 @@ impl DockerfileGenerator {
         ));
 
         dockerfile.push_str("RUN mkdir -p /tmp/dev-container-features\n\n");
+
+        // Host-CA injection (016, T037): install the corporate CA into the
+        // distro trust store BEFORE any feature `install.sh` RUN-mount, so
+        // feature network calls trust the proxy CA. Deterministic + cache-keyed
+        // on the mounted bundle content (FR-017).
+        if self.config.host_ca_build_context.is_some() {
+            dockerfile.push_str(&host_ca_run_step());
+        }
 
         for (level_idx, level) in plan.levels.iter().enumerate() {
             dockerfile.push_str(&format!("# Level {}: Installing features\n", level_idx));
@@ -390,6 +436,13 @@ impl DockerfileGenerator {
             }
         }
 
+        // Build-time host-CA build context (016): provides the bundle + install
+        // script the generated RUN step mounts. Only present when injection is on.
+        if let Some(ref ca_dir) = self.config.host_ca_build_context {
+            args.push("--build-context".to_string());
+            args.push(format!("{}={}", HOST_CA_BUILD_CONTEXT, ca_dir));
+        }
+
         // Add build context and other standard arguments
         args.extend(vec![
             "--build-context".to_string(),
@@ -552,6 +605,68 @@ mod tests {
         assert!(dockerfile.contains("RUN --mount=type=bind"));
         assert!(dockerfile.contains("VERSION=\"20\""));
         assert!(dockerfile.contains("./install.sh"));
+    }
+
+    /// 016 / T034: the host-CA install RUN step is emitted after the features
+    /// mkdir and BEFORE the first feature RUN-mount, only when injection is on,
+    /// and is byte-stable for the same CA set (FR-017).
+    #[test]
+    fn test_host_ca_run_step_ordering_and_byte_stability() {
+        let mut options = HashMap::new();
+        options.insert("version".to_string(), OptionValue::String("20".to_string()));
+        let feature = create_test_feature("node", options);
+        let plan = InstallationPlan::new(vec![feature]);
+
+        // Without injection: no CA step (default output unchanged).
+        let off = DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
+        };
+        let off_df = DockerfileGenerator::new(off).generate(&plan).unwrap();
+        assert!(!off_df.contains("deacon_ca_source"));
+
+        // With injection: CA step present, ordered correctly.
+        let on = DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            host_ca_build_context: Some("/tmp/deacon-ca-ctx".to_string()),
+            ..Default::default()
+        };
+        let df1 = DockerfileGenerator::new(on.clone())
+            .generate(&plan)
+            .unwrap();
+        let mkdir_pos = df1
+            .find("RUN mkdir -p /tmp/dev-container-features")
+            .unwrap();
+        let ca_pos = df1
+            .find("--mount=type=bind,from=deacon_ca_source")
+            .expect("CA step present");
+        let first_feature_pos = df1
+            .find("--mount=type=bind,from=dev_containers_feature_content_source")
+            .unwrap();
+        assert!(
+            mkdir_pos < ca_pos && ca_pos < first_feature_pos,
+            "CA step must sit between mkdir and the first feature mount"
+        );
+        assert!(df1.contains("sh /tmp/deacon-ca/install.sh"));
+
+        // Byte-stable: same CA set + image → identical Dockerfile text.
+        let df2 = DockerfileGenerator::new(on).generate(&plan).unwrap();
+        assert_eq!(df1, df2);
+
+        // The build args carry the CA build context.
+        let args = DockerfileGenerator::new(DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            host_ca_build_context: Some("/tmp/deacon-ca-ctx".to_string()),
+            ..Default::default()
+        })
+        .generate_build_args(std::path::Path::new("/tmp/Dockerfile"), "img:tag", None);
+        assert!(
+            args.iter()
+                .any(|a| a == "deacon_ca_source=/tmp/deacon-ca-ctx")
+        );
     }
 
     /// Bead 14b: when extending a user-authored Dockerfile (compose `build:`

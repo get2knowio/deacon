@@ -4,6 +4,7 @@ pub(crate) mod build_resolution;
 pub mod config_loader;
 pub mod env_user;
 pub mod feature_resolver;
+pub mod host_ca;
 pub mod identity;
 pub mod progress;
 pub mod remote_env;

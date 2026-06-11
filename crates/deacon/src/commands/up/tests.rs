@@ -512,6 +512,7 @@ fn test_up_success_with_new_fields_serialization() {
         ]),
         configuration: None,
         merged_configuration: None,
+        injected_ca_subjects: None,
     };
 
     let json_value = serde_json::to_value(&success).unwrap();
@@ -567,6 +568,7 @@ fn test_up_success_with_none_fields_serialization() {
         external_volumes_preserved: None,
         configuration: None,
         merged_configuration: None,
+        injected_ca_subjects: None,
     };
 
     let json_value = serde_json::to_value(&success).unwrap();

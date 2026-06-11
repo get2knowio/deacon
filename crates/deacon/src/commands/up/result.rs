@@ -79,6 +79,12 @@ pub struct UpSuccess {
     /// Merged configuration object (only when includeMergedConfiguration flag is set)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub merged_configuration: Option<serde_json::Value>,
+
+    /// Subject DNs of corporate CAs injected into the container (016, FR-028).
+    /// Additive and **omitted** when host-CA injection was off or yielded zero
+    /// certs, so the default unconfigured output stays byte-stable (FR-029).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub injected_ca_subjects: Option<Vec<String>>,
 }
 
 /// Error response for the up command, emitted as JSON to stdout.
@@ -145,6 +151,7 @@ impl UpResult {
             external_volumes_preserved: None,
             configuration: None,
             merged_configuration: None,
+            injected_ca_subjects: None,
         }))
     }
 
@@ -213,6 +220,17 @@ impl UpResult {
     pub fn with_external_volumes_preserved(mut self, volumes: Vec<String>) -> Self {
         if let UpResult::Success(ref mut success) = self {
             success.external_volumes_preserved = Some(volumes);
+        }
+        self
+    }
+
+    /// Add injected corporate-CA subjects to a success result (016). A no-op for
+    /// an empty list so the field stays omitted (byte-stable default output).
+    pub fn with_injected_ca_subjects(mut self, subjects: Vec<String>) -> Self {
+        if let UpResult::Success(ref mut success) = self {
+            if !subjects.is_empty() {
+                success.injected_ca_subjects = Some(subjects);
+            }
         }
         self
     }
@@ -401,4 +419,7 @@ pub struct UpContainerInfo {
     pub external_volumes_preserved: Option<Vec<String>>,
     pub configuration: Option<serde_json::Value>,
     pub merged_configuration: Option<serde_json::Value>,
+    /// Subject DNs of corporate CAs injected into the container (016). Empty
+    /// when injection was off or yielded zero certs.
+    pub injected_ca_subjects: Vec<String>,
 }
