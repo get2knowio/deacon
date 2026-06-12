@@ -1014,11 +1014,14 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                 // are intentionally NOT folded in here — they're collected separately
                 // for the plural output. Mirrors upstream `mergeConfiguration` which
                 // strips replaceProperties from the base before re-emitting plurals.
-                for (key, value) in &metadata.container_env {
-                    derived_config
-                        .container_env
-                        .insert(key.clone(), value.clone());
-                }
+                //
+                // Feature `containerEnv` (and `remoteEnv`) are intentionally NOT folded
+                // into the merged config: per upstream `imageMetadata.ts`, a feature's
+                // image-metadata entry omits env — feature env is realized by the
+                // feature's own install step (baked into the image), not surfaced via
+                // the `devcontainer.metadata` merge. The reference CLI's read-config
+                // `mergedConfiguration.containerEnv` therefore carries only the base
+                // config's (and image-label) env, never un-built feature env.
 
                 for mount in &metadata.mounts {
                     derived_config.mounts.push(mount.clone());
