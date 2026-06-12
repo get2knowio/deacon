@@ -624,6 +624,55 @@ fn or_merge_bool(current: Option<bool>, new: Option<bool>) -> Option<bool> {
     }
 }
 
+/// Apply final `mergedConfiguration`-only normalizations that match the reference CLI's
+/// `mergeConfiguration` output shape (these do NOT apply to the top-level `configuration`,
+/// which preserves the raw authored values):
+///
+/// - `hostRequirements.memory` / `.storage` are emitted as a byte-count STRING (binary
+///   units), not the raw authored form. So `"8gb"` becomes `"8589934592"`. `cpus` stays
+///   numeric. Matches upstream `imageMetadata.ts` which normalizes these to bytes when
+///   assembling the merged image metadata.
+/// - `init` and `privileged` always materialize as booleans, defaulting to `false` when
+///   no config / image-metadata / feature entry sets them. Matches upstream's
+///   `init: imageMetadata.some(e => e.init)` / `privileged: imageMetadata.some(e => e.privileged)`,
+///   which always yields a boolean.
+fn normalize_merged_configuration_shape(value: &mut serde_json::Value) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+
+    // init / privileged: null or absent -> false (always a boolean in the merged shape).
+    for key in ["init", "privileged"] {
+        let needs_default = obj.get(key).map(|v| v.is_null()).unwrap_or(true);
+        if needs_default {
+            obj.insert(key.to_string(), serde_json::Value::Bool(false));
+        }
+    }
+
+    // hostRequirements memory / storage -> byte-count string.
+    if let Some(serde_json::Value::Object(hr)) = obj.get_mut("hostRequirements") {
+        for key in ["memory", "storage"] {
+            if let Some(bytes) = hr.get(key).and_then(resource_value_to_bytes) {
+                hr.insert(
+                    key.to_string(),
+                    serde_json::Value::String(bytes.to_string()),
+                );
+            }
+        }
+    }
+}
+
+/// Parse a hostRequirements resource JSON value (authored string like `"8gb"` or a raw
+/// number) into a byte count, reusing the core [`ResourceSpec`] binary-unit semantics.
+/// Returns `None` (leaving the value untouched) when the value is null or unparseable.
+fn resource_value_to_bytes(v: &serde_json::Value) -> Option<u64> {
+    if v.is_null() {
+        return None;
+    }
+    let spec: deacon_core::config::ResourceSpec = serde_json::from_value(v.clone()).ok()?;
+    spec.parse_bytes().ok()
+}
+
 /// Apply the upstream `mergeConfiguration` customizations shape to the merged base JSON.
 ///
 /// Upstream collects `customizations` per tool key into an array of values across every metadata
@@ -1584,18 +1633,18 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                 Vec::new()
             };
 
-        Some(
-            compute_merged_configuration(
-                &config,
-                container_info.as_ref(),
-                container_context.as_ref(),
-                features_for_merge,
-                secrets.as_ref(),
-                &fetcher,
-                &image_metadata_entries,
-            )
-            .await?,
+        let mut merged = compute_merged_configuration(
+            &config,
+            container_info.as_ref(),
+            container_context.as_ref(),
+            features_for_merge,
+            secrets.as_ref(),
+            &fetcher,
+            &image_metadata_entries,
         )
+        .await?;
+        normalize_merged_configuration_shape(&mut merged);
+        Some(merged)
     } else {
         None
     };
@@ -1634,8 +1683,62 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
 mod tests {
     use super::*;
     use deacon_core::redaction::{RedactionConfig, SecretRegistry};
+    use serde_json::json;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_normalize_merged_shape_host_requirements_to_bytes() {
+        // mergedConfiguration normalizes memory/storage to a byte-count STRING (binary
+        // units), matching the reference CLI; cpus stays numeric. "8gb" -> 8 * 2^30.
+        let mut v = json!({
+            "hostRequirements": { "cpus": 4, "memory": "8gb", "storage": "32gb" }
+        });
+        normalize_merged_configuration_shape(&mut v);
+        let hr = &v["hostRequirements"];
+        assert_eq!(hr["memory"], json!("8589934592"));
+        assert_eq!(hr["storage"], json!("34359738368"));
+        assert_eq!(hr["cpus"], json!(4));
+    }
+
+    #[test]
+    fn test_normalize_merged_shape_host_requirements_already_bytes() {
+        // A raw byte count (already-merged form) round-trips unchanged.
+        let mut v = json!({ "hostRequirements": { "memory": "536870912" } });
+        normalize_merged_configuration_shape(&mut v);
+        assert_eq!(v["hostRequirements"]["memory"], json!("536870912"));
+    }
+
+    #[test]
+    fn test_normalize_merged_shape_init_privileged_default_false() {
+        // Absent and null both materialize to `false` in the merged shape.
+        let mut absent = json!({ "image": "x" });
+        normalize_merged_configuration_shape(&mut absent);
+        assert_eq!(absent["init"], json!(false));
+        assert_eq!(absent["privileged"], json!(false));
+
+        let mut nulled = json!({ "init": null, "privileged": null });
+        normalize_merged_configuration_shape(&mut nulled);
+        assert_eq!(nulled["init"], json!(false));
+        assert_eq!(nulled["privileged"], json!(false));
+    }
+
+    #[test]
+    fn test_normalize_merged_shape_init_privileged_true_preserved() {
+        // A real `true` (e.g. accumulated from a feature) is never downgraded.
+        let mut v = json!({ "init": true, "privileged": true });
+        normalize_merged_configuration_shape(&mut v);
+        assert_eq!(v["init"], json!(true));
+        assert_eq!(v["privileged"], json!(true));
+    }
+
+    #[test]
+    fn test_normalize_merged_shape_no_host_requirements_is_noop() {
+        // Missing hostRequirements is fine; only init/privileged get defaulted.
+        let mut v = json!({ "image": "x" });
+        normalize_merged_configuration_shape(&mut v);
+        assert!(v.get("hostRequirements").is_none());
+    }
 
     fn create_test_args(
         temp_dir: &TempDir,
