@@ -505,19 +505,21 @@ raw value for debugging. Hermetic docker test
 stream fix is reverted. (`crates/deacon/src/commands/up/mod.rs`,
 `crates/core/src/docker.rs`.)
 
-## Open divergences (confirmed, not yet fixed)
+### 27. `--secrets-file` did not accept the reference's JSON format
 
-### `--secrets-file` format: `.env` vs JSON
-
-The reference CLI (and the spec) expect `--secrets-file` to be **JSON**
-(`{"MY_SECRET":"…"}`) — it rejects a `KEY=VALUE` `.env` file with `Error: Invalid
-json data`. deacon parses **`.env`** (`KEY=VALUE`) and does NOT parse JSON (a JSON
-file leaves the secret unset). So a reference-format secrets file silently yields
-empty secrets in deacon, and vice-versa. Switching deacon to JSON is a breaking
-change to its current `.env` contract (and its existing tests), so it's deferred
-as a product decision (accept JSON only, or both?).
-(`crates/core/src/secrets.rs::parse_secrets_file`.) Note the redaction fix (#26)
-is independent of the format.
+The reference CLI (and the containers.dev spec) expect `--secrets-file` to be a
+flat **JSON** object (`{"MY_SECRET":"…"}`) — it rejects a `KEY=VALUE` `.env` file
+with `Error: Invalid json data`. deacon parsed only `.env` and silently left
+secrets unset when given a reference-format JSON file. **Fix:** `parse_secrets_file`
+now accepts **both** — a leading `{` (after whitespace) selects JSON, otherwise
+`KEY=VALUE`. The two are syntactically disjoint, so JSON support is purely additive
+(no `.env` regression) and a deacon superset of the reference. Non-string JSON
+values are coerced to their string form (number/bool literal, object/array as
+compact JSON, null → empty); a `{`-leading file that isn't valid JSON fails fast
+with a clear error (no silent fallback). Verified end-to-end: a JSON secrets file
+injects + redacts under deacon exactly as under the reference, and the existing
+`.env` path is unchanged. Unit tests cover JSON parsing, whitespace-led detection,
+non-string coercion, and the invalid-JSON error. (`crates/core/src/secrets.rs`.)
 
 ## Verified non-bugs
 

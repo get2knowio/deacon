@@ -1,17 +1,19 @@
 //! Secrets file parsing and management
 //!
-//! This module handles parsing and management of secrets files in KEY=VALUE format,
-//! supports multiple files with conflict resolution (later wins), and provides
-//! integration with the redaction system.
+//! This module parses secrets files (JSON or `.env`), supports multiple files
+//! with conflict resolution (later wins), and integrates with the redaction
+//! system.
 //!
 //! ## File Format
 //!
-//! Secrets files support:
-//! - KEY=VALUE format (one per line)
-//! - Empty lines (ignored)
-//! - Comments starting with # (ignored)
-//! - Values may contain spaces and special characters
-//! - No quotes around values (taken literally)
+//! Two formats are accepted (auto-detected by a leading `{`):
+//!
+//! - **JSON** — a flat object `{"KEY": "value", ...}`, the format used by the
+//!   reference CLI and the containers.dev spec. Non-string values are coerced to
+//!   their string form.
+//! - **`.env`** (`KEY=VALUE`, one per line) — deacon's original format, retained
+//!   for backwards compatibility. Empty lines and `#` comments are ignored;
+//!   values are taken literally (no quoting) and may contain spaces.
 //!
 //! ## Example
 //!
@@ -116,6 +118,15 @@ impl SecretsCollection {
         let content =
             fs::read_to_string(file_path).map_err(|e| DeaconError::Config(ConfigError::Io(e)))?;
 
+        // Accept BOTH formats: the reference CLI / spec use a flat JSON object
+        // (`{"KEY":"value"}`); deacon historically used `.env` (`KEY=VALUE`). A
+        // leading `{` (after whitespace) selects JSON, otherwise fall back to
+        // KEY=VALUE. The two are syntactically disjoint, so detection is
+        // unambiguous and JSON support is purely additive (no `.env` regression).
+        if content.trim_start().starts_with('{') {
+            return Self::parse_secrets_json(file_path, &content);
+        }
+
         let mut secrets = HashMap::new();
 
         for (line_num, line) in content.lines().enumerate() {
@@ -150,6 +161,39 @@ impl SecretsCollection {
                     line
                 );
             }
+        }
+
+        Ok(secrets)
+    }
+
+    /// Parse a flat JSON object secrets file (`{"KEY":"value", ...}`), matching
+    /// the reference CLI / containers.dev spec. Non-string values are coerced to
+    /// their string form (number/bool → literal, object/array → compact JSON,
+    /// null → empty) so a value type doesn't hard-fail injection.
+    fn parse_secrets_json(file_path: &Path, content: &str) -> Result<HashMap<String, String>> {
+        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(content)
+            .map_err(|e| {
+                DeaconError::Config(ConfigError::Validation {
+                    message: format!("Invalid JSON secrets file {}: {}", file_path.display(), e),
+                })
+            })?;
+
+        let mut secrets = HashMap::new();
+        for (key, value) in map {
+            if key.is_empty() {
+                warn!(
+                    "Empty key found in JSON secrets file {}",
+                    file_path.display()
+                );
+                continue;
+            }
+            let value = match value {
+                serde_json::Value::String(s) => s,
+                serde_json::Value::Null => String::new(),
+                other => other.to_string(),
+            };
+            debug!("Parsed secret key: {}", key);
+            secrets.insert(key, value);
         }
 
         Ok(secrets)
@@ -210,6 +254,53 @@ mod tests {
         let secrets = SecretsCollection::parse_secrets_file(&secrets_file)?;
         assert!(secrets.is_empty());
         Ok(())
+    }
+
+    #[test]
+    fn test_parse_json_secrets_file() -> Result<()> {
+        // Reference / spec format: a flat JSON object. Non-string values are
+        // coerced to their string form.
+        let temp_dir = TempDir::new().unwrap();
+        let secrets_file = temp_dir.path().join("secrets.json");
+        fs::write(
+            &secrets_file,
+            r#"{ "MY_SECRET": "topsecret", "NUM": 42, "FLAG": true }"#,
+        )
+        .unwrap();
+
+        let secrets = SecretsCollection::parse_secrets_file(&secrets_file)?;
+        assert_eq!(secrets.len(), 3);
+        assert_eq!(secrets.get("MY_SECRET"), Some(&"topsecret".to_string()));
+        assert_eq!(secrets.get("NUM"), Some(&"42".to_string()));
+        assert_eq!(secrets.get("FLAG"), Some(&"true".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_json_detected_by_leading_brace_with_whitespace() -> Result<()> {
+        // Leading whitespace before `{` still selects JSON (not KEY=VALUE).
+        let temp_dir = TempDir::new().unwrap();
+        let secrets_file = temp_dir.path().join("secrets.txt");
+        fs::write(&secrets_file, "\n  { \"K\": \"v\" }\n").unwrap();
+        let secrets = SecretsCollection::parse_secrets_file(&secrets_file)?;
+        assert_eq!(secrets.get("K"), Some(&"v".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_invalid_json_secrets_file_errors() {
+        // A `{`-leading file that isn't valid JSON fails fast (no silent
+        // fallback to KEY=VALUE parsing).
+        let temp_dir = TempDir::new().unwrap();
+        let secrets_file = temp_dir.path().join("secrets.json");
+        fs::write(&secrets_file, r#"{ "MY_SECRET": "x",, }"#).unwrap();
+        let result = SecretsCollection::parse_secrets_file(&secrets_file);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("Invalid JSON secrets file"),
+            "expected JSON parse error, got: {msg}"
+        );
     }
 
     #[test]
