@@ -92,10 +92,28 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
                 }
             }
         } else {
+            // Compose files resolve relative to the directory containing
+            // devcontainer.json, not the workspace folder (spec parity).
+            let target_config_dir = match args.config_path.as_deref() {
+                Some(cfg) if cfg.is_dir() => cfg.to_path_buf(),
+                Some(cfg) => cfg
+                    .parent()
+                    .unwrap_or(workspace_folder.as_path())
+                    .to_path_buf(),
+                None => {
+                    let dc = workspace_folder.join(".devcontainer");
+                    if dc.is_dir() {
+                        dc
+                    } else {
+                        workspace_folder.to_path_buf()
+                    }
+                }
+            };
             match resolve_target_container(
                 &docker_client,
                 workspace_folder.as_path(),
                 &config,
+                &target_config_dir,
                 None,
                 &args.docker_path,
                 &[],

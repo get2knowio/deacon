@@ -1281,9 +1281,15 @@ async fn execute_compose_build(
 
     let build_start = Instant::now();
 
-    // Create compose project
+    // Create compose project. Compose files resolve relative to the directory
+    // containing devcontainer.json (spec parity), not the workspace folder.
     let compose_manager = ComposeManager::new();
-    let project = compose_manager.create_project(config, workspace_folder)?;
+    let config_dir = args
+        .config_path
+        .as_deref()
+        .and_then(|p| p.parent())
+        .unwrap_or(workspace_folder);
+    let project = compose_manager.create_project(config, workspace_folder, config_dir)?;
 
     // Validate service exists
     if !compose_manager
@@ -1357,7 +1363,9 @@ async fn execute_compose_build_with_features(
         .ok_or_else(|| anyhow!("Docker Compose configuration must specify a service"))?;
 
     let compose_manager = ComposeManager::new();
-    let project = compose_manager.create_project(config, workspace_folder)?;
+    // Compose files resolve relative to the config dir (spec parity).
+    let config_dir = config_path.parent().unwrap_or(workspace_folder);
+    let project = compose_manager.create_project(config, workspace_folder, config_dir)?;
     if !compose_manager
         .validate_service_exists(&project, service)
         .await?

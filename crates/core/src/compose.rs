@@ -761,6 +761,7 @@ impl ComposeManager {
         &self,
         config: &DevContainerConfig,
         base_path: &Path,
+        config_dir: &Path,
     ) -> Result<ComposeProject> {
         // Check if docker_compose_file is specified
         if config.docker_compose_file.is_none() {
@@ -785,13 +786,18 @@ impl ComposeManager {
                 message: "No service specified for compose project".to_string(),
             })?;
 
-        // Resolve compose file paths relative to base_path
+        // Resolve compose file paths relative to the directory containing
+        // devcontainer.json (`config_dir`), per the containers.dev spec
+        // ("relative to the devcontainer.json file") and the reference CLI.
+        // For the standard `.devcontainer/docker-compose.yml` layout this is the
+        // `.devcontainer` dir, NOT the workspace folder. The project name and
+        // working dir still derive from `base_path` (the workspace folder).
         let mut resolved_files = Vec::new();
         for file in &compose_files {
             let file_path = if Path::new(file).is_absolute() {
                 PathBuf::from(file)
             } else {
-                base_path.join(file)
+                config_dir.join(file)
             };
 
             if !file_path.exists() {
@@ -1339,6 +1345,14 @@ impl ComposeProject {
                 yaml.push_str(&format!("      {}: {}\n", key, escaped));
             }
             for svc in &self.run_services {
+                // Skip the primary service: it already has a full block above
+                // (with image/command/labels). `runServices` commonly lists the
+                // primary service alongside the others, and emitting it again
+                // here produces a duplicate YAML mapping key ("mapping key
+                // <svc> already defined") that docker compose rejects.
+                if svc == &self.service {
+                    continue;
+                }
                 yaml.push_str(&format!("  {}:\n", svc));
                 yaml.push_str("    labels:\n");
                 for (key, value) in &self.deacon_labels {
@@ -1603,6 +1617,68 @@ mod tests {
         assert!(args.contains(&"test-project".to_string()));
         assert!(args.contains(&"up".to_string()));
         assert!(args.contains(&"-d".to_string()));
+    }
+
+    #[test]
+    fn test_create_project_resolves_compose_files_against_config_dir() {
+        // Compose files must resolve relative to the directory containing
+        // devcontainer.json (the `.devcontainer` dir for the standard layout),
+        // NOT the workspace folder — matching the spec and the reference CLI.
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = temp_dir.path().to_path_buf();
+        let config_dir = workspace.join(".devcontainer");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(config_dir.join("docker-compose.yml"), "services: {}\n").unwrap();
+        std::fs::write(
+            config_dir.join("docker-compose.override.yml"),
+            "services: {}\n",
+        )
+        .unwrap();
+
+        let config = crate::config::DevContainerConfig {
+            docker_compose_file: Some(serde_json::json!([
+                "docker-compose.yml",
+                "docker-compose.override.yml"
+            ])),
+            service: Some("app".to_string()),
+            ..Default::default()
+        };
+
+        let manager = ComposeManager::new();
+        let project = manager
+            .create_project(&config, &workspace, &config_dir)
+            .unwrap();
+
+        // Files resolved under `.devcontainer`, not the workspace root.
+        assert_eq!(
+            project.compose_files,
+            vec![
+                config_dir.join("docker-compose.yml"),
+                config_dir.join("docker-compose.override.yml"),
+            ]
+        );
+        // Project base_path stays the workspace folder (naming / working dir).
+        assert_eq!(project.base_path, workspace);
+    }
+
+    #[test]
+    fn test_create_project_absolute_compose_path_is_not_rebased() {
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = temp_dir.path().to_path_buf();
+        let config_dir = workspace.join(".devcontainer");
+        let abs = workspace.join("custom-compose.yml");
+        std::fs::write(&abs, "services: {}\n").unwrap();
+
+        let config = crate::config::DevContainerConfig {
+            docker_compose_file: Some(serde_json::json!(abs.to_string_lossy())),
+            service: Some("app".to_string()),
+            ..Default::default()
+        };
+
+        let project = ComposeManager::new()
+            .create_project(&config, &workspace, &config_dir)
+            .unwrap();
+        assert_eq!(project.compose_files, vec![abs]);
     }
 
     #[test]
@@ -2080,6 +2156,46 @@ mod tests {
             zzz_pos,
             aaa_pos,
             mmm_pos
+        );
+    }
+
+    #[test]
+    fn test_generate_injection_override_run_services_includes_primary() {
+        // `runServices` commonly lists the primary service alongside others.
+        // The override must emit the primary service exactly once (it already
+        // has a full block); a second top-level `app:` mapping is invalid YAML
+        // ("mapping key app already defined") and docker compose rejects it.
+        let mut labels: IndexMap<String, String> = IndexMap::new();
+        labels.insert("devcontainer.local_folder".to_string(), "/ws".to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: vec!["app".to_string(), "db".to_string()],
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env: IndexMap::new(),
+            external_volumes: Vec::new(),
+            override_command: Some(true),
+            service_image_override: Some("deacon-features:abc123".to_string()),
+            deacon_labels: labels,
+        };
+
+        let yaml = project.generate_injection_override().unwrap();
+
+        // Exactly one `app:` mapping, exactly one `db:` mapping.
+        assert_eq!(
+            yaml.matches("  app:\n").count(),
+            1,
+            "primary service must appear once:\n{yaml}"
+        );
+        assert_eq!(
+            yaml.matches("  db:\n").count(),
+            1,
+            "secondary run service must appear once:\n{yaml}"
         );
     }
 
