@@ -725,7 +725,7 @@ fn compose_service_port_is_forwarded() {
         ws.join(".devcontainer/devcontainer.json"),
         r#"{
   "name": "af-compose",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": "../docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace",
   "forwardPorts": ["db:5432"]

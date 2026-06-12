@@ -88,7 +88,7 @@ fn test_compose_override_command_default_keeps_service_alive() {
 "#;
     let devcontainer_json = r#"{
   "name": "Compose Override Default",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": "../docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace"
 }"#;
@@ -150,7 +150,7 @@ fn test_compose_override_command_explicit_false_runs_natural_command() {
 "#;
     let devcontainer_json = r#"{
   "name": "Compose Override False",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": "../docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace",
   "overrideCommand": false
@@ -217,7 +217,7 @@ fn test_compose_override_command_lifecycle_runs() {
 "#;
     let devcontainer_json = r#"{
   "name": "Compose Lifecycle Marker",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": "../docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace",
   "postCreateCommand": "touch /tmp/deacon-lifecycle-marker"

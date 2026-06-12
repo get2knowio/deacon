@@ -744,7 +744,15 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             )
             .await
         } else {
-            execute_compose_build(&config, &args, &workspace_folder, &labels, &config_hash).await
+            execute_compose_build(
+                &config,
+                &args,
+                &workspace_folder,
+                &config_path,
+                &labels,
+                &config_hash,
+            )
+            .await
         }
     } else if config.image.is_some() {
         execute_image_reference_build(&config, &args, &workspace_folder, &labels).await
@@ -1266,6 +1274,7 @@ async fn execute_compose_build(
     config: &DevContainerConfig,
     args: &BuildArgs,
     workspace_folder: &Path,
+    config_path: &Path,
     labels: &[(String, String)],
     config_hash: &str,
 ) -> Result<BuildResult> {
@@ -1283,12 +1292,10 @@ async fn execute_compose_build(
 
     // Create compose project. Compose files resolve relative to the directory
     // containing devcontainer.json (spec parity), not the workspace folder.
+    // Use the *resolved* config path (discovery may place it under
+    // `.devcontainer/`); `args.config_path` is only the explicit `--config` flag.
     let compose_manager = ComposeManager::new();
-    let config_dir = args
-        .config_path
-        .as_deref()
-        .and_then(|p| p.parent())
-        .unwrap_or(workspace_folder);
+    let config_dir = config_path.parent().unwrap_or(workspace_folder);
     let project = compose_manager.create_project(config, workspace_folder, config_dir)?;
 
     // Validate service exists

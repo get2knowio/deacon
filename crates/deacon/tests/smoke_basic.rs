@@ -195,7 +195,7 @@ services:
     // Create devcontainer.json with dockerComposeFile + service
     let devcontainer_config = r#"{
     "name": "Compose Test Container",
-    "dockerComposeFile": "docker-compose.yml",
+    "dockerComposeFile": "../docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/workspace"
 }
