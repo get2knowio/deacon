@@ -1420,6 +1420,51 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             config
         };
 
+    // Divergence B: the reference CLI's `configuration` output is the RAW entry
+    // config with `extends` preserved — it defers the extends merge to
+    // `up`/`mergedConfiguration`. deacon's shared loader eagerly merges the
+    // extends chain (and drops `extends`), which is correct for `up` but diverges
+    // from the reference's read-configuration presentation. So when the entry
+    // file declares `extends`, load and substitute the single entry file on its
+    // own for the output `configuration` field, leaving the merged `config`
+    // (used for `featuresConfiguration`/`mergedConfiguration`) untouched. Configs
+    // without `extends` are unaffected (raw == merged for a single file).
+    let raw_config_for_output: Option<DevContainerConfig> = if container_only_mode {
+        None
+    } else if let Some(cfg_path) = resolved_config_path.as_deref() {
+        match deacon_core::config::ConfigLoader::load_from_path(cfg_path).await {
+            Ok(raw) if raw.extends.is_some() => {
+                let substituted = if let Some(ctx) = &container_context {
+                    // Reuse the exact container-aware context applied to the merged config.
+                    raw.apply_variable_substitution(ctx).0
+                } else {
+                    let mut ctx = SubstitutionContext::new(workspace_folder)?;
+                    // Mirror the shared loader (fix #4) + Divergence A seam.
+                    match raw.workspace_folder.as_deref() {
+                        Some(wf) if !wf.trim().is_empty() && !wf.contains("${") => {
+                            ctx.container_workspace_folder = Some(wf.to_string());
+                        }
+                        None => {
+                            ctx.container_workspace_folder =
+                                Some(ctx.local_workspace_folder.clone());
+                        }
+                        _ => {}
+                    }
+                    if let Some(secrets) = &secrets {
+                        for (key, value) in secrets.as_env_vars() {
+                            ctx.local_env.insert(key.clone(), value.clone());
+                        }
+                    }
+                    raw.apply_variable_substitution(&ctx).0
+                };
+                Some(substituted)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     // Create fetcher with tight timeouts for features resolution
     // Per FR-009: Use 2s timeout and exactly 1 retry for predictable performance
     use deacon_core::retry::{JitterStrategy, RetryConfig};
@@ -1560,6 +1605,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         configuration: if container_only_mode {
             // Per spec line 310: "Only container flags provided (no config/workspace): returns { configuration: {}, ... }"
             serde_json::Value::Object(serde_json::Map::new())
+        } else if let Some(raw) = &raw_config_for_output {
+            // Divergence B: emit the raw (un-merged) entry config with `extends`
+            // preserved, matching the reference CLI.
+            serde_json::to_value(raw)?
         } else {
             serde_json::to_value(&config)?
         },

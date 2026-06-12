@@ -243,6 +243,26 @@ where
     }
 }
 
+/// Custom serializer for the `extends` field.
+///
+/// Mirrors the reference CLI's read-configuration output, which emits a single
+/// extends target as a bare string (`"./base.json"`) and multiple targets as an
+/// array. Paired with `skip_serializing_if = "Option::is_none"` so `extends`
+/// never appears as `null`.
+fn serialize_extends<S>(
+    value: &Option<Vec<String>>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match value {
+        None => serializer.serialize_none(),
+        Some(v) if v.len() == 1 => serializer.serialize_str(&v[0]),
+        Some(v) => serializer.collect_seq(v.iter()),
+    }
+}
+
 /// Configuration file location information
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfigLocation {
@@ -433,7 +453,12 @@ pub struct DevContainerConfig {
     /// Paths to extend from. Can be a single path or array of paths.
     ///
     /// Reference: [Configuration - extends](https://containers.dev/implementors/json_reference/#extends)
-    #[serde(default, deserialize_with = "deserialize_extends")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_extends",
+        serialize_with = "serialize_extends",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extends: Option<Vec<String>>,
 
     /// Human-readable name for the development container.
@@ -2998,6 +3023,31 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn test_extends_serializes_string_array_and_skips_none() {
+        // Single target → bare string (reference parity).
+        let mut config = DevContainerConfig {
+            extends: Some(vec!["./base.json".to_string()]),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&config).unwrap();
+        assert_eq!(v["extends"], serde_json::json!("./base.json"));
+
+        // Multiple targets → array.
+        config.extends = Some(vec!["./a.json".to_string(), "./b.json".to_string()]);
+        let v = serde_json::to_value(&config).unwrap();
+        assert_eq!(v["extends"], serde_json::json!(["./a.json", "./b.json"]));
+
+        // None → field omitted entirely (never `extends: null`).
+        config.extends = None;
+        let v = serde_json::to_value(&config).unwrap();
+        assert!(
+            v.get("extends").is_none(),
+            "extends should be skipped when None, got: {:?}",
+            v.get("extends")
+        );
     }
 
     /// BEAD-15-T01: circular extends (A -> B -> A) returns an error including

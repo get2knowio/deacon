@@ -243,12 +243,25 @@ against the reference (identical `containerEnv`) and via the Tier-1 differ
 `containerWorkspaceFolder == localWorkspaceFolder` with no explicit
 `workspaceFolder`. (`crates/deacon/src/commands/read_configuration.rs`.)
 
-## Open follow-ups (found, not yet fixed)
+### 16. read-configuration eagerly merged `extends` (raw-vs-merged output shape)
 
-- **Divergence B — `extends` output shape.** The reference returns the *raw*
-  child config with `extends` preserved (defers the merge to `up`); deacon
-  eagerly merges via `load_with_extends` and drops `extends`. Functionally
-  equivalent at `up`; differs only in read-config presentation.
+The reference CLI's read-configuration `configuration` is the **raw** entry
+config with `extends` preserved (a single target as a string) — it defers the
+extends merge to `up`/`mergedConfiguration`. deacon eagerly merged the extends
+chain via the shared loader (correct for `up`, but it leaked base values into
+the output, dropped `extends`, and merged `forwardPorts`). **Fix:** when the
+entry file declares `extends`, `read-configuration` loads and substitutes the
+single entry file on its own for the output `configuration` field, leaving the
+merged `config` (used for `featuresConfiguration`/`mergedConfiguration`)
+untouched. Also added a custom `extends` serializer so a single target emits as
+a bare string (`"./base.json"`) and `extends` is omitted (never `null`) when
+unset, matching the reference. Verified via the Tier-1 differ (`extends-child`
+now ✅ identical; **all 23 configs identical, 0 divergences**). Tests cover the
+raw-output shape and the string/array/skip serialization.
+(`crates/core/src/config.rs`, `crates/deacon/src/commands/read_configuration.rs`.)
+
+All Tier-1 read-configuration divergences against the reference CLI are now
+resolved.
 
 ## Verified non-bugs
 

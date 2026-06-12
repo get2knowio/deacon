@@ -516,3 +516,66 @@ fn test_container_workspace_folder_resolves_without_explicit_workspace_folder() 
 
     Ok(())
 }
+
+/// Divergence B: the default `configuration` output is the RAW entry config with
+/// `extends` preserved (a single target as a string) and child values left
+/// un-merged with the base — matching the reference CLI, which defers the
+/// extends merge to `up`/`mergedConfiguration`.
+#[test]
+fn test_extends_output_is_raw_unmerged_with_extends_preserved() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    let devcontainer_dir = helper.temp_dir().join(".devcontainer");
+    fs::create_dir_all(&devcontainer_dir)?;
+    fs::write(
+        devcontainer_dir.join("base.json"),
+        r#"{
+            "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+            "containerEnv": { "BASE": "yes" },
+            "forwardPorts": [3000],
+            "postCreateCommand": "echo from base"
+        }"#,
+    )?;
+    helper.create_config(
+        r#"{
+            "name": "child",
+            "extends": "./base.json",
+            "forwardPorts": [4000],
+            "containerEnv": { "CHILD": "yes" },
+            "remoteUser": "vscode"
+        }"#,
+    )?;
+
+    let result = helper.run_with_workspace(&[])?;
+    let cfg = &result["configuration"];
+
+    // `extends` is preserved as a bare string (single target), not an array.
+    assert_eq!(
+        cfg["extends"], "./base.json",
+        "extends must be preserved as a string in the raw output"
+    );
+    // forwardPorts is the child's un-merged value.
+    assert_eq!(
+        cfg["forwardPorts"],
+        serde_json::json!([4000]),
+        "forwardPorts must be the raw child value, not merged with the base"
+    );
+    // Base-only values must NOT be merged into the raw child output. deacon
+    // serializes the full struct (absent fields as `null`, stripped by the
+    // Tier-1 normalizer), so a base value would appear as a non-null leak.
+    assert!(
+        cfg["image"].is_null(),
+        "base `image` must not be merged into the raw child output, got: {:?}",
+        cfg["image"]
+    );
+    assert!(
+        cfg["postCreateCommand"].is_null(),
+        "base `postCreateCommand` must not be merged into the raw child output, got: {:?}",
+        cfg["postCreateCommand"]
+    );
+    assert!(
+        cfg["containerEnv"].get("BASE").is_none(),
+        "base containerEnv must not be merged into the raw child output"
+    );
+
+    Ok(())
+}
