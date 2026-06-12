@@ -318,7 +318,7 @@ container-running state, then tear both down (deacon's container is removed
 host ports, a false positive). Lifecycle ordering, object-form parallel commands
 (`lint`/`deps`), array/string forms, feature install, mounts, user-mapping,
 init/privileged, and `appPort` bindings (`ports-mixed`: deacon and reference emit
-byte-identical `-p` host bindings) all reach parity. One real bug:
+byte-identical `-p` host bindings) all reach parity. Three real bugs:
 
 ### 20. `up` Dockerfile-build + features: bare `sha256:` digest as `FROM` (BuildKit 404)
 
@@ -344,6 +344,48 @@ installed — both CLIs failed identically on it); it now uses `vscode` +
 `git --version` (the git feature it installs), reaching parity-success.
 (`crates/deacon/src/commands/up/image_build.rs`,
 `crates/deacon/tests/integration_up_dockerfile_features.rs`.)
+
+### 21. Compose: `dockerComposeFile` resolved against the workspace folder, not the config dir
+
+deacon resolved `dockerComposeFile` paths relative to the **workspace folder**,
+so the standard `.devcontainer/docker-compose.yml` layout failed at `up` with
+`open <workspace>/docker-compose.yml: no such file or directory`. The spec
+("relative to the devcontainer.json file") and the reference both resolve them
+relative to the **directory containing devcontainer.json** (`.devcontainer/` for
+the nested layout) — confirmed by the reference's
+`-f <ws>/.devcontainer/docker-compose.yml`. **Fix:** thread the config dir into
+`ComposeManager::create_project` and resolve relative compose files against it,
+while keeping the project name + working dir on the workspace folder. Volume
+`..:/workspace` still resolves to the workspace root (compose's project dir
+defaults to the first `-f` file's dir = `.devcontainer/`), so the bind mount
+matches the reference byte-for-byte (`<ws> -> /workspace`). Threaded through `up`,
+`exec`, `run-user-commands`, and `build` compose paths. Absolute compose paths are
+left un-rebased. Unit tests cover config-dir resolution + absolute passthrough.
+(`crates/core/src/compose.rs` + the four command call sites.)
+
+### 22. Compose: `runServices` listing the primary service produced duplicate YAML keys
+
+The feature/keep-alive injection override emits a full block for the primary
+service, then a labels-only block for **every** `runServices` entry. When
+`runServices` lists the primary service alongside the others (e.g.
+`["app","db"]` — the common form), `app:` was emitted twice, so
+`docker compose` rejected the piped override with `mapping key "app" already
+defined`. Every compose config with features (or a non-default
+`overrideCommand`) plus a primary-inclusive `runServices` failed. **Fix:** skip
+the primary service in the `runServices` label loop (it already has a full
+block). Verified end-to-end: `compose-postgres` (compose + `github-cli` feature +
+`runServices:[app,db]`) now brings up both services with `gh` installed, matching
+the reference. Unit test asserts the primary + secondary services each appear
+exactly once. (`crates/core/src/compose.rs`.)
+
+### Known remaining Tier-2 gap (tracked, not yet fixed)
+
+- **Compose project name scheme differs.** For the same workspace folder deacon
+  derives the compose `--project-name` as `<folder>` while the reference uses
+  `<folder>_devcontainer` (sanitized). Both isolate correctly and `up`/`exec`/
+  `down` are self-consistent, so it's functional — but a config that hard-codes a
+  project name, or interop with VS Code's reference-built projects, would see a
+  mismatch. Candidate for a future round.
 
 ### Tier-2 divergences that are NOT deacon bugs
 
