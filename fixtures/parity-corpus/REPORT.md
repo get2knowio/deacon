@@ -483,8 +483,40 @@ the fix all four modes match the reference byte-for-byte. Unit tests cover each
 mode's flags. (`crates/core/src/container_env_probe.rs`,
 `crates/core/src/container_lifecycle.rs`.)
 
+## Open divergences (confirmed, not yet fixed)
+
+### `--secrets-file`: format mismatch + lifecycle-output secret leak
+
+Two confirmed divergences (security-sensitive — flagged for a dedicated PR):
+
+1. **File format.** The reference CLI (and the spec) expect `--secrets-file` to be
+   **JSON** (`{"MY_SECRET":"…"}`) — it rejects a `KEY=VALUE` `.env` file with
+   `Error: Invalid json data`. deacon parses **`.env`** (`KEY=VALUE`) and does NOT
+   parse JSON (a JSON file leaves the secret unset). So a reference-format secrets
+   file silently yields empty secrets in deacon, and vice-versa.
+   (`crates/core/src/secrets.rs::parse_secrets_file`.)
+2. **Redaction of lifecycle output.** With a secret injected and
+   `postCreateCommand: echo "the secret is $MY_SECRET"`, the reference prints
+   `the secret is ********` (redacted) while deacon prints
+   `the secret is topsecret123` (**plaintext leak**). deacon redacts lifecycle
+   *command strings* (for progress events) but streams the command *output*
+   through `CliDocker::exec` with no redaction, and loaded secrets are registered
+   only in a local `SecretsCollection::redaction_registry`, not the global
+   registry the lifecycle redaction consults. Fixing this needs the secrets wired
+   into the output-stream redaction path (cross-cutting).
+
 ## Verified non-bugs
 
+- **`exec` env/user/workdir + `userEnvProbe` are at parity.** `deacon exec` matches
+  the reference on `whoami`, `pwd` (= workspaceFolder), `containerEnv`, `remoteEnv`
+  (incl. `${containerEnv:…}` substitution), and the probed login/interactive env;
+  and it honors `userEnvProbe: none` (empty) vs the default (profile+bashrc) — exec
+  uses probe-and-inject, so unlike the lifecycle path (fix #25) it was already
+  correct.
+- **`--additional-features` injection + ordering at parity.** A config feature plus
+  a CLI-injected local feature install in the same order under deacon and the
+  reference (`basef, extraf`); `./`-relative additional-feature paths resolve
+  against the config dir for both.
 - **Feature typed-option handling is at parity.** A local feature with `string`,
   `boolean`, and `enum` options, the user setting only one: deacon and the
   reference both apply the omitted options' **defaults**, stringify `boolean`
