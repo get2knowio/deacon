@@ -347,6 +347,56 @@ fn test_local_feature_anchors_to_discovered_config_dir() -> Result<()> {
     Ok(())
 }
 
+/// Regression: `featuresConfiguration.featureSets` is emitted ONE-PER-FEATURE in
+/// INSTALL ORDER (a feature's dependencies first), matching the reference CLI —
+/// not grouped by registry. Two local features where `app` dependsOn `lib` must
+/// produce sets ordered `[lib, app]`. Hermetic (local features, no network).
+#[test]
+fn test_features_configuration_emitted_in_install_order() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+        "name": "order",
+        "image": "ubuntu:22.04",
+        "features": { "./features/app": {} }
+    }"#,
+    )?;
+    let feats = helper.temp_dir().join(".devcontainer").join("features");
+    for (name, body) in [
+        (
+            "lib",
+            r#"{ "id": "lib", "version": "1.0.0", "name": "Lib" }"#,
+        ),
+        (
+            "app",
+            r#"{ "id": "app", "version": "1.0.0", "name": "App", "dependsOn": { "./features/lib": {} } }"#,
+        ),
+    ] {
+        let d = feats.join(name);
+        std::fs::create_dir_all(&d)?;
+        std::fs::write(d.join("devcontainer-feature.json"), body)?;
+        std::fs::write(d.join("install.sh"), "#!/bin/sh\ntrue\n")?;
+    }
+
+    let result = helper.run_with_workspace(&["--include-features-configuration"])?;
+    let sets = result["featuresConfiguration"]["featureSets"]
+        .as_array()
+        .expect("featureSets array");
+    // One set per feature (lib auto-installed via dependsOn + app declared).
+    assert_eq!(sets.len(), 2, "expected one set per feature: {result:#}");
+    let order: Vec<&str> = sets
+        .iter()
+        .filter_map(|s| s["features"][0]["id"].as_str())
+        .map(|id| if id.contains("lib") { "lib" } else { "app" })
+        .collect();
+    assert_eq!(
+        order,
+        vec!["lib", "app"],
+        "dependency must come before dependent (install order): {order:?}"
+    );
+    Ok(())
+}
+
 /// Test acceptance: deep-merge --additional-features with precedence over base
 #[test]
 fn test_acceptance_additional_features_deep_merge_precedence() -> Result<()> {

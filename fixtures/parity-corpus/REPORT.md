@@ -5,7 +5,7 @@ Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 23 corpus configs.
 Source of truth: the official containers.dev spec and the reference CLI's
 behavior — not any deacon-authored spec doc.
 
-## Fixed in this PR (eleven real bugs)
+## Fixed in this PR (twelve real bugs)
 
 ### 1. `hostRequirements` hard-failed `up`/`build` (spec violation)
 
@@ -187,8 +187,26 @@ to the workspace folder only when neither a `--config` arg nor a discovered path
 is available. Integration test `test_local_feature_anchors_to_discovered_config_dir`.
 (`crates/deacon/src/commands/read_configuration.rs`.)
 
+### 12. `featuresConfiguration` output grouped by registry instead of install order
+
+`read-configuration --include-features-configuration` discarded the install
+plan and grouped features by registry (alphabetical), so the `featureSets` order
+diverged from the reference, which emits **one set per feature in install order**
+(a feature's dependencies first). For the `dependson-autoinstall` fixture the
+reference gives `[node, needs-node]`; deacon gave `[needs-node, node]`.
+
+**Fix:** drive `featureSets` from the resolved installation plan — one set per
+feature, in topological install order. Now matches the reference exactly
+(`[node, needs-node]`, 2 sets). Integration test
+`test_features_configuration_emitted_in_install_order`.
+(`crates/deacon/src/commands/read_configuration.rs`.)
+
 ## Open follow-ups (found, not yet fixed)
 
+- **`featuresConfiguration.sourceInformation` is minimal.** deacon emits
+  `{ type: "oci", registry }` per set; the reference carries richer per-feature
+  source info (`featureRef`, `userFeatureId`, `manifest`/`resolvedFilePath`).
+  Order + per-feature structure now match (#12); the source-info *fields* don't.
 - **Fully reference-correct feature env** would emit feature `containerEnv` as
   image `ENV` (build-time `${PATH}` expansion); fix #7 relies on the image ENV /
   shell init already carrying the value (true for realistic features).

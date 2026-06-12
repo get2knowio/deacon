@@ -380,83 +380,77 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     let override_order = config.override_feature_install_order.clone();
     let resolver = FeatureDependencyResolver::new(override_order);
 
-    // Resolve dependencies and create installation plan
-    let _installation_plan = resolver.resolve(&resolved_features)?;
+    // Resolve dependencies into an installation plan. The plan is in install
+    // order — a feature's dependencies come before it (topological sort). The
+    // reference CLI emits one featureSet per feature in exactly this order, so
+    // we mirror that (rather than grouping by registry, which loses the order).
+    let installation_plan = resolver.resolve(&resolved_features)?;
 
-    // Group features by registry extracted from their source
-    use std::collections::BTreeMap;
-    let mut features_by_registry: BTreeMap<String, Vec<Feature>> = BTreeMap::new();
-
-    for resolved in &resolved_features {
-        // Extract registry from source (format: "oci://registry/namespace/name:tag")
-        let registry = if resolved.source.starts_with("oci://") {
-            let without_prefix = resolved.source.trim_start_matches("oci://");
-            // Extract first component (registry) before first slash
-            without_prefix
-                .split('/')
-                .next()
-                .unwrap_or("ghcr.io")
-                .to_string()
-        } else {
-            // Fallback for non-OCI sources
-            "ghcr.io".to_string()
-        };
-
-        let options = if resolved.options.is_empty() {
-            None
-        } else {
-            Some(
+    let feature_sets: Vec<FeatureSet> = installation_plan
+        .features
+        .iter()
+        .map(|resolved| {
+            // Extract registry from source (format: "oci://registry/namespace/name:tag").
+            let registry = if resolved.source.starts_with("oci://") {
                 resolved
-                    .options
-                    .iter()
-                    .map(|(k, v)| {
-                        let json_val = match v {
-                            OptionValue::Boolean(b) => serde_json::Value::Bool(*b),
-                            OptionValue::String(s) => serde_json::Value::String(s.clone()),
-                            OptionValue::Number(n) => serde_json::Value::Number(n.clone()),
-                            OptionValue::Array(a) => serde_json::Value::Array(a.clone()),
-                            OptionValue::Object(o) => serde_json::Value::Object(o.clone()),
-                            OptionValue::Null => serde_json::Value::Null,
-                        };
-                        (k.clone(), json_val)
-                    })
-                    .collect(),
-            )
-        };
+                    .source
+                    .trim_start_matches("oci://")
+                    .split('/')
+                    .next()
+                    .unwrap_or("ghcr.io")
+                    .to_string()
+            } else {
+                "ghcr.io".to_string()
+            };
 
-        let feature = Feature {
-            id: resolved.id.clone(),
-            options,
-            source: Some(resolved.source.clone()),
-            customizations: resolved.metadata.customizations.clone(),
-            init: resolved.metadata.init,
-            privileged: resolved.metadata.privileged,
-            mounts: if resolved.metadata.mounts.is_empty() {
+            let options = if resolved.options.is_empty() {
                 None
             } else {
-                Some(resolved.metadata.mounts.clone())
-            },
-            container_env: if resolved.metadata.container_env.is_empty() {
-                None
-            } else {
-                Some(resolved.metadata.container_env.clone())
-            },
-        };
+                Some(
+                    resolved
+                        .options
+                        .iter()
+                        .map(|(k, v)| {
+                            let json_val = match v {
+                                OptionValue::Boolean(b) => serde_json::Value::Bool(*b),
+                                OptionValue::String(s) => serde_json::Value::String(s.clone()),
+                                OptionValue::Number(n) => serde_json::Value::Number(n.clone()),
+                                OptionValue::Array(a) => serde_json::Value::Array(a.clone()),
+                                OptionValue::Object(o) => serde_json::Value::Object(o.clone()),
+                                OptionValue::Null => serde_json::Value::Null,
+                            };
+                            (k.clone(), json_val)
+                        })
+                        .collect(),
+                )
+            };
 
-        features_by_registry
-            .entry(registry)
-            .or_default()
-            .push(feature);
-    }
+            let feature = Feature {
+                id: resolved.id.clone(),
+                options,
+                source: Some(resolved.source.clone()),
+                customizations: resolved.metadata.customizations.clone(),
+                init: resolved.metadata.init,
+                privileged: resolved.metadata.privileged,
+                mounts: if resolved.metadata.mounts.is_empty() {
+                    None
+                } else {
+                    Some(resolved.metadata.mounts.clone())
+                },
+                container_env: if resolved.metadata.container_env.is_empty() {
+                    None
+                } else {
+                    Some(resolved.metadata.container_env.clone())
+                },
+            };
 
-    // Build one FeatureSet per registry
-    let feature_sets: Vec<FeatureSet> = features_by_registry
-        .into_iter()
-        .map(|(registry, features)| FeatureSet {
-            features,
-            source_information: SourceInformation::Oci { registry },
-            internal_version: None,
-            computed_digest: None,
+            // One featureSet per feature, in install order (reference parity).
+            FeatureSet {
+                features: vec![feature],
+                source_information: SourceInformation::Oci { registry },
+                internal_version: None,
+                computed_digest: None,
+            }
         })
         .collect();
 
