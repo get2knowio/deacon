@@ -452,8 +452,48 @@ partial override (`w` first, then `y, x` per override, then unlisted `z`). Unit
 tests cover the partial-override and dependency-interaction cases.
 (`crates/core/src/features.rs`.)
 
+## Round 5 — `userEnvProbe` modes
+
+Docker differential: a Dockerfile sets `PROFILE_VAR` in `/etc/profile.d` (login
+shells) and `BASHRC_VAR` in `~/.bashrc` (interactive shells); `postCreateCommand`
+records which the lifecycle env captured, per `userEnvProbe` mode.
+
+### 25. Lifecycle commands ignored `userEnvProbe` (always login+interactive)
+
+deacon ran every lifecycle command through a **login + interactive** shell
+(`bash -l -i -c`) regardless of `userEnvProbe`, so `none`/`loginShell`/
+`interactiveShell` all behaved like `loginInteractiveShell` — sourcing both
+`/etc/profile` and `~/.bashrc`. The reference varies the shell by mode. Full
+matrix (before fix deacon was `P=[fromprofile] B=[frombashrc]` for **all** four):
+
+| mode | reference | deacon (before) |
+|------|-----------|-----------------|
+| `none` | `P=[] B=[]` | `P=[…] B=[…]` ✗ |
+| `loginShell` | `P=[fromprofile] B=[]` | `P=[…] B=[…]` ✗ |
+| `interactiveShell` | `P=[] B=[frombashrc]` | `P=[…] B=[…]` ✗ |
+| `loginInteractiveShell` | `P=[fromprofile] B=[frombashrc]` | ✓ |
+
+**Fix:** `get_shell_command_for_lifecycle` now takes the `userEnvProbe` mode and
+maps it to the shell's login/interactive flags — `none` → plain `sh -c`,
+`loginShell` → `-l -c`, `interactiveShell` → `-i -c`, `loginInteractiveShell` →
+`-l -i -c`. The default (`loginInteractiveShell`) is unchanged, so the
+feature-installed-tools-on-PATH behavior (nvm/node via interactive rc) is
+preserved — confirmed by the docker `integration_feature_lifecycle` suite. After
+the fix all four modes match the reference byte-for-byte. Unit tests cover each
+mode's flags. (`crates/core/src/container_env_probe.rs`,
+`crates/core/src/container_lifecycle.rs`.)
+
 ## Verified non-bugs
 
+- **Feature typed-option handling is at parity.** A local feature with `string`,
+  `boolean`, and `enum` options, the user setting only one: deacon and the
+  reference both apply the omitted options' **defaults**, stringify `boolean`
+  to `true`/`false`, and pass an **invalid** enum value through unchanged
+  (neither validates enum membership at install time). All cases byte-identical.
+- **`build --image-name` resolves to the feature-extended image (single + multiple
+  names).** `deacon build --image-name a:1 --image-name b:2` on an image+features
+  config tags BOTH names with the layered image (feature marker present), matching
+  the reference.
 - **Feature `containerEnv` with `${...}` shell refs (incl. a *novel* PATH dir) is
   NOT applied — by deacon AND the reference.** Empirically tested a feature whose
   `containerEnv` adds `/opt/novel/bin:${PATH}`, `DERIVED=got-${NOVEL_VAR}`, and
