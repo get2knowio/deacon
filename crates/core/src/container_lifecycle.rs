@@ -1441,13 +1441,18 @@ where
 
                 // Detect shell and create appropriate command args
                 let command_args = if config.use_login_shell {
-                    // Use detected shell or fallback to sh
+                    // Use detected shell or fallback to sh. The login/interactive
+                    // flags follow `userEnvProbe` so the command sources exactly
+                    // the startup files the reference CLI would for that mode.
                     let shell = detected_shell.unwrap_or("sh");
-                    debug!("Using login shell for lifecycle command: {}", shell);
+                    debug!(
+                        "Using {:?} shell for lifecycle command: {}",
+                        config.user_env_probe, shell
+                    );
                     crate::container_env_probe::get_shell_command_for_lifecycle(
                         shell,
                         &substituted_command,
-                        true,
+                        config.user_env_probe,
                     )
                 } else {
                     // Legacy mode: plain sh -c
@@ -1769,7 +1774,9 @@ where
                                 if config.use_login_shell {
                                     let shell = detected_shell.unwrap_or("sh");
                                     crate::container_env_probe::get_shell_command_for_lifecycle(
-                                        shell, cmd, true,
+                                        shell,
+                                        cmd,
+                                        config.user_env_probe,
                                     )
                                 } else {
                                     vec!["sh".to_string(), "-c".to_string(), cmd.clone()]

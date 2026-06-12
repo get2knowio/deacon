@@ -647,57 +647,46 @@ impl ContainerEnvironmentProber {
     }
 }
 
-/// Get shell command for lifecycle execution
+/// Get shell command for lifecycle execution.
 ///
-/// Determines the appropriate shell and flags to use for executing lifecycle commands.
-/// Defaults to login shell mode for best environment parity.
+/// The shell's login/interactive flags follow the `userEnvProbe` `mode`, so a
+/// lifecycle command sources exactly the startup files the reference CLI would
+/// for that mode:
+///
+/// | mode                    | shell invocation        | sources                       |
+/// |-------------------------|-------------------------|-------------------------------|
+/// | `none`                  | `sh -c`                 | nothing (minimal env)         |
+/// | `loginShell`            | `<shell> -l -c`         | `/etc/profile`, `~/.profile`  |
+/// | `interactiveShell`      | `<shell> -i -c`         | `~/.bashrc` (interactive rc)  |
+/// | `loginInteractiveShell` | `<shell> -l -i -c`      | both (the default)            |
+///
+/// Login+interactive is what puts feature-installed tools (nvm/node, which hook
+/// the *interactive* startup files) on `PATH`, so it stays the default; the
+/// other modes are honored verbatim for parity (deacon previously always used
+/// `-l -i`, ignoring `none`/`loginShell`/`interactiveShell`).
 pub fn get_shell_command_for_lifecycle(
     shell: &str,
     command: &str,
-    use_login_shell: bool,
+    mode: ContainerProbeMode,
 ) -> Vec<String> {
-    if !use_login_shell {
-        // Legacy mode: plain sh -c
+    // `none` opts out of startup-file sourcing entirely: a plain `sh -c` with no
+    // probed env injected (the caller skips the probe for `none`).
+    if mode == ContainerProbeMode::None {
         return vec!["sh".to_string(), "-c".to_string(), command.to_string()];
     }
 
-    // Determine shell name for flag compatibility
-    let shell_name = shell.split('/').next_back().unwrap_or(shell);
+    let flags: &[&str] = match mode {
+        ContainerProbeMode::None => unreachable!("handled above"),
+        ContainerProbeMode::LoginShell => &["-l", "-c"],
+        ContainerProbeMode::InteractiveShell => &["-i", "-c"],
+        ContainerProbeMode::LoginInteractiveShell => &["-l", "-i", "-c"],
+    };
 
-    match shell_name {
-        "zsh" => {
-            // Use login + interactive shell for zsh to source .zshrc
-            // This is critical for tools installed via package managers like nvm
-            vec![
-                shell.to_string(),
-                "-l".to_string(),
-                "-i".to_string(),
-                "-c".to_string(),
-                command.to_string(),
-            ]
-        }
-        "bash" => {
-            // Login + interactive for bash, for the same reason as zsh: many
-            // feature-installed tools (notably nvm/node) hook into the
-            // *interactive* startup files (`/etc/bash.bashrc`, `~/.bashrc`),
-            // which a non-interactive `bash -lc` skips (those files commonly
-            // early-return when `$PS1` is unset). The reference CLI runs
-            // lifecycle commands in an interactive-login shell too. Without
-            // `-i`, `node --version` in postCreate fails with `command not
-            // found` (exit 127) on bases that don't put the tool on PATH.
-            vec![
-                shell.to_string(),
-                "-l".to_string(),
-                "-i".to_string(),
-                "-c".to_string(),
-                command.to_string(),
-            ]
-        }
-        _ => {
-            // Fallback: try -lc, may not work for all shells
-            vec![shell.to_string(), "-lc".to_string(), command.to_string()]
-        }
-    }
+    let mut args = Vec::with_capacity(flags.len() + 2);
+    args.push(shell.to_string());
+    args.extend(flags.iter().map(|f| f.to_string()));
+    args.push(command.to_string());
+    args
 }
 
 /// Resolve the container user's home directory.
@@ -941,29 +930,55 @@ mod tests {
     }
 
     #[test]
-    fn test_get_shell_command_legacy_mode() {
-        let cmd = get_shell_command_for_lifecycle("/bin/bash", "echo hello", false);
+    fn test_get_shell_command_none_is_plain() {
+        // `none` opts out of startup-file sourcing: plain `sh -c`, no shell rc.
+        let cmd =
+            get_shell_command_for_lifecycle("/bin/bash", "echo hello", ContainerProbeMode::None);
         assert_eq!(cmd, vec!["sh", "-c", "echo hello"]);
     }
 
     #[test]
     fn test_get_shell_command_bash_login_interactive() {
-        // bash uses login + interactive (like zsh) so feature-installed tools
+        // The default mode keeps login + interactive so feature-installed tools
         // hooked into interactive bashrc (nvm/node) are on PATH for lifecycle.
-        let cmd = get_shell_command_for_lifecycle("/bin/bash", "echo hello", true);
+        let cmd = get_shell_command_for_lifecycle(
+            "/bin/bash",
+            "echo hello",
+            ContainerProbeMode::LoginInteractiveShell,
+        );
         assert_eq!(cmd, vec!["/bin/bash", "-l", "-i", "-c", "echo hello"]);
     }
 
     #[test]
-    fn test_get_shell_command_zsh_login() {
-        let cmd = get_shell_command_for_lifecycle("/usr/bin/zsh", "echo hello", true);
-        assert_eq!(cmd, vec!["/usr/bin/zsh", "-l", "-i", "-c", "echo hello"]);
+    fn test_get_shell_command_login_shell_only() {
+        // loginShell sources /etc/profile (+ ~/.profile), not the interactive rc.
+        let cmd = get_shell_command_for_lifecycle(
+            "/bin/bash",
+            "echo hello",
+            ContainerProbeMode::LoginShell,
+        );
+        assert_eq!(cmd, vec!["/bin/bash", "-l", "-c", "echo hello"]);
     }
 
     #[test]
-    fn test_get_shell_command_sh_fallback() {
-        let cmd = get_shell_command_for_lifecycle("/bin/sh", "echo hello", true);
-        assert_eq!(cmd, vec!["/bin/sh", "-lc", "echo hello"]);
+    fn test_get_shell_command_interactive_shell_only() {
+        // interactiveShell sources ~/.bashrc, not the login profile.
+        let cmd = get_shell_command_for_lifecycle(
+            "/bin/bash",
+            "echo hello",
+            ContainerProbeMode::InteractiveShell,
+        );
+        assert_eq!(cmd, vec!["/bin/bash", "-i", "-c", "echo hello"]);
+    }
+
+    #[test]
+    fn test_get_shell_command_zsh_login_interactive() {
+        let cmd = get_shell_command_for_lifecycle(
+            "/usr/bin/zsh",
+            "echo hello",
+            ContainerProbeMode::LoginInteractiveShell,
+        );
+        assert_eq!(cmd, vec!["/usr/bin/zsh", "-l", "-i", "-c", "echo hello"]);
     }
 
     #[test]
