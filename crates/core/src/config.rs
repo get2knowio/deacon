@@ -967,6 +967,24 @@ impl DevContainerConfig {
             )?);
         }
 
+        // Substitute image and docker_compose_file (parity with
+        // apply_variable_substitution — both carry `${...}` templates that flow
+        // into docker run/compose; the advanced path was missing them).
+        if let Some(ref image) = config.image {
+            config.image = Some(VariableSubstitution::substitute_string_advanced(
+                image, context, options, report,
+            )?);
+        }
+        if let Some(ref compose_file) = config.docker_compose_file {
+            config.docker_compose_file =
+                Some(VariableSubstitution::substitute_json_value_with_options(
+                    compose_file,
+                    context,
+                    options,
+                    report,
+                )?);
+        }
+
         // Substitute workspace_folder
         if let Some(ref workspace_folder) = config.workspace_folder {
             config.workspace_folder = Some(VariableSubstitution::substitute_string_advanced(
@@ -3622,6 +3640,42 @@ mod tests {
         assert_eq!(args.get("LITERAL").and_then(|v| v.as_str()), Some("plain"));
         // No unresolved templates remain anywhere in the build object.
         assert!(!substituted.build.unwrap().to_string().contains("${"));
+    }
+
+    #[test]
+    fn test_advanced_substitution_covers_image_and_compose() {
+        // Parity: apply_variable_substitution_advanced (used by `deacon config`)
+        // must substitute `image` and `docker_compose_file` like the basic path.
+        use crate::variable::{SubstitutionOptions, SubstitutionReport};
+        let temp_dir = TempDir::new().unwrap();
+        let mut context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        context
+            .local_env
+            .insert("TAG".to_string(), "v9".to_string());
+
+        let config = DevContainerConfig {
+            image: Some("ghcr.io/example:${localEnv:TAG}".to_string()),
+            docker_compose_file: Some(serde_json::Value::String(
+                "${localWorkspaceFolder}/compose.yml".to_string(),
+            )),
+            ..Default::default()
+        };
+        let options = SubstitutionOptions::default();
+        let mut report = SubstitutionReport::new();
+        let substituted = config
+            .apply_variable_substitution_advanced(&context, &options, &mut report)
+            .unwrap();
+        assert_eq!(
+            substituted.image.as_deref(),
+            Some("ghcr.io/example:v9"),
+            "advanced path must substitute image"
+        );
+        let compose = substituted
+            .docker_compose_file
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert!(compose.ends_with("/compose.yml") && !compose.contains("${"));
     }
 
     #[test]
