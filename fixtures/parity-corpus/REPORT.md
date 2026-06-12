@@ -309,6 +309,64 @@ branches. With the `typescript-node` image present, `node-ts`
 entries in matching order). Unit tests cover the ordering invariant.
 (`crates/deacon/src/commands/read_configuration.rs`.)
 
+## Round 3 — Tier-2 (Docker) `up` sweep
+
+A Docker-level differential: copy each corpus config to a TempDir **outside** the
+repo, run `deacon up` and `devcontainer up`, compare exit/outcome/remoteUser and
+container-running state, then tear both down (deacon's container is removed
+**before** the reference runs — otherwise the two collide on `appPort`/published
+host ports, a false positive). Lifecycle ordering, object-form parallel commands
+(`lint`/`deps`), array/string forms, feature install, mounts, user-mapping,
+init/privileged, and `appPort` bindings (`ports-mixed`: deacon and reference emit
+byte-identical `-p` host bindings) all reach parity. One real bug:
+
+### 20. `up` Dockerfile-build + features: bare `sha256:` digest as `FROM` (BuildKit 404)
+
+For a config with `build.dockerfile` (no `image`) **and** `features`, `up` first
+builds the user Dockerfile via `docker build -q`, which yields a bare
+`sha256:<digest>` image ID, and stored that verbatim as `config.image`. The
+feature-layering stage then emitted `ARG _DEV_CONTAINERS_BASE_IMAGE=sha256:<digest>`
++ `FROM ${_DEV_CONTAINERS_BASE_IMAGE}` — and BuildKit resolves a **bare digest**
+as a remote `docker.io/library/sha256:...` repository → `pull access denied` /
+404. So **every** Dockerfile+features `up` failed at feature build, while the
+reference (which tags its build) succeeded. **Fix:** `build_image_from_config`
+tags the freshly-built image with a deterministic real `repo:tag`
+(`deacon-build:<digest12>`, mirroring `deacon build`'s base tag) and returns the
+tag, so the downstream `FROM` resolves to the local image. With no features the
+bare digest also worked for `docker create`, so only the features path was
+affected. Verified end-to-end: deacon now builds + layers features and the
+container carries both the Dockerfile-stage markers and the feature marker.
+Unit tests cover the digest→tag derivation; a hermetic docker integration test
+(`integration_up_dockerfile_features`) guards the full path (reverting the fix
+makes it fail with the 404). Also corrected the `dockerfile-build` fixture, which
+was invalid two ways (`remoteUser: node` + `node --version` though node is never
+installed — both CLIs failed identically on it); it now uses `vscode` +
+`git --version` (the git feature it installs), reaching parity-success.
+(`crates/deacon/src/commands/up/image_build.rs`,
+`crates/deacon/tests/integration_up_dockerfile_features.rs`.)
+
+### Tier-2 divergences that are NOT deacon bugs
+
+- **`bare-base-node-feature`: deacon succeeds, reference fails.** Config is
+  `debian:bookworm-slim` + `ghcr.io/devcontainers/features/node` + `remoteUser:
+  node` (no `common-utils`). deacon's node-feature install **creates** the `node`
+  user (`node:x:1000:1000`, node v22 on PATH) and `postCreate` runs as `node`.
+  The reference installs the same feature but its image has **no** `node` user
+  (`getent passwd node` → none; node binary present at
+  `/usr/local/share/nvm/...`), so its `up` dies with `unable to find user node`.
+  deacon is **more permissive** here (materializes the declared `remoteUser` via
+  the feature), not silently falling back — verified the user genuinely exists in
+  deacon's container. Not a deacon defect.
+- **`extends-child`: deacon resolves `extends` at `up`/merged; reference errors.**
+  Raw `read-configuration` is parity (both emit the raw child with `extends`
+  preserved — fix #16). But `deacon up` and `deacon read-configuration
+  --include-merged-configuration` fully resolve the chain (`image` =
+  `base:bookworm`, `containerEnv` = `{CHILD, BASE}`, `forwardPorts` =
+  `[3000,4000]`), whereas the reference CLI v0.87.0 **errors** (`up`: "missing one
+  of image/dockerFile/dockerComposeFile"; merged read-config: exit 1, empty
+  stdout). `extends` is a deliberate deacon capability beyond the reference, not a
+  regression — do not "fix" by dropping support.
+
 ## Verified non-bugs
 
 - **Feature `containerEnv` with `${...}` shell refs (incl. a *novel* PATH dir) is
