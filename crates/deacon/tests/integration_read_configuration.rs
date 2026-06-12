@@ -347,6 +347,46 @@ fn test_local_feature_anchors_to_discovered_config_dir() -> Result<()> {
     Ok(())
 }
 
+/// Parity: a feature's `containerEnv` must NOT be folded into
+/// `mergedConfiguration.containerEnv` at read-config time. Per upstream
+/// `imageMetadata.ts`, a feature's image-metadata entry omits env — feature env
+/// is realized by the feature's install step, not via the `devcontainer.metadata`
+/// merge. The base config's own `containerEnv` MUST still survive the merge.
+/// Hermetic (local feature, no network).
+#[test]
+fn test_merged_config_excludes_feature_container_env() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+        "name": "feat-env",
+        "image": "ubuntu:22.04",
+        "containerEnv": { "BASE_VAR": "base-value" },
+        "features": { "./featenv": {} }
+    }"#,
+    )?;
+    let feat_dir = helper.temp_dir().join(".devcontainer").join("featenv");
+    std::fs::create_dir_all(&feat_dir)?;
+    std::fs::write(
+        feat_dir.join("devcontainer-feature.json"),
+        r#"{ "id": "featenv", "version": "1.0.0", "name": "Feat Env",
+            "containerEnv": { "FEATURE_VAR": "feature-value" } }"#,
+    )?;
+    std::fs::write(feat_dir.join("install.sh"), "#!/bin/sh\ntrue\n")?;
+
+    let result = helper.run_with_workspace(&["--include-merged-configuration"])?;
+    let merged_env = &result["mergedConfiguration"]["containerEnv"];
+    assert_eq!(
+        merged_env["BASE_VAR"].as_str(),
+        Some("base-value"),
+        "base config containerEnv must survive the merge: {result:#}"
+    );
+    assert!(
+        merged_env.get("FEATURE_VAR").is_none(),
+        "feature containerEnv must NOT appear in mergedConfiguration: {result:#}"
+    );
+    Ok(())
+}
+
 /// Regression: `featuresConfiguration.featureSets` is emitted ONE-PER-FEATURE in
 /// INSTALL ORDER (a feature's dependencies first), matching the reference CLI —
 /// not grouped by registry. Two local features where `app` dependsOn `lib` must
