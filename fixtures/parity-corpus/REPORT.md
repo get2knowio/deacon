@@ -523,6 +523,17 @@ non-string coercion, and the invalid-JSON error. (`crates/core/src/secrets.rs`.)
 
 ## Verified non-bugs
 
+- **`updateRemoteUserUID` is at parity.** With a Dockerfile user at uid/gid
+  `2000:2000`, `updateRemoteUserUID: true` remaps the remote user to the host's
+  `1000:1000` (lifecycle runs as the remapped id) under both deacon and the
+  reference; `false` leaves it at `2000:2000` for both.
+- **`containerUser` vs `remoteUser` is at parity.** With `containerUser: root` +
+  `remoteUser: vscode`, both CLIs run the container process as `root`
+  (`.Config.User`) while lifecycle/`postCreate` run as `vscode`.
+- **OCI digest-pinned feature refs are at parity.** A feature pinned by digest
+  (`ghcr.io/devcontainers/features/git@sha256:…`) resolves and installs
+  identically under deacon and the reference (git 2.54.0 present). deacon's
+  registry parser handles `name[:tag]@sha256:…` (digest wins over tag).
 - **`exec` env/user/workdir + `userEnvProbe` are at parity.** `deacon exec` matches
   the reference on `whoami`, `pwd` (= workspaceFolder), `containerEnv`, `remoteEnv`
   (incl. `${containerEnv:…}` substitution), and the probed login/interactive env;
