@@ -329,6 +329,14 @@ pub(crate) async fn execute_up_with_runtime(
     };
     if let Some(secrets) = &secrets_collection {
         for (key, value) in secrets.as_env_vars() {
+            // Register the secret value in the (global) redaction registry so it
+            // doesn't leak into lifecycle command output or logs — parity with
+            // the `build` path and the reference CLI (which prints `********`).
+            // Gated on redaction being enabled so `--no-redact` still surfaces
+            // raw values for debugging.
+            if args.redaction_config.enabled {
+                args.secret_registry.add_secret(value);
+            }
             cli_remote_env
                 .entry(key.clone())
                 .or_insert_with(|| value.clone());

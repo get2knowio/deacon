@@ -483,27 +483,41 @@ the fix all four modes match the reference byte-for-byte. Unit tests cover each
 mode's flags. (`crates/core/src/container_env_probe.rs`,
 `crates/core/src/container_lifecycle.rs`.)
 
+## Round 6 — `--secrets-file`
+
+### 26. `--secrets-file` secrets leaked in plaintext in lifecycle output
+
+With a secret injected and `postCreateCommand: echo "the secret is $MY_SECRET"`,
+the reference prints `the secret is ********` (redacted) while deacon printed
+`the secret is topsecret123` (**plaintext leak**). deacon redacted lifecycle
+*command strings* (for progress events) but streamed the command *output* through
+`CliDocker::exec` via a raw `tokio::io::copy` with no redaction — and the loaded
+secrets were registered only in a local `SecretsCollection::redaction_registry`,
+never the **global** registry the lifecycle redaction consults. **Fix:** `up`
+now registers the loaded secret values in the global registry (gated on
+redaction being enabled, mirroring the `build` path), and the `stdout_to_stderr`
+lifecycle stream is redacted line-by-line through `redact_if_enabled`. With no
+secrets registered (or `--no-redact`) it's a no-op, so normal output is
+unchanged. Verified: the secret value no longer appears in deacon's output (it's
+replaced by the redaction placeholder), while `--no-redact` still surfaces the
+raw value for debugging. Hermetic docker test
+(`integration_up_secrets_redaction`) asserts both, and fails (leak) if the
+stream fix is reverted. (`crates/deacon/src/commands/up/mod.rs`,
+`crates/core/src/docker.rs`.)
+
 ## Open divergences (confirmed, not yet fixed)
 
-### `--secrets-file`: format mismatch + lifecycle-output secret leak
+### `--secrets-file` format: `.env` vs JSON
 
-Two confirmed divergences (security-sensitive — flagged for a dedicated PR):
-
-1. **File format.** The reference CLI (and the spec) expect `--secrets-file` to be
-   **JSON** (`{"MY_SECRET":"…"}`) — it rejects a `KEY=VALUE` `.env` file with
-   `Error: Invalid json data`. deacon parses **`.env`** (`KEY=VALUE`) and does NOT
-   parse JSON (a JSON file leaves the secret unset). So a reference-format secrets
-   file silently yields empty secrets in deacon, and vice-versa.
-   (`crates/core/src/secrets.rs::parse_secrets_file`.)
-2. **Redaction of lifecycle output.** With a secret injected and
-   `postCreateCommand: echo "the secret is $MY_SECRET"`, the reference prints
-   `the secret is ********` (redacted) while deacon prints
-   `the secret is topsecret123` (**plaintext leak**). deacon redacts lifecycle
-   *command strings* (for progress events) but streams the command *output*
-   through `CliDocker::exec` with no redaction, and loaded secrets are registered
-   only in a local `SecretsCollection::redaction_registry`, not the global
-   registry the lifecycle redaction consults. Fixing this needs the secrets wired
-   into the output-stream redaction path (cross-cutting).
+The reference CLI (and the spec) expect `--secrets-file` to be **JSON**
+(`{"MY_SECRET":"…"}`) — it rejects a `KEY=VALUE` `.env` file with `Error: Invalid
+json data`. deacon parses **`.env`** (`KEY=VALUE`) and does NOT parse JSON (a JSON
+file leaves the secret unset). So a reference-format secrets file silently yields
+empty secrets in deacon, and vice-versa. Switching deacon to JSON is a breaking
+change to its current `.env` contract (and its existing tests), so it's deferred
+as a product decision (accept JSON only, or both?).
+(`crates/core/src/secrets.rs::parse_secrets_file`.) Note the redaction fix (#26)
+is independent of the format.
 
 ## Verified non-bugs
 

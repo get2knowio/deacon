@@ -1653,12 +1653,35 @@ impl Docker for CliRuntime {
 
             // Forward child stdout to deacon's stderr when stdout_to_stderr
             // is set. Lifecycle output remains live-streamed, but it lands on
-            // stderr so the result JSON on stdout stays single-document. #113.
+            // stderr so the result JSON on stdout stays single-document (#113)
+            // and is redacted line-by-line so injected secrets (e.g. from
+            // `--secrets-file`) don't leak in command output — matching the
+            // reference CLI's `********`. With no secrets registered (or
+            // `--no-redact`) redaction is a no-op, leaving output unchanged.
             if config.stdout_to_stderr {
-                if let Some(mut stdout) = child.stdout.take() {
+                if let Some(stdout) = child.stdout.take() {
                     tokio::spawn(async move {
+                        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                        let cfg = crate::redaction::RedactionConfig::default();
+                        let mut reader = BufReader::new(stdout);
                         let mut stderr = tokio::io::stderr();
-                        let _ = tokio::io::copy(&mut stdout, &mut stderr).await;
+                        let mut line = Vec::new();
+                        loop {
+                            line.clear();
+                            // read_until keeps the trailing '\n' (and emits a
+                            // final unterminated line as-is on EOF).
+                            match reader.read_until(b'\n', &mut line).await {
+                                Ok(0) | Err(_) => break,
+                                Ok(_) => {
+                                    let text = String::from_utf8_lossy(&line);
+                                    let redacted = crate::redaction::redact_if_enabled(&text, &cfg);
+                                    if stderr.write_all(redacted.as_bytes()).await.is_err() {
+                                        break;
+                                    }
+                                    let _ = stderr.flush().await;
+                                }
+                            }
+                        }
                     });
                 }
             }
