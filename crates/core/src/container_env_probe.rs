@@ -677,8 +677,21 @@ pub fn get_shell_command_for_lifecycle(
             ]
         }
         "bash" => {
-            // Use login shell with -lc flag for bash
-            vec![shell.to_string(), "-lc".to_string(), command.to_string()]
+            // Login + interactive for bash, for the same reason as zsh: many
+            // feature-installed tools (notably nvm/node) hook into the
+            // *interactive* startup files (`/etc/bash.bashrc`, `~/.bashrc`),
+            // which a non-interactive `bash -lc` skips (those files commonly
+            // early-return when `$PS1` is unset). The reference CLI runs
+            // lifecycle commands in an interactive-login shell too. Without
+            // `-i`, `node --version` in postCreate fails with `command not
+            // found` (exit 127) on bases that don't put the tool on PATH.
+            vec![
+                shell.to_string(),
+                "-l".to_string(),
+                "-i".to_string(),
+                "-c".to_string(),
+                command.to_string(),
+            ]
         }
         _ => {
             // Fallback: try -lc, may not work for all shells
@@ -934,9 +947,11 @@ mod tests {
     }
 
     #[test]
-    fn test_get_shell_command_bash_login() {
+    fn test_get_shell_command_bash_login_interactive() {
+        // bash uses login + interactive (like zsh) so feature-installed tools
+        // hooked into interactive bashrc (nvm/node) are on PATH for lifecycle.
         let cmd = get_shell_command_for_lifecycle("/bin/bash", "echo hello", true);
-        assert_eq!(cmd, vec!["/bin/bash", "-lc", "echo hello"]);
+        assert_eq!(cmd, vec!["/bin/bash", "-l", "-i", "-c", "echo hello"]);
     }
 
     #[test]

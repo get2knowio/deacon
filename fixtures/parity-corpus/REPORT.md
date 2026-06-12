@@ -1,11 +1,11 @@
 # Parity corpus — findings
 
-Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 20 corpus configs.
+Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 22 corpus configs.
 
 Source of truth: the official containers.dev spec and the reference CLI's
 behavior — not any deacon-authored spec doc.
 
-## Fixed in this PR (seven real bugs)
+## Fixed in this PR (eight real bugs)
 
 ### 1. `hostRequirements` hard-failed `up`/`build` (spec violation)
 
@@ -121,18 +121,43 @@ metadata-label re-introduction). Regression test
 end-to-end: the Ruby + Node-22 config now does a full clean `up` (`ruby 3.4.4`,
 `v22.22.3`). (`crates/core/src/docker.rs`, fixture `ruby-node-feature/`.)
 
+### 8. Lifecycle bash ran non-interactive → feature tools (node) not on PATH
+
+`bare debian:bookworm-slim + node:22 feature` (and any base that doesn't already
+put the tool on PATH): `postCreate` failed `node: command not found` (exit 127).
+The node feature hooks nvm into the **interactive** bash startup
+(`/etc/bash.bashrc`, which early-returns when `$PS1` is unset), but
+`get_shell_command_for_lifecycle` ran bash as `-lc` (login, **non-interactive**)
+— so nvm was never sourced. zsh already used `-l -i -c`; bash didn't. Proven on
+the reference's own container: `bash -lc 'node'` → not found, `bash -lic 'node'`
+→ `v22.22.3`. The reference runs lifecycle in an interactive-login shell.
+
+**Fix:** bash lifecycle commands now use `-l -i -c` (login + interactive), like
+zsh and the reference. Test `test_get_shell_command_bash_login_interactive`.
+Verified end-to-end: bare-base + node-22 now does a clean `up` (`v22.22.3`).
+(`crates/core/src/container_env_probe.rs`, fixture `bare-base-node-feature/`.)
+
+Note on the dependency question: the node feature declares
+`installsAfter: [common-utils]` (a *soft ordering* hint), **not** `dependsOn`.
+Neither deacon nor the reference auto-installs `installsAfter` targets —
+verified the reference's bare-base container has no common-utils (only the
+`node` user the node feature itself created). So this was a shell-mode bug, not
+a missing transitive dependency.
+
 ## Open follow-ups (found, not yet fixed)
 
-- **Transitive feature dependencies (`dependsOn`) not auto-installed.** deacon
-  warns `Feature 'node' depends on 'common-utils' which is not in the feature
-  set` and proceeds. Harmless when the base image already bundles the dependency
-  (the devcontainers Ruby image bundles `common-utils`), but on a bare base a
-  `dependsOn` feature would be skipped where the reference auto-installs it.
+- **Transitive `dependsOn` (HARD deps) not auto-installed.** The reference
+  auto-fetches and installs a feature's `dependsOn` targets even when undeclared;
+  deacon instead returns a hard error if a `dependsOn` key isn't already in the
+  declared set (`crates/core/src/features.rs` build-graph). Distinct from
+  `installsAfter` (soft ordering — correctly not auto-installed). Lower frequency
+  (most popular features use `installsAfter`), but a real divergence: a config
+  declaring only a feature that hard-`dependsOn` another would fail under deacon
+  and succeed under the reference. Fixing it means resolving + fetching the
+  transitive `dependsOn` closure into the install plan.
 - **Fully reference-correct feature env** would emit feature `containerEnv` as
-  image `ENV` (build-time `${PATH}` expansion) so a feature adding a *novel*
-  PATH dir not already in the base image still lands. Fix #7 relies on the image
-  ENV already carrying the value (true for the realistic features); the ENV-
-  generation approach would close the novel-path gap.
+  image `ENV` (build-time `${PATH}` expansion); fix #7 relies on the image ENV /
+  shell init already carrying the value (true for realistic features).
 
 - **Divergence A (residual) — `${containerWorkspaceFolder}` without an explicit
   `workspaceFolder`.** Now fixed for the common case (workspaceFolder set, fix
@@ -174,4 +199,5 @@ compose (`compose-postgres`, `compose-array`), jsonc/kitchen-sink
 extends (`extends-child`), substitution (`containerenv-subst`, `name-subst`,
 `workspacefolder-custom`), mounts (`mounts-bind-localenv`), ports (`ports-mixed`),
 user mapping (`user-mapping`), security (`init-privileged`),
-ruby + node-feature (`ruby-node-feature`).
+ruby + node-feature (`ruby-node-feature`), bare base + node-feature
+(`bare-base-node-feature`).

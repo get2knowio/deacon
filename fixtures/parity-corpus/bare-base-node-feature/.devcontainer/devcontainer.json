@@ -1,0 +1,9 @@
+{
+  "name": "Bare base + Node feature",
+  "image": "debian:bookworm-slim",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+  "remoteUser": "node",
+  "postCreateCommand": "node --version && whoami"
+}
