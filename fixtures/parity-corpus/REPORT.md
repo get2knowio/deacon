@@ -228,15 +228,23 @@ and fresh paths) flows. Unit tests cover the basename / explicit / no-basename
 cases; verified end-to-end (`deacon up` now reports `/workspaces/<basename>`,
 matching the reference). (`crates/deacon/src/commands/up/{helpers,container,compose}.rs`.)
 
+### 15. `${containerWorkspaceFolder}` leaked literal in read-configuration (no `workspaceFolder`, no container)
+
+Fix #4 resolved `${containerWorkspaceFolder}` only when the config set an
+explicit `workspaceFolder`. The residual case — `read-configuration` with no
+container and no `workspaceFolder` (`universal-jsonc`) — still emitted the
+literal `${containerWorkspaceFolder}`. The shared loader leaves it unresolved on
+purpose so `up`'s container-aware pass can fill the real mount target, so the
+fix is a **read-config-only seam**: in the no-container path, re-substitute the
+output config with `containerWorkspaceFolder` seeded to the host workspace path
+(the same value as `${localWorkspaceFolder}`), matching the reference. Verified
+against the reference (identical `containerEnv`) and via the Tier-1 differ
+(`universal-jsonc` now ✅ identical). Integration test asserts
+`containerWorkspaceFolder == localWorkspaceFolder` with no explicit
+`workspaceFolder`. (`crates/deacon/src/commands/read_configuration.rs`.)
+
 ## Open follow-ups (found, not yet fixed)
 
-- **Divergence A (residual) — `${containerWorkspaceFolder}` without an explicit
-  `workspaceFolder`.** Now fixed for the common case (workspaceFolder set, fix
-  #4). The residual case — no `workspaceFolder`, `read-configuration` with no
-  container — still leaks the literal (`universal-jsonc`). The reference falls
-  back to the host workspace path; the spec-correct value would be
-  `/workspaces/<basename>`. Resolving it in the shared loader risks corrupting
-  `up`'s container-aware pass, so deferred pending a read-config-only seam.
 - **Divergence B — `extends` output shape.** The reference returns the *raw*
   child config with `extends` preserved (defers the merge to `up`); deacon
   eagerly merges via `load_with_extends` and drops `extends`. Functionally

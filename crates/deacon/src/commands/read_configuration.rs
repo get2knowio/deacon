@@ -1396,6 +1396,30 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         debug!("Container has {} environment variables", env.len());
     }
 
+    // Read-config-only seam (Divergence A): when there is no container and the
+    // config declares no explicit `workspaceFolder`, the shared loader leaves
+    // `${containerWorkspaceFolder}` unresolved on purpose — `up` fills it from
+    // the real mount target during its container-aware pass, and seeding a
+    // default in the shared loader would corrupt that. But `read-configuration`
+    // never reaches that pass, so the literal leaks into the output. The
+    // reference CLI resolves it to the host workspace path (the same value as
+    // `${localWorkspaceFolder}`) in this case, so do the same here on the output
+    // config only. Substitution is idempotent for already-resolved fields.
+    let config =
+        if !container_only_mode && container_info.is_none() && config.workspace_folder.is_none() {
+            let mut ctx = SubstitutionContext::new(workspace_folder)?;
+            ctx.container_workspace_folder = Some(ctx.local_workspace_folder.clone());
+            if let Some(secrets) = &secrets {
+                for (key, value) in secrets.as_env_vars() {
+                    ctx.local_env.insert(key.clone(), value.clone());
+                }
+            }
+            let (resolved, _report) = config.apply_variable_substitution(&ctx);
+            resolved
+        } else {
+            config
+        };
+
     // Create fetcher with tight timeouts for features resolution
     // Per FR-009: Use 2s timeout and exactly 1 retry for predictable performance
     use deacon_core::retry::{JitterStrategy, RetryConfig};

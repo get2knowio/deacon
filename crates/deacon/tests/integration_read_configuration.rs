@@ -475,3 +475,44 @@ fn test_acceptance_container_only_mode_empty_configuration() -> Result<()> {
 
     Ok(())
 }
+
+/// Divergence A: `${containerWorkspaceFolder}` must resolve even when the
+/// config declares no explicit `workspaceFolder` and there is no container.
+/// The reference CLI resolves it to the host workspace path (the same value as
+/// `${localWorkspaceFolder}`); deacon previously left the literal in place.
+#[test]
+fn test_container_workspace_folder_resolves_without_explicit_workspace_folder() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+            "name": "no-workspace-folder",
+            "image": "ubuntu:22.04",
+            "containerEnv": {
+                "WORKSPACE": "${containerWorkspaceFolder}",
+                "LOCAL_WS": "${localWorkspaceFolder}"
+            }
+        }"#,
+    )?;
+
+    let result = helper.run_with_workspace(&[])?;
+    let env = &result["configuration"]["containerEnv"];
+
+    let workspace = env["WORKSPACE"]
+        .as_str()
+        .expect("WORKSPACE should be a string");
+    let local_ws = env["LOCAL_WS"]
+        .as_str()
+        .expect("LOCAL_WS should be a string");
+
+    assert!(
+        !workspace.contains("${"),
+        "containerWorkspaceFolder must be resolved, got literal: {workspace}"
+    );
+    // Reference parity: with no container, containerWorkspaceFolder == localWorkspaceFolder.
+    assert_eq!(
+        workspace, local_ws,
+        "containerWorkspaceFolder should equal localWorkspaceFolder when there is no container"
+    );
+
+    Ok(())
+}
