@@ -263,6 +263,52 @@ raw-output shape and the string/array/skip serialization.
 All Tier-1 read-configuration divergences against the reference CLI are now
 resolved.
 
+## Round 2 — `mergedConfiguration` sweep (`--include-merged-configuration`)
+
+A second differ compares the `mergedConfiguration` block (deacon vs reference)
+across the corpus, after the same null/empty normalization. Three real,
+Docker-free divergences fixed:
+
+### 17. `mergedConfiguration` leaked raw `hostRequirements` + `null` init/privileged
+
+The reference's merged shape normalizes `hostRequirements.memory`/`.storage` to
+a **byte-count string** (binary units): `"8gb"` → `"8589934592"` (`cpus` stays
+numeric; the top-level `configuration` block keeps the raw authored string).
+It also always materializes `init`/`privileged` as booleans (default `false`,
+per upstream `imageMetadata.some(e => e.init)`). deacon leaked the raw `"8gb"`
+string and emitted `null` for the booleans. **Fix:** a `mergedConfiguration`
+finalization pass (`normalize_merged_configuration_shape`) reusing the core
+`ResourceSpec::parse_bytes` binary-unit semantics. Verified byte-identical on
+`node-ts` (hostRequirements) and across all configs (init/privileged).
+(`crates/deacon/src/commands/read_configuration.rs`.)
+
+### 18. Feature `containerEnv` over-merged into `mergedConfiguration`
+
+deacon folded a feature's `containerEnv` (e.g. `GOROOT`/`GOPATH`, `NVM_*`,
+`DOTNET_*`) into `mergedConfiguration.containerEnv`. The reference does **not**:
+per upstream `imageMetadata.ts`, a feature's image-metadata entry omits env —
+feature env is realized by the feature's own install step (baked into the
+image), not surfaced via the `devcontainer.metadata` merge. So the merged shape
+carries only the base config's (and image-label) env. **Fix:** stop folding
+feature `containerEnv`; feature `mounts`/`customizations`/`init`/`privileged`/
+`capAdd`/`securityOpt` are still folded (those *are* in the upstream metadata
+entry). Base config env survives unchanged. All feature configs (go/python/
+ruby/dotnet) now show `0` deacon-only merged env. Hermetic local-feature
+regression test. (`crates/deacon/src/commands/read_configuration.rs`.)
+
+### 19. Image-metadata `customizations` emitted in reversed order
+
+The merged `customizations.<tool>` array prepended each image
+`devcontainer.metadata` entry with `insert(0, …)` in a forward loop, which
+**reversed** the image entries — scrambling the array relative to the
+reference's `[...image, ...features, config]` (image entries in label order).
+**Fix:** a pure `ordered_customizations_entries` helper concatenating the
+per-contributor buckets in forward order, used by both image-metadata merge
+branches. With the `typescript-node` image present, `node-ts`
+`mergedConfiguration.customizations.vscode` is byte-identical (all 7 contributor
+entries in matching order). Unit tests cover the ordering invariant.
+(`crates/deacon/src/commands/read_configuration.rs`.)
+
 ## Verified non-bugs
 
 - **Feature `containerEnv` with `${...}` shell refs (incl. a *novel* PATH dir) is
@@ -286,6 +332,17 @@ resolved.
 - `appPort` host-port already in use → `docker -p` bind conflict (environmental;
   `ports-mixed` uses uncommon ports). Note: after fix #6 `forwardPorts` are no
   longer bound, so they cannot cause this.
+- **`mergedConfiguration` image-metadata only merges *locally-present* images.**
+  The remaining `customizations.vscode` / `capAdd` / `containerUser` /
+  `entrypoints` / `mounts` divergences in the round-2 sweep (go/python/dotnet/
+  ruby/compose, `universal-jsonc`) are entirely because those base images are
+  not pulled in the test environment. deacon's image-metadata fetch is
+  best-effort **local-only** (it does not pull during a read-only command); the
+  reference CLI pulls the image to read its `devcontainer.metadata` label. With
+  the image present, deacon matches: `node-ts` (typescript-node pulled) is
+  byte-identical after fix #19. This is a deliberate read-config design choice
+  (no implicit network/pull), not a merge-logic bug. Compose configs
+  additionally have no `config.image` to inspect at read-config time.
 
 ## Corpus (20 configs)
 
