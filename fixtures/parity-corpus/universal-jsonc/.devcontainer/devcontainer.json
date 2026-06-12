@@ -1,0 +1,28 @@
+{
+  // A kitchen-sink jsonc config with comments and trailing commas,
+  // modeled on the GitHub Codespaces "universal" default.
+  "name": "Universal",
+  "image": "mcr.microsoft.com/devcontainers/universal:2-linux",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}, // dind for builds
+  },
+  "forwardPorts": [3000, 5000, 8080],
+  "otherPortsAttributes": { "onAutoForward": "silent" },
+  "portsAttributes": {
+    "3000": { "label": "web", "protocol": "https" },
+    "8080": { "label": "api", "requireLocalPort": true },
+  },
+  "containerEnv": {
+    "WORKSPACE": "${containerWorkspaceFolder}",
+    "LOCAL_WS": "${localWorkspaceFolder}",
+  },
+  // object-form lifecycle with parallel commands
+  "onCreateCommand": {
+    "a": "echo a",
+    "b": ["echo", "b with spaces"],
+  },
+  "postAttachCommand": ["echo", "attached"],
+  "userEnvProbe": "loginInteractiveShell",
+  "overrideCommand": false,
+  "remoteUser": "codespace",
+}

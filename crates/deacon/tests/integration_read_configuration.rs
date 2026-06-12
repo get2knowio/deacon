@@ -295,6 +295,121 @@ fn test_acceptance_features_configuration_present() -> Result<()> {
     Ok(())
 }
 
+/// Regression: a local feature (`./feat`) declared in an auto-discovered
+/// `.devcontainer/devcontainer.json` must anchor to the config file's directory
+/// (`.devcontainer/`), not the workspace folder. Before the fix, running with
+/// only `--workspace-folder` (no `--config`) mis-anchored `./feat` to the
+/// workspace root and failed with "not accessible". Hermetic (local feature, no
+/// network).
+#[test]
+fn test_local_feature_anchors_to_discovered_config_dir() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+        "name": "local-anchor",
+        "image": "ubuntu:22.04",
+        "features": { "./localfeat": {} }
+    }"#,
+    )?;
+    // Local feature lives NEXT TO the config, under .devcontainer/.
+    let feat_dir = helper.temp_dir().join(".devcontainer").join("localfeat");
+    std::fs::create_dir_all(&feat_dir)?;
+    std::fs::write(
+        feat_dir.join("devcontainer-feature.json"),
+        r#"{ "id": "localfeat", "version": "1.0.0", "name": "Local Feat" }"#,
+    )?;
+    std::fs::write(feat_dir.join("install.sh"), "#!/bin/sh\ntrue\n")?;
+
+    // Auto-discovery (only --workspace-folder) + features resolution.
+    let result = helper.run_with_workspace(&["--include-features-configuration"])?;
+    let features_config = result["featuresConfiguration"].as_object().unwrap();
+    let sets = features_config
+        .get("featureSets")
+        .and_then(|v| v.as_array())
+        .expect("featureSets array");
+    let found = sets.iter().any(|fs| {
+        fs.get("features")
+            .and_then(|f| f.as_array())
+            .map(|arr| {
+                arr.iter().any(|feat| {
+                    feat.get("id")
+                        .and_then(|i| i.as_str())
+                        .map(|s| s.contains("localfeat"))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false)
+    });
+    assert!(
+        found,
+        "local feature must resolve via discovered-config anchoring: {result:#}"
+    );
+    Ok(())
+}
+
+/// Regression: `featuresConfiguration.featureSets` is emitted ONE-PER-FEATURE in
+/// INSTALL ORDER (a feature's dependencies first), matching the reference CLI —
+/// not grouped by registry. Two local features where `app` dependsOn `lib` must
+/// produce sets ordered `[lib, app]`. Hermetic (local features, no network).
+#[test]
+fn test_features_configuration_emitted_in_install_order() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+        "name": "order",
+        "image": "ubuntu:22.04",
+        "features": { "./features/app": {} }
+    }"#,
+    )?;
+    let feats = helper.temp_dir().join(".devcontainer").join("features");
+    for (name, body) in [
+        (
+            "lib",
+            r#"{ "id": "lib", "version": "1.0.0", "name": "Lib" }"#,
+        ),
+        (
+            "app",
+            r#"{ "id": "app", "version": "1.0.0", "name": "App", "dependsOn": { "./features/lib": {} } }"#,
+        ),
+    ] {
+        let d = feats.join(name);
+        std::fs::create_dir_all(&d)?;
+        std::fs::write(d.join("devcontainer-feature.json"), body)?;
+        std::fs::write(d.join("install.sh"), "#!/bin/sh\ntrue\n")?;
+    }
+
+    let result = helper.run_with_workspace(&["--include-features-configuration"])?;
+    let sets = result["featuresConfiguration"]["featureSets"]
+        .as_array()
+        .expect("featureSets array");
+    // One set per feature (lib auto-installed via dependsOn + app declared).
+    assert_eq!(sets.len(), 2, "expected one set per feature: {result:#}");
+    let order: Vec<&str> = sets
+        .iter()
+        .filter_map(|s| s["features"][0]["id"].as_str())
+        .map(|id| if id.contains("lib") { "lib" } else { "app" })
+        .collect();
+    assert_eq!(
+        order,
+        vec!["lib", "app"],
+        "dependency must come before dependent (install order): {order:?}"
+    );
+
+    // sourceInformation for local features matches the reference's `file-path`
+    // shape: { type, resolvedFilePath, userFeatureId }.
+    let si = &sets[0]["sourceInformation"];
+    assert_eq!(si["type"], "file-path", "local feature source type: {si:#}");
+    assert_eq!(si["userFeatureId"], "./features/lib");
+    assert!(
+        si["resolvedFilePath"]
+            .as_str()
+            .map(|p| p.ends_with("features/lib"))
+            .unwrap_or(false),
+        "resolvedFilePath should point at the feature dir: {si:#}"
+    );
+    Ok(())
+}
+
 /// Test acceptance: deep-merge --additional-features with precedence over base
 #[test]
 fn test_acceptance_additional_features_deep_merge_precedence() -> Result<()> {
@@ -356,6 +471,110 @@ fn test_acceptance_container_only_mode_empty_configuration() -> Result<()> {
     assert!(
         result.get("mergedConfiguration").is_none(),
         "mergedConfiguration should not be present when not requested"
+    );
+
+    Ok(())
+}
+
+/// Divergence A: `${containerWorkspaceFolder}` must resolve even when the
+/// config declares no explicit `workspaceFolder` and there is no container.
+/// The reference CLI resolves it to the host workspace path (the same value as
+/// `${localWorkspaceFolder}`); deacon previously left the literal in place.
+#[test]
+fn test_container_workspace_folder_resolves_without_explicit_workspace_folder() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+            "name": "no-workspace-folder",
+            "image": "ubuntu:22.04",
+            "containerEnv": {
+                "WORKSPACE": "${containerWorkspaceFolder}",
+                "LOCAL_WS": "${localWorkspaceFolder}"
+            }
+        }"#,
+    )?;
+
+    let result = helper.run_with_workspace(&[])?;
+    let env = &result["configuration"]["containerEnv"];
+
+    let workspace = env["WORKSPACE"]
+        .as_str()
+        .expect("WORKSPACE should be a string");
+    let local_ws = env["LOCAL_WS"]
+        .as_str()
+        .expect("LOCAL_WS should be a string");
+
+    assert!(
+        !workspace.contains("${"),
+        "containerWorkspaceFolder must be resolved, got literal: {workspace}"
+    );
+    // Reference parity: with no container, containerWorkspaceFolder == localWorkspaceFolder.
+    assert_eq!(
+        workspace, local_ws,
+        "containerWorkspaceFolder should equal localWorkspaceFolder when there is no container"
+    );
+
+    Ok(())
+}
+
+/// Divergence B: the default `configuration` output is the RAW entry config with
+/// `extends` preserved (a single target as a string) and child values left
+/// un-merged with the base — matching the reference CLI, which defers the
+/// extends merge to `up`/`mergedConfiguration`.
+#[test]
+fn test_extends_output_is_raw_unmerged_with_extends_preserved() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    let devcontainer_dir = helper.temp_dir().join(".devcontainer");
+    fs::create_dir_all(&devcontainer_dir)?;
+    fs::write(
+        devcontainer_dir.join("base.json"),
+        r#"{
+            "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+            "containerEnv": { "BASE": "yes" },
+            "forwardPorts": [3000],
+            "postCreateCommand": "echo from base"
+        }"#,
+    )?;
+    helper.create_config(
+        r#"{
+            "name": "child",
+            "extends": "./base.json",
+            "forwardPorts": [4000],
+            "containerEnv": { "CHILD": "yes" },
+            "remoteUser": "vscode"
+        }"#,
+    )?;
+
+    let result = helper.run_with_workspace(&[])?;
+    let cfg = &result["configuration"];
+
+    // `extends` is preserved as a bare string (single target), not an array.
+    assert_eq!(
+        cfg["extends"], "./base.json",
+        "extends must be preserved as a string in the raw output"
+    );
+    // forwardPorts is the child's un-merged value.
+    assert_eq!(
+        cfg["forwardPorts"],
+        serde_json::json!([4000]),
+        "forwardPorts must be the raw child value, not merged with the base"
+    );
+    // Base-only values must NOT be merged into the raw child output. deacon
+    // serializes the full struct (absent fields as `null`, stripped by the
+    // Tier-1 normalizer), so a base value would appear as a non-null leak.
+    assert!(
+        cfg["image"].is_null(),
+        "base `image` must not be merged into the raw child output, got: {:?}",
+        cfg["image"]
+    );
+    assert!(
+        cfg["postCreateCommand"].is_null(),
+        "base `postCreateCommand` must not be merged into the raw child output, got: {:?}",
+        cfg["postCreateCommand"]
+    );
+    assert!(
+        cfg["containerEnv"].get("BASE").is_none(),
+        "base containerEnv must not be merged into the raw child output"
     );
 
     Ok(())

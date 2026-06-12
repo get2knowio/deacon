@@ -1,0 +1,9 @@
+{
+  "name": "User mapping",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "remoteUser": "vscode",
+  "containerUser": "vscode",
+  "updateRemoteUserUID": true,
+  "containerEnv": { "WHO": "vscode" },
+  "postCreateCommand": "id -un && echo user-ok"
+}

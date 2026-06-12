@@ -3,7 +3,7 @@
 //! Implements the `deacon read-configuration` subcommand for reading and displaying
 //! DevContainer configuration with variable substitution and extends resolution.
 //!
-//! Spec: docs/subcommand-specs/read-configuration/SPEC.md
+//! Spec: the containers.dev spec / reference CLI
 //! Implementation: specs/001-read-config-parity/spec.md
 
 use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
@@ -106,12 +106,60 @@ pub struct Feature {
     pub container_env: Option<HashMap<String, String>>,
 }
 
-/// Source information for features
+/// Parsed OCI feature reference, mirroring the reference CLI's `featureRef`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeatureRefInfo {
+    /// Feature name, e.g. `node`.
+    pub id: String,
+    /// First namespace segment, e.g. `devcontainers`.
+    pub owner: String,
+    /// Namespace, e.g. `devcontainers/features`.
+    pub namespace: String,
+    /// Registry host, e.g. `ghcr.io`.
+    pub registry: String,
+    /// `registry/namespace/name`, e.g. `ghcr.io/devcontainers/features/node`.
+    pub resource: String,
+    /// `namespace/name`, e.g. `devcontainers/features/node`.
+    pub path: String,
+    /// Resolved version/tag, e.g. `1`.
+    pub version: String,
+    /// Tag as written, e.g. `1`.
+    pub tag: String,
+}
+
+/// Source information for a resolved feature, matching the reference CLI's
+/// `sourceInformation` shape (one variant per feature origin).
+///
+/// The `Oci` variant is much larger than `FilePath` (it carries the full OCI
+/// manifest), but this is a serialization-only DTO constructed once per feature
+/// for output, so the size asymmetry is irrelevant.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SourceInformation {
-    #[serde(rename = "oci")]
-    Oci { registry: String },
+    /// An OCI-registry feature.
+    #[serde(rename = "oci", rename_all = "camelCase")]
+    Oci {
+        /// The full OCI manifest (config + layers + annotations).
+        manifest: serde_json::Value,
+        /// `sha256:<hex>` digest of the raw manifest body.
+        manifest_digest: String,
+        /// Parsed reference.
+        feature_ref: FeatureRefInfo,
+        /// The id as written in `devcontainer.json` (with tag).
+        user_feature_id: String,
+        /// The id as written, minus the `:tag`.
+        user_feature_id_without_version: String,
+    },
+    /// A local (on-disk) feature.
+    #[serde(rename = "file-path", rename_all = "camelCase")]
+    FilePath {
+        /// Absolute path to the feature directory.
+        resolved_file_path: String,
+        /// The id as written in `devcontainer.json` (e.g. `./feature`).
+        user_feature_id: String,
+    },
 }
 
 /// Workspace configuration information
@@ -350,32 +398,44 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
         });
     }
 
+    // Auto-install transitive `dependsOn` (hard) dependencies before resolving
+    // the install order — parity with the reference CLI and the `up`/`build`
+    // path, so `--include-features-configuration` reports (and orders) the full
+    // closure instead of erroring on an undeclared hard dependency.
+    // `installsAfter` (soft ordering) is NOT auto-installed.
+    let mut idx = 0;
+    while idx < resolved_features.len() {
+        let mut deps: Vec<(String, serde_json::Value)> = resolved_features[idx]
+            .metadata
+            .depends_on
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        deps.sort_by(|a, b| a.0.cmp(&b.0));
+        for (dep_key, dep_value) in deps {
+            let dep = crate::commands::shared::feature_resolver::resolve_one_feature(
+                &dep_key, &dep_value, config_dir, fetcher,
+            )
+            .await?;
+            if !resolved_features.iter().any(|f| f.id == dep.id) {
+                resolved_features.push(dep);
+            }
+        }
+        idx += 1;
+    }
+
     // Create dependency resolver
     let override_order = config.override_feature_install_order.clone();
     let resolver = FeatureDependencyResolver::new(override_order);
 
-    // Resolve dependencies and create installation plan
-    let _installation_plan = resolver.resolve(&resolved_features)?;
+    // Resolve dependencies into an installation plan. The plan is in install
+    // order — a feature's dependencies come before it (topological sort). The
+    // reference CLI emits one featureSet per feature in exactly this order, so
+    // we mirror that (rather than grouping by registry, which loses the order).
+    let installation_plan = resolver.resolve(&resolved_features)?;
 
-    // Group features by registry extracted from their source
-    use std::collections::BTreeMap;
-    let mut features_by_registry: BTreeMap<String, Vec<Feature>> = BTreeMap::new();
-
-    for resolved in &resolved_features {
-        // Extract registry from source (format: "oci://registry/namespace/name:tag")
-        let registry = if resolved.source.starts_with("oci://") {
-            let without_prefix = resolved.source.trim_start_matches("oci://");
-            // Extract first component (registry) before first slash
-            without_prefix
-                .split('/')
-                .next()
-                .unwrap_or("ghcr.io")
-                .to_string()
-        } else {
-            // Fallback for non-OCI sources
-            "ghcr.io".to_string()
-        };
-
+    let mut feature_sets: Vec<FeatureSet> = Vec::with_capacity(installation_plan.features.len());
+    for resolved in &installation_plan.features {
         let options = if resolved.options.is_empty() {
             None
         } else {
@@ -417,22 +477,67 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             },
         };
 
-        features_by_registry
-            .entry(registry)
-            .or_default()
-            .push(feature);
-    }
+        // Build sourceInformation matching the reference CLI's per-origin shape.
+        let source_information = if let Some(path) = resolved.id.strip_prefix("local:") {
+            SourceInformation::FilePath {
+                resolved_file_path: path.to_string(),
+                user_feature_id: resolved.source.clone(),
+            }
+        } else {
+            // OCI: parse the reference form back out, fetch the manifest + its
+            // digest, and assemble the full `featureRef`.
+            let (registry_url, namespace, name, tag) = parse_registry_reference(&resolved.source)
+                .with_context(|| {
+                format!("Invalid OCI feature reference '{}'", resolved.source)
+            })?;
+            let feature_ref = FeatureRef::new(
+                registry_url.clone(),
+                namespace.clone(),
+                name.clone(),
+                tag.clone(),
+            );
+            let (manifest, digest_hex) = fetcher
+                .get_manifest_with_digest(&feature_ref)
+                .await
+                .with_context(|| {
+                    format!("Failed to fetch manifest for feature '{}'", resolved.source)
+                })?;
+            let repository = feature_ref.repository(); // namespace/name
+            let resource = format!("{}/{}", registry_url, repository);
+            // userFeatureIdWithoutVersion == registry/namespace/name (no tag).
+            let user_feature_id_without_version = resource.clone();
+            let version = feature_ref.tag().to_string();
+            let owner = namespace
+                .split('/')
+                .next()
+                .unwrap_or(&namespace)
+                .to_string();
+            SourceInformation::Oci {
+                manifest,
+                manifest_digest: format!("sha256:{}", digest_hex),
+                feature_ref: FeatureRefInfo {
+                    id: name,
+                    owner,
+                    namespace,
+                    registry: registry_url,
+                    resource,
+                    path: repository,
+                    version: version.clone(),
+                    tag: version,
+                },
+                user_feature_id: resolved.source.clone(),
+                user_feature_id_without_version,
+            }
+        };
 
-    // Build one FeatureSet per registry
-    let feature_sets: Vec<FeatureSet> = features_by_registry
-        .into_iter()
-        .map(|(registry, features)| FeatureSet {
-            features,
-            source_information: SourceInformation::Oci { registry },
+        // One featureSet per feature, in install order (reference parity).
+        feature_sets.push(FeatureSet {
+            features: vec![feature],
+            source_information,
             internal_version: None,
             computed_digest: None,
-        })
-        .collect();
+        });
+    }
 
     Ok(FeaturesConfiguration {
         feature_sets,
@@ -1099,6 +1204,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         .unwrap_or(Path::new("."));
 
     // Load configuration using shared helper (aligns with up/exec behavior)
+    // The actual config file that was loaded/discovered (may differ from the CLI
+    // `--config` arg when auto-discovered under `.devcontainer/`). Used to anchor
+    // local feature paths (`./feature`) to the config file's directory.
+    let mut resolved_config_path: Option<PathBuf> = None;
     let (config, substitution_report) = if container_only_mode {
         // Per spec line 104: "If only container selection flags are provided (no config or workspace),
         // proceed with an empty base config {} and a substitution function seeded with host env/paths."
@@ -1116,6 +1225,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             secrets_files: &args.secrets_files,
         })
         .await?;
+        resolved_config_path = Some(config_result.config_path);
         (config_result.config, config_result.substitution_report)
     };
 
@@ -1286,6 +1396,75 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         debug!("Container has {} environment variables", env.len());
     }
 
+    // Read-config-only seam (Divergence A): when there is no container and the
+    // config declares no explicit `workspaceFolder`, the shared loader leaves
+    // `${containerWorkspaceFolder}` unresolved on purpose — `up` fills it from
+    // the real mount target during its container-aware pass, and seeding a
+    // default in the shared loader would corrupt that. But `read-configuration`
+    // never reaches that pass, so the literal leaks into the output. The
+    // reference CLI resolves it to the host workspace path (the same value as
+    // `${localWorkspaceFolder}`) in this case, so do the same here on the output
+    // config only. Substitution is idempotent for already-resolved fields.
+    let config =
+        if !container_only_mode && container_info.is_none() && config.workspace_folder.is_none() {
+            let mut ctx = SubstitutionContext::new(workspace_folder)?;
+            ctx.container_workspace_folder = Some(ctx.local_workspace_folder.clone());
+            if let Some(secrets) = &secrets {
+                for (key, value) in secrets.as_env_vars() {
+                    ctx.local_env.insert(key.clone(), value.clone());
+                }
+            }
+            let (resolved, _report) = config.apply_variable_substitution(&ctx);
+            resolved
+        } else {
+            config
+        };
+
+    // Divergence B: the reference CLI's `configuration` output is the RAW entry
+    // config with `extends` preserved — it defers the extends merge to
+    // `up`/`mergedConfiguration`. deacon's shared loader eagerly merges the
+    // extends chain (and drops `extends`), which is correct for `up` but diverges
+    // from the reference's read-configuration presentation. So when the entry
+    // file declares `extends`, load and substitute the single entry file on its
+    // own for the output `configuration` field, leaving the merged `config`
+    // (used for `featuresConfiguration`/`mergedConfiguration`) untouched. Configs
+    // without `extends` are unaffected (raw == merged for a single file).
+    let raw_config_for_output: Option<DevContainerConfig> = if container_only_mode {
+        None
+    } else if let Some(cfg_path) = resolved_config_path.as_deref() {
+        match deacon_core::config::ConfigLoader::load_from_path(cfg_path).await {
+            Ok(raw) if raw.extends.is_some() => {
+                let substituted = if let Some(ctx) = &container_context {
+                    // Reuse the exact container-aware context applied to the merged config.
+                    raw.apply_variable_substitution(ctx).0
+                } else {
+                    let mut ctx = SubstitutionContext::new(workspace_folder)?;
+                    // Mirror the shared loader (fix #4) + Divergence A seam.
+                    match raw.workspace_folder.as_deref() {
+                        Some(wf) if !wf.trim().is_empty() && !wf.contains("${") => {
+                            ctx.container_workspace_folder = Some(wf.to_string());
+                        }
+                        None => {
+                            ctx.container_workspace_folder =
+                                Some(ctx.local_workspace_folder.clone());
+                        }
+                        _ => {}
+                    }
+                    if let Some(secrets) = &secrets {
+                        for (key, value) in secrets.as_env_vars() {
+                            ctx.local_env.insert(key.clone(), value.clone());
+                        }
+                    }
+                    raw.apply_variable_substitution(&ctx).0
+                };
+                Some(substituted)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     // Create fetcher with tight timeouts for features resolution
     // Per FR-009: Use 2s timeout and exactly 1 retry for predictable performance
     use deacon_core::retry::{JitterStrategy, RetryConfig};
@@ -1309,12 +1488,17 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     let features_configuration_for_output = if args.include_features_configuration
         || (args.include_merged_configuration && args.container_id.is_none())
     {
-        // Anchor local-feature paths to the config file's directory; fall
-        // back to the workspace folder if --config wasn't supplied. Mirrors
-        // the up flow's anchor (`features_build.rs`).
+        // Anchor local-feature paths to the config file's directory. Use the
+        // CLI `--config` arg when given, otherwise the *discovered* config path
+        // (e.g. `.devcontainer/devcontainer.json`), and only fall back to the
+        // workspace folder when neither is available. Mirrors the up flow's
+        // anchor (`features_build.rs`); the previous code used only the CLI arg,
+        // so an auto-discovered config mis-anchored `./feature` to the workspace
+        // folder instead of `.devcontainer/`.
         let features_config_dir = args
             .config_path
             .as_deref()
+            .or(resolved_config_path.as_deref())
             .and_then(|p| p.parent())
             .unwrap_or(workspace_folder)
             .to_path_buf();
@@ -1421,6 +1605,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         configuration: if container_only_mode {
             // Per spec line 310: "Only container flags provided (no config/workspace): returns { configuration: {}, ... }"
             serde_json::Value::Object(serde_json::Map::new())
+        } else if let Some(raw) = &raw_config_for_output {
+            // Divergence B: emit the raw (un-merged) entry config with `extends`
+            // preserved, matching the reference CLI.
+            serde_json::to_value(raw)?
         } else {
             serde_json::to_value(&config)?
         },

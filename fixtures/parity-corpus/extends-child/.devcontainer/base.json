@@ -1,0 +1,6 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "containerEnv": { "BASE": "yes", "CHILD": "no" },
+  "forwardPorts": [3000],
+  "postCreateCommand": "echo from base"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Mounts (bind + volume)",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "mounts": [
+    "source=${localEnv:HOME},target=/host-home,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder},target=/workspace-mirror,type=bind",
+    { "source": "named-vol", "target": "/data", "type": "volume" }
+  ],
+  "postCreateCommand": "ls -la /host-home >/dev/null && echo mounts-ok",
+  "remoteUser": "vscode"
+}

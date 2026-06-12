@@ -1,0 +1,10 @@
+{
+  "name": "Child overrides base",
+  "extends": "./base.json",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "20" }
+  },
+  "forwardPorts": [4000],
+  "containerEnv": { "CHILD": "yes" },
+  "remoteUser": "vscode"
+}

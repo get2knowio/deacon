@@ -1,6 +1,6 @@
 # AGENTS: Quick Guide for AI Assistants
-- Source of truth: follow the `docs/subcommand-specs/*/SPEC.md` files; no silent fallbacks—fail fast if unimplemented.
-- **CRITICAL PRE-IMPLEMENTATION**: Read COMPLETE spec (SPEC.md + data-model.md + contracts/) BEFORE coding; verify data structures match spec shapes exactly (map vs vec, null handling, ordering); identify all spec-defined algorithms to implement precisely.
+- Source of truth: the official [containers.dev specification](https://containers.dev) and the reference implementation (`@devcontainers/cli`); no silent fallbacks—fail fast if unimplemented.
+- **CRITICAL PRE-IMPLEMENTATION**: Read the relevant section of the official containers.dev spec and confirm the reference CLI's behavior BEFORE coding; verify data structures match spec shapes exactly (map vs vec, null handling, ordering); identify all spec-defined algorithms to implement precisely.
 - Build: `cargo build --quiet`; Run CLI: `cargo run -- --help`.
 - Fast loop (DEFAULT): `make test-nextest-fast` (unit/bin/examples + doctests; excludes smoke/parity/docker)
 - Targeted test commands (USE THESE EXCLUSIVELY):
@@ -84,7 +84,7 @@ Guidelines:
 
 ## Spec Alignment Checklist (Before Implementation)
 Run this checklist BEFORE writing implementation code for any new subcommand/feature:
-1. **Full Spec Read**: Have you read SPEC.md, data-model.md, and contracts/ completely?
+1. **Full Spec Read**: Have you read the relevant official containers.dev spec section and confirmed the reference CLI's behavior?
 2. **Data Model Match**: Do your structs match spec shapes exactly? Check: map vs vec, field names, null semantics, ordering (declaration order vs alphabetical).
 3. **Algorithm Fidelity**: Have you identified all spec-defined algorithms (e.g., version derivation, extends resolution, tag selection)? Will you implement them step-by-step as specified?
 4. **Input Validation**: Which inputs are valid/supported per spec (e.g., only OCI refs, only semver tags)? Where will you filter invalid entries?

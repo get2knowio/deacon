@@ -409,6 +409,9 @@ pub(crate) async fn execute_up_with_runtime(
 
         let gpu_available = Some(args.gpu_mode == deacon_core::gpu::GpuMode::All);
 
+        // hostRequirements are advisory per the containers.dev spec: the
+        // evaluator warns when they are not met and proceeds (it never errors).
+        // `--ignore-host-requirements` downgrades that warning to a debug log.
         match evaluator.validate_requirements_with_gpu_availability(
             host_requirements,
             Some(workspace_folder.as_path()),
@@ -418,10 +421,6 @@ pub(crate) async fn execute_up_with_runtime(
             Ok(evaluation) => {
                 if evaluation.requirements_met {
                     debug!("Host requirements validation passed");
-                } else if args.ignore_host_requirements {
-                    warn!(
-                        "Host requirements not met, but proceeding due to --ignore-host-requirements flag"
-                    );
                 }
                 debug!("Host evaluation: {:?}", evaluation);
             }

@@ -1,0 +1,13 @@
+{
+  "name": "Build args substitution",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".",
+    "args": {
+      "BASE_TAG": "bookworm",
+      "FROM_LOCAL_ENV": "${localEnv:USER}"
+    }
+  },
+  "postCreateCommand": "cat /etc/built-args",
+  "remoteUser": "root"
+}

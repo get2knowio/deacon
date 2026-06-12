@@ -370,7 +370,10 @@ pub enum Commands {
         container_name: Option<String>,
 
         // Host requirements
-        /// Ignore host requirements validation (log warnings instead of failing)
+        /// Suppress the advisory warning when hostRequirements are not met.
+        /// hostRequirements are advisory per the containers.dev spec: deacon
+        /// always proceeds and only warns; this flag downgrades that warning to
+        /// a debug log.
         #[arg(long)]
         ignore_host_requirements: bool,
 
@@ -438,7 +441,10 @@ pub enum Commands {
         /// Override feature installation order (comma-separated list of IDs)
         #[arg(long)]
         feature_install_order: Option<String>,
-        /// Ignore host requirements validation (log warnings instead of failing)
+        /// Suppress the advisory warning when hostRequirements are not met.
+        /// hostRequirements are advisory per the containers.dev spec: deacon
+        /// always proceeds and only warns; this flag downgrades that warning to
+        /// a debug log.
         #[arg(long)]
         ignore_host_requirements: bool,
         /// Enable host-CA injection into the generated feature-layering
@@ -588,7 +594,7 @@ pub enum Commands {
     /// resolved Feature set. Use `--dry-run` to print the lockfile JSON to
     /// stdout instead of writing to disk.
     ///
-    /// See `docs/subcommand-specs/upgrade/SPEC.md` for the authoritative behavior.
+    /// See the containers.dev spec / reference CLI for the authoritative behavior.
     Upgrade {
         /// Print the generated lockfile JSON to stdout instead of writing it
         /// to disk. Spec §2.
@@ -615,7 +621,7 @@ pub enum Commands {
     /// configuration + image metadata, executing lifecycle hooks, and emitting
     /// a JSON snapshot of the resulting configuration.
     ///
-    /// See `docs/subcommand-specs/set-up/SPEC.md` for the authoritative behavior.
+    /// See the containers.dev spec / reference CLI for the authoritative behavior.
     SetUp {
         /// Target container ID (required). The container must already exist.
         #[arg(long)]

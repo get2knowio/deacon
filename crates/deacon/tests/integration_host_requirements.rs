@@ -74,10 +74,10 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
 }
 
 #[tokio::test]
-async fn test_host_requirements_validation_fails_with_unrealistic_requirements() {
+async fn test_host_requirements_unmet_warns_and_proceeds() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
-    // Create config with unrealistic requirements
+    // Create config with unrealistic requirements.
     let requirements = HostRequirements {
         cpus: Some(ResourceSpec::Number(1000.0)), // Impossible number of CPUs
         memory: Some(ResourceSpec::String("1TB".to_string())), // Very large memory
@@ -98,22 +98,21 @@ async fn test_host_requirements_validation_fails_with_unrealistic_requirements()
 
     let result = execute_up(args).await;
 
-    // This should fail due to host requirements not being met
-    assert!(result.is_err());
-
-    let err = result.unwrap_err();
-    if let Some(deacon_error) = err.downcast_ref::<DeaconError>() {
-        if let DeaconError::Config(ConfigError::Validation { message }) = deacon_error {
+    // hostRequirements are advisory per the containers.dev spec: deacon must
+    // warn and PROCEED, never refuse to start. So unmet requirements must not
+    // surface as a "Host requirements not met" validation error. (The run may
+    // still fail later for unrelated reasons such as Docker being unavailable.)
+    if let Err(e) = result {
+        if let Some(DeaconError::Config(ConfigError::Validation { message })) =
+            e.downcast_ref::<DeaconError>()
+        {
             assert!(
-                message.contains("Host requirements not met"),
-                "Expected host requirements validation error, got: {}",
+                !message.contains("Host requirements not met"),
+                "hostRequirements are advisory; up must proceed, but it hard-failed: {}",
                 message
             );
-        } else {
-            panic!("Expected ConfigError::Validation, got: {:?}", deacon_error);
         }
-    } else {
-        panic!("Expected DeaconError, got: {:?}", err);
+        // Other errors (e.g. Docker not available) are acceptable for this test.
     }
 }
 

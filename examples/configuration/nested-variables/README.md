@@ -281,7 +281,7 @@ deacon config substitute --config devcontainer.json --max-depth 10
 
 ## Spec References
 
-Per subcommand-specs/*/SPEC.md "Variable Substitution":
+Per the containers.dev spec "Variable Substitution":
 - Supported variables: `localWorkspaceFolder`, `containerWorkspaceFolder`, `localEnv:*`, `containerEnv:*`, `remoteEnv:*`
 - Substitution contexts: before and after container creation
 - Multi-pass resolution for nested references

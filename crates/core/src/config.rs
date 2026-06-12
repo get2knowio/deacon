@@ -243,6 +243,26 @@ where
     }
 }
 
+/// Custom serializer for the `extends` field.
+///
+/// Mirrors the reference CLI's read-configuration output, which emits a single
+/// extends target as a bare string (`"./base.json"`) and multiple targets as an
+/// array. Paired with `skip_serializing_if = "Option::is_none"` so `extends`
+/// never appears as `null`.
+fn serialize_extends<S>(
+    value: &Option<Vec<String>>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match value {
+        None => serializer.serialize_none(),
+        Some(v) if v.len() == 1 => serializer.serialize_str(&v[0]),
+        Some(v) => serializer.collect_seq(v.iter()),
+    }
+}
+
 /// Configuration file location information
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfigLocation {
@@ -433,7 +453,12 @@ pub struct DevContainerConfig {
     /// Paths to extend from. Can be a single path or array of paths.
     ///
     /// Reference: [Configuration - extends](https://containers.dev/implementors/json_reference/#extends)
-    #[serde(default, deserialize_with = "deserialize_extends")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_extends",
+        serialize_with = "serialize_extends",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extends: Option<Vec<String>>,
 
     /// Human-readable name for the development container.
@@ -764,6 +789,20 @@ impl DevContainerConfig {
             ));
         }
 
+        // Substitute build config: build.args / dockerfile / context / target /
+        // cacheFrom commonly carry `${localEnv:*}` / `${localWorkspaceFolder}`
+        // template strings (e.g. `"args": {"USER": "${localEnv:USER}"}`). The
+        // reference CLI substitutes these; deacon was passing the literal
+        // template straight to `docker build`. The whole JSON value is
+        // recursively substituted (string leaves only).
+        if let Some(ref build) = config.build {
+            config.build = Some(VariableSubstitution::substitute_json_value(
+                build,
+                context,
+                &mut report,
+            ));
+        }
+
         // Substitute workspace_folder
         if let Some(ref workspace_folder) = config.workspace_folder {
             config.workspace_folder = Some(VariableSubstitution::substitute_string(
@@ -953,6 +992,24 @@ impl DevContainerConfig {
             )?);
         }
 
+        // Substitute image and docker_compose_file (parity with
+        // apply_variable_substitution — both carry `${...}` templates that flow
+        // into docker run/compose; the advanced path was missing them).
+        if let Some(ref image) = config.image {
+            config.image = Some(VariableSubstitution::substitute_string_advanced(
+                image, context, options, report,
+            )?);
+        }
+        if let Some(ref compose_file) = config.docker_compose_file {
+            config.docker_compose_file =
+                Some(VariableSubstitution::substitute_json_value_with_options(
+                    compose_file,
+                    context,
+                    options,
+                    report,
+                )?);
+        }
+
         // Substitute workspace_folder
         if let Some(ref workspace_folder) = config.workspace_folder {
             config.workspace_folder = Some(VariableSubstitution::substitute_string_advanced(
@@ -970,6 +1027,14 @@ impl DevContainerConfig {
                 context,
                 options,
                 report,
+            )?);
+        }
+
+        // Substitute build config (build.args / dockerfile / context / target /
+        // cacheFrom) — see apply_variable_substitution for rationale.
+        if let Some(ref build) = config.build {
+            config.build = Some(VariableSubstitution::substitute_json_value_with_options(
+                build, context, options, report,
             )?);
         }
 
@@ -2532,6 +2597,21 @@ impl ConfigLoader {
         // Apply variable substitution with secrets
         let mut substitution_context = crate::variable::SubstitutionContext::new(workspace_path)?;
 
+        // When the config sets an explicit `workspaceFolder`, that IS the
+        // container workspace folder, so `${containerWorkspaceFolder}` can be
+        // resolved now (matches the reference CLI, which resolves it to the
+        // configured folder). When unset we leave it for the container-aware
+        // pass during `up` (derived from the real mount target), so we don't
+        // bake a wrong default here.
+        if let Some(ref wf) = merged.workspace_folder {
+            // Only seed from a literal folder; if it carries its own `${...}`
+            // template, defer to the container-aware pass rather than seeding a
+            // template that would leak into `${containerWorkspaceFolder}`.
+            if !wf.trim().is_empty() && !wf.contains("${") {
+                substitution_context.container_workspace_folder = Some(wf.clone());
+            }
+        }
+
         // Add secrets to local environment for substitution
         if let Some(secrets) = secrets {
             for (key, value) in secrets.as_env_vars() {
@@ -2943,6 +3023,31 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn test_extends_serializes_string_array_and_skips_none() {
+        // Single target → bare string (reference parity).
+        let mut config = DevContainerConfig {
+            extends: Some(vec!["./base.json".to_string()]),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&config).unwrap();
+        assert_eq!(v["extends"], serde_json::json!("./base.json"));
+
+        // Multiple targets → array.
+        config.extends = Some(vec!["./a.json".to_string(), "./b.json".to_string()]);
+        let v = serde_json::to_value(&config).unwrap();
+        assert_eq!(v["extends"], serde_json::json!(["./a.json", "./b.json"]));
+
+        // None → field omitted entirely (never `extends: null`).
+        config.extends = None;
+        let v = serde_json::to_value(&config).unwrap();
+        assert!(
+            v.get("extends").is_none(),
+            "extends should be skipped when None, got: {:?}",
+            v.get("extends")
+        );
     }
 
     /// BEAD-15-T01: circular extends (A -> B -> A) returns an error including
@@ -3548,6 +3653,114 @@ mod tests {
             .unwrap();
         assert!(compose_file.ends_with("/compose.yml"));
         assert!(!compose_file.contains("${"));
+    }
+
+    #[test]
+    fn test_substitution_covers_build_args() {
+        // apply_variable_substitution must expand variables inside the `build`
+        // object (notably build.args), which flow straight into `docker build`.
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = temp_dir.path();
+        let mut context = SubstitutionContext::new(workspace).unwrap();
+        context
+            .local_env
+            .insert("USER".to_string(), "alice".to_string());
+
+        let config = DevContainerConfig {
+            build: Some(serde_json::json!({
+                "dockerfile": "Dockerfile",
+                "args": {
+                    "FROM_LOCAL_ENV": "${localEnv:USER}",
+                    "WS": "${localWorkspaceFolderBasename}",
+                    "LITERAL": "plain"
+                }
+            })),
+            ..Default::default()
+        };
+        let (substituted, _) = config.apply_variable_substitution(&context);
+        let args = substituted
+            .build
+            .as_ref()
+            .and_then(|b| b.get("args"))
+            .unwrap();
+        assert_eq!(
+            args.get("FROM_LOCAL_ENV").and_then(|v| v.as_str()),
+            Some("alice")
+        );
+        assert_eq!(args.get("LITERAL").and_then(|v| v.as_str()), Some("plain"));
+        // No unresolved templates remain anywhere in the build object.
+        assert!(!substituted.build.unwrap().to_string().contains("${"));
+    }
+
+    #[test]
+    fn test_advanced_substitution_covers_image_and_compose() {
+        // Parity: apply_variable_substitution_advanced (used by `deacon config`)
+        // must substitute `image` and `docker_compose_file` like the basic path.
+        use crate::variable::{SubstitutionOptions, SubstitutionReport};
+        let temp_dir = TempDir::new().unwrap();
+        let mut context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        context
+            .local_env
+            .insert("TAG".to_string(), "v9".to_string());
+
+        let config = DevContainerConfig {
+            image: Some("ghcr.io/example:${localEnv:TAG}".to_string()),
+            docker_compose_file: Some(serde_json::Value::String(
+                "${localWorkspaceFolder}/compose.yml".to_string(),
+            )),
+            ..Default::default()
+        };
+        let options = SubstitutionOptions::default();
+        let mut report = SubstitutionReport::new();
+        let substituted = config
+            .apply_variable_substitution_advanced(&context, &options, &mut report)
+            .unwrap();
+        assert_eq!(
+            substituted.image.as_deref(),
+            Some("ghcr.io/example:v9"),
+            "advanced path must substitute image"
+        );
+        let compose = substituted
+            .docker_compose_file
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert!(compose.ends_with("/compose.yml") && !compose.contains("${"));
+    }
+
+    #[test]
+    fn test_container_workspace_folder_seeded_from_explicit_workspace_folder() {
+        // When the config sets an explicit (literal) workspaceFolder,
+        // `${containerWorkspaceFolder}` must resolve to it (matches the
+        // reference CLI) rather than leaking the literal template.
+        use crate::config::ConfigLoader;
+        let temp_dir = TempDir::new().unwrap();
+        let dc_dir = temp_dir.path().join(".devcontainer");
+        std::fs::create_dir_all(&dc_dir).unwrap();
+        let config_path = dc_dir.join("devcontainer.json");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "image": "debian:bookworm-slim",
+                "workspaceFolder": "/srv/app",
+                "containerEnv": { "APP_DIR": "${containerWorkspaceFolder}" }
+            }"#,
+        )
+        .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (config, _report) = rt
+            .block_on(ConfigLoader::load_with_overrides_and_substitution(
+                &config_path,
+                None,
+                None,
+                temp_dir.path(),
+            ))
+            .unwrap();
+        assert_eq!(
+            config.container_env.get("APP_DIR").map(String::as_str),
+            Some("/srv/app")
+        );
     }
 
     #[test]

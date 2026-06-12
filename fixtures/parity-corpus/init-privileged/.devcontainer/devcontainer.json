@@ -1,0 +1,10 @@
+{
+  "name": "Init + privileged + caps",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "init": true,
+  "privileged": true,
+  "capAdd": ["SYS_PTRACE", "NET_ADMIN"],
+  "securityOpt": ["seccomp=unconfined", "apparmor=unconfined"],
+  "postCreateCommand": "echo init-privileged-ok",
+  "remoteUser": "root"
+}

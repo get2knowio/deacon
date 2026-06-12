@@ -604,6 +604,8 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
         debug!("Validating host requirements");
         let mut evaluator = deacon_core::host_requirements::HostRequirementsEvaluator::new();
 
+        // Advisory per spec: the evaluator warns when unmet and proceeds (never
+        // errors); --ignore-host-requirements downgrades the warning to debug.
         match evaluator.validate_requirements(
             host_requirements,
             Some(&workspace_folder),
@@ -612,10 +614,6 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             Ok(evaluation) => {
                 if evaluation.requirements_met {
                     debug!("Host requirements validation passed");
-                } else if args.ignore_host_requirements {
-                    warn!(
-                        "Host requirements not met, but proceeding due to --ignore-host-requirements flag"
-                    );
                 }
                 debug!("Host evaluation: {:?}", evaluation);
             }

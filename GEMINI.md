@@ -5,7 +5,7 @@ This document provides the essential guidelines and principles for AI assistants
 ## 1. Core Principles: Spec-Driven Development
 
 ### I. Spec‑Parity is the Non-Negotiable Source of Truth
-- **Authoritative Specs**: Deacon MUST implement behavior consistent with the specifications in `docs/CLI-SPEC.md` and `docs/subcommand-specs/*/SPEC.md`. Terminology MUST be preserved.
+- **Authoritative Specs**: Deacon MUST implement behavior consistent with the official [containers.dev specification](https://containers.dev) and the reference implementation (`@devcontainers/cli`). Terminology MUST be preserved.
 - **Data Model and Algorithm Alignment**: Implementation data structures MUST exactly match spec-defined shapes (e.g., `map<string, T>` vs. `Vec<T>`, null handling, field presence, ordering). Algorithms defined in the spec MUST be followed step-by-step.
 - **Complete Configuration Resolution**: Commands MUST use the full resolution path (`extends` chains, overrides, variable substitution), not just the top-level file.
 
@@ -18,7 +18,7 @@ This document provides the essential guidelines and principles for AI assistants
 
 **CRITICAL**: BEFORE writing any implementation code for a new subcommand or feature, you MUST complete and document the following checklist (e.g., in a `plan.md` or PR description):
 
-1.  **Full Spec Read**: Have you read the COMPLETE spec section (`SPEC.md`, `data-model.md`, `contracts/`) to understand all requirements?
+1.  **Full Spec Read**: Have you consulted the relevant official containers.dev spec section and the reference CLI's behavior to understand all requirements?
 2.  **Data Model Match**: Do your data structures match the spec shapes exactly? (Check: `map` vs `vec`, field names, null semantics, ordering).
 3.  **Algorithm Fidelity**: Have you identified all spec-defined algorithms (e.g., version derivation, `extends` resolution, tag selection) and planned to implement them precisely?
 4.  **Input Validation**: Where will you filter invalid inputs (e.g., non-OCI refs, non-semver tags) as defined by the spec?

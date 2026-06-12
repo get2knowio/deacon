@@ -776,10 +776,16 @@ pub(crate) async fn execute_container_up(
         })
         .unwrap_or_else(|| "root".to_string());
 
-    let remote_workspace_folder = config
-        .workspace_folder
-        .clone()
-        .unwrap_or_else(|| "/workspaces".to_string());
+    // Spec default for the container workspace folder is
+    // `/workspaces/${localWorkspaceFolderBasename}` (not a bare `/workspaces`).
+    // Mirror the actual bind-mount target built in `Docker::create_container`,
+    // which uses the basename of `workspace_mount_source` (the git-root mount
+    // source under `--mount-workspace-git-root`), so the reported value always
+    // matches what is really mounted inside the container.
+    let remote_workspace_folder = super::helpers::default_remote_workspace_folder(
+        config.workspace_folder.as_deref(),
+        &workspace_mount_source,
+    );
 
     // Serialize configuration if requested
     let configuration = if args.include_configuration {

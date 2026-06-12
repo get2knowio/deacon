@@ -1,0 +1,4 @@
+services:
+  app:
+    environment:
+      OVERRIDE_APPLIED: "yes"

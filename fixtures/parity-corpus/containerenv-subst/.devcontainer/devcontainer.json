@@ -1,0 +1,13 @@
+{
+  "name": "containerEnv substitution",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "containerEnv": {
+    "HOST_HOME": "${localEnv:HOME}",
+    "WS_BASENAME": "${localWorkspaceFolderBasename}",
+    "WS_LOCAL": "${localWorkspaceFolder}",
+    "LITERAL": "plain-value",
+    "MISSING_LOCAL": "${localEnv:DEFINITELY_NOT_SET_12345}"
+  },
+  "postCreateCommand": "echo \"$WS_BASENAME $LITERAL\"",
+  "remoteUser": "vscode"
+}

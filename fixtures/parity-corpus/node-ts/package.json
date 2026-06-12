@@ -1,0 +1,9 @@
+{
+  "name": "parity-corpus-node-ts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal Node project so the node-ts corpus config's postCreate (npm install / npm run build) succeeds.",
+  "scripts": {
+    "build": "echo built"
+  }
+}

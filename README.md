@@ -568,7 +568,7 @@ Deacon focuses on consuming dev containers — building, running, and managing t
 - Docker/OCI integration
 - Cross-platform support
 
-See the [CLI specification](docs/subcommand-specs/*/SPEC.md) for detailed architecture and planned features.
+See the [containers.dev specification](https://containers.dev) and the [reference CLI](https://github.com/devcontainers/cli) for authoritative behavior.
 
 ### Binary Authenticity & Code Signing
 

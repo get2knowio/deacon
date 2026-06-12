@@ -4,7 +4,7 @@
 //! postCreate, postStart, postAttach) with host-only simulation for phases before
 //! container support.
 //!
-//! References: subcommand-specs/*/SPEC.md "Container Lifecycle Management"
+//! References: the containers.dev spec / reference CLI "Container Lifecycle Management"
 
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::redaction::{RedactionConfig, redact_if_enabled};
@@ -22,7 +22,7 @@ use tracing::{debug, error, info, instrument};
 /// The spec-defined execution order is:
 /// onCreate -> updateContent -> postCreate -> dotfiles -> postStart -> postAttach
 ///
-/// References: subcommand-specs/*/SPEC.md "Lifecycle Commands"
+/// References: the containers.dev spec / reference CLI "Lifecycle Commands"
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LifecyclePhase {

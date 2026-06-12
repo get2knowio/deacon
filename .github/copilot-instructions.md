@@ -3,7 +3,7 @@
 These instructions guide AI assistance (e.g. GitHub Copilot / Chat) when proposing code, architecture, or documentation changes for this repository.
 
 ## Prime Directives
-1. Respect the authoritative CLI specification found at `docs/CLI-SPEC.md`. Treat it as a source-of-truth for architecture, workflow semantics, data shapes, and command behavior. If user requests conflict with the spec, explicitly call out the discrepancy and request clarification before generating code.
+1. Respect the official [containers.dev specification](https://containers.dev) and the reference implementation (`@devcontainers/cli`) as the source of truth for architecture, workflow semantics, data shapes, and command behavior. If user requests conflict with the spec, explicitly call out the discrepancy and request clarification before generating code.
 2. Prefer incremental, small, reviewable changes. Avoid large refactors unless explicitly requested.
 3. Maintain idiomatic, modern Rust (Edition 2021) with clear module boundaries and test coverage for new logic.
 4. Avoid introducing unsafe code. If absolutely necessary, justify with a comment explaining safety invariants.
@@ -21,7 +21,7 @@ These instructions guide AI assistance (e.g. GitHub Copilot / Chat) when proposi
 
 ## Scope & Architecture Alignment
 The long-term goal is a Rust implementation of a DevContainer-like CLI. Align concepts with the spec's domains (configuration resolution, feature system, template system, Docker/OCI integration, lifecycle execution). For any new major subsystem:
-- Reference relevant section headers from `CLI-SPEC.md` (e.g. "Feature Installation Workflow", "Configuration Resolution Workflow").
+- Reference the relevant section of the containers.dev spec (e.g. feature installation, configuration resolution) and confirm against the reference CLI.
 - Preserve terminology: *feature*, *template*, *lifecycle command*, *workspace*, *container environment*, *variable substitution*.
 - Introduce abstractions behind traits to enable future alternate backends (e.g., Docker vs. Podman).
 
@@ -314,7 +314,7 @@ Definition of Done for PRs (in addition to quality gates above)
 - Tests updated/added for behavior changes.
 
 ## Examples Maintenance
-The `examples/` directory and configuration/feature/template fixtures under `examples/` and `fixtures/` are living documentation and MUST reflect current CLI behavior defined in `docs/CLI-SPEC.md`.
+The `examples/` directory and configuration/feature/template fixtures under `examples/` and `fixtures/` are living documentation and MUST reflect current CLI behavior, consistent with the containers.dev spec and the reference CLI.
 
 Guidelines:
 - Prefer minimal, focused examples that each illustrate one primary concept: configuration resolution, variable substitution, feature options, template options, lifecycle commands, etc.
@@ -423,8 +423,8 @@ When modifying `HttpClient` trait or implementing OCI registry operations:
 - **Do** test with realistic mock responses including proper status codes (202 for upload initiation, 201/204 for completion)
 - **Do** ensure error handling distinguishes 404 (not found), 401/403 (auth failure), and 5xx (server error)
 
-## Adherence to `CLI-SPEC.md`
-> IMPORTANT: All generated code, designs, and refactors MUST remain consistent with `docs/CLI-SPEC.md`. If a requested change deviates (e.g., new command semantics, altered lifecycle order, renamed workflow), respond with a clarification prompt and do not implement until resolved.
+## Adherence to the spec & reference CLI
+> IMPORTANT: All generated code, designs, and refactors MUST remain consistent with the [containers.dev specification](https://containers.dev) and the reference implementation (`@devcontainers/cli`). If a requested change deviates (e.g., new command semantics, altered lifecycle order, renamed workflow), respond with a clarification prompt and do not implement until resolved.
 
 Checklist before submitting AI-generated PR suggestions:
 - [ ] **All CI checks pass locally after EVERY code change** (build, test, fmt, clippy)

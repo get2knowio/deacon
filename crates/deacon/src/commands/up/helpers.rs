@@ -22,6 +22,30 @@ use super::args::UpArgs;
 #[cfg(unix)]
 const EROFS: i32 = 30;
 
+/// Resolve the container workspace folder reported to callers.
+///
+/// When the config sets an explicit `workspaceFolder`, that value is used
+/// verbatim. Otherwise the spec default is
+/// `/workspaces/${localWorkspaceFolderBasename}` — the basename of
+/// `mount_source` (the actual bind-mount source, i.e. the git root under
+/// `--mount-workspace-git-root`). A bare `/workspaces` (no basename) diverged
+/// from the reference CLI, which always reports `/workspaces/<basename>`.
+pub(crate) fn default_remote_workspace_folder(
+    config_workspace_folder: Option<&str>,
+    mount_source: &Path,
+) -> String {
+    match config_workspace_folder {
+        Some(wf) => wf.to_string(),
+        None => format!(
+            "/workspaces/{}",
+            mount_source
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("workspace")
+        ),
+    }
+}
+
 /// Check if any features are disallowed and return an error if found.
 ///
 /// Per FR-004: Configuration resolution MUST block disallowed Features.
@@ -454,6 +478,33 @@ fn sort_json_object(value: &mut serde_json::Value) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod remote_workspace_folder_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn defaults_to_workspaces_basename_when_unset() {
+        // Parity with the reference CLI: `/workspaces/<basename>`, never a bare
+        // `/workspaces`.
+        let got = default_remote_workspace_folder(None, Path::new("/home/me/myproject"));
+        assert_eq!(got, "/workspaces/myproject");
+    }
+
+    #[test]
+    fn honors_explicit_workspace_folder() {
+        let got =
+            default_remote_workspace_folder(Some("/custom/app"), Path::new("/home/me/myproject"));
+        assert_eq!(got, "/custom/app");
+    }
+
+    #[test]
+    fn falls_back_to_workspace_when_basename_missing() {
+        let got = default_remote_workspace_folder(None, Path::new("/"));
+        assert_eq!(got, "/workspaces/workspace");
     }
 }
 

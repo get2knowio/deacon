@@ -432,50 +432,42 @@ pub fn derive_container_workspace_folder(mounts: &[Mount]) -> Option<String> {
     longest_bind_mount.map(|mount| mount.destination.clone())
 }
 
-/// Convert a single port specification into a docker `-p` value.
+/// Convert a single `appPort` specification into a docker `-p` value, matching
+/// the reference CLI exactly:
 ///
-/// A bare port number (or numeric string) publishes to the same port on the
-/// host (`N` -> `N:N`); an explicit `HOST:CONTAINER` string is passed through
-/// unchanged. Returns `None` for an unparseable spec (logged and skipped),
-/// matching the fail-soft behavior of upstream port handling.
-fn port_spec_to_publish_arg(port_spec: &crate::config::PortSpec, source: &str) -> Option<String> {
+/// - a numeric port binds to **loopback** (`N` -> `127.0.0.1:N:N`) so it is not
+///   exposed on all interfaces (`0.0.0.0`);
+/// - a string spec is passed through **verbatim** — the user controls the host
+///   binding (`"8080:80"`, `"127.0.0.1:8080:80"`, or a bare `"8080"`).
+///
+/// Empty strings are skipped.
+fn port_spec_to_publish_arg(port_spec: &crate::config::PortSpec) -> Option<String> {
     match port_spec {
-        crate::config::PortSpec::Number(port) => Some(format!("{}:{}", port, port)),
+        crate::config::PortSpec::Number(port) => Some(format!("127.0.0.1:{port}:{port}")),
         crate::config::PortSpec::String(spec) => {
-            if spec.contains(':') {
-                // Already has host:container mapping
-                Some(spec.clone())
+            let trimmed = spec.trim();
+            if trimmed.is_empty() {
+                warn!("Empty appPort specification skipped");
+                None
             } else {
-                // Single port string, map to same port
-                match spec.parse::<u16>() {
-                    Ok(port) => Some(format!("{}:{}", port, port)),
-                    Err(_) => {
-                        warn!("Invalid port specification in {}: {}", source, spec);
-                        None
-                    }
-                }
+                Some(trimmed.to_string())
             }
         }
     }
 }
 
-/// Build the ordered list of docker `run` arguments that publish ports from a
-/// config's `forwardPorts` and `appPort` fields.
+/// Build the ordered list of docker `-p` arguments from a config's `appPort`.
 ///
-/// Both fields publish host bindings via `-p`; `forwardPorts` entries come
-/// first (in declaration order) followed by `appPort`. Invalid specs are
-/// skipped. Reference: containers.dev `forwardPorts` / `appPort`.
+/// Only `appPort` is statically published, matching the reference CLI.
+/// `forwardPorts` are forwarding **hints**, not publish directives — the
+/// reference never binds them at `docker create`, and neither do we. They are
+/// surfaced to the dynamic forwarder (`--auto-forward`) instead, so a host-port
+/// conflict on a declared forward port never fails `up`.
 fn port_publish_args(config: &DevContainerConfig) -> Vec<String> {
     let mut args = Vec::new();
-    for port_spec in &config.forward_ports {
-        if let Some(port_arg) = port_spec_to_publish_arg(port_spec, "forwardPorts") {
-            args.push("-p".to_string());
-            args.push(port_arg);
-        }
-    }
     if let Some(app_port) = &config.app_port {
         for port_spec in app_port.specs() {
-            if let Some(port_arg) = port_spec_to_publish_arg(port_spec, "appPort") {
+            if let Some(port_arg) = port_spec_to_publish_arg(port_spec) {
                 args.push("-p".to_string());
                 args.push(port_arg);
             }
@@ -1936,21 +1928,46 @@ impl ContainerOps for CliRuntime {
             args.push(mount_str.clone());
         }
 
-        // Apply containerEnv variables from configuration
+        // Apply containerEnv variables from configuration. Only `containerEnv`
+        // is baked onto the container at creation time.
+        //
+        // A value still containing an unexpanded `${...}` shell reference — e.g.
+        // a feature's `PATH=/usr/local/share/nvm/current/bin:${PATH}` (the
+        // standard "prepend to the existing PATH" idiom) — must NOT be passed
+        // via `docker create --env`: Docker does not expand it, so the literal
+        // `${PATH}` would be written as the container's PATH, dropping
+        // `/usr/local/bin`, `/bin`, … and making even `sh` unreachable
+        // (`exec: "sh": not found in $PATH`) — every exec/lifecycle command then
+        // fails with code 127. The feature/base image ENV already carries the
+        // correctly-expanded value (Docker expanded `${PATH}` at image-build
+        // time), so we leave the image's env to stand for these.
         for (key, value) in &config.container_env {
+            if value.contains("${") {
+                debug!(
+                    key = %key,
+                    value = %value,
+                    "Skipping containerEnv with unexpanded shell reference at create; relying on image ENV"
+                );
+                continue;
+            }
             args.push("--env".to_string());
             args.push(format!("{}={}", key, value));
         }
 
-        // Apply remoteEnv variables (Dev Container spec: remote env should be available during shell/exec sessions)
-        // `None` values indicate removal; emulate by setting an empty value to override defaults.
-        for (key, value) in &config.remote_env {
-            args.push("--env".to_string());
-            match value {
-                Some(val) => args.push(format!("{}={}", key, val)),
-                None => args.push(format!("{}=", key)),
-            }
-        }
+        // NOTE: `remoteEnv` is intentionally NOT applied here. Per the
+        // containers.dev spec, `remoteEnv` defines variables for the *remote
+        // environment* of commands run inside the container (lifecycle hooks,
+        // `exec`), not container-creation env. It is applied at exec/lifecycle
+        // time via `build_effective_env`, where `${containerEnv:VAR}` references
+        // can actually be resolved against the live container.
+        //
+        // Baking it into `docker create --env` was a real bug: a value like
+        // `remoteEnv.PATH = "${containerEnv:PATH}:/custom/bin"` (the canonical
+        // PATH-append idiom) is unresolvable at creation, so the literal
+        // template was written as the container's PATH — leaving out
+        // `/usr/local/bin` and making the image entrypoint unrunnable
+        // (`exec: "docker-entrypoint.sh": executable file not found in $PATH`),
+        // so the container failed to start at all.
 
         // Add security options from merged security (config + features)
         args.extend(merged_security.to_docker_args());
@@ -3813,8 +3830,14 @@ mod tests {
         args.push("--name".to_string());
         args.push("test-container".to_string());
 
-        // containerEnv
+        // containerEnv only — remoteEnv is intentionally NOT a create-time env
+        // var (applied at exec/lifecycle time instead). Values with an
+        // unexpanded `${...}` shell reference are skipped (image ENV stands).
+        // Mirrors create_container.
         for (key, value) in &config.container_env {
+            if value.contains("${") {
+                continue;
+            }
             args.push("--env".to_string());
             args.push(format!("{}={}", key, value));
         }
@@ -3854,6 +3877,76 @@ mod tests {
             cpu_pos,
             image_pos - 1,
             "runArgs should be immediately before image"
+        );
+    }
+
+    #[test]
+    fn test_container_env_with_shell_ref_not_baked_into_create_args() {
+        // Regression (Ruby + node feature bomb): a feature/containerEnv value
+        // like `PATH=/usr/local/share/nvm/current/bin:${PATH}` must NOT be
+        // passed via `docker create --env` — Docker won't expand `${PATH}`, so
+        // the literal would clobber the image PATH and make `sh` unreachable
+        // (exit 127). The image ENV already has the correct value.
+        let mut config = DevContainerConfig {
+            image: Some("debian:bookworm-slim".to_string()),
+            ..Default::default()
+        };
+        config.container_env.insert(
+            "PATH".to_string(),
+            "/usr/local/share/nvm/current/bin:${PATH}".to_string(),
+        );
+        config
+            .container_env
+            .insert("NODE_ENV".to_string(), "development".to_string());
+
+        let args = build_create_args(&config);
+        // Plain values are baked.
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--env" && w[1] == "NODE_ENV=development"),
+            "plain containerEnv must be baked: {args:?}"
+        );
+        // The unexpanded shell reference is skipped entirely.
+        assert!(
+            !args.iter().any(|a| a.contains("${PATH}")),
+            "containerEnv with ${{...}} must not be baked into create args: {args:?}"
+        );
+    }
+
+    #[test]
+    fn test_remote_env_not_baked_into_create_args() {
+        // Regression: remoteEnv must NOT be applied as a container-create `--env`.
+        // A value like `PATH=${containerEnv:PATH}:/custom/bin` is unresolvable at
+        // creation, so baking it in wrote a literal template as the container's
+        // PATH and the image entrypoint could not be found, so the container
+        // failed to start. remoteEnv belongs to the exec/lifecycle environment.
+        let mut config = DevContainerConfig {
+            image: Some("node:20-bookworm-slim".to_string()),
+            ..Default::default()
+        };
+        config
+            .container_env
+            .insert("NODE_ENV".to_string(), "development".to_string());
+        config.remote_env.insert(
+            "PATH".to_string(),
+            Some("${containerEnv:PATH}:/custom/bin".to_string()),
+        );
+
+        let args = build_create_args(&config);
+        // containerEnv is present at create time.
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--env" && w[1] == "NODE_ENV=development"),
+            "containerEnv must be baked into create args"
+        );
+        // remoteEnv (and especially the unresolved template) is absent.
+        assert!(
+            !args.iter().any(|a| a.contains("${containerEnv:PATH}")),
+            "remoteEnv must not leak an unresolved template into create args: {args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a.contains("/custom/bin")),
+            "remoteEnv must not be applied as a create-time --env: {args:?}"
         );
     }
 
@@ -3922,33 +4015,37 @@ mod tests {
     fn test_port_spec_to_publish_arg_variants() {
         use crate::config::PortSpec;
 
-        // Bare number publishes to the same host port.
+        // Numeric appPort binds to loopback (reference parity, not 0.0.0.0).
         assert_eq!(
-            port_spec_to_publish_arg(&PortSpec::Number(3000), "forwardPorts"),
-            Some("3000:3000".to_string())
+            port_spec_to_publish_arg(&PortSpec::Number(3000)),
+            Some("127.0.0.1:3000:3000".to_string())
         );
-        // Numeric string behaves like a bare number.
+        // String specs pass through verbatim — the user controls the binding.
         assert_eq!(
-            port_spec_to_publish_arg(&PortSpec::String("8080".to_string()), "appPort"),
-            Some("8080:8080".to_string())
+            port_spec_to_publish_arg(&PortSpec::String("8080".to_string())),
+            Some("8080".to_string())
         );
-        // Explicit host:container mapping passes through unchanged.
         assert_eq!(
-            port_spec_to_publish_arg(&PortSpec::String("8080:80".to_string()), "forwardPorts"),
+            port_spec_to_publish_arg(&PortSpec::String("8080:80".to_string())),
             Some("8080:80".to_string())
         );
-        // Unparseable spec is skipped.
         assert_eq!(
-            port_spec_to_publish_arg(&PortSpec::String("nope".to_string()), "appPort"),
+            port_spec_to_publish_arg(&PortSpec::String("127.0.0.1:8080:80".to_string())),
+            Some("127.0.0.1:8080:80".to_string())
+        );
+        // Empty spec is skipped.
+        assert_eq!(
+            port_spec_to_publish_arg(&PortSpec::String("   ".to_string())),
             None
         );
     }
 
     #[test]
-    fn test_port_publish_args_includes_app_port() {
+    fn test_port_publish_args_excludes_forward_ports() {
         use crate::config::{AppPort, PortSpec};
 
         let config = DevContainerConfig {
+            // forwardPorts are forwarding hints — never statically published.
             forward_ports: vec![
                 PortSpec::Number(3000),
                 PortSpec::String("9000:90".to_string()),
@@ -3957,18 +4054,23 @@ mod tests {
             ..Default::default()
         };
 
-        // forwardPorts entries come first (in order), then appPort.
+        // Only appPort is published (loopback-bound); forwardPorts are absent.
         assert_eq!(
             port_publish_args(&config),
-            vec![
-                "-p",
-                "3000:3000", //
-                "-p",
-                "9000:90", //
-                "-p",
-                "8080:8080",
-            ]
+            vec!["-p", "127.0.0.1:8080:8080"]
         );
+    }
+
+    #[test]
+    fn test_port_publish_args_empty_without_app_port() {
+        use crate::config::PortSpec;
+
+        let config = DevContainerConfig {
+            forward_ports: vec![PortSpec::Number(3000), PortSpec::Number(8080)],
+            ..Default::default()
+        };
+        // forwardPorts alone publish nothing.
+        assert!(port_publish_args(&config).is_empty());
     }
 
     #[test]
@@ -3995,9 +4097,10 @@ mod tests {
             ..Default::default()
         };
 
+        // Numeric -> loopback; string -> verbatim (reference parity).
         assert_eq!(
             port_publish_args(&config),
-            vec!["-p", "8080:8080", "-p", "9000:90"]
+            vec!["-p", "127.0.0.1:8080:8080", "-p", "9000:90"]
         );
     }
 

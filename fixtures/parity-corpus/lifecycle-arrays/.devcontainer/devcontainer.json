@@ -1,0 +1,12 @@
+{
+  "name": "Lifecycle arrays",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "initializeCommand": ["echo", "host init"],
+  "onCreateCommand": ["echo", "on create"],
+  "updateContentCommand": "echo update content",
+  "postCreateCommand": ["bash", "-c", "echo post create"],
+  "postStartCommand": "echo post start",
+  "postAttachCommand": "echo post attach",
+  "waitFor": "updateContentCommand",
+  "remoteUser": "vscode"
+}

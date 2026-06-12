@@ -200,4 +200,4 @@ docker rm -f "$CONTAINER_ID"
 ## Specification Reference
 
 - Feature Spec: `specs/001-gpu-modes/spec.md`
-- Up Subcommand Spec: `docs/subcommand-specs/up/SPEC.md`
+- Up Subcommand Spec: the containers.dev spec
