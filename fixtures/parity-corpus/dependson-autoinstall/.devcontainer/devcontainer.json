@@ -1,0 +1,9 @@
+{
+  "name": "dependsOn auto-install",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "features": {
+    "./needs-node": {}
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "node --version && echo dependson-ok"
+}

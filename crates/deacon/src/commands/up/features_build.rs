@@ -398,6 +398,28 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     })
 }
 
+/// Convert a `devcontainer.json` feature-options JSON value (the value side of
+/// a `features` entry, or of a `dependsOn` entry) into the internal option map.
+/// A non-object value (e.g. `true`) yields no options.
+fn parse_feature_options(value: &serde_json::Value) -> HashMap<String, OptionValue> {
+    let Some(obj) = value.as_object() else {
+        return HashMap::new();
+    };
+    obj.iter()
+        .map(|(k, v)| {
+            let opt = match v {
+                serde_json::Value::Bool(b) => OptionValue::Boolean(*b),
+                serde_json::Value::String(s) => OptionValue::String(s.clone()),
+                serde_json::Value::Number(n) => OptionValue::Number(n.clone()),
+                serde_json::Value::Array(a) => OptionValue::Array(a.clone()),
+                serde_json::Value::Object(o) => OptionValue::Object(o.clone()),
+                serde_json::Value::Null => OptionValue::Null,
+            };
+            (k.clone(), opt)
+        })
+        .collect()
+}
+
 /// Shared core: parse features from `config`, download them, resolve the
 /// installation plan, and stage feature directories into a deterministic temp
 /// directory so BuildKit can mount them as the
@@ -539,24 +561,7 @@ async fn resolve_and_stage_features(
 
         user_id_by_canonical.insert(canonical_id.clone(), feature_id.clone());
 
-        let options = if let Some(opts_obj) = feature_options.as_object() {
-            opts_obj
-                .iter()
-                .filter_map(|(k, v)| {
-                    let opt_val = match v {
-                        serde_json::Value::Bool(b) => Some(OptionValue::Boolean(*b)),
-                        serde_json::Value::String(s) => Some(OptionValue::String(s.clone())),
-                        serde_json::Value::Number(n) => Some(OptionValue::Number(n.clone())),
-                        serde_json::Value::Array(a) => Some(OptionValue::Array(a.clone())),
-                        serde_json::Value::Object(o) => Some(OptionValue::Object(o.clone())),
-                        serde_json::Value::Null => Some(OptionValue::Null),
-                    };
-                    opt_val.map(|v| (k.clone(), v))
-                })
-                .collect()
-        } else {
-            HashMap::new()
-        };
+        let options = parse_feature_options(feature_options);
 
         feature_options_map.insert(canonical_id.clone(), options);
         feature_refs.push((canonical_id, feature_ref));
@@ -575,6 +580,114 @@ async fn resolve_and_stage_features(
         }
         let downloaded = fetcher.fetch_feature(feature_ref).await?;
         downloaded_features.insert(canonical_id.clone(), downloaded);
+    }
+
+    // Auto-install transitive `dependsOn` (HARD) dependencies.
+    //
+    // Per spec (https://containers.dev/implementors/features/#dependson) a
+    // feature's `dependsOn` targets MUST be installed; the reference CLI fetches
+    // and installs them even when the user did not declare them. We compute the
+    // transitive closure here and add any missing dependency to the feature set
+    // — with the options given on the `dependsOn` entry — before resolving the
+    // install order. (`installsAfter` is a soft *ordering* hint and is NOT
+    // auto-installed; that stays the resolver's job.)
+    //
+    // The "already downloaded → skip" guard makes a user's own declaration of a
+    // dependency win (its options are kept) and terminates on dependency cycles.
+    let mut to_scan: Vec<String> = feature_refs.iter().map(|(c, _)| c.clone()).collect();
+    while let Some(scan_id) = to_scan.pop() {
+        let Some(downloaded) = downloaded_features.get(&scan_id) else {
+            continue;
+        };
+        // Deterministic order despite the metadata map being unordered.
+        let mut deps: Vec<(String, serde_json::Value)> = downloaded
+            .metadata
+            .depends_on
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        deps.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (dep_key, dep_options_value) in deps {
+            let is_local =
+                dep_key.starts_with("./") || dep_key.starts_with("../") || dep_key.starts_with('/');
+
+            let (dep_canonical, dep_ref) = if is_local {
+                let resolved = config_dir.join(&dep_key);
+                let canonical_path = resolved.canonicalize().map_err(|e| {
+                    DeaconError::Runtime(format!(
+                        "dependsOn local feature '{}' (of '{}', resolved to '{}') is not accessible: {}",
+                        dep_key, scan_id, resolved.display(), e
+                    ))
+                })?;
+                let dep_canonical = format!("local:{}", canonical_path.display());
+                if downloaded_features.contains_key(&dep_canonical) {
+                    continue;
+                }
+                let metadata_path = canonical_path.join("devcontainer-feature.json");
+                let metadata = deacon_core::features::parse_feature_metadata(&metadata_path)
+                    .map_err(|e| {
+                        DeaconError::Runtime(format!(
+                            "Failed to parse dependsOn local feature metadata at '{}': {}",
+                            metadata_path.display(),
+                            e
+                        ))
+                    })?;
+                let digest = dep_canonical.clone();
+                downloaded_features.insert(
+                    dep_canonical.clone(),
+                    DownloadedFeature {
+                        path: canonical_path.clone(),
+                        metadata,
+                        digest,
+                    },
+                );
+                let dep_ref = FeatureRef::new(
+                    "local".to_string(),
+                    "fs".to_string(),
+                    canonical_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| dep_key.clone()),
+                    None,
+                );
+                (dep_canonical, dep_ref)
+            } else {
+                let (registry_url, namespace, name, tag) = parse_registry_reference(&dep_key)
+                    .map_err(|e| {
+                        DeaconError::Runtime(format!(
+                            "Invalid dependsOn feature ref '{}' (of '{}'): {}",
+                            dep_key, scan_id, e
+                        ))
+                    })?;
+                let dep_ref = FeatureRef::new(registry_url, namespace, name, tag);
+                let dep_canonical = format!(
+                    "{}/{}/{}",
+                    dep_ref.registry, dep_ref.namespace, dep_ref.name
+                );
+                if downloaded_features.contains_key(&dep_canonical) {
+                    continue;
+                }
+                info!(
+                    feature = %scan_id,
+                    dependency = %dep_key,
+                    "Auto-installing transitive dependsOn feature"
+                );
+                let downloaded = fetcher.fetch_feature(&dep_ref).await?;
+                downloaded_features.insert(dep_canonical.clone(), downloaded);
+                (dep_canonical, dep_ref)
+            };
+
+            feature_options_map.insert(
+                dep_canonical.clone(),
+                parse_feature_options(&dep_options_value),
+            );
+            user_id_by_canonical
+                .entry(dep_canonical.clone())
+                .or_insert_with(|| dep_key.clone());
+            feature_refs.push((dep_canonical.clone(), dep_ref));
+            to_scan.push(dep_canonical);
+        }
     }
 
     // Create resolved features
@@ -871,6 +984,27 @@ pub(crate) fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std:
 mod lockfile_assembly_tests {
     use super::*;
     use deacon_core::features::FeatureMetadata;
+
+    #[test]
+    fn parse_feature_options_handles_object_and_non_object() {
+        // Object → typed options (the `dependsOn` value side and the `features`
+        // value side share this shape).
+        let opts = parse_feature_options(&serde_json::json!({
+            "version": "22",
+            "moby": true,
+            "count": 3
+        }));
+        assert_eq!(
+            opts.get("version"),
+            Some(&OptionValue::String("22".to_string()))
+        );
+        assert_eq!(opts.get("moby"), Some(&OptionValue::Boolean(true)));
+        assert!(matches!(opts.get("count"), Some(OptionValue::Number(_))));
+
+        // Non-object (e.g. `dependsOn: { "ref": true }`) → no options.
+        assert!(parse_feature_options(&serde_json::Value::Bool(true)).is_empty());
+        assert!(parse_feature_options(&serde_json::json!("str")).is_empty());
+    }
 
     fn make_downloaded(version: Option<&str>, digest: &str) -> DownloadedFeature {
         DownloadedFeature {

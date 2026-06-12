@@ -1,11 +1,11 @@
 # Parity corpus — findings
 
-Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 22 corpus configs.
+Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 23 corpus configs.
 
 Source of truth: the official containers.dev spec and the reference CLI's
 behavior — not any deacon-authored spec doc.
 
-## Fixed in this PR (eight real bugs)
+## Fixed in this PR (nine real bugs)
 
 ### 1. `hostRequirements` hard-failed `up`/`build` (spec violation)
 
@@ -24,8 +24,7 @@ deacon **refused to start** when the host didn't meet `hostRequirements`
 `build`. `--ignore-host-requirements` is retained as a back-compat
 warning-suppressor (downgrades the warning to a debug log). Verified end-to-end:
 deacon now proceeds through image pull + feature install exactly like the
-reference. (`crates/core/src/host_requirements.rs`, `up`/`build` call sites,
-`docs/subcommand-specs/up/SPEC.md`.)
+reference. (`crates/core/src/host_requirements.rs`, `up`/`build` call sites.)
 
 ### 2. `remoteEnv` baked into `docker create` broke container startup
 
@@ -144,17 +143,28 @@ verified the reference's bare-base container has no common-utils (only the
 `node` user the node feature itself created). So this was a shell-mode bug, not
 a missing transitive dependency.
 
+### 9. Transitive `dependsOn` (hard deps) not auto-installed
+
+The reference auto-fetches and installs a feature's `dependsOn` targets even when
+undeclared; deacon instead returned a hard error if a `dependsOn` key wasn't
+already in the declared set. So a config declaring only a feature that
+hard-`dependsOn` another failed under deacon while succeeding under the
+reference. (Distinct from `installsAfter`, a soft ordering hint that is
+correctly *not* auto-installed.)
+
+**Fix:** in `resolve_and_stage_features`, compute the transitive `dependsOn`
+closure after downloading the declared features — fetch each missing dependency
+(OCI or local), apply the options from its `dependsOn` entry, and add it to the
+feature set before resolving the install order. A user's own declaration of a
+dependency still wins (its options are kept), and the closure terminates on
+cycles (which the resolver also detects). Test
+`parse_feature_options_handles_object_and_non_object`; fixture
+`dependson-autoinstall/` (a local feature that `dependsOn` node:22). Verified
+end-to-end: declaring only the local feature auto-installs node (`v22.22.3`).
+(`crates/deacon/src/commands/up/features_build.rs`.)
+
 ## Open follow-ups (found, not yet fixed)
 
-- **Transitive `dependsOn` (HARD deps) not auto-installed.** The reference
-  auto-fetches and installs a feature's `dependsOn` targets even when undeclared;
-  deacon instead returns a hard error if a `dependsOn` key isn't already in the
-  declared set (`crates/core/src/features.rs` build-graph). Distinct from
-  `installsAfter` (soft ordering — correctly not auto-installed). Lower frequency
-  (most popular features use `installsAfter`), but a real divergence: a config
-  declaring only a feature that hard-`dependsOn` another would fail under deacon
-  and succeed under the reference. Fixing it means resolving + fetching the
-  transitive `dependsOn` closure into the install plan.
 - **Fully reference-correct feature env** would emit feature `containerEnv` as
   image `ENV` (build-time `${PATH}` expansion); fix #7 relies on the image ENV /
   shell init already carrying the value (true for realistic features).

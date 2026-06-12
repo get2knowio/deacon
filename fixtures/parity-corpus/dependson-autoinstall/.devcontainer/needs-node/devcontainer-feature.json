@@ -1,0 +1,8 @@
+{
+  "id": "needs-node",
+  "version": "1.0.0",
+  "name": "Needs Node",
+  "dependsOn": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  }
+}
