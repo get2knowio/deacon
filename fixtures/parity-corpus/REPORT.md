@@ -165,6 +165,14 @@ end-to-end: declaring only the local feature auto-installs node (`v22.22.3`).
 
 ## Open follow-ups (found, not yet fixed)
 
+- **`dependsOn` auto-install only covers the `up`/`build` path.** Fix #9 lives in
+  `resolve_and_stage_features`. The shared `resolve_features_ordered`
+  (`run-user-commands`) and read-configuration's feature path don't pre-fetch, so
+  they'd still hard-error on a `dependsOn`-to-undeclared feature. Low impact —
+  `read-configuration`'s default output doesn't resolve the graph (verified: the
+  `dependson-autoinstall` fixture reads cleanly), and `run-user-commands` runs in
+  an already-`up` container where deps are installed. Closing it means lifting the
+  closure into the shared resolver.
 - **Fully reference-correct feature env** would emit feature `containerEnv` as
   image `ENV` (build-time `${PATH}` expansion); fix #7 relies on the image ENV /
   shell init already carrying the value (true for realistic features).
