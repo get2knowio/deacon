@@ -216,10 +216,6 @@ the `file-path` shape. (`crates/deacon/src/commands/read_configuration.rs`.)
 
 ## Open follow-ups (found, not yet fixed)
 
-- **Fully reference-correct feature env** would emit feature `containerEnv` as
-  image `ENV` (build-time `${PATH}` expansion); fix #7 relies on the image ENV /
-  shell init already carrying the value (true for realistic features).
-
 - **Divergence A (residual) — `${containerWorkspaceFolder}` without an explicit
   `workspaceFolder`.** Now fixed for the common case (workspaceFolder set, fix
   #4). The residual case — no `workspaceFolder`, `read-configuration` with no
@@ -238,6 +234,15 @@ the `file-path` shape. (`crates/deacon/src/commands/read_configuration.rs`.)
 
 ## Verified non-bugs
 
+- **Feature `containerEnv` with `${...}` shell refs (incl. a *novel* PATH dir) is
+  NOT applied — by deacon AND the reference.** Empirically tested a feature whose
+  `containerEnv` adds `/opt/novel/bin:${PATH}`, `DERIVED=got-${NOVEL_VAR}`, and
+  `PATHCOPY=${PATH}` on a bare `debian:bookworm-slim`. Both deacon and the
+  reference produce identical results: plain values (`NOVEL_VAR=hello`) are set;
+  every `${...}`-containing value is left **unset** (novel dir not on PATH,
+  `DERIVED`/`PATHCOPY` empty). So fix #7's "skip `${...}` containerEnv at create"
+  is exactly reference-correct — emitting them as image `ENV` (build-time
+  expansion) would have *diverged* by setting values the reference leaves unset.
 - `docker-in-docker` + `--init` on the heavy `typescript-node` image fails to
   keep the container alive **in both deacon and the reference** in this nested
   environment (dind needs `--privileged`; identical failure, identical container
