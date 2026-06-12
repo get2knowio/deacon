@@ -673,6 +673,28 @@ fn resource_value_to_bytes(v: &serde_json::Value) -> Option<u64> {
     spec.parse_bytes().ok()
 }
 
+/// Order per-contributor `customizations` objects per upstream
+/// `getDevcontainerMetadata` precedence: image-metadata entries (in
+/// label/declaration order) first, then feature entries, then the base config —
+/// `[...image, ...features, base]`. Each argument holds the already-extracted
+/// non-empty `customizations` object for that contributor.
+///
+/// Critically, image entries are concatenated in FORWARD order: a previous
+/// implementation prepended them one-by-one with `insert(0, …)`, which reversed
+/// them and scrambled the merged `customizations` array relative to the
+/// reference CLI.
+fn ordered_customizations_entries(
+    image: &[serde_json::Value],
+    features: &[serde_json::Value],
+    base: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    let mut out = Vec::with_capacity(image.len() + features.len() + base.len());
+    out.extend(image.iter().cloned());
+    out.extend(features.iter().cloned());
+    out.extend(base.iter().cloned());
+    out
+}
+
 /// Apply the upstream `mergeConfiguration` customizations shape to the merged base JSON.
 ///
 /// Upstream collects `customizations` per tool key into an array of values across every metadata
@@ -947,7 +969,10 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         // array shape (see `apply_customizations_shape`).
         let mut derived_config = deacon_core::config::DevContainerConfig::default();
         let mut metadata_entries: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
-        let mut customizations_entries: Vec<serde_json::Value> = Vec::new();
+        // Per-contributor customizations, kept in separate buckets so the final
+        // assembly can enforce the `[...image, ...features, base]` order (see
+        // `ordered_customizations_entries`).
+        let mut feature_customizations: Vec<serde_json::Value> = Vec::new();
 
         for feature_set in &features_config.feature_sets {
             for feature in &feature_set.features {
@@ -1034,7 +1059,7 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                 if let Some(customizations) = &metadata.customizations {
                     if let serde_json::Value::Object(map) = customizations {
                         if !map.is_empty() {
-                            customizations_entries.push(customizations.clone());
+                            feature_customizations.push(customizations.clone());
                         }
                     }
                 }
@@ -1076,9 +1101,10 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         }
         // Per upstream `getDevcontainerMetadata`, the base config's `customizations` is the
         // final entry in the metadata chain (pickConfigProperties includes `customizations`).
+        let mut base_customizations: Vec<serde_json::Value> = Vec::new();
         if let serde_json::Value::Object(map) = &base_config.customizations {
             if !map.is_empty() {
-                customizations_entries.push(base_config.customizations.clone());
+                base_customizations.push(base_config.customizations.clone());
             }
         }
 
@@ -1099,6 +1125,9 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         // and base per upstream getDevcontainerMetadata precedence.
         let mut combined_metadata_entries: Vec<serde_json::Map<String, serde_json::Value>> =
             Vec::new();
+        // Image-metadata customizations come first, in label (declaration) order — per
+        // upstream `getDevcontainerMetadata` precedence `[...image, ...features, config]`.
+        let mut image_customizations: Vec<serde_json::Value> = Vec::new();
         for entry in image_metadata_entries {
             let entry_json = serde_json::to_value(entry)?;
             let collected = collect_entry_from_config_json(&entry_json);
@@ -1108,11 +1137,16 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
             if let Some(c) = entry_json.get("customizations") {
                 if let serde_json::Value::Object(map) = c {
                     if !map.is_empty() {
-                        customizations_entries.insert(0, c.clone());
+                        image_customizations.push(c.clone());
                     }
                 }
             }
         }
+        let customizations_entries = ordered_customizations_entries(
+            &image_customizations,
+            &feature_customizations,
+            &base_customizations,
+        );
         combined_metadata_entries.extend(metadata_entries);
 
         debug!(
@@ -1152,21 +1186,25 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
             entries.push(base_entry);
         }
 
-        let mut customizations_entries: Vec<serde_json::Value> = Vec::new();
+        let mut image_customizations: Vec<serde_json::Value> = Vec::new();
         for entry in image_metadata_entries {
             if let Some(c) = serde_json::to_value(entry)?.get("customizations") {
                 if let serde_json::Value::Object(map) = c {
                     if !map.is_empty() {
-                        customizations_entries.push(c.clone());
+                        image_customizations.push(c.clone());
                     }
                 }
             }
         }
+        let mut base_customizations: Vec<serde_json::Value> = Vec::new();
         if let serde_json::Value::Object(map) = &base_config.customizations {
             if !map.is_empty() {
-                customizations_entries.push(base_config.customizations.clone());
+                base_customizations.push(base_config.customizations.clone());
             }
         }
+        // No features in this branch: `[...image, base]`.
+        let customizations_entries =
+            ordered_customizations_entries(&image_customizations, &[], &base_customizations);
 
         let shaped = apply_upstream_merge_shape(merged_json, &entries);
         Ok(apply_customizations_shape(shaped, &customizations_entries))
@@ -1741,6 +1779,32 @@ mod tests {
         let mut v = json!({ "image": "x" });
         normalize_merged_configuration_shape(&mut v);
         assert!(v.get("hostRequirements").is_none());
+    }
+
+    #[test]
+    fn test_ordered_customizations_image_then_features_then_base() {
+        // Precedence is [...image, ...features, base], and image entries keep their
+        // FORWARD declaration order (the prior insert(0,..) bug reversed them).
+        let img = vec![
+            json!({"vscode": {"id": "img0"}}),
+            json!({"vscode": {"id": "img1"}}),
+        ];
+        let feat = vec![json!({"vscode": {"id": "feat0"}})];
+        let base = vec![json!({"vscode": {"id": "base0"}})];
+        let out = ordered_customizations_entries(&img, &feat, &base);
+        let ids: Vec<&str> = out
+            .iter()
+            .map(|e| e["vscode"]["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["img0", "img1", "feat0", "base0"]);
+    }
+
+    #[test]
+    fn test_ordered_customizations_empty_buckets() {
+        // Empty buckets contribute nothing; no panic, correct concatenation.
+        let out = ordered_customizations_entries(&[], &[json!({"a": 1})], &[]);
+        assert_eq!(out, vec![json!({"a": 1})]);
+        assert!(ordered_customizations_entries(&[], &[], &[]).is_empty());
     }
 
     fn create_test_args(
