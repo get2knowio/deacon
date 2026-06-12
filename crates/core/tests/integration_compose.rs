@@ -9,45 +9,30 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-/// Helper to compute expected compose project name using same rules as core
+/// Helper to compute expected compose project name using same rules as core:
+/// strip chars outside [a-z0-9_-], lowercase, trim leading separators, then
+/// append the reference's `_devcontainer` suffix.
 fn expected_project_name_for_path(base_path: &std::path::Path) -> String {
-    const FALLBACK: &str = "deacon-compose";
-    let original = base_path
+    const FALLBACK_STEM: &str = "deacon";
+    let stem = base_path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or(FALLBACK);
+        .unwrap_or(FALLBACK_STEM);
 
-    if original.is_empty() || original.chars().all(|c| c == '.') {
-        return FALLBACK.to_string();
-    }
+    let stripped: String = stem
+        .chars()
+        .map(|c| c.to_ascii_lowercase())
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
 
-    let mut sanitized = String::with_capacity(original.len());
-    let mut last_was_dash = false;
-    for ch in original.chars() {
-        let lc = ch.to_ascii_lowercase();
-        if lc.is_ascii_alphanumeric() {
-            sanitized.push(lc);
-            last_was_dash = false;
-        } else if lc == '-' || lc == '_' {
-            if !(sanitized.is_empty() && (lc == '-' || lc == '_')) {
-                sanitized.push(lc);
-            }
-            last_was_dash = lc == '-';
-        } else if !last_was_dash {
-            sanitized.push('-');
-            last_was_dash = true;
-        }
-    }
+    let trimmed = stripped.trim_start_matches(['-', '_']);
+    let stem = if trimmed.is_empty() {
+        FALLBACK_STEM
+    } else {
+        trimmed
+    };
 
-    let sanitized = sanitized
-        .trim_matches(|c: char| c == '-' || c == '_')
-        .to_string();
-
-    match sanitized.chars().next() {
-        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => sanitized,
-        Some(_) => format!("d{}", sanitized),
-        None => FALLBACK.to_string(),
-    }
+    format!("{stem}_devcontainer")
 }
 
 /// Create a minimal docker-compose.yml file for testing

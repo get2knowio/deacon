@@ -33,18 +33,24 @@ fn deacon_down(workspace: &Path) {
         .output();
 }
 
-/// Look up the running container id for a compose service via `docker compose ps`.
-fn compose_service_container_id(workspace: &Path, service: &str) -> Option<String> {
-    let output = std::process::Command::new("docker")
-        .current_dir(workspace)
-        .args(["compose", "ps", "-q", service])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if id.is_empty() { None } else { Some(id) }
+/// Extract the primary service container id from `deacon up`'s JSON result.
+///
+/// Using deacon's own reported `containerId` is robust to the compose project
+/// name (which is `<folder>_devcontainer` and not what a bare `docker compose
+/// ps` from the workspace would infer).
+fn up_container_id(up_output: &std::process::Output) -> Option<String> {
+    let stdout = String::from_utf8_lossy(&up_output.stdout);
+    let trimmed = stdout.trim();
+    let value: serde_json::Value = serde_json::from_str(trimmed).ok().or_else(|| {
+        trimmed
+            .rfind('{')
+            .and_then(|i| serde_json::from_str(&trimmed[i..]).ok())
+    })?;
+    value
+        .get("containerId")?
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 fn docker_inspect_state_running(container_id: &str) -> Option<bool> {
@@ -118,8 +124,7 @@ fn test_compose_override_command_default_keeps_service_alive() {
         panic!("deacon up failed: {}", stderr);
     }
 
-    let container_id =
-        compose_service_container_id(workspace, "app").expect("compose ps should return id");
+    let container_id = up_container_id(&up_output).expect("deacon up should report a containerId");
     let running = docker_inspect_state_running(&container_id).unwrap_or(false);
 
     deacon_down(workspace);
@@ -179,8 +184,7 @@ fn test_compose_override_command_explicit_false_runs_natural_command() {
         panic!("deacon up failed: {}", stderr);
     }
 
-    let container_id =
-        compose_service_container_id(workspace, "app").expect("compose ps should return id");
+    let container_id = up_container_id(&up_output).expect("deacon up should report a containerId");
     let cmd_json = docker_inspect_cmd(&container_id).unwrap_or_default();
 
     deacon_down(workspace);
@@ -246,8 +250,7 @@ fn test_compose_override_command_lifecycle_runs() {
         panic!("deacon up failed: {}", stderr);
     }
 
-    let container_id =
-        compose_service_container_id(workspace, "app").expect("compose ps should return id");
+    let container_id = up_container_id(&up_output).expect("deacon up should report a containerId");
 
     let marker = std::process::Command::new("docker")
         .args([
