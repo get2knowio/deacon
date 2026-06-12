@@ -378,14 +378,24 @@ block). Verified end-to-end: `compose-postgres` (compose + `github-cli` feature 
 the reference. Unit test asserts the primary + secondary services each appear
 exactly once. (`crates/core/src/compose.rs`.)
 
-### Known remaining Tier-2 gap (tracked, not yet fixed)
+### 23. Compose project name scheme differed from the reference
 
-- **Compose project name scheme differs.** For the same workspace folder deacon
-  derives the compose `--project-name` as `<folder>` while the reference uses
-  `<folder>_devcontainer` (sanitized). Both isolate correctly and `up`/`exec`/
-  `down` are self-consistent, so it's functional — but a config that hard-codes a
-  project name, or interop with VS Code's reference-built projects, would see a
-  mismatch. Candidate for a future round.
+For the same workspace folder deacon derived the compose `--project-name` as a
+sanitized `<folder>` (invalid chars → `-`, no suffix) while the reference uses
+`<folder>_devcontainer`. The two also sanitized differently: the reference
+**strips** every character outside `[a-z0-9_-]` then lowercases (`Foo.Bar-1` →
+`foobar-1`, `my proj` → `myproj`), whereas deacon replaced them with `-`
+(`my-proj`). Both isolate correctly and deacon's `up`/`exec`/`down` were
+self-consistent, but the project differed from VS Code / reference-built projects
+for the same folder. **Fix:** `derive_project_name` now mirrors the reference —
+strip `[^a-z0-9_-]`, lowercase, append `_devcontainer` — keeping the explicit
+`.env` `COMPOSE_PROJECT_NAME` override verbatim (no suffix). For degenerate
+folders where the reference emits an invalid name and docker compose then fails
+(leading `-`/`_`, or empty after stripping), deacon trims leading separators /
+falls back to a `deacon` stem so it stays robust. Verified end-to-end: for
+workspace `My.App-1` both deacon and the reference now produce
+`myapp-1_devcontainer`. Unit tests cover the strip/lowercase/suffix rules and the
+degenerate fallbacks. (`crates/core/src/compose.rs`.)
 
 ### Tier-2 divergences that are NOT deacon bugs
 
