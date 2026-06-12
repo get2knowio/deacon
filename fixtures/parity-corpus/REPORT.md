@@ -419,6 +419,39 @@ degenerate fallbacks. (`crates/core/src/compose.rs`.)
   stdout). `extends` is a deliberate deacon capability beyond the reference, not a
   regression — do not "fix" by dropping support.
 
+## Round 4 — feature install ordering
+
+A Docker differential on feature install order using local order-recording
+features (each `install.sh` appends its id to a shared file, read back from the
+container) plus the official-feature `feature-order` corpus config.
+
+### 24. Partial `overrideFeatureInstallOrder` was ignored
+
+`apply_override_order` only honored `overrideFeatureInstallOrder` when it listed
+**every** resolved feature (`override_set == sorted_set`); for a **partial**
+override it fell back to a pure topological sort, dropping the override entirely.
+So `feature-order` (override `[common-utils, node, python]`, with
+`docker-in-docker` unlisted) installed `common-utils, docker-in-docker, node,
+python` (alphabetical), while the reference installs `common-utils, node, python,
+docker-in-docker` — listed features in override order first, the unlisted one
+last. Confirmed with isolated local features: partial override `[charlie]` over
+`{alpha,bravo,charlie}` gave deacon `alpha,bravo,charlie` vs reference
+`charlie,alpha,bravo`.
+
+**Fix:** replaced the topological-sort + `apply_override_order` pair with a single
+priority-aware Kahn's sort. Among the ready set each round (nodes whose
+`installsAfter` deps are all emitted), the next feature is chosen by
+`(override position, lexicographic id)` — listed features by their override
+position, then unlisted features alphabetically. `installsAfter`/`dependsOn`
+dependencies are always respected (the override is a tie-break among independent
+features, never a way to violate a dependency). The no-override path already
+matched the reference (parallel-level flattening = the same lexicographic
+rounds), so it is unchanged. Verified end-to-end against the reference for:
+no-override tie-break (alphabetical), partial override, and `installsAfter` +
+partial override (`w` first, then `y, x` per override, then unlisted `z`). Unit
+tests cover the partial-override and dependency-interaction cases.
+(`crates/core/src/features.rs`.)
+
 ## Verified non-bugs
 
 - **Feature `containerEnv` with `${...}` shell refs (incl. a *novel* PATH dir) is
