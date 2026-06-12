@@ -154,6 +154,7 @@ pub async fn resolve_target_container<D>(
     docker_client: &D,
     workspace_folder: &Path,
     config: &DevContainerConfig,
+    config_dir: &Path,
     target_service: Option<&str>,
     docker_path: &str,
     env_files: &[PathBuf],
@@ -169,6 +170,7 @@ where
         return resolve_compose_target_container(
             workspace_folder,
             config,
+            config_dir,
             target_service,
             docker_path,
             env_files,
@@ -312,11 +314,12 @@ where
 fn create_compose_project_for_exec(
     workspace_folder: &Path,
     config: &DevContainerConfig,
+    config_dir: &Path,
     docker_path: &str,
     env_files: &[PathBuf],
 ) -> Result<(ComposeManager, ComposeProject)> {
     let compose_manager = ComposeManager::with_docker_path(docker_path.to_string());
-    let mut project = compose_manager.create_project(config, workspace_folder)?;
+    let mut project = compose_manager.create_project(config, workspace_folder, config_dir)?;
     project.env_files = env_files.to_vec();
     Ok((compose_manager, project))
 }
@@ -326,14 +329,20 @@ fn create_compose_project_for_exec(
 async fn resolve_compose_target_container(
     workspace_folder: &Path,
     config: &DevContainerConfig,
+    config_dir: &Path,
     target_service: Option<&str>,
     docker_path: &str,
     env_files: &[PathBuf],
 ) -> Result<String> {
     debug!("Resolving compose target container");
 
-    let (compose_manager, project) =
-        create_compose_project_for_exec(workspace_folder, config, docker_path, env_files)?;
+    let (compose_manager, project) = create_compose_project_for_exec(
+        workspace_folder,
+        config,
+        config_dir,
+        docker_path,
+        env_files,
+    )?;
 
     debug!("Created compose project: {:?}", project.name);
 
@@ -573,10 +582,15 @@ where
             let config_ctx = resolved_config
                 .as_ref()
                 .expect("workspace resolution requires configuration");
+            let config_dir = config_ctx
+                .config_path
+                .parent()
+                .unwrap_or(config_ctx.workspace_folder.as_path());
             resolve_target_container(
                 docker_client,
                 config_ctx.workspace_folder.as_path(),
                 &config_ctx.config,
+                config_dir,
                 args.service.as_deref(),
                 &args.docker_path,
                 &args.env_file,
@@ -1229,7 +1243,8 @@ services:
 
         let env_files = vec![env_file.clone()];
         let (compose_manager, project) =
-            create_compose_project_for_exec(workspace, &config, "docker", &env_files).unwrap();
+            create_compose_project_for_exec(workspace, &config, workspace, "docker", &env_files)
+                .unwrap();
 
         assert_eq!(project.env_files, env_files);
 

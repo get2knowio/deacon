@@ -79,12 +79,13 @@ fn compose_features_image_shape_installs_feature() {
     // (zsh / oh-my-zsh / package upgrades) to keep the test fast.
     let dc_dir = workspace.join(".devcontainer");
     fs::create_dir_all(&dc_dir).expect("create .devcontainer");
-    // `dockerComposeFile` is resolved relative to the workspace folder per
-    // deacon's compose loader, so we place the compose file at the workspace
-    // root and reference it by name.
+    // `dockerComposeFile` is resolved relative to the directory containing
+    // devcontainer.json (`.devcontainer/`) per the spec and the reference CLI.
+    // The compose file lives at the workspace root (a common layout), so the
+    // config references it with `../`.
     let dc_json = r#"{
   "name": "compose-features-image-shape",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": "../docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace",
   "features": {
@@ -193,13 +194,13 @@ fn compose_features_build_shape_installs_feature() {
 
     let dc_dir = workspace.join(".devcontainer");
     fs::create_dir_all(&dc_dir).expect("create .devcontainer");
-    // dockerComposeFile is resolved relative to the workspace folder, so we
-    // point at `compose-dir/docker-compose.yml`. Compose THEN resolves
-    // build.context/build.dockerfile relative to its OWN directory
+    // dockerComposeFile is resolved relative to the config dir (`.devcontainer/`)
+    // per the spec, so we reference the root-level subdir with `../`. Compose
+    // THEN resolves build.context/build.dockerfile relative to its OWN directory
     // (`<workspace>/compose-dir/`), NOT the workspace.
     let dc_json = r#"{
   "name": "compose-features-build-shape",
-  "dockerComposeFile": "compose-dir/docker-compose.yml",
+  "dockerComposeFile": "../compose-dir/docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace",
   "features": {

@@ -28,7 +28,7 @@ fn test_compose_multiservice_project_creation() {
     let compose_manager = ComposeManager::new();
 
     let project = compose_manager
-        .create_project(&config, temp_dir.path())
+        .create_project(&config, temp_dir.path(), temp_dir.path())
         .expect("Should create compose project");
 
     assert_eq!(project.service, "app");

@@ -86,7 +86,10 @@ pub(crate) async fn execute_compose_up(
     debug!("Starting Docker Compose project");
 
     let compose_manager = ComposeManager::with_docker_path(args.docker_path.clone());
-    let mut project = compose_manager.create_project(config, workspace_folder)?;
+    // Compose files resolve relative to the directory containing devcontainer.json
+    // (the `.devcontainer` dir for the standard layout), not the workspace folder.
+    let config_dir = config_path.parent().unwrap_or(workspace_folder);
+    let mut project = compose_manager.create_project(config, workspace_folder, config_dir)?;
 
     // Add env files from CLI args
     project.env_files = args.env_file.clone();

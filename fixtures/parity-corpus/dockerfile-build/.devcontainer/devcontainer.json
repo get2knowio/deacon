@@ -12,6 +12,6 @@
   },
   "runArgs": ["--cap-add=NET_ADMIN"],
   "containerEnv": { "BUILT_BY": "deacon" },
-  "postCreateCommand": "node --version",
-  "remoteUser": "node"
+  "postCreateCommand": "git --version",
+  "remoteUser": "vscode"
 }

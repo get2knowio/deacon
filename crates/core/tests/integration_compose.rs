@@ -104,7 +104,7 @@ fn test_compose_project_creation() {
 
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &base_path)
+        .create_project(&config, &base_path, &base_path)
         .expect("Failed to create compose project");
 
     assert_eq!(project.service, "app");
@@ -142,7 +142,7 @@ services:
 
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &base_path)
+        .create_project(&config, &base_path, &base_path)
         .expect("Failed to create compose project");
 
     assert_eq!(project.compose_files.len(), 2);
@@ -161,7 +161,7 @@ fn test_compose_command_building() {
 
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &base_path)
+        .create_project(&config, &base_path, &base_path)
         .expect("Failed to create compose project");
 
     let command_builder = manager.get_command(&project);
@@ -199,7 +199,7 @@ fn test_config_validation_without_compose() {
     };
 
     let manager = ComposeManager::new();
-    let result = manager.create_project(&config, &base_path);
+    let result = manager.create_project(&config, &base_path, &base_path);
 
     assert!(result.is_err());
     let error_msg = format!("{:?}", result.unwrap_err());
@@ -219,7 +219,7 @@ fn test_config_validation_missing_service() {
     };
 
     let manager = ComposeManager::new();
-    let result = manager.create_project(&config, &base_path);
+    let result = manager.create_project(&config, &base_path, &base_path);
 
     assert!(result.is_err());
     let error_msg = format!("{:?}", result.unwrap_err());
@@ -295,7 +295,7 @@ fn test_compose_project_name_generation() {
 
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &base_path)
+        .create_project(&config, &base_path, &base_path)
         .expect("Failed to create compose project");
 
     // Project name should be derived from directory name and sanitized for compose
@@ -373,7 +373,7 @@ services:
     // Create compose project
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &devcontainer_dir)
+        .create_project(&config, &devcontainer_dir, &devcontainer_dir)
         .expect("Failed to create compose project");
 
     // Project name should be sanitized (leading dot removed)

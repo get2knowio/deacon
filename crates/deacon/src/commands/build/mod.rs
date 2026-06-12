@@ -744,7 +744,15 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             )
             .await
         } else {
-            execute_compose_build(&config, &args, &workspace_folder, &labels, &config_hash).await
+            execute_compose_build(
+                &config,
+                &args,
+                &workspace_folder,
+                &config_path,
+                &labels,
+                &config_hash,
+            )
+            .await
         }
     } else if config.image.is_some() {
         execute_image_reference_build(&config, &args, &workspace_folder, &labels).await
@@ -1266,6 +1274,7 @@ async fn execute_compose_build(
     config: &DevContainerConfig,
     args: &BuildArgs,
     workspace_folder: &Path,
+    config_path: &Path,
     labels: &[(String, String)],
     config_hash: &str,
 ) -> Result<BuildResult> {
@@ -1281,9 +1290,13 @@ async fn execute_compose_build(
 
     let build_start = Instant::now();
 
-    // Create compose project
+    // Create compose project. Compose files resolve relative to the directory
+    // containing devcontainer.json (spec parity), not the workspace folder.
+    // Use the *resolved* config path (discovery may place it under
+    // `.devcontainer/`); `args.config_path` is only the explicit `--config` flag.
     let compose_manager = ComposeManager::new();
-    let project = compose_manager.create_project(config, workspace_folder)?;
+    let config_dir = config_path.parent().unwrap_or(workspace_folder);
+    let project = compose_manager.create_project(config, workspace_folder, config_dir)?;
 
     // Validate service exists
     if !compose_manager
@@ -1357,7 +1370,9 @@ async fn execute_compose_build_with_features(
         .ok_or_else(|| anyhow!("Docker Compose configuration must specify a service"))?;
 
     let compose_manager = ComposeManager::new();
-    let project = compose_manager.create_project(config, workspace_folder)?;
+    // Compose files resolve relative to the config dir (spec parity).
+    let config_dir = config_path.parent().unwrap_or(workspace_folder);
+    let project = compose_manager.create_project(config, workspace_folder, config_dir)?;
     if !compose_manager
         .validate_service_exists(&project, service)
         .await?

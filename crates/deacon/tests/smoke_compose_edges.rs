@@ -53,7 +53,7 @@ fn test_compose_path_detection_without_docker() {
     // Create devcontainer.json that references the compose file
     let devcontainer_config = r#"{
     "name": "Compose Path Detection Test",
-    "dockerComposeFile": "docker-compose.yml",
+    "dockerComposeFile": "../docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/workspace"
 }"#;
@@ -120,7 +120,7 @@ fn test_compose_subfolder_config() {
     // Create devcontainer.json in subdirectory that references the compose file
     let devcontainer_config = r#"{
     "name": "Compose Subfolder Test",
-    "dockerComposeFile": "docker-compose.yml",
+    "dockerComposeFile": "../docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/workspace"
 }"#;
@@ -233,7 +233,7 @@ services:
     // Create devcontainer.json that references the invalid compose file
     let devcontainer_config = r#"{
     "name": "Compose Invalid Syntax Test",
-    "dockerComposeFile": "docker-compose.yml",
+    "dockerComposeFile": "../docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/workspace"
 }"#;
@@ -317,7 +317,7 @@ fn test_compose_multiple_files() {
     // Create devcontainer.json that references multiple compose files
     let devcontainer_config = r#"{
     "name": "Compose Multiple Files Test",
-    "dockerComposeFile": ["docker-compose.yml", "docker-compose.override.yml"],
+    "dockerComposeFile": ["../docker-compose.yml", "../docker-compose.override.yml"],
     "service": "app",
     "workspaceFolder": "/workspace"
 }"#;
@@ -384,7 +384,7 @@ RUN echo "app service" > /tmp/app.txt
     // Create devcontainer.json that references the compose file and targets app service
     let devcontainer_config = r#"{
     "name": "Compose Build Target Service Test",
-    "dockerComposeFile": "docker-compose.yml",
+    "dockerComposeFile": "../docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/workspace"
 }"#;

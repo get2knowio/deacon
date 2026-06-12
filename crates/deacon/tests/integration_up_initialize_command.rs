@@ -190,7 +190,7 @@ services:
     let devcontainer_config = format!(
         r#"{{
     "name": "Compose Initialize Test",
-    "dockerComposeFile": "docker-compose.yml",
+    "dockerComposeFile": "../docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/workspace",
     "initializeCommand": "echo 'compose-init' > {}",
