@@ -394,6 +394,19 @@ fn test_features_configuration_emitted_in_install_order() -> Result<()> {
         vec!["lib", "app"],
         "dependency must come before dependent (install order): {order:?}"
     );
+
+    // sourceInformation for local features matches the reference's `file-path`
+    // shape: { type, resolvedFilePath, userFeatureId }.
+    let si = &sets[0]["sourceInformation"];
+    assert_eq!(si["type"], "file-path", "local feature source type: {si:#}");
+    assert_eq!(si["userFeatureId"], "./features/lib");
+    assert!(
+        si["resolvedFilePath"]
+            .as_str()
+            .map(|p| p.ends_with("features/lib"))
+            .unwrap_or(false),
+        "resolvedFilePath should point at the feature dir: {si:#}"
+    );
     Ok(())
 }
 

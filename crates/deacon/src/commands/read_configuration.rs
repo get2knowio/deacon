@@ -106,12 +106,60 @@ pub struct Feature {
     pub container_env: Option<HashMap<String, String>>,
 }
 
-/// Source information for features
+/// Parsed OCI feature reference, mirroring the reference CLI's `featureRef`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeatureRefInfo {
+    /// Feature name, e.g. `node`.
+    pub id: String,
+    /// First namespace segment, e.g. `devcontainers`.
+    pub owner: String,
+    /// Namespace, e.g. `devcontainers/features`.
+    pub namespace: String,
+    /// Registry host, e.g. `ghcr.io`.
+    pub registry: String,
+    /// `registry/namespace/name`, e.g. `ghcr.io/devcontainers/features/node`.
+    pub resource: String,
+    /// `namespace/name`, e.g. `devcontainers/features/node`.
+    pub path: String,
+    /// Resolved version/tag, e.g. `1`.
+    pub version: String,
+    /// Tag as written, e.g. `1`.
+    pub tag: String,
+}
+
+/// Source information for a resolved feature, matching the reference CLI's
+/// `sourceInformation` shape (one variant per feature origin).
+///
+/// The `Oci` variant is much larger than `FilePath` (it carries the full OCI
+/// manifest), but this is a serialization-only DTO constructed once per feature
+/// for output, so the size asymmetry is irrelevant.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SourceInformation {
-    #[serde(rename = "oci")]
-    Oci { registry: String },
+    /// An OCI-registry feature.
+    #[serde(rename = "oci", rename_all = "camelCase")]
+    Oci {
+        /// The full OCI manifest (config + layers + annotations).
+        manifest: serde_json::Value,
+        /// `sha256:<hex>` digest of the raw manifest body.
+        manifest_digest: String,
+        /// Parsed reference.
+        feature_ref: FeatureRefInfo,
+        /// The id as written in `devcontainer.json` (with tag).
+        user_feature_id: String,
+        /// The id as written, minus the `:tag`.
+        user_feature_id_without_version: String,
+    },
+    /// A local (on-disk) feature.
+    #[serde(rename = "file-path", rename_all = "camelCase")]
+    FilePath {
+        /// Absolute path to the feature directory.
+        resolved_file_path: String,
+        /// The id as written in `devcontainer.json` (e.g. `./feature`).
+        user_feature_id: String,
+    },
 }
 
 /// Workspace configuration information
@@ -386,73 +434,110 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     // we mirror that (rather than grouping by registry, which loses the order).
     let installation_plan = resolver.resolve(&resolved_features)?;
 
-    let feature_sets: Vec<FeatureSet> = installation_plan
-        .features
-        .iter()
-        .map(|resolved| {
-            // Extract registry from source (format: "oci://registry/namespace/name:tag").
-            let registry = if resolved.source.starts_with("oci://") {
+    let mut feature_sets: Vec<FeatureSet> = Vec::with_capacity(installation_plan.features.len());
+    for resolved in &installation_plan.features {
+        let options = if resolved.options.is_empty() {
+            None
+        } else {
+            Some(
                 resolved
-                    .source
-                    .trim_start_matches("oci://")
-                    .split('/')
-                    .next()
-                    .unwrap_or("ghcr.io")
-                    .to_string()
-            } else {
-                "ghcr.io".to_string()
-            };
+                    .options
+                    .iter()
+                    .map(|(k, v)| {
+                        let json_val = match v {
+                            OptionValue::Boolean(b) => serde_json::Value::Bool(*b),
+                            OptionValue::String(s) => serde_json::Value::String(s.clone()),
+                            OptionValue::Number(n) => serde_json::Value::Number(n.clone()),
+                            OptionValue::Array(a) => serde_json::Value::Array(a.clone()),
+                            OptionValue::Object(o) => serde_json::Value::Object(o.clone()),
+                            OptionValue::Null => serde_json::Value::Null,
+                        };
+                        (k.clone(), json_val)
+                    })
+                    .collect(),
+            )
+        };
 
-            let options = if resolved.options.is_empty() {
+        let feature = Feature {
+            id: resolved.id.clone(),
+            options,
+            source: Some(resolved.source.clone()),
+            customizations: resolved.metadata.customizations.clone(),
+            init: resolved.metadata.init,
+            privileged: resolved.metadata.privileged,
+            mounts: if resolved.metadata.mounts.is_empty() {
                 None
             } else {
-                Some(
-                    resolved
-                        .options
-                        .iter()
-                        .map(|(k, v)| {
-                            let json_val = match v {
-                                OptionValue::Boolean(b) => serde_json::Value::Bool(*b),
-                                OptionValue::String(s) => serde_json::Value::String(s.clone()),
-                                OptionValue::Number(n) => serde_json::Value::Number(n.clone()),
-                                OptionValue::Array(a) => serde_json::Value::Array(a.clone()),
-                                OptionValue::Object(o) => serde_json::Value::Object(o.clone()),
-                                OptionValue::Null => serde_json::Value::Null,
-                            };
-                            (k.clone(), json_val)
-                        })
-                        .collect(),
-                )
-            };
+                Some(resolved.metadata.mounts.clone())
+            },
+            container_env: if resolved.metadata.container_env.is_empty() {
+                None
+            } else {
+                Some(resolved.metadata.container_env.clone())
+            },
+        };
 
-            let feature = Feature {
-                id: resolved.id.clone(),
-                options,
-                source: Some(resolved.source.clone()),
-                customizations: resolved.metadata.customizations.clone(),
-                init: resolved.metadata.init,
-                privileged: resolved.metadata.privileged,
-                mounts: if resolved.metadata.mounts.is_empty() {
-                    None
-                } else {
-                    Some(resolved.metadata.mounts.clone())
-                },
-                container_env: if resolved.metadata.container_env.is_empty() {
-                    None
-                } else {
-                    Some(resolved.metadata.container_env.clone())
-                },
-            };
-
-            // One featureSet per feature, in install order (reference parity).
-            FeatureSet {
-                features: vec![feature],
-                source_information: SourceInformation::Oci { registry },
-                internal_version: None,
-                computed_digest: None,
+        // Build sourceInformation matching the reference CLI's per-origin shape.
+        let source_information = if let Some(path) = resolved.id.strip_prefix("local:") {
+            SourceInformation::FilePath {
+                resolved_file_path: path.to_string(),
+                user_feature_id: resolved.source.clone(),
             }
-        })
-        .collect();
+        } else {
+            // OCI: parse the reference form back out, fetch the manifest + its
+            // digest, and assemble the full `featureRef`.
+            let (registry_url, namespace, name, tag) = parse_registry_reference(&resolved.source)
+                .with_context(|| {
+                format!("Invalid OCI feature reference '{}'", resolved.source)
+            })?;
+            let feature_ref = FeatureRef::new(
+                registry_url.clone(),
+                namespace.clone(),
+                name.clone(),
+                tag.clone(),
+            );
+            let (manifest, digest_hex) = fetcher
+                .get_manifest_with_digest(&feature_ref)
+                .await
+                .with_context(|| {
+                    format!("Failed to fetch manifest for feature '{}'", resolved.source)
+                })?;
+            let repository = feature_ref.repository(); // namespace/name
+            let resource = format!("{}/{}", registry_url, repository);
+            // userFeatureIdWithoutVersion == registry/namespace/name (no tag).
+            let user_feature_id_without_version = resource.clone();
+            let version = feature_ref.tag().to_string();
+            let owner = namespace
+                .split('/')
+                .next()
+                .unwrap_or(&namespace)
+                .to_string();
+            SourceInformation::Oci {
+                manifest,
+                manifest_digest: format!("sha256:{}", digest_hex),
+                feature_ref: FeatureRefInfo {
+                    id: name,
+                    owner,
+                    namespace,
+                    registry: registry_url,
+                    resource,
+                    path: repository,
+                    version: version.clone(),
+                    tag: version,
+                },
+                user_feature_id: resolved.source.clone(),
+                user_feature_id_without_version,
+            }
+        };
+
+        // One featureSet per feature, in install order (reference parity).
+        feature_sets.push(FeatureSet {
+            features: vec![feature],
+            source_information,
+            internal_version: None,
+            computed_digest: None,
+        });
+    }
 
     Ok(FeaturesConfiguration {
         feature_sets,

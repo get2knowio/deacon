@@ -5,7 +5,7 @@ Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 23 corpus configs.
 Source of truth: the official containers.dev spec and the reference CLI's
 behavior — not any deacon-authored spec doc.
 
-## Fixed in this PR (twelve real bugs)
+## Fixed in this PR (thirteen real bugs)
 
 ### 1. `hostRequirements` hard-failed `up`/`build` (spec violation)
 
@@ -201,12 +201,21 @@ feature, in topological install order. Now matches the reference exactly
 `test_features_configuration_emitted_in_install_order`.
 (`crates/deacon/src/commands/read_configuration.rs`.)
 
+### 13. `featuresConfiguration.sourceInformation` was minimal
+
+deacon emitted `{ type: "oci", registry }` per set; the reference carries full
+per-feature source info. **Fix:** `sourceInformation` now matches the reference
+byte-for-byte — for OCI features `{ type: "oci", manifest, manifestDigest,
+featureRef: { id, owner, namespace, registry, resource, path, version, tag },
+userFeatureId, userFeatureIdWithoutVersion }` (the **manifest is fetched and
+emitted in full**, config + layers + the embedded `dev.containers.metadata`
+annotation, with the raw-body `sha256:` digest), and for local features
+`{ type: "file-path", resolvedFilePath, userFeatureId }`. Verified field-by-field
+against the reference (incl. the byte-equal manifest). Integration test asserts
+the `file-path` shape. (`crates/deacon/src/commands/read_configuration.rs`.)
+
 ## Open follow-ups (found, not yet fixed)
 
-- **`featuresConfiguration.sourceInformation` is minimal.** deacon emits
-  `{ type: "oci", registry }` per set; the reference carries richer per-feature
-  source info (`featureRef`, `userFeatureId`, `manifest`/`resolvedFilePath`).
-  Order + per-feature structure now match (#12); the source-info *fields* don't.
 - **Fully reference-correct feature env** would emit feature `containerEnv` as
   image `ENV` (build-time `${PATH}` expansion); fix #7 relies on the image ENV /
   shell init already carrying the value (true for realistic features).
