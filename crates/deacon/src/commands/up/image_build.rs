@@ -150,5 +150,82 @@ pub(crate) async fn build_image_from_config(
     let image_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     debug!("Built image with ID: {}", image_id);
 
-    Ok(image_id)
+    // `docker build -q` returns a bare `sha256:<digest>` image ID. Returning
+    // that as the resolved `config.image` works for `docker create`, but when
+    // features are layered on top the generated `FROM ${base}` makes BuildKit
+    // treat a bare digest as a `docker.io/library/sha256:...` repository
+    // (pull access denied / 404). Tag the freshly-built image with a real,
+    // deterministic `repo:tag` so any downstream `FROM` resolves to the local
+    // image — mirroring `deacon build`'s `deacon-build:<hash>` base tag. The
+    // digest is content-addressed, so the derived tag is stable across rebuilds.
+    let tag = derive_local_build_tag(&image_id);
+    tag_built_image(&image_id, &tag).await?;
+    debug!("Tagged built image {} as {}", image_id, tag);
+
+    Ok(tag)
+}
+
+/// Derive a deterministic, BuildKit-`FROM`-safe `repo:tag` from a bare image
+/// digest. `docker build -q` yields `sha256:<64hex>`; a bare digest used as a
+/// `FROM` is resolved as a remote `docker.io/library/...` repo (404), so reuse
+/// the digest's leading hex (content-addressed → stable) as the tag suffix.
+fn derive_local_build_tag(image_id: &str) -> String {
+    let stripped = image_id.strip_prefix("sha256:").unwrap_or(image_id);
+    let short = &stripped[..stripped.len().min(12)];
+    format!("deacon-build:{}", short)
+}
+
+/// Apply `tag` to the locally-built image `image_id` (`docker tag`).
+async fn tag_built_image(image_id: &str, tag: &str) -> Result<()> {
+    let output = tokio::process::Command::new("docker")
+        .args(["tag", image_id, tag])
+        .output()
+        .await
+        .with_context(|| format!("Failed to run 'docker tag {} {}'", image_id, tag))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(DeaconError::Docker(DockerError::CLIError(format!(
+            "Failed to tag built image '{}' as '{}': {}",
+            image_id,
+            tag,
+            stderr.trim()
+        )))
+        .into());
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_local_build_tag_from_digest_is_real_repo_tag() {
+        // A bare `sha256:` digest used as a `FROM` 404s in BuildKit; the derived
+        // tag must be a real `repo:tag` with no `sha256:` prefix.
+        let tag = derive_local_build_tag(
+            "sha256:f621c4937bcb40b86157263eb8c14c45ca0b4c273747da4a57bc301f895d398b",
+        );
+        assert_eq!(tag, "deacon-build:f621c4937bcb");
+        assert!(!tag.contains("sha256:"));
+        // Deterministic: same digest → same tag (content-addressed).
+        assert_eq!(
+            tag,
+            derive_local_build_tag(
+                "sha256:f621c4937bcb40b86157263eb8c14c45ca0b4c273747da4a57bc301f895d398b"
+            )
+        );
+    }
+
+    #[test]
+    fn derive_local_build_tag_without_sha256_prefix() {
+        // Defensive: a non-`sha256:` id still yields a valid-looking tag.
+        assert_eq!(
+            derive_local_build_tag("abcdef123456"),
+            "deacon-build:abcdef123456"
+        );
+        assert_eq!(derive_local_build_tag("short"), "deacon-build:short");
+    }
 }
