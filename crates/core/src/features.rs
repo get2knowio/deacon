@@ -51,7 +51,7 @@ use crate::errors::{FeatureError, Result};
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tracing::{debug, instrument, warn};
 
@@ -823,14 +823,19 @@ impl FeatureDependencyResolver {
         // Apply override order constraints if present
         let (sorted_features, final_levels) = if let Some(ref override_order) = self.override_order
         {
-            // For override order, fall back to sequential execution
-            let sorted_ids = self.topological_sort(&graph)?;
-            let final_order = self.apply_override_order(&sorted_ids, override_order)?;
-            let sorted_features = final_order
+            // Priority topological sort: features listed in
+            // `overrideFeatureInstallOrder` are preferred (in the listed order)
+            // among the ready set each round; the rest tie-break lexicographically
+            // — matching the reference CLI. A PARTIAL override still applies (the
+            // listed features come first, unlisted ones follow); `installsAfter`
+            // dependencies are always respected. Install sequentially in this
+            // order.
+            let sorted_ids = self.topological_sort(&graph, Some(override_order))?;
+            let sorted_features = sorted_ids
                 .iter()
                 .filter_map(|id| features.iter().find(|f| f.id == *id).cloned())
                 .collect::<Vec<_>>();
-            let sequential_levels = vec![final_order];
+            let sequential_levels = vec![sorted_ids];
             (sorted_features, sequential_levels)
         } else {
             // Use parallel levels - flatten for features list but keep levels for parallel execution
@@ -1009,11 +1014,32 @@ impl FeatureDependencyResolver {
         Ok(graph)
     }
 
-    /// Perform topological sort with cycle detection using Kahn's algorithm
+    /// Perform a topological sort with cycle detection using Kahn's algorithm.
+    ///
+    /// Among the "ready" set (nodes whose `installsAfter` dependencies are all
+    /// already emitted) each round, the next node is chosen by:
+    /// 1. position in `priority` (`overrideFeatureInstallOrder`) when listed —
+    ///    earlier wins; a partial list still applies (listed before unlisted),
+    /// 2. lexicographic feature id otherwise (deterministic tie-break, matching
+    ///    the reference CLI for features absent from the override).
     fn topological_sort(
         &self,
         graph: &HashMap<String, HashSet<String>>,
+        priority: Option<&[String]>,
     ) -> std::result::Result<Vec<String>, FeatureError> {
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+
+        // Map each feature id to its override position (lower = earlier);
+        // features absent from the override sort after every listed one.
+        let priority_index = |id: &str| -> usize {
+            priority
+                .and_then(|p| p.iter().position(|o| o == id))
+                .unwrap_or(usize::MAX)
+        };
+        // Sort key for the ready set: (override position, lexicographic id).
+        let sort_key = |id: &str| (priority_index(id), id.to_string());
+
         let mut in_degree: HashMap<String, usize> = HashMap::new();
         let mut adj_list: HashMap<String, HashSet<String>> = HashMap::new();
 
@@ -1046,28 +1072,24 @@ impl FeatureDependencyResolver {
             }
         }
 
-        // Initialize queue with nodes having no dependencies (sorted for determinism)
-        let mut queue: VecDeque<String> = VecDeque::new();
-        let mut zero_degree_nodes: Vec<String> = in_degree
-            .iter()
-            .filter(|&(_, &degree)| degree == 0)
-            .map(|(node, _)| node.clone())
-            .collect();
-        zero_degree_nodes.sort(); // Lexicographic ordering for determinism - tie-breaks independent features
-        for node in zero_degree_nodes {
-            queue.push_back(node);
+        // Min-heap (via Reverse) over the ready set, keyed by (priority, id).
+        let mut ready: BinaryHeap<Reverse<(usize, String)>> = BinaryHeap::new();
+        for (node, &degree) in &in_degree {
+            if degree == 0 {
+                ready.push(Reverse(sort_key(node)));
+            }
         }
 
         let mut result = Vec::new();
         let mut processed = 0;
 
-        while let Some(current) = queue.pop_front() {
+        while let Some(Reverse((_, current))) = ready.pop() {
             result.push(current.clone());
             processed += 1;
 
-            // Process all nodes that depend on current (sorted for determinism)
+            // Decrement dependents; newly-ready nodes enter the priority heap.
             let mut neighbors: Vec<String> = adj_list[&current].iter().cloned().collect();
-            neighbors.sort(); // Lexicographic ordering for determinism
+            neighbors.sort(); // deterministic iteration (heap re-prioritizes)
             for neighbor in neighbors {
                 let degree = in_degree.get_mut(&neighbor).ok_or_else(|| {
                     FeatureError::DependencyResolution {
@@ -1079,7 +1101,7 @@ impl FeatureDependencyResolver {
                 })?;
                 *degree -= 1;
                 if *degree == 0 {
-                    queue.push_back(neighbor);
+                    ready.push(Reverse(sort_key(&neighbor)));
                 }
             }
         }
@@ -1242,31 +1264,6 @@ impl FeatureDependencyResolver {
         path.pop();
         rec_stack.remove(node);
         None
-    }
-
-    /// Apply override order constraints to the topologically sorted list
-    /// The override order should be respected where possible without violating dependencies
-    fn apply_override_order(
-        &self,
-        sorted_ids: &[String],
-        override_order: &[String],
-    ) -> std::result::Result<Vec<String>, FeatureError> {
-        // For independent features (no dependencies), we can apply the override order directly
-        // For this initial implementation, we'll use the override order if all features are independent
-
-        // Create a set of all feature IDs for quick lookup
-        let sorted_set: HashSet<String> = sorted_ids.iter().cloned().collect();
-
-        // If override order contains all features and they're all present, use override order
-        let override_set: HashSet<String> = override_order.iter().cloned().collect();
-        if override_set == sorted_set {
-            return Ok(override_order.to_vec());
-        }
-
-        // Otherwise, keep the topological order as a fallback
-        let result = sorted_ids.to_vec();
-        debug!("Applied override order, final result: {:?}", result);
-        Ok(result)
     }
 }
 
@@ -2487,6 +2484,42 @@ mod tests {
         assert!(ids.contains(&"feature-a".to_string()));
         assert!(ids.contains(&"feature-b".to_string()));
         assert!(ids.contains(&"feature-c".to_string()));
+    }
+
+    #[test]
+    fn test_override_order_partial_lists_listed_first() {
+        // A PARTIAL override (only "c" listed) must still apply: the listed
+        // feature installs first, then the rest in lexicographic tie-break order
+        // (reference parity). Regression for the old `apply_override_order` which
+        // ignored partial overrides and fell back to a pure topological sort.
+        let features = vec![
+            create_test_feature("a", vec![], HashMap::new()),
+            create_test_feature("b", vec![], HashMap::new()),
+            create_test_feature("c", vec![], HashMap::new()),
+        ];
+        let resolver = FeatureDependencyResolver::new(Some(vec!["c".to_string()]));
+        let ids = resolver.resolve(&features).unwrap().feature_ids();
+        assert_eq!(ids, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn test_override_order_partial_respects_installs_after() {
+        // x, y, z all installAfter w; override [w, y, x] (z unlisted).
+        // Expect: w first (dependency), then y, x (override order), then z
+        // (unlisted, lexicographic). Dependencies always win over the override.
+        let features = vec![
+            create_test_feature("x", vec!["w".to_string()], HashMap::new()),
+            create_test_feature("y", vec!["w".to_string()], HashMap::new()),
+            create_test_feature("z", vec!["w".to_string()], HashMap::new()),
+            create_test_feature("w", vec![], HashMap::new()),
+        ];
+        let resolver = FeatureDependencyResolver::new(Some(vec![
+            "w".to_string(),
+            "y".to_string(),
+            "x".to_string(),
+        ]));
+        let ids = resolver.resolve(&features).unwrap().feature_ids();
+        assert_eq!(ids, vec!["w", "y", "x", "z"]);
     }
 
     #[test]
