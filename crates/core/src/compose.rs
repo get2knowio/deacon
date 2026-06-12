@@ -1526,63 +1526,45 @@ fn parse_env_file_for_project_name(env_file_path: &Path) -> Option<String> {
 }
 
 fn derive_project_name(base_path: &Path) -> String {
-    // Task T020: Check for .env file and extract COMPOSE_PROJECT_NAME
+    // An explicit COMPOSE_PROJECT_NAME in a sibling `.env` is used verbatim
+    // (no suffix), matching docker compose and the reference CLI.
     let env_file_path = base_path.join(".env");
     if let Some(project_name) = parse_env_file_for_project_name(&env_file_path) {
         debug!("Using project name from .env file: {}", project_name);
         return project_name;
     }
 
-    // Docker Compose project name rules:
-    // - must start with a lowercase letter or number
-    // - may contain only lowercase alphanumeric characters, hyphens, and underscores
-    // - we also collapse runs of invalid characters into a single '-'
-    const FALLBACK: &str = "deacon-compose";
+    // Folder-derived default. The reference (devcontainers/cli) takes the
+    // workspace folder basename, STRIPS every character outside [a-z0-9_-]
+    // (case-insensitively), lowercases, and appends `_devcontainer`
+    // (e.g. `Foo.Bar-1` -> `foobar-1_devcontainer`, `my proj` ->
+    // `myproj_devcontainer`). Note it strips invalid chars rather than
+    // replacing them with '-'.
+    const FALLBACK_STEM: &str = "deacon";
 
-    let original = base_path
+    let stem = base_path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or(FALLBACK);
+        .unwrap_or(FALLBACK_STEM);
 
-    // Fallback when directory name is empty or only dots (e.g., "...")
-    if original.is_empty() || original.chars().all(|c| c == '.') {
-        return FALLBACK.to_string();
-    }
+    let stripped: String = stem
+        .chars()
+        .map(|c| c.to_ascii_lowercase())
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
 
-    // Sanitize: lowercase, keep [a-z0-9_-], convert other chars to '-'
-    let mut sanitized = String::with_capacity(original.len());
-    let mut last_was_dash = false;
-    for ch in original.chars() {
-        let lc = ch.to_ascii_lowercase();
-        if lc.is_ascii_alphanumeric() {
-            sanitized.push(lc);
-            last_was_dash = false;
-        } else if lc == '-' || lc == '_' {
-            // Preserve hyphen/underscore but avoid leading repetitions
-            if !(sanitized.is_empty() && (lc == '-' || lc == '_')) {
-                sanitized.push(lc);
-            }
-            last_was_dash = lc == '-';
-        } else {
-            // Replace invalid characters with a single '-'
-            if !last_was_dash {
-                sanitized.push('-');
-                last_was_dash = true;
-            }
-        }
-    }
+    // Docker Compose requires the project name to start with [a-z0-9]. The
+    // reference emits an invalid name (leading '-'/'_', or empty) and docker
+    // compose then rejects it; deacon stays robust by trimming leading
+    // separators and falling back to a stem when nothing valid remains.
+    let trimmed = stripped.trim_start_matches(['-', '_']);
+    let stem = if trimmed.is_empty() {
+        FALLBACK_STEM
+    } else {
+        trimmed
+    };
 
-    // Trim leading/trailing dashes/underscores
-    let sanitized = sanitized
-        .trim_matches(|c: char| c == '-' || c == '_')
-        .to_string();
-
-    // Ensure first character is a lowercase letter or number
-    match sanitized.chars().next() {
-        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => sanitized,
-        Some(_) => format!("d{}", sanitized),
-        None => FALLBACK.to_string(),
-    }
+    format!("{stem}_devcontainer")
 }
 
 #[cfg(test)]
@@ -1867,21 +1849,59 @@ mod tests {
     #[test]
     fn test_derive_project_name_from_hidden_directory() {
         let path = Path::new("/tmp/.tmpAbC123");
-        // Leading dot should be removed and name sanitized to valid compose project name
-        assert_eq!(derive_project_name(path), "tmpabc123");
+        // Leading dot stripped, lowercased, `_devcontainer` suffix appended
+        // (reference parity).
+        assert_eq!(derive_project_name(path), "tmpabc123_devcontainer");
     }
 
     #[test]
-    fn test_derive_project_name_replaces_invalid_characters() {
-        let path = Path::new("/tmp/My Project!");
-        // Sanitize spaces and punctuation, lowercase and replace with hyphen
-        assert_eq!(derive_project_name(path), "my-project");
+    fn test_derive_project_name_strips_invalid_characters() {
+        // The reference STRIPS chars outside [a-z0-9_-] (it does not replace
+        // them with '-'): `My Project!` -> `myproject`, not `my-project`.
+        assert_eq!(
+            derive_project_name(Path::new("/tmp/My Project!")),
+            "myproject_devcontainer"
+        );
+        assert_eq!(
+            derive_project_name(Path::new("/tmp/Foo.Bar-1")),
+            "foobar-1_devcontainer"
+        );
+        assert_eq!(
+            derive_project_name(Path::new("/tmp/UPPER_Case")),
+            "upper_case_devcontainer"
+        );
+        assert_eq!(
+            derive_project_name(Path::new("/tmp/9lives")),
+            "9lives_devcontainer"
+        );
+    }
+
+    #[test]
+    fn test_derive_project_name_appends_devcontainer_suffix() {
+        assert_eq!(
+            derive_project_name(Path::new("/home/user/myapp")),
+            "myapp_devcontainer"
+        );
     }
 
     #[test]
     fn test_derive_project_name_fallback_for_all_invalid() {
-        let path = Path::new("/tmp/...");
-        assert_eq!(derive_project_name(path), "deacon-compose");
+        // Nothing valid remains -> robust fallback stem (the reference would
+        // emit an invalid name and docker compose would reject it).
+        assert_eq!(
+            derive_project_name(Path::new("/tmp/...")),
+            "deacon_devcontainer"
+        );
+    }
+
+    #[test]
+    fn test_derive_project_name_leading_separator_trimmed() {
+        // Leading '-'/'_' would make an invalid compose project name; trim it
+        // so deacon stays robust where the reference fails.
+        assert_eq!(
+            derive_project_name(Path::new("/tmp/-leadingdash")),
+            "leadingdash_devcontainer"
+        );
     }
 
     #[test]
