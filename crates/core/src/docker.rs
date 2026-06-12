@@ -1930,7 +1930,26 @@ impl ContainerOps for CliRuntime {
 
         // Apply containerEnv variables from configuration. Only `containerEnv`
         // is baked onto the container at creation time.
+        //
+        // A value still containing an unexpanded `${...}` shell reference — e.g.
+        // a feature's `PATH=/usr/local/share/nvm/current/bin:${PATH}` (the
+        // standard "prepend to the existing PATH" idiom) — must NOT be passed
+        // via `docker create --env`: Docker does not expand it, so the literal
+        // `${PATH}` would be written as the container's PATH, dropping
+        // `/usr/local/bin`, `/bin`, … and making even `sh` unreachable
+        // (`exec: "sh": not found in $PATH`) — every exec/lifecycle command then
+        // fails with code 127. The feature/base image ENV already carries the
+        // correctly-expanded value (Docker expanded `${PATH}` at image-build
+        // time), so we leave the image's env to stand for these.
         for (key, value) in &config.container_env {
+            if value.contains("${") {
+                debug!(
+                    key = %key,
+                    value = %value,
+                    "Skipping containerEnv with unexpanded shell reference at create; relying on image ENV"
+                );
+                continue;
+            }
             args.push("--env".to_string());
             args.push(format!("{}={}", key, value));
         }
@@ -3812,8 +3831,13 @@ mod tests {
         args.push("test-container".to_string());
 
         // containerEnv only — remoteEnv is intentionally NOT a create-time env
-        // var (applied at exec/lifecycle time instead). Mirrors create_container.
+        // var (applied at exec/lifecycle time instead). Values with an
+        // unexpanded `${...}` shell reference are skipped (image ENV stands).
+        // Mirrors create_container.
         for (key, value) in &config.container_env {
+            if value.contains("${") {
+                continue;
+            }
             args.push("--env".to_string());
             args.push(format!("{}={}", key, value));
         }
@@ -3853,6 +3877,39 @@ mod tests {
             cpu_pos,
             image_pos - 1,
             "runArgs should be immediately before image"
+        );
+    }
+
+    #[test]
+    fn test_container_env_with_shell_ref_not_baked_into_create_args() {
+        // Regression (Ruby + node feature bomb): a feature/containerEnv value
+        // like `PATH=/usr/local/share/nvm/current/bin:${PATH}` must NOT be
+        // passed via `docker create --env` — Docker won't expand `${PATH}`, so
+        // the literal would clobber the image PATH and make `sh` unreachable
+        // (exit 127). The image ENV already has the correct value.
+        let mut config = DevContainerConfig {
+            image: Some("debian:bookworm-slim".to_string()),
+            ..Default::default()
+        };
+        config.container_env.insert(
+            "PATH".to_string(),
+            "/usr/local/share/nvm/current/bin:${PATH}".to_string(),
+        );
+        config
+            .container_env
+            .insert("NODE_ENV".to_string(), "development".to_string());
+
+        let args = build_create_args(&config);
+        // Plain values are baked.
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--env" && w[1] == "NODE_ENV=development"),
+            "plain containerEnv must be baked: {args:?}"
+        );
+        // The unexpanded shell reference is skipped entirely.
+        assert!(
+            !args.iter().any(|a| a.contains("${PATH}")),
+            "containerEnv with ${{...}} must not be baked into create args: {args:?}"
         );
     }
 

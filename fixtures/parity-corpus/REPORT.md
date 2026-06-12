@@ -5,7 +5,7 @@ Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 20 corpus configs.
 Source of truth: the official containers.dev spec and the reference CLI's
 behavior — not any deacon-authored spec doc.
 
-## Fixed in this PR (six real bugs)
+## Fixed in this PR (seven real bugs)
 
 ### 1. `hostRequirements` hard-failed `up`/`build` (spec violation)
 
@@ -102,7 +102,37 @@ publish only `appPort`; numeric → `127.0.0.1:N:N`, string → verbatim;
 `--auto-forward` daemon). Tests `test_port_publish_args_excludes_forward_ports`,
 `test_port_spec_to_publish_arg_variants`. (`crates/core/src/docker.rs`.)
 
+### 7. Feature `containerEnv` with `${PATH}` clobbered the container PATH (`sh` 127)
+
+The reported real-world break: a **standard Ruby devcontainer + Node.js 22 as a
+feature**. The node feature's `containerEnv.PATH =
+"/usr/local/share/nvm/current/bin:${PATH}"` was baked into `docker create -e
+PATH=…${PATH}` **unexpanded** — Docker doesn't expand `${PATH}` there, so the
+literal became the container PATH, dropping `/usr/local/bin`, `/bin`, … Then
+**every** exec failed: `exec: "sh": executable file not found in $PATH` (exit
+127) — env probe, user mapping, and `postCreate` all bombed.
+
+The feature/base image ENV already carries the correctly-expanded PATH (Docker
+expanded `${PATH}` at image-build time). **Fix:** at container creation, skip any
+`containerEnv` value still containing an unexpanded `${...}` shell reference and
+let the image's ENV stand (catches the feature `combined_env` re-bake and any
+metadata-label re-introduction). Regression test
+`test_container_env_with_shell_ref_not_baked_into_create_args`. Verified
+end-to-end: the Ruby + Node-22 config now does a full clean `up` (`ruby 3.4.4`,
+`v22.22.3`). (`crates/core/src/docker.rs`, fixture `ruby-node-feature/`.)
+
 ## Open follow-ups (found, not yet fixed)
+
+- **Transitive feature dependencies (`dependsOn`) not auto-installed.** deacon
+  warns `Feature 'node' depends on 'common-utils' which is not in the feature
+  set` and proceeds. Harmless when the base image already bundles the dependency
+  (the devcontainers Ruby image bundles `common-utils`), but on a bare base a
+  `dependsOn` feature would be skipped where the reference auto-installs it.
+- **Fully reference-correct feature env** would emit feature `containerEnv` as
+  image `ENV` (build-time `${PATH}` expansion) so a feature adding a *novel*
+  PATH dir not already in the base image still lands. Fix #7 relies on the image
+  ENV already carrying the value (true for the realistic features); the ENV-
+  generation approach would close the novel-path gap.
 
 - **Divergence A (residual) — `${containerWorkspaceFolder}` without an explicit
   `workspaceFolder`.** Now fixed for the common case (workspaceFolder set, fix
@@ -143,4 +173,5 @@ compose (`compose-postgres`, `compose-array`), jsonc/kitchen-sink
 (`universal-jsonc`), lifecycle forms (`lifecycle-arrays`, `lifecycle-mixed`),
 extends (`extends-child`), substitution (`containerenv-subst`, `name-subst`,
 `workspacefolder-custom`), mounts (`mounts-bind-localenv`), ports (`ports-mixed`),
-user mapping (`user-mapping`), security (`init-privileged`).
+user mapping (`user-mapping`), security (`init-privileged`),
+ruby + node-feature (`ruby-node-feature`).
