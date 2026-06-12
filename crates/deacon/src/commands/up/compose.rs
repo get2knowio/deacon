@@ -247,10 +247,12 @@ pub(crate) async fn execute_compose_up(
                     .or_else(|| config.container_user.clone())
                     .unwrap_or_else(|| "root".to_string());
 
-                let remote_workspace_folder = config
-                    .workspace_folder
-                    .clone()
-                    .unwrap_or_else(|| "/workspaces".to_string());
+                // Spec default is `/workspaces/${localWorkspaceFolderBasename}`,
+                // not a bare `/workspaces`.
+                let remote_workspace_folder = super::helpers::default_remote_workspace_folder(
+                    config.workspace_folder.as_deref(),
+                    workspace_folder,
+                );
 
                 // Serialize configuration if requested
                 let configuration = if args.include_configuration {
@@ -457,10 +459,12 @@ pub(crate) async fn execute_compose_up(
         .or_else(|| config.container_user.clone())
         .unwrap_or_else(|| "root".to_string());
 
-    let remote_workspace_folder = config
-        .workspace_folder
-        .clone()
-        .unwrap_or_else(|| "/workspaces".to_string());
+    // Spec default is `/workspaces/${localWorkspaceFolderBasename}`, not a bare
+    // `/workspaces`.
+    let remote_workspace_folder = super::helpers::default_remote_workspace_folder(
+        config.workspace_folder.as_deref(),
+        workspace_folder,
+    );
 
     // Serialize configuration if requested
     let configuration = if args.include_configuration {

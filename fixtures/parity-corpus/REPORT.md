@@ -214,6 +214,20 @@ annotation, with the raw-body `sha256:` digest), and for local features
 against the reference (incl. the byte-equal manifest). Integration test asserts
 the `file-path` shape. (`crates/deacon/src/commands/read_configuration.rs`.)
 
+### 14. `up` reported a bare `remoteWorkspaceFolder: "/workspaces"`
+
+For an image config without an explicit `workspaceFolder`, `up` reported the
+bare `/workspaces` instead of the spec default
+`/workspaces/${localWorkspaceFolderBasename}`. Verified against the reference
+(`devcontainer up` on a TempDir): it reports `/workspaces/<basename>`. **Fix:**
+a shared `default_remote_workspace_folder` helper now mirrors the actual
+bind-mount target built in `Docker::create_container` (basename of the
+mount source, i.e. the git root under `--mount-workspace-git-root`), used by
+both the traditional (`container.rs`) and compose (`compose.rs`, both reconnect
+and fresh paths) flows. Unit tests cover the basename / explicit / no-basename
+cases; verified end-to-end (`deacon up` now reports `/workspaces/<basename>`,
+matching the reference). (`crates/deacon/src/commands/up/{helpers,container,compose}.rs`.)
+
 ## Open follow-ups (found, not yet fixed)
 
 - **Divergence A (residual) — `${containerWorkspaceFolder}` without an explicit
@@ -227,10 +241,6 @@ the `file-path` shape. (`crates/deacon/src/commands/read_configuration.rs`.)
   child config with `extends` preserved (defers the merge to `up`); deacon
   eagerly merges via `load_with_extends` and drops `extends`. Functionally
   equivalent at `up`; differs only in read-config presentation.
-- **Observation — `remoteWorkspaceFolder: "/workspaces"`** reported by `up` for
-  image configs without an explicit `workspaceFolder` (spec default is
-  `/workspaces/${localWorkspaceFolderBasename}`). Worth verifying against the
-  reference's container workspace mount target.
 
 ## Verified non-bugs
 
