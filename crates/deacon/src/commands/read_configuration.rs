@@ -350,6 +350,32 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
         });
     }
 
+    // Auto-install transitive `dependsOn` (hard) dependencies before resolving
+    // the install order — parity with the reference CLI and the `up`/`build`
+    // path, so `--include-features-configuration` reports (and orders) the full
+    // closure instead of erroring on an undeclared hard dependency.
+    // `installsAfter` (soft ordering) is NOT auto-installed.
+    let mut idx = 0;
+    while idx < resolved_features.len() {
+        let mut deps: Vec<(String, serde_json::Value)> = resolved_features[idx]
+            .metadata
+            .depends_on
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        deps.sort_by(|a, b| a.0.cmp(&b.0));
+        for (dep_key, dep_value) in deps {
+            let dep = crate::commands::shared::feature_resolver::resolve_one_feature(
+                &dep_key, &dep_value, config_dir, fetcher,
+            )
+            .await?;
+            if !resolved_features.iter().any(|f| f.id == dep.id) {
+                resolved_features.push(dep);
+            }
+        }
+        idx += 1;
+    }
+
     // Create dependency resolver
     let override_order = config.override_feature_install_order.clone();
     let resolver = FeatureDependencyResolver::new(override_order);
@@ -1099,6 +1125,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         .unwrap_or(Path::new("."));
 
     // Load configuration using shared helper (aligns with up/exec behavior)
+    // The actual config file that was loaded/discovered (may differ from the CLI
+    // `--config` arg when auto-discovered under `.devcontainer/`). Used to anchor
+    // local feature paths (`./feature`) to the config file's directory.
+    let mut resolved_config_path: Option<PathBuf> = None;
     let (config, substitution_report) = if container_only_mode {
         // Per spec line 104: "If only container selection flags are provided (no config or workspace),
         // proceed with an empty base config {} and a substitution function seeded with host env/paths."
@@ -1116,6 +1146,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             secrets_files: &args.secrets_files,
         })
         .await?;
+        resolved_config_path = Some(config_result.config_path);
         (config_result.config, config_result.substitution_report)
     };
 
@@ -1309,12 +1340,17 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     let features_configuration_for_output = if args.include_features_configuration
         || (args.include_merged_configuration && args.container_id.is_none())
     {
-        // Anchor local-feature paths to the config file's directory; fall
-        // back to the workspace folder if --config wasn't supplied. Mirrors
-        // the up flow's anchor (`features_build.rs`).
+        // Anchor local-feature paths to the config file's directory. Use the
+        // CLI `--config` arg when given, otherwise the *discovered* config path
+        // (e.g. `.devcontainer/devcontainer.json`), and only fall back to the
+        // workspace folder when neither is available. Mirrors the up flow's
+        // anchor (`features_build.rs`); the previous code used only the CLI arg,
+        // so an auto-discovered config mis-anchored `./feature` to the workspace
+        // folder instead of `.devcontainer/`.
         let features_config_dir = args
             .config_path
             .as_deref()
+            .or(resolved_config_path.as_deref())
             .and_then(|p| p.parent())
             .unwrap_or(workspace_folder)
             .to_path_buf();

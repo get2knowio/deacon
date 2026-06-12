@@ -295,6 +295,58 @@ fn test_acceptance_features_configuration_present() -> Result<()> {
     Ok(())
 }
 
+/// Regression: a local feature (`./feat`) declared in an auto-discovered
+/// `.devcontainer/devcontainer.json` must anchor to the config file's directory
+/// (`.devcontainer/`), not the workspace folder. Before the fix, running with
+/// only `--workspace-folder` (no `--config`) mis-anchored `./feat` to the
+/// workspace root and failed with "not accessible". Hermetic (local feature, no
+/// network).
+#[test]
+fn test_local_feature_anchors_to_discovered_config_dir() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+        "name": "local-anchor",
+        "image": "ubuntu:22.04",
+        "features": { "./localfeat": {} }
+    }"#,
+    )?;
+    // Local feature lives NEXT TO the config, under .devcontainer/.
+    let feat_dir = helper.temp_dir().join(".devcontainer").join("localfeat");
+    std::fs::create_dir_all(&feat_dir)?;
+    std::fs::write(
+        feat_dir.join("devcontainer-feature.json"),
+        r#"{ "id": "localfeat", "version": "1.0.0", "name": "Local Feat" }"#,
+    )?;
+    std::fs::write(feat_dir.join("install.sh"), "#!/bin/sh\ntrue\n")?;
+
+    // Auto-discovery (only --workspace-folder) + features resolution.
+    let result = helper.run_with_workspace(&["--include-features-configuration"])?;
+    let features_config = result["featuresConfiguration"].as_object().unwrap();
+    let sets = features_config
+        .get("featureSets")
+        .and_then(|v| v.as_array())
+        .expect("featureSets array");
+    let found = sets.iter().any(|fs| {
+        fs.get("features")
+            .and_then(|f| f.as_array())
+            .map(|arr| {
+                arr.iter().any(|feat| {
+                    feat.get("id")
+                        .and_then(|i| i.as_str())
+                        .map(|s| s.contains("localfeat"))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false)
+    });
+    assert!(
+        found,
+        "local feature must resolve via discovered-config anchoring: {result:#}"
+    );
+    Ok(())
+}
+
 /// Test acceptance: deep-merge --additional-features with precedence over base
 #[test]
 fn test_acceptance_additional_features_deep_merge_precedence() -> Result<()> {

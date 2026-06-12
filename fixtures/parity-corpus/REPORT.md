@@ -5,7 +5,7 @@ Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 23 corpus configs.
 Source of truth: the official containers.dev spec and the reference CLI's
 behavior — not any deacon-authored spec doc.
 
-## Fixed in this PR (nine real bugs)
+## Fixed in this PR (eleven real bugs)
 
 ### 1. `hostRequirements` hard-failed `up`/`build` (spec violation)
 
@@ -163,16 +163,32 @@ cycles (which the resolver also detects). Test
 end-to-end: declaring only the local feature auto-installs node (`v22.22.3`).
 (`crates/deacon/src/commands/up/features_build.rs`.)
 
+### 10. `dependsOn` auto-install across `run-user-commands` + `read-configuration`
+
+Fix #9 covered the `up`/`build` install path. The shared `resolve_features_ordered`
+(`run-user-commands`) and read-configuration's `--include-features-configuration`
+path still hard-errored on an undeclared `dependsOn`. **Fix:** the transitive
+`dependsOn` closure is now applied in the shared resolver (via an extracted
+`resolve_one_feature`) and reused by read-configuration, so all three feature
+paths behave identically and match the reference. Unit test
+`auto_installs_transitive_depends_on`.
+(`crates/deacon/src/commands/shared/feature_resolver.rs`,
+`crates/deacon/src/commands/read_configuration.rs`.)
+
+### 11. read-configuration mis-anchored local features under auto-discovery
+
+`read-configuration --workspace-folder <ws> --include-features-configuration`
+(no `--config`) anchored local feature paths (`./feat`) to the **workspace
+folder** instead of the **discovered** `.devcontainer/` config dir, failing with
+`Local feature path './feat' … is not accessible` for any config under
+`.devcontainer/` — while `up` (which threads the resolved config path) worked.
+**Fix:** anchor to the resolved/discovered config path's directory, falling back
+to the workspace folder only when neither a `--config` arg nor a discovered path
+is available. Integration test `test_local_feature_anchors_to_discovered_config_dir`.
+(`crates/deacon/src/commands/read_configuration.rs`.)
+
 ## Open follow-ups (found, not yet fixed)
 
-- **`dependsOn` auto-install only covers the `up`/`build` path.** Fix #9 lives in
-  `resolve_and_stage_features`. The shared `resolve_features_ordered`
-  (`run-user-commands`) and read-configuration's feature path don't pre-fetch, so
-  they'd still hard-error on a `dependsOn`-to-undeclared feature. Low impact —
-  `read-configuration`'s default output doesn't resolve the graph (verified: the
-  `dependson-autoinstall` fixture reads cleanly), and `run-user-commands` runs in
-  an already-`up` container where deps are installed. Closing it means lifting the
-  closure into the shared resolver.
 - **Fully reference-correct feature env** would emit feature `containerEnv` as
   image `ENV` (build-time `${PATH}` expansion); fix #7 relies on the image ENV /
   shell init already carrying the value (true for realistic features).
