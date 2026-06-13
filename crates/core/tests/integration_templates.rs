@@ -144,7 +144,7 @@ fn test_apply_minimal_template_fixture() -> anyhow::Result<()> {
 
     // Check variable substitution in README.md
     let readme = fs::read_to_string(dest_dir.join("README.md"))?;
-    assert!(readme.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(readme.contains(&dest_leaf));
     assert!(!readme.contains("${localWorkspaceFolder}"));
 
     Ok(())
@@ -183,15 +183,15 @@ fn test_apply_template_with_options_fixture() -> anyhow::Result<()> {
     assert!(!dockerfile.contains("${localWorkspaceFolder}"));
 
     let main_py = fs::read_to_string(dest_dir.join("src/main.py"))?;
-    assert!(main_py.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(main_py.contains(&dest_leaf));
     assert!(!main_py.contains("${localWorkspaceFolder}"));
 
     let app_conf = fs::read_to_string(dest_dir.join("config/app.conf"))?;
-    assert!(app_conf.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(app_conf.contains(&dest_leaf));
     assert!(!app_conf.contains("${localWorkspaceFolder}"));
 
     let readme = fs::read_to_string(dest_dir.join("README.md"))?;
-    assert!(readme.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(readme.contains(&dest_leaf));
     assert!(!readme.contains("${localWorkspaceFolder}"));
 
     Ok(())

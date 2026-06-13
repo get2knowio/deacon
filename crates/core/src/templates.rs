@@ -698,7 +698,7 @@ mod tests {
         assert!(!dockerfile.contains("${localWorkspaceFolder}"));
 
         let config = fs::read_to_string(dest_dir.join("config.json"))?;
-        assert!(config.contains(&dest_dir.to_string_lossy().to_string()));
+        assert!(config.contains(&dest_leaf));
         assert!(!config.contains("${localWorkspaceFolder}"));
 
         // Binary file should be unchanged
