@@ -28,6 +28,20 @@ deep-diffs, and prints a ranked report:
 
 Requires the reference CLI on `PATH` (`npm i -g @devcontainers/cli`).
 
+## Tier 1c — error-path differential (fast, Docker-free)
+
+```bash
+python3 fixtures/parity-corpus/run_tier1_errors.py [deacon_bin] [corpus_dir]
+```
+
+Where Tier 1 diffs *successful* output, Tier 1c diffs the **accept/reject
+decision** over invalid / edge-case configs under `errors/`: do both CLIs agree
+on whether the input is an error? Exits non-zero on any divergence from each
+fixture's encoded expectation (CI-gateable). It surfaced that deacon validates
+eagerly/strictly at `read-configuration` while the reference parses leniently and
+defers `extends` resolution — see `errors/README.md` for the full matrix and why
+those divergences are characterized rather than treated as bugs.
+
 ## Tier 3 — pinned real-world corpus fetch
 
 ```bash

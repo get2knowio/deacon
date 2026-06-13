@@ -1,0 +1,4 @@
+{
+	"name": "extends-cycle",
+	"extends": "./base-a.json"
+}

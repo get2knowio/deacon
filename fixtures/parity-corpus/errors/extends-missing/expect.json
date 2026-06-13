@@ -1,0 +1,4 @@
+{
+  "description": "extends points at a nonexistent file. deacon resolves extends eagerly at read-configuration and errors on the missing target; the reference does NOT resolve extends during read-configuration (echoes the literal field). Characterized divergence: eager (deacon) vs lazy (reference) extends resolution.",
+  "expect": "deacon-stricter"
+}

@@ -1,0 +1,6 @@
+{
+	"name": "malformed-json",
+	// hard syntax error: a key with no value. jsonc tolerates comments and
+	// trailing commas, but not a missing value — both CLIs must reject.
+	"image":
+}

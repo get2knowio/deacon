@@ -1,0 +1,4 @@
+{
+  "description": "Object with a duplicate key (image declared twice). Both CLIs accept and both apply last-wins (image=busybox:1.36). After pruning deacon's default/null fields, the resolved configs agree.",
+  "expect": "both-accept"
+}

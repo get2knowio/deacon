@@ -1,0 +1,5 @@
+{
+	"name": "wrong-type-features",
+	"image": "alpine:3.18",
+	"features": "ghcr.io/devcontainers/features/node:1"
+}

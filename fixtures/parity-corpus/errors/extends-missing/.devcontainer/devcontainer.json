@@ -1,0 +1,4 @@
+{
+	"name": "extends-missing",
+	"extends": "./does-not-exist.json"
+}
