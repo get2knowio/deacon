@@ -135,14 +135,16 @@ fn test_apply_minimal_template_fixture() -> anyhow::Result<()> {
     assert!(dest_dir.join("README.md").exists());
     assert!(!dest_dir.join("devcontainer-template.json").exists());
 
-    // Check variable substitution in Dockerfile
+    // Check variable substitution in Dockerfile. Match the workspace dir's leaf
+    // component (robust to Windows path canonicalization).
+    let dest_leaf = dest_dir.file_name().unwrap().to_string_lossy().to_string();
     let dockerfile = fs::read_to_string(dest_dir.join("Dockerfile"))?;
-    assert!(dockerfile.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(dockerfile.contains(&dest_leaf));
     assert!(!dockerfile.contains("${localWorkspaceFolder}"));
 
     // Check variable substitution in README.md
     let readme = fs::read_to_string(dest_dir.join("README.md"))?;
-    assert!(readme.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(readme.contains(&dest_leaf));
     assert!(!readme.contains("${localWorkspaceFolder}"));
 
     Ok(())
@@ -173,21 +175,23 @@ fn test_apply_template_with_options_fixture() -> anyhow::Result<()> {
     assert!(dest_dir.join("config/app.conf").exists());
     assert!(!dest_dir.join("devcontainer-template.json").exists());
 
-    // Check variable substitution in various files
+    // Check variable substitution in various files. Match the workspace dir's
+    // leaf component (robust to Windows path canonicalization).
+    let dest_leaf = dest_dir.file_name().unwrap().to_string_lossy().to_string();
     let dockerfile = fs::read_to_string(dest_dir.join("Dockerfile"))?;
-    assert!(dockerfile.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(dockerfile.contains(&dest_leaf));
     assert!(!dockerfile.contains("${localWorkspaceFolder}"));
 
     let main_py = fs::read_to_string(dest_dir.join("src/main.py"))?;
-    assert!(main_py.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(main_py.contains(&dest_leaf));
     assert!(!main_py.contains("${localWorkspaceFolder}"));
 
     let app_conf = fs::read_to_string(dest_dir.join("config/app.conf"))?;
-    assert!(app_conf.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(app_conf.contains(&dest_leaf));
     assert!(!app_conf.contains("${localWorkspaceFolder}"));
 
     let readme = fs::read_to_string(dest_dir.join("README.md"))?;
-    assert!(readme.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(readme.contains(&dest_leaf));
     assert!(!readme.contains("${localWorkspaceFolder}"));
 
     Ok(())

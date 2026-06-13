@@ -265,6 +265,11 @@ mod tests {
         assert_eq!(entries[0].label.as_deref(), Some("web"));
     }
 
+    // Unix-only: collision/remap depends on `pid_alive` to tell a live owner
+    // from a stale one. On Windows `pid_alive` is always false (the port-forward
+    // daemon is Unix-only), so a registered owner reads as dead and its port is
+    // reused rather than remapped. Windows port-forwarding is out of scope.
+    #[cfg(unix)]
     #[test]
     fn collision_triggers_next_free_remap() {
         let dir = TempDir::new().unwrap();

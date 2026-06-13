@@ -33,6 +33,11 @@ fn write_devcontainer_with_init(workspace: &std::path::Path, init_cmd: &str) {
 ///
 /// The marker file MUST NOT exist after the run; the run MUST fail with a
 /// message naming the workspace and `--trust-workspace`.
+// Unix-only: verifies host `initializeCommand` execution via a POSIX shell
+// command (`echo … > marker`). Windows host-hook execution is a separate
+// concern; the trust-policy resolution itself is covered by unit tests in
+// `deacon_core::trust`.
+#[cfg(unix)]
 #[test]
 fn untrusted_workspace_refuses_initialize_command() {
     let tmp = TempDir::new().unwrap();
@@ -87,6 +92,9 @@ fn untrusted_workspace_refuses_initialize_command() {
 ///
 /// The marker file MUST exist after the run, even when the downstream
 /// container creation fails (we don't have Docker in this hermetic test).
+// Unix-only: see `untrusted_workspace_refuses_initialize_command` — exercises
+// host `initializeCommand` execution via a POSIX shell.
+#[cfg(unix)]
 #[test]
 fn trust_workspace_flag_allows_initialize_command() {
     let tmp = TempDir::new().unwrap();
@@ -149,6 +157,9 @@ fn deacon_no_prompt_denies_without_explicit_trust() {
 
 /// `--trust-workspace-persist` records the workspace into the trust store so
 /// subsequent runs without any flag are also allowed.
+// Unix-only: see `untrusted_workspace_refuses_initialize_command` — exercises
+// host `initializeCommand` execution via a POSIX shell.
+#[cfg(unix)]
 #[test]
 fn trust_workspace_persist_remembers_for_next_run() {
     let tmp = TempDir::new().unwrap();

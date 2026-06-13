@@ -1101,6 +1101,9 @@ mod redacting_buffer {
 /// output. Exercises the wiring in `init_with_redaction` via an equivalent in-process
 /// subscriber so the integration test stays hermetic (no real registry, no global
 /// subscriber install).
+// Unix-only: installs a feature whose `install.sh` is a bash script (shebang
+// `#!/bin/sh`), which cannot execute on Windows.
+#[cfg(unix)]
 #[tokio::test]
 async fn test_oci_install_env_secret_not_in_logs() {
     use deacon_core::oci::{DownloadedFeature, FeatureFetcher, ReqwestClient};

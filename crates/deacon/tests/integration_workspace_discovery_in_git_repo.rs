@@ -91,7 +91,8 @@ fn read_configuration_in_subdir_loads_inner_config_not_git_root() {
     );
     let config_folder = json["workspace"]["configFolderPath"]
         .as_str()
-        .expect("configFolderPath must be a string");
+        .expect("configFolderPath must be a string")
+        .replace('\\', "/"); // normalize Windows separators for the path check
     assert!(
         config_folder.contains("/sub/.devcontainer")
             || config_folder.ends_with("sub/.devcontainer"),

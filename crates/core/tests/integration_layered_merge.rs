@@ -75,13 +75,23 @@ async fn test_enhanced_merge_with_metadata() -> Result<()> {
     let meta = merged_result.meta.unwrap();
     assert_eq!(meta.layers.len(), 2);
 
-    // First layer should be the base config
-    assert!(meta.layers[0].source.contains("base/devcontainer.json"));
+    // First layer should be the base config (normalize Windows separators)
+    assert!(
+        meta.layers[0]
+            .source
+            .replace('\\', "/")
+            .contains("base/devcontainer.json")
+    );
     assert_eq!(meta.layers[0].precedence, 0);
     assert!(!meta.layers[0].hash.is_empty());
 
-    // Second layer should be the app config
-    assert!(meta.layers[1].source.contains("app/devcontainer.json"));
+    // Second layer should be the app config (normalize Windows separators)
+    assert!(
+        meta.layers[1]
+            .source
+            .replace('\\', "/")
+            .contains("app/devcontainer.json")
+    );
     assert_eq!(meta.layers[1].precedence, 1);
     assert!(!meta.layers[1].hash.is_empty());
 
@@ -240,10 +250,25 @@ async fn test_multi_level_extends_with_metadata() -> Result<()> {
     assert_eq!(meta.layers[1].precedence, 1);
     assert_eq!(meta.layers[2].precedence, 2);
 
-    // Check source paths
-    assert!(meta.layers[0].source.contains("base/devcontainer.json"));
-    assert!(meta.layers[1].source.contains("middle/devcontainer.json"));
-    assert!(meta.layers[2].source.contains("app/devcontainer.json"));
+    // Check source paths (normalize Windows separators)
+    assert!(
+        meta.layers[0]
+            .source
+            .replace('\\', "/")
+            .contains("base/devcontainer.json")
+    );
+    assert!(
+        meta.layers[1]
+            .source
+            .replace('\\', "/")
+            .contains("middle/devcontainer.json")
+    );
+    assert!(
+        meta.layers[2]
+            .source
+            .replace('\\', "/")
+            .contains("app/devcontainer.json")
+    );
 
     Ok(())
 }

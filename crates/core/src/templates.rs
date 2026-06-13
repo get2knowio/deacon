@@ -687,13 +687,18 @@ mod tests {
         assert_eq!(result.files_skipped, 0);
         assert!(result.substitution_report.has_substitutions());
 
-        // Verify files were created and substituted
+        // Verify files were created and the workspace path was substituted in.
+        // Match on the workspace dir's leaf component (unique temp name): it is
+        // robust to Windows path canonicalization (the `\\?\` prefix / 8.3
+        // short-name expansion that `SubstitutionContext` applies), which the full
+        // path string is not.
+        let dest_leaf = dest_dir.file_name().unwrap().to_string_lossy().to_string();
         let dockerfile = fs::read_to_string(dest_dir.join("Dockerfile"))?;
-        assert!(dockerfile.contains(&dest_dir.to_string_lossy().to_string()));
+        assert!(dockerfile.contains(&dest_leaf));
         assert!(!dockerfile.contains("${localWorkspaceFolder}"));
 
         let config = fs::read_to_string(dest_dir.join("config.json"))?;
-        assert!(config.contains(&dest_dir.to_string_lossy().to_string()));
+        assert!(config.contains(&dest_leaf));
         assert!(!config.contains("${localWorkspaceFolder}"));
 
         // Binary file should be unchanged
@@ -786,12 +791,14 @@ mod tests {
         assert!(dest_dir.join("src/main.rs").exists());
         assert!(dest_dir.join("config/app.conf").exists());
 
-        // Verify substitution in subdirectory files
+        // Verify substitution in subdirectory files. Match the workspace dir's
+        // leaf component (robust to Windows path canonicalization).
+        let dest_leaf = dest_dir.file_name().unwrap().to_string_lossy().to_string();
         let main_rs = fs::read_to_string(dest_dir.join("src/main.rs"))?;
-        assert!(main_rs.contains(&dest_dir.to_string_lossy().to_string()));
+        assert!(main_rs.contains(&dest_leaf));
 
         let app_conf = fs::read_to_string(dest_dir.join("config/app.conf"))?;
-        assert!(app_conf.contains(&dest_dir.to_string_lossy().to_string()));
+        assert!(app_conf.contains(&dest_leaf));
 
         Ok(())
     }
