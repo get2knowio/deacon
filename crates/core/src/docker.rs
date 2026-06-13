@@ -901,20 +901,27 @@ impl CliRuntime {
     /// Docker is a no-op (it auto-pulls short names and resolves locally-built
     /// bare tags natively). Under podman:
     /// - already-qualified refs pass through unchanged;
-    /// - a bare name that exists locally (a deacon-built tag like
-    ///   `deacon-build:<hash>`) is referenced as `localhost/<ref>` — podman
-    ///   stores locally-built images under the `localhost/` repository and
-    ///   would otherwise treat the bare name as a remote pull target;
-    /// - a bare name that is NOT local (a base image like `alpine:3.19`) is
-    ///   qualified to `docker.io/library/<ref>` so the implicit pull during
-    ///   `create` resolves unambiguously (rootless podman won't resolve bare
-    ///   short names non-interactively).
+    /// - a bare name whose **`localhost/`-qualified** form exists (a deacon-built
+    ///   tag like `deacon-build:<hash>`) is referenced as `localhost/<ref>` —
+    ///   podman stores locally-built images under the `localhost/` repository
+    ///   and would otherwise treat the bare name as a remote pull target;
+    /// - any other bare name (a base image like `alpine:3.19`) is qualified to
+    ///   `docker.io/library/<ref>` so the implicit pull during `create` resolves
+    ///   unambiguously (rootless podman won't resolve bare short names
+    ///   non-interactively).
+    ///
+    /// The existence probe is on the `localhost/`-qualified form, NOT the bare
+    /// name: a base image pulled from a registry (`docker.io/library/alpine`)
+    /// also satisfies `podman image exists alpine:3.19` via short-name
+    /// resolution, but must NOT be rewritten to `localhost/` (which has no
+    /// registry and would force a doomed pull from `localhost`).
     async fn qualify_image_ref(&self, image_ref: &str) -> String {
         if self.flavor != RuntimeFlavor::Podman || Self::is_already_qualified(image_ref) {
             return image_ref.to_string();
         }
-        if self.image_exists_local(image_ref).await {
-            format!("localhost/{image_ref}")
+        let localhost_ref = format!("localhost/{image_ref}");
+        if self.image_exists_local(&localhost_ref).await {
+            localhost_ref
         } else {
             Self::qualify_short_remote(image_ref)
         }
