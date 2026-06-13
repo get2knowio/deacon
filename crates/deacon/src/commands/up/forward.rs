@@ -237,10 +237,17 @@ mod tests {
         // Missing marker ⇒ no pid (spawn fresh).
         assert_eq!(live_forwarder_pid(Some(udf), "none"), None);
 
-        // Live pid (our own process) ⇒ reuse.
+        // Live pid (our own process). On Unix a live pid is adopted/reused. On
+        // non-Unix the forward daemon is unsupported and `pid_alive` is always
+        // false (see `port_forward::daemon::pid_alive`), so even a live marker
+        // yields None (spawn-fresh) — assert the platform-correct behavior so the
+        // test runs on Windows instead of being skipped.
         let me = std::process::id();
         write_marker(udf, "live", me);
+        #[cfg(unix)]
         assert_eq!(live_forwarder_pid(Some(udf), "live"), Some(me));
+        #[cfg(not(unix))]
+        assert_eq!(live_forwarder_pid(Some(udf), "live"), None);
 
         // Dead pid ⇒ spawn fresh (None).
         write_marker(udf, "dead", 2_000_000_000);

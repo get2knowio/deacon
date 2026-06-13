@@ -153,7 +153,10 @@ jobs:
         tool: cargo-nextest
 
     - name: Run MVP fast tests
-      run: cargo nextest run --profile dev-fast
+      # --no-fail-fast: report ALL failures in one run rather than aborting at the
+      # first (matters most for the Windows lane, where we want the complete
+      # cross-platform failure set, not just the earliest).
+      run: cargo nextest run --profile dev-fast --no-fail-fast
 
   test-integration:
     name: Test (MVP integration)
