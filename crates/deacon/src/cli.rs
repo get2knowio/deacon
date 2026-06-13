@@ -1535,7 +1535,7 @@ impl Cli {
                     terminal_dimensions,
                 };
 
-                execute_exec(args).await
+                execute_exec(args, self.runtime.map(|r| r.into())).await
             }
             Some(Commands::ReadConfiguration {
                 include_merged_configuration,
@@ -1714,12 +1714,13 @@ impl Cli {
                     docker_path: self.docker_path.clone(),
                     docker_compose_path: self.docker_compose_path.clone(),
                 };
+                let down_runtime = self.runtime.map(|r| r.into());
 
                 // If spinner is eligible, wrap the down execution with a plain spinner
                 if spinner_eligible {
                     if stderr_is_tty {
                         let sp = PlainSpinner::start("Stopping environment…");
-                        let res = execute_down(args).await;
+                        let res = execute_down(args, down_runtime).await;
                         match res {
                             Ok(()) => {
                                 sp.finish_with_message("Shutdown completed");
@@ -1731,10 +1732,10 @@ impl Cli {
                             }
                         }
                     } else {
-                        execute_down(args).await
+                        execute_down(args, down_runtime).await
                     }
                 } else {
-                    execute_down(args).await
+                    execute_down(args, down_runtime).await
                 }
             }
             Some(Commands::Outdated {

@@ -723,6 +723,7 @@ pub(crate) async fn execute_container_up(
         resolved_features.as_deref().unwrap_or(&[]),
         prior_markers,
         Some(&identity.config_hash),
+        runtime,
     )
     .await?;
 

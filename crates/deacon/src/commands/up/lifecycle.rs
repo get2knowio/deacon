@@ -148,10 +148,11 @@ pub(crate) async fn execute_lifecycle_commands(
     resolved_features: &[ResolvedFeature],
     prior_markers: Vec<LifecyclePhaseState>,
     config_hash: Option<&str>,
+    runtime: &deacon_core::runtime::ContainerRuntimeImpl,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
         ContainerLifecycleCommands, ContainerLifecycleConfig,
-        execute_container_lifecycle_with_progress_callback,
+        execute_container_lifecycle_with_progress_callback_and_docker,
     };
     use deacon_core::variable::SubstitutionContext;
 
@@ -322,11 +323,15 @@ pub(crate) async fn execute_lifecycle_commands(
 
     let lifecycle_start_time = std::time::Instant::now();
 
-    // Execute lifecycle commands with progress callback
-    let result = execute_container_lifecycle_with_progress_callback(
+    // Execute lifecycle commands with progress callback, using the SELECTED
+    // runtime (docker or podman). The plain wrapper hardcodes a docker client,
+    // which under podman cannot see the podman-created container ("No such
+    // container") — so every lifecycle exec must go through `runtime`.
+    let result = execute_container_lifecycle_with_progress_callback_and_docker(
         &lifecycle_config,
         &commands,
         &substitution_context,
+        &runtime.cli_docker(),
         Some(crate::commands::shared::progress::make_progress_callback(
             &args.progress_tracker,
         )),
@@ -362,14 +367,13 @@ pub(crate) async fn execute_lifecycle_commands(
     // Execute non-blocking phases (postStart, postAttach) synchronously
     // This ensures they run before the up command returns
     if !result.non_blocking_phases.is_empty() {
-        use deacon_core::docker::CliDocker;
-
         debug!(
             "Executing {} non-blocking phases synchronously",
             result.non_blocking_phases.len()
         );
 
-        let docker = CliDocker::new();
+        // Use the selected runtime (see blocking-phase note above).
+        let docker = runtime.cli_docker();
 
         let _final_result = result
             .execute_non_blocking_phases_sync_with_callback(
