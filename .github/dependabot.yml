@@ -38,3 +38,11 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # The MSRV-check job pins dtolnay/rust-toolchain@<rust-version> on purpose
+      # (see .github/workflows/ci.yml — it must equal `rust-version` in
+      # [workspace.package]). Dependabot reads that ref as an action version and
+      # tries to bump it (e.g. PR #168 → @1.100, a Rust release that doesn't even
+      # exist → 404). Raising the MSRV is a deliberate decision made in lockstep
+      # with Cargo.toml, never an automatic bump.
+      - dependency-name: dtolnay/rust-toolchain
