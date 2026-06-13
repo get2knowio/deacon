@@ -85,8 +85,13 @@ async fn test_enhanced_merge_with_metadata() -> Result<()> {
     assert_eq!(meta.layers[0].precedence, 0);
     assert!(!meta.layers[0].hash.is_empty());
 
-    // Second layer should be the app config
-    assert!(meta.layers[1].source.contains("app/devcontainer.json"));
+    // Second layer should be the app config (normalize Windows separators)
+    assert!(
+        meta.layers[1]
+            .source
+            .replace('\\', "/")
+            .contains("app/devcontainer.json")
+    );
     assert_eq!(meta.layers[1].precedence, 1);
     assert!(!meta.layers[1].hash.is_empty());
 
