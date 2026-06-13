@@ -1,0 +1,6 @@
+{
+	"name": "unknown-field-preserved",
+	"image": "alpine:3.18",
+	"someFutureSpecField": { "enabled": true },
+	"x-tool-specific": "hello"
+}

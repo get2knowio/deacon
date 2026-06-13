@@ -1,0 +1,4 @@
+{
+  "description": "features is a bare string instead of a map. deacon now rejects this (type-strict, matching forwardPorts) instead of passing it through untyped. This is the deliberate consistency fix: modeled fields enforce their spec shape and fail fast on a clear mistake. The reference keeps the raw JSON and accepts.",
+  "expect": "deacon-stricter"
+}

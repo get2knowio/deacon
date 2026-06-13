@@ -1,0 +1,4 @@
+{
+  "description": "JSONC with a hard syntax error (key with no value). deacon rejects at parse; the reference uses a recovering jsonc parser that drops the broken property and accepts. Characterized divergence: deacon fails fast (constitution: no silent fallbacks), reference is lenient at read-configuration.",
+  "expect": "deacon-stricter"
+}

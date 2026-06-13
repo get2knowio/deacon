@@ -585,6 +585,7 @@ mod tests {
             cap_add: Vec::new(),
             security_opt: Vec::new(),
             secrets: None,
+            extra: Default::default(),
         };
 
         PluginManager::augment_config(&mut config).unwrap();
@@ -663,6 +664,7 @@ mod tests {
             cap_add: Vec::new(),
             security_opt: Vec::new(),
             secrets: None,
+            extra: Default::default(),
         };
 
         assert!(plugin.augment_config(&mut config).is_ok());

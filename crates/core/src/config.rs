@@ -39,6 +39,70 @@ fn default_empty_object() -> serde_json::Value {
     serde_json::Value::Object(Default::default())
 }
 
+/// Human-readable name for a JSON value's type, for type-mismatch diagnostics.
+fn json_type_name(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "an array",
+        serde_json::Value::Object(_) => "an object",
+    }
+}
+
+/// Deserialize a field that the spec defines as a `map<string, …>`, rejecting
+/// any non-object value.
+///
+/// `features` and `customizations` are stored as raw `serde_json::Value` for
+/// flexibility, but the spec shape is an object. Accepting a bare string (or
+/// array/number) here would silently carry an invalid config downstream, where
+/// it surfaces as a confusing late error. We instead fail fast with a precise
+/// message — the same strictness `forwardPorts` (a typed `Vec`) already enforces.
+/// This keeps deacon's type-checking *consistent* across modeled fields.
+fn deserialize_object_value<'de, D>(
+    deserializer: D,
+) -> std::result::Result<serde_json::Value, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if value.is_object() {
+        Ok(value)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "expected an object (map), found {}",
+            json_type_name(&value)
+        )))
+    }
+}
+
+/// Deep-merge two flattened "extra" maps of unmodeled fields, with the overlay
+/// winning on conflicting keys. Nested objects merge recursively (mirroring how
+/// `features`/`customizations` deep-merge); all other values are replaced. Used
+/// to preserve forward-compatible unknown fields through the merge chain instead
+/// of dropping them.
+fn merge_extra_maps(
+    base: &serde_json::Map<String, serde_json::Value>,
+    overlay: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut result = base.clone();
+    for (key, overlay_val) in overlay {
+        match (result.get(key), overlay_val) {
+            (Some(serde_json::Value::Object(base_obj)), serde_json::Value::Object(overlay_obj)) => {
+                result.insert(
+                    key.clone(),
+                    serde_json::Value::Object(merge_extra_maps(base_obj, overlay_obj)),
+                );
+            }
+            _ => {
+                result.insert(key.clone(), overlay_val.clone());
+            }
+        }
+    }
+    result
+}
+
 /// Port specification that can be either a number or a string.
 ///
 /// Supports port numbers (e.g., 3000) and port mappings (e.g., "3000:3000").
@@ -505,7 +569,10 @@ pub struct DevContainerConfig {
     /// Kept as raw JSON value for initial implementation. Will be strongly typed in future iterations.
     ///
     /// Reference: [Features](https://containers.dev/implementors/json_reference/#features)
-    #[serde(default = "default_empty_object")]
+    #[serde(
+        default = "default_empty_object",
+        deserialize_with = "deserialize_object_value"
+    )]
     pub features: serde_json::Value,
 
     /// Override the default feature installation order.
@@ -522,7 +589,10 @@ pub struct DevContainerConfig {
     /// Kept as raw JSON value for initial implementation.
     ///
     /// Reference: [Customizations](https://containers.dev/implementors/json_reference/#customizations)
-    #[serde(default = "default_empty_object")]
+    #[serde(
+        default = "default_empty_object",
+        deserialize_with = "deserialize_object_value"
+    )]
     pub customizations: serde_json::Value,
 
     /// Path to workspace folder inside the container.
@@ -690,6 +760,18 @@ pub struct DevContainerConfig {
     /// expect, and `read-configuration` must surface it intact (#72).
     #[serde(default)]
     pub secrets: Option<std::collections::HashMap<String, SecretMetadata>>,
+
+    /// Unknown / unmodeled fields, preserved verbatim for forward-compatibility.
+    ///
+    /// The spec's extensibility model assumes tools tolerate fields they don't
+    /// understand (new spec properties, editor-specific keys). Silently dropping
+    /// them on `read-configuration` is a fidelity loss versus the reference CLI,
+    /// which echoes them. We neither reject (that would break configs valid in
+    /// VS Code / the reference) nor drop (that loses data) — we preserve and pass
+    /// them through unchanged. They are intentionally *not* substituted: deacon
+    /// does not know their semantics, so it leaves them exactly as authored.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Metadata describing a declarative secret entry.
@@ -1281,6 +1363,7 @@ impl Default for DevContainerConfig {
             cap_add: Vec::new(),
             security_opt: Vec::new(),
             secrets: None,
+            extra: serde_json::Map::new(),
         }
     }
 }
@@ -1468,6 +1551,10 @@ impl ConfigMerger {
             // containerEnv semantics; #72). Parent keys not redeclared in
             // the overlay are preserved.
             secrets: Self::merge_secrets(base.secrets.as_ref(), overlay.secrets.as_ref()),
+
+            // Unmodeled fields: deep-merge, overlay wins (preserved for
+            // forward-compat rather than dropped). Mirrors customizations/features.
+            extra: merge_extra_maps(&base.extra, &overlay.extra),
         }
     }
 
@@ -2863,6 +2950,177 @@ mod tests {
         assert_eq!(config.run_args.len(), 0);
         assert!(config.features.is_object());
         assert!(config.customizations.is_object());
+        assert!(config.extra.is_empty());
+    }
+
+    /// Unknown / unmodeled top-level fields must survive a parse → serialize
+    /// round-trip instead of being silently dropped. The spec's extensibility
+    /// model assumes tools pass unknown fields through (the reference CLI does);
+    /// dropping them is a fidelity loss on `read-configuration`.
+    #[test]
+    fn test_unknown_top_level_fields_preserved() {
+        let raw = serde_json::json!({
+            "name": "x",
+            "image": "alpine:3.18",
+            "someFutureSpecField": { "enabled": true },
+            "x-tool-specific": "hello"
+        });
+        let config: DevContainerConfig = serde_json::from_value(raw).expect("parse");
+
+        // Captured into `extra`, not dropped.
+        assert_eq!(
+            config.extra.get("someFutureSpecField"),
+            Some(&serde_json::json!({ "enabled": true }))
+        );
+        assert_eq!(
+            config.extra.get("x-tool-specific"),
+            Some(&serde_json::Value::String("hello".to_string()))
+        );
+        // Modeled fields did NOT leak into `extra`.
+        assert!(!config.extra.contains_key("name"));
+        assert!(!config.extra.contains_key("image"));
+
+        // And they round-trip back out on serialize.
+        let out = serde_json::to_value(&config).expect("serialize");
+        assert_eq!(
+            out["someFutureSpecField"],
+            serde_json::json!({ "enabled": true })
+        );
+        assert_eq!(out["x-tool-specific"], serde_json::json!("hello"));
+    }
+
+    /// Unknown fields are preserved verbatim — NOT variable-substituted. deacon
+    /// does not know their semantics, so it leaves `${...}` exactly as authored.
+    #[test]
+    fn test_unknown_fields_not_substituted() {
+        let raw = serde_json::json!({
+            "image": "alpine:3.18",
+            "x-custom": "${localWorkspaceFolder}/keep-literal"
+        });
+        let config: DevContainerConfig = serde_json::from_value(raw).expect("parse");
+        let workspace = TempDir::new().expect("tempdir");
+        let ctx = SubstitutionContext::new(workspace.path()).expect("ctx");
+        let (substituted, _report) = config.apply_variable_substitution(&ctx);
+        assert_eq!(
+            substituted.extra.get("x-custom"),
+            Some(&serde_json::Value::String(
+                "${localWorkspaceFolder}/keep-literal".to_string()
+            )),
+            "unmodeled fields must be preserved verbatim, not substituted"
+        );
+    }
+
+    /// `features` is spec-shaped as `map<string, …>`. A non-object value is a
+    /// clear authoring mistake and must fail fast with a precise message —
+    /// matching the typed strictness `forwardPorts` already enforces, so
+    /// deacon's type-checking is *consistent* across modeled fields.
+    #[test]
+    fn test_features_must_be_an_object() {
+        let err = serde_json::from_value::<DevContainerConfig>(serde_json::json!({
+            "image": "alpine:3.18",
+            "features": "ghcr.io/devcontainers/features/node:1"
+        }))
+        .expect_err("features as a bare string must be rejected");
+        assert!(
+            err.to_string().contains("expected an object"),
+            "message should name the type mismatch, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_customizations_must_be_an_object() {
+        let err = serde_json::from_value::<DevContainerConfig>(serde_json::json!({
+            "image": "alpine:3.18",
+            "customizations": "vscode"
+        }))
+        .expect_err("customizations as a bare string must be rejected");
+        assert!(err.to_string().contains("expected an object"));
+    }
+
+    #[test]
+    fn test_features_object_still_accepted() {
+        let config: DevContainerConfig = serde_json::from_value(serde_json::json!({
+            "image": "alpine:3.18",
+            "features": { "ghcr.io/devcontainers/features/node:1": { "version": "20" } }
+        }))
+        .expect("a proper features map must still parse");
+        assert!(config.features.is_object());
+    }
+
+    /// Merging deep-merges `extra`: overlay wins on conflicts, base-only keys
+    /// survive, and nested objects merge recursively (mirroring features).
+    #[test]
+    fn test_merge_preserves_and_overrides_extra() {
+        let base = DevContainerConfig {
+            extra: serde_json::json!({
+                "baseOnly": 1,
+                "shared": { "a": 1, "b": 1 }
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            extra: serde_json::json!({
+                "overlayOnly": 2,
+                "shared": { "b": 2, "c": 2 }
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            ..Default::default()
+        };
+        let merged = ConfigMerger::merge_configs(&[base, overlay]);
+        assert_eq!(merged.extra.get("baseOnly"), Some(&serde_json::json!(1)));
+        assert_eq!(merged.extra.get("overlayOnly"), Some(&serde_json::json!(2)));
+        // nested deep-merge: a from base, b overridden by overlay, c from overlay
+        assert_eq!(
+            merged.extra.get("shared"),
+            Some(&serde_json::json!({ "a": 1, "b": 2, "c": 2 }))
+        );
+    }
+
+    /// `MergedDevContainerConfig` flattens both `config` and (transitively)
+    /// `config.extra`, while keeping its own `__meta` field. Guard the
+    /// nested-flatten boundary: on round-trip, `__meta` must route to `meta`
+    /// and an unknown field must route to `config.extra` — no cross-contamination.
+    #[test]
+    fn test_merged_config_flatten_keeps_meta_separate_from_extra() {
+        use merge::{ConfigLayer, ConfigMeta, MergedDevContainerConfig};
+        let merged = MergedDevContainerConfig {
+            config: DevContainerConfig {
+                image: Some("alpine:3.18".to_string()),
+                extra: serde_json::json!({ "someFutureSpecField": true })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                ..Default::default()
+            },
+            meta: Some(ConfigMeta {
+                layers: vec![ConfigLayer {
+                    source: "test".to_string(),
+                    hash: "abc".to_string(),
+                    precedence: 0,
+                }],
+            }),
+        };
+        let json = serde_json::to_value(&merged).expect("serialize");
+        // Both surface at the top level on serialize.
+        assert_eq!(json["someFutureSpecField"], serde_json::json!(true));
+        assert!(json.get("__meta").is_some());
+
+        let round: MergedDevContainerConfig = serde_json::from_value(json).expect("deserialize");
+        assert!(round.meta.is_some(), "__meta must route back to meta");
+        assert_eq!(
+            round.config.extra.get("someFutureSpecField"),
+            Some(&serde_json::json!(true)),
+            "unknown field must route to config.extra"
+        );
+        assert!(
+            !round.config.extra.contains_key("__meta"),
+            "__meta must NOT leak into config.extra"
+        );
     }
 
     #[tokio::test]

@@ -1,0 +1,5 @@
+{
+	"name": "duplicate-keys",
+	"image": "alpine:3.18",
+	"image": "busybox:1.36"
+}
