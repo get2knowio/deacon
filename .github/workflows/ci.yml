@@ -281,6 +281,39 @@ jobs:
         # Sanity-check rootless pull + run before the suite.
         podman run --rm docker.io/library/alpine:3.18 echo "podman-ok"
 
+    # TEMPORARY diagnostic (issue #30): the experimental lane shows containers
+    # vanishing ~0.1s after `podman start` (mid-`up`), failing every
+    # up->exec->lifecycle test with "No such container". Reproduce deacon's
+    # exact create+start+keepalive manually and capture WHY the container exits
+    # (host cgroup/event config + container exit code/error + conmon logs).
+    # Non-blocking; remove once the root cause is understood.
+    - name: Diagnose rootless podman container persistence (#30)
+      run: |
+        set -x
+        echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-<unset>}"
+        id
+        loginctl show-user "$(id -un)" 2>&1 | grep -i linger || echo "no linger info"
+        systemctl --user is-system-running 2>&1 || echo "no user systemd session"
+        podman info --format 'cgroupManager={{.Host.CgroupManager}} cgroupVersion={{.Host.CgroupsVersion}} eventLogger={{.Host.EventLogger}} ociRuntime={{.Host.OCIRuntime.Name}}'
+        podman pull -q docker.io/library/alpine:3.19
+        # Mirror deacon's create_container: overrideCommand keep-alive.
+        CID=$(podman create docker.io/library/alpine:3.19 /bin/sh -c \
+          'export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"; sleep infinity || tail -f /dev/null')
+        echo "created: $CID"
+        podman start "$CID"
+        echo "=== immediately after start ==="
+        podman ps -a --filter "id=$CID" --format '{{.ID}} {{.Status}}'
+        sleep 1
+        echo "=== +1s ==="
+        podman inspect "$CID" --format 'status={{.State.Status}} exitCode={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} error={{.State.Error}}' 2>&1 || echo "inspect failed (container gone?)"
+        echo "=== exec probe (what deacon does) ==="
+        podman exec "$CID" sh -c 'echo alive' 2>&1 || echo "exec failed"
+        echo "=== container logs ==="
+        podman logs "$CID" 2>&1 || echo "logs unavailable"
+        echo "=== conmon / cleanup events (last 30s) ==="
+        podman events --stream=false --filter "container=$CID" 2>&1 | tail -20 || echo "no events"
+        podman rm -f "$CID" 2>&1 || true
+
     - name: Acquire GHCR bearer token (read-only)
       run: |
         set -euo pipefail
