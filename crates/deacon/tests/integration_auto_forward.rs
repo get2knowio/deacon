@@ -783,7 +783,6 @@ fn server_config_on_auto_forward(port: u16, action: &str) -> String {
 /// Write a fake "browser": a host shell script that appends its first arg (the
 /// URL deacon passes) to a marker file. Returns `(script_path, marker_path)`.
 fn write_fake_browser(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
     let marker = dir.join("opened-urls.txt");
     let script = dir.join("fake-browser.sh");
     std::fs::write(
@@ -794,7 +793,15 @@ fn write_fake_browser(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
         ),
     )
     .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Make the fake-browser script executable on Unix. Gated with `#[cfg(unix)]`
+    // (not `if !cfg!(windows)`) so the unix-only `PermissionsExt` is not compiled
+    // on Windows. These tests are Docker-gated and only run on Unix anyway, but
+    // the file must still compile on Windows.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     (script, marker)
 }
 

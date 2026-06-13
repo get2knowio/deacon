@@ -240,8 +240,12 @@ exit 0
 
     fs::write(&script_path, script_content).unwrap();
 
-    if !cfg!(target_os = "windows") {
-        // Make script executable on Unix systems
+    // Make the script executable on Unix. Must be a `#[cfg(unix)]` *attribute*
+    // block, not `if !cfg!(target_os = "windows")` — the latter is a runtime
+    // boolean that still COMPILES the unix-only `PermissionsExt`/`set_mode` on
+    // Windows, breaking the build.
+    #[cfg(unix)]
+    {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(&script_path).unwrap().permissions();
         perms.set_mode(0o755);
