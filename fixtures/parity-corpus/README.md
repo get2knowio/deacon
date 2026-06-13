@@ -28,6 +28,26 @@ deep-diffs, and prints a ranked report:
 
 Requires the reference CLI on `PATH` (`npm i -g @devcontainers/cli`).
 
+## Tier 3 — pinned real-world corpus fetch
+
+```bash
+python3 fixtures/parity-corpus/fetch_realworld_corpus.py --clean --dest /tmp/realworld-corpus
+python3 fixtures/parity-corpus/run_tier1.py target/debug/deacon /tmp/realworld-corpus
+python3 fixtures/parity-corpus/run_tier1_merged.py target/debug/deacon /tmp/realworld-corpus
+```
+
+`fetch_realworld_corpus.py` downloads a pinned set of public workspace snapshots
+into `/tmp/realworld-corpus` without vendoring third-party content into this
+repository. The current manifest mixes:
+
+- `devcontainers/images` workspace subtrees
+- two compose-based `devcontainers/templates` workspace subtrees
+- `microsoft/vscode-remote-try-*` sample repos
+- a couple of small real OSS repos with checked-in devcontainers
+
+The fetched corpus includes a `_manifest.json` file recording the exact repos and
+commit SHAs used for the run.
+
 ## Tier 2 — up/build (Docker)
 
 Copy a config to a TempDir **outside** the repo (in-repo `up` chowns the

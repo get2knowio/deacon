@@ -81,6 +81,15 @@ pub struct SubstitutionContext {
     pub feature_vars: HashMap<String, String>,
     /// Template option values (for template variable substitution)
     pub template_options: Option<HashMap<String, String>>,
+    /// Whether `${devcontainerId}` should be resolved in this pass.
+    ///
+    /// The reference CLI only resolves `${devcontainerId}` once a container
+    /// identity exists (during `up`/runtime). At config-load /
+    /// `read-configuration` time — before any container has been created — the
+    /// token is left literal. Defaults to `true` so runtime substitution passes
+    /// (which set `devcontainer_id` to a meaningful value) keep resolving it;
+    /// `read-configuration`'s pre-container output passes set this to `false`.
+    pub resolve_devcontainer_id: bool,
 }
 
 impl SubstitutionContext {
@@ -152,6 +161,7 @@ impl SubstitutionContext {
             container_env: None,
             feature_vars: HashMap::new(),
             template_options: None,
+            resolve_devcontainer_id: true,
         })
     }
 
@@ -461,7 +471,15 @@ impl VariableSubstitution {
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default(),
             ),
-            "devcontainerId" => Some(context.devcontainer_id.clone()),
+            // Per the reference CLI, `${devcontainerId}` is only resolved once a
+            // container identity exists. When `resolve_devcontainer_id` is false
+            // (config-load / `read-configuration` output before any container),
+            // return None so the literal token is preserved for a later
+            // container-aware pass — mirroring the `containerEnv` deferral above.
+            "devcontainerId" if context.resolve_devcontainer_id => {
+                Some(context.devcontainer_id.clone())
+            }
+            "devcontainerId" => None,
             "containerWorkspaceFolder" => context.container_workspace_folder.clone(),
             "containerWorkspaceFolderBasename" => {
                 context.container_workspace_folder.as_ref().map(|p| {
@@ -682,6 +700,37 @@ mod tests {
         assert!(result.starts_with("container-"));
         assert_eq!(result.len(), "container-".len() + 12); // 12-char ID
         assert!(report.replacements.contains_key("devcontainerId"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_devcontainer_id_left_literal_when_disabled() -> anyhow::Result<()> {
+        // Parity (#219): before a container identity exists,
+        // `${devcontainerId}` must survive substitution as a literal while
+        // other variables still resolve.
+        let temp_dir = TempDir::new()?;
+        let mut context = SubstitutionContext::new(temp_dir.path())?;
+        context.resolve_devcontainer_id = false;
+        let mut report = SubstitutionReport::new();
+
+        let input = "vol-${devcontainerId}-${localWorkspaceFolderBasename}";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        assert!(
+            result.starts_with("vol-${devcontainerId}-"),
+            "devcontainerId should remain literal, got: {result}"
+        );
+        assert!(
+            !report.replacements.contains_key("devcontainerId"),
+            "devcontainerId must not be recorded as replaced"
+        );
+        assert!(
+            report
+                .replacements
+                .contains_key("localWorkspaceFolderBasename"),
+            "other variables must still resolve"
+        );
 
         Ok(())
     }

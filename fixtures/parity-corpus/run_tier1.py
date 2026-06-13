@@ -33,6 +33,36 @@ def ref_read(ws):
     return run(["devcontainer", "read-configuration", "--workspace-folder", str(ws)])
 
 
+def corpus_entries():
+    manifest = CORPUS / "_manifest.json"
+    if manifest.is_file():
+        data = json.loads(manifest.read_text())
+        return [
+            {
+                "name": entry["name"],
+                "workspace": CORPUS / entry["name"],
+                "config_path": entry.get("config_path", ""),
+            }
+            for entry in data.get("entries", [])
+        ]
+    return [
+        {
+            "name": p.name,
+            "workspace": p,
+            "config_path": "",
+        }
+        for p in sorted(CORPUS.iterdir())
+        if (p / ".devcontainer").is_dir()
+    ]
+
+
+def build_command(cli, workspace, config_path):
+    cmd = [cli, "read-configuration", "--workspace-folder", str(workspace)]
+    if config_path:
+        cmd.extend(["--config", str(workspace / config_path)])
+    return cmd
+
+
 def prune(v):
     """Recursively drop nulls, empty arrays/objects/strings, and DROP_KEYS."""
     if isinstance(v, dict):
@@ -81,15 +111,17 @@ def diff(d, r, path=""):
 
 
 def main():
-    configs = sorted(p for p in CORPUS.iterdir() if (p / ".devcontainer").is_dir())
+    configs = corpus_entries()
     rank = {"ref-only": 0, "value": 1, "deacon-only": 2}
     totals = {"ref-only": 0, "value": 0, "deacon-only": 0}
     crashes = []
 
-    for ws in configs:
-        name = ws.name
-        dc, dout, derr = deacon_read(ws)
-        rc, rout, rerr = ref_read(ws)
+    for entry in configs:
+        name = entry["name"]
+        workspace = entry["workspace"]
+        config_path = entry["config_path"]
+        dc, dout, derr = run(build_command(DEACON, workspace, config_path))
+        rc, rout, rerr = run(build_command("devcontainer", workspace, config_path))
         print(f"\n=== {name} ===")
         if dc != 0:
             print(f"  ⚠️  DEACON crashed (exit {dc}): {derr.strip()[:400]}")

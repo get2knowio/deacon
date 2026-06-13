@@ -1082,6 +1082,9 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
 
         // Apply variable substitution to the derived config
         let mut substitution_context = SubstitutionContext::new(Path::new("."))?;
+        // This branch only runs without a container identity, so leave
+        // ${devcontainerId} literal in feature-provided mounts too (#219).
+        substitution_context.resolve_devcontainer_id = container_context.is_some();
         if let Some(secrets) = secrets {
             for (key, value) in secrets.as_env_vars() {
                 substitution_context
@@ -1313,6 +1316,9 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             config_path: args.config_path.as_deref(),
             override_config_path: args.override_config_path.as_deref(),
             secrets_files: &args.secrets_files,
+            // read-configuration has no container identity yet: leave
+            // ${devcontainerId} literal in the output, matching the reference.
+            resolve_devcontainer_id: false,
         })
         .await?;
         resolved_config_path = Some(config_result.config_path);
@@ -1499,6 +1505,8 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         if !container_only_mode && container_info.is_none() && config.workspace_folder.is_none() {
             let mut ctx = SubstitutionContext::new(workspace_folder)?;
             ctx.container_workspace_folder = Some(ctx.local_workspace_folder.clone());
+            // No container identity yet: keep ${devcontainerId} literal (#219).
+            ctx.resolve_devcontainer_id = false;
             if let Some(secrets) = &secrets {
                 for (key, value) in secrets.as_env_vars() {
                     ctx.local_env.insert(key.clone(), value.clone());
@@ -1529,6 +1537,8 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                     raw.apply_variable_substitution(ctx).0
                 } else {
                     let mut ctx = SubstitutionContext::new(workspace_folder)?;
+                    // No container identity yet: keep ${devcontainerId} literal (#219).
+                    ctx.resolve_devcontainer_id = false;
                     // Mirror the shared loader (fix #4) + Divergence A seam.
                     match raw.workspace_folder.as_deref() {
                         Some(wf) if !wf.trim().is_empty() && !wf.contains("${") => {

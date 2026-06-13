@@ -28,7 +28,7 @@ mod forward;
 mod helpers;
 mod image_build;
 mod lifecycle;
-mod merged_config;
+pub(crate) mod merged_config;
 mod ports;
 mod result;
 #[cfg(test)]
@@ -198,6 +198,7 @@ pub(crate) async fn execute_up_with_runtime(
         config_path: args.config_path.as_deref(),
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
+        resolve_devcontainer_id: true,
     })
     .await?;
 

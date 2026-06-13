@@ -788,6 +788,88 @@ fn strip_oci_tag(reference: &str) -> &str {
     }
 }
 
+/// Resolves a feature reference written in *features-object* form (the same
+/// syntax used for `dependsOn`/`installsAfter`/`overrideFeatureInstallOrder`)
+/// to the canonical `ResolvedFeature.id`.
+///
+/// A reference may be spelled as the canonical id, the metadata id, or the
+/// fetch-time source (a local path or full OCI ref), and OCI refs are matched
+/// tag-insensitively. Building the lookup maps once lets both dependency-graph
+/// construction and `overrideFeatureInstallOrder` translation share the exact
+/// same matching rules (#218).
+struct FeatureIdResolver {
+    feature_ids: HashSet<String>,
+    alias_to_canonical: HashMap<String, String>,
+    source_to_canonical: HashMap<String, String>,
+    source_notag_to_canonical: HashMap<String, String>,
+}
+
+impl FeatureIdResolver {
+    fn new(features: &[ResolvedFeature]) -> Self {
+        let feature_ids: HashSet<String> = features.iter().map(|f| f.id.clone()).collect();
+
+        // Map a feature's metadata id to its canonical id, but only when it
+        // does not itself collide with a real canonical id (so OCI features
+        // keyed by their short metadata id stay unambiguous).
+        let mut alias_to_canonical: HashMap<String, String> = HashMap::new();
+        for feature in features {
+            let meta_id = &feature.metadata.id;
+            if !meta_id.is_empty() && meta_id != &feature.id && !feature_ids.contains(meta_id) {
+                alias_to_canonical
+                    .entry(meta_id.clone())
+                    .or_insert_with(|| feature.id.clone());
+            }
+        }
+
+        // Map each candidate `source` (and its tag-stripped form, plus the
+        // tag-stripped canonical id) to a canonical id.
+        let mut source_to_canonical: HashMap<String, String> = HashMap::new();
+        let mut source_notag_to_canonical: HashMap<String, String> = HashMap::new();
+        for feature in features {
+            source_to_canonical
+                .entry(feature.source.clone())
+                .or_insert_with(|| feature.id.clone());
+            let src_notag = strip_oci_tag(&feature.source);
+            source_notag_to_canonical
+                .entry(src_notag.to_string())
+                .or_insert_with(|| feature.id.clone());
+            let id_notag = strip_oci_tag(&feature.id);
+            source_notag_to_canonical
+                .entry(id_notag.to_string())
+                .or_insert_with(|| feature.id.clone());
+        }
+
+        Self {
+            feature_ids,
+            alias_to_canonical,
+            source_to_canonical,
+            source_notag_to_canonical,
+        }
+    }
+
+    /// Resolve `dep_id` to a canonical id, or `None` when no feature matches.
+    fn resolve(&self, dep_id: &str) -> Option<String> {
+        // 1. Exact canonical id.
+        if self.feature_ids.contains(dep_id) {
+            return Some(dep_id.to_string());
+        }
+        // 2. Metadata-id alias.
+        if let Some(canonical) = self.alias_to_canonical.get(dep_id) {
+            return Some(canonical.clone());
+        }
+        // 3. Exact features-object reference (source) form.
+        if let Some(canonical) = self.source_to_canonical.get(dep_id) {
+            return Some(canonical.clone());
+        }
+        // 4. Tag-insensitive OCI ref match (key and/or candidate without tag).
+        let dep_notag = strip_oci_tag(dep_id);
+        if let Some(canonical) = self.source_notag_to_canonical.get(dep_notag) {
+            return Some(canonical.clone());
+        }
+        None
+    }
+}
+
 /// Feature dependency resolver that builds DAG and performs topological sort
 #[derive(Debug)]
 pub struct FeatureDependencyResolver {
@@ -809,8 +891,25 @@ impl FeatureDependencyResolver {
     ) -> std::result::Result<InstallationPlan, FeatureError> {
         debug!("Resolving dependencies for {} features", features.len());
 
+        // Translate `overrideFeatureInstallOrder` entries (written in
+        // features-object form, e.g. `ghcr.io/devcontainers/features/common-utils`
+        // or `./local-feature`) to canonical `ResolvedFeature.id`s before
+        // validating/sorting. Different resolution paths canonicalize OCI
+        // features differently (the short metadata id in read-configuration vs.
+        // the registry path in up/build), so an exact string match against the
+        // override list is unreliable and previously crashed when local + OCI
+        // features coexisted (#218). Unmatched entries are preserved so the
+        // validation step still reports them with the user's spelling.
+        let override_order = self.override_order.as_ref().map(|order| {
+            let id_resolver = FeatureIdResolver::new(features);
+            order
+                .iter()
+                .map(|entry| id_resolver.resolve(entry).unwrap_or_else(|| entry.clone()))
+                .collect::<Vec<_>>()
+        });
+
         // Validate all features exist in override order
-        if let Some(ref override_order) = self.override_order {
+        if let Some(ref override_order) = override_order {
             self.validate_override_order(features, override_order)?;
         }
 
@@ -821,8 +920,7 @@ impl FeatureDependencyResolver {
         let levels = self.compute_parallel_levels(&graph)?;
 
         // Apply override order constraints if present
-        let (sorted_features, final_levels) = if let Some(ref override_order) = self.override_order
-        {
+        let (sorted_features, final_levels) = if let Some(ref override_order) = override_order {
             // Priority topological sort: features listed in
             // `overrideFeatureInstallOrder` are preferred (in the listed order)
             // among the ready set each round; the rest tie-break lexicographically
@@ -884,77 +982,17 @@ impl FeatureDependencyResolver {
         features: &[ResolvedFeature],
     ) -> std::result::Result<HashMap<String, HashSet<String>>, FeatureError> {
         let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
-        let feature_ids: HashSet<String> = features.iter().map(|f| f.id.clone()).collect();
 
-        // Per spec (https://containers.dev/implementors/features/#dependson),
-        // `dependsOn`/`installsAfter` reference features by their canonical
-        // `id`. For local features our canonical lookup key is the absolute
-        // path (e.g. `local:/abs/path/feature-a`), but authors write the
-        // sibling's metadata id (`feature-a`). Build an alias map so both
-        // spellings resolve. The metadata id is overridden by a real
-        // `ResolvedFeature.id` collision so OCI features remain unambiguous.
-        let mut alias_to_canonical: HashMap<String, String> = HashMap::new();
-        for feature in features {
-            let meta_id = &feature.metadata.id;
-            if !meta_id.is_empty() && meta_id != &feature.id && !feature_ids.contains(meta_id) {
-                alias_to_canonical
-                    .entry(meta_id.clone())
-                    .or_insert_with(|| feature.id.clone());
-            }
-        }
-
-        // Per spec (https://containers.dev/implementors/features/#installation-order),
-        // `dependsOn`/`installsAfter` keys use "the same syntax as the `features`
-        // object". That means besides the canonical `id` and the metadata-`id`
-        // alias, a key may be the *features-object reference form* that was used to
-        // fetch the feature — i.e. `ResolvedFeature.source`. This covers:
-        //   * local relative/absolute paths (`./feature-lib`, `../x`, `/abs`), and
-        //   * full/partial OCI refs (`ghcr.io/owner/repo/feat:1`).
-        //
-        // For OCI refs we also match tag-insensitively: a key without a version/tag
-        // should match a candidate whose only difference is the trailing `:tag`
-        // (and vice versa). Local paths are compared as exact strings since they use
-        // identical syntax on both sides.
-
-        // Map each candidate `source` (and its tag-stripped form) to a canonical id.
-        let mut source_to_canonical: HashMap<String, String> = HashMap::new();
-        let mut source_notag_to_canonical: HashMap<String, String> = HashMap::new();
-        for feature in features {
-            source_to_canonical
-                .entry(feature.source.clone())
-                .or_insert_with(|| feature.id.clone());
-            let src_notag = strip_oci_tag(&feature.source);
-            source_notag_to_canonical
-                .entry(src_notag.to_string())
-                .or_insert_with(|| feature.id.clone());
-            // Also index the canonical id without its tag so a tagless dep key can
-            // match an `id` that carries a tag.
-            let id_notag = strip_oci_tag(&feature.id);
-            source_notag_to_canonical
-                .entry(id_notag.to_string())
-                .or_insert_with(|| feature.id.clone());
-        }
-
-        let resolve_dep = |dep_id: &str| -> Option<String> {
-            // 1. Exact canonical id.
-            if feature_ids.contains(dep_id) {
-                return Some(dep_id.to_string());
-            }
-            // 2. Metadata-id alias.
-            if let Some(canonical) = alias_to_canonical.get(dep_id) {
-                return Some(canonical.clone());
-            }
-            // 3. Exact features-object reference (source) form.
-            if let Some(canonical) = source_to_canonical.get(dep_id) {
-                return Some(canonical.clone());
-            }
-            // 4. Tag-insensitive OCI ref match (key and/or candidate without tag).
-            let dep_notag = strip_oci_tag(dep_id);
-            if let Some(canonical) = source_notag_to_canonical.get(dep_notag) {
-                return Some(canonical.clone());
-            }
-            None
-        };
+        // Per spec (https://containers.dev/implementors/features/#dependson and
+        // #installation-order), `dependsOn`/`installsAfter` keys use "the same
+        // syntax as the `features` object": the canonical `id`, the metadata
+        // `id` alias (e.g. a local feature referenced by its sibling's short
+        // id), or the fetch-time `source` (local path or full/partial OCI ref,
+        // matched tag-insensitively). `FeatureIdResolver` encapsulates exactly
+        // those rules and is shared with `overrideFeatureInstallOrder`
+        // translation in `resolve()`.
+        let id_resolver = FeatureIdResolver::new(features);
+        let resolve_dep = |dep_id: &str| -> Option<String> { id_resolver.resolve(dep_id) };
 
         // Initialize graph with all feature IDs
         for feature in features {
@@ -2540,6 +2578,57 @@ mod tests {
         } else {
             panic!("Expected dependency resolution error");
         }
+    }
+
+    #[test]
+    fn test_override_order_accepts_full_oci_ref_against_short_canonical_id() {
+        // Regression for #218: `read-configuration` canonicalizes OCI features
+        // to their short metadata id (`common-utils`), but the user writes the
+        // full registry ref in `overrideFeatureInstallOrder`
+        // (`ghcr.io/devcontainers/features/common-utils`). The resolver must
+        // translate the override entry to the canonical id instead of crashing
+        // with "does not exist in feature set" — including when a local feature
+        // (canonical `local:/abs/path`) coexists.
+        let common_utils = ResolvedFeature {
+            id: "common-utils".to_string(),
+            source: "ghcr.io/devcontainers/features/common-utils:2".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "common-utils".to_string(),
+                ..create_test_feature("common-utils", vec![], HashMap::new()).metadata
+            },
+        };
+        let node = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node:1".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                ..create_test_feature("node", vec![], HashMap::new()).metadata
+            },
+        };
+        let apache = ResolvedFeature {
+            id: "local:/abs/path/apache-config".to_string(),
+            source: "./local-features/apache-config".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "apache-config".to_string(),
+                ..create_test_feature("apache-config", vec![], HashMap::new()).metadata
+            },
+        };
+        let features = vec![common_utils, node, apache];
+
+        let resolver = FeatureDependencyResolver::new(Some(vec![
+            "ghcr.io/devcontainers/features/common-utils".to_string(),
+        ]));
+        let plan = resolver
+            .resolve(&features)
+            .expect("full OCI ref in override order must resolve to the short canonical id");
+        let ids = plan.feature_ids();
+
+        // The override-listed feature installs first; the rest follow.
+        assert_eq!(ids.first().map(String::as_str), Some("common-utils"));
+        assert_eq!(ids.len(), 3);
     }
 
     #[test]

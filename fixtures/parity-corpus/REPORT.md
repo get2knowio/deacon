@@ -521,7 +521,114 @@ injects + redacts under deacon exactly as under the reference, and the existing
 `.env` path is unchanged. Unit tests cover JSON parsing, whitespace-led detection,
 non-string coercion, and the invalid-JSON error. (`crates/core/src/secrets.rs`.)
 
+## Round 7 — real-world corpus sweep (pinned upstream repos)
+
+First sweep using the pinned real-world fetcher
+(`fixtures/parity-corpus/fetch_realworld_corpus.py`), comparing deacon against
+`@devcontainers/cli` v0.87.0 on actual `devcontainers/images`,
+`devcontainers/templates`, and `microsoft/*` devcontainers. Four real bugs
+fixed; three diff clusters classified as non-bugs (cold-image caveat /
+reference-side failures) so future sweeps don't re-file them.
+
+### 28. read-configuration eagerly resolved `${devcontainerId}` (#219)
+
+Raw `read-configuration` substituted `${devcontainerId}` (a deterministic
+workspace hash) inside mount sources and `containerEnv`, e.g.
+`devcontainer-cargo-cache-${devcontainerId}` → `devcontainer-cargo-cache-4ba8fc…`
+on `astral-sh/ruff`. The reference leaves the token **literal** in both
+`configuration` and `mergedConfiguration` — `${devcontainerId}` is only knowable
+once a container identity exists, which read-configuration never reaches. **Fix:**
+`${devcontainerId}` is now deferred (left literal) whenever no container identity
+is present. A new `SubstitutionContext.resolve_devcontainer_id` flag (default
+`true`, so `up`/`exec`/runtime are unchanged) is set `false` for
+read-configuration's pre-container load + output passes. All other variables
+(`${localWorkspaceFolder}`, `…Basename`) still resolve. Verified byte-identical
+to the reference for raw + merged mounts and `containerEnv`.
+(`crates/core/src/variable.rs`, `config.rs::load_with_overrides_and_substitution`,
+`commands/shared/config_loader.rs`, `commands/read_configuration.rs`.)
+
+### 29. merged read-configuration crashed on `overrideFeatureInstallOrder` (#218)
+
+`read-configuration --include-merged-configuration` on `devcontainers/images`
+PHP (`common-utils`/`node`/`git` OCI features + a local `./apache-config`)
+**crashed**: `Feature 'ghcr.io/devcontainers/features/common-utils' in
+overrideFeatureInstallOrder does not exist in feature set`. read-configuration
+canonicalizes OCI features to their short metadata id (`common-utils`), but the
+override list is written as the full registry ref — and
+`validate_override_order`/`topological_sort` matched by exact string. **Fix:** the
+resolver now translates each `overrideFeatureInstallOrder` entry to the canonical
+`ResolvedFeature.id` before validating/sorting, reusing a new shared
+`FeatureIdResolver` (canonical id / metadata-id alias / source form /
+tag-insensitive OCI match — the same rules `build_dependency_graph` already used,
+now factored out and shared with the `up`/`build` path). Verified: images-php
+merged config now resolves all four features instead of crashing.
+(`crates/core/src/features.rs`.)
+
+### 30. `up` left `${devcontainerId}` literal in image-metadata mounts (#224)
+
+`deacon up` on `microsoft/AgenticCookBook` (`mcr…/universal:2`, nonstandard
+`.devcontainer/.devcontainer.json`) failed at `docker create`:
+`create dind-var-lib-docker-${devcontainerId}: … includes invalid characters`.
+The dind volume mount comes from the image's `devcontainer.metadata` LABEL, which
+is merged into `config.mounts` **after** `up`'s substitution pass
+(`merge_image_metadata_after_image_ready`). `merge_mounts` substituted *feature*
+mounts but not *config* mounts (assuming they were already done upstream), so the
+late-arriving image-metadata mount kept its literal token. **Fix:** `merge_mounts`
+now runs config mounts through the same substitution context as feature mounts
+(idempotent for already-resolved mounts), so the label-based `${devcontainerId}`
+resolves before `docker create`. Verified end-to-end: the dind volume is created
+with a substituted name and the AgenticCookBook container starts.
+(`crates/core/src/mount.rs`.)
+
+### 31. `exec` ignored image-metadata `remoteUser` (#223)
+
+After `deacon up` on `microsoft/vscode-remote-try-node` (`remoteUser: node`
+sourced from the image's `devcontainer.metadata` label, not `Config.User`),
+`deacon exec … id -un` returned **`root`** while the reference returned `node`.
+`up` merges image metadata as a lower-precedence layer before resolving the user;
+`exec` loaded only the raw devcontainer.json and recovered just `deacon.remoteEnv.*`
+container labels, so the metadata-derived `remoteUser` was lost. **Fix:** `exec`
+now re-applies the same image-metadata merge against the running container's image
+(`merge_image_metadata_after_image_ready`) before resolving the effective config.
+Verified: `exec … id -un` returns `node`, matching the reference; an explicit
+config `remoteUser` and CLI `--user` still win (lower-precedence merge).
+(`commands/exec.rs`, `commands/up/merged_config.rs` made `pub(crate)`.)
+
 ## Verified non-bugs
+
+- **Real-world `mergedConfiguration` cold-image cluster is the documented
+  image-metadata caveat (#221).** The repeated ref-only `remoteUser` / `capAdd` /
+  `securityOpt` / `containerEnv` / value-mismatch `init` / `customizations.vscode`
+  diffs across `oss-ruff`, `try-{node,go,java,php,python,rust,…}`, `oss-gh-cli`,
+  `try-cpp`, `try-dotnetcore` are entirely because the base images were **not
+  pulled** in the sweep environment. deacon's image-metadata fetch is best-effort
+  **local-only** (a read-only command never pulls); the reference pulls the image
+  to read its `devcontainer.metadata` label. Confirmed empirically: with
+  `mcr…/javascript-node:1-18-bullseye` present locally, `try-node`'s merged config
+  matches the reference (`remoteUser: node`, `init: false`,
+  `customizations.vscode` length 4 — all previously ref-only). The only residual
+  is `capAdd`/`securityOpt` serialized as `[]` (deacon) vs `null` (reference), a
+  cosmetic empty-vs-null shape difference. Not a merge-logic bug.
+- **`images-java` `customizations.vscode` length 4 vs 5 is the same caveat,
+  build-config variant (#220).** The reference's extra 5th block is an **exact
+  duplicate** of the `git` feature's customizations. images-java is a
+  `build.dockerfile` config whose four resolved features (common-utils, java,
+  node, git) each contribute their vscode block once — deacon emits git once. The
+  reference builds the image and reads the **built image's baked
+  `devcontainer.metadata` label** (which already contains the layered features'
+  customizations) *in addition to* fresh feature resolution, so git's block
+  appears twice. deacon's read-configuration has no built image to inspect (no
+  `config.image`, no container), so it lacks the duplicate. Same root as #221, not
+  a feature-aggregation bug.
+- **Two compose `devcontainers/templates` entries fail in the *reference*, not
+  deacon (#222).** `templates-go-postgres` and `templates-javascript-node-postgres`
+  ship uninstantiated `${templateOption:imageVariant}` in their Dockerfile `FROM`
+  (`mcr…/go:2-${templateOption:imageVariant}`). The reference CLI's merged-config
+  path fails resolving the image (`Tag 'imagevariant}' … failed validation`);
+  deacon's raw read-config is clean (exit 0). These are uninstantiated template
+  inputs — a template must be applied (options filled) before
+  `--include-merged-configuration` is a meaningful comparison. Excluded from the
+  merged real-world sweep as reference-side failures, not deacon regressions.
 
 - **`updateRemoteUserUID` is at parity.** With a Dockerfile user at uid/gid
   `2000:2000`, `updateRemoteUserUID: true` remaps the remote user to the host's

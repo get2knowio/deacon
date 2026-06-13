@@ -73,6 +73,24 @@ fn exec_echo(ws: &Path, marker: &str) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+/// Run `exec --workspace-folder <ws> -- <args...>` and return trimmed stdout.
+fn exec_cmd(ws: &Path, cmd: &[&str]) -> String {
+    let out = deacon()
+        .args(["exec", "--workspace-folder"])
+        .arg(ws)
+        .arg("--")
+        .args(cmd)
+        .stderr(Stdio::inherit())
+        .output()
+        .expect("spawn deacon exec");
+    assert!(
+        out.status.success(),
+        "`deacon exec --workspace-folder {}` failed",
+        ws.display()
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 fn down(ws: &Path) {
     let _ = deacon()
         .args(["down", "--workspace-folder"])
@@ -130,4 +148,73 @@ fn up_then_exec_resolves_dockerfile_config_by_workspace_folder() {
     down(ws.path());
 
     assert_eq!(got, "IDENTITY_DOCKERFILE_OK");
+}
+
+/// #223: when `remoteUser` comes only from the image's `devcontainer.metadata`
+/// LABEL (not the user's devcontainer.json), `exec` must run as that user —
+/// matching what `up` reports — instead of falling back to root. `up` merges
+/// image metadata as a lower-precedence layer; `exec` previously loaded only the
+/// raw config and so lost the metadata-derived user.
+#[test]
+fn exec_honors_remote_user_from_image_metadata() {
+    if !is_docker_available() {
+        eprintln!("skipping: docker unavailable");
+        return;
+    }
+
+    // Build a tiny image with a non-root `appuser` and a devcontainer.metadata
+    // label that sets remoteUser. The devcontainer.json below does NOT set a
+    // user, so the only source of `appuser` is the image label.
+    let tag = "deacon-test-img-metadata-user:latest";
+    let build_dir = TempDir::new().unwrap();
+    std::fs::write(
+        build_dir.path().join("Dockerfile"),
+        "FROM alpine:3.18\n\
+         RUN adduser -D appuser\n\
+         LABEL devcontainer.metadata='[{\"remoteUser\":\"appuser\"}]'\n",
+    )
+    .unwrap();
+    let built = StdCommand::new("docker")
+        .args(["build", "-t", tag, "."])
+        .current_dir(build_dir.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("spawn docker build");
+    assert!(built.success(), "failed to build metadata-label test image");
+
+    let ws = TempDir::new().unwrap();
+    write(
+        ws.path(),
+        ".devcontainer/devcontainer.json",
+        &format!(r#"{{ "name": "md-user", "image": "{tag}", "overrideCommand": true }}"#),
+    );
+
+    // Mirror the issue repro: no UID remapping so the container user stays appuser.
+    let up_status = deacon()
+        .args(["up", "--workspace-folder"])
+        .arg(ws.path())
+        .args([
+            "--remove-existing-container",
+            "--update-remote-user-uid-default",
+            "off",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("spawn deacon up");
+    assert!(up_status.success(), "`deacon up` failed");
+
+    let got = exec_cmd(ws.path(), &["sh", "-lc", "id -un"]);
+    down(ws.path());
+    let _ = StdCommand::new("docker")
+        .args(["rmi", "-f", tag])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    assert_eq!(
+        got, "appuser",
+        "exec must run as the image-metadata remoteUser (#223), got {got:?}"
+    );
 }

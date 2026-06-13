@@ -82,6 +82,7 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
         config_path: args.config_path.as_deref(),
         override_config_path: None,
         secrets_files: &[],
+        resolve_devcontainer_id: true,
     })
     .await?;
     let config_path = initial.config_path.clone();
@@ -107,6 +108,7 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
             config_path: args.config_path.as_deref(),
             override_config_path: None,
             secrets_files: &[],
+            resolve_devcontainer_id: true,
         })
         .await?
         .config
