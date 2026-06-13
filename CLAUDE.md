@@ -374,6 +374,24 @@ Document this checklist in plan.md or PR description to prevent spec drift.
 3. If fixed identifier: leave it out, and add a comment explaining why (see `wait_for`
    for the pattern).
 
+**Config validation philosophy (constitution IV — "strict on mistakes, faithful on the
+unmodeled"):** two-sided, applied consistently.
+- **Modeled fields fail fast on the developer's mistakes.** Typed fields already do this
+  (e.g. `forwardPorts: "3000"` → type error). Object-shaped fields stored as raw JSON MUST
+  match: `features` and `customizations` use `deserialize_object_value` to reject a non-object
+  with a precise message. When you add a new object-shaped `serde_json::Value` field, wire it
+  to that deserializer too — don't leave it lenient (inconsistent strictness is a defect).
+- **Unmodeled fields are preserved, never dropped.** `DevContainerConfig` carries
+  `#[serde(flatten)] pub extra: serde_json::Map<…>` so unknown / future / editor-specific
+  top-level keys round-trip through `read-configuration` instead of being silently dropped
+  (a fidelity loss vs the reference). It is merged (deep, overlay-wins) in `merge_two_configs`
+  and preserved **verbatim** — NOT variable-substituted. Adding any field to
+  `DevContainerConfig` forces updates to the `Default` impl and `merge_two_configs` (both
+  exhaustive); the compiler flags the few non-`..Default` test literals (e.g. `plugins.rs`).
+  Nested-struct unknown-field preservation (HostRequirements/PortAttributes/SecretMetadata)
+  is a deferred follow-up (~43 exhaustive-literal edits); top-level + untyped passthrough
+  (`build`, `gpu`) already cover the real forward-compat surface.
+
 **Dockerfile location parity:** the canonical containers.dev form is nested
 `build.dockerfile`; the top-level `dockerFile` is legacy. Any code resolving the Dockerfile
 must accept BOTH (see `extract_build_config` in `commands/build/mod.rs` and `up`'s
@@ -445,6 +463,15 @@ rediscover-and-investigate loop:
 - **compose path doesn't call `clear_markers()` on `--remove-existing-container`**
   (`commands/up/compose.rs:287`). Doesn't surface functionally because
   `execute_compose_post_create` doesn't consult markers. Parity-only cleanup.
+- **deacon `read-configuration` rejects things the reference CLI accepts** (malformed
+  JSONC, missing/cyclic `extends`, wrong-typed `features`/`forwardPorts`). The reference's
+  `read-configuration` is a **lenient parse-and-echo**: it recovers from malformed JSONC by
+  dropping the broken key, does NOT resolve `extends` (echoes it literally), and keeps
+  wrong-typed values verbatim — deferring all of that to `up`/`build`. deacon validates
+  eagerly and strictly by design (constitution IV: fail fast). These are characterized,
+  intended divergences, NOT bugs — encoded as `deacon-stricter` in the Tier 1c error corpus
+  (`fixtures/parity-corpus/errors/`, `run_tier1_errors.py`). Conversely, deacon preserving
+  unknown fields matches the reference (`both-accept`); silently dropping them WOULD be a bug.
 
 ## Output Streams Contract
 
@@ -553,6 +580,37 @@ re-triggers the check.
 - Test race conditions (reclassify to more conservative nextest group)
 - PR title using a disallowed type (`test`/`style`) — retitle to `chore`
 
+**MSRV / `dtolnay/rust-toolchain` dependabot gotcha:** the `MSRV (cargo check)` job pins
+`dtolnay/rust-toolchain@<rust-version>` (e.g. `@1.95`), where the ref IS the MSRV and MUST
+equal `rust-version` in root `Cargo.toml` `[workspace.package]`. dependabot reads that ref
+as an ordinary action version and tries to bump it — PR #168 pushed it to `@1.100`, a Rust
+release that doesn't exist (`rustup` 404), so the job could never pass. Such bumps are
+**ignored** in `.github/dependabot.yml` (github-actions ecosystem) and MUST NOT be merged.
+Raising the MSRV is a deliberate, in-lockstep decision (bump the pin AND `rust-version`
+together), never an automatic dependency bump.
+
+## Release Process
+
+Releases are **tag-triggered**: pushing a `v*.*.*` tag runs `.github/workflows/release.yml`,
+which verifies (fmt/clippy/lib tests), then builds + publishes binaries for 8 targets
+(Linux gnu/musl × {x86_64, aarch64}, macOS × {x86_64, aarch64}, Windows × {x86_64, aarch64})
+plus per-archive SHA256, an aggregate `SHA256SUMS`, SPDX SBOMs, and SLSA build provenance,
+and deploys the install script to Pages. `-rc`/pre-release tags are flagged prerelease.
+
+To cut a release:
+1. Bump the version in **all four spots** (they must stay in sync): root `Cargo.toml`
+   (`deacon-core` dep `version = …`), `crates/deacon/Cargo.toml`, `crates/core/Cargo.toml`,
+   and refresh `Cargo.lock` (`cargo update -p deacon -p deacon-core`). Land it via a normal
+   PR (CI-gated).
+2. On the merged `main` commit, push an **annotated** tag matching the crate version
+   (`git tag -a vX.Y.Z -m … && git push origin vX.Y.Z`). The workflow **validates the tag
+   equals `crates/deacon/Cargo.toml`'s version** and fails otherwise.
+3. `workflow_dispatch` with a `version` input can re-build/re-publish an existing tag.
+
+Stacked-PR gotcha learned cutting rc.6: merging a base PR with `--delete-branch` **closes**
+any PR stacked on that branch (GitHub does not retarget to `main`). Retarget the child to
+`main` first, or rebase + open a fresh PR.
+
 ## Debugging Tips
 
 **Enable debug logging:**
@@ -587,6 +645,8 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - N/A (filesystem-only config discovery) (014-named-config-search)
 - Rust, Edition 2024, MSRV 1.95 (`workspace.package` in root `Cargo.toml`); `unsafe_code = "deny"` workspace-wide. + `tokio` (rt/process/fs/io-util/net), `clap` (CLI), `serde`/`serde_json` (registry + marker JSON), `tracing` (daemon logging), `thiserror` (core domain errors), `anyhow` (binary boundary), `directories-next` (user-data folder), `libc` (already in core). **New (Unix-only):** `nix` (features `process`, `signal` — safe `setsid()`, `kill()`, `Pid`, process-liveness checks without raw `unsafe`); `fs2` (advisory `flock` on the registry, auto-released on process death). (015-auto-forward-ports)
 - Two host-side JSON files under the user-data folder (default `~/.deacon/`): a host-global `forwarded_ports.json` registry and per-container `forward_daemon_<container_id>.pid` markers; per-container `forward_daemon_<container_id>.log` log files. All writes use the temp-file + `fs::rename` atomic pattern (`crates/core/src/cache/disk.rs::save_index`). (015-auto-forward-ports)
+- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + `reqwest` 0.12 (rustls-tls / ring — **unchanged**), `rustls-native-certs` (new, (016-host-ca-injection)
+- `{user_data_folder}/settings.json` (atomic write, sibling of `trusted_workspaces.json`); (016-host-ca-injection)
 
 ## Recent Changes
 - 009-complete-feature-support: Added Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing

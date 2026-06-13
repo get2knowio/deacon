@@ -1,5 +1,30 @@
 <!--
-Sync Impact Report
+Sync Impact Report (latest: 1.13.1 → 1.14.0)
+- Version change: 1.13.1 → 1.14.0 (MINOR — new normative guidance added to Principle IV; no redefinition)
+- Modified principles:
+  - IV. No Silent Fallbacks — Fail Fast: Added the "Strict on Mistakes, Faithful on the Unmodeled" clause.
+    Modeled fields (typed fields AND object-shaped maps such as `features`/`customizations`) MUST enforce their
+    spec shape consistently and fail fast on a clear authoring mistake; fields the tool does NOT model
+    (unknown / forward-compatible / editor-specific keys) MUST be preserved verbatim, since silently dropping
+    them is itself a forbidden fidelity loss versus the reference. Codifies the validation philosophy applied in
+    the config-fidelity work (unknown-field preservation via `#[serde(flatten)]`; object-strict
+    `features`/`customizations` via a shared deserializer).
+- Templates requiring updates/alignment:
+  - ✅ CLAUDE.md (config field-addition checklist + Verified Non-Bugs updated in lockstep)
+- Follow-up TODOs: None
+
+Prior report (1.13.0 → 1.13.1)
+- Version change: 1.13.0 → 1.13.1 (PATCH — factual correction, no principle redefinition)
+- Modified principles:
+  - V. Idiomatic, Safe Rust: Corrected the Rust edition to match the live workspace — Edition 2021 →
+    Edition 2024 (MSRV 1.95; `unsafe_code = "deny"` workspace-wide). The workspace migrated editions
+    after 1.13.0 was ratified; this amendment ends the doc drift. No normative change to the principle.
+- Templates requiring updates/alignment:
+  - ✅ .specify/templates/plan-template.md (no change — edition is sourced from plan Technical Context)
+  - ✅ CLAUDE.md (already states Edition 2024 / MSRV 1.95)
+- Follow-up TODOs: None
+
+Prior report (1.12.0 → 1.13.0)
 - Version change: 1.12.0 → 1.13.0
 - Modified principles:
   - I. Spec-Parity as Source of Truth: Added upstream devcontainers/spec repository (commit 113500f4,
@@ -146,8 +171,26 @@ if !VALID_CONSISTENCY.contains(&value.as_str()) {
 }
 ```
 
+**Strict on Mistakes, Faithful on the Unmodeled**: Validation is two‑sided.
+1. *Fail fast on the developer's own mistakes.* Fields the tool **models** MUST enforce their spec shape and
+   reject a clear authoring error with a precise, located message rather than recovering and surfacing a
+   confusing late error downstream. This applies to typed fields AND object‑shaped maps stored as raw JSON
+   (e.g. `features`, `customizations` MUST be objects). Strictness MUST be **consistent** across modeled fields —
+   a typed `forwardPorts` and an object `features` are held to the same standard; "caught here but not there" is
+   itself a defect.
+2. *Never drop what you don't model.* Fields the tool does **not** model (unknown / forward‑compatible /
+   editor‑specific keys) MUST be preserved verbatim and passed through — never silently dropped. The spec's
+   extensibility model assumes tools tolerate unknown fields, so dropping one is a forbidden silent fallback (a
+   fidelity loss versus the reference). Unmodeled fields are preserved exactly as authored (e.g. NOT
+   variable‑substituted), since their semantics are unknown.
+
+The guiding rule: **fail fast and precisely where the developer erred; preserve silently where deacon does not
+model the field.** (Implementation: unknown fields round‑trip via `#[serde(flatten)]` on `DevContainerConfig`;
+object‑shaped fields use a shared object‑only deserializer. Differential coverage: the Tier 1c error corpus in
+`fixtures/parity-corpus/errors/`.)
+
 ### V. Idiomatic, Safe Rust
-Code MUST be modern, idiomatic Rust (Edition 2021) with clear module boundaries, no `unsafe` (unless absolutely
+Code MUST be modern, idiomatic Rust (Edition 2024, MSRV 1.95; `unsafe_code = "deny"` workspace-wide) with clear module boundaries, no `unsafe` (unless absolutely
 required and fully justified with documented safety invariants). Error handling: prefer `thiserror` for domain
 errors in core; use `anyhow` only at the binary boundary with meaningful context. Abstractions SHOULD be expressed
 via traits (e.g., `ContainerRuntime`, `RegistryClient`) to enable alternate backends; production binds to real
@@ -430,4 +473,4 @@ This checklist prevents spec drift and reduces rework. Document deviations with 
 - Compliance Review: All PRs MUST include a quick constitution compliance check (in PR body or checklist). Reviewers
   SHALL block merges on violations of Principles I–IX or on missing updates to tests/examples.
 
-**Version**: 1.13.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2026-02-21
+**Version**: 1.14.0 | **Ratified**: 2025-10-31 | **Last Amended**: 2026-06-13
