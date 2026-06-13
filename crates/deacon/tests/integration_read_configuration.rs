@@ -485,7 +485,7 @@ fn test_features_configuration_emitted_in_install_order() -> Result<()> {
     assert!(
         si["resolvedFilePath"]
             .as_str()
-            .map(|p| p.ends_with("features/lib"))
+            .map(|p| p.replace('\\', "/").ends_with("features/lib"))
             .unwrap_or(false),
         "resolvedFilePath should point at the feature dir: {si:#}"
     );

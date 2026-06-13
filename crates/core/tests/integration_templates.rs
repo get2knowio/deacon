@@ -135,9 +135,13 @@ fn test_apply_minimal_template_fixture() -> anyhow::Result<()> {
     assert!(dest_dir.join("README.md").exists());
     assert!(!dest_dir.join("devcontainer-template.json").exists());
 
-    // Check variable substitution in Dockerfile
+    // Check variable substitution in Dockerfile (normalize Windows separators)
     let dockerfile = fs::read_to_string(dest_dir.join("Dockerfile"))?;
-    assert!(dockerfile.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(
+        dockerfile
+            .replace('\\', "/")
+            .contains(&dest_dir.to_string_lossy().replace('\\', "/"))
+    );
     assert!(!dockerfile.contains("${localWorkspaceFolder}"));
 
     // Check variable substitution in README.md
@@ -173,9 +177,13 @@ fn test_apply_template_with_options_fixture() -> anyhow::Result<()> {
     assert!(dest_dir.join("config/app.conf").exists());
     assert!(!dest_dir.join("devcontainer-template.json").exists());
 
-    // Check variable substitution in various files
+    // Check variable substitution in various files (normalize Windows separators)
     let dockerfile = fs::read_to_string(dest_dir.join("Dockerfile"))?;
-    assert!(dockerfile.contains(&dest_dir.to_string_lossy().to_string()));
+    assert!(
+        dockerfile
+            .replace('\\', "/")
+            .contains(&dest_dir.to_string_lossy().replace('\\', "/"))
+    );
     assert!(!dockerfile.contains("${localWorkspaceFolder}"));
 
     let main_py = fs::read_to_string(dest_dir.join("src/main.py"))?;

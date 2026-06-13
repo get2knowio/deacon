@@ -687,9 +687,13 @@ mod tests {
         assert_eq!(result.files_skipped, 0);
         assert!(result.substitution_report.has_substitutions());
 
-        // Verify files were created and substituted
+        // Verify files were created and substituted (normalize Windows separators)
         let dockerfile = fs::read_to_string(dest_dir.join("Dockerfile"))?;
-        assert!(dockerfile.contains(&dest_dir.to_string_lossy().to_string()));
+        assert!(
+            dockerfile
+                .replace('\\', "/")
+                .contains(&dest_dir.to_string_lossy().replace('\\', "/"))
+        );
         assert!(!dockerfile.contains("${localWorkspaceFolder}"));
 
         let config = fs::read_to_string(dest_dir.join("config.json"))?;
@@ -786,12 +790,13 @@ mod tests {
         assert!(dest_dir.join("src/main.rs").exists());
         assert!(dest_dir.join("config/app.conf").exists());
 
-        // Verify substitution in subdirectory files
+        // Verify substitution in subdirectory files (normalize Windows separators)
+        let dest_norm = dest_dir.to_string_lossy().replace('\\', "/");
         let main_rs = fs::read_to_string(dest_dir.join("src/main.rs"))?;
-        assert!(main_rs.contains(&dest_dir.to_string_lossy().to_string()));
+        assert!(main_rs.replace('\\', "/").contains(&dest_norm));
 
         let app_conf = fs::read_to_string(dest_dir.join("config/app.conf"))?;
-        assert!(app_conf.contains(&dest_dir.to_string_lossy().to_string()));
+        assert!(app_conf.replace('\\', "/").contains(&dest_norm));
 
         Ok(())
     }

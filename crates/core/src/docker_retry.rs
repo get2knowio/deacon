@@ -552,6 +552,9 @@ mod tests {
     /// drains. We run against `/usr/bin/true` (present on both Linux and macOS
     /// runners; `/bin/true` is absent on macOS GHA images) so that the real
     /// subprocess succeeds on the recovery attempt (no Docker daemon required).
+    // Unix-only: drives the real subprocess path via `/usr/bin/true`, which does
+    // not exist on Windows (the spawn fails before the retry logic is exercised).
+    #[cfg(unix)]
     #[tokio::test]
     async fn run_build_recovers_after_transient_failures() {
         let _guard = HOOK_LOCK.lock().await;
@@ -602,6 +605,8 @@ mod tests {
     }
 
     /// First attempt succeeds (no failures injected) — no retries, no env hook.
+    // Unix-only: spawns `/usr/bin/true`, absent on Windows.
+    #[cfg(unix)]
     #[tokio::test]
     async fn run_build_succeeds_on_first_attempt_without_hook() {
         let _guard = HOOK_LOCK.lock().await;
