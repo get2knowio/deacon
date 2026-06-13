@@ -277,6 +277,14 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y podman
         podman version
+        # ROOT-CAUSE FIX CANDIDATE (#30): under the default systemd cgroup
+        # manager + crun + cgroup v2, the transient systemd scopes created for
+        # each `podman exec` session can cascade-tear-down the CONTAINER's own
+        # scope, so a healthy container vanishes ("No such container") after
+        # deacon's env-probe exec burst — failing every up->exec->lifecycle
+        # test. cgroupfs avoids the per-exec transient-scope teardown.
+        mkdir -p ~/.config/containers
+        printf '[engine]\ncgroup_manager = "cgroupfs"\n' > ~/.config/containers/containers.conf
         # deacon's PodmanRuntime drives the `podman` CLI directly (no socket).
         # Sanity-check rootless pull + run before the suite.
         podman run --rm docker.io/library/alpine:3.18 echo "podman-ok"
@@ -310,13 +318,12 @@ jobs:
         DEACON_CONTAINER_RUNTIME=podman RUST_LOG=deacon=debug,deacon_core=debug \
           "$BIN" up --workspace-folder "$WS" --mount-workspace-git-root false
         echo "=== deacon up exit: $? ==="
-        sleep 1
+        sleep 3   # let any teardown event flush before killing the stream
         kill "$EVPID" 2>/dev/null
         echo "=== podman ps -a (did the container survive?) ==="
         podman ps -a --format '{{.ID}} {{.Names}} {{.Status}}'
-        echo "=== container lifecycle events (died vs remove vs cleanup) ==="
-        grep -iE "type=container" /tmp/podman_events.log \
-          | grep -iE "create|init|start|died|remove|cleanup|stop|exec" | tail -50
+        echo "=== ALL container lifecycle events (look for died/remove/cleanup/stop) ==="
+        grep -iE "type=container" /tmp/podman_events.log | tail -80
         podman rm -f -a 2>&1 | tail -2 || true
 
     - name: Acquire GHCR bearer token (read-only)
