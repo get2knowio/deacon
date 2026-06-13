@@ -1,0 +1,4 @@
+{
+  "description": "Workspace folder with NO devcontainer config at all. Both CLIs must reject — a true 'both-reject' agreement case that guards deacon doesn't silently invent an empty config.",
+  "expect": "both-reject"
+}

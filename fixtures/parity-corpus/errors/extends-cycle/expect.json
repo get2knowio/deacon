@@ -1,0 +1,4 @@
+{
+  "description": "extends chain forms a cycle (a -> b -> a). deacon resolves eagerly and detects the loop (no stack overflow — good); the reference does not resolve extends at read-configuration so it accepts. Characterized divergence: eager (deacon) vs lazy (reference) extends resolution.",
+  "expect": "deacon-stricter"
+}

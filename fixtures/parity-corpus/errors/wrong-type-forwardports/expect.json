@@ -1,0 +1,4 @@
+{
+  "description": "forwardPorts is a bare string instead of an array. deacon deserializes into a typed struct and rejects the type mismatch; the reference keeps the raw JSON and accepts. Characterized divergence: typed (deacon) vs untyped (reference) read-configuration. Note deacon is NOT uniformly strict here — see wrong-type-features, which deacon accepts.",
+  "expect": "deacon-stricter"
+}

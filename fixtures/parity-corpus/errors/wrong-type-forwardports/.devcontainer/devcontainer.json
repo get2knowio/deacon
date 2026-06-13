@@ -1,0 +1,5 @@
+{
+	"name": "wrong-type-forwardports",
+	"image": "alpine:3.18",
+	"forwardPorts": "3000"
+}

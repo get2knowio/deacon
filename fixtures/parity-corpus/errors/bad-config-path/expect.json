@@ -1,0 +1,5 @@
+{
+  "description": "Explicit --config points at a file that does not exist. Both CLIs must reject (the file was named explicitly, so silent discovery fallback is wrong).",
+  "expect": "both-reject",
+  "config": "nope.json"
+}

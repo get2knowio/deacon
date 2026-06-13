@@ -18,6 +18,31 @@ kind of thing worth calling out in a blog post or on the project page.
   user can drop in the `.env` file they already have for `docker`/`compose` instead of
   hand-converting it to JSON. (`crates/core/src/secrets.rs`.)
 
+- **Config validation that fails fast on *your* mistakes, but never loses *your* data.**
+  Deacon applies one consistent rule the reference CLI does not: **fail fast and
+  precisely where the developer made a mistake; preserve silently where deacon
+  doesn't model the field.**
+  - *Precise early errors instead of confusing late ones.* The reference's
+    `read-configuration` is a lenient parse-and-echo: it recovers from malformed
+    JSONC by silently dropping the broken property, and accepts type errors like
+    `forwardPorts: "3000"` or `features: "<ref>"` verbatim. Those mistakes don't
+    vanish — they resurface much later as a misleading downstream failure (e.g. a
+    dropped `"image":` becomes *"No image information specified"* at build time,
+    pointing nowhere near the typo). Deacon rejects them up front with the exact
+    cause and location (`JSONC parsing error: … line 6`, `expected an object (map),
+    found a string`), and does so *consistently* across modeled fields — typed
+    fields (`forwardPorts`) and object-shaped fields (`features`, `customizations`)
+    are all held to their spec shape, so there's no "deacon caught this one but not
+    that one" surprise.
+  - *Forward-compatible field preservation.* For fields deacon does **not** model
+    (new spec properties, editor-specific keys), it neither rejects (which would
+    break a config that's valid in VS Code / the reference) nor silently drops them
+    — it passes them through verbatim, matching the reference's fidelity. The spec's
+    extensibility model assumes tools tolerate unknown fields; deacon honors that.
+    (`crates/core/src/config.rs` — strict `deserialize_object_value` for
+    `features`/`customizations`; `#[serde(flatten)] extra` round-trips unknown
+    top-level fields. Differential coverage: `fixtures/parity-corpus/errors/`.)
+
 ## Capability
 
 - **`extends` is resolved for `up` and `read-configuration --include-merged-configuration`.**
