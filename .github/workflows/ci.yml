@@ -115,9 +115,14 @@ jobs:
             runs_on: ubuntu-latest
           - os: macos
             runs_on: macos-14
-          # Windows disabled until bespoke runner with Docker support is available
-          # - os: windows
-          #   runs_on: windows-latest
+          # Windows runs the dev-fast profile, which already EXCLUDES Docker /
+          # smoke / testcontainers tests — so no Docker daemon is required here.
+          # This exercises the platform-agnostic logic (config parse/merge,
+          # substitution, OCI ref parsing, path handling) on Windows, the binary
+          # we ship but otherwise never test. Container behavior on Windows
+          # remains unverified (no Docker on the runner).
+          - os: windows
+            runs_on: windows-latest
     steps:
     - name: Free disk space (Ubuntu)
       if: matrix.os == 'ubuntu'
