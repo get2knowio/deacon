@@ -31,6 +31,11 @@ pub struct ForwardDaemonArgs {
     pub ports_events: bool,
     /// Docker CLI path.
     pub docker_path: String,
+    /// Parent-resolved browser program for `onAutoForward` auto-open
+    /// (`DEACON_BROWSER` > settings); `None` ⇒ OS default opener.
+    pub browser: Option<String>,
+    /// Whether browser auto-open is enabled (parent's headless/CI/TTY decision).
+    pub auto_open: bool,
 }
 
 /// Detach, redirect stdio to the per-container log, and run the supervisor loop.
@@ -57,6 +62,8 @@ pub async fn run_forward_daemon(args: ForwardDaemonArgs) -> anyhow::Result<()> {
         config_path: args.config_path,
         ports_events: args.ports_events,
         docker_path: args.docker_path,
+        browser: args.browser,
+        auto_open: args.auto_open,
     };
 
     daemon::run(config)

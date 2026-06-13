@@ -305,24 +305,26 @@ impl PortForwardingManager {
                     );
                 }
                 OnAutoForward::OpenBrowser | OnAutoForward::OpenBrowserOnce => {
-                    // `openBrowserOnce` differs from `openBrowser` only in an
-                    // editor-UX detail (open the browser the first time vs every
-                    // time). A headless CLI has no browser, so both are surfaced
-                    // the same way; the distinction is moot here.
+                    // Report availability + the URL. The actual browser launch
+                    // happens in the `up` caller (which owns the machine-owner
+                    // browser resolution + headless gate); this core path stays
+                    // pure reporting. `openBrowserOnce` vs `openBrowser` is moot
+                    // on this one-shot static path.
                     info!(
-                        "Port {} is now available - would open browser at {}://localhost:{}",
+                        "Port {} is now available at {}://localhost:{}",
                         event.port,
                         url_scheme,
                         event.local_port.unwrap_or(event.port)
                     );
-                    // In a real implementation, this would open the browser
                 }
                 OnAutoForward::OpenPreview => {
+                    // No preview pane in a CLI; surface availability only (the
+                    // user chose notify-only semantics for openPreview).
                     info!(
-                        "Port {} is now available - would open preview panel",
-                        event.port
+                        "Port {} is now available at localhost:{}",
+                        event.port,
+                        event.local_port.unwrap_or(event.port)
                     );
-                    // In a real implementation, this would open a preview panel
                 }
                 OnAutoForward::Silent => {
                     // Do nothing - silent forwarding

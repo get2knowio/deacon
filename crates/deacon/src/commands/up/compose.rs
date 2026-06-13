@@ -420,6 +420,8 @@ pub(crate) async fn execute_compose_up(
             &args.redaction_config,
             &args.secret_registry,
             &args.docker_path,
+            args.auto_forward,
+            args.user_data_folder.as_deref(),
         )
         .await?;
     }

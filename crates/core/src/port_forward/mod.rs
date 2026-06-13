@@ -130,9 +130,13 @@ pub enum ForwardOrigin {
 pub struct ResolvedPortAttributes {
     /// Human label for reporting.
     pub label: Option<String>,
-    /// `ignore` / `silent` / `notify` (v1); `openBrowser`/`openPreview`
-    /// are accepted but treated as `notify`.
+    /// The real `onAutoForward` action. `openBrowser`/`openBrowserOnce` drive
+    /// browser auto-open in the daemon; `openPreview` (no CLI analog) and the
+    /// rest are surfaced but do not open a browser.
     pub on_auto_forward: OnAutoForward,
+    /// `protocol` hint (`http`/`https`) used to build the auto-open URL and the
+    /// PORT_EVENT scheme. `None` ⇒ `http`.
+    pub protocol: Option<String>,
 }
 
 impl Default for ResolvedPortAttributes {
@@ -140,6 +144,7 @@ impl Default for ResolvedPortAttributes {
         ResolvedPortAttributes {
             label: None,
             on_auto_forward: OnAutoForward::Notify,
+            protocol: None,
         }
     }
 }

@@ -733,6 +733,8 @@ pub(crate) async fn execute_container_up(
             runtime,
             &args.redaction_config,
             &args.secret_registry,
+            args.auto_forward,
+            args.user_data_folder.as_deref(),
         )
         .await?;
     }

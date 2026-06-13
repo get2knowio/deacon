@@ -774,6 +774,13 @@ pub enum Commands {
         /// Emit machine-readable PORT_EVENT lines as ports come and go.
         #[arg(long)]
         ports_events: bool,
+        /// Parent-resolved browser program for onAutoForward auto-open
+        /// (absent ⇒ OS default opener).
+        #[arg(long)]
+        browser: Option<String>,
+        /// Suppress browser auto-open (parent decided headless/CI/no-TTY).
+        #[arg(long)]
+        no_auto_open: bool,
     },
 }
 
@@ -1776,6 +1783,8 @@ impl Cli {
                 workspace,
                 declared_port,
                 ports_events,
+                browser,
+                no_auto_open,
             }) => {
                 crate::commands::forward_daemon::run_forward_daemon(
                     crate::commands::forward_daemon::ForwardDaemonArgs {
@@ -1786,6 +1795,8 @@ impl Cli {
                         config_path: self.config.clone(),
                         ports_events,
                         docker_path: self.docker_path.clone(),
+                        browser,
+                        auto_open: !no_auto_open,
                     },
                 )
                 .await

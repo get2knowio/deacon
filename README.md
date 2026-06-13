@@ -125,12 +125,31 @@ deacon down                        # reaps the forwarder and releases its host p
 How it works: the forwarder polls the container's listening sockets and relays
 bytes via `docker exec` into the container's network namespace. Declared ports
 (`forwardPorts`/`appPort`/`--forward-port`) forward eagerly and are not also
-`-p` published; `portsAttributes.onAutoForward` (`ignore`/`silent`/`notify`) is
+`-p` published; `portsAttributes.onAutoForward`
+(`ignore`/`silent`/`notify`/`openBrowser`/`openBrowserOnce`/`openPreview`) is
 honored; compose `"service:port"` declared ports are forwarded too.
 
+**Auto-open a browser.** A port whose `onAutoForward` is `openBrowser` (every
+time it forwards) or `openBrowserOnce` (the first time per forwarder session)
+opens your browser at the forwarded loopback URL. `openPreview` has no CLI
+analog and is treated as `notify`. Which browser is a **machine-owner** choice,
+resolved with precedence:
+
+```bash
+DEACON_BROWSER=firefox deacon up --auto-forward     # env var (highest)
+# or persist it: ~/.deacon/settings.json  ->  { "browser": "firefox" }
+# else the OS default opener (xdg-open / open / start) is used.
+```
+
+The value is a bare program (the URL is appended as the final argument — no
+shell). Auto-open is **skipped in CI / non-TTY sessions** unless a browser is
+explicitly configured. Nothing in `devcontainer.json` can choose the program;
+the workspace can only *request* an open via `onAutoForward` (a loopback URL).
+
 **Limits (v1):** loopback-only (never `0.0.0.0`/LAN), TCP only, Unix hosts only,
-and best-effort — if forwarding can't start you get a clear warning but `up`
-still succeeds. Forwarder logs: `~/.deacon/forward_daemon_<container_id>.log`.
+and best-effort — if forwarding (or the browser launch) can't start you get a
+clear warning but `up` still succeeds. Forwarder logs:
+`~/.deacon/forward_daemon_<container_id>.log`.
 
 ## Corporate CA injection (`--inject-host-ca`)
 

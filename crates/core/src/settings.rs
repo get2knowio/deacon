@@ -32,6 +32,12 @@ pub struct Settings {
     /// Absent ⇒ no setting (the lowest-precedence activation source).
     #[serde(rename = "hostCa", default, skip_serializing_if = "Option::is_none")]
     pub host_ca: Option<String>,
+
+    /// Browser program for port auto-open (`onAutoForward: openBrowser`). A bare
+    /// program name/path (the forwarded URL is appended). Absent ⇒ fall back to
+    /// `DEACON_BROWSER` then the OS default opener. See [`crate::browser`].
+    #[serde(rename = "browser", default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
 }
 
 impl Settings {
@@ -121,6 +127,20 @@ mod tests {
         std::fs::write(tmp.path().join("settings.json"), "{}").unwrap();
         let settings = Settings::load(Some(tmp.path())).unwrap();
         assert!(settings.host_ca.is_none());
+        assert!(settings.browser.is_none());
+    }
+
+    #[test]
+    fn browser_parses_alongside_host_ca() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("settings.json"),
+            r#"{ "hostCa": "auto", "browser": "firefox" }"#,
+        )
+        .unwrap();
+        let settings = Settings::load(Some(tmp.path())).unwrap();
+        assert_eq!(settings.host_ca.as_deref(), Some("auto"));
+        assert_eq!(settings.browser.as_deref(), Some("firefox"));
     }
 
     #[test]

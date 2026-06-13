@@ -6,11 +6,45 @@
 
 use anyhow::Result;
 use deacon_core::compose::{ComposeManager, ComposeProject};
-use deacon_core::config::DevContainerConfig;
+use deacon_core::config::{DevContainerConfig, OnAutoForward};
 use deacon_core::docker::Docker;
-use deacon_core::ports::PortForwardingManager;
+use deacon_core::ports::{PortEvent, PortForwardingManager};
 use deacon_core::runtime::ContainerRuntimeImpl;
+use std::path::Path;
 use tracing::{debug, instrument, warn};
+
+use super::forward::{auto_open_enabled, resolve_browser_cli};
+
+/// Open the machine owner's browser for static-path port events whose
+/// `onAutoForward` is `openBrowser`/`openBrowserOnce` and which have a reachable
+/// host port (i.e. `-p`-published). Suppressed entirely when `--auto-forward` is
+/// active (the forwarder daemon owns browser-opening). Best-effort — never
+/// fails `up`; only opens a loopback URL with a machine-owner-chosen program.
+fn open_browsers_for_events(events: &[PortEvent], auto_forward: bool, udf: Option<&Path>) {
+    if auto_forward {
+        return; // the --auto-forward daemon is the single opener
+    }
+    let browser = resolve_browser_cli(udf);
+    if !auto_open_enabled(browser.is_some()) {
+        return;
+    }
+    for ev in events {
+        let opens = matches!(
+            ev.on_auto_forward,
+            Some(OnAutoForward::OpenBrowser) | Some(OnAutoForward::OpenBrowserOnce)
+        );
+        // Only open when the port is actually reachable on the host (a `-p`
+        // mapping gave it a host `local_port`).
+        let Some(host_port) = ev.local_port.filter(|_| opens) else {
+            continue;
+        };
+        let scheme = ev.protocol.as_deref().unwrap_or("http");
+        let url = format!("{scheme}://127.0.0.1:{host_port}");
+        if let Err(e) = deacon_core::browser::open_url_blocking(browser.as_deref(), &url) {
+            debug!(error = %e, url = %url, "static-path browser open failed (best-effort)");
+        }
+    }
+}
 
 /// Handle port events for compose projects
 #[instrument(skip(config, project, redaction_config, secret_registry, docker_path))]
@@ -20,6 +54,8 @@ pub(crate) async fn handle_port_events(
     redaction_config: &deacon_core::redaction::RedactionConfig,
     secret_registry: &deacon_core::redaction::SecretRegistry,
     docker_path: &str,
+    auto_forward: bool,
+    user_data_folder: Option<&Path>,
 ) -> Result<()> {
     debug!("Processing port events for compose project");
 
@@ -79,6 +115,7 @@ pub(crate) async fn handle_port_events(
                 events.len(),
                 service.name
             );
+            open_browsers_for_events(&events, auto_forward, user_data_folder);
             total_events += events.len();
         }
     }
@@ -98,6 +135,8 @@ pub(crate) async fn handle_container_port_events(
     runtime: &ContainerRuntimeImpl,
     redaction_config: &deacon_core::redaction::RedactionConfig,
     secret_registry: &deacon_core::redaction::SecretRegistry,
+    auto_forward: bool,
+    user_data_folder: Option<&Path>,
 ) -> Result<()> {
     debug!("Processing port events for container");
 
@@ -128,6 +167,7 @@ pub(crate) async fn handle_container_port_events(
     );
 
     debug!("Emitted {} port events", events.len());
+    open_browsers_for_events(&events, auto_forward, user_data_folder);
 
     Ok(())
 }
