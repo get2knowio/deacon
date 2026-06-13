@@ -2564,6 +2564,7 @@ impl ConfigLoader {
         override_config_path: Option<&Path>,
         secrets: Option<&crate::secrets::SecretsCollection>,
         workspace_path: &Path,
+        resolve_devcontainer_id: bool,
     ) -> Result<(DevContainerConfig, crate::variable::SubstitutionReport)> {
         debug!(
             "Loading configuration with overrides and substitution from {}",
@@ -2596,6 +2597,10 @@ impl ConfigLoader {
 
         // Apply variable substitution with secrets
         let mut substitution_context = crate::variable::SubstitutionContext::new(workspace_path)?;
+        // `read-configuration` defers `${devcontainerId}` to a container-aware
+        // pass (it has no container identity yet), so it asks us to leave the
+        // token literal. Runtime callers (`up`/`exec`/…) keep the default.
+        substitution_context.resolve_devcontainer_id = resolve_devcontainer_id;
 
         // When the config sets an explicit `workspaceFolder`, that IS the
         // container workspace folder, so `${containerWorkspaceFolder}` can be
@@ -3755,6 +3760,7 @@ mod tests {
                 None,
                 None,
                 temp_dir.path(),
+                true,
             ))
             .unwrap();
         assert_eq!(

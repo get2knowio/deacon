@@ -618,6 +618,7 @@ impl ContainerEnvironmentProber {
                 container_env: Some(probed_env.clone()),
                 feature_vars: HashMap::new(),
                 template_options: None,
+                resolve_devcontainer_id: true,
             };
             let mut report = crate::variable::SubstitutionReport::new();
             for (k, v_opt) in remote {

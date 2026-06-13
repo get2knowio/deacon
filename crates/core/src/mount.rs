@@ -451,6 +451,25 @@ pub fn merge_mounts(
 
     // Process config mounts (these override features)
     for mount_value in config_mounts {
+        // Config mounts are normally substituted upstream during config load.
+        // But mounts contributed by the image's `devcontainer.metadata` LABEL
+        // are merged in *after* that pass (see
+        // `merge_image_metadata_after_image_ready`), so they can still carry
+        // literal tokens like `${devcontainerId}`. Run them through the same
+        // substitution context as feature mounts before parsing — substitution
+        // is idempotent, so already-resolved config mounts are unaffected (#224).
+        let substituted_mount_value: serde_json::Value;
+        let mount_value = if let Some(ctx) = substitution_context {
+            let mut report = crate::variable::SubstitutionReport::new();
+            substituted_mount_value = crate::variable::VariableSubstitution::substitute_json_value(
+                mount_value,
+                ctx,
+                &mut report,
+            );
+            &substituted_mount_value
+        } else {
+            mount_value
+        };
         let mount_str = match mount_value {
             serde_json::Value::String(s) => s.clone(),
             serde_json::Value::Object(obj) => {
@@ -1741,6 +1760,37 @@ mod merge_mounts_tests {
         assert!(
             mount.contains("dind-var-lib-docker-abc123def456"),
             "expected substituted volume name; got: {mount}"
+        );
+        assert!(
+            !mount.contains("${devcontainerId}"),
+            "literal token must not survive into docker mount string"
+        );
+    }
+
+    #[test]
+    fn test_merge_mounts_config_mount_with_devcontainer_id_substitution() {
+        // Per #224: a config mount source containing ${devcontainerId} (e.g.
+        // contributed by an image's devcontainer.metadata label, which is
+        // merged into config.mounts AFTER the up substitution pass) must also
+        // be substituted before reaching Docker. Substitution is idempotent, so
+        // already-resolved config mounts are unaffected.
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut ctx = crate::variable::SubstitutionContext::new(temp.path()).unwrap();
+        ctx.devcontainer_id = "abc123def456".to_string();
+
+        let config_mounts = vec![serde_json::json!({
+            "source": "dind-var-lib-docker-${devcontainerId}",
+            "target": "/var/lib/docker",
+            "type": "volume"
+        })];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features, Some(&ctx)).unwrap();
+        assert_eq!(result.mounts.len(), 1);
+        let mount = &result.mounts[0];
+        assert!(
+            mount.contains("dind-var-lib-docker-abc123def456"),
+            "expected substituted config volume name; got: {mount}"
         );
         assert!(
             !mount.contains("${devcontainerId}"),

@@ -523,6 +523,7 @@ where
                     config_path: args.config_path.as_deref(),
                     override_config_path: args.override_config_path.as_deref(),
                     secrets_files: &args.secrets_files,
+                    resolve_devcontainer_id: true,
                 })
                 .await
                 .map_err(map_config_error)?,
@@ -611,15 +612,30 @@ where
         if let Some(config_ctx) = resolved_config.as_ref() {
             let resolved = match docker_client.inspect_container(&container_id).await {
                 Ok(Some(container_info)) => {
+                    // #223: `up` resolves `remoteUser` (and other fields) from the
+                    // image's `devcontainer.metadata` LABEL as a lower-precedence
+                    // layer. `exec` only loads the raw devcontainer.json, so a
+                    // remoteUser that lives solely in image metadata (e.g.
+                    // vscode-remote-try-node's `node`) would be lost and exec would
+                    // fall back to `root`. Re-apply that same image-metadata merge
+                    // against the running container's image before resolving the
+                    // effective config, so exec runs as the same user `up` reported.
+                    let base =
+                        crate::commands::up::merged_config::merge_image_metadata_after_image_ready(
+                            docker_client,
+                            &container_info.image,
+                            config_ctx.config.clone(),
+                        )
+                        .await;
                     match deacon_core::config::ConfigMerger::resolve_effective_config(
-                        &config_ctx.config,
+                        &base,
                         Some(&container_info.labels),
                         config_ctx.workspace_folder.as_path(),
                     ) {
                         Ok((resolved_config, _report)) => resolved_config,
                         Err(e) => {
                             tracing::warn!("Failed to resolve effective config with labels: {}", e);
-                            config_ctx.config.clone()
+                            base
                         }
                     }
                 }

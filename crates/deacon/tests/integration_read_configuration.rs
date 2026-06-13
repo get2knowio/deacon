@@ -230,6 +230,48 @@ fn test_acceptance_devcontainer_id_order_independence() -> Result<()> {
     Ok(())
 }
 
+/// Parity (#219): without a container identity (plain --workspace-folder,
+/// no --id-label/--container-id), `${devcontainerId}` must stay LITERAL in the
+/// raw `configuration` output — including inside mount sources and containerEnv
+/// — while other variables (e.g. `${localWorkspaceFolderBasename}`) still
+/// resolve. The reference CLI defers `${devcontainerId}` to a container-aware
+/// pass it never reaches in read-configuration.
+#[test]
+fn test_devcontainer_id_left_literal_without_container() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+        "name": "test-literal-id",
+        "image": "ubuntu:22.04",
+        "mounts": [
+            { "source": "vol-${devcontainerId}", "target": "/data", "type": "volume" }
+        ],
+        "containerEnv": {
+            "DC_ID": "${devcontainerId}",
+            "BASENAME": "${localWorkspaceFolderBasename}"
+        }
+    }"#,
+    )?;
+
+    let result = helper.run_with_workspace(&[])?;
+
+    assert_eq!(
+        result["configuration"]["mounts"][0]["source"], "vol-${devcontainerId}",
+        "mount source must keep ${{devcontainerId}} literal without a container"
+    );
+    assert_eq!(
+        result["configuration"]["containerEnv"]["DC_ID"], "${devcontainerId}",
+        "containerEnv must keep ${{devcontainerId}} literal without a container"
+    );
+    // Sanity: other variables still resolve in the same output.
+    assert_ne!(
+        result["configuration"]["containerEnv"]["BASENAME"], "${localWorkspaceFolderBasename}",
+        "other variables must still resolve"
+    );
+
+    Ok(())
+}
+
 /// Test acceptance: with --container-id and --include-merged-configuration, error if inspect fails (no fallback)
 #[test]
 fn test_acceptance_container_id_with_merged_config_errors_on_inspect_failure() -> Result<()> {

@@ -556,6 +556,7 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
         config_path: args.config_path.as_deref(),
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
+        resolve_devcontainer_id: true,
     })
     .await?;
 

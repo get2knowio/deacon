@@ -64,6 +64,7 @@ UNUSED_SECRET=ignored-value
         Some(&override_config_path),
         Some(&secrets),
         temp_dir.path(),
+        true,
     )
     .await?;
 

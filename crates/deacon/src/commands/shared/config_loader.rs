@@ -19,6 +19,11 @@ pub struct ConfigLoadArgs<'a> {
     pub override_config_path: Option<&'a Path>,
     /// Secrets file paths (--secrets-file)
     pub secrets_files: &'a [PathBuf],
+    /// Whether `${devcontainerId}` should be resolved during load-time
+    /// substitution. Runtime commands (`up`/`exec`/`build`/…) pass `true`;
+    /// `read-configuration` passes `false` so the token stays literal in its
+    /// pre-container output, matching the reference CLI.
+    pub resolve_devcontainer_id: bool,
 }
 
 /// Loaded configuration and supporting context.
@@ -93,6 +98,7 @@ pub async fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
         override_config_path.as_deref(),
         secrets.as_ref(),
         &workspace_folder,
+        args.resolve_devcontainer_id,
     )
     .await?;
 
@@ -125,6 +131,7 @@ mod tests {
             config_path: None,
             override_config_path: Some(override_path.as_path()),
             secrets_files: &[],
+            resolve_devcontainer_id: true,
         })
         .await
         .unwrap();
@@ -142,6 +149,7 @@ mod tests {
             config_path: None,
             override_config_path: None,
             secrets_files: &[],
+            resolve_devcontainer_id: true,
         })
         .await
         .unwrap_err();
@@ -177,6 +185,7 @@ mod tests {
             config_path: Some(config_path.as_path()),
             override_config_path: None,
             secrets_files: &[],
+            resolve_devcontainer_id: true,
         })
         .await
         .unwrap();
@@ -214,6 +223,7 @@ mod tests {
             config_path: Some(explicit_config.as_path()),
             override_config_path: None,
             secrets_files: &[],
+            resolve_devcontainer_id: true,
         })
         .await
         .unwrap();
@@ -235,6 +245,7 @@ mod tests {
             config_path: Some(nonexistent_path.as_path()),
             override_config_path: None,
             secrets_files: &[],
+            resolve_devcontainer_id: true,
         })
         .await
         .unwrap_err();
