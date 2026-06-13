@@ -750,6 +750,20 @@ impl<T: Docker> Docker for &T {
     }
 }
 
+/// Which container runtime a `CliRuntime` is driving.
+///
+/// Lives here (rather than reusing `runtime::RuntimeKind`) so the low-level
+/// `docker.rs` module does not depend on the higher-level `runtime.rs`. It
+/// gates podman-specific command construction (e.g. image-ref qualification).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RuntimeFlavor {
+    /// Docker (or a Docker-compatible CLI).
+    #[default]
+    Docker,
+    /// Podman.
+    Podman,
+}
+
 /// Generic CLI-based container runtime implementation
 ///
 /// This can be used for both Docker and Podman runtimes since they share
@@ -758,6 +772,8 @@ impl<T: Docker> Docker for &T {
 pub struct CliRuntime {
     /// Container runtime CLI binary path (e.g., "docker" or "podman")
     runtime_path: String,
+    /// Which runtime this drives — gates podman-specific behavior.
+    flavor: RuntimeFlavor,
 }
 
 impl CliRuntime {
@@ -765,6 +781,7 @@ impl CliRuntime {
     pub fn docker() -> Self {
         Self {
             runtime_path: "docker".to_string(),
+            flavor: RuntimeFlavor::Docker,
         }
     }
 
@@ -772,12 +789,38 @@ impl CliRuntime {
     pub fn podman() -> Self {
         Self {
             runtime_path: "podman".to_string(),
+            flavor: RuntimeFlavor::Podman,
         }
     }
 
-    /// Create a new CliRuntime with custom runtime binary path
+    /// Create a new CliRuntime with a custom runtime binary path.
+    ///
+    /// The flavor is inferred from the binary basename (`*podman*` → Podman,
+    /// otherwise Docker). Use [`CliRuntime::with_runtime_path_and_flavor`] when
+    /// the flavor is known and the path is non-standard.
     pub fn with_runtime_path(runtime_path: String) -> Self {
-        Self { runtime_path }
+        let flavor = if std::path::Path::new(&runtime_path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|name| name.contains("podman"))
+            .unwrap_or(false)
+        {
+            RuntimeFlavor::Podman
+        } else {
+            RuntimeFlavor::Docker
+        };
+        Self {
+            runtime_path,
+            flavor,
+        }
+    }
+
+    /// Create a new CliRuntime with an explicit binary path and flavor.
+    pub fn with_runtime_path_and_flavor(runtime_path: String, flavor: RuntimeFlavor) -> Self {
+        Self {
+            runtime_path,
+            flavor,
+        }
     }
 
     /// Create a new CliRuntime instance (defaults to Docker)
@@ -793,6 +836,88 @@ impl CliRuntime {
     /// This is an alias for `CliRuntime::with_runtime_path()` provided for backward compatibility.
     pub fn with_path(runtime_path: String) -> Self {
         Self::with_runtime_path(runtime_path)
+    }
+
+    /// Whether this runtime is podman (gates podman-specific command construction).
+    pub fn is_podman(&self) -> bool {
+        self.flavor == RuntimeFlavor::Podman
+    }
+
+    /// The runtime CLI binary path (e.g. "docker" or "podman").
+    pub fn runtime_path(&self) -> &str {
+        &self.runtime_path
+    }
+
+    /// Whether an image reference is already fully qualified (carries an
+    /// explicit registry, the `localhost/` repository, or is a bare digest).
+    ///
+    /// Bare short names like `alpine:3.19`, `node:18`, `deacon-build:abc`, and
+    /// even `library/alpine` are NOT qualified — under podman these need
+    /// rewriting (see [`CliRuntime::qualify_image_ref`]).
+    fn is_already_qualified(image_ref: &str) -> bool {
+        if image_ref.starts_with("localhost/") {
+            return true;
+        }
+        // Bare digest reference (e.g. `sha256:deadbeef…`).
+        if image_ref.starts_with("sha256:") {
+            return true;
+        }
+        // A registry-qualified ref has a first path segment that looks like a
+        // host (`ghcr.io/…`, `mcr.microsoft.com/…`, `localhost:5000/…`,
+        // `docker.io/…`).
+        if let Some((first, _rest)) = image_ref.split_once('/') {
+            return crate::registry_parser::looks_like_registry(first);
+        }
+        false
+    }
+
+    /// Qualify a short remote image name to its Docker Hub canonical form
+    /// (`docker.io/library/<name>` for single-segment names, `docker.io/<ns>/<name>`
+    /// otherwise) so podman resolves it without short-name ambiguity.
+    fn qualify_short_remote(image_ref: &str) -> String {
+        if image_ref.contains('/') {
+            format!("docker.io/{image_ref}")
+        } else {
+            format!("docker.io/library/{image_ref}")
+        }
+    }
+
+    /// Whether an image is present in the local image store.
+    ///
+    /// Uses `<runtime> image exists <ref>` (exit-code only — podman's
+    /// purpose-built check). Docker lacks `image exists`, but this is only
+    /// called on the podman path.
+    async fn image_exists_local(&self, image_ref: &str) -> bool {
+        Command::new(&self.runtime_path)
+            .args(["image", "exists", image_ref])
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Rewrite an image reference so podman can resolve it.
+    ///
+    /// Docker is a no-op (it auto-pulls short names and resolves locally-built
+    /// bare tags natively). Under podman:
+    /// - already-qualified refs pass through unchanged;
+    /// - a bare name that exists locally (a deacon-built tag like
+    ///   `deacon-build:<hash>`) is referenced as `localhost/<ref>` — podman
+    ///   stores locally-built images under the `localhost/` repository and
+    ///   would otherwise treat the bare name as a remote pull target;
+    /// - a bare name that is NOT local (a base image like `alpine:3.19`) is
+    ///   qualified to `docker.io/library/<ref>` so the implicit pull during
+    ///   `create` resolves unambiguously (rootless podman won't resolve bare
+    ///   short names non-interactively).
+    async fn qualify_image_ref(&self, image_ref: &str) -> String {
+        if self.flavor != RuntimeFlavor::Podman || Self::is_already_qualified(image_ref) {
+            return image_ref.to_string();
+        }
+        if self.image_exists_local(image_ref).await {
+            format!("localhost/{image_ref}")
+        } else {
+            Self::qualify_short_remote(image_ref)
+        }
     }
 }
 
@@ -1484,13 +1609,18 @@ impl Docker for CliRuntime {
     async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
         debug!("Inspecting image: {}", image_ref);
 
+        // Match the ref form `create_container` uses under podman (locally
+        // built images live under `localhost/…`). A wrong guess is non-fatal:
+        // the "No such image" branch below returns Ok(None).
+        let qualified = self.qualify_image_ref(image_ref).await;
+
         // Use the default array-of-objects output (no --format). With
         // `--format "{{json .}}"` Docker emits a single bare object per
         // image, which the array parser below would reject; this surfaced
         // when image-metadata merging started actually consuming the
         // labels (#70).
         let output = Command::new(&self.runtime_path)
-            .args(["image", "inspect", image_ref])
+            .args(["image", "inspect", &qualified])
             .output()
             .await
             .map_err(|e| {
@@ -2041,7 +2171,10 @@ impl ContainerOps for CliRuntime {
         let image = config.image.as_ref().ok_or_else(|| {
             DockerError::CLIError("No image specified in configuration".to_string())
         })?;
-        args.push(image.clone());
+        // Under podman, rewrite bare refs so `create` resolves them: locally
+        // built tags -> `localhost/…`, short base images -> `docker.io/library/…`.
+        // No-op under docker.
+        args.push(self.qualify_image_ref(image).await);
 
         // Respect overrideCommand semantics (default: true)
         // When enabled, ensure the container stays running so lifecycle commands can execute.
@@ -3047,6 +3180,97 @@ mod tests {
         let custom_path = "/usr/local/bin/docker";
         let docker = CliDocker::with_path(custom_path.to_string());
         assert_eq!(docker.runtime_path, custom_path);
+    }
+
+    #[test]
+    fn test_runtime_flavor_constructors() {
+        assert!(!CliRuntime::docker().is_podman());
+        assert!(CliRuntime::podman().is_podman());
+        // basename inference
+        assert!(CliRuntime::with_runtime_path("/usr/bin/podman".to_string()).is_podman());
+        assert!(CliRuntime::with_runtime_path("podman".to_string()).is_podman());
+        assert!(!CliRuntime::with_runtime_path("/usr/local/bin/docker".to_string()).is_podman());
+        // explicit flavor wins over a non-standard path
+        assert!(
+            CliRuntime::with_runtime_path_and_flavor(
+                "/opt/pod/run".to_string(),
+                RuntimeFlavor::Podman
+            )
+            .is_podman()
+        );
+    }
+
+    #[test]
+    fn test_is_already_qualified() {
+        // Qualified: explicit registry, localhost repo, or bare digest.
+        for r in [
+            "localhost/deacon-build:abc",
+            "localhost:5000/x:1",
+            "ghcr.io/owner/name:tag",
+            "mcr.microsoft.com/devcontainers/base:ubuntu",
+            "docker.io/library/alpine:3.19",
+            "sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        ] {
+            assert!(
+                CliRuntime::is_already_qualified(r),
+                "expected qualified: {r}"
+            );
+        }
+        // Short / bare: need rewriting under podman.
+        for r in [
+            "alpine:3.19",
+            "node:18",
+            "deacon-build:abc123",
+            "deacon-devcontainer-features:hash",
+            "library/alpine", // namespaced but no registry host
+        ] {
+            assert!(
+                !CliRuntime::is_already_qualified(r),
+                "expected NOT qualified: {r}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_qualify_short_remote() {
+        assert_eq!(
+            CliRuntime::qualify_short_remote("alpine:3.19"),
+            "docker.io/library/alpine:3.19"
+        );
+        assert_eq!(
+            CliRuntime::qualify_short_remote("library/alpine"),
+            "docker.io/library/alpine"
+        );
+        assert_eq!(
+            CliRuntime::qualify_short_remote("user/repo:tag"),
+            "docker.io/user/repo:tag"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_qualify_image_ref_docker_is_noop() {
+        let docker = CliRuntime::docker();
+        for r in ["alpine:3.19", "deacon-build:abc", "ghcr.io/o/n:t"] {
+            assert_eq!(
+                docker.qualify_image_ref(r).await,
+                r,
+                "docker must not rewrite {r}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_qualify_image_ref_podman_passes_through_qualified() {
+        // Already-qualified refs are untouched even under podman; this path
+        // does not shell out to `podman image exists`.
+        let podman = CliRuntime::podman();
+        for r in [
+            "localhost/deacon-build:abc",
+            "ghcr.io/o/n:t",
+            "docker.io/library/alpine:3.19",
+        ] {
+            assert_eq!(podman.qualify_image_ref(r).await, r);
+        }
     }
 
     #[test]

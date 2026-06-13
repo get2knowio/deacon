@@ -535,7 +535,10 @@ impl PodmanRuntime {
     /// Create new Podman runtime with custom path
     pub fn with_path(podman_path: String) -> Self {
         Self {
-            runtime: CliRuntime::with_runtime_path(podman_path),
+            runtime: CliRuntime::with_runtime_path_and_flavor(
+                podman_path,
+                crate::docker::RuntimeFlavor::Podman,
+            ),
         }
     }
 }

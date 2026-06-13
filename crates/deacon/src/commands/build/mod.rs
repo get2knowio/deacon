@@ -1397,6 +1397,9 @@ async fn execute_compose_build_with_features(
         config_path,
         &workspace_hash,
         host_ca_set,
+        // `deacon build` is docker-only today; podman parity for the build
+        // command is tracked separately (issue #30 deferred items).
+        &deacon_core::docker::CliDocker::new(),
     )
     .await?
     .ok_or_else(|| anyhow!("Compose feature build produced no image (no features declared?)"))?;
@@ -1612,6 +1615,9 @@ async fn apply_features_and_lockfile(
         config_path,
         None,
         host_ca_set,
+        // `deacon build` is docker-only today; podman parity for the build
+        // command is tracked separately (issue #30 deferred items).
+        &deacon_core::docker::CliDocker::new(),
     )
     .await
     .context("Failed to build feature-extended image from build output")?;
