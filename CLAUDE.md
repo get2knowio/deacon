@@ -611,6 +611,37 @@ Stacked-PR gotcha learned cutting rc.6: merging a base PR with `--delete-branch`
 any PR stacked on that branch (GitHub does not retarget to `main`). Retarget the child to
 `main` first, or rebase + open a fresh PR.
 
+## Cross-Platform / Windows Notes
+
+CI runs the `dev-fast` nextest profile on `windows-latest` (no Docker — `dev-fast`
+excludes Docker/smoke/testcontainers, so it exercises platform-agnostic logic only).
+We ship Windows binaries, so keep this lane green. Hard-won lessons:
+
+- **Main-thread stack is ~1 MiB on Windows** (vs ~8 MiB on Unix). `main.rs` does NOT
+  use `#[tokio::main]`; it runs the runtime on a 16 MiB `STACK_SIZE` thread (driver +
+  `thread_stack_size` for workers). Without this, deep subcommand futures (doctor,
+  read-configuration) crash with `STATUS_STACK_OVERFLOW` (0xC00000FD) — and `--version`
+  survives (clap short-circuits), so a `--version` smoke test will NOT catch it. Don't
+  reintroduce `#[tokio::main]`.
+- **`if !cfg!(target_os = "windows") { … }` does NOT prevent compilation.** `cfg!` is a
+  runtime boolean; both branches still compile. To exclude unix-only APIs
+  (`std::os::unix`, `PermissionsExt`, `from_mode`) on Windows, use a `#[cfg(unix)]`
+  **attribute** block (or gate the whole test). nextest compiles *all* test binaries
+  before filtering, so even `dev-fast`-excluded Docker tests must compile on Windows.
+- **Windows paths use `\` and get canonicalized** (`\\?\` verbatim prefix, 8.3 short-name
+  expansion in `SubstitutionContext`). deacon's path output is correct (the reference CLI
+  also emits `\` on Windows). Make path assertions separator-agnostic
+  (`.replace('\\', "/")`) for relative fragments; for substituted absolute paths compare
+  the **leaf component** (`dest_dir.file_name()`), which survives canonicalization, rather
+  than the full path string.
+- **`--no-fail-fast`** is set on the test step so one run reports the full failure set
+  (a single failure otherwise cancels the run and hides the rest — `nextest` shows
+  `N/Total tests run` when cancelled vs `Total tests run` when complete).
+- Genuinely Unix-only tests (POSIX-shell `initializeCommand`, bash `install.sh`,
+  `/usr/bin/true`, the Unix-only port-forward daemon / `pid_alive`) are `#[cfg(unix)]`-gated
+  with a one-line reason. Tracked Windows follow-ups: host-path mount semantics and
+  host-hook (`initializeCommand`) execution.
+
 ## Debugging Tips
 
 **Enable debug logging:**
