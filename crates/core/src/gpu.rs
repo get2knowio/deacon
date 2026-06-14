@@ -146,6 +146,15 @@ impl UpGpuApplication {
     }
 }
 
+/// Whether a runtime binary path refers to podman, by basename (mirrors the flavor inference used by `CliRuntime::with_runtime_path` in `docker.rs`).
+fn runtime_path_is_podman(runtime_path: &str) -> bool {
+    std::path::Path::new(runtime_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.contains("podman"))
+        .unwrap_or(false)
+}
+
 /// Detect GPU capability on the host by checking for GPU-capable runtimes.
 ///
 /// This function queries the Docker daemon for available runtimes and checks
@@ -166,6 +175,20 @@ impl UpGpuApplication {
 #[instrument(skip(runtime_path))]
 pub async fn detect_gpu_capability(runtime_path: &str) -> HostGpuCapability {
     debug!("Detecting GPU capability using runtime: {}", runtime_path);
+
+    // Podman has no `.Runtimes` field in `podman info`, so the docker-shaped
+    // `--format {{json .Runtimes}}` query below errors ("can't evaluate field
+    // Runtimes in type *define.Info"). Podman exposes GPUs via CDI devices, not
+    // an OCI-runtime registry, so there is nothing equivalent to probe here.
+    // Treat it as "no GPU runtime detected" (a clean, non-error result) so
+    // `--gpu detect` proceeds without acceleration and without a noisy WARN.
+    if runtime_path_is_podman(runtime_path) {
+        debug!(
+            "GPU runtime detection is not supported on podman ({}); treating as unavailable",
+            runtime_path
+        );
+        return HostGpuCapability::unavailable();
+    }
 
     // Execute 'docker info --format {{json .Runtimes}}' to get runtime information
     let output = tokio::process::Command::new(runtime_path)
@@ -327,6 +350,29 @@ mod tests {
                 .probe_error
                 .unwrap()
                 .contains("Failed to execute runtime info command")
+        );
+    }
+
+    #[test]
+    fn test_runtime_path_is_podman() {
+        assert!(runtime_path_is_podman("podman"));
+        assert!(runtime_path_is_podman("/usr/bin/podman"));
+        assert!(runtime_path_is_podman("podman-remote"));
+        assert!(!runtime_path_is_podman("docker"));
+        assert!(!runtime_path_is_podman("/usr/local/bin/docker"));
+    }
+
+    #[tokio::test]
+    async fn test_detect_gpu_capability_podman_is_unavailable_not_error() {
+        // Podman short-circuits to a clean "unavailable" result without shelling
+        // out (the binary name need not exist) and without surfacing a probe
+        // error — so `--gpu detect` proceeds quietly without acceleration.
+        let result = detect_gpu_capability("/nonexistent/path/podman").await;
+        assert!(!result.available);
+        assert!(
+            result.probe_error.is_none(),
+            "podman GPU detection must not report a probe error: {:?}",
+            result.probe_error
         );
     }
 

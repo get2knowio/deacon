@@ -3,14 +3,16 @@
 //! This module provides execution of lifecycle commands in an existing container
 //! without going through the full `up` workflow.
 
-use crate::commands::shared::{ConfigLoadArgs, ConfigLoadResult, load_config};
+use crate::commands::shared::{ConfigLoadArgs, ConfigLoadResult, load_config, resolve_runtime};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
     ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
-    aggregate_lifecycle_commands, execute_container_lifecycle_with_progress_callback,
+    aggregate_lifecycle_commands, execute_container_lifecycle_with_progress_callback_and_docker,
 };
+use deacon_core::docker::CliRuntime;
 use deacon_core::lifecycle::{LifecyclePhase, should_queue_phase_for_wait_for, wait_for_phase};
+use deacon_core::runtime::RuntimeKind;
 use deacon_core::variable::SubstitutionContext;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -43,9 +45,17 @@ pub struct RunUserCommandsArgs {
 }
 
 /// Execute the run-user-commands command
-#[instrument(skip(args))]
-pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> {
+#[instrument(skip(args, runtime))]
+pub async fn execute_run_user_commands(
+    args: RunUserCommandsArgs,
+    runtime: Option<RuntimeKind>,
+) -> Result<()> {
     info!("Starting run-user-commands execution");
+
+    // Select the runtime (docker/podman) honoring --runtime/DEACON_CONTAINER_RUNTIME.
+    // Hardcoding CliDocker::new() here would talk to docker while the container
+    // lives in podman → "Dev container not found" (mirrors the up/exec/down fix).
+    let cli = resolve_runtime(runtime, &args.docker_path).cli_docker();
 
     // Load configuration with override and secrets support via shared helper
     let ConfigLoadResult {
@@ -64,7 +74,7 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
     debug!("Loaded configuration with overrides and secrets support");
 
     let container_id = {
-        let docker_client = deacon_core::docker::CliDocker::new();
+        let docker_client = cli.clone();
 
         // Container selection precedence (matches `exec`):
         // 1. --container-id (direct lookup)
@@ -139,12 +149,8 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
     // no activation re-resolve) into containerEnv, insert-if-absent so user
     // values win. Mirrors `exec`.
     {
-        let docker_client = deacon_core::docker::CliDocker::new();
-        if let Some(bundle_path) = crate::commands::shared::host_ca::read_host_ca_bundle_path(
-            &docker_client,
-            &container_id,
-        )
-        .await
+        if let Some(bundle_path) =
+            crate::commands::shared::host_ca::read_host_ca_bundle_path(&cli, &container_id).await
         {
             for name in deacon_core::host_ca::CA_ENV_VARS {
                 config
@@ -157,7 +163,14 @@ pub async fn execute_run_user_commands(args: RunUserCommandsArgs) -> Result<()> 
     }
 
     // Execute lifecycle commands
-    execute_lifecycle_commands(&container_id, &config, workspace_folder.as_path(), &args).await?;
+    execute_lifecycle_commands(
+        &container_id,
+        &config,
+        workspace_folder.as_path(),
+        &args,
+        &cli,
+    )
+    .await?;
 
     info!("Run-user-commands execution completed successfully");
     Ok(())
@@ -170,6 +183,7 @@ async fn execute_lifecycle_commands(
     config: &DevContainerConfig,
     workspace_folder: &Path,
     args: &RunUserCommandsArgs,
+    cli: &CliRuntime,
 ) -> Result<()> {
     info!("Executing lifecycle commands in container");
 
@@ -322,11 +336,13 @@ async fn execute_lifecycle_commands(
         }
     }
 
-    // Execute lifecycle commands with progress callback
-    let result = execute_container_lifecycle_with_progress_callback(
+    // Execute lifecycle commands with progress callback, against the SELECTED
+    // runtime (docker/podman) rather than a hardcoded docker client.
+    let result = execute_container_lifecycle_with_progress_callback_and_docker(
         &lifecycle_config,
         &commands,
         &substitution_context,
+        cli,
         Some(crate::commands::shared::progress::make_progress_callback(
             &args.progress_tracker,
         )),
@@ -353,15 +369,13 @@ async fn execute_lifecycle_commands(
     // above), so an empty `non_blocking_phases` here means we have nothing
     // to do.
     if !result.non_blocking_phases.is_empty() {
-        use deacon_core::docker::CliDocker;
         debug!(
             "Executing {} non-blocking phase(s) synchronously",
             result.non_blocking_phases.len()
         );
-        let docker = CliDocker::new();
         result
             .execute_non_blocking_phases_sync_with_callback(
-                &docker,
+                cli,
                 Some(crate::commands::shared::progress::make_progress_callback(
                     &args.progress_tracker,
                 )),

@@ -204,7 +204,7 @@ see SECURITY.md for the manual `ARG`/`COPY` convention.
 
 | Limitation | Notes |
 |---|---|
-| **Podman runtime** | Ships as **experimental in 1.0**. Trait-level integration is complete and the happy path works, but rootless-Podman parity items (`label=disable`, `--userns=keep-id`, `--uidmap`/`--gidmap`) and dedicated test coverage are targeted for **1.1** — see [#30](https://github.com/get2knowio/deacon/issues/30). Using `--runtime podman` emits a one-time WARN. |
+| **Podman runtime** | **Supported.** A required CI lane runs the integration suite against rootless Podman, and `up`/`exec`/`down`/`run-user-commands`/`set-up` handle Podman's image-ref qualification, `ps`-JSON shape, SELinux `label=disable`, and rootless `--userns=keep-id`. Remaining gap: **GPU passthrough is not wired for Podman** (`--gpu detect` cleanly reports no GPU; CDI/`--device` support is a follow-up). See [#30](https://github.com/get2knowio/deacon/issues/30). |
 | **`build` features** | Feature installation during `build` is supported for **Dockerfile-based** configs only. Compose-build and image-reference configs still error out with features (different integration patterns; tracked as a post-1.0 follow-up). |
 
 For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). Post-1.0 hardening landed in May 2026 — redaction wiring into the tracing pipeline, a [workspace-trust gate](#workspace-trust) for host-side lifecycle hooks, async I/O conversion across `crates/core`, typed errors throughout `crates/core`, and the `json5`→`jsonc-parser` migration (see closed [#52](https://github.com/get2knowio/deacon/issues/52)).
@@ -222,22 +222,23 @@ See the full details and additional commands in `examples/README.md`.
 
 ## Runtime Selection
 
-Deacon uses Docker as its container runtime. Podman support ships in **1.0 as
-experimental**: the trait-level integration is complete, but rootless-Podman
-parity items (`label=disable`, `--userns=keep-id`, `--uidmap`/`--gidmap`) and
-dedicated test coverage are still required for full support, targeted for 1.1
-(tracked in [#30](https://github.com/get2knowio/deacon/issues/30)). Using
-`--runtime podman` emits a one-time WARN.
+Deacon supports **Docker** (default) and **Podman**. Podman is exercised by a
+required CI lane that runs the integration suite against rootless Podman, and
+the consumer commands handle Podman's specifics automatically: local image-ref
+qualification (`localhost/…`), the `podman ps` JSON shape, SELinux relabeling
+(`--security-opt label=disable`), and rootless UID mapping (`--userns=keep-id`
+for non-root users). The one remaining gap is GPU passthrough, which is not yet
+wired for Podman (tracked in [#30](https://github.com/get2knowio/deacon/issues/30)).
 
 ```bash
 # Explicitly select Docker (optional, it's the default)
 deacon --runtime docker up
 
-# Experimental: select Podman
+# Select Podman
 deacon --runtime podman up
 
 # Or via environment variable
-DEACON_CONTAINER_RUNTIME=docker deacon up
+DEACON_CONTAINER_RUNTIME=podman deacon up
 ```
 
 ## Runtime Configuration

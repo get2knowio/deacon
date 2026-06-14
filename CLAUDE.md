@@ -552,7 +552,7 @@ echo "$OUTPUT" | jq '.configuration'
 
 **Container Runtimes:**
 - Docker (default, production-ready)
-- Podman (experimental in 1.0; trait-level support complete; parity items and test coverage targeted for 1.1)
+- Podman (supported; required CI lane runs the integration suite against rootless Podman). Podman-specific handling lives behind `CliRuntime::is_podman()` in `crates/core/src/docker.rs`: image-ref qualification (`localhost/…` / `docker.io/library/…`), `podman ps` JSON shape (`Id`+`Names` array), SELinux `--security-opt label=disable`, and rootless `--userns=keep-id` for non-root users (`podman_create_args`, mirroring upstream `getPodmanArgs`). Remaining gap: GPU passthrough is not wired for Podman (`detect_gpu_capability` short-circuits to "unavailable").
 
 ## CI/CD Requirements
 

@@ -11,6 +11,19 @@ The 1.0 release is being assembled across a series of PRs tracked in
 
 ### Added
 
+- **Podman promoted from experimental to supported.** A required CI lane runs the
+  integration suite against rootless Podman. Beyond the parity fixes already
+  landed (local image-ref qualification, `podman ps` JSON shape, runtime
+  selection across `up`/`exec`/`down`), this adds the rootless-host arguments
+  mirroring upstream `getPodmanArgs`: `--security-opt label=disable` (so host
+  bind mounts are accessible without the destructive `:Z` relabel) and
+  `--userns=keep-id` for non-root users (skipped for root, and when the user
+  supplies their own `--uidmap`/`--gidmap`). `run-user-commands` and `set-up`
+  now honor `--runtime`/`DEACON_CONTAINER_RUNTIME` like the other commands, and
+  GPU detection no longer emits a spurious WARN under Podman (it cleanly reports
+  no GPU — CDI passthrough remains a follow-up). See
+  [#30](https://github.com/get2knowio/deacon/issues/30).
+
 - `DEACON_OVERRIDE_CONFIG` environment variable as an alternative to the
   `--override-config` flag (the explicit flag takes precedence). Uses clap-native
   `env` support, so `--help` advertises it.
