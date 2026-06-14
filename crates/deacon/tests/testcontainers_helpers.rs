@@ -9,6 +9,27 @@ use testcontainers::core::WaitFor;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ContainerRequest, GenericImage, ImageExt};
 
+/// testcontainers-rs talks to the docker API socket; it cannot drive rootless
+/// podman (no podman socket is started in CI). Tests that spin up a container
+/// via testcontainers and then exec into it with deacon must therefore skip
+/// when the active runtime (`DEACON_CONTAINER_RUNTIME`) is not docker — under
+/// podman the testcontainers container lives in docker while deacon looks in
+/// podman's store, which is an invalid cross-runtime scenario, not a deacon bug.
+///
+/// Returns `true` (caller should `return` early) when running under non-docker.
+pub fn skip_if_not_docker_runtime() -> bool {
+    match std::env::var("DEACON_CONTAINER_RUNTIME") {
+        Ok(rt) if rt != "docker" => {
+            eprintln!(
+                "skipping testcontainers-based test: DEACON_CONTAINER_RUNTIME={rt} \
+                 (testcontainers requires the docker API)"
+            );
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Create a simple Alpine container request that sleeps forever.
 /// Useful for tests that need a running container to exec into.
 pub fn alpine_sleep_image() -> ContainerRequest<GenericImage> {

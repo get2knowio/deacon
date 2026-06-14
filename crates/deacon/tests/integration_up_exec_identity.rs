@@ -22,8 +22,15 @@ use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use tempfile::TempDir;
 
+/// The container runtime binary under test (honors `DEACON_CONTAINER_RUNTIME`,
+/// the same env var deacon reads). Setup/cleanup that bypasses deacon must use
+/// this so images/containers land in the store deacon-under-podman actually reads.
+fn runtime_bin() -> String {
+    std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string())
+}
+
 fn is_docker_available() -> bool {
-    StdCommand::new("docker")
+    StdCommand::new(runtime_bin())
         .arg("info")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -174,7 +181,7 @@ fn exec_honors_remote_user_from_image_metadata() {
          LABEL devcontainer.metadata='[{\"remoteUser\":\"appuser\"}]'\n",
     )
     .unwrap();
-    let built = StdCommand::new("docker")
+    let built = StdCommand::new(runtime_bin())
         .args(["build", "-t", tag, "."])
         .current_dir(build_dir.path())
         .stdout(Stdio::null())
@@ -207,7 +214,7 @@ fn exec_honors_remote_user_from_image_metadata() {
 
     let got = exec_cmd(ws.path(), &["sh", "-lc", "id -un"]);
     down(ws.path());
-    let _ = StdCommand::new("docker")
+    let _ = StdCommand::new(runtime_bin())
         .args(["rmi", "-f", tag])
         .stdout(Stdio::null())
         .stderr(Stdio::null())

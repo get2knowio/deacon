@@ -8,11 +8,14 @@ use tempfile::TempDir;
 use testcontainers::runners::AsyncRunner;
 
 mod testcontainers_helpers;
-use testcontainers_helpers::{alpine_sleep_image, container_id};
+use testcontainers_helpers::{alpine_sleep_image, container_id, skip_if_not_docker_runtime};
 
 #[tokio::test]
 async fn test_exec_with_container_id_selection() {
     // T008: Integration: direct ID selection
+    if skip_if_not_docker_runtime() {
+        return;
+    }
     // Start a container using testcontainers (auto-cleanup on drop)
     let container = alpine_sleep_image().start().await.unwrap();
     let id = container_id(&container);

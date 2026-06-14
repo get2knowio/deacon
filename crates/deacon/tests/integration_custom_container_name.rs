@@ -3,26 +3,20 @@
 use assert_cmd::Command;
 use serde_json::json;
 use std::fs;
-use std::process::{Command as StdCommand, Stdio};
+use std::process::Command as StdCommand;
 use tempfile::TempDir;
 
 mod support;
-use support::unique_name;
+use support::{is_runtime_available, runtime_bin, unique_name};
 
-/// Helper to check if Docker is available
+/// Helper to check if the active container runtime is available
 fn is_docker_available() -> bool {
-    StdCommand::new("docker")
-        .arg("info")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    is_runtime_available()
 }
 
-/// Helper to check if a container exists by name
+/// Helper to check if a container exists by name (in the active runtime's store)
 fn container_exists(name: &str) -> bool {
-    StdCommand::new("docker")
+    StdCommand::new(runtime_bin())
         .args([
             "ps",
             "-a",
@@ -39,9 +33,11 @@ fn container_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Helper to cleanup a container by name
+/// Helper to cleanup a container by name (in the active runtime's store)
 fn cleanup_container(name: &str) {
-    let _ = StdCommand::new("docker").args(["rm", "-f", name]).output();
+    let _ = StdCommand::new(runtime_bin())
+        .args(["rm", "-f", name])
+        .output();
 }
 
 #[test]

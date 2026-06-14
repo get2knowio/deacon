@@ -6,11 +6,14 @@ use testcontainers::runners::AsyncRunner;
 mod support;
 mod testcontainers_helpers;
 use support::unique_name;
-use testcontainers_helpers::alpine_sleep_with_labels;
+use testcontainers_helpers::{alpine_sleep_with_labels, skip_if_not_docker_runtime};
 
 #[tokio::test]
 async fn test_exec_id_label_successful_unique_match() {
     // Test successful execution with a uniquely matched container
+    if skip_if_not_docker_runtime() {
+        return;
+    }
     // Use a unique label value to ensure we match only our container
     let unique_value = unique_name("unique-match");
 
@@ -51,6 +54,9 @@ async fn test_exec_id_label_successful_unique_match() {
 #[tokio::test]
 async fn test_exec_id_label_ambiguous_match_lists_candidates() {
     // Test that when multiple containers match, we use the first one (deterministic behavior)
+    if skip_if_not_docker_runtime() {
+        return;
+    }
     // Use a unique label value to ensure we match only our containers
     let unique_value = unique_name("ambiguous-match");
 
