@@ -228,19 +228,19 @@ jobs:
         path: artifacts/nextest/mvp-integration-timing.json
         if-no-files-found: warn
 
-  # Experimental Podman parity lane. deacon's PodmanRuntime is trait-complete but
-  # had no execution coverage; this runs the integration suite against a real
-  # `podman` (via DEACON_CONTAINER_RUNTIME=podman) to surface parity gaps
-  # (rootless userns, image-ref defaults, networking, compose). Non-blocking
-  # (continue-on-error) while the gaps are burned down; promote to required when
-  # green. Tracks 1.1 Podman support.
+  # Podman parity lane. deacon's PodmanRuntime drives the `podman` CLI directly;
+  # this runs the full integration suite against a real rootless `podman` (via
+  # DEACON_CONTAINER_RUNTIME=podman). Promoted from experimental to REQUIRED once
+  # the lane reached 163/163 — the image-ref qualification, runtime selection
+  # across the consumer surface, and podman `ps`-JSON parsing fixes landed
+  # (issue #30). Remaining 1.1 items (rootless userns/uidmap, label=disable,
+  # podman-aware GPU info) are non-blocking polish, tracked on #30.
   test-podman:
-    name: Test (Podman, experimental)
+    name: Test (Podman)
     if: github.event_name != 'schedule'
     needs: test-fast
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    continue-on-error: true
     env:
       DEACON_CONTAINER_RUNTIME: podman
       DEACON_NETWORK_TESTS: "1"
@@ -293,5 +293,5 @@ jobs:
         TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
         echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-    - name: Run integration suite against Podman (non-blocking, full failure set)
+    - name: Run integration suite against Podman (full failure set)
       run: cargo nextest run --profile mvp-integration --no-fail-fast
