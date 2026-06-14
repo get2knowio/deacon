@@ -97,7 +97,7 @@ use std::path::PathBuf;
 pub enum RuntimeOption {
     /// Docker runtime
     Docker,
-    /// Podman runtime (experimental in 1.0)
+    /// Podman runtime (rootless-aware: SELinux `label=disable` + `--userns=keep-id`)
     Podman,
 }
 
@@ -895,7 +895,7 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     pub plugin: Vec<String>,
 
-    /// Container runtime to use (docker or podman [experimental]; can be set via DEACON_CONTAINER_RUNTIME env var)
+    /// Container runtime to use (docker or podman; can be set via DEACON_CONTAINER_RUNTIME env var)
     #[arg(long, global = true, value_enum)]
     pub runtime: Option<RuntimeOption>,
 
@@ -1653,7 +1653,7 @@ impl Cli {
                     container_data_folder: self.container_data_folder.clone(),
                 };
 
-                execute_run_user_commands(args).await
+                execute_run_user_commands(args, self.runtime.map(|r| r.into())).await
             }
             Some(Commands::SetUp {
                 container_id,
@@ -1691,7 +1691,7 @@ impl Cli {
                     progress_tracker: progress_tracker.clone(),
                 };
 
-                execute_set_up(args).await
+                execute_set_up(args, self.runtime.map(|r| r.into())).await
             }
             Some(Commands::Down {
                 remove,

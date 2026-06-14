@@ -926,6 +926,74 @@ impl CliRuntime {
             Self::qualify_short_remote(image_ref)
         }
     }
+
+    /// Extract the user named by a `--user`/`-u` flag in `run_args`, if any.
+    ///
+    /// Accepts both the split form (`--user`, `<value>`) and the joined form
+    /// (`--user=<value>` / `-u=<value>`). Mirrors upstream `findUserArg`.
+    fn find_user_arg(run_args: &[String]) -> Option<String> {
+        let mut iter = run_args.iter();
+        while let Some(arg) = iter.next() {
+            if let Some(value) = arg
+                .strip_prefix("--user=")
+                .or_else(|| arg.strip_prefix("-u="))
+            {
+                return Some(value.to_string());
+            }
+            if arg == "--user" || arg == "-u" {
+                if let Some(value) = iter.next() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// Podman-specific `create` arguments for rootless/SELinux Linux hosts,
+    /// mirroring upstream devcontainers/cli `getPodmanArgs`
+    /// (`src/spec-node/singleContainer.ts`):
+    ///
+    /// - `--security-opt label=disable` is added unconditionally so host bind
+    ///   mounts are accessible without the destructive `:Z` SELinux relabel
+    ///   (which rewrites labels on the host's own files). Harmless when SELinux
+    ///   is already disabled.
+    /// - `--userns=keep-id` maps the host UID/GID into the container so a
+    ///   non-root container user can read/write bind-mounted host files. It is
+    ///   added ONLY when the effective remote user is non-root AND the user has
+    ///   not supplied their own `--uidmap`/`--gidmap` in `runArgs` (the two are
+    ///   mutually exclusive in podman). Skipping it for root avoids the
+    ///   well-known breakage where keep-id makes root-owned mounts inaccessible
+    ///   (devcontainers/cli #1004).
+    ///
+    /// No-op under docker or on non-Linux hosts. `remote_user` is the resolved
+    /// effective user (config `remoteUser` → `--user` runArg → `containerUser`);
+    /// `None` is treated as root.
+    fn podman_create_args(
+        is_podman: bool,
+        remote_user: Option<&str>,
+        run_args: &[String],
+    ) -> Vec<String> {
+        // `cfg!` is a runtime boolean here (we only want this behavior on Linux
+        // hosts, where podman's userns/SELinux semantics apply); both branches
+        // still compile on every platform.
+        if !is_podman || !cfg!(target_os = "linux") {
+            return Vec::new();
+        }
+
+        let mut args = vec!["--security-opt".to_string(), "label=disable".to_string()];
+
+        let has_id_mapping = run_args
+            .iter()
+            .any(|a| a.starts_with("--uidmap") || a.starts_with("--gidmap"));
+        if !has_id_mapping {
+            let user = remote_user.unwrap_or("root");
+            if user != "root" && user != "0" {
+                args.push("--userns=keep-id".to_string());
+            }
+        }
+
+        args
+    }
 }
 
 impl Default for CliRuntime {
@@ -2196,6 +2264,21 @@ impl ContainerOps for CliRuntime {
             }
         }
 
+        // Podman rootless/SELinux args (no-op under docker / non-Linux):
+        // `--security-opt label=disable` always, and `--userns=keep-id` when the
+        // effective remote user is non-root. Resolve that user the way upstream
+        // does: config remoteUser → a `--user` runArg → containerUser.
+        let effective_user = config
+            .remote_user
+            .clone()
+            .or_else(|| Self::find_user_arg(&config.run_args))
+            .or_else(|| config.container_user.clone());
+        args.extend(Self::podman_create_args(
+            self.is_podman(),
+            effective_user.as_deref(),
+            &config.run_args,
+        ));
+
         // Add runArgs if present
         args.extend(config.run_args.iter().cloned());
 
@@ -3302,6 +3385,83 @@ mod tests {
             "docker.io/library/alpine:3.19",
         ] {
             assert_eq!(podman.qualify_image_ref(r).await, r);
+        }
+    }
+
+    #[test]
+    fn test_find_user_arg() {
+        // Split form.
+        assert_eq!(
+            CliRuntime::find_user_arg(&["--user".to_string(), "vscode".to_string()]).as_deref(),
+            Some("vscode")
+        );
+        assert_eq!(
+            CliRuntime::find_user_arg(&["-u".to_string(), "1000".to_string()]).as_deref(),
+            Some("1000")
+        );
+        // Joined form.
+        assert_eq!(
+            CliRuntime::find_user_arg(&["--user=node".to_string()]).as_deref(),
+            Some("node")
+        );
+        assert_eq!(
+            CliRuntime::find_user_arg(&["-u=node".to_string()]).as_deref(),
+            Some("node")
+        );
+        // Absent.
+        assert_eq!(
+            CliRuntime::find_user_arg(&["--privileged".to_string()]),
+            None
+        );
+        assert_eq!(CliRuntime::find_user_arg(&[]), None);
+    }
+
+    #[test]
+    fn test_podman_create_args_docker_is_noop() {
+        // Docker never gets podman args, regardless of user.
+        assert!(CliRuntime::podman_create_args(false, Some("vscode"), &[]).is_empty());
+        assert!(CliRuntime::podman_create_args(false, None, &[]).is_empty());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_podman_create_args_linux() {
+        // Root (or unset) user: only the SELinux label-disable, no keep-id.
+        assert_eq!(
+            CliRuntime::podman_create_args(true, Some("root"), &[]),
+            vec!["--security-opt".to_string(), "label=disable".to_string()]
+        );
+        assert_eq!(
+            CliRuntime::podman_create_args(true, Some("0"), &[]),
+            vec!["--security-opt".to_string(), "label=disable".to_string()]
+        );
+        assert_eq!(
+            CliRuntime::podman_create_args(true, None, &[]),
+            vec!["--security-opt".to_string(), "label=disable".to_string()]
+        );
+
+        // Non-root user: keep-id is added on top of label-disable.
+        assert_eq!(
+            CliRuntime::podman_create_args(true, Some("vscode"), &[]),
+            vec![
+                "--security-opt".to_string(),
+                "label=disable".to_string(),
+                "--userns=keep-id".to_string()
+            ]
+        );
+
+        // User-supplied --uidmap/--gidmap suppresses keep-id (mutually exclusive),
+        // but label-disable still applies.
+        for mapping in ["--uidmap=0:1000:1", "--gidmap"] {
+            assert_eq!(
+                CliRuntime::podman_create_args(
+                    true,
+                    Some("vscode"),
+                    &[mapping.to_string(), "1".to_string()]
+                ),
+                vec!["--security-opt".to_string(), "label=disable".to_string()],
+                "id mapping {mapping} must suppress keep-id"
+            );
         }
     }
 

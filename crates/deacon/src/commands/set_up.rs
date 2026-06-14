@@ -32,14 +32,16 @@
 //!   (`${containerEnv:VAR}`) — current pass uses only the configured
 //!   `container_env`, not the live `docker exec` env probe
 
+use crate::commands::shared::resolve_runtime;
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
     AggregatedLifecycleCommand, ContainerLifecycleCommands, ContainerLifecycleConfig,
     DotfilesConfig, LifecycleCommandList, LifecycleCommandSource, LifecycleCommandValue,
-    execute_container_lifecycle_with_progress_callback,
+    execute_container_lifecycle_with_progress_callback_and_docker,
 };
-use deacon_core::docker::{CliDocker, ContainerInfo, Docker, ExecConfig};
+use deacon_core::docker::{CliRuntime, ContainerInfo, Docker, ExecConfig};
+use deacon_core::runtime::RuntimeKind;
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -88,10 +90,9 @@ pub struct SetUpArgs {
     /// `/var/devcontainer`. Spec §6 — `.patchEtcEnvironmentMarker` and
     /// `.patchEtcProfileMarker` live here.
     pub container_system_data_folder: Option<PathBuf>,
-    /// Docker CLI path; defaults to `"docker"`. Currently plumbed for shape
-    /// parity with `run-user-commands`; `CliDocker::new()` uses the binary
-    /// resolution baked into the runtime layer.
-    #[allow(dead_code)]
+    /// Docker CLI path; defaults to `"docker"`. Forwarded to
+    /// [`resolve_runtime`] so a `--docker-path` override reaches the selected
+    /// runtime (and, under docker, the binary it shells out to).
     pub docker_path: String,
     /// Progress tracker shared with the CLI shell.
     pub progress_tracker: Arc<Mutex<Option<deacon_core::progress::ProgressTracker>>>,
@@ -122,16 +123,20 @@ enum SetUpResult {
 /// `Ok(())`. On error: propagates the error so the binary boundary maps it
 /// to the spec's `{outcome: "error", ...}` JSON shape + exit code 1
 /// (handled in `crates/deacon/src/main.rs` via the existing error path).
-#[instrument(skip(args), fields(container_id = %args.container_id))]
-pub async fn execute_set_up(args: SetUpArgs) -> Result<()> {
+#[instrument(skip(args, runtime), fields(container_id = %args.container_id))]
+pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Result<()> {
     info!("Starting set-up execution");
 
     // Phase 1: Validate --remote-env early (fail-fast per spec §9).
     parse_remote_env(&args.remote_env)?;
 
+    // Select the runtime (docker/podman) honoring --runtime/DEACON_CONTAINER_RUNTIME.
+    // Hardcoding CliDocker::new() here would inspect/exec via docker while the
+    // container lives in podman → "Dev container not found" (mirrors up/exec/down).
+    let docker = resolve_runtime(runtime, &args.docker_path).cli_docker();
+
     // Phase 2: Inspect the target container. Per spec §9, a missing container
     // produces the upstream-aligned summary "Dev container not found."
-    let docker = CliDocker::new();
     let container = docker
         .inspect_container(&args.container_id)
         .await
@@ -195,6 +200,7 @@ pub async fn execute_set_up(args: SetUpArgs) -> Result<()> {
             &container,
             &substituted_merged,
             &substitution_context,
+            &docker,
         )
         .await?;
     } else {
@@ -351,6 +357,7 @@ async fn execute_lifecycle_hooks(
     container: &ContainerInfo,
     merged_config: &DevContainerConfig,
     substitution_context: &SubstitutionContext,
+    cli: &CliRuntime,
 ) -> Result<()> {
     let remote_env_pairs = parse_remote_env(&args.remote_env)?;
 
@@ -436,10 +443,11 @@ async fn execute_lifecycle_hooks(
     }
 
     debug!("Executing lifecycle hooks in container {}", container.id);
-    let result = execute_container_lifecycle_with_progress_callback(
+    let result = execute_container_lifecycle_with_progress_callback_and_docker(
         &lifecycle_config,
         &commands,
         substitution_context,
+        cli,
         Some(crate::commands::shared::progress::make_progress_callback(
             &args.progress_tracker,
         )),
@@ -469,15 +477,13 @@ async fn execute_lifecycle_hooks(
     // set-up previously stopped at the log line, so file side effects
     // (e.g. `/tmp/postStart.flag`) were never observable to callers.
     if !result.non_blocking_phases.is_empty() {
-        use deacon_core::docker::CliDocker;
         debug!(
             "Executing {} non-blocking phase(s) synchronously",
             result.non_blocking_phases.len()
         );
-        let docker = CliDocker::new();
         result
             .execute_non_blocking_phases_sync_with_callback(
-                &docker,
+                cli,
                 Some(crate::commands::shared::progress::make_progress_callback(
                     &args.progress_tracker,
                 )),
