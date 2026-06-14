@@ -30,8 +30,14 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Host diagnostics
+      # Purely informational. `wsl --status` exits non-zero when no distro is
+      # installed (the runner default), so force Continue + `exit 0` so this can
+      # never abort the run — the previous attempt failed here for exactly that
+      # reason (#239).
+      continue-on-error: true
       shell: pwsh
       run: |
+        $ErrorActionPreference = 'Continue'
         Write-Host "== OS =="
         [System.Environment]::OSVersion.Version | Out-String
         (Get-CimInstance Win32_OperatingSystem).Caption
@@ -43,20 +49,29 @@ jobs:
         (Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled | Out-String
         Write-Host "== podman preinstalled? =="
         (Get-Command podman -ErrorAction SilentlyContinue | Out-String)
+        exit 0
 
     - name: Ensure WSL2
       id: wsl
       continue-on-error: true
       shell: pwsh
       run: |
+        $ErrorActionPreference = 'Continue'
+        # Ensure the WSL2 platform is present (podman machine brings its own
+        # distro, so --no-distribution is enough). May require a reboot the
+        # runner won't get — if so, `podman machine start` below will fail and
+        # that becomes the recorded finding.
+        wsl --install --no-distribution 2>&1 | Out-String
         wsl --update 2>&1 | Out-String
         wsl --set-default-version 2 2>&1 | Out-String
+        exit 0
 
     - name: Install Podman client (if needed)
       id: install
       continue-on-error: true
       shell: pwsh
       run: |
+        $ErrorActionPreference = 'Continue'
         if (-not (Get-Command podman -ErrorAction SilentlyContinue)) {
           Write-Host "podman not on PATH; installing via Chocolatey"
           choco install podman-cli -y --no-progress
@@ -66,14 +81,21 @@ jobs:
         $env:Path += ";C:\Program Files\RedHat\Podman"
         echo "C:\Program Files\RedHat\Podman" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         podman --version 2>&1 | Out-String
+        exit 0
 
     - name: Init + start podman machine (WSL2 backend)
       id: machine
       continue-on-error: true
       shell: pwsh
       run: |
+        # Accurate exit semantics: this step's outcome must reflect whether the
+        # WSL2-backed machine actually came up (it gates nothing directly, but
+        # the Findings summary reports it). Fail fast on init/start so the
+        # captured error is the real blocker, not a later symptom.
         podman machine init 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { Write-Host "podman machine init FAILED"; exit 1 }
         podman machine start 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { Write-Host "podman machine start FAILED"; exit 1 }
         Write-Host "== podman info =="
         podman info 2>&1 | Out-String
 
@@ -82,6 +104,8 @@ jobs:
       continue-on-error: true
       shell: pwsh
       run: |
+        # Trailing native exit code is the step outcome and gates the deacon
+        # e2e below — do NOT swallow it with `exit 0`.
         podman run --rm $env:SPIKE_IMAGE echo "podman-windows-ok" 2>&1 | Out-String
 
     # ---- deacon e2e (only attempted if the podman backend actually works) ----
