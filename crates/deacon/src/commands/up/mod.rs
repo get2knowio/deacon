@@ -485,7 +485,9 @@ pub(crate) async fn execute_up_with_runtime(
     if config.image.is_none() && !config.uses_compose() {
         if let Some(build_config) = extract_build_config_from_devcontainer(&config, &config_path)? {
             info!("Building image from Dockerfile configuration");
-            let built_image_id = build_image_from_config(&build_config, &build_options).await?;
+            let built_image_id =
+                build_image_from_config(&build_config, &build_options, &runtime.cli_docker())
+                    .await?;
 
             // Update config to use the built image
             config.image = Some(built_image_id.clone());

@@ -26,6 +26,35 @@ pub fn skip_if_no_network_tests() -> bool {
     false
 }
 
+/// The container runtime binary under test, honoring `DEACON_CONTAINER_RUNTIME`
+/// (the same env var deacon reads). Defaults to `docker`.
+///
+/// Tests that create/query containers or images directly (bypassing deacon)
+/// MUST use this rather than hardcoding `"docker"`, otherwise they set up state
+/// in docker while deacon-under-podman looks in podman's separate store — the
+/// container/image is invisible and the test fails spuriously.
+pub fn runtime_bin() -> String {
+    std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string())
+}
+
+/// Whether the active runtime ([`runtime_bin`]) is reachable.
+pub fn is_runtime_available() -> bool {
+    std::process::Command::new(runtime_bin())
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Whether the active runtime is docker (not podman). testcontainers-rs is a
+/// docker-API client and cannot drive rootless podman without a podman socket,
+/// so testcontainers-based tests skip when this is false.
+pub fn runtime_is_docker() -> bool {
+    runtime_bin() == "docker"
+}
+
 /// Helper function to extract JSON from mixed output (logs + JSON).
 ///
 /// When running CLI tests with logging enabled, the output may contain log lines

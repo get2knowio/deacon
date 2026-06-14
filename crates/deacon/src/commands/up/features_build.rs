@@ -90,7 +90,7 @@ struct StagedFeatures {
 /// When `build_options` is provided and not default, cache arguments are included
 /// in the generated build command. This enables cache-from/cache-to/no-cache/builder
 /// options to propagate to feature builds per spec (data-model.md).
-#[instrument(skip(config, identity, build_options))]
+#[instrument(skip(config, identity, build_options, cli))]
 pub(crate) async fn build_image_with_features(
     config: &DevContainerConfig,
     identity: &ContainerIdentity,
@@ -98,9 +98,8 @@ pub(crate) async fn build_image_with_features(
     config_path: &Path,
     build_options: Option<&BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
+    cli: &deacon_core::docker::CliRuntime,
 ) -> Result<FeatureBuildOutput> {
-    use deacon_core::docker::CliDocker;
-
     info!("Building extended image with features");
 
     // Get base image
@@ -180,9 +179,8 @@ pub(crate) async fn build_image_with_features(
     let build_args =
         generator.generate_build_args(&dockerfile_path, &extended_image_tag, build_options);
 
-    let cli_docker = CliDocker::new();
     debug!("Building image with args: {:?}", build_args);
-    let _image_id = cli_docker.build_image(&build_args).await?;
+    let _image_id = cli.build_image(&build_args).await?;
 
     info!("Successfully built extended image: {}", extended_image_tag);
 
@@ -240,9 +238,8 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     target: Option<&str>,
     build_options: Option<&BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
+    cli: &deacon_core::docker::CliRuntime,
 ) -> Result<FeatureBuildOutput> {
-    use deacon_core::docker::CliDocker;
-
     // Optional `build.target` is honored as the upstream stage we extend. The
     // reference CLI rewrites the FROM matching `target`; we accomplish the
     // same outcome by trusting the caller to pre-process via
@@ -375,9 +372,8 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         base_context_dir.display().to_string(),
     ]);
 
-    let cli_docker = CliDocker::new();
     debug!("Building image with args: {:?}", build_args);
-    let _image_id = cli_docker.build_image(&build_args).await.with_context(|| {
+    let _image_id = cli.build_image(&build_args).await.with_context(|| {
         format!(
             "Failed to build feature-extended image from Dockerfile {} (context {})",
             dockerfile_path.display(),

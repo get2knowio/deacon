@@ -227,3 +227,71 @@ jobs:
         name: nextest-mvp-integration-timing
         path: artifacts/nextest/mvp-integration-timing.json
         if-no-files-found: warn
+
+  # Podman parity lane. deacon's PodmanRuntime drives the `podman` CLI directly;
+  # this runs the full integration suite against a real rootless `podman` (via
+  # DEACON_CONTAINER_RUNTIME=podman). Promoted from experimental to REQUIRED once
+  # the lane reached 163/163 — the image-ref qualification, runtime selection
+  # across the consumer surface, and podman `ps`-JSON parsing fixes landed
+  # (issue #30). Remaining 1.1 items (rootless userns/uidmap, label=disable,
+  # podman-aware GPU info) are non-blocking polish, tracked on #30.
+  test-podman:
+    name: Test (Podman)
+    if: github.event_name != 'schedule'
+    needs: test-fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEACON_CONTAINER_RUNTIME: podman
+      DEACON_NETWORK_TESTS: "1"
+    steps:
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-nextest-
+          ${{ runner.os }}-cargo-
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
+
+    - name: Set up Podman (rootless)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y podman
+        podman version
+        # deacon's PodmanRuntime drives the `podman` CLI directly (no socket).
+        # Sanity-check rootless pull + run before the suite.
+        podman run --rm docker.io/library/alpine:3.18 echo "podman-ok"
+
+    - name: Acquire GHCR bearer token (read-only)
+      run: |
+        set -euo pipefail
+        TOKEN_URL="https://ghcr.io/token?service=ghcr.io\
+        &scope=repository:devcontainers/features/node:pull\
+        &scope=repository:devcontainers/features/common-utils:pull\
+        &scope=repository:devcontainers/features/docker-in-docker:pull\
+        &scope=repository:devcontainers/features/python:pull\
+        &scope=repository:devcontainers/features/git:pull"
+        TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+        echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+    - name: Run integration suite against Podman (full failure set)
+      run: cargo nextest run --profile mvp-integration --no-fail-fast

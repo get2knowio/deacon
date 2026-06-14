@@ -350,6 +350,7 @@ pub(crate) async fn execute_compose_up(
         config_path,
         workspace_hash,
         host_ca_set,
+        &runtime.cli_docker(),
     )
     .await?;
 
@@ -640,6 +641,7 @@ pub(crate) async fn execute_compose_post_create(
 /// 4. In both cases, set `project.service_image_override` so the existing
 ///    injection override rewrites the target service's `image:` line to point
 ///    at the extended tag.
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip(config, compose_manager, project, workspace_folder))]
 async fn install_features_for_compose(
     config: &DevContainerConfig,
@@ -649,6 +651,7 @@ async fn install_features_for_compose(
     config_path: &Path,
     workspace_hash: &str,
     host_ca_set: Option<&CorporateCaSet>,
+    cli: &deacon_core::docker::CliRuntime,
 ) -> Result<Option<FeatureBuildOutput>> {
     let output = match resolve_compose_feature_image(
         config,
@@ -658,6 +661,7 @@ async fn install_features_for_compose(
         config_path,
         workspace_hash,
         host_ca_set,
+        cli,
     )
     .await?
     {
@@ -676,6 +680,7 @@ async fn install_features_for_compose(
 /// `service_image_override` to run the extended image) and `build` (which tags
 /// the produced image for the user and writes the lockfile). Returns `None` when
 /// the config declares no features.
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip(config, compose_manager, project, workspace_folder))]
 pub(crate) async fn resolve_compose_feature_image(
     config: &DevContainerConfig,
@@ -685,6 +690,7 @@ pub(crate) async fn resolve_compose_feature_image(
     config_path: &Path,
     workspace_hash: &str,
     host_ca_set: Option<&CorporateCaSet>,
+    cli: &deacon_core::docker::CliRuntime,
 ) -> Result<Option<FeatureBuildOutput>> {
     // Nothing to install when features is missing or an empty object.
     let features_obj = match config.features.as_object() {
@@ -737,6 +743,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 config_path,
                 None,
                 host_ca_set,
+                cli,
             )
             .await
             .with_context(|| {
@@ -813,6 +820,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 target.as_deref(),
                 None,
                 host_ca_set,
+                cli,
             )
             .await
             .with_context(|| {

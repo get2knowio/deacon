@@ -268,6 +268,7 @@ pub(crate) async fn execute_container_up(
             config_path,
             Some(build_options),
             host_ca_set,
+            &runtime.cli_docker(),
         )
         .await
         .with_context(|| "Failed to build feature-extended image")?;
@@ -722,6 +723,7 @@ pub(crate) async fn execute_container_up(
         resolved_features.as_deref().unwrap_or(&[]),
         prior_markers,
         Some(&identity.config_hash),
+        runtime,
     )
     .await?;
 

@@ -88,7 +88,7 @@ pub fn parse_registry_reference(
 
 /// Check if a string looks like a registry hostname.
 /// A registry has a dot (e.g. ghcr.io) or a colon followed by digits (e.g. localhost:5000).
-fn looks_like_registry(s: &str) -> bool {
+pub(crate) fn looks_like_registry(s: &str) -> bool {
     if s.contains('.') {
         return true;
     }

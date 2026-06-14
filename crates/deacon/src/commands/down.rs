@@ -43,7 +43,10 @@ pub struct DownArgs {
 
 /// Execute the down command
 #[instrument(skip(args))]
-pub async fn execute_down(args: DownArgs) -> Result<()> {
+pub async fn execute_down(
+    args: DownArgs,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
+) -> Result<()> {
     debug!("Starting down command execution");
     debug!("Down args: {:?}", args);
 
@@ -82,7 +85,7 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
             }
             DiscoveryResult::None(_) => {
                 debug!("No configuration found, attempting auto-discovery from state");
-                return execute_down_with_auto_discovery(workspace_folder, &args).await;
+                return execute_down_with_auto_discovery(workspace_folder, &args, runtime).await;
             }
         }
     };
@@ -94,7 +97,7 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
                 "Failed to load configuration: {}, attempting auto-discovery",
                 e
             );
-            return execute_down_with_auto_discovery(workspace_folder, &args).await;
+            return execute_down_with_auto_discovery(workspace_folder, &args, runtime).await;
         }
     };
 
@@ -109,7 +112,7 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
 
     // If --all flag is set, find and remove all containers with matching labels
     if args.all {
-        return execute_down_all(&identity, &args).await;
+        return execute_down_all(&identity, &args, runtime).await;
     }
 
     // Load saved state
@@ -137,6 +140,7 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
                 &args,
                 &mut state_manager,
                 workspace_hash,
+                runtime,
             )
             .await
         }
@@ -159,10 +163,14 @@ pub async fn execute_down(args: DownArgs) -> Result<()> {
 
 /// Execute down for all containers with matching labels
 #[instrument(skip(identity, args))]
-async fn execute_down_all(identity: &ContainerIdentity, args: &DownArgs) -> Result<()> {
+async fn execute_down_all(
+    identity: &ContainerIdentity,
+    args: &DownArgs,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
+) -> Result<()> {
     debug!("Finding all containers with matching labels");
 
-    let docker = CliDocker::new();
+    let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path).cli_docker();
 
     // `--all` sweeps *every* container for this workspace, including stale
     // ones created under an older/different config. Match on the durable,
@@ -281,12 +289,14 @@ fn is_already_gone(err: &impl std::fmt::Display) -> bool {
 
 /// Execute down for single container configurations
 #[instrument(skip(config, container_state, state_manager, args))]
+#[allow(clippy::too_many_arguments)]
 async fn execute_container_down(
     config: &DevContainerConfig,
     container_state: &deacon_core::state::ContainerState,
     args: &DownArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
 ) -> Result<()> {
     debug!("Shutting down container: {}", container_state.container_id);
 
@@ -303,7 +313,7 @@ async fn execute_container_down(
         );
     }
 
-    let docker = CliDocker::new();
+    let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path).cli_docker();
 
     // Determine if we should remove based on flags
     let should_remove = args.remove || args.force;
@@ -504,7 +514,11 @@ async fn execute_compose_down(
 
 /// Execute down with auto-discovery when config is not available
 #[instrument]
-async fn execute_down_with_auto_discovery(workspace_folder: &Path, args: &DownArgs) -> Result<()> {
+async fn execute_down_with_auto_discovery(
+    workspace_folder: &Path,
+    args: &DownArgs,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
+) -> Result<()> {
     debug!("Attempting auto-discovery of running containers/projects");
 
     // Create a minimal identity just for workspace hash generation (no config
@@ -528,6 +542,7 @@ async fn execute_down_with_auto_discovery(workspace_folder: &Path, args: &DownAr
                 args,
                 &mut state_manager,
                 workspace_hash,
+                runtime,
             )
             .await
         }

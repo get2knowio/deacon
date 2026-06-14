@@ -12,8 +12,15 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+/// The container runtime binary under test (honors `DEACON_CONTAINER_RUNTIME`,
+/// the same env var deacon reads). Stale-container setup must use this so it
+/// lands in the store deacon-under-podman actually sweeps.
+fn runtime_bin() -> String {
+    std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string())
+}
+
 fn is_docker_available() -> bool {
-    std::process::Command::new("docker")
+    std::process::Command::new(runtime_bin())
         .arg("info")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -196,7 +203,7 @@ fn test_down_all_sweeps_stale_by_local_folder() {
     // local_folder label (simulating a container from an older deacon run
     // whose state file / config no longer matches).
     let local_folder_label = format!("devcontainer.local_folder={}", workspace.display());
-    let stale = std::process::Command::new("docker")
+    let stale = std::process::Command::new(runtime_bin())
         .args([
             "run",
             "-d",
@@ -218,7 +225,7 @@ fn test_down_all_sweeps_stale_by_local_folder() {
 
     // Count containers with this workspace label before sweep (expect >= 2).
     let count_label = || -> usize {
-        let out = std::process::Command::new("docker")
+        let out = std::process::Command::new(runtime_bin())
             .args([
                 "ps",
                 "-a",
@@ -252,7 +259,7 @@ fn test_down_all_sweeps_stale_by_local_folder() {
 
     let remaining = count_label();
     // Best-effort cleanup of the stale container regardless of assertion outcome.
-    let _ = std::process::Command::new("docker")
+    let _ = std::process::Command::new(runtime_bin())
         .args(["rm", "-f", &stale_id])
         .output();
 

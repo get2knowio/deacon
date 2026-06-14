@@ -459,9 +459,12 @@ fn apply_container_substitution(
 
 /// Execute the exec command
 #[instrument]
-pub async fn execute_exec(args: ExecArgs) -> Result<()> {
-    let docker_path = args.docker_path.clone();
-    execute_exec_with_docker(args, &CliDocker::with_path(docker_path)).await
+pub async fn execute_exec(
+    args: ExecArgs,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
+) -> Result<()> {
+    let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path);
+    execute_exec_with_docker(args, &docker).await
 }
 
 /// Execute the exec command with a custom Docker implementation

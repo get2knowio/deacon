@@ -61,10 +61,11 @@ pub(crate) fn extract_build_config_from_devcontainer(
 /// When `build_options.is_default()` is true, no extra arguments are added,
 /// preserving existing behavior. When cache-from/cache-to/builder options
 /// are set, they are passed to the docker build command via `to_docker_args()`.
-#[instrument(skip(build_config, build_options))]
+#[instrument(skip(build_config, build_options, cli))]
 pub(crate) async fn build_image_from_config(
     build_config: &BuildConfig,
     build_options: &BuildOptions,
+    cli: &deacon_core::docker::CliRuntime,
 ) -> Result<String> {
     debug!(
         "Building image from Dockerfile: {}",
@@ -134,18 +135,19 @@ pub(crate) async fn build_image_from_config(
             .to_string(),
     );
 
-    debug!("Docker build command: docker {}", build_args.join(" "));
+    let runtime_path = cli.runtime_path();
+    debug!("Build command: {} {}", runtime_path, build_args.join(" "));
 
-    // Execute docker build with retry-on-transient (network blips, 429,
+    // Execute the build with retry-on-transient (network blips, 429,
     // 5xx from registry). Terminal failures (Dockerfile syntax, RUN failure,
     // 401/403) fail on the first attempt — see classifier in
     // deacon_core::docker_retry.
     let output = deacon_core::docker_retry::run_build_with_retry(
-        std::path::Path::new("docker"),
+        std::path::Path::new(runtime_path),
         &build_args,
     )
     .await
-    .context("docker build failed")?;
+    .context("image build failed")?;
 
     let image_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     debug!("Built image with ID: {}", image_id);
@@ -159,7 +161,7 @@ pub(crate) async fn build_image_from_config(
     // image — mirroring `deacon build`'s `deacon-build:<hash>` base tag. The
     // digest is content-addressed, so the derived tag is stable across rebuilds.
     let tag = derive_local_build_tag(&image_id);
-    tag_built_image(&image_id, &tag).await?;
+    tag_built_image(runtime_path, &image_id, &tag).await?;
     debug!("Tagged built image {} as {}", image_id, tag);
 
     Ok(tag)
@@ -175,13 +177,13 @@ fn derive_local_build_tag(image_id: &str) -> String {
     format!("deacon-build:{}", short)
 }
 
-/// Apply `tag` to the locally-built image `image_id` (`docker tag`).
-async fn tag_built_image(image_id: &str, tag: &str) -> Result<()> {
-    let output = tokio::process::Command::new("docker")
+/// Apply `tag` to the locally-built image `image_id` (`<runtime> tag`).
+async fn tag_built_image(runtime_path: &str, image_id: &str, tag: &str) -> Result<()> {
+    let output = tokio::process::Command::new(runtime_path)
         .args(["tag", image_id, tag])
         .output()
         .await
-        .with_context(|| format!("Failed to run 'docker tag {} {}'", image_id, tag))?;
+        .with_context(|| format!("Failed to run '{} tag {} {}'", runtime_path, image_id, tag))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
