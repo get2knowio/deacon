@@ -1096,15 +1096,26 @@ impl CliRuntime {
         let mut result = Vec::new();
         for container in containers {
             let container_info = ContainerInfo {
+                // Accept both docker (`ID`) and podman (`Id`) key casing.
                 id: container
                     .get("ID")
+                    .or_else(|| container.get("Id"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string(),
+                // docker: comma-joined string; podman: array of names.
                 names: container
                     .get("Names")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.split(',').map(|name| name.trim().to_string()).collect())
+                    .map(|v| match v {
+                        serde_json::Value::String(s) => {
+                            s.split(',').map(|name| name.trim().to_string()).collect()
+                        }
+                        serde_json::Value::Array(items) => items
+                            .iter()
+                            .filter_map(|n| n.as_str().map(|s| s.to_string()))
+                            .collect(),
+                        _ => vec![],
+                    })
                     .unwrap_or_default(),
                 image: container
                     .get("Image")
@@ -1423,16 +1434,30 @@ impl Docker for CliRuntime {
                 DockerError::CLIError(format!("Failed to parse container JSON: {}", e))
             })?;
 
+            // Field shapes differ between docker and podman `ps --format "{{json .}}"`:
+            // docker emits `"ID"` + `"Names"` (comma-joined string); podman emits
+            // `"Id"` + `"Names"` (array of strings). Accept both so container
+            // discovery (start/exec/down) resolves a real ID under podman instead
+            // of falling back to "unknown".
             let container_info = ContainerInfo {
                 id: container
                     .get("ID")
+                    .or_else(|| container.get("Id"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string(),
                 names: container
                     .get("Names")
-                    .and_then(|v| v.as_str())
-                    .map(|s| vec![s.to_string()])
+                    .map(|v| match v {
+                        serde_json::Value::String(s) => {
+                            s.split(',').map(|n| n.trim().to_string()).collect()
+                        }
+                        serde_json::Value::Array(items) => items
+                            .iter()
+                            .filter_map(|n| n.as_str().map(|s| s.to_string()))
+                            .collect(),
+                        _ => vec![],
+                    })
                     .unwrap_or_default(),
                 image: container
                     .get("Image")
@@ -3285,6 +3310,25 @@ mod tests {
         let docker = CliDocker::new();
         let result = docker.parse_container_list("").unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_container_list_docker_and_podman_shapes() {
+        let docker = CliDocker::new();
+        // docker `ps --format "{{json .}}"`: "ID" + comma-joined "Names" string.
+        let docker_line = r#"{"ID":"abc123","Names":"my-ctr","Image":"alpine:3.19","Status":"Up","State":"running"}"#;
+        let parsed = docker.parse_container_list(docker_line).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "abc123");
+        assert_eq!(parsed[0].names, vec!["my-ctr".to_string()]);
+
+        // podman `ps --format "{{json .}}"`: "Id" + "Names" array. Must NOT
+        // fall back to "unknown" (regression: every podman container did).
+        let podman_line = r#"{"Id":"def456","Names":["pod-ctr"],"Image":"alpine:3.19","Status":"Up","State":"running"}"#;
+        let parsed = docker.parse_container_list(podman_line).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "def456");
+        assert_eq!(parsed[0].names, vec!["pod-ctr".to_string()]);
     }
 
     #[test]
