@@ -1,30 +1,42 @@
-# Manual feasibility spike for issue #239 — can a GitHub-hosted windows-latest
-# runner host `podman machine` (WSL2 backend) well enough to run a real
-# `deacon up → exec → down` against a Linux image?
+# Non-required Windows + Podman smoke lane (issue #239).
 #
-# This is NOT a CI lane: it runs ONLY via workflow_dispatch (never on push/PR).
-# Every risky step is `continue-on-error` so the run always reaches the summary
-# and records the exact failure mode (the spike's primary deliverable). The
-# job's overall conclusion intentionally reflects only whether the e2e
-# succeeded; read the step summary for the layer-by-layer findings.
-name: Spike - Windows + Podman e2e (#239)
+# A nightly (+ manually dispatchable) end-to-end check that a GitHub-hosted
+# windows-latest runner can host `podman machine` (WSL2 backend) and run a
+# minimal `deacon up → exec → down` against a Linux image. The feasibility
+# spike (#239) proved this works once; this lane runs it on a schedule to
+# gather RELIABILITY data before deciding whether to promote it to a required
+# check (mirroring how the Linux podman lane went #236 experimental → #237
+# required).
+#
+# NOT a PR gate: it never runs on push/PR (no per-PR Windows-runner cost) and
+# nothing depends on it. A failing nightly is the signal we're collecting —
+# check the run's step summary for the layer-by-layer breakdown. The
+# workflow_dispatch trigger keeps it runnable on demand as a diagnostic.
+name: Windows + Podman smoke (#239)
 
 on:
+  schedule:
+    # 06:00 UTC daily.
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: windows-podman-smoke
+  cancel-in-progress: true
+
 jobs:
-  windows-podman-spike:
-    name: Windows + Podman feasibility
+  windows-podman-smoke:
+    name: Windows + Podman smoke
     runs-on: windows-latest
     timeout-minutes: 45
     env:
       DEACON_CONTAINER_RUNTIME: podman
-      # A fully-qualified ref sidesteps podman short-name resolution so the
-      # spike measures the runtime/mount path, not image qualification.
-      SPIKE_IMAGE: docker.io/library/alpine:3.18
+      # A fully-qualified ref sidesteps podman short-name resolution so the lane
+      # measures the runtime/mount path, not image qualification.
+      SMOKE_IMAGE: docker.io/library/alpine:3.18
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
@@ -32,8 +44,7 @@ jobs:
     - name: Host diagnostics
       # Purely informational. `wsl --status` exits non-zero when no distro is
       # installed (the runner default), so force Continue + `exit 0` so this can
-      # never abort the run — the previous attempt failed here for exactly that
-      # reason (#239).
+      # never abort the run.
       continue-on-error: true
       shell: pwsh
       run: |
@@ -58,9 +69,9 @@ jobs:
       run: |
         $ErrorActionPreference = 'Continue'
         # Ensure the WSL2 platform is present (podman machine brings its own
-        # distro, so --no-distribution is enough). May require a reboot the
-        # runner won't get — if so, `podman machine start` below will fail and
-        # that becomes the recorded finding.
+        # distro, so --no-distribution is enough). If a reboot is ever required,
+        # `podman machine start` below fails and that becomes the recorded
+        # finding.
         wsl --install --no-distribution 2>&1 | Out-String
         wsl --update 2>&1 | Out-String
         wsl --set-default-version 2 2>&1 | Out-String
@@ -89,8 +100,7 @@ jobs:
       shell: pwsh
       run: |
         # Accurate exit semantics: this step's outcome must reflect whether the
-        # WSL2-backed machine actually came up (it gates nothing directly, but
-        # the Findings summary reports it). Fail fast on init/start so the
+        # WSL2-backed machine actually came up. Fail fast on init/start so the
         # captured error is the real blocker, not a later symptom.
         podman machine init 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { Write-Host "podman machine init FAILED"; exit 1 }
@@ -106,13 +116,26 @@ jobs:
       run: |
         # Trailing native exit code is the step outcome and gates the deacon
         # e2e below — do NOT swallow it with `exit 0`.
-        podman run --rm $env:SPIKE_IMAGE echo "podman-windows-ok" 2>&1 | Out-String
+        podman run --rm $env:SMOKE_IMAGE echo "podman-windows-ok" 2>&1 | Out-String
 
     # ---- deacon e2e (only attempted if the podman backend actually works) ----
 
     - name: Install Rust toolchain
       if: steps.smoke.outcome == 'success'
       uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      if: steps.smoke.outcome == 'success'
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-winpodman-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-winpodman-
+          ${{ runner.os }}-cargo-
 
     - name: Build deacon
       id: build
@@ -127,22 +150,22 @@ jobs:
       shell: bash
       run: |
         set -x
-        ws="$RUNNER_TEMP/spike-ws"
+        ws="$RUNNER_TEMP/winpodman-ws"
         mkdir -p "$ws/.devcontainer"
         cat > "$ws/.devcontainer/devcontainer.json" <<JSON
-        { "name": "win-podman-spike", "image": "$SPIKE_IMAGE", "overrideCommand": true }
+        { "name": "win-podman-smoke", "image": "$SMOKE_IMAGE", "overrideCommand": true }
         JSON
         bin="target/debug/deacon.exe"
         "$bin" up --workspace-folder "$ws" --skip-post-create --skip-non-blocking-commands
         "$bin" exec --workspace-folder "$ws" -- echo "deacon-podman-windows-e2e-ok"
         "$bin" down --workspace-folder "$ws"
 
-    - name: Findings summary
+    - name: Smoke summary
       if: always()
       shell: bash
       run: |
         {
-          echo "## Windows + Podman spike (#239) — findings"
+          echo "## Windows + Podman smoke (#239)"
           echo ""
           echo "| Layer | Outcome |"
           echo "|---|---|"
@@ -153,22 +176,22 @@ jobs:
           echo "| cargo build -p deacon | ${{ steps.build.outcome }} |"
           echo "| deacon up/exec/down | ${{ steps.e2e.outcome }} |"
           echo ""
-          echo "Verdict driver: the **smoke** row answers spike task #1 (can the runner"
-          echo "host a podman backend at all); the **e2e** row answers task #2 (deacon's"
-          echo "Windows host-side path against that backend). See the step logs above for"
-          echo "the captured failure mode of any non-\`success\` layer."
+          echo "Non-required reliability lane. A failing nightly is the signal we're"
+          echo "collecting before deciding whether to promote this to a required check"
+          echo "(#239). See the step logs above for the captured failure mode of any"
+          echo "non-\`success\` layer."
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Reflect e2e conclusion
       if: always()
       shell: bash
       run: |
-        # The job is green only if the full e2e worked; otherwise fail so the run
-        # conclusion honestly reflects "not yet feasible" (diagnostics are already
-        # captured in the summary + logs above).
+        # Job is green only if the full e2e worked; otherwise fail so the run
+        # conclusion honestly reflects the reliability data point (diagnostics
+        # are already captured in the summary + logs above).
         if [ "${{ steps.e2e.outcome }}" = "success" ]; then
           echo "deacon up/exec/down succeeded under Windows podman"
         else
-          echo "Windows + Podman e2e not achieved; see Findings summary for the failing layer."
+          echo "Windows + Podman e2e not achieved this run; see summary for the failing layer."
           exit 1
         fi
