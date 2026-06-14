@@ -1,0 +1,150 @@
+# Manual feasibility spike for issue #239 — can a GitHub-hosted windows-latest
+# runner host `podman machine` (WSL2 backend) well enough to run a real
+# `deacon up → exec → down` against a Linux image?
+#
+# This is NOT a CI lane: it runs ONLY via workflow_dispatch (never on push/PR).
+# Every risky step is `continue-on-error` so the run always reaches the summary
+# and records the exact failure mode (the spike's primary deliverable). The
+# job's overall conclusion intentionally reflects only whether the e2e
+# succeeded; read the step summary for the layer-by-layer findings.
+name: Spike - Windows + Podman e2e (#239)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-podman-spike:
+    name: Windows + Podman feasibility
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      DEACON_CONTAINER_RUNTIME: podman
+      # A fully-qualified ref sidesteps podman short-name resolution so the
+      # spike measures the runtime/mount path, not image qualification.
+      SPIKE_IMAGE: docker.io/library/alpine:3.18
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Host diagnostics
+      shell: pwsh
+      run: |
+        Write-Host "== OS =="
+        [System.Environment]::OSVersion.Version | Out-String
+        (Get-CimInstance Win32_OperatingSystem).Caption
+        Write-Host "== WSL =="
+        wsl --version 2>&1 | Out-String
+        wsl --status 2>&1 | Out-String
+        wsl --list --verbose 2>&1 | Out-String
+        Write-Host "== Virtualization =="
+        (Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled | Out-String
+        Write-Host "== podman preinstalled? =="
+        (Get-Command podman -ErrorAction SilentlyContinue | Out-String)
+
+    - name: Ensure WSL2
+      id: wsl
+      continue-on-error: true
+      shell: pwsh
+      run: |
+        wsl --update 2>&1 | Out-String
+        wsl --set-default-version 2 2>&1 | Out-String
+
+    - name: Install Podman client (if needed)
+      id: install
+      continue-on-error: true
+      shell: pwsh
+      run: |
+        if (-not (Get-Command podman -ErrorAction SilentlyContinue)) {
+          Write-Host "podman not on PATH; installing via Chocolatey"
+          choco install podman-cli -y --no-progress
+        } else {
+          Write-Host "podman already present"
+        }
+        $env:Path += ";C:\Program Files\RedHat\Podman"
+        echo "C:\Program Files\RedHat\Podman" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        podman --version 2>&1 | Out-String
+
+    - name: Init + start podman machine (WSL2 backend)
+      id: machine
+      continue-on-error: true
+      shell: pwsh
+      run: |
+        podman machine init 2>&1 | Out-String
+        podman machine start 2>&1 | Out-String
+        Write-Host "== podman info =="
+        podman info 2>&1 | Out-String
+
+    - name: Podman smoke (run alpine)
+      id: smoke
+      continue-on-error: true
+      shell: pwsh
+      run: |
+        podman run --rm $env:SPIKE_IMAGE echo "podman-windows-ok" 2>&1 | Out-String
+
+    # ---- deacon e2e (only attempted if the podman backend actually works) ----
+
+    - name: Install Rust toolchain
+      if: steps.smoke.outcome == 'success'
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build deacon
+      id: build
+      if: steps.smoke.outcome == 'success'
+      continue-on-error: true
+      run: cargo build -p deacon
+
+    - name: deacon up - exec - down against Podman
+      id: e2e
+      if: steps.smoke.outcome == 'success' && steps.build.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -x
+        ws="$RUNNER_TEMP/spike-ws"
+        mkdir -p "$ws/.devcontainer"
+        cat > "$ws/.devcontainer/devcontainer.json" <<JSON
+        { "name": "win-podman-spike", "image": "$SPIKE_IMAGE", "overrideCommand": true }
+        JSON
+        bin="target/debug/deacon.exe"
+        "$bin" up --workspace-folder "$ws" --skip-post-create --skip-non-blocking-commands
+        "$bin" exec --workspace-folder "$ws" -- echo "deacon-podman-windows-e2e-ok"
+        "$bin" down --workspace-folder "$ws"
+
+    - name: Findings summary
+      if: always()
+      shell: bash
+      run: |
+        {
+          echo "## Windows + Podman spike (#239) — findings"
+          echo ""
+          echo "| Layer | Outcome |"
+          echo "|---|---|"
+          echo "| Ensure WSL2 | ${{ steps.wsl.outcome }} |"
+          echo "| Install podman client | ${{ steps.install.outcome }} |"
+          echo "| podman machine init + start | ${{ steps.machine.outcome }} |"
+          echo "| podman run alpine (smoke) | ${{ steps.smoke.outcome }} |"
+          echo "| cargo build -p deacon | ${{ steps.build.outcome }} |"
+          echo "| deacon up/exec/down | ${{ steps.e2e.outcome }} |"
+          echo ""
+          echo "Verdict driver: the **smoke** row answers spike task #1 (can the runner"
+          echo "host a podman backend at all); the **e2e** row answers task #2 (deacon's"
+          echo "Windows host-side path against that backend). See the step logs above for"
+          echo "the captured failure mode of any non-\`success\` layer."
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Reflect e2e conclusion
+      if: always()
+      shell: bash
+      run: |
+        # The job is green only if the full e2e worked; otherwise fail so the run
+        # conclusion honestly reflects "not yet feasible" (diagnostics are already
+        # captured in the summary + logs above).
+        if [ "${{ steps.e2e.outcome }}" = "success" ]; then
+          echo "deacon up/exec/down succeeded under Windows podman"
+        else
+          echo "Windows + Podman e2e not achieved; see Findings summary for the failing layer."
+          exit 1
+        fi
