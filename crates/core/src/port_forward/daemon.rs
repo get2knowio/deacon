@@ -69,8 +69,6 @@ pub struct DaemonConfig {
 /// `nix` wrappers keep this `unsafe`-free.
 #[cfg(unix)]
 pub fn daemonize(log_path: &Path) -> Result<()> {
-    use std::os::unix::io::AsRawFd;
-
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| PortForwardError::io(format!("create log dir {}", parent.display()), e))?;
@@ -91,14 +89,12 @@ pub fn daemonize(log_path: &Path) -> Result<()> {
         .open("/dev/null")
         .map_err(|e| PortForwardError::io("open /dev/null", e))?;
 
-    let dup = |old: i32, new: i32, what: &str| -> Result<()> {
-        nix::unistd::dup2(old, new)
-            .map(|_| ())
-            .map_err(|e| PortForwardError::io(format!("dup2 {what}"), std::io::Error::from(e)))
-    };
-    dup(devnull.as_raw_fd(), 0, "stdin")?;
-    dup(log.as_raw_fd(), 1, "stdout")?;
-    dup(log.as_raw_fd(), 2, "stderr")?;
+    nix::unistd::dup2_stdin(&devnull)
+        .map_err(|e| PortForwardError::io("dup2 stdin", std::io::Error::from(e)))?;
+    nix::unistd::dup2_stdout(&log)
+        .map_err(|e| PortForwardError::io("dup2 stdout", std::io::Error::from(e)))?;
+    nix::unistd::dup2_stderr(&log)
+        .map_err(|e| PortForwardError::io("dup2 stderr", std::io::Error::from(e)))?;
     Ok(())
 }
 
