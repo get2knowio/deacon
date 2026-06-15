@@ -10,6 +10,11 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+    # Supply-chain cooldown: hold newly published crate versions for 7 days so a
+    # compromised release can be detected/yanked before it's proposed. (cargo
+    # has no install-time cooldown, so this Dependabot gate is the only layer.)
+    cooldown:
+      default-days: 7
     groups:
       rust-minor-patch:
         update-types:
@@ -33,6 +38,8 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+    cooldown:
+      default-days: 7
     groups:
       actions-minor-patch:
         update-types:
