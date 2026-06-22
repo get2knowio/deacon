@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo registry
@@ -59,7 +59,7 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
       - name: Checkout code at tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.get_version.outputs.version }}
       - name: Validate tag matches crate version
@@ -161,7 +161,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Ensure we build from the exact tag commit when dispatched manually
           ref: ${{ env.VERSION }}
@@ -404,7 +404,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.create-release.outputs.version }}
 

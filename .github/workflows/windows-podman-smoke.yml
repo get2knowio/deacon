@@ -39,7 +39,7 @@ jobs:
       SMOKE_IMAGE: docker.io/library/alpine:3.18
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Host diagnostics
       # Purely informational. `wsl --status` exits non-zero when no distro is
