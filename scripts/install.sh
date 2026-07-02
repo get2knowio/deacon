@@ -378,8 +378,20 @@ main() {
 
         if [[ "${DEACON_FORCE:-false}" != "true" ]]; then
             warn "Deacon is already installed: $existing_version"
-            echo -n "Do you want to overwrite? [y/N] "
-            read -r response
+            # When invoked via `curl ... | bash`, stdin is the pipe (already at
+            # EOF), not the keyboard — so `read` from stdin would auto-answer
+            # with an empty string and cancel. Read from the controlling
+            # terminal instead. If there's no terminal (truly non-interactive,
+            # e.g. CI), fail fast with guidance rather than silently cancelling.
+            local response=""
+            if [[ -r /dev/tty ]]; then
+                echo -n "Do you want to overwrite? [y/N] " > /dev/tty
+                read -r response < /dev/tty || response=""
+            else
+                error "Deacon is already installed ($existing_version) and no terminal is available to confirm overwrite."
+                error "Re-run with DEACON_FORCE=true to overwrite non-interactively."
+                exit 1
+            fi
             if [[ ! "$response" =~ ^[Yy]$ ]]; then
                 info "Installation cancelled"
                 exit 0
