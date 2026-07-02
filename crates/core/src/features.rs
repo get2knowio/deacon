@@ -53,7 +53,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument};
 
 /// Canonicalize a feature ID by trimming whitespace
 ///
@@ -1018,8 +1018,13 @@ impl FeatureDependencyResolver {
                         dependencies.insert(canonical);
                     }
                     None => {
-                        warn!(
-                            "Feature '{}' depends on '{}' which is not in the feature set",
+                        // `installsAfter` is a soft ordering hint, not a dependency:
+                        // per spec it only orders features already in the set and never
+                        // pulls in missing ones. An unresolved entry is expected, common
+                        // (e.g. every feature's installsAfter on common-utils), and not
+                        // actionable by the user — pure ordering bookkeeping, so debug.
+                        debug!(
+                            "Feature '{}' lists 'installsAfter' '{}', which is not in the feature set; ignoring for ordering",
                             feature.id, after_id
                         );
                     }

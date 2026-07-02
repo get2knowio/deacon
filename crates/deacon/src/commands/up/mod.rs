@@ -160,7 +160,13 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
                     error
                 );
             } else {
-                warn!(
+                // `detect` is best-effort by design ("use a GPU if one is
+                // present, otherwise proceed without"). Finding none is the
+                // expected outcome on a GPU-less host, not a problem the user
+                // must act on, so this is informational rather than a warning.
+                // (A probe *error* above stays at warn — that's an actual
+                // malfunction, not a clean negative result.)
+                info!(
                     "GPU mode 'detect' specified but no GPU runtime found. Proceeding without GPU acceleration."
                 );
             }
