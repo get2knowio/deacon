@@ -1,0 +1,4 @@
+# These captured BuildKit `--progress=plain` logs are committed test fixtures
+# (consumed by `include_str!` in ui/build_progress.rs). Re-include them despite
+# the global `*.log` ignore in the repo-root .gitignore.
+!*.plain.log
