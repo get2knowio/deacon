@@ -845,6 +845,7 @@ mod tests {
             ],
             cache_to: Some("type=registry,ref=myrepo/cache:latest".to_string()),
             builder: Some("mybuilder".to_string()),
+            output_mode: crate::build::BuildOutputMode::default(),
         };
 
         let generator = DockerfileGenerator::new(config);

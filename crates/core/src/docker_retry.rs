@@ -67,6 +67,28 @@ pub trait BuildLineSink {
     fn reset(&self) {}
 }
 
+/// How [`run_build_with_retry`] wires the child process's standard streams.
+///
+/// This is the single seam the build-output UI drives: the resolved output mode
+/// picks a variant, and the executor either captures + streams (Plain/Compact)
+/// or hands the terminal to the child (Inherit).
+#[derive(Clone, Copy)]
+pub enum BuildIo<'a> {
+    /// Pipe stdout/stderr, capture both, and forward each line to the sink as it
+    /// arrives (`None` = capture only, no forwarding). Transient failures are
+    /// retried because the captured stderr can be classified. Used by the Plain
+    /// and Compact output modes (and by internal callers that just want the
+    /// image ID).
+    Captured(Option<&'a dyn BuildLineSink>),
+
+    /// Inherit the parent's stdio so the child (`docker buildx build`) draws its
+    /// own native progress UI directly to the terminal. Nothing is captured, so
+    /// there is **no** retry-on-transient and no failure-log trim — matching the
+    /// Inherit-mode decision in the build-output plan. Used only when the user
+    /// opted into verbose output on a TTY.
+    Inherited,
+}
+
 /// Classification of a failed `docker build` / `docker buildx build` invocation.
 ///
 /// Variants carry the raw `stderr` and `exit_code` for diagnostics — both for
@@ -293,17 +315,22 @@ pub(crate) static FORCED_TRANSIENT_FAILURES: std::sync::atomic::AtomicU32 =
 /// returns a `DockerError::CLIError` carrying the final stderr — preserving
 /// existing call-site error rendering.
 ///
-/// When `sink` is `Some`, each output line is forwarded to it as the child
-/// produces it (live progress) and [`BuildLineSink::reset`] is called at the
-/// start of every attempt. When `sink` is `None`, output is captured but not
-/// forwarded — identical to the historical `.output()` behavior. Either way the
-/// full stdout/stderr is captured into the returned `Output` for retry
-/// classification and error rendering.
+/// The [`BuildIo`] argument selects the stdio strategy. [`BuildIo::Captured`]
+/// pipes and captures both streams (forwarding lines to the sink if present)
+/// and retries transient failures. [`BuildIo::Inherited`] hands the terminal to
+/// the child — no capture, no retry — and is used only for the verbose Inherit
+/// output mode. Either way the returned `Output` carries the process's exit
+/// status (and, for `Captured`, the full stdout/stderr).
 pub async fn run_build_with_retry(
     runtime_path: &Path,
     args: &[String],
-    sink: Option<&dyn BuildLineSink>,
+    io: BuildIo<'_>,
 ) -> Result<Output> {
+    let sink = match io {
+        BuildIo::Inherited => return run_build_inherited(runtime_path, args).await,
+        BuildIo::Captured(sink) => sink,
+    };
+
     let config = RetryConfig::network();
 
     let result = retry_async(
@@ -342,6 +369,40 @@ pub async fn run_build_with_retry(
     .await;
 
     result.map_err(|e| DockerError::CLIError(format!("Image build failed: {}", e.stderr())).into())
+}
+
+/// Run a single build with the child inheriting the parent's stdio, so
+/// `docker buildx build` renders its own progress UI straight to the terminal.
+///
+/// Nothing is captured, so there is no retry-on-transient (the classifier needs
+/// stderr) and no failing-step trim. Returns an `Output` with empty stdout/stderr
+/// buffers and the real exit status; a non-zero exit becomes a `CLIError`.
+async fn run_build_inherited(runtime_path: &Path, args: &[String]) -> Result<Output> {
+    let status = tokio::process::Command::new(runtime_path)
+        .args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .await
+        .map_err(|e| DockerError::CLIError(format!("Failed to execute docker build: {}", e)))?;
+
+    if !status.success() {
+        return Err(DockerError::CLIError(format!(
+            "Image build failed: docker build exited with {}",
+            status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".to_string())
+        ))
+        .into());
+    }
+
+    Ok(Output {
+        status,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    })
 }
 
 /// Spawn a single `docker build` attempt with piped stdio, streaming stderr
@@ -684,7 +745,7 @@ mod tests {
         let result = run_build_with_retry(
             std::path::Path::new("/usr/bin/true"),
             &[] as &[String],
-            None,
+            BuildIo::Captured(None),
         )
         .await;
 
@@ -711,7 +772,7 @@ mod tests {
         let result = run_build_with_retry(
             std::path::Path::new("/usr/bin/true"),
             &[] as &[String],
-            None,
+            BuildIo::Captured(None),
         )
         .await;
 
@@ -742,7 +803,7 @@ mod tests {
         let result = run_build_with_retry(
             std::path::Path::new("/usr/bin/true"),
             &[] as &[String],
-            None,
+            BuildIo::Captured(None),
         )
         .await;
 
@@ -793,7 +854,7 @@ mod tests {
         let result = run_build_with_retry(
             std::path::Path::new("/bin/sh"),
             &args,
-            Some(&sink as &dyn BuildLineSink),
+            BuildIo::Captured(Some(&sink as &dyn BuildLineSink)),
         )
         .await;
 
@@ -841,7 +902,7 @@ mod tests {
         let result = run_build_with_retry(
             std::path::Path::new("/bin/sh"),
             &args,
-            Some(&sink as &dyn BuildLineSink),
+            BuildIo::Captured(Some(&sink as &dyn BuildLineSink)),
         )
         .await;
 
@@ -857,5 +918,42 @@ mod tests {
                 .any(|(_, l)| l.contains("unknown instruction")),
             "sink should have received the failing stderr line"
         );
+    }
+
+    /// Inherited mode returns Ok on success without touching any sink.
+    // Unix-only: spawns `/usr/bin/true`, absent on Windows.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn inherited_mode_succeeds_without_capture() {
+        let _guard = HOOK_LOCK.lock().await;
+        clear_fail_hook();
+
+        let result = run_build_with_retry(
+            std::path::Path::new("/usr/bin/true"),
+            &[] as &[String],
+            BuildIo::Inherited,
+        )
+        .await;
+
+        let output = result.expect("true should succeed");
+        assert!(output.status.success());
+        // Inherited mode captures nothing.
+        assert!(output.stdout.is_empty() && output.stderr.is_empty());
+    }
+
+    /// Inherited mode surfaces a non-zero exit as a CLIError (no retry).
+    // Unix-only: spawns `/bin/sh`, absent on Windows.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn inherited_mode_nonzero_exit_is_error() {
+        let _guard = HOOK_LOCK.lock().await;
+        clear_fail_hook();
+
+        let args = vec!["-c".to_string(), "exit 3".to_string()];
+        let result =
+            run_build_with_retry(std::path::Path::new("/bin/sh"), &args, BuildIo::Inherited).await;
+
+        let err = result.expect_err("non-zero exit should error");
+        assert!(err.to_string().contains("Image build failed"));
     }
 }

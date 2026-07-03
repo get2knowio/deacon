@@ -30,6 +30,9 @@ pub struct BuildArgs {
     pub cache_from: Vec<String>,
     pub cache_to: Vec<String>,
     pub buildkit: Option<BuildKitOption>,
+    /// Resolved build-output presentation (Compact/Inherit/Plain), computed once
+    /// at the CLI tier from verbosity + TTY + log-format.
+    pub build_output_mode: deacon_core::build::BuildOutputMode,
     pub secret: Vec<String>,
     pub build_secret: Vec<String>,
     pub ssh: Vec<String>,
@@ -91,6 +94,7 @@ impl Default for BuildArgs {
             build_arg: Vec::new(),
             force: false,
             output_format: OutputFormat::Text,
+            build_output_mode: deacon_core::build::BuildOutputMode::default(),
             cache_from: Vec::new(),
             cache_to: Vec::new(),
             buildkit: None,
@@ -819,6 +823,7 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             &workspace_folder,
             &config_path,
             host_ca_set.as_ref(),
+            args.build_output_mode,
         )
         .await?;
 
@@ -1586,8 +1591,10 @@ async fn apply_features_and_lockfile(
     workspace_folder: &Path,
     config_path: &Path,
     host_ca_set: Option<&CorporateCaSet>,
+    build_output_mode: deacon_core::build::BuildOutputMode,
 ) -> Result<(String, Option<PathBuf>)> {
     use crate::commands::up::features_build::build_image_with_features;
+    use deacon_core::build::BuildOptions;
     use deacon_core::container::ContainerIdentity;
     use deacon_core::lockfile::{get_lockfile_path, write_lockfile};
 
@@ -1608,12 +1615,19 @@ async fn apply_features_and_lockfile(
     let mut identity = ContainerIdentity::new(workspace_folder, &synth_config);
     identity.workspace_hash = format!("{}-build", identity.workspace_hash);
 
+    // Carry the resolved build-output mode so feature-install steps render the
+    // same way `up` does (cache/builder options stay default here).
+    let build_options = BuildOptions {
+        output_mode: build_output_mode,
+        ..Default::default()
+    };
+
     let feature_build = build_image_with_features(
         &synth_config,
         &identity,
         workspace_folder,
         config_path,
-        None,
+        Some(&build_options),
         host_ca_set,
         // `deacon build` is docker-only today; podman parity for the build
         // command is tracked separately (issue #30 deferred items).

@@ -392,6 +392,9 @@ pub struct UpArgs {
     pub cache_from: Vec<String>,
     pub cache_to: Option<String>,
     pub buildkit: Option<crate::cli::BuildKitOption>,
+    /// Resolved build-output presentation (Compact/Inherit/Plain), computed once
+    /// at the CLI tier from verbosity + TTY + log-format.
+    pub build_output_mode: deacon_core::build::BuildOutputMode,
 
     // Features and dotfiles
     pub additional_features: Option<String>,
@@ -488,6 +491,7 @@ impl Default for UpArgs {
             cache_from: Vec::new(),
             cache_to: None,
             buildkit: None,
+            build_output_mode: deacon_core::build::BuildOutputMode::default(),
             additional_features: None,
             prefer_cli_features: false,
             feature_install_order: None,
@@ -559,6 +563,8 @@ pub(crate) fn build_options_from_args(args: &UpArgs) -> BuildOptions {
         cache_to: args.cache_to.clone(),
         // builder is not currently exposed in the up CLI; reserved for future addition
         builder: None,
+        // Resolved at the CLI tier from verbosity + TTY + log-format.
+        output_mode: args.build_output_mode,
     }
 }
 

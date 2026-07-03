@@ -1172,6 +1172,16 @@ impl Cli {
             && stderr_is_tty
             && !json_format;
 
+        // Resolve how `docker build` output is presented, from the same signals:
+        // Compact (default TTY), Inherit (`-v` on a TTY → buildx native UI), or
+        // Plain (non-TTY / CI / JSON / explicit non-auto `--progress`).
+        let build_output_mode = crate::ui::build_render::resolve_build_output_mode(
+            self.verbose,
+            stderr_is_tty,
+            json_format,
+            self.progress == ProgressFormat::Auto,
+        );
+
         // Compute the default log directive used only when the user has set
         // neither DEACON_LOG nor RUST_LOG. We pass it directly to the logging
         // initializer rather than mutating the process environment: env
@@ -1315,6 +1325,7 @@ impl Cli {
                     cache_from,
                     cache_to,
                     buildkit,
+                    build_output_mode,
                     skip_feature_auto_mapping,
                     no_lockfile,
                     frozen_lockfile,
@@ -1489,6 +1500,7 @@ impl Cli {
                     cache_from,
                     cache_to,
                     buildkit,
+                    build_output_mode,
                     secret,
                     build_secret,
                     ssh,
