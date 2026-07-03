@@ -350,8 +350,13 @@ impl DockerfileGenerator {
         Ok(command)
     }
 
-    /// Sanitize feature ID for use in file paths
-    fn sanitize_feature_id(id: &str) -> String {
+    /// Sanitize feature ID for use in file paths.
+    ///
+    /// Public so consumers that need to reverse-map a build-log mount marker
+    /// (`source=<sanitized_id>_<level>`) back to a feature — e.g. the build
+    /// progress parser in the `deacon` crate — can compute the same sanitized
+    /// form instead of re-implementing (and drifting from) this scheme.
+    pub fn sanitize_feature_id(id: &str) -> String {
         // Replace special characters with underscores
         id.chars()
             .map(|c| {
