@@ -32,6 +32,7 @@ fn test_build_options_generates_cache_from_args() {
         ],
         cache_to: None,
         builder: None,
+        ..Default::default()
     };
 
     let args = options.to_docker_args();
@@ -54,6 +55,7 @@ fn test_build_options_generates_cache_to_args() {
         cache_from: vec![],
         cache_to: Some("type=registry,ref=myregistry.io/cache:build".to_string()),
         builder: None,
+        ..Default::default()
     };
 
     let args = options.to_docker_args();
@@ -73,6 +75,7 @@ fn test_build_options_generates_builder_args() {
         cache_from: vec![],
         cache_to: None,
         builder: Some("mybuilder".to_string()),
+        ..Default::default()
     };
 
     let args = options.to_docker_args();
@@ -92,6 +95,7 @@ fn test_build_options_generates_all_cache_args() {
         cache_from: vec!["type=registry,ref=cache:latest".to_string()],
         cache_to: Some("type=registry,ref=cache:build".to_string()),
         builder: Some("cloud-builder".to_string()),
+        ..Default::default()
     };
 
     let args = options.to_docker_args();

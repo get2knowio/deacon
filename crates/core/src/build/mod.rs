@@ -18,6 +18,27 @@ use std::path::PathBuf;
 pub mod buildkit;
 pub mod metadata;
 
+/// How `docker build` output is presented to the user.
+///
+/// Resolved once at the CLI tier from verbosity + TTY + log-format and carried
+/// on [`BuildOptions`] so it reaches every build site. The deacon crate owns the
+/// renderer that consumes this (`ui::build_render`); the enum lives here only so
+/// it can ride along on `BuildOptions` (which `crates/core` defines). It does
+/// **not** affect [`BuildOptions::is_default`] or [`BuildOptions::to_docker_args`]
+/// — the executor acts on it via the stdio strategy, not via a docker flag.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BuildOutputMode {
+    /// Collapsing per-step progress on an interactive TTY; failure shows only the
+    /// failing step's log tail.
+    Compact,
+    /// Hand the terminal to buildx for its native progress UI (verbose on a TTY).
+    Inherit,
+    /// Stream lines verbatim to stderr (non-TTY / CI / JSON / non-auto progress).
+    /// The safe default for non-interactive contexts.
+    #[default]
+    Plain,
+}
+
 /// Build options that apply to both Dockerfile and feature builds.
 ///
 /// This struct aggregates all cache and builder options passed via CLI flags.
@@ -46,6 +67,13 @@ pub struct BuildOptions {
     /// Optional buildx builder name to use for builds.
     /// When set, builds use `docker buildx build --builder <name>`.
     pub builder: Option<String>,
+
+    /// How build output is rendered to the user. Does not participate in
+    /// [`Self::is_default`] / [`Self::to_docker_args`] — the executor consumes it
+    /// via the stdio strategy, not a docker flag. Defaults to
+    /// [`BuildOutputMode::Plain`] (safe for non-interactive callers/tests).
+    #[serde(default)]
+    pub output_mode: BuildOutputMode,
 }
 
 impl BuildOptions {
@@ -520,6 +548,7 @@ mod tests {
             ],
             cache_to: Some("type=registry,ref=repo/cache:latest".to_string()),
             builder: Some("mybuilder".to_string()),
+            output_mode: BuildOutputMode::default(),
         };
         let args = opts.to_docker_args();
 

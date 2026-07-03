@@ -180,7 +180,18 @@ pub(crate) async fn build_image_with_features(
         generator.generate_build_args(&dockerfile_path, &extended_image_tag, build_options);
 
     debug!("Building image with args: {:?}", build_args);
-    let _image_id = cli.build_image(&build_args).await?;
+    let mode = build_options.map(|o| o.output_mode).unwrap_or_default();
+    let renderer = crate::ui::build_render::BuildRenderer::for_mode(
+        mode,
+        staged.plan.features.iter().map(|f| f.id.as_str()),
+    );
+    let build_result = cli
+        .build_image(&build_args, crate::ui::build_render::io_for(&renderer))
+        .await;
+    if let Some(r) = &renderer {
+        r.finish(build_result.is_ok());
+    }
+    let _image_id = build_result?;
 
     info!("Successfully built extended image: {}", extended_image_tag);
 
@@ -373,7 +384,18 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     ]);
 
     debug!("Building image with args: {:?}", build_args);
-    let _image_id = cli.build_image(&build_args).await.with_context(|| {
+    let mode = build_options.map(|o| o.output_mode).unwrap_or_default();
+    let renderer = crate::ui::build_render::BuildRenderer::for_mode(
+        mode,
+        staged.plan.features.iter().map(|f| f.id.as_str()),
+    );
+    let build_result = cli
+        .build_image(&build_args, crate::ui::build_render::io_for(&renderer))
+        .await;
+    if let Some(r) = &renderer {
+        r.finish(build_result.is_ok());
+    }
+    let _image_id = build_result.with_context(|| {
         format!(
             "Failed to build feature-extended image from Dockerfile {} (context {})",
             dockerfile_path.display(),

@@ -2535,8 +2535,12 @@ impl CliRuntime {
     /// # Returns
     ///
     /// Returns the image ID on success
-    #[instrument(skip(self))]
-    pub async fn build_image(&self, args: &[String]) -> Result<String> {
+    #[instrument(skip(self, io))]
+    pub async fn build_image(
+        &self,
+        args: &[String],
+        io: crate::docker_retry::BuildIo<'_>,
+    ) -> Result<String> {
         debug!("Building image with BuildKit: {:?}", args);
 
         // Retrieve the built image ID via `--iidfile` rather than scraping
@@ -2553,7 +2557,7 @@ impl CliRuntime {
         let _output = crate::docker_retry::run_build_with_retry(
             std::path::Path::new(&self.runtime_path),
             &args,
-            None,
+            io,
         )
         .await?;
 

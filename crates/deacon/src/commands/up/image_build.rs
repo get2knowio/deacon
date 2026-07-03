@@ -147,13 +147,22 @@ pub(crate) async fn build_image_from_config(
     // 5xx from registry). Terminal failures (Dockerfile syntax, RUN failure,
     // 401/403) fail on the first attempt — see classifier in
     // deacon_core::docker_retry.
-    deacon_core::docker_retry::run_build_with_retry(
+    // Render build output per the resolved mode. No features are installed in
+    // this base-Dockerfile pass, so no feature ids to register.
+    let renderer = crate::ui::build_render::BuildRenderer::for_mode(
+        build_options.output_mode,
+        Vec::<&str>::new(),
+    );
+    let build_result = deacon_core::docker_retry::run_build_with_retry(
         std::path::Path::new(runtime_path),
         &build_args,
-        None,
+        crate::ui::build_render::io_for(&renderer),
     )
-    .await
-    .context("image build failed")?;
+    .await;
+    if let Some(r) = &renderer {
+        r.finish(build_result.is_ok());
+    }
+    build_result.context("image build failed")?;
 
     let image_id = tokio::fs::read_to_string(iidfile.path())
         .await
