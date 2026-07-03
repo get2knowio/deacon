@@ -1315,8 +1315,21 @@ async fn execute_compose_build(
         ));
     }
 
-    // Build the service
-    let _build_output = compose_manager.build_service(&project, service).await?;
+    // Build the service, rendering its BuildKit output per the resolved mode.
+    // This is the base compose-service build (no feature-install steps — feature
+    // layering renders separately), so there are no feature ids to register.
+    let renderer = crate::ui::build_render::BuildRenderer::for_mode(
+        args.build_output_mode,
+        Vec::<&str>::new(),
+    );
+    let sink = renderer
+        .as_ref()
+        .map(|r| r as &dyn deacon_core::docker_retry::BuildLineSink);
+    let build_result = compose_manager.build_service(&project, service, sink).await;
+    if let Some(r) = &renderer {
+        r.finish(build_result.is_ok());
+    }
+    let _build_output = build_result?;
 
     let build_duration = build_start.elapsed().as_secs_f64();
 
@@ -1989,17 +2002,36 @@ async fn execute_docker_build(
 
         debug!("Docker build command: docker {}", build_args.join(" "));
 
-        // Execute docker build (async) using the prepared command with env vars
-        let output = cmd
-            .args(&build_args) // Pass all args including "build" subcommand
-            .current_dir(workspace_folder)
-            .output()
-            .await
-            .map_err(|e| DockerError::CLIError(format!("Failed to execute docker build: {}", e)))?;
+        // Execute the base Dockerfile build through the streaming executor so its
+        // output honors the resolved mode (Compact/Inherit/Plain). No features are
+        // installed in this pass — feature layering renders separately — so there
+        // are no feature ids to register. `run_build_once` runs a single attempt
+        // (no retry) on our pre-configured command (env vars + working dir).
+        cmd.args(&build_args) // Pass all args including "build" subcommand
+            .current_dir(workspace_folder);
+        let renderer = crate::ui::build_render::BuildRenderer::for_mode(
+            args.build_output_mode,
+            Vec::<&str>::new(),
+        );
+        let output = deacon_core::docker_retry::run_build_once(
+            cmd,
+            crate::ui::build_render::io_for(&renderer),
+        )
+        .await?;
+        if let Some(r) = &renderer {
+            r.finish(output.status.success());
+        }
 
         if !output.status.success() {
+            // In Inherit mode stderr wasn't captured (it went to the terminal);
+            // fall back to a generic message so we never print an empty error.
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(DockerError::CLIError(format!("Docker build failed: {}", stderr)).into());
+            let detail = if stderr.trim().is_empty() {
+                format!("exited with {}", output.status)
+            } else {
+                stderr.to_string()
+            };
+            return Err(DockerError::CLIError(format!("Docker build failed: {}", detail)).into());
         }
 
         // When using --push or --output, we may not get a local image ID; use a

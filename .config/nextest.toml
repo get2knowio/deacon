@@ -114,7 +114,7 @@ test-group = 'smoke-cli'
 slow-timeout = "60s"
 
 [[profile.default.overrides]]
-filter = 'binary(=integration_build) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build)'
+filter = 'binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build)'
 test-group = 'docker-slow-shared'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
@@ -149,7 +149,7 @@ test-group = 'fs-heavy'
 slow-timeout = "2m"
 
 [[profile.default.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
 # Fast feedback loop profile: skip smoke/parity suites, Docker tests, and testcontainers tests
@@ -157,7 +157,7 @@ priority = 100
 retries = 0
 slow-timeout = "30s"
 # Exclude: smoke, parity, Docker-dependent tests, testcontainers-based tests
-default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build) | binary(=integration_auto_forward) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build))'
+default-filter = 'not (binary(#smoke_*) | binary(#parity_*) | binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build) | binary(=integration_auto_forward) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build))'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -217,7 +217,7 @@ test-group = 'smoke-cli'
 slow-timeout = "60s"
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=integration_build) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build)'
+filter = 'binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build)'
 test-group = 'docker-slow-shared'
 
 [[profile.dev-fast.overrides]]
@@ -248,7 +248,7 @@ test-group = 'fs-heavy'
 slow-timeout = "2m"
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
 # Full profile: Run all tests with appropriate grouping
@@ -263,7 +263,7 @@ status-level = "none"
 retries = 0
 slow-timeout = { period = "30m", terminate-after = 1 }
 status-level = "pass"
-default-filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_vulnerability_scan)'
+default-filter = 'binary(=integration_build) | binary(=integration_build_output) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_vulnerability_scan)'
 
 # integration_up_build_options tests are CLI-only (no actual Docker container operations)
 [[profile.long-running.overrides]]
@@ -272,7 +272,7 @@ test-group = 'smoke-cli'
 slow-timeout = "60s"
 
 [[profile.long-running.overrides]]
-filter = 'binary(=integration_build) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_vulnerability_scan)'
+filter = 'binary(=integration_build) | binary(=integration_build_output) | binary(#integration_up_*) | binary(=integration_progress) | binary(=integration_vulnerability_scan)'
 test-group = 'docker-slow-shared'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
@@ -325,7 +325,7 @@ test-group = 'smoke-cli'
 slow-timeout = "60s"
 
 [[profile.docker.overrides]]
-filter = 'binary(=integration_build) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress)'
+filter = 'binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress)'
 test-group = 'docker-slow-shared'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
@@ -363,7 +363,7 @@ test-group = 'fs-heavy'
 slow-timeout = "2m"
 
 [[profile.docker.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
 # Apply all default overrides
@@ -409,7 +409,7 @@ test-group = 'smoke-cli'
 slow-timeout = "60s"
 
 [[profile.full.overrides]]
-filter = 'binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(#integration_compose_*)  | binary(=integration_progress) | binary(=up_dotfiles)'
+filter = 'binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(#integration_compose_*)  | binary(=integration_progress) | binary(=up_dotfiles)'
 test-group = 'docker-exclusive'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
@@ -441,7 +441,7 @@ test-group = 'fs-heavy'
 slow-timeout = "2m"
 
 [[profile.full.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
 # CI profile: Conservative settings for deterministic CI execution
@@ -495,7 +495,7 @@ test-group = 'smoke-cli'
 slow-timeout = "60s"
 
 [[profile.ci.overrides]]
-filter = 'binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(#integration_compose_*)  | binary(=integration_progress) | binary(=up_dotfiles)'
+filter = 'binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(#integration_compose_*)  | binary(=integration_progress) | binary(=up_dotfiles)'
 test-group = 'docker-exclusive'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
@@ -529,7 +529,7 @@ test-group = 'fs-heavy'
 slow-timeout = "2m"
 
 [[profile.ci.overrides]]
-filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
+filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(=up_dotfiles)'
 priority = 100
 
 # MVP Integration profile: Consolidated smoke + parity + core Docker integration tests
