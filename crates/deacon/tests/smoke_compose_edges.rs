@@ -396,10 +396,14 @@ RUN echo "app service" > /tmp/app.txt
     )
     .unwrap();
 
-    // Test build command with compose configuration
+    // Test build command with compose configuration.
+    // The default log level is `warn`; the "Building Docker Compose service:
+    // <name>" status is emitted at INFO, so opt into it via the global `-v`
+    // flag to assert on the compose-service build indicators below.
     let mut build_cmd = Command::cargo_bin("deacon").unwrap();
     let build_output = build_cmd
         .current_dir(&temp_dir)
+        .arg("-v")
         .arg("build")
         .arg("--workspace-folder")
         .arg(temp_dir.path())

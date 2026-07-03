@@ -261,10 +261,17 @@ The JSON format is useful for CI/CD systems and log aggregation tools that need 
 
 ### Quiet mode and spinner (TTY only)
 
-When running in a real terminal (stderr is a TTY) and using the default text output, deacon shows a small spinner during long-running operations like `up` and `down`. In these spinner sessions, if you haven't set `DEACON_LOG`, `RUST_LOG`, or `--log-level`, the default log level is temporarily set to `warn` so routine progress noise stays out of your way. JSON mode or non‑TTY environments (CI, redirections) do not render a spinner and keep the previous logging behavior.
+The default log level is `warn`, so routine `info` progress noise stays out of your way unless you ask for it. When running in a real terminal (stderr is a TTY) and using the default text output, deacon also shows a small spinner during long-running operations like `up` and `down`. JSON mode or non‑TTY environments (CI, redirections) do not render a spinner.
+
+Verbosity is a single axis (`error < warn < info < debug < trace`). Use the `-v`/`-q` shortcuts to shift it, or `--log-level` to set the baseline directly:
+
+- `-v`/`--verbose` raises verbosity one step (`-v`=info, `-vv`=debug, `-vvv`=trace); repeatable.
+- `-q`/`--quiet` lowers it (`-q`=error, silencing warnings).
+- `--log-level <level>` sets the baseline that `-v`/`-q` shift from.
+- `DEACON_LOG`/`RUST_LOG` take precedence over all of the above.
 
 Tips:
-- Want details with the spinner? Set `RUST_LOG=info` or use `--log-level info`.
+- Want details? Use `-v` (or `--log-level info`); `-vv` for debug.
 - Prefer structured logs? Use `--log-format json` (no spinner) and parse stderr.
 
 Color and accessibility:
@@ -431,9 +438,9 @@ becomes:
 
 Deacon uses the `tracing` ecosystem for structured logging.
 
-- Default log level: `info`
+- Default log level: `warn`
 - Default log format: text (human-readable)
-- CLI flag overrides: `--log-level` (`error|warn|info|debug|trace`), `--log-format` (`text|json`)
+- CLI flag overrides: `--log-level` (`error|warn|info|debug|trace`), `-v`/`--verbose` and `-q`/`--quiet` (repeatable shortcuts that shift the baseline), `--log-format` (`text|json`)
 - Environment overrides (take precedence before CLI flag processing sets `RUST_LOG`):
   - `DEACON_LOG`: Full filter specification (e.g. `DEACON_LOG=deacon=debug,deacon_core=debug`)
   - `RUST_LOG`: Standard Rust filter fallback if `DEACON_LOG` unset
