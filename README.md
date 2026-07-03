@@ -278,6 +278,21 @@ Color and accessibility:
 - Help/usage output uses automatic color when writing to a terminal. Spinner/status messages also use subtle colors (yellow for in‑progress, green for success, red for failures).
 - Respecting your environment, color is disabled when not writing to a TTY and when `NO_COLOR` is set (see https://no-color.org/). To force-disable colors, export `NO_COLOR=1`.
 
+### Build output
+
+When `deacon up` or `deacon build` runs `docker build` (for a Dockerfile, a
+feature-extended image, or a compose service), the way that build's output is
+presented follows the same verbosity/TTY signals as logging:
+
+| Situation | What you see |
+|-----------|--------------|
+| Interactive terminal, default verbosity | **Compact**: one collapsing line per build step (feature-install steps are named), with a live spinner for the current step. On failure, only the **failing step's log tail** is shown — not the whole BuildKit firehose. |
+| Interactive terminal, `-v`/`--verbose` | **Inherit**: the terminal is handed to BuildKit so you get its full native, collapsing progress UI. |
+| Non‑TTY (CI, redirection), `--log-format json`, or an explicit `--progress` | **Plain**: build output is streamed verbatim to stderr as it arrives (stdout stays reserved for the command result). |
+
+In all modes stdout stays reserved for the command's result (so `--output json`
+/ piped output remain parseable); build progress and diagnostics go to stderr.
+
 ### PTY Allocation for JSON Log Mode
 
 When using JSON logging format (`--log-format json`), lifecycle commands (onCreate, postCreate, etc.) run without PTY (pseudo-terminal) allocation by default. This is ideal for non-interactive scripts and automated environments.
