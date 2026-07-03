@@ -1,0 +1,47 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 810B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/alpine:3.19
+#2 DONE 0.0s
+
+#3 [context dev_containers_feature_content_source] load .dockerignore
+#3 transferring dev_containers_feature_content_source: 2B done
+#3 DONE 0.0s
+
+#4 [internal] load .dockerignore
+#4 transferring context:
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [stage-0 1/3] FROM docker.io/library/alpine:3.19
+#5 CACHED
+
+#6 [context dev_containers_feature_content_source] load from client
+#6 transferring dev_containers_feature_content_source: 309B done
+#6 DONE 0.0s
+
+#7 [context dev_containers_feature_content_source] load from client
+#7 transferring dev_containers_feature_content_source: 446B done
+#7 DONE 0.1s
+
+#8 [stage-0 2/3] RUN --mount=type=bind,from=dev_containers_feature_content_source,source=node_0,target=/tmp/build-features-0/node_0,rw     export _REMOTE_USER="root" &&     export _REMOTE_USER_HOME="/root" &&     export _CONTAINER_USER="root" &&     export _CONTAINER_USER_HOME="/root" &&     cd /tmp/build-features-0/node_0 &&     chmod +x ./install.sh &&     ./install.sh
+#8 0.133 Installing node feature (nvm)...
+#8 0.135 node feature installed
+#8 DONE 0.2s
+
+#9 [stage-0 3/3] RUN --mount=type=bind,from=dev_containers_feature_content_source,source=ai-clis_0,target=/tmp/build-features-0/ai-clis_0,rw     export _REMOTE_USER="root" &&     export _REMOTE_USER_HOME="/root" &&     cd /tmp/build-features-0/ai-clis_0 &&     chmod +x ./install.sh &&     ./install.sh
+#9 0.137 Installing ai-clis feature...
+#9 0.137 Installing Gemini CLI via npm...
+#9 0.137 /usr/local/share/nvm/current/bin/npm
+#9 0.137 10.0.0
+#9 0.138 ai-clis feature installed
+#9 DONE 0.2s
+
+#10 exporting to image
+#10 exporting layers 0.1s done
+#10 writing image sha256:a1d55d2cdb7715495c4e7a69cbdb0dc6b7974ea81b41b964b8b75c51c44d52db done
+#10 naming to docker.io/library/deacon-bkfix:success 0.0s done
+#10 DONE 0.1s
