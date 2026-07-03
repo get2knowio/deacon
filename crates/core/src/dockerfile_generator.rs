@@ -320,9 +320,32 @@ impl DockerfileGenerator {
 
         // Execute the install script
         command.push_str(&format!(
-            "    cd {} && chmod +x install.sh && ./install.sh\n\n",
+            "    cd {} && chmod +x install.sh && ./install.sh\n",
             mount_target
         ));
+
+        // Persist the feature's `containerEnv` as Dockerfile `ENV` lines AFTER
+        // its install step, so it survives into every subsequent feature's
+        // install `RUN` and into the final image — matching the upstream
+        // devcontainer CLI. Without this, a feature like `node` (which installs
+        // Node via nvm and exposes it only through
+        // `containerEnv.PATH = "/usr/local/share/nvm/current/bin:${PATH}"`)
+        // leaves `npm`/`node` invisible to a later feature's `install.sh`,
+        // causing `npm: command not found`. The `export … &&` chain above is
+        // scoped to a single RUN and cannot cross feature boundaries; `ENV`
+        // does. Values are emitted verbatim (only `\`/`"` escaped) so Docker's
+        // own `ENV` expansion resolves `${PATH}`-style self-references against
+        // the accumulated environment. Deterministic order: sort by key.
+        if !feature.metadata.container_env.is_empty() {
+            let mut sorted: Vec<(&String, &String)> =
+                feature.metadata.container_env.iter().collect();
+            sorted.sort_by(|a, b| a.0.cmp(b.0));
+            for (key, value) in sorted {
+                command.push_str(&format!("ENV {}\n", Self::format_env_var(key, value)));
+            }
+        }
+
+        command.push('\n');
 
         Ok(command)
     }
@@ -500,6 +523,64 @@ mod tests {
                 post_attach_command: None,
             },
         }
+    }
+
+    fn create_test_feature_with_env(
+        id: &str,
+        options: HashMap<String, OptionValue>,
+        container_env: HashMap<String, String>,
+    ) -> ResolvedFeature {
+        let mut feature = create_test_feature(id, options);
+        feature.metadata.container_env = container_env;
+        feature
+    }
+
+    /// A feature's `containerEnv` must be emitted as `ENV` lines AFTER its own
+    /// install `RUN` and BEFORE any subsequent feature's `RUN`, so later
+    /// features (and the final image) inherit it. Regression test for the
+    /// `npm: command not found` failure when `ai-clis` installs after the
+    /// `node` feature, whose nvm PATH lives only in `containerEnv`.
+    #[test]
+    fn test_container_env_emitted_as_env_between_features() {
+        let mut node_env = HashMap::new();
+        node_env.insert(
+            "PATH".to_string(),
+            "/usr/local/share/nvm/current/bin:${PATH}".to_string(),
+        );
+        node_env.insert("NVM_DIR".to_string(), "/usr/local/share/nvm".to_string());
+
+        let node = create_test_feature_with_env("node", HashMap::new(), node_env);
+        // A later feature with no containerEnv of its own.
+        let ai = create_test_feature_with_env("ai-clis", HashMap::new(), HashMap::new());
+        let plan = InstallationPlan::new(vec![node, ai]);
+
+        let config = DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
+        };
+        let dockerfile = DockerfileGenerator::new(config).generate(&plan).unwrap();
+
+        // The nvm PATH is emitted verbatim (Docker expands `${PATH}` itself).
+        let env_line = "ENV PATH=\"/usr/local/share/nvm/current/bin:${PATH}\"";
+        assert!(
+            dockerfile.contains(env_line),
+            "expected node containerEnv PATH as an ENV line:\n{dockerfile}"
+        );
+        assert!(dockerfile.contains("ENV NVM_DIR=\"/usr/local/share/nvm\""));
+
+        // Ordering: node's install RUN < node's ENV < ai-clis's install RUN.
+        let node_run = dockerfile.find("source=node_0").unwrap();
+        let env_pos = dockerfile.find(env_line).unwrap();
+        let ai_run = dockerfile.find("source=ai-clis_0").unwrap();
+        assert!(
+            node_run < env_pos && env_pos < ai_run,
+            "containerEnv ENV must sit after node's RUN and before ai-clis's RUN"
+        );
+
+        // A feature with an empty containerEnv emits no stray ENV line for it.
+        // (Only the two node ENV lines exist in the whole file.)
+        assert_eq!(dockerfile.matches("\nENV ").count(), 2);
     }
 
     #[test]
