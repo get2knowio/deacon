@@ -306,6 +306,49 @@ impl ComposeCommand {
         Ok(stdout)
     }
 
+    /// Execute a compose command, streaming its stderr (where `docker compose
+    /// build` writes BuildKit progress) line-by-line to `sink` as it arrives.
+    ///
+    /// Mirrors [`Self::execute`] for the no-stdin case but reuses the shared
+    /// build-output streaming path ([`crate::docker_retry::stream_captured_child`])
+    /// so `deacon build`'s compose-service build renders like the other build
+    /// paths. Returns captured stdout on success.
+    #[instrument(skip(self, sink))]
+    pub async fn execute_streamed(
+        &self,
+        args: &[&str],
+        sink: Option<&dyn crate::docker_retry::BuildLineSink>,
+    ) -> Result<String> {
+        use std::process::Stdio;
+
+        if let Some(sink) = sink {
+            sink.reset();
+        }
+
+        let mut command = self.build_command(args);
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+
+        let child = command.spawn().map_err(|e| {
+            DockerError::CLIError(format!("Failed to execute docker compose command: {}", e))
+        })?;
+
+        let output = crate::docker_retry::stream_captured_child(child, sink)
+            .await
+            .map_err(|e| DockerError::CLIError(format!("docker compose I/O error: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(DockerError::CLIError(format!(
+                "Docker compose command failed: {}",
+                stderr
+            ))
+            .into());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
     /// Start services
     #[instrument(skip(self))]
     pub async fn up(
@@ -1073,13 +1116,18 @@ impl ComposeManager {
     ///     deacon_labels: IndexMap::new(),
     /// };
     ///
-    /// let output = manager.build_service(&project, "web").await?;
+    /// let output = manager.build_service(&project, "web", None).await?;
     /// println!("Build output: {}", output);
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(skip(self))]
-    pub async fn build_service(&self, project: &ComposeProject, service: &str) -> Result<String> {
+    #[instrument(skip(self, sink))]
+    pub async fn build_service(
+        &self,
+        project: &ComposeProject,
+        service: &str,
+        sink: Option<&dyn crate::docker_retry::BuildLineSink>,
+    ) -> Result<String> {
         let command = self.get_command(project);
 
         debug!(
@@ -1087,7 +1135,7 @@ impl ComposeManager {
             project.name, service
         );
 
-        let output = command.execute(&["build", service]).await?;
+        let output = command.execute_streamed(&["build", service], sink).await?;
 
         debug!(
             "Compose project {} service {} built successfully",

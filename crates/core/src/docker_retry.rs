@@ -419,7 +419,7 @@ async fn stream_build_once(
     args: &[String],
     sink: Option<&dyn BuildLineSink>,
 ) -> std::result::Result<Output, DockerSubprocessError> {
-    let mut child = tokio::process::Command::new(runtime_path)
+    let child = tokio::process::Command::new(runtime_path)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -429,11 +429,33 @@ async fn stream_build_once(
             exit_code: -1,
         })?;
 
+    stream_captured_child(child, sink)
+        .await
+        .map_err(|e| DockerSubprocessError::Other {
+            stderr: format!("docker build I/O error: {}", e),
+            exit_code: -1,
+        })
+}
+
+/// Drain an already-spawned child that has **piped** stdout/stderr: forward each
+/// stderr line to `sink` (BuildKit progress is on stderr) while capturing both
+/// streams into the returned [`Output`].
+///
+/// stdout is drained concurrently in a spawned task — required to avoid a pipe
+/// deadlock where the child blocks writing stdout while we only read stderr.
+/// The child's stdout handle is `Send`, so the drain task needs no bound on the
+/// (possibly `!Send`) sink; stdout is captured but not forwarded because BuildKit
+/// emits no progress there.
+///
+/// `pub(crate)` so the compose executor can reuse the same streaming behavior for
+/// `docker compose build` (which also emits BuildKit progress on stderr).
+pub(crate) async fn stream_captured_child(
+    mut child: tokio::process::Child,
+    sink: Option<&dyn BuildLineSink>,
+) -> std::io::Result<Output> {
     let child_stdout = child.stdout.take();
     let child_stderr = child.stderr.take();
 
-    // Drain stdout in a background task so a full stdout pipe can't stall the
-    // child while we're forwarding stderr.
     let stdout_task = tokio::spawn(async move {
         let mut buf = Vec::new();
         if let Some(mut out) = child_stdout {
@@ -442,8 +464,6 @@ async fn stream_build_once(
         buf
     });
 
-    // Forward stderr lines to the sink in this task; also capture verbatim so
-    // classification and error text see exactly what the process emitted.
     let mut err_buf: Vec<u8> = Vec::new();
     if let Some(err) = child_stderr {
         let mut lines = BufReader::new(err).lines();
@@ -465,20 +485,63 @@ async fn stream_build_once(
     }
 
     let out_buf = stdout_task.await.unwrap_or_default();
-
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| DockerSubprocessError::Other {
-            stderr: format!("Failed to wait for docker build: {}", e),
-            exit_code: -1,
-        })?;
+    let status = child.wait().await?;
 
     Ok(Output {
         status,
         stdout: out_buf,
         stderr: err_buf,
     })
+}
+
+/// Run a **single** pre-configured build command (env/cwd/args already set by the
+/// caller) with the given [`BuildIo`], returning its [`Output`] — like
+/// `Command::output()` but honoring the output mode. Unlike
+/// [`run_build_with_retry`], there is **no** retry: this is for callers that own
+/// a bespoke command (e.g. `deacon build`'s base Dockerfile build, which sets
+/// `DOCKER_BUILDKIT`, a working directory, and secret mounts).
+///
+/// The returned `Output` always carries the real exit status; the caller decides
+/// how to treat a non-zero exit (a spawn/wait failure is the only `Err`). For
+/// [`BuildIo::Inherited`] the stdout/stderr buffers are empty (stdio was handed
+/// to the terminal); for [`BuildIo::Captured`] they hold the full capture.
+pub async fn run_build_once(
+    mut command: tokio::process::Command,
+    io: BuildIo<'_>,
+) -> Result<Output> {
+    match io {
+        BuildIo::Inherited => {
+            let status = command
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status()
+                .await
+                .map_err(|e| {
+                    DockerError::CLIError(format!("Failed to execute docker build: {}", e))
+                })?;
+            Ok(Output {
+                status,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            })
+        }
+        BuildIo::Captured(sink) => {
+            if let Some(sink) = sink {
+                sink.reset();
+            }
+            let child = command
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| {
+                    DockerError::CLIError(format!("Failed to execute docker build: {}", e))
+                })?;
+            stream_captured_child(child, sink)
+                .await
+                .map_err(|e| DockerError::CLIError(format!("docker build I/O error: {}", e)).into())
+        }
+    }
 }
 
 /// Pull-and-decrement the test-hook counter. Returns `Some(stderr)` if a
