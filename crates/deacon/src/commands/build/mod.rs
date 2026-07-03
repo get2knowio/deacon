@@ -1318,6 +1318,8 @@ async fn execute_compose_build(
     // Build the service, rendering its BuildKit output per the resolved mode.
     // This is the base compose-service build (no feature-install steps — feature
     // layering renders separately), so there are no feature ids to register.
+    // Pause the spinner so the build's streaming renderer owns stderr.
+    let _pause = crate::commands::shared::progress::SpinnerPause::new(&args.progress_tracker);
     let renderer = crate::ui::build_render::BuildRenderer::for_mode(
         args.build_output_mode,
         Vec::<&str>::new(),
@@ -1407,6 +1409,12 @@ async fn execute_compose_build_with_features(
     let identity = ContainerIdentity::new(workspace_folder, config);
     let workspace_hash = format!("{}-build", identity.workspace_hash);
 
+    // Carry the resolved build-output mode into the feature build so it renders
+    // like the other build paths (cache/builder options stay default here).
+    let build_options = deacon_core::build::BuildOptions {
+        output_mode: args.build_output_mode,
+        ..Default::default()
+    };
     let feature_build = resolve_compose_feature_image(
         config,
         &compose_manager,
@@ -1414,6 +1422,7 @@ async fn execute_compose_build_with_features(
         workspace_folder,
         config_path,
         &workspace_hash,
+        Some(&build_options),
         host_ca_set,
         // `deacon build` is docker-only today; podman parity for the build
         // command is tracked separately (issue #30 deferred items).
@@ -2009,6 +2018,8 @@ async fn execute_docker_build(
         // (no retry) on our pre-configured command (env vars + working dir).
         cmd.args(&build_args) // Pass all args including "build" subcommand
             .current_dir(workspace_folder);
+        // Pause the spinner so the build's streaming renderer owns stderr.
+        let _pause = crate::commands::shared::progress::SpinnerPause::new(&args.progress_tracker);
         let renderer = crate::ui::build_render::BuildRenderer::for_mode(
             args.build_output_mode,
             Vec::<&str>::new(),

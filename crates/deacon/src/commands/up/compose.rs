@@ -85,6 +85,14 @@ pub(crate) async fn execute_compose_up(
 ) -> Result<UpContainerInfo> {
     debug!("Starting Docker Compose project");
 
+    // Build options (cache flags + the resolved build-output mode) for the
+    // feature-extended image builds below. Previously this path passed `None`,
+    // which (a) ignored cache-from/cache-to/no-cache and (b) defaulted the build
+    // output to Plain — so on a TTY the compose feature build dumped the raw
+    // BuildKit firehose instead of the compact per-step view. Mirror the
+    // single-container path (container.rs), which threads these through.
+    let build_options = super::args::build_options_from_args(args);
+
     let compose_manager = ComposeManager::with_docker_path(args.docker_path.clone());
     // Compose files resolve relative to the directory containing devcontainer.json
     // (the `.devcontainer` dir for the standard layout), not the workspace folder.
@@ -342,17 +350,24 @@ pub(crate) async fn execute_compose_up(
     // the existing injection override. Both the `image:` shape (14a) and the
     // `build:` shape (14b — user-authored Dockerfile + context) are supported.
     // Future work (per spec): thread resolved_features into merged_configuration.
-    let feature_build = install_features_for_compose(
-        config,
-        &compose_manager,
-        &mut project,
-        workspace_folder,
-        config_path,
-        workspace_hash,
-        host_ca_set,
-        &runtime.cli_docker(),
-    )
-    .await?;
+    // Pause the interactive spinner around the feature build so the build's
+    // streaming renderer owns stderr (otherwise the steady-tick spinner clobbers
+    // the build progress).
+    let feature_build = {
+        let _pause = crate::commands::shared::progress::SpinnerPause::new(&args.progress_tracker);
+        install_features_for_compose(
+            config,
+            &compose_manager,
+            &mut project,
+            workspace_folder,
+            config_path,
+            workspace_hash,
+            Some(&build_options),
+            host_ca_set,
+            &runtime.cli_docker(),
+        )
+        .await?
+    };
 
     // Lockfile graduation (PR-4b): mirror the single-container flow — write
     // the lockfile to disk, or byte-compare it in `--frozen-lockfile` mode.
@@ -410,7 +425,14 @@ pub(crate) async fn execute_compose_up(
             .map(|v| v == "json")
             .unwrap_or(false);
         let force_pty = resolve_force_pty(args.force_tty_if_json, json_mode);
-        execute_compose_post_create(&project, config, &args.docker_path, force_pty).await?;
+        execute_compose_post_create(
+            &project,
+            config,
+            workspace_folder,
+            &args.docker_path,
+            force_pty,
+        )
+        .await?;
     }
 
     // Handle port forwarding and events
@@ -571,10 +593,18 @@ pub(crate) async fn execute_compose_up(
 pub(crate) async fn execute_compose_post_create(
     project: &ComposeProject,
     config: &DevContainerConfig,
+    workspace_folder: &Path,
     docker_path: &str,
     force_pty: bool,
 ) -> Result<()> {
     debug!("Executing post-create lifecycle for compose project");
+
+    // Run lifecycle commands from the container's workspace folder, matching the
+    // single-container path (container_lifecycle.rs). Without this the exec
+    // inherits the image's default WORKDIR (often `/`), so a workspace-relative
+    // command like `.devcontainer/setup.sh` fails with "No such file or directory".
+    let container_workspace_folder =
+        crate::commands::shared::derive_container_workspace_folder(config, workspace_folder);
 
     // Get the primary container ID
     let compose_manager = ComposeManager::with_docker_path(docker_path.to_string());
@@ -603,7 +633,7 @@ pub(crate) async fn execute_compose_post_create(
                     &["sh".to_string(), "-c".to_string(), cmd_str.to_string()],
                     ExecConfig {
                         user: None,
-                        working_dir: None,
+                        working_dir: Some(container_workspace_folder.clone()),
                         env: std::collections::HashMap::new(),
                         tty: force_pty,
                         interactive: false,
@@ -650,6 +680,7 @@ async fn install_features_for_compose(
     workspace_folder: &Path,
     config_path: &Path,
     workspace_hash: &str,
+    build_options: Option<&deacon_core::build::BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
 ) -> Result<Option<FeatureBuildOutput>> {
@@ -660,6 +691,7 @@ async fn install_features_for_compose(
         workspace_folder,
         config_path,
         workspace_hash,
+        build_options,
         host_ca_set,
         cli,
     )
@@ -689,6 +721,7 @@ pub(crate) async fn resolve_compose_feature_image(
     workspace_folder: &Path,
     config_path: &Path,
     workspace_hash: &str,
+    build_options: Option<&deacon_core::build::BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
 ) -> Result<Option<FeatureBuildOutput>> {
@@ -741,7 +774,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 &identity,
                 workspace_folder,
                 config_path,
-                None,
+                build_options,
                 host_ca_set,
                 cli,
             )
@@ -818,7 +851,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 &context_path,
                 config_path,
                 target.as_deref(),
-                None,
+                build_options,
                 host_ca_set,
                 cli,
             )
