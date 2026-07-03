@@ -491,9 +491,13 @@ pub(crate) async fn execute_up_with_runtime(
     if config.image.is_none() && !config.uses_compose() {
         if let Some(build_config) = extract_build_config_from_devcontainer(&config, &config_path)? {
             info!("Building image from Dockerfile configuration");
-            let built_image_id =
+            let built_image_id = {
+                // Pause the spinner so the build's streaming renderer owns stderr.
+                let _pause =
+                    crate::commands::shared::progress::SpinnerPause::new(&args.progress_tracker);
                 build_image_from_config(&build_config, &build_options, &runtime.cli_docker())
-                    .await?;
+                    .await?
+            };
 
             // Update config to use the built image
             config.image = Some(built_image_id.clone());

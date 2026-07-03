@@ -752,6 +752,22 @@ impl ProgressTracker {
         Ok(())
     }
 
+    /// Suspend the emitter's terminal drawing (e.g. an interactive spinner) so a
+    /// streaming build renderer can own stderr without the two clobbering each
+    /// other. No-op for non-interactive emitters. Pair with [`Self::resume`].
+    pub fn suspend(&mut self) {
+        if let Some(ref mut emitter) = self.emitter {
+            emitter.suspend();
+        }
+    }
+
+    /// Resume terminal drawing after [`Self::suspend`].
+    pub fn resume(&mut self) {
+        if let Some(ref mut emitter) = self.emitter {
+            emitter.resume();
+        }
+    }
+
     /// Records a duration for an operation into the tracker's in-memory metrics.
     ///
     /// The `operation` string is used as the histogram key; the duration is added to
@@ -828,6 +844,14 @@ impl ProgressTracker {
 pub trait ProgressEmitter: Send + Sync + std::fmt::Debug {
     /// Emit a progress event
     fn emit(&mut self, event: &ProgressEvent) -> Result<()>;
+
+    /// Temporarily stop drawing to the terminal so another component can own
+    /// stderr (e.g. the streaming build-output renderer, which draws its own
+    /// progress). Default no-op — only the interactive spinner overrides this.
+    fn suspend(&mut self) {}
+
+    /// Resume drawing after a [`Self::suspend`]. Default no-op.
+    fn resume(&mut self) {}
 }
 
 /// JSON line emitter that writes to a file

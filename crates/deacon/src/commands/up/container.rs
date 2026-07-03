@@ -260,18 +260,24 @@ pub(crate) async fn execute_container_up(
         info!("Features detected in configuration - building feature-extended image with BuildKit");
 
         // Pass build_options to propagate cache-from/cache-to/buildx settings per spec (data-model.md).
-        // `config_path` anchors local feature references (#69).
-        let feature_build = build_image_with_features(
-            &config,
-            identity,
-            workspace_folder,
-            config_path,
-            Some(build_options),
-            host_ca_set,
-            &runtime.cli_docker(),
-        )
-        .await
-        .with_context(|| "Failed to build feature-extended image")?;
+        // `config_path` anchors local feature references (#69). Pause the
+        // interactive spinner for the build so its streaming renderer owns stderr
+        // (otherwise the steady-tick spinner clobbers the build progress).
+        let feature_build = {
+            let _pause =
+                crate::commands::shared::progress::SpinnerPause::new(&args.progress_tracker);
+            build_image_with_features(
+                &config,
+                identity,
+                workspace_folder,
+                config_path,
+                Some(build_options),
+                host_ca_set,
+                &runtime.cli_docker(),
+            )
+            .await
+            .with_context(|| "Failed to build feature-extended image")?
+        };
 
         if !feature_build.combined_env.is_empty() {
             config

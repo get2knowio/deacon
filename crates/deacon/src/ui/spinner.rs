@@ -1,6 +1,6 @@
 use console::style;
 use deacon_core::progress::{ProgressEmitter, ProgressEvent, Result};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::time::Duration;
 
 // (no-op) TTY helpers live in CLI; UI module remains pure
@@ -153,6 +153,17 @@ impl ProgressEmitter for SpinnerEmitter {
             _ => {}
         }
         Ok(())
+    }
+
+    fn suspend(&mut self) {
+        // Clear the current spinner line and stop drawing so the streaming
+        // build-output renderer can own stderr. The steady-tick thread keeps
+        // running but draws to a hidden target (a no-op) until `resume`.
+        self.pb.set_draw_target(ProgressDrawTarget::hidden());
+    }
+
+    fn resume(&mut self) {
+        self.pb.set_draw_target(ProgressDrawTarget::stderr());
     }
 }
 
