@@ -261,9 +261,12 @@ async fn execute_templates_apply(
     // Apply the template
     let result = apply_template(&template_dir, &output_dir, &apply_options)?;
 
-    // Report results
+    // Report results. A `--dry-run` preview is the output the user explicitly
+    // asked for, so it goes to stdout as a result (matching the config
+    // substitute dry-run) and stays visible at the quiet default log level. A
+    // live apply reports progress via `info!` (quiet by default, like `up`).
     if dry_run {
-        info!("DRY RUN: Would process {} files", result.files_processed);
+        println!("DRY RUN: Would process {} files", result.files_processed);
     } else {
         info!("Successfully processed {} files", result.files_processed);
     }
@@ -289,13 +292,23 @@ async fn execute_templates_apply(
                 } else {
                     ""
                 };
-                info!(
-                    "{} {} -> {}{}",
-                    action_str,
-                    src.display(),
-                    dest.display(),
-                    subst_str
-                );
+                if dry_run {
+                    println!(
+                        "{} {} -> {}{}",
+                        action_str,
+                        src.display(),
+                        dest.display(),
+                        subst_str
+                    );
+                } else {
+                    info!(
+                        "{} {} -> {}{}",
+                        action_str,
+                        src.display(),
+                        dest.display(),
+                        subst_str
+                    );
+                }
             }
             deacon_core::templates::PlannedAction::SkipExistingFile { dest } => {
                 info!("Skipped existing file: {}", dest.display());
@@ -315,13 +328,23 @@ async fn execute_templates_apply(
                 } else {
                     ""
                 };
-                info!(
-                    "{} {} -> {}{}",
-                    action_str,
-                    src.display(),
-                    dest.display(),
-                    subst_str
-                );
+                if dry_run {
+                    println!(
+                        "{} {} -> {}{}",
+                        action_str,
+                        src.display(),
+                        dest.display(),
+                        subst_str
+                    );
+                } else {
+                    info!(
+                        "{} {} -> {}{}",
+                        action_str,
+                        src.display(),
+                        dest.display(),
+                        subst_str
+                    );
+                }
             }
         }
     }

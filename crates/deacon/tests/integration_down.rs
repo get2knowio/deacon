@@ -12,11 +12,13 @@ fn test_down_command_basic() {
     // Create a temp directory for testing
     let temp_dir = TempDir::new().unwrap();
 
+    // Default log level is now `warn`; the "nothing to tear down" outcome is
+    // emitted at INFO, so opt into it via the global `-v` flag.
     let assert = cmd
+        .arg("-v")
         .arg("down")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
-        // .env("DEACON_LOG", "info") // Removed unnecessary env override
         .assert()
         .success();
 
@@ -42,11 +44,11 @@ fn test_down_command_with_remove() {
     let temp_dir = TempDir::new().unwrap();
 
     let assert = cmd
+        .arg("-v")
         .arg("down")
         .arg("--remove")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
-        // .env("DEACON_LOG", "info") // Removed unnecessary env override
         .assert()
         .success();
 
@@ -104,6 +106,7 @@ fn test_down_command_with_all() {
     let temp_dir = TempDir::new().unwrap();
 
     let assert = cmd
+        .arg("-v")
         .arg("down")
         .arg("--all")
         .arg("--workspace-folder")
@@ -132,6 +135,7 @@ fn test_down_command_with_volumes() {
     let temp_dir = TempDir::new().unwrap();
 
     let assert = cmd
+        .arg("-v")
         .arg("down")
         .arg("--volumes")
         .arg("--workspace-folder")
@@ -160,6 +164,7 @@ fn test_down_command_with_force() {
     let temp_dir = TempDir::new().unwrap();
 
     let assert = cmd
+        .arg("-v")
         .arg("down")
         .arg("--force")
         .arg("--workspace-folder")
@@ -188,6 +193,7 @@ fn test_down_command_with_timeout() {
     let temp_dir = TempDir::new().unwrap();
 
     let assert = cmd
+        .arg("-v")
         .arg("down")
         .arg("--timeout")
         .arg("60")
@@ -217,6 +223,7 @@ fn test_down_command_with_combined_flags() {
     let temp_dir = TempDir::new().unwrap();
 
     let assert = cmd
+        .arg("-v")
         .arg("down")
         .arg("--remove")
         .arg("--volumes")
