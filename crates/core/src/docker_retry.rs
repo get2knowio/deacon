@@ -27,12 +27,45 @@
 //!   than mask a real bug behind 3 retries.
 
 use std::path::Path;
-use std::process::Output;
+use std::process::{Output, Stdio};
 
 use thiserror::Error;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
 use crate::errors::{DockerError, Result};
 use crate::retry::{RetryConfig, RetryDecision, retry_async};
+
+/// Which of the child process's standard streams a build-output line came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildStream {
+    /// The child's standard output.
+    Stdout,
+    /// The child's standard error. BuildKit (`docker buildx build`) writes all
+    /// `--progress=plain` output here, so this is the stream the build-progress
+    /// renderer consumes.
+    Stderr,
+}
+
+/// Sink for streamed `docker build` output lines.
+///
+/// [`run_build_with_retry`] forwards each output line to this sink as it is
+/// produced, so the build UI can render live progress instead of waiting for a
+/// buffered `.output()` to return. Passing `None` preserves the historical
+/// buffer-and-surface-on-failure behavior.
+///
+/// The methods take `&self` (not `&mut self`) because the retry loop drives the
+/// subprocess through [`retry_async`], whose operation closure is `Fn`; the sink
+/// is therefore shared across attempts by shared reference. Implementors that
+/// need to mutate state use interior mutability (e.g. `Mutex` / `RefCell`).
+pub trait BuildLineSink {
+    /// Called once per output line (newline stripped) as it streams from the
+    /// child process.
+    fn on_line(&self, line: &str, stream: BuildStream);
+
+    /// Called at the start of every attempt so stateful renderers can discard
+    /// output captured from a prior, failed-and-retried attempt. Default no-op.
+    fn reset(&self) {}
+}
 
 /// Classification of a failed `docker build` / `docker buildx build` invocation.
 ///
@@ -259,14 +292,25 @@ pub(crate) static FORCED_TRANSIENT_FAILURES: std::sync::atomic::AtomicU32 =
 /// terminal failure (auth, build-failed, unknown) or exhausted retries
 /// returns a `DockerError::CLIError` carrying the final stderr — preserving
 /// existing call-site error rendering.
-pub async fn run_build_with_retry(runtime_path: &Path, args: &[String]) -> Result<Output> {
+///
+/// When `sink` is `Some`, each output line is forwarded to it as the child
+/// produces it (live progress) and [`BuildLineSink::reset`] is called at the
+/// start of every attempt. When `sink` is `None`, output is captured but not
+/// forwarded — identical to the historical `.output()` behavior. Either way the
+/// full stdout/stderr is captured into the returned `Output` for retry
+/// classification and error rendering.
+pub async fn run_build_with_retry(
+    runtime_path: &Path,
+    args: &[String],
+    sink: Option<&dyn BuildLineSink>,
+) -> Result<Output> {
     let config = RetryConfig::network();
 
     let result = retry_async(
         &config,
         || {
-            // Re-borrow per attempt so the async block can `move` references
-            // without consuming the outer FnMut closure state.
+            // Re-borrow per attempt so the async block can `move` the shared
+            // references (all `Copy`) without consuming the outer closure state.
             async move {
                 // Test hook: synthesize a transient failure for the first N calls.
                 if let Some(forced) = take_forced_failure() {
@@ -276,14 +320,13 @@ pub async fn run_build_with_retry(runtime_path: &Path, args: &[String]) -> Resul
                     });
                 }
 
-                let output = tokio::process::Command::new(runtime_path)
-                    .args(args)
-                    .output()
-                    .await
-                    .map_err(|e| DockerSubprocessError::Other {
-                        stderr: format!("Failed to execute docker build: {}", e),
-                        exit_code: -1,
-                    })?;
+                // Fresh attempt: let a stateful sink drop any output it captured
+                // from a prior attempt that failed transiently and got retried.
+                if let Some(sink) = sink {
+                    sink.reset();
+                }
+
+                let output = stream_build_once(runtime_path, args, sink).await?;
 
                 if output.status.success() {
                     return Ok(output);
@@ -299,6 +342,82 @@ pub async fn run_build_with_retry(runtime_path: &Path, args: &[String]) -> Resul
     .await;
 
     result.map_err(|e| DockerError::CLIError(format!("Image build failed: {}", e.stderr())).into())
+}
+
+/// Spawn a single `docker build` attempt with piped stdio, streaming stderr
+/// line-by-line to `sink` (BuildKit writes `--progress=plain` to stderr) while
+/// capturing both streams into the returned [`Output`].
+///
+/// stdout is drained concurrently in a spawned task — required to avoid a pipe
+/// deadlock where the child blocks writing stdout while we only read stderr.
+/// The child's stdout handle is `Send`, so the drain task needs no bound on the
+/// (possibly `!Send`) sink; stdout is captured but not forwarded because BuildKit
+/// emits no progress there.
+async fn stream_build_once(
+    runtime_path: &Path,
+    args: &[String],
+    sink: Option<&dyn BuildLineSink>,
+) -> std::result::Result<Output, DockerSubprocessError> {
+    let mut child = tokio::process::Command::new(runtime_path)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| DockerSubprocessError::Other {
+            stderr: format!("Failed to execute docker build: {}", e),
+            exit_code: -1,
+        })?;
+
+    let child_stdout = child.stdout.take();
+    let child_stderr = child.stderr.take();
+
+    // Drain stdout in a background task so a full stdout pipe can't stall the
+    // child while we're forwarding stderr.
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        if let Some(mut out) = child_stdout {
+            let _ = out.read_to_end(&mut buf).await;
+        }
+        buf
+    });
+
+    // Forward stderr lines to the sink in this task; also capture verbatim so
+    // classification and error text see exactly what the process emitted.
+    let mut err_buf: Vec<u8> = Vec::new();
+    if let Some(err) = child_stderr {
+        let mut lines = BufReader::new(err).lines();
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    if let Some(sink) = sink {
+                        sink.on_line(&line, BuildStream::Stderr);
+                    }
+                    err_buf.extend_from_slice(line.as_bytes());
+                    err_buf.push(b'\n');
+                }
+                Ok(None) => break,
+                // A decode/IO error on the pipe shouldn't abort the build; stop
+                // reading and let `child.wait()` report the real exit status.
+                Err(_) => break,
+            }
+        }
+    }
+
+    let out_buf = stdout_task.await.unwrap_or_default();
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| DockerSubprocessError::Other {
+            stderr: format!("Failed to wait for docker build: {}", e),
+            exit_code: -1,
+        })?;
+
+    Ok(Output {
+        status,
+        stdout: out_buf,
+        stderr: err_buf,
+    })
 }
 
 /// Pull-and-decrement the test-hook counter. Returns `Some(stderr)` if a
@@ -562,8 +681,12 @@ mod tests {
         // Two synthetic transient failures, then real subprocess succeeds.
         FORCED_TRANSIENT_FAILURES.store(2, Ordering::SeqCst);
 
-        let result =
-            run_build_with_retry(std::path::Path::new("/usr/bin/true"), &[] as &[String]).await;
+        let result = run_build_with_retry(
+            std::path::Path::new("/usr/bin/true"),
+            &[] as &[String],
+            None,
+        )
+        .await;
 
         assert!(
             result.is_ok(),
@@ -585,8 +708,12 @@ mod tests {
         // guarantees exhaustion.
         FORCED_TRANSIENT_FAILURES.store(10, Ordering::SeqCst);
 
-        let result =
-            run_build_with_retry(std::path::Path::new("/usr/bin/true"), &[] as &[String]).await;
+        let result = run_build_with_retry(
+            std::path::Path::new("/usr/bin/true"),
+            &[] as &[String],
+            None,
+        )
+        .await;
 
         assert!(
             result.is_err(),
@@ -612,9 +739,123 @@ mod tests {
         let _guard = HOOK_LOCK.lock().await;
         clear_fail_hook();
 
-        let result =
-            run_build_with_retry(std::path::Path::new("/usr/bin/true"), &[] as &[String]).await;
+        let result = run_build_with_retry(
+            std::path::Path::new("/usr/bin/true"),
+            &[] as &[String],
+            None,
+        )
+        .await;
 
         assert!(result.is_ok(), "expected success, got {:?}", result);
+    }
+
+    // ------------------------------------------------------------------
+    // Streaming sink — verifies stderr lines are forwarded live and both
+    // streams are still captured into the returned `Output`. Uses `/bin/sh`
+    // so no Docker daemon is needed. BuildKit writes progress to stderr, so
+    // the sink is fed from stderr.
+    // ------------------------------------------------------------------
+
+    /// A test sink that records every forwarded line (interior mutability, as
+    /// the trait requires `&self`), plus how many times `reset` fired.
+    #[cfg(unix)]
+    #[derive(Default)]
+    struct RecordingSink {
+        lines: std::sync::Mutex<Vec<(BuildStream, String)>>,
+        resets: std::sync::atomic::AtomicUsize,
+    }
+
+    #[cfg(unix)]
+    impl BuildLineSink for RecordingSink {
+        fn on_line(&self, line: &str, stream: BuildStream) {
+            self.lines.lock().unwrap().push((stream, line.to_string()));
+        }
+        fn reset(&self) {
+            self.resets.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// The sink receives each stderr line as it streams, `reset` is called once
+    /// for the single (successful) attempt, and the returned `Output` still
+    /// carries the full captured stderr for classification/error text.
+    // Unix-only: drives `/bin/sh`, absent on Windows.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn streaming_sink_receives_stderr_lines_and_output_is_captured() {
+        let _guard = HOOK_LOCK.lock().await;
+        clear_fail_hook();
+
+        let sink = RecordingSink::default();
+        // Emit two stderr lines and one stdout line, then exit 0.
+        let script = "echo err-one 1>&2; echo out-one; echo err-two 1>&2";
+        let args = vec!["-c".to_string(), script.to_string()];
+
+        let result = run_build_with_retry(
+            std::path::Path::new("/bin/sh"),
+            &args,
+            Some(&sink as &dyn BuildLineSink),
+        )
+        .await;
+
+        let output = result.expect("sh script should succeed");
+        assert!(output.status.success());
+
+        // Sink saw exactly the two stderr lines, in order.
+        let seen = sink.lines.lock().unwrap().clone();
+        assert_eq!(
+            seen,
+            vec![
+                (BuildStream::Stderr, "err-one".to_string()),
+                (BuildStream::Stderr, "err-two".to_string()),
+            ],
+            "sink should receive stderr lines live and in order"
+        );
+        // reset() fired once for the single attempt.
+        assert_eq!(sink.resets.load(Ordering::SeqCst), 1);
+
+        // Full capture is preserved for classification / error rendering.
+        let captured_stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(captured_stderr.contains("err-one") && captured_stderr.contains("err-two"));
+        let captured_stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            captured_stdout.contains("out-one"),
+            "stdout should be captured even though it is not forwarded to the sink"
+        );
+    }
+
+    /// A failing streamed build classifies from the captured stderr just like
+    /// the buffered path did, and the sink still saw the failing line.
+    // Unix-only: drives `/bin/sh`, absent on Windows.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn streaming_sink_failure_still_classifies_from_captured_stderr() {
+        let _guard = HOOK_LOCK.lock().await;
+        clear_fail_hook();
+
+        let sink = RecordingSink::default();
+        // A terminal (non-retryable) build failure phrase, then exit 1.
+        let script =
+            "echo 'Dockerfile parse error on line 5: unknown instruction: FOOBAR' 1>&2; exit 1";
+        let args = vec!["-c".to_string(), script.to_string()];
+
+        let result = run_build_with_retry(
+            std::path::Path::new("/bin/sh"),
+            &args,
+            Some(&sink as &dyn BuildLineSink),
+        )
+        .await;
+
+        let err = result.expect_err("non-zero exit should surface an error");
+        assert!(err.to_string().contains("Image build failed"));
+        // Terminal failure → exactly one attempt → exactly one reset.
+        assert_eq!(sink.resets.load(Ordering::SeqCst), 1);
+        assert!(
+            sink.lines
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, l)| l.contains("unknown instruction")),
+            "sink should have received the failing stderr line"
+        );
     }
 }

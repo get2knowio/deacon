@@ -1948,10 +1948,20 @@ async fn execute_docker_build(
             build_args.push("--load".to_string());
         }
 
-        // Add quiet flag to reduce output noise (only if not pushing/exporting)
-        if !args.push && args.output.is_none() {
-            build_args.push("-q".to_string());
-        }
+        // Retrieve the image ID via `--iidfile` instead of `docker build -q`
+        // stdout scraping (only when building locally — push/export may not
+        // produce a local image). Dropping `-q` lets BuildKit progress stream
+        // to stderr for the build-output UI while the digest still arrives
+        // reliably. The temp file must outlive the build invocation below.
+        let iidfile = if !args.push && args.output.is_none() {
+            let f =
+                tempfile::NamedTempFile::new().context("Failed to create image ID temp file")?;
+            build_args.push("--iidfile".to_string());
+            build_args.push(f.path().display().to_string());
+            Some(f)
+        } else {
+            None
+        };
 
         // Finally add build context (must be last)
         build_args.push(
@@ -1978,17 +1988,32 @@ async fn execute_docker_build(
             return Err(DockerError::CLIError(format!("Docker build failed: {}", stderr)).into());
         }
 
-        // When using --push or --output, we may not get an image ID on stdout
-        let image_id = if args.push || args.output.is_some() {
-            // For push/export, the image may not be available locally
-            // Use the first user-specified tag or the deterministic tag as a reference
-            if !args.image_names.is_empty() {
-                args.image_names[0].clone()
-            } else {
-                tag.clone()
+        // When using --push or --output, we may not get a local image ID; use a
+        // tag reference. Otherwise read the digest from the `--iidfile` the
+        // daemon wrote (replaces the former `-q` stdout scrape).
+        let image_id = match iidfile {
+            None => {
+                // push/export path — the image may not be available locally
+                if !args.image_names.is_empty() {
+                    args.image_names[0].clone()
+                } else {
+                    tag.clone()
+                }
             }
-        } else {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
+            Some(f) => {
+                let id = tokio::fs::read_to_string(f.path())
+                    .await
+                    .context("Build succeeded but the image ID file could not be read")?
+                    .trim()
+                    .to_string();
+                if id.is_empty() {
+                    return Err(DockerError::CLIError(
+                        "Build succeeded but wrote an empty image ID file".to_string(),
+                    )
+                    .into());
+                }
+                id
+            }
         };
 
         // Extract image metadata (skip if pushing or exporting as image may not be local)
@@ -2665,8 +2690,9 @@ mod tests {
         build_args.push("--label".to_string());
         build_args.push(label);
 
-        // Add quiet flag
-        build_args.push("-q".to_string());
+        // Capture the image ID via --iidfile (replaces the former `-q` scrape)
+        build_args.push("--iidfile".to_string());
+        build_args.push("/tmp/deacon-iid".to_string());
 
         // Finally add context (PATH last)
         build_args.push(context_path.to_str().unwrap().to_string());
@@ -2684,8 +2710,9 @@ mod tests {
         assert_eq!(build_args[9], "deacon-build:abcd12345678");
         assert_eq!(build_args[10], "--label");
         assert_eq!(build_args[11], "org.deacon.configHash=abcd1234567890");
-        assert_eq!(build_args[12], "-q");
-        assert_eq!(build_args[13], context_path.to_str().unwrap());
+        assert_eq!(build_args[12], "--iidfile");
+        assert_eq!(build_args[13], "/tmp/deacon-iid");
+        assert_eq!(build_args[14], context_path.to_str().unwrap());
 
         // Verify that when passed to Command::new("docker").args(&build_args),
         // it will correctly execute "docker build ..." not "docker -f ..."
@@ -2757,8 +2784,9 @@ mod tests {
         build_args.push("--label".to_string());
         build_args.push(label);
 
-        // Add quiet flag
-        build_args.push("-q".to_string());
+        // Capture the image ID via --iidfile (replaces the former `-q` scrape)
+        build_args.push("--iidfile".to_string());
+        build_args.push("/tmp/deacon-iid".to_string());
 
         // Finally add context (PATH last)
         build_args.push(context_path.to_str().unwrap().to_string());

@@ -122,8 +122,13 @@ pub(crate) async fn build_image_from_config(
         build_args.push(format!("{}={}", key, value));
     }
 
-    // Add quiet flag to reduce output noise and get just the image ID
-    build_args.push("-q".to_string());
+    // Retrieve the image ID via `--iidfile` instead of `docker build -q`
+    // stdout scraping. Dropping `-q` lets BuildKit progress stream to stderr
+    // (rendered by the build-output UI); the digest still arrives reliably via
+    // the file the daemon writes. The temp file must outlive the build call.
+    let iidfile = tempfile::NamedTempFile::new().context("Failed to create image ID temp file")?;
+    build_args.push("--iidfile".to_string());
+    build_args.push(iidfile.path().display().to_string());
 
     // Finally add build context (must be last)
     build_args.push(
@@ -142,17 +147,28 @@ pub(crate) async fn build_image_from_config(
     // 5xx from registry). Terminal failures (Dockerfile syntax, RUN failure,
     // 401/403) fail on the first attempt — see classifier in
     // deacon_core::docker_retry.
-    let output = deacon_core::docker_retry::run_build_with_retry(
+    deacon_core::docker_retry::run_build_with_retry(
         std::path::Path::new(runtime_path),
         &build_args,
+        None,
     )
     .await
     .context("image build failed")?;
 
-    let image_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let image_id = tokio::fs::read_to_string(iidfile.path())
+        .await
+        .context("Build succeeded but the image ID file could not be read")?
+        .trim()
+        .to_string();
+    if image_id.is_empty() {
+        return Err(DeaconError::Docker(DockerError::CLIError(
+            "Build succeeded but wrote an empty image ID file".to_string(),
+        ))
+        .into());
+    }
     debug!("Built image with ID: {}", image_id);
 
-    // `docker build -q` returns a bare `sha256:<digest>` image ID. Returning
+    // The `--iidfile` digest is a bare `sha256:<digest>` image ID. Returning
     // that as the resolved `config.image` works for `docker create`, but when
     // features are layered on top the generated `FROM ${base}` makes BuildKit
     // treat a bare digest as a `docker.io/library/sha256:...` repository
