@@ -143,6 +143,34 @@ pub enum LogLevel {
     Trace,
 }
 
+/// Resolve the effective tracing level from the `--log-level` baseline shifted
+/// by repeated `-v`/`-q`.
+///
+/// Verbosity is a single axis (`error < warn < info < debug < trace`). `-v`
+/// raises it one step, `-q` lowers it, and the net shift is applied to the
+/// `--log-level` baseline (default `warn`) then clamped to the valid range.
+/// This resolves only the *default* log directive — an explicit
+/// `DEACON_LOG`/`RUST_LOG` still wins (see [`Cli::dispatch`]).
+fn resolve_log_level(base: &LogLevel, verbose: u8, quiet: u8) -> &'static str {
+    let base_idx: i32 = match base {
+        LogLevel::Error => 0,
+        LogLevel::Warn => 1,
+        LogLevel::Info => 2,
+        LogLevel::Debug => 3,
+        LogLevel::Trace => 4,
+    };
+    // `-v` and `-q` are both u8 counts; widen to i32 so the difference can go
+    // negative before clamping.
+    let idx = (base_idx + i32::from(verbose) - i32::from(quiet)).clamp(0, 4);
+    match idx {
+        0 => "error",
+        1 => "warn",
+        2 => "info",
+        3 => "debug",
+        _ => "trace",
+    }
+}
+
 /// Progress format options
 #[derive(Debug, Clone, ValueEnum, PartialEq, Eq)]
 pub enum ProgressFormat {
@@ -613,7 +641,9 @@ pub enum Commands {
         feature: Option<String>,
         /// HIDDEN: target version for `--feature`. Must match
         /// `^\d+(\.\d+(\.\d+)?)?$`.
-        #[arg(long, short = 'v', hide = true)]
+        // No `-v` short: `-v` is the global `--verbose` flag. Dependabot uses
+        // the long `--target-version` form.
+        #[arg(long, hide = true)]
         target_version: Option<String>,
     },
 
@@ -850,9 +880,22 @@ pub struct Cli {
     #[arg(long, global = true, value_enum)]
     pub log_format: Option<LogFormat>,
 
-    /// Log level
-    #[arg(long, global = true, value_enum, default_value = "info")]
+    /// Log level (baseline verbosity). Shifted by repeated `-v`/`-q`.
+    #[arg(long, global = true, value_enum, default_value = "warn")]
     pub log_level: LogLevel,
+
+    /// Increase log verbosity, repeatable: `-v`=info, `-vv`=debug, `-vvv`=trace.
+    ///
+    /// Convenience shortcut that raises `--log-level` one step per `-v`. An
+    /// explicit `DEACON_LOG`/`RUST_LOG` still takes precedence over this.
+    #[arg(short = 'v', long, global = true, action = clap::ArgAction::Count)]
+    pub verbose: u8,
+
+    /// Decrease log verbosity, repeatable: `-q`=error (silences warnings).
+    ///
+    /// Convenience shortcut that lowers `--log-level` one step per `-q`.
+    #[arg(short = 'q', long, global = true, action = clap::ArgAction::Count)]
+    pub quiet: u8,
 
     /// Workspace folder path
     #[arg(long, global = true, value_name = "PATH")]
@@ -1115,13 +1158,11 @@ impl Cli {
             None => None, // Let logging module check environment variable
         };
 
-        let mut log_level = match self.log_level {
-            LogLevel::Error => "error",
-            LogLevel::Warn => "warn",
-            LogLevel::Info => "info",
-            LogLevel::Debug => "debug",
-            LogLevel::Trace => "trace",
-        };
+        // Resolve the effective baseline level from `--log-level` (default
+        // `warn`) shifted by repeated `-v`/`-q`. The default is intentionally
+        // quiet: routine INFO chatter is hidden unless the user opts in with
+        // `-v`.
+        let log_level = resolve_log_level(&self.log_level, self.verbose, self.quiet);
 
         // Determine if spinner-friendly session: progress auto, no progress_file, stderr is TTY, non-JSON format.
         let stderr_is_tty = std::io::stderr().is_terminal();
@@ -1138,11 +1179,6 @@ impl Cli {
         // runtime's worker threads exist.
         let default_log_directive =
             if std::env::var_os("DEACON_LOG").is_none() && std::env::var_os("RUST_LOG").is_none() {
-                // In spinner sessions, prefer a quieter default unless the user
-                // overrode it via flag/env.
-                if spinner_eligible {
-                    log_level = "warn";
-                }
                 Some(format!(
                     "deacon={level},deacon_core={level}",
                     level = log_level
@@ -1824,6 +1860,52 @@ mod tests {
         assert_eq!(cli.docker_compose_path, "docker-compose");
         assert!(cli.terminal_columns.is_none());
         assert!(cli.terminal_rows.is_none());
+    }
+
+    #[test]
+    fn test_resolve_log_level_default_is_warn() {
+        // Default baseline (no -v/-q) is now warn, not info.
+        assert_eq!(resolve_log_level(&LogLevel::Warn, 0, 0), "warn");
+    }
+
+    #[test]
+    fn test_resolve_log_level_verbose_raises() {
+        assert_eq!(resolve_log_level(&LogLevel::Warn, 1, 0), "info");
+        assert_eq!(resolve_log_level(&LogLevel::Warn, 2, 0), "debug");
+        assert_eq!(resolve_log_level(&LogLevel::Warn, 3, 0), "trace");
+        // Clamp at the top; extra -v is a no-op past trace.
+        assert_eq!(resolve_log_level(&LogLevel::Warn, 9, 0), "trace");
+    }
+
+    #[test]
+    fn test_resolve_log_level_quiet_lowers() {
+        assert_eq!(resolve_log_level(&LogLevel::Warn, 0, 1), "error");
+        // Clamp at the bottom.
+        assert_eq!(resolve_log_level(&LogLevel::Warn, 0, 5), "error");
+    }
+
+    #[test]
+    fn test_resolve_log_level_shifts_from_explicit_baseline() {
+        // `--log-level` sets the baseline; -v/-q shift from it additively.
+        assert_eq!(resolve_log_level(&LogLevel::Info, 1, 0), "debug");
+        assert_eq!(resolve_log_level(&LogLevel::Info, 0, 1), "warn");
+        // -v and -q cancel out.
+        assert_eq!(resolve_log_level(&LogLevel::Info, 1, 1), "info");
+    }
+
+    #[test]
+    fn test_verbose_quiet_flags_parse_and_count() {
+        let cli = Cli::parse_from(["deacon"]);
+        assert_eq!(cli.verbose, 0);
+        assert_eq!(cli.quiet, 0);
+
+        let cli = Cli::parse_from(["deacon", "-vv"]);
+        assert_eq!(cli.verbose, 2);
+
+        // Global flags work after the subcommand too.
+        let cli = Cli::parse_from(["deacon", "doctor", "-v", "-q"]);
+        assert_eq!(cli.verbose, 1);
+        assert_eq!(cli.quiet, 1);
     }
 
     /// BEAD-11-T03: --log-format json must auto-force PTY allocation so the
