@@ -600,9 +600,18 @@ pub(crate) async fn execute_compose_post_create(
     debug!("Executing post-create lifecycle for compose project");
 
     // Run lifecycle commands from the container's workspace folder, matching the
-    // single-container path (container_lifecycle.rs). Without this the exec
-    // inherits the image's default WORKDIR (often `/`), so a workspace-relative
-    // command like `.devcontainer/setup.sh` fails with "No such file or directory".
+    // single-container path. Without this the exec inherits the image's default
+    // WORKDIR (often `/`), so a workspace-relative command like
+    // `.devcontainer/setup.sh` fails with "No such file or directory".
+    //
+    // We do NOT set `docker exec -w <dir>` (ExecConfig.working_dir): deacon does
+    // not inject a workspace bind mount for compose (the user's compose file
+    // provides it), so `<workspaceFolder>` may not exist in the container — and
+    // `-w` to a missing dir makes the exec hard-fail
+    // ("chdir to cwd … no such file or directory"). Instead we `cd` into it from
+    // inside the shell and fall through to the default dir if it is absent. This
+    // matches the reference CLI (run lifecycle from workspaceFolder) when the
+    // workspace is mounted, and stays graceful when it is not.
     let container_workspace_folder =
         crate::commands::shared::derive_container_workspace_folder(config, workspace_folder);
 
@@ -626,14 +635,22 @@ pub(crate) async fn execute_compose_post_create(
         if let Some(cmd_str) = post_create_cmd.as_str() {
             debug!("Executing postCreateCommand: {}", cmd_str);
 
+            // Run from the container workspace folder if it exists, else fall
+            // through (see the note above). Single-quote the path defensively;
+            // container workspace paths do not contain single quotes in practice.
+            let wrapped_cmd = format!(
+                "cd '{}' 2>/dev/null; {}",
+                container_workspace_folder, cmd_str
+            );
+
             let docker = deacon_core::docker::CliDocker::new();
             let result = docker
                 .exec(
                     &container_id,
-                    &["sh".to_string(), "-c".to_string(), cmd_str.to_string()],
+                    &["sh".to_string(), "-c".to_string(), wrapped_cmd],
                     ExecConfig {
                         user: None,
-                        working_dir: Some(container_workspace_folder.clone()),
+                        working_dir: None,
                         env: std::collections::HashMap::new(),
                         tty: force_pty,
                         interactive: false,
