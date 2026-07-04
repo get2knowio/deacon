@@ -3,7 +3,7 @@
 //! This module provides container-specific lifecycle command execution with full
 //! variable substitution including containerEnv & containerWorkspaceFolder.
 
-use crate::docker::{CliDocker, Docker, ExecConfig};
+use crate::docker::{CliDocker, Docker, ExecConfig, ExecResult};
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::lifecycle::LifecyclePhase;
 use crate::progress::{ProgressEvent, ProgressTracker};
@@ -514,6 +514,79 @@ pub struct ContainerLifecycleConfig {
     /// rerun. `None` writes legacy markers (no hash) — compatible with
     /// older deacon installs.
     pub config_hash: Option<String>,
+    /// Capture lifecycle command output instead of streaming it live (Part 3
+    /// build-output-and-verbosity). When `true` (compact mode), each command's
+    /// stdout+stderr is buffered rather than forwarded to deacon's stderr, so
+    /// the per-phase progress spinner owns the terminal; on a non-zero exit the
+    /// captured log is replayed (redacted, tail-capped) so failures stay
+    /// diagnosable. When `false` (verbose/`-v`, non-TTY, or JSON), output
+    /// streams verbatim as before. Default `false` preserves legacy behavior.
+    pub capture_output: bool,
+}
+
+/// Maximum number of trailing lines of a failed command's captured output to
+/// replay, so a runaway log (e.g. a verbose installer) doesn't re-flood the
+/// terminal on failure.
+const MAX_REPLAY_LINES: usize = 100;
+
+/// Build the text to replay for a lifecycle command's captured output on failure
+/// (compact mode only), or `None` when nothing should be printed.
+///
+/// In compact mode (`ContainerLifecycleConfig::capture_output = true`) the
+/// command's stdout+stderr were buffered by the exec layer (`silent = true`)
+/// rather than streamed live, so on success nothing reaches the terminal and the
+/// per-phase spinner stays clean. When the command *fails* we still owe the user
+/// the output that explains why — so return it here (redacted, tail-capped to the
+/// last `MAX_REPLAY_LINES` lines).
+///
+/// Returns `None` when output was streamed live (`capture` is `false`), the
+/// command succeeded (`result.success`), or there is no output to show.
+fn build_lifecycle_failure_replay(capture: bool, result: &ExecResult) -> Option<String> {
+    if !capture || result.success {
+        return None;
+    }
+
+    let mut combined = result.stdout.clone();
+    if !result.stderr.is_empty() {
+        if !combined.is_empty() && !combined.ends_with('\n') {
+            combined.push('\n');
+        }
+        combined.push_str(&result.stderr);
+    }
+
+    let redacted = redact_if_enabled(&combined, &RedactionConfig::default());
+    let trimmed = redacted.trim_end();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let lines: Vec<&str> = trimmed.lines().collect();
+    let mut out = String::new();
+    if lines.len() > MAX_REPLAY_LINES {
+        let omitted = lines.len() - MAX_REPLAY_LINES;
+        out.push_str(&format!(
+            "  … {} earlier line(s) omitted (showing last {} of captured output)\n",
+            omitted, MAX_REPLAY_LINES
+        ));
+        for line in &lines[lines.len() - MAX_REPLAY_LINES..] {
+            out.push_str(line);
+            out.push('\n');
+        }
+    } else {
+        for line in &lines {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    Some(out)
+}
+
+/// Replay a failed lifecycle command's captured output to stderr (compact mode).
+/// No-op unless [`build_lifecycle_failure_replay`] yields text.
+fn replay_captured_lifecycle_output(capture: bool, result: &ExecResult) {
+    if let Some(text) = build_lifecycle_failure_replay(capture, result) {
+        eprint!("{}", text);
+    }
 }
 
 /// Execute lifecycle commands in a container with full variable substitution
@@ -1434,7 +1507,9 @@ where
                     tty: config.force_pty,
                     interactive: false,
                     detach: false,
-                    silent: false,
+                    // Compact mode buffers output (see `capture_output`); verbose/
+                    // non-TTY/JSON streams it live as before.
+                    silent: config.capture_output,
                     stdout_to_stderr: true,
                     terminal_size: None,
                 };
@@ -1472,6 +1547,9 @@ where
 
                 match exec_result {
                     Ok(exec_result) => {
+                        // Compact mode: replay the buffered output if the command
+                        // failed (no-op on success or when streamed live).
+                        replay_captured_lifecycle_output(config.capture_output, &exec_result);
                         debug!(
                             "Container command completed with exit code: {} in {:?}",
                             exec_result.exit_code, duration
@@ -1616,7 +1694,9 @@ where
                     tty: config.force_pty,
                     interactive: false,
                     detach: false,
-                    silent: false,
+                    // Compact mode buffers output (see `capture_output`); verbose/
+                    // non-TTY/JSON streams it live as before.
+                    silent: config.capture_output,
                     stdout_to_stderr: true,
                     terminal_size: None,
                 };
@@ -1630,6 +1710,9 @@ where
 
                 match exec_result {
                     Ok(exec_result) => {
+                        // Compact mode: replay the buffered output if the command
+                        // failed (no-op on success or when streamed live).
+                        replay_captured_lifecycle_output(config.capture_output, &exec_result);
                         debug!(
                             "Exec-style command completed with exit code: {} in {:?}",
                             exec_result.exit_code, duration
@@ -2730,6 +2813,60 @@ impl ContainerLifecycleResult {
 mod tests {
     use super::*;
 
+    fn exec_result(success: bool, stdout: &str, stderr: &str) -> ExecResult {
+        ExecResult {
+            exit_code: if success { 0 } else { 1 },
+            success,
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+        }
+    }
+
+    #[test]
+    fn replay_is_none_when_not_capturing() {
+        // Streamed live (capture = false): output already went to the terminal,
+        // so there is nothing to replay even on failure.
+        let r = exec_result(false, "boom stdout", "boom stderr");
+        assert!(build_lifecycle_failure_replay(false, &r).is_none());
+    }
+
+    #[test]
+    fn replay_is_none_on_success() {
+        // Compact + success: the whole point is to stay quiet.
+        let r = exec_result(true, "lots of noise\n", "job control blah\n");
+        assert!(build_lifecycle_failure_replay(true, &r).is_none());
+    }
+
+    #[test]
+    fn replay_is_none_when_output_empty() {
+        let r = exec_result(false, "", "   \n  \n");
+        assert!(build_lifecycle_failure_replay(true, &r).is_none());
+    }
+
+    #[test]
+    fn replay_combines_stdout_and_stderr_on_failure() {
+        let r = exec_result(false, "line-out", "line-err");
+        let text = build_lifecycle_failure_replay(true, &r).expect("replay text");
+        assert!(text.contains("line-out"), "stdout present: {text:?}");
+        assert!(text.contains("line-err"), "stderr present: {text:?}");
+    }
+
+    #[test]
+    fn replay_tail_caps_long_output() {
+        // 250 lines of stdout; only the last MAX_REPLAY_LINES are shown, with a
+        // truncation notice for the remainder.
+        let stdout: String = (0..250).map(|i| format!("row{i}\n")).collect();
+        let r = exec_result(false, &stdout, "");
+        let text = build_lifecycle_failure_replay(true, &r).expect("replay text");
+        assert!(text.contains("earlier line(s) omitted"), "notice: {text:?}");
+        // Last line must be present, an early one must be dropped.
+        assert!(text.contains("row249"), "tail kept");
+        assert!(!text.contains("row0\n"), "head dropped");
+        // Count of content rows shown never exceeds the cap.
+        let shown = text.matches("row").count();
+        assert_eq!(shown, MAX_REPLAY_LINES, "exactly the cap of rows shown");
+    }
+
     /// Helper to convert string commands to AggregatedLifecycleCommand for tests
     fn make_config_commands(cmds: &[&str]) -> Vec<AggregatedLifecycleCommand> {
         cmds.iter()
@@ -2750,6 +2887,7 @@ mod tests {
     #[test]
     fn test_container_lifecycle_config_creation() {
         let config = ContainerLifecycleConfig {
+            capture_output: false,
             container_id: "test-container".to_string(),
             user: Some("root".to_string()),
             container_workspace_folder: "/workspaces/test".to_string(),
@@ -2900,6 +3038,7 @@ mod tests {
             phase: LifecyclePhase::PostStart,
             commands: make_config_commands(&["echo 'test'"]),
             config: ContainerLifecycleConfig {
+                capture_output: false,
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
@@ -2964,6 +3103,7 @@ mod tests {
             phase: LifecyclePhase::PostStart,
             commands: make_config_commands(&["echo 'test'"]),
             config: ContainerLifecycleConfig {
+                capture_output: false,
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
@@ -3042,6 +3182,7 @@ mod tests {
             phase: LifecyclePhase::PostStart,
             commands: make_config_commands(&["echo 'test'"]),
             config: ContainerLifecycleConfig {
+                capture_output: false,
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
@@ -3107,6 +3248,7 @@ mod tests {
             phase: LifecyclePhase::PostStart,
             commands: make_config_commands(&["echo 'test'"]),
             config: ContainerLifecycleConfig {
+                capture_output: false,
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
@@ -3194,6 +3336,7 @@ mod tests {
             phase: LifecyclePhase::PostStart,
             commands: make_config_commands(&["echo 'postStart'"]),
             config: ContainerLifecycleConfig {
+                capture_output: false,
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
@@ -3219,6 +3362,7 @@ mod tests {
             phase: LifecyclePhase::PostAttach,
             commands: make_config_commands(&["echo 'postAttach'"]),
             config: ContainerLifecycleConfig {
+                capture_output: false,
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
@@ -3296,6 +3440,7 @@ mod tests {
             phase: LifecyclePhase::PostStart,
             commands: make_config_commands(&["exit 1"]),
             config: ContainerLifecycleConfig {
+                capture_output: false,
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
@@ -3379,6 +3524,7 @@ mod tests {
             phase: LifecyclePhase::PostStart,
             commands: make_config_commands(&["echo 'postStart'"]),
             config: ContainerLifecycleConfig {
+                capture_output: false,
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
@@ -3404,6 +3550,7 @@ mod tests {
             phase: LifecyclePhase::PostAttach,
             commands: make_config_commands(&["echo 'postAttach'"]),
             config: ContainerLifecycleConfig {
+                capture_output: false,
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),

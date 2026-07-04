@@ -28,6 +28,7 @@ async fn test_container_lifecycle_with_variable_substitution() {
     container_env.insert("DEBUG".to_string(), "true".to_string());
 
     let config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container-123".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspaces/test".to_string(),
@@ -101,6 +102,7 @@ async fn test_container_lifecycle_with_skip_flags() {
 
     // Test with skip flags enabled
     let config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container-456".to_string(),
         user: None, // Test without user specification
         container_workspace_folder: "/workspaces/test".to_string(),
@@ -158,6 +160,7 @@ fn test_container_lifecycle_config_validation() {
     container_env.insert("TEST_VAR".to_string(), "test_value".to_string());
 
     let config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container".to_string(),
         user: Some("testuser".to_string()),
         container_workspace_folder: "/workspaces/myproject".to_string(),
@@ -224,6 +227,7 @@ async fn test_all_lifecycle_phases_ordering() {
     let substitution_context = SubstitutionContext::new(workspace_path).unwrap();
 
     let config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container-all-phases".to_string(),
         user: None,
         container_workspace_folder: "/workspaces/test".to_string(),

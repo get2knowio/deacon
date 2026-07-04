@@ -162,6 +162,30 @@ Staged, each independently CI-verifiable (user has no preference; this keeps rev
 
 ---
 
+## Part 3: Compact lifecycle-command output (follow-on from real-world `up`)
+
+Running the shipped Compact build UX on a real project surfaced the next layer of
+noise: the **build** output was compact, but `postCreate` (a verbose `setup.sh`:
+playwright browser downloads + a 94-package apt install) still streamed its full
+firehose over the per-phase spinner, and two `bash: … no job control` lines leaked
+from running the hook as an interactive login shell without a PTY.
+
+Fix (extends the same verbosity/TTY axis):
+- `ContainerLifecycleConfig::capture_output` (default `false`). When `true`
+  (Compact mode, set from `UpArgs::build_output_mode == Compact` in
+  `commands/up/lifecycle.rs`), the lifecycle exec runs with `silent: true` so
+  stdout+stderr are **buffered** instead of streamed — the `SpinnerEmitter`'s
+  existing `Running <phase>…` / `<phase> completed in N ms` line owns the terminal,
+  and the interactive-shell job-control noise is captured and discarded on success.
+- On a **non-zero exit**, `build_lifecycle_failure_replay` replays the captured
+  output (redacted, tail-capped to the last 100 lines) so failures stay
+  diagnosable. Unit-tested in `container_lifecycle.rs`.
+- Covers the String and `Exec` (array) command paths. Parallel (object-form) and
+  dotfiles installation intentionally keep streaming (prefixed / interleaved output
+  stays attributable) — noted as a follow-up.
+- Verbose (`-v`), non-TTY/CI, and `--log-format json` all keep streaming verbatim
+  (`capture_output` stays `false`).
+
 ## Part 2 (optional): `ai-clis` feature defensiveness
 
 Once PR #252 is merged and a new deacon is in use, `ai-clis` works unchanged. Independently

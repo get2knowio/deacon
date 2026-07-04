@@ -33,6 +33,7 @@ async fn test_non_blocking_phases_are_deferred() {
 
     // Create lifecycle configuration with non-blocking commands enabled
     let lifecycle_config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
@@ -140,6 +141,7 @@ async fn test_skip_non_blocking_commands_behavior() {
 
     // Create lifecycle configuration with non-blocking commands DISABLED
     let lifecycle_config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
@@ -214,6 +216,7 @@ async fn test_non_blocking_phases_sync_execution() {
 
     // Create lifecycle configuration with non-blocking commands enabled
     let lifecycle_config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
@@ -338,6 +341,7 @@ async fn test_non_blocking_phase_command_failures_are_handled() {
 
     // Create lifecycle configuration with non-blocking commands enabled
     let lifecycle_config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
@@ -457,6 +461,7 @@ async fn test_non_blocking_phase_timeout_handling() {
 
     // Create lifecycle configuration with very short timeout
     let lifecycle_config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
@@ -538,6 +543,7 @@ async fn test_non_blocking_phases_with_progress_streaming() {
 
     // Create lifecycle configuration with non-blocking commands enabled
     let lifecycle_config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),

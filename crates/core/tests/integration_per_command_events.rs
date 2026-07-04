@@ -64,6 +64,7 @@ async fn test_per_command_events_emitted() {
 
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspaces/test".to_string(),

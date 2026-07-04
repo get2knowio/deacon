@@ -196,6 +196,7 @@ async fn execute_lifecycle_commands(
 
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: container_id.to_string(),
         user: config
             .remote_user
