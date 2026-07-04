@@ -331,6 +331,7 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
 
     // Create lifecycle configuration
     let config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "lifecycle-test-container".to_string(),
         user: Some("node".to_string()),
         container_workspace_folder: "/workspace/app".to_string(),
@@ -434,6 +435,7 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
 
     // Create lifecycle configuration with skip flags
     let config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "skip-test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
@@ -502,6 +504,7 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
 
     // Create lifecycle configuration
     let config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "failure-test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
@@ -610,6 +613,7 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
 
     // Create lifecycle configuration with non-blocking commands skipped
     let config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "non-blocking-test".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),

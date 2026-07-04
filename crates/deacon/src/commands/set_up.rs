@@ -376,6 +376,7 @@ async fn execute_lifecycle_hooks(
         .unwrap_or_else(|| "/".to_string());
 
     let lifecycle_config = ContainerLifecycleConfig {
+        capture_output: false,
         container_id: container.id.clone(),
         user: merged_config
             .remote_user

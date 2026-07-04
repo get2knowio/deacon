@@ -243,6 +243,9 @@ pub(crate) async fn execute_lifecycle_commands(
 
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {
+        // Part 3: buffer lifecycle output behind the per-phase spinner in compact
+        // mode; verbose/non-TTY/JSON keeps streaming it live.
+        capture_output: args.build_output_mode == deacon_core::build::BuildOutputMode::Compact,
         container_id: container_id.to_string(),
         user: effective_user,
         container_workspace_folder,
@@ -510,6 +513,7 @@ pub(crate) async fn execute_initialize_command(
 
     // Create a dummy lifecycle config (only needed for container phases, not host phases)
     let lifecycle_config = deacon_core::container_lifecycle::ContainerLifecycleConfig {
+        capture_output: false,
         container_id: "<host-only-no-container>".to_string(),
         user: None,
         container_workspace_folder: "<host-only-no-container>".to_string(),

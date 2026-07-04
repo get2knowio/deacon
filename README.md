@@ -293,6 +293,22 @@ presented follows the same verbosity/TTY signals as logging:
 In all modes stdout stays reserved for the command's result (so `--output json`
 / piped output remain parseable); build progress and diagnostics go to stderr.
 
+### Lifecycle command output
+
+Lifecycle commands (`onCreate`, `postCreate`, `postStart`, …) follow the same
+signals:
+
+| Situation | What you see |
+|-----------|--------------|
+| Interactive terminal, default verbosity | **Compact**: output is buffered behind the per‑phase spinner (`Running postCreate…` → `postCreate completed in N ms`). On failure the captured output is replayed (redacted, tail‑capped to the last 100 lines) so you still see why it failed. |
+| `-v`/`--verbose`, non‑TTY (CI, redirection), or `--log-format json` | **Streamed**: each command's output is forwarded to stderr verbatim as it runs, exactly as before. |
+
+This keeps a verbose `postCreateCommand` (e.g. an installer that downloads
+hundreds of MB) from burying the progress spinner, while a failing hook still
+surfaces its log. It applies to string and array (`exec`) form commands; parallel
+(object‑form) and dotfiles installation still stream so their interleaved output
+stays attributable.
+
 ### PTY Allocation for JSON Log Mode
 
 When using JSON logging format (`--log-format json`), lifecycle commands (onCreate, postCreate, etc.) run without PTY (pseudo-terminal) allocation by default. This is ideal for non-interactive scripts and automated environments.
