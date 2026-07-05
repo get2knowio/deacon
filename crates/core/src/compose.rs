@@ -850,8 +850,9 @@ impl ComposeManager {
             resolved_files.push(file_path);
         }
 
-        // Generate project name from directory name, ensuring it meets Docker Compose requirements
-        let project_name = derive_project_name(base_path);
+        // Deacon-namespaced project name, unique per devcontainer (workspace +
+        // config hash), so sibling devcontainers in one repo never collide.
+        let project_name = derive_project_name(base_path, config);
 
         Ok(ComposeProject {
             name: project_name,
@@ -1573,7 +1574,7 @@ fn parse_env_file_for_project_name(env_file_path: &Path) -> Option<String> {
     None
 }
 
-fn derive_project_name(base_path: &Path) -> String {
+fn derive_project_name(base_path: &Path, config: &DevContainerConfig) -> String {
     // An explicit COMPOSE_PROJECT_NAME in a sibling `.env` is used verbatim
     // (no suffix) — this is a deliberate user override, so honor it exactly
     // as docker compose and the reference CLI would.
@@ -1583,25 +1584,30 @@ fn derive_project_name(base_path: &Path) -> String {
         return project_name;
     }
 
-    // Auto-derived default: deacon-namespaced and folder-INdependent (#265).
+    // Auto-derived default: deacon-namespaced (#265) and unique per devcontainer.
     //
     // The reference CLI's own default is `<folder>_devcontainer` — identical
     // to what deacon used to produce here. That collision meant `devcontainer
     // up` would *discover* a compose project deacon brought up (same name,
     // same directory), then fail looking for its own `vsc-*`-tagged image,
     // which deacon never creates (deacon's compose service images aren't
-    // named that way). Using `deacon_<workspace_hash>` — the SAME hash
-    // `ContainerIdentity` stamps as the `devcontainer.workspaceHash` label —
-    // keeps deacon's compose project cleanly out of the reference CLI's
-    // naming convention while staying deterministic per workspace and
-    // consistent with the container-identity labels already applied
-    // (`execute_compose_up` stamps `identity.labels()` onto the same
-    // project). This is a one-way migration: compose projects created by
-    // prior deacon versions under `<folder>_devcontainer` become orphaned
-    // (not deleted) — `docker compose -p <old-name> down` (or `deacon down`
-    // on the old binary) clears them.
+    // named that way). The `deacon_` prefix keeps deacon's compose project
+    // cleanly out of the reference CLI's naming convention.
+    //
+    // The name combines BOTH hashes `ContainerIdentity` uses — `workspace_hash`
+    // (the `devcontainer.workspaceHash` label) plus `config_hash` — mirroring
+    // `ContainerIdentity::container_name`. `workspace_hash` walks to the git
+    // root, so `workspace_hash` alone would be IDENTICAL for two devcontainer
+    // folders in the same repo (e.g. a monorepo's `services/api` and
+    // `services/web`), collapsing them onto one compose project and letting a
+    // `deacon up`/`down` in one silently reconcile or tear down the other.
+    // Folding in `config_hash` disambiguates siblings exactly as the
+    // single-container path does. This is a one-way migration from any prior
+    // naming: projects created by older deacon versions become orphaned (not
+    // deleted) — `docker compose -p <old-name> down` clears them.
     let workspace_hash = crate::container::ContainerIdentity::hash_workspace_path(base_path);
-    format!("deacon_{workspace_hash}")
+    let config_hash = crate::container::ContainerIdentity::hash_config(config);
+    format!("deacon_{workspace_hash}_{config_hash}")
 }
 
 #[cfg(test)]
@@ -1883,33 +1889,36 @@ mod tests {
         assert_eq!(all_services, vec!["app"]);
     }
 
-    /// #265: the auto-derived project name is `deacon_<workspace_hash>` — the
-    /// SAME hash `ContainerIdentity` computes — not the reference CLI's
-    /// `<folder>_devcontainer` convention, so `devcontainer up` can never
+    /// #265: the auto-derived project name is `deacon_<workspace_hash>_<config_hash>`
+    /// — the SAME two hashes `ContainerIdentity` computes — not the reference
+    /// CLI's `<folder>_devcontainer` convention, so `devcontainer up` can never
     /// mistake a deacon-owned compose project for its own.
     #[test]
     fn test_derive_project_name_is_deacon_namespaced_and_hash_based() {
         let path = Path::new("/tmp/my-workspace");
-        let name = derive_project_name(path);
+        let config = DevContainerConfig::default();
+        let name = derive_project_name(path, &config);
         assert!(
             name.starts_with("deacon_"),
             "expected deacon_<hash>, got {name}"
         );
         let expected = format!(
-            "deacon_{}",
-            crate::container::ContainerIdentity::hash_workspace_path(path)
+            "deacon_{}_{}",
+            crate::container::ContainerIdentity::hash_workspace_path(path),
+            crate::container::ContainerIdentity::hash_config(&config),
         );
         assert_eq!(name, expected);
     }
 
-    /// Same input path -> same project name (deterministic), and it must NOT
-    /// collide with the reference CLI's `<folder>_devcontainer` form for any
-    /// folder name.
+    /// Same input path + config -> same project name (deterministic), and it
+    /// must NOT collide with the reference CLI's `<folder>_devcontainer` form
+    /// for any folder name.
     #[test]
     fn test_derive_project_name_deterministic_and_not_reference_form() {
         let path = Path::new("/home/user/myapp");
-        let first = derive_project_name(path);
-        let second = derive_project_name(path);
+        let config = DevContainerConfig::default();
+        let first = derive_project_name(path, &config);
+        let second = derive_project_name(path, &config);
         assert_eq!(first, second, "derivation must be deterministic");
         assert_ne!(
             first, "myapp_devcontainer",
@@ -1920,9 +1929,36 @@ mod tests {
     /// Distinct workspace paths must not collide on the same project name.
     #[test]
     fn test_derive_project_name_differs_per_workspace() {
-        let a = derive_project_name(Path::new("/tmp/workspace-a"));
-        let b = derive_project_name(Path::new("/tmp/workspace-b"));
+        let config = DevContainerConfig::default();
+        let a = derive_project_name(Path::new("/tmp/workspace-a"), &config);
+        let b = derive_project_name(Path::new("/tmp/workspace-b"), &config);
         assert_ne!(a, b);
+    }
+
+    /// #265 regression guard: two devcontainers that resolve to the SAME
+    /// workspace path (e.g. sibling folders under one git root in a monorepo,
+    /// both hashing to the git-root `workspace_hash`) but carry DIFFERENT
+    /// configs must derive DIFFERENT compose project names. Otherwise a
+    /// `deacon up`/`down` in one would silently reconcile or tear down the
+    /// other's compose project. The `config_hash` component disambiguates
+    /// them, exactly as it does for the single-container `container_name`.
+    #[test]
+    fn test_derive_project_name_differs_by_config_for_same_path() {
+        let path = Path::new("/tmp/shared-workspace");
+        let config_a = DevContainerConfig {
+            name: Some("api".to_string()),
+            ..DevContainerConfig::default()
+        };
+        let config_b = DevContainerConfig {
+            name: Some("web".to_string()),
+            ..DevContainerConfig::default()
+        };
+        let a = derive_project_name(path, &config_a);
+        let b = derive_project_name(path, &config_b);
+        assert_ne!(
+            a, b,
+            "sibling devcontainers under one workspace path must not share a compose project name"
+        );
     }
 
     /// An explicit `COMPOSE_PROJECT_NAME` in a sibling `.env` is honored
@@ -1935,7 +1971,11 @@ mod tests {
             "COMPOSE_PROJECT_NAME=my-custom-project\n",
         )
         .unwrap();
-        assert_eq!(derive_project_name(temp_dir.path()), "my-custom-project");
+        let config = DevContainerConfig::default();
+        assert_eq!(
+            derive_project_name(temp_dir.path(), &config),
+            "my-custom-project"
+        );
     }
 
     #[test]

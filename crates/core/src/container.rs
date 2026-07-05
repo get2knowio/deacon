@@ -204,8 +204,12 @@ impl ContainerIdentity {
         format!("{:016x}", hash)[..8].to_string()
     }
 
-    /// Generate a deterministic hash from the configuration
-    fn hash_config(config: &DevContainerConfig) -> String {
+    /// Generate a deterministic hash from the configuration.
+    ///
+    /// `pub(crate)` so the compose project name (#265) can fold in the same
+    /// config discriminator the container name uses, keeping two devcontainer
+    /// folders under one git root from deriving an identical project name.
+    pub(crate) fn hash_config(config: &DevContainerConfig) -> String {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 

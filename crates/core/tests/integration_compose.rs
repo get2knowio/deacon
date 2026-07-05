@@ -10,13 +10,22 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-/// Helper to compute the expected compose project name: `deacon_<workspace_hash>`
-/// (#265) — the same hash `ContainerIdentity` stamps as the
-/// `devcontainer.workspaceHash` label, computed here via the same public
-/// constructor so this test doesn't duplicate the hash algorithm.
-fn expected_project_name_for_path(base_path: &std::path::Path) -> String {
-    let identity = ContainerIdentity::new(base_path, &DevContainerConfig::default());
-    format!("deacon_{}", identity.workspace_hash)
+/// Helper to compute the expected compose project name:
+/// `deacon_<workspace_hash>_<config_hash>` (#265) — the same two hashes
+/// `ContainerIdentity` computes (mirroring `container_name`), so sibling
+/// devcontainers under one git root never collide. Computed via the same
+/// public constructor so this test doesn't duplicate the hash algorithm; the
+/// config must be the SAME one passed to `create_project`, since the
+/// config_hash now participates.
+fn expected_project_name_for_config(
+    base_path: &std::path::Path,
+    config: &DevContainerConfig,
+) -> String {
+    let identity = ContainerIdentity::new(base_path, config);
+    format!(
+        "deacon_{}_{}",
+        identity.workspace_hash, identity.config_hash
+    )
 }
 
 /// Create a minimal docker-compose.yml file for testing
@@ -267,8 +276,8 @@ fn test_compose_project_name_generation() {
         .create_project(&config, &base_path, &base_path)
         .expect("Failed to create compose project");
 
-    // Project name should be derived from directory name and sanitized for compose
-    let expected_name = expected_project_name_for_path(&base_path);
+    // Project name is deacon-namespaced and unique per workspace+config.
+    let expected_name = expected_project_name_for_config(&base_path, &config);
     assert_eq!(project.name, expected_name);
 }
 
@@ -345,10 +354,10 @@ services:
         .create_project(&config, &devcontainer_dir, &devcontainer_dir)
         .expect("Failed to create compose project");
 
-    // Project name should be sanitized (leading dot removed)
+    // Project name is deacon-namespaced and unique per workspace+config.
     assert_eq!(
         project.name,
-        expected_project_name_for_path(&devcontainer_dir)
+        expected_project_name_for_config(&devcontainer_dir, &config)
     );
     assert_eq!(project.service, "app");
     assert_eq!(project.run_services, vec!["db", "redis"]);
