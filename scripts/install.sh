@@ -402,9 +402,17 @@ main() {
     fi
 
     # Create temporary directory
+    #
+    # The trap body is double-quoted so `$tmp_dir` is expanded NOW, not when
+    # the trap fires. `main` is the script's last statement, so the EXIT trap
+    # actually runs after `main` has already returned — at which point the
+    # `local tmp_dir` is out of scope. A single-quoted trap defers `$tmp_dir`
+    # lookup to that later, out-of-scope point, and `set -u` turns the
+    # now-unset reference into a spurious "tmp_dir: unbound variable" error
+    # right as the script exits (even though installation already succeeded).
     local tmp_dir
     tmp_dir=$(mktemp -d)
-    trap 'rm -rf "$tmp_dir"' EXIT
+    trap "rm -rf '$tmp_dir'" EXIT
 
     # Construct download URLs
     local archive_name="deacon-${version}-${target}.${ext}"
@@ -463,8 +471,26 @@ main() {
     success "Deacon $version has been installed successfully!"
     echo ""
 
-    # Verify installation
-    if "$binary_path" --version >/dev/null 2>&1; then
+    # Verify installation.
+    #
+    # On macOS a freshly-written binary can occasionally be killed (SIGKILL)
+    # on its very first execution — Gatekeeper's on-demand scan racing the
+    # exec — even though every later invocation succeeds once the scan
+    # completes. Retry once after a brief pause so a one-shot hiccup here
+    # doesn't just silently skip the version report.
+    #
+    # The check itself runs inside a nested `bash -c` that captures the exit
+    # code and exits explicitly (`exit "$ec"`) rather than letting the killed
+    # command sit in tail position: bash re-raises a signal that kills the
+    # last command in a script's own tail position, which would otherwise
+    # propagate the raw SIGKILL up to this script and print an alarming,
+    # unsuppressable "Killed: 9" line to the terminal — confusing given the
+    # install itself already succeeded and this check is non-fatal.
+    check_version() {
+        bash -c '"$1" --version >/dev/null 2>&1; ec=$?; exit "$ec"' _ "$binary_path" \
+            >/dev/null 2>&1
+    }
+    if check_version || { sleep 1; check_version; }; then
         info "Installed version: $("$binary_path" --version)"
     fi
 
