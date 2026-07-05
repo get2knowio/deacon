@@ -200,9 +200,27 @@ pub(crate) async fn execute_compose_up(
         project.additional_mounts = dedupe_compose_mounts_by_target(additional_mounts);
     }
 
-    // Apply remote env to compose services
-    if !effective_env.is_empty() {
-        project.additional_env = effective_env.clone();
+    // Apply `containerEnv` (config) + remote env (CLI, higher precedence) to
+    // compose services. `config.container_env` was never read here at all —
+    // only CLI `--remote-env` reached the compose service, unlike the
+    // single-container path where `create_container` (docker.rs) reads
+    // `config.container_env` directly. Found via the #267 parity suite.
+    let mut merged_container_env: IndexMap<String, String> = IndexMap::new();
+    // `config.container_env` is a `HashMap`, whose iteration order is
+    // randomized per process. Insert in sorted-key order so the rendered
+    // compose override `environment:` block is deterministic run-to-run —
+    // otherwise the IndexMap (whose whole point is stable ordering) inherits
+    // the HashMap's nondeterminism for the containerEnv-derived lines.
+    let mut config_env_keys: Vec<&String> = config.container_env.keys().collect();
+    config_env_keys.sort();
+    for key in config_env_keys {
+        merged_container_env.insert(key.clone(), config.container_env[key].clone());
+    }
+    for (key, value) in effective_env {
+        merged_container_env.insert(key.clone(), value.clone());
+    }
+    if !merged_container_env.is_empty() {
+        project.additional_env = merged_container_env;
     }
 
     // Host-CA env (016, T028): synthesize the six CA env vars into the primary

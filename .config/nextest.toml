@@ -89,6 +89,14 @@ slow-timeout = { period = "5m", terminate-after = 1 }
 filter = 'binary(#parity_*)'
 test-group = 'parity'
 
+# parity_observable_state runs multiple up/down cycles against a real Docker
+# daemon per test (including an OCI feature fetch and a two-CLI handoff
+# matrix), longer-running than the other parity_* binaries.
+[[profile.default.overrides]]
+filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
+
 [[profile.default.overrides]]
 filter = 'binary(=parity_read_configuration)'
 test-group = 'parity-cli'
@@ -192,6 +200,14 @@ test-group = 'docker-exclusive'
 [[profile.dev-fast.overrides]]
 filter = 'binary(#parity_*)'
 test-group = 'parity'
+
+# parity_observable_state runs multiple up/down cycles against a real Docker
+# daemon per test (including an OCI feature fetch and a two-CLI handoff
+# matrix), longer-running than the other parity_* binaries.
+[[profile.dev-fast.overrides]]
+filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=parity_read_configuration)'
@@ -301,6 +317,14 @@ test-group = 'smoke-cli'
 filter = 'binary(#parity_*)'
 test-group = 'parity'
 
+# parity_observable_state runs multiple up/down cycles against a real Docker
+# daemon per test (including an OCI feature fetch and a two-CLI handoff
+# matrix), longer-running than the other parity_* binaries.
+[[profile.docker.overrides]]
+filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
+
 [[profile.docker.overrides]]
 filter = 'binary(=parity_read_configuration)'
 test-group = 'parity-cli'
@@ -384,6 +408,14 @@ test-group = 'smoke-cli'
 [[profile.full.overrides]]
 filter = 'binary(#parity_*)'
 test-group = 'parity'
+
+# parity_observable_state runs multiple up/down cycles against a real Docker
+# daemon per test (including an OCI feature fetch and a two-CLI handoff
+# matrix), longer-running than the other parity_* binaries.
+[[profile.full.overrides]]
+filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
 
 [[profile.full.overrides]]
 filter = 'binary(=parity_read_configuration)'
@@ -470,6 +502,14 @@ test-group = 'smoke-cli'
 [[profile.ci.overrides]]
 filter = 'binary(#parity_*)'
 test-group = 'parity'
+
+# parity_observable_state runs multiple up/down cycles against a real Docker
+# daemon per test (including an OCI feature fetch and a two-CLI handoff
+# matrix), longer-running than the other parity_* binaries.
+[[profile.ci.overrides]]
+filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
 
 [[profile.ci.overrides]]
 filter = 'binary(=parity_read_configuration)'
@@ -560,6 +600,14 @@ test-group = 'smoke-cli'
 [[profile.mvp-integration.overrides]]
 filter = 'binary(#parity_*)'
 test-group = 'parity'
+
+# parity_observable_state runs multiple up/down cycles against a real Docker
+# daemon per test (including an OCI feature fetch and a two-CLI handoff
+# matrix), longer-running than the other parity_* binaries.
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
 
 [[profile.mvp-integration.overrides]]
 filter = 'binary(=parity_read_configuration) | binary(=parity_remote_env_flags)'
