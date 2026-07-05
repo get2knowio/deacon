@@ -537,11 +537,11 @@ pub struct KnownGap {
     pub note: &'static str,
 }
 
-pub const KNOWN_GAPS: &[KnownGap] = &[KnownGap {
-    field_matcher: "mount:/feat-mnt",
-    issue: "#272",
-    note: "feature-contributed mounts dropped on deacon compose path",
-}];
+// Currently empty: #272 (feature-contributed mounts dropped on compose) was
+// fixed by resolving features before folding their `mounts` into
+// `additional_mounts` (see `execute_compose_up` in
+// `commands/up/compose.rs`). New entries go here only for genuinely open bugs.
+pub const KNOWN_GAPS: &[KnownGap] = &[];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountState {
@@ -897,6 +897,18 @@ fn field_matches(field: &str, matcher: &str) -> bool {
 }
 
 pub fn classify_divergence(field: &str, extra_allowed: &[&str]) -> DivergenceClass {
+    classify_divergence_with_gaps(field, extra_allowed, KNOWN_GAPS)
+}
+
+/// As `classify_divergence`, but against an explicit gaps list rather than the
+/// production `KNOWN_GAPS`. Lets unit tests exercise the `KnownGap` branch of
+/// the classifier mechanism with a synthetic entry, independent of whatever
+/// real open bugs `KNOWN_GAPS` currently holds (ideally none).
+pub fn classify_divergence_with_gaps(
+    field: &str,
+    extra_allowed: &[&str],
+    gaps: &'static [KnownGap],
+) -> DivergenceClass {
     if let Some(m) = extra_allowed.iter().find(|m| field_matches(field, m)) {
         return DivergenceClass::Intentional(format!("caller-allowed ({m})"));
     }
@@ -906,10 +918,7 @@ pub fn classify_divergence(field: &str, extra_allowed: &[&str]) -> DivergenceCla
     {
         return DivergenceClass::Intentional((*why).to_string());
     }
-    if let Some(gap) = KNOWN_GAPS
-        .iter()
-        .find(|g| field_matches(field, g.field_matcher))
-    {
+    if let Some(gap) = gaps.iter().find(|g| field_matches(field, g.field_matcher)) {
         return DivergenceClass::KnownGap(gap);
     }
     DivergenceClass::Unexpected
@@ -932,10 +941,21 @@ pub fn assert_snapshots_parity(
     upstream: &StateSnapshot,
     extra_allowed: &[&str],
 ) {
+    assert_snapshots_parity_with_gaps(deacon, upstream, extra_allowed, KNOWN_GAPS)
+}
+
+/// As `assert_snapshots_parity`, but against an explicit gaps list. See
+/// `classify_divergence_with_gaps`.
+pub fn assert_snapshots_parity_with_gaps(
+    deacon: &StateSnapshot,
+    upstream: &StateSnapshot,
+    extra_allowed: &[&str],
+    gaps: &'static [KnownGap],
+) {
     let divs = diff_states(deacon, upstream);
     let mut unexpected = Vec::new();
     for div in &divs {
-        match classify_divergence(&div.field, extra_allowed) {
+        match classify_divergence_with_gaps(&div.field, extra_allowed, gaps) {
             DivergenceClass::Intentional(why) => {
                 eprintln!(
                     "[state-diff] intentional: {} — {} ({})",

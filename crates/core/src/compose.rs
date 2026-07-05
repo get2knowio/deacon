@@ -1411,12 +1411,36 @@ impl ComposeProject {
             }
         }
 
+        // Named-volume mounts (e.g. a feature-contributed `type=volume`
+        // mount, #272) must be declared under the compose file's top-level
+        // `volumes:` key, or `docker compose up` rejects the project with
+        // "refers to undefined volume …: invalid compose project". Compose
+        // deep-merges `volumes:` across override files, so declaring an
+        // already-known volume here as an empty mapping is a harmless no-op
+        // (the base file's `external`/driver settings win); for a genuinely
+        // new volume, this is what makes the reference valid. This is a
+        // top-level (not per-service) YAML key, so it must sit outside the
+        // `services:` block built above.
+        let mut new_volume_names: Vec<&str> = Vec::new();
+        for mount in &self.additional_mounts {
+            if mount.mount_type == "volume" && !new_volume_names.contains(&mount.source.as_str()) {
+                new_volume_names.push(&mount.source);
+            }
+        }
+        if !new_volume_names.is_empty() {
+            yaml.push_str("volumes:\n");
+            for name in &new_volume_names {
+                yaml.push_str(&format!("  {}: {{}}\n", name));
+            }
+        }
+
         debug!(
-            "Generated compose injection override for service '{}': {} env vars, {} mounts, {} labels, override_command={}",
+            "Generated compose injection override for service '{}': {} env vars, {} mounts, {} labels, {} volumes, override_command={}",
             self.service,
             self.additional_env.len(),
             self.additional_mounts.len(),
             self.deacon_labels.len(),
+            new_volume_names.len(),
             override_cmd,
         );
 
@@ -2142,6 +2166,58 @@ mod tests {
         assert!(override_yaml.contains("volumes:"));
         assert!(override_yaml.contains("/host/path:/container/path"));
         assert!(override_yaml.contains("/another/host:/another/container:ro"));
+    }
+
+    #[test]
+    fn test_generate_injection_override_declares_new_named_volumes() {
+        // #272 follow-up: a `type=volume` additional mount (e.g. a
+        // feature-contributed mount) must be declared under a top-level
+        // `volumes:` key, or `docker compose up` rejects the project with
+        // "refers to undefined volume …: invalid compose project".
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: vec![
+                ComposeMount {
+                    mount_type: "volume".to_string(),
+                    source: "feat-probe-vol".to_string(),
+                    target: "/feat-mnt".to_string(),
+                    read_only: false,
+                    consistency: None,
+                },
+                ComposeMount {
+                    mount_type: "bind".to_string(),
+                    source: "/host/ws".to_string(),
+                    target: "/workspace".to_string(),
+                    read_only: false,
+                    consistency: None,
+                },
+            ],
+            profiles: Vec::new(),
+            additional_env: IndexMap::new(),
+            external_volumes: Vec::new(),
+            override_command: Some(false),
+            service_image_override: None,
+            deacon_labels: IndexMap::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+
+        // The per-service `volumes:` list still gets the short-form mount…
+        assert!(override_yaml.contains("feat-probe-vol:/feat-mnt"));
+        // …and a SIBLING top-level `volumes:` key declares the named volume
+        // (not nested under `services:`), so compose accepts the reference.
+        let top_level_volumes_idx = override_yaml
+            .find("\nvolumes:\n")
+            .expect("expected a top-level `volumes:` key");
+        let declaration = &override_yaml[top_level_volumes_idx..];
+        assert!(declaration.contains("  feat-probe-vol: {}"));
+        // The bind mount's source must NOT be declared as a named volume.
+        assert!(!declaration.contains("/host/ws"));
     }
 
     #[test]

@@ -152,53 +152,11 @@ pub(crate) async fn execute_compose_up(
         );
     }
 
-    // Apply `devcontainer.json` `mounts` to the compose project (#266). The
-    // single-container path applies these via `merge_mounts`
-    // (up/container.rs); the compose path never read `config.mounts` at all.
-    // Feature-contributed mounts are out of scope here (compose feature
-    // dispatch doesn't yet resolve `ResolvedFeature` mounts the same way) —
-    // pass an empty feature slice so `merge_mounts` only substitutes +
-    // normalizes `config.mounts`.
-    if !config.mounts.is_empty() {
-        let mount_substitution_context = {
-            let mut ctx = deacon_core::variable::SubstitutionContext::new(workspace_folder)?;
-            let id_labels: Vec<(String, String)> = identity.labels().into_iter().collect();
-            ctx.devcontainer_id = deacon_core::container::compute_dev_container_id(&id_labels);
-            ctx
-        };
-        let merged_config_mounts = deacon_core::mount::merge_mounts(
-            &config.mounts,
-            &[],
-            Some(&mount_substitution_context),
-        )
-        .with_context(|| "Failed to merge devcontainer.json mounts for compose")?;
-        for mount_str in &merged_config_mounts.mounts {
-            let mount = NormalizedMount::parse(mount_str).with_context(|| {
-                format!(
-                    "Invalid mount specification in devcontainer.json: {}",
-                    mount_str
-                )
-            })?;
-            additional_mounts.push(normalized_mount_to_compose_mount(&mount));
-        }
-    }
-
-    // Apply CLI mounts to compose project
-    // Per CLAUDE.md: No silent fallbacks - fail fast on invalid mounts
-    for mount_str in &args.mount {
-        let mount = NormalizedMount::parse(mount_str)
-            .with_context(|| format!("Invalid mount specification: {}", mount_str))?;
-        additional_mounts.push(normalized_mount_to_compose_mount(&mount));
-    }
-
-    // Dedupe by target, last-wins, so later sources (config, then CLI) can
-    // override the workspace-consistency mount or each other for the same
-    // target path — mirrors `merge_mounts`' union-by-target semantics
-    // (`mount.rs`), which `generate_injection_override` does NOT do on its
-    // own; it renders every `additional_mounts` entry verbatim.
-    if !additional_mounts.is_empty() {
-        project.additional_mounts = dedupe_compose_mounts_by_target(additional_mounts);
-    }
+    // `devcontainer.json` `mounts` (#266) and feature-contributed `mounts`
+    // (#272) are folded into `additional_mounts` further below, AFTER
+    // features are resolved (`feature_build`) — `merge_mounts` needs the
+    // resolved features to fold their `mounts` in, mirroring the
+    // single-container path (up/container.rs).
 
     // Apply `containerEnv` (config) + remote env (CLI, higher precedence) to
     // compose services. `config.container_env` was never read here at all —
@@ -421,6 +379,57 @@ pub(crate) async fn execute_compose_up(
     // `None` when no features are declared).
     if let Some(ref fb) = feature_build {
         handle_lockfile_post_build(args, config_path, &fb.lockfile).await?;
+    }
+
+    // Apply `devcontainer.json` `mounts` (#266) and feature-contributed
+    // `mounts` (#272) to the compose project. Run through `merge_mounts` in a
+    // single call — same as the single-container path (up/container.rs) —
+    // so config-vs-feature precedence and target-based dedup happen exactly
+    // once. Must run here (after `feature_build`) so `resolved_features` is
+    // available. Precedence overall: workspace < feature < config < CLI.
+    let resolved_features_for_mounts: &[deacon_core::features::ResolvedFeature] = feature_build
+        .as_ref()
+        .map(|fb| fb.resolved_features.as_slice())
+        .unwrap_or(&[]);
+    if !config.mounts.is_empty() || !resolved_features_for_mounts.is_empty() {
+        let mount_substitution_context = {
+            let mut ctx = deacon_core::variable::SubstitutionContext::new(workspace_folder)?;
+            let id_labels: Vec<(String, String)> = identity.labels().into_iter().collect();
+            ctx.devcontainer_id = deacon_core::container::compute_dev_container_id(&id_labels);
+            ctx
+        };
+        let merged_config_mounts = deacon_core::mount::merge_mounts(
+            &config.mounts,
+            resolved_features_for_mounts,
+            Some(&mount_substitution_context),
+        )
+        .with_context(|| "Failed to merge devcontainer.json + feature mounts for compose")?;
+        for mount_str in &merged_config_mounts.mounts {
+            let mount = NormalizedMount::parse(mount_str).with_context(|| {
+                format!(
+                    "Invalid mount specification in devcontainer.json/feature: {}",
+                    mount_str
+                )
+            })?;
+            additional_mounts.push(normalized_mount_to_compose_mount(&mount));
+        }
+    }
+
+    // Apply CLI mounts to compose project
+    // Per CLAUDE.md: No silent fallbacks - fail fast on invalid mounts
+    for mount_str in &args.mount {
+        let mount = NormalizedMount::parse(mount_str)
+            .with_context(|| format!("Invalid mount specification: {}", mount_str))?;
+        additional_mounts.push(normalized_mount_to_compose_mount(&mount));
+    }
+
+    // Dedupe by target, last-wins, so later sources (feature, config, then
+    // CLI) can override the workspace-consistency mount or each other for the
+    // same target path — mirrors `merge_mounts`' union-by-target semantics
+    // (`mount.rs`), which `generate_injection_override` does NOT do on its
+    // own; it renders every `additional_mounts` entry verbatim.
+    if !additional_mounts.is_empty() {
+        project.additional_mounts = dedupe_compose_mounts_by_target(additional_mounts);
     }
 
     // Start the compose project

@@ -67,40 +67,59 @@ knowingly different.
 
 ## Known gaps (`KNOWN_GAPS`) — open bugs, reported but not failing
 
-| Field | Issue | Note |
-|---|---|---|
-| `mount:/feat-mnt` | [#272](https://github.com/get2knowio/deacon/issues/272) | Feature-contributed `mounts` dropped on deacon's compose path. |
+Currently **empty**. [#272](https://github.com/get2knowio/deacon/issues/272)
+(feature-contributed `mounts` dropped on deacon's compose path) was the only
+global entry and is now **fixed**: `execute_compose_up` resolves features
+before folding their `mounts` into `additional_mounts` (same `merge_mounts`
+call the single-container path uses), so compose feature mounts now match
+upstream (`crates/deacon/src/commands/up/compose.rs`).
 
-Additional tracked gaps asserted per-fixture (not in the global `KNOWN_GAPS`
-because they only surface for one fixture shape):
+[#274](https://github.com/get2knowio/deacon/issues/274) (`containerUser` not
+reflected in `Config.User`) is also **fixed**: `create_container`
+(`crates/core/src/docker.rs`) now passes `--user <containerUser>` at container
+create time when `containerUser` is configured, mirroring the reference CLI's
+`PV()`/`getContainerUser` resolution (`containerUser` alone — `remoteUser` is
+never consulted for `Config.User`, only for exec/lifecycle time). Both fixtures
+(`state_diff_compose_parity_with_feature_mount_gap`,
+`state_diff_dockerfile_build_and_nonroot_user`) now assert full parity instead
+of a tracked gap shape.
 
-- [#273](https://github.com/get2knowio/deacon/issues/273) — default
-  workspace-mount target (`state_diff_default_workspace_mount_target_divergence`).
-- [#274](https://github.com/get2knowio/deacon/issues/274) — `containerUser` not
-  reflected in `Config.User` (`state_diff_dockerfile_build_and_nonroot_user`
-  allows `user` and asserts the gap's shape).
-
-Each gap-tracking test asserts the divergence's **shape**, so it flips red when
-the gap is fixed — forcing the tracking entry to be removed rather than silently
-lingering.
+[#273](https://github.com/get2knowio/deacon/issues/273) (default
+workspace-mount target) was **investigated and closed as an intentional,
+characterized divergence** — see below; it never used a KNOWN_GAP tracking
+entry (`state_diff_default_workspace_mount_target_divergence` characterizes
+both CLIs' behavior independently rather than diffing them).
 
 ## Divergences discovered while building the differ
 
 The differ surfaced these on its first runs (as test *failures*, before any
 allowlisting):
 
-1. **Default workspace-mount target — real divergence, filed as
-   [#273](https://github.com/get2knowio/deacon/issues/273).** On the
+1. **Default workspace-mount target — investigated, closed as intentional
+   ([#273](https://github.com/get2knowio/deacon/issues/273)).** On the
    single-container path, with `workspaceFolder` set and no explicit
    `workspaceMount`, deacon mounts the workspace **at `workspaceFolder`**
    (`/workspace`), while the reference CLI mounts it at the spec default
    **`/workspaces/<basename>`** and uses `workspaceFolder` only as the working
-   directory (`crates/core/src/docker.rs:2150-2162`). Characterized and tracked
-   by `state_diff_default_workspace_mount_target_divergence`.
+   directory (`crates/core/src/docker.rs:2150-2162`).
+
+   **Why deacon does NOT align to the reference here:** empirically, the
+   reference CLI's own behavior in this exact shape is broken — mounting at
+   `/workspaces/<basename>` while defaulting `remoteWorkspaceFolder` (and thus
+   the exec/lifecycle working directory) to `workspaceFolder` means `/workspace`
+   never exists in the container. Verified with `@devcontainers/cli` 0.87.0
+   against `{"image": "debian:bookworm-slim", "workspaceFolder": "/workspace"}`
+   (no `workspaceMount`): `devcontainer exec … pwd` fails with `OCI runtime exec
+   failed: … chdir to cwd ("/workspace") set in config.json failed: no such
+   file or directory`. Aligning deacon to the reference default would import
+   this footgun. deacon's behavior — mounting at `workspaceFolder` so it
+   actually exists — is the more robust choice and is kept as a deliberate,
+   tested characterization (`state_diff_default_workspace_mount_target_divergence`),
+   not a bug to fix.
 2. **Compose workspace mount — NOT a parity gap (verified).** deacon's compose
    path only mounts the workspace root when `--workspace-mount-consistency` is
    passed, and ignores `workspaceMount` on compose
-   (`crates/deacon/src/commands/up/compose.rs:117-153`) — but the **reference
+   (`crates/deacon/src/commands/up/compose.rs`) — but the **reference
    CLI behaves the same on compose**: a plain compose devcontainer yields *zero*
    workspace binds on both CLIs (the compose file is responsible for mounting the
    workspace). The differ's intra-deacon single-vs-compose fixture surfaces the
@@ -108,5 +127,4 @@ allowlisting):
    allowed (`mount:/workspace`) there with a comment, not filed.
 
 The differ's own fixtures pin `workspaceMount` explicitly (single-container) so
-divergence (1) does not mask real findings (e.g. #272) in the cross-CLI
-comparison.
+divergence (1) does not mask real findings in the cross-CLI comparison.

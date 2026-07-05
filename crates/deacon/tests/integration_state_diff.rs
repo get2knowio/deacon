@@ -9,9 +9,18 @@ use serde_json::json;
 
 mod parity_utils;
 use parity_utils::{
-    DivergenceClass, StateSnapshot, assert_snapshots_parity, classify_divergence, diff_states,
-    snapshot_from_inspect,
+    DivergenceClass, KnownGap, StateSnapshot, assert_snapshots_parity,
+    assert_snapshots_parity_with_gaps, classify_divergence, classify_divergence_with_gaps,
+    diff_states, snapshot_from_inspect,
 };
+
+/// Synthetic gap used only to exercise the `KnownGap` classification branch
+/// (production `KNOWN_GAPS` is empty — every tracked gap has been fixed).
+const SYNTHETIC_GAP: &[KnownGap] = &[KnownGap {
+    field_matcher: "mount:/feat-mnt",
+    issue: "#TEST",
+    note: "synthetic gap for classifier unit tests",
+}];
 
 /// A minimal single-container `docker inspect` object with the given env,
 /// mounts, and labels.
@@ -136,12 +145,18 @@ fn missing_env_is_detected() {
 }
 
 #[test]
-fn feature_mount_gap_classifies_as_known_gap_272() {
-    // The #272 gap: upstream has the feature volume at /feat-mnt, deacon lacks it.
-    match classify_divergence("mount:/feat-mnt", &[]) {
-        DivergenceClass::KnownGap(gap) => assert_eq!(gap.issue, "#272"),
-        _ => panic!("mount:/feat-mnt should classify as the #272 known gap"),
+fn known_gap_classifies_via_gaps_list() {
+    // #272 (the original real-world example of this mechanism) is fixed and
+    // KNOWN_GAPS is empty; exercise the KnownGap branch with a synthetic gap.
+    match classify_divergence_with_gaps("mount:/feat-mnt", &[], SYNTHETIC_GAP) {
+        DivergenceClass::KnownGap(gap) => assert_eq!(gap.issue, "#TEST"),
+        _ => panic!("mount:/feat-mnt should classify as the synthetic known gap"),
     }
+    // Absent a matching gaps list, the same field is unexplained.
+    assert!(matches!(
+        classify_divergence("mount:/feat-mnt", &[]),
+        DivergenceClass::Unexpected
+    ));
 }
 
 #[test]
@@ -161,13 +176,14 @@ fn unlisted_divergence_classifies_as_unexpected() {
 fn assert_snapshots_parity_passes_on_known_gap_but_fails_on_new_divergence() {
     let base = snapshot_from_inspect(&inspect(&["FOO=bar"], json!([]), json!({})));
 
-    // Only a known-gap divergence (/feat-mnt) → passes.
+    // Only a known-gap divergence (/feat-mnt) → passes, against a synthetic
+    // gaps list (production KNOWN_GAPS is currently empty).
     let with_gap = snapshot_from_inspect(&inspect(
         &["FOO=bar"],
         json!([volume("/feat-mnt", "up_feat-probe-vol")]),
         json!({}),
     ));
-    assert_snapshots_parity(&base, &with_gap, &[]);
+    assert_snapshots_parity_with_gaps(&base, &with_gap, &[], SYNTHETIC_GAP);
 
     // A NEW, unlisted divergence → must panic (teeth).
     let with_new = snapshot_from_inspect(&inspect(
