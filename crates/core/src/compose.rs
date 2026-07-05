@@ -850,8 +850,9 @@ impl ComposeManager {
             resolved_files.push(file_path);
         }
 
-        // Generate project name from directory name, ensuring it meets Docker Compose requirements
-        let project_name = derive_project_name(base_path);
+        // Deacon-namespaced project name, unique per devcontainer (workspace +
+        // config hash), so sibling devcontainers in one repo never collide.
+        let project_name = derive_project_name(base_path, config);
 
         Ok(ComposeProject {
             name: project_name,
@@ -1573,46 +1574,40 @@ fn parse_env_file_for_project_name(env_file_path: &Path) -> Option<String> {
     None
 }
 
-fn derive_project_name(base_path: &Path) -> String {
+fn derive_project_name(base_path: &Path, config: &DevContainerConfig) -> String {
     // An explicit COMPOSE_PROJECT_NAME in a sibling `.env` is used verbatim
-    // (no suffix), matching docker compose and the reference CLI.
+    // (no suffix) — this is a deliberate user override, so honor it exactly
+    // as docker compose and the reference CLI would.
     let env_file_path = base_path.join(".env");
     if let Some(project_name) = parse_env_file_for_project_name(&env_file_path) {
         debug!("Using project name from .env file: {}", project_name);
         return project_name;
     }
 
-    // Folder-derived default. The reference (devcontainers/cli) takes the
-    // workspace folder basename, STRIPS every character outside [a-z0-9_-]
-    // (case-insensitively), lowercases, and appends `_devcontainer`
-    // (e.g. `Foo.Bar-1` -> `foobar-1_devcontainer`, `my proj` ->
-    // `myproj_devcontainer`). Note it strips invalid chars rather than
-    // replacing them with '-'.
-    const FALLBACK_STEM: &str = "deacon";
-
-    let stem = base_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(FALLBACK_STEM);
-
-    let stripped: String = stem
-        .chars()
-        .map(|c| c.to_ascii_lowercase())
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect();
-
-    // Docker Compose requires the project name to start with [a-z0-9]. The
-    // reference emits an invalid name (leading '-'/'_', or empty) and docker
-    // compose then rejects it; deacon stays robust by trimming leading
-    // separators and falling back to a stem when nothing valid remains.
-    let trimmed = stripped.trim_start_matches(['-', '_']);
-    let stem = if trimmed.is_empty() {
-        FALLBACK_STEM
-    } else {
-        trimmed
-    };
-
-    format!("{stem}_devcontainer")
+    // Auto-derived default: deacon-namespaced (#265) and unique per devcontainer.
+    //
+    // The reference CLI's own default is `<folder>_devcontainer` — identical
+    // to what deacon used to produce here. That collision meant `devcontainer
+    // up` would *discover* a compose project deacon brought up (same name,
+    // same directory), then fail looking for its own `vsc-*`-tagged image,
+    // which deacon never creates (deacon's compose service images aren't
+    // named that way). The `deacon_` prefix keeps deacon's compose project
+    // cleanly out of the reference CLI's naming convention.
+    //
+    // The name combines BOTH hashes `ContainerIdentity` uses — `workspace_hash`
+    // (the `devcontainer.workspaceHash` label) plus `config_hash` — mirroring
+    // `ContainerIdentity::container_name`. `workspace_hash` walks to the git
+    // root, so `workspace_hash` alone would be IDENTICAL for two devcontainer
+    // folders in the same repo (e.g. a monorepo's `services/api` and
+    // `services/web`), collapsing them onto one compose project and letting a
+    // `deacon up`/`down` in one silently reconcile or tear down the other.
+    // Folding in `config_hash` disambiguates siblings exactly as the
+    // single-container path does. This is a one-way migration from any prior
+    // naming: projects created by older deacon versions become orphaned (not
+    // deleted) — `docker compose -p <old-name> down` clears them.
+    let workspace_hash = crate::container::ContainerIdentity::hash_workspace_path(base_path);
+    let config_hash = crate::container::ContainerIdentity::hash_config(config);
+    format!("deacon_{workspace_hash}_{config_hash}")
 }
 
 #[cfg(test)]
@@ -1894,61 +1889,92 @@ mod tests {
         assert_eq!(all_services, vec!["app"]);
     }
 
+    /// #265: the auto-derived project name is `deacon_<workspace_hash>_<config_hash>`
+    /// — the SAME two hashes `ContainerIdentity` computes — not the reference
+    /// CLI's `<folder>_devcontainer` convention, so `devcontainer up` can never
+    /// mistake a deacon-owned compose project for its own.
     #[test]
-    fn test_derive_project_name_from_hidden_directory() {
-        let path = Path::new("/tmp/.tmpAbC123");
-        // Leading dot stripped, lowercased, `_devcontainer` suffix appended
-        // (reference parity).
-        assert_eq!(derive_project_name(path), "tmpabc123_devcontainer");
+    fn test_derive_project_name_is_deacon_namespaced_and_hash_based() {
+        let path = Path::new("/tmp/my-workspace");
+        let config = DevContainerConfig::default();
+        let name = derive_project_name(path, &config);
+        assert!(
+            name.starts_with("deacon_"),
+            "expected deacon_<hash>, got {name}"
+        );
+        let expected = format!(
+            "deacon_{}_{}",
+            crate::container::ContainerIdentity::hash_workspace_path(path),
+            crate::container::ContainerIdentity::hash_config(&config),
+        );
+        assert_eq!(name, expected);
     }
 
+    /// Same input path + config -> same project name (deterministic), and it
+    /// must NOT collide with the reference CLI's `<folder>_devcontainer` form
+    /// for any folder name.
     #[test]
-    fn test_derive_project_name_strips_invalid_characters() {
-        // The reference STRIPS chars outside [a-z0-9_-] (it does not replace
-        // them with '-'): `My Project!` -> `myproject`, not `my-project`.
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/My Project!")),
-            "myproject_devcontainer"
-        );
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/Foo.Bar-1")),
-            "foobar-1_devcontainer"
-        );
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/UPPER_Case")),
-            "upper_case_devcontainer"
-        );
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/9lives")),
-            "9lives_devcontainer"
-        );
-    }
-
-    #[test]
-    fn test_derive_project_name_appends_devcontainer_suffix() {
-        assert_eq!(
-            derive_project_name(Path::new("/home/user/myapp")),
-            "myapp_devcontainer"
-        );
-    }
-
-    #[test]
-    fn test_derive_project_name_fallback_for_all_invalid() {
-        // Nothing valid remains -> robust fallback stem (the reference would
-        // emit an invalid name and docker compose would reject it).
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/...")),
-            "deacon_devcontainer"
+    fn test_derive_project_name_deterministic_and_not_reference_form() {
+        let path = Path::new("/home/user/myapp");
+        let config = DevContainerConfig::default();
+        let first = derive_project_name(path, &config);
+        let second = derive_project_name(path, &config);
+        assert_eq!(first, second, "derivation must be deterministic");
+        assert_ne!(
+            first, "myapp_devcontainer",
+            "must not collide with the reference CLI's own default naming"
         );
     }
 
+    /// Distinct workspace paths must not collide on the same project name.
     #[test]
-    fn test_derive_project_name_leading_separator_trimmed() {
-        // Leading '-'/'_' would make an invalid compose project name; trim it
-        // so deacon stays robust where the reference fails.
+    fn test_derive_project_name_differs_per_workspace() {
+        let config = DevContainerConfig::default();
+        let a = derive_project_name(Path::new("/tmp/workspace-a"), &config);
+        let b = derive_project_name(Path::new("/tmp/workspace-b"), &config);
+        assert_ne!(a, b);
+    }
+
+    /// #265 regression guard: two devcontainers that resolve to the SAME
+    /// workspace path (e.g. sibling folders under one git root in a monorepo,
+    /// both hashing to the git-root `workspace_hash`) but carry DIFFERENT
+    /// configs must derive DIFFERENT compose project names. Otherwise a
+    /// `deacon up`/`down` in one would silently reconcile or tear down the
+    /// other's compose project. The `config_hash` component disambiguates
+    /// them, exactly as it does for the single-container `container_name`.
+    #[test]
+    fn test_derive_project_name_differs_by_config_for_same_path() {
+        let path = Path::new("/tmp/shared-workspace");
+        let config_a = DevContainerConfig {
+            name: Some("api".to_string()),
+            ..DevContainerConfig::default()
+        };
+        let config_b = DevContainerConfig {
+            name: Some("web".to_string()),
+            ..DevContainerConfig::default()
+        };
+        let a = derive_project_name(path, &config_a);
+        let b = derive_project_name(path, &config_b);
+        assert_ne!(
+            a, b,
+            "sibling devcontainers under one workspace path must not share a compose project name"
+        );
+    }
+
+    /// An explicit `COMPOSE_PROJECT_NAME` in a sibling `.env` is honored
+    /// verbatim — only the auto-derived branch changed under #265.
+    #[test]
+    fn test_derive_project_name_env_override_used_verbatim() {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::write(
+            temp_dir.path().join(".env"),
+            "COMPOSE_PROJECT_NAME=my-custom-project\n",
+        )
+        .unwrap();
+        let config = DevContainerConfig::default();
         assert_eq!(
-            derive_project_name(Path::new("/tmp/-leadingdash")),
-            "leadingdash_devcontainer"
+            derive_project_name(temp_dir.path(), &config),
+            "my-custom-project"
         );
     }
 

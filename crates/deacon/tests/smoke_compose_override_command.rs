@@ -36,8 +36,9 @@ fn deacon_down(workspace: &Path) {
 /// Extract the primary service container id from `deacon up`'s JSON result.
 ///
 /// Using deacon's own reported `containerId` is robust to the compose project
-/// name (which is `<folder>_devcontainer` and not what a bare `docker compose
-/// ps` from the workspace would infer).
+/// name (deacon-namespaced as `deacon_<workspace_hash>_<config_hash>` — see
+/// #265 — and not what a bare `docker compose ps` from the workspace would
+/// infer).
 fn up_container_id(up_output: &std::process::Output) -> Option<String> {
     let stdout = String::from_utf8_lossy(&up_output.stdout);
     let trimmed = stdout.trim();

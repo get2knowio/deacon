@@ -178,8 +178,13 @@ impl ContainerIdentity {
         self
     }
 
-    /// Generate a deterministic hash from the workspace path
-    fn hash_workspace_path(workspace_path: &Path) -> String {
+    /// Generate a deterministic hash from the workspace path.
+    ///
+    /// `pub(crate)` so other identity-adjacent naming (e.g. the compose
+    /// project name, #265) can derive from the exact same hash as the
+    /// container's own `workspace_hash` label, rather than recomputing a
+    /// similar-but-different hash.
+    pub(crate) fn hash_workspace_path(workspace_path: &Path) -> String {
         use crate::workspace::resolve_workspace_root;
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -199,8 +204,12 @@ impl ContainerIdentity {
         format!("{:016x}", hash)[..8].to_string()
     }
 
-    /// Generate a deterministic hash from the configuration
-    fn hash_config(config: &DevContainerConfig) -> String {
+    /// Generate a deterministic hash from the configuration.
+    ///
+    /// `pub(crate)` so the compose project name (#265) can fold in the same
+    /// config discriminator the container name uses, keeping two devcontainer
+    /// folders under one git root from deriving an identical project name.
+    pub(crate) fn hash_config(config: &DevContainerConfig) -> String {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
