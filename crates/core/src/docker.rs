@@ -2225,6 +2225,20 @@ impl ContainerOps for CliRuntime {
         // Add security options from merged security (config + features)
         args.extend(merged_security.to_docker_args());
 
+        // Apply `containerUser` to the container's start user (`Config.User`).
+        // Per containers.dev, `containerUser` is "the user the container will
+        // be started as" — the reference CLI passes it straight to `docker run
+        // -u <containerUser>` (unset falls through to the image's own default
+        // user). `remoteUser` is intentionally NOT consulted here: it only
+        // resolves the user for exec/lifecycle time (`resolve_env_and_user`),
+        // defaulting to `containerUser` when unset — never the other way
+        // around. Pushed before `runArgs` below so a user-supplied `--user` in
+        // `runArgs` still wins (Docker CLI honors the last `--user` flag).
+        if let Some(ref container_user) = config.container_user {
+            args.push("--user".to_string());
+            args.push(container_user.clone());
+        }
+
         // Apply entrypoint from chain (features + config)
         match entrypoint_chain {
             crate::features::EntrypointChain::None => {

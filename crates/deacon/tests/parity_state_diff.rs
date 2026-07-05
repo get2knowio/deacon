@@ -239,11 +239,12 @@ fn state_diff_single_container_parity() {
 }
 
 // ===========================================================================
-// Test 2: compose outcome parity — exercises the #272 feature-mount gap. The
-// gap classifies as a tracked KNOWN_GAP (passes today); any OTHER compose
-// divergence fails. The positive control (feature `containerEnv`, baked into
-// the image) proves the Feature installed on deacon's compose path, so a
-// missing /feat-mnt is specifically the runtime mount being dropped.
+// Test 2: compose outcome parity — covers the (fixed) #272 feature-mount gap.
+// `execute_compose_up` now resolves features before folding their `mounts`
+// into `additional_mounts` (mirrors the single-container path), so the
+// feature mount must now match upstream exactly; any compose divergence
+// fails. The positive control (feature `containerEnv`, baked into the image)
+// proves the Feature installed on deacon's compose path.
 // ===========================================================================
 
 #[test]
@@ -281,21 +282,19 @@ fn state_diff_compose_parity_with_feature_mount_gap() {
         "upstream compose snapshot missing baked feature env: {:?}",
         up_snap.env
     );
-    // The #272 gap itself: upstream has the feature mount, deacon does not.
-    // Asserting this shape keeps the KNOWN_GAP honest — if deacon starts
-    // applying it, this assertion flips and the gap entry should be removed.
+    // #272 fixed: deacon now applies the feature-contributed mount, matching
+    // upstream, on the compose path.
     assert!(
         up_snap.mounts.contains_key("/feat-mnt"),
         "upstream should apply the feature mount /feat-mnt: {:?}",
         up_snap.mounts
     );
     assert!(
-        !d_snap.mounts.contains_key("/feat-mnt"),
-        "deacon unexpectedly applied /feat-mnt — #272 may be FIXED; remove the KNOWN_GAP entry and drop this assertion: {:?}",
+        d_snap.mounts.contains_key("/feat-mnt"),
+        "deacon should now apply the feature mount /feat-mnt (#272 fix): {:?}",
         d_snap.mounts
     );
 
-    // Everything except the tracked #272 gap must match.
     assert_snapshots_parity(&d_snap, &up_snap, &[]);
 }
 
@@ -516,22 +515,19 @@ fn state_diff_dockerfile_build_and_nonroot_user() {
         );
     }
 
-    // #274: deacon does not apply `containerUser` to the created container's
-    // `Config.User` (it runs as root, applying the user only at exec time),
-    // whereas the reference sets `Config.User=dev`. Assert the gap's shape so
-    // this test flips red when #274 is fixed, then allow `user` in the diff.
+    // #274 fixed: deacon now passes `--user <containerUser>` at container
+    // create time, so `Config.User` matches the reference.
     assert_eq!(
         up_snap.user, "dev",
         "reference should set Config.User=dev from containerUser: {:?}",
         up_snap.user
     );
-    assert!(
-        d_snap.user.is_empty() || d_snap.user == "root",
-        "deacon unexpectedly set Config.User ({:?}) — #274 may be FIXED; drop \
-         the `user` allowance and this shape assertion",
+    assert_eq!(
+        d_snap.user, "dev",
+        "deacon should now set Config.User=dev from containerUser (#274 fix): {:?}",
         d_snap.user
     );
-    assert_snapshots_parity(&d_snap, &up_snap, &["user"]);
+    assert_snapshots_parity(&d_snap, &up_snap, &[]);
 }
 
 // ===========================================================================
