@@ -97,6 +97,13 @@ filter = 'binary(=parity_observable_state)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
+# parity_state_diff brings each fixture up with BOTH CLIs (including an OCI
+# feature build on the compose fixture) to diff normalized container state.
+[[profile.default.overrides]]
+filter = 'binary(=parity_state_diff)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
+
 [[profile.default.overrides]]
 filter = 'binary(=parity_read_configuration)'
 test-group = 'parity-cli'
@@ -206,6 +213,13 @@ test-group = 'parity'
 # matrix), longer-running than the other parity_* binaries.
 [[profile.dev-fast.overrides]]
 filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
+
+# parity_state_diff brings each fixture up with BOTH CLIs (including an OCI
+# feature build on the compose fixture) to diff normalized container state.
+[[profile.dev-fast.overrides]]
+filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
@@ -325,6 +339,13 @@ filter = 'binary(=parity_observable_state)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
+# parity_state_diff brings each fixture up with BOTH CLIs (including an OCI
+# feature build on the compose fixture) to diff normalized container state.
+[[profile.docker.overrides]]
+filter = 'binary(=parity_state_diff)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
+
 [[profile.docker.overrides]]
 filter = 'binary(=parity_read_configuration)'
 test-group = 'parity-cli'
@@ -414,6 +435,13 @@ test-group = 'parity'
 # matrix), longer-running than the other parity_* binaries.
 [[profile.full.overrides]]
 filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
+
+# parity_state_diff brings each fixture up with BOTH CLIs (including an OCI
+# feature build on the compose fixture) to diff normalized container state.
+[[profile.full.overrides]]
+filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
@@ -508,6 +536,13 @@ test-group = 'parity'
 # matrix), longer-running than the other parity_* binaries.
 [[profile.ci.overrides]]
 filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
+
+# parity_state_diff brings each fixture up with BOTH CLIs (including an OCI
+# feature build on the compose fixture) to diff normalized container state.
+[[profile.ci.overrides]]
+filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
@@ -606,6 +641,13 @@ test-group = 'parity'
 # matrix), longer-running than the other parity_* binaries.
 [[profile.mvp-integration.overrides]]
 filter = 'binary(=parity_observable_state)'
+test-group = 'parity'
+slow-timeout = { period = "15m", terminate-after = 1 }
+
+# parity_state_diff brings each fixture up with BOTH CLIs (including an OCI
+# feature build on the compose fixture) to diff normalized container state.
+[[profile.mvp-integration.overrides]]
+filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
