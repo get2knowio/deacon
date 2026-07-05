@@ -94,8 +94,15 @@ pub struct DownloadedFeature {
     pub path: PathBuf,
     /// Feature metadata
     pub metadata: FeatureMetadata,
-    /// Feature digest for caching
+    /// Layer (blob) digest, used as the on-disk cache key and for blob
+    /// integrity verification. This is NOT the digest the reference CLI
+    /// expects in lockfile `resolved`/`integrity` fields — use
+    /// `manifest_digest` for that.
     pub digest: String,
+    /// `sha256:`-prefixed digest of the OCI manifest body. This is the value
+    /// the reference `@devcontainers/cli` records in lockfile `resolved`
+    /// (`{registry}/{repository}@{manifest_digest}`) and `integrity` fields.
+    pub manifest_digest: String,
 }
 
 /// Downloaded and extracted template data
