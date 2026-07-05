@@ -206,14 +206,30 @@ jobs:
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release --target ${{ matrix.target }}
+      - name: Ad-hoc codesign (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Apple Silicon requires every executable to carry a valid code
+          # signature (even an ad-hoc one) or the kernel's AMFI check refuses
+          # to exec it (SIGKILL, immediately, on every attempt). `strip = true`
+          # in [profile.release] strips the binary via an external tool AFTER
+          # ld64 already applied its automatic ad-hoc signature at link time,
+          # which invalidates that signature. Re-sign ad-hoc after stripping
+          # so the shipped binary actually runs on arm64 macOS.
+          codesign --sign - --force target/${{ matrix.target }}/release/deacon
+          codesign --verify --verbose target/${{ matrix.target }}/release/deacon
       - name: Smoke run (Unix native)
-        if: runner.os != 'Windows' && !contains(matrix.target, 'aarch64') && !contains(matrix.target, 'arm')
+        # `aarch64-apple-darwin` is NATIVE here: GitHub's `macos-latest` runners
+        # are Apple Silicon (arm64), so that build can and should be exercised
+        # too — only genuinely cross-compiled Linux aarch64/arm targets (built
+        # on an x86_64 ubuntu-latest runner) cannot run their own binary.
+        if: runner.os != 'Windows' && (runner.os == 'macOS' || (!contains(matrix.target, 'aarch64') && !contains(matrix.target, 'arm')))
         run: |
           BIN=target/${{ matrix.target }}/release/deacon
           "$BIN" --version
           "$BIN" --help | head -n 20
       - name: Skip note (cross-compiled ARM64 on x86 runner)
-        if: runner.os != 'Windows' && (contains(matrix.target, 'aarch64') || contains(matrix.target, 'arm'))
+        if: runner.os == 'Linux' && (contains(matrix.target, 'aarch64') || contains(matrix.target, 'arm'))
         run: echo "Skipping runtime smoke test for ${{ matrix.target }} (cross-compiled binary cannot execute on x86 runner)."
       - name: Smoke run (Windows)
         if: runner.os == 'Windows' && matrix.target == 'x86_64-pc-windows-msvc'
