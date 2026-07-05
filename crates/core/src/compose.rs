@@ -1575,44 +1575,33 @@ fn parse_env_file_for_project_name(env_file_path: &Path) -> Option<String> {
 
 fn derive_project_name(base_path: &Path) -> String {
     // An explicit COMPOSE_PROJECT_NAME in a sibling `.env` is used verbatim
-    // (no suffix), matching docker compose and the reference CLI.
+    // (no suffix) — this is a deliberate user override, so honor it exactly
+    // as docker compose and the reference CLI would.
     let env_file_path = base_path.join(".env");
     if let Some(project_name) = parse_env_file_for_project_name(&env_file_path) {
         debug!("Using project name from .env file: {}", project_name);
         return project_name;
     }
 
-    // Folder-derived default. The reference (devcontainers/cli) takes the
-    // workspace folder basename, STRIPS every character outside [a-z0-9_-]
-    // (case-insensitively), lowercases, and appends `_devcontainer`
-    // (e.g. `Foo.Bar-1` -> `foobar-1_devcontainer`, `my proj` ->
-    // `myproj_devcontainer`). Note it strips invalid chars rather than
-    // replacing them with '-'.
-    const FALLBACK_STEM: &str = "deacon";
-
-    let stem = base_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(FALLBACK_STEM);
-
-    let stripped: String = stem
-        .chars()
-        .map(|c| c.to_ascii_lowercase())
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect();
-
-    // Docker Compose requires the project name to start with [a-z0-9]. The
-    // reference emits an invalid name (leading '-'/'_', or empty) and docker
-    // compose then rejects it; deacon stays robust by trimming leading
-    // separators and falling back to a stem when nothing valid remains.
-    let trimmed = stripped.trim_start_matches(['-', '_']);
-    let stem = if trimmed.is_empty() {
-        FALLBACK_STEM
-    } else {
-        trimmed
-    };
-
-    format!("{stem}_devcontainer")
+    // Auto-derived default: deacon-namespaced and folder-INdependent (#265).
+    //
+    // The reference CLI's own default is `<folder>_devcontainer` — identical
+    // to what deacon used to produce here. That collision meant `devcontainer
+    // up` would *discover* a compose project deacon brought up (same name,
+    // same directory), then fail looking for its own `vsc-*`-tagged image,
+    // which deacon never creates (deacon's compose service images aren't
+    // named that way). Using `deacon_<workspace_hash>` — the SAME hash
+    // `ContainerIdentity` stamps as the `devcontainer.workspaceHash` label —
+    // keeps deacon's compose project cleanly out of the reference CLI's
+    // naming convention while staying deterministic per workspace and
+    // consistent with the container-identity labels already applied
+    // (`execute_compose_up` stamps `identity.labels()` onto the same
+    // project). This is a one-way migration: compose projects created by
+    // prior deacon versions under `<folder>_devcontainer` become orphaned
+    // (not deleted) — `docker compose -p <old-name> down` (or `deacon down`
+    // on the old binary) clears them.
+    let workspace_hash = crate::container::ContainerIdentity::hash_workspace_path(base_path);
+    format!("deacon_{workspace_hash}")
 }
 
 #[cfg(test)]
@@ -1894,62 +1883,59 @@ mod tests {
         assert_eq!(all_services, vec!["app"]);
     }
 
+    /// #265: the auto-derived project name is `deacon_<workspace_hash>` — the
+    /// SAME hash `ContainerIdentity` computes — not the reference CLI's
+    /// `<folder>_devcontainer` convention, so `devcontainer up` can never
+    /// mistake a deacon-owned compose project for its own.
     #[test]
-    fn test_derive_project_name_from_hidden_directory() {
-        let path = Path::new("/tmp/.tmpAbC123");
-        // Leading dot stripped, lowercased, `_devcontainer` suffix appended
-        // (reference parity).
-        assert_eq!(derive_project_name(path), "tmpabc123_devcontainer");
+    fn test_derive_project_name_is_deacon_namespaced_and_hash_based() {
+        let path = Path::new("/tmp/my-workspace");
+        let name = derive_project_name(path);
+        assert!(
+            name.starts_with("deacon_"),
+            "expected deacon_<hash>, got {name}"
+        );
+        let expected = format!(
+            "deacon_{}",
+            crate::container::ContainerIdentity::hash_workspace_path(path)
+        );
+        assert_eq!(name, expected);
     }
 
+    /// Same input path -> same project name (deterministic), and it must NOT
+    /// collide with the reference CLI's `<folder>_devcontainer` form for any
+    /// folder name.
     #[test]
-    fn test_derive_project_name_strips_invalid_characters() {
-        // The reference STRIPS chars outside [a-z0-9_-] (it does not replace
-        // them with '-'): `My Project!` -> `myproject`, not `my-project`.
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/My Project!")),
-            "myproject_devcontainer"
-        );
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/Foo.Bar-1")),
-            "foobar-1_devcontainer"
-        );
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/UPPER_Case")),
-            "upper_case_devcontainer"
-        );
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/9lives")),
-            "9lives_devcontainer"
-        );
-    }
-
-    #[test]
-    fn test_derive_project_name_appends_devcontainer_suffix() {
-        assert_eq!(
-            derive_project_name(Path::new("/home/user/myapp")),
-            "myapp_devcontainer"
+    fn test_derive_project_name_deterministic_and_not_reference_form() {
+        let path = Path::new("/home/user/myapp");
+        let first = derive_project_name(path);
+        let second = derive_project_name(path);
+        assert_eq!(first, second, "derivation must be deterministic");
+        assert_ne!(
+            first, "myapp_devcontainer",
+            "must not collide with the reference CLI's own default naming"
         );
     }
 
+    /// Distinct workspace paths must not collide on the same project name.
     #[test]
-    fn test_derive_project_name_fallback_for_all_invalid() {
-        // Nothing valid remains -> robust fallback stem (the reference would
-        // emit an invalid name and docker compose would reject it).
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/...")),
-            "deacon_devcontainer"
-        );
+    fn test_derive_project_name_differs_per_workspace() {
+        let a = derive_project_name(Path::new("/tmp/workspace-a"));
+        let b = derive_project_name(Path::new("/tmp/workspace-b"));
+        assert_ne!(a, b);
     }
 
+    /// An explicit `COMPOSE_PROJECT_NAME` in a sibling `.env` is honored
+    /// verbatim — only the auto-derived branch changed under #265.
     #[test]
-    fn test_derive_project_name_leading_separator_trimmed() {
-        // Leading '-'/'_' would make an invalid compose project name; trim it
-        // so deacon stays robust where the reference fails.
-        assert_eq!(
-            derive_project_name(Path::new("/tmp/-leadingdash")),
-            "leadingdash_devcontainer"
-        );
+    fn test_derive_project_name_env_override_used_verbatim() {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::write(
+            temp_dir.path().join(".env"),
+            "COMPOSE_PROJECT_NAME=my-custom-project\n",
+        )
+        .unwrap();
+        assert_eq!(derive_project_name(temp_dir.path()), "my-custom-project");
     }
 
     #[test]

@@ -4,35 +4,19 @@
 
 use deacon_core::compose::ComposeManager;
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
+use deacon_core::container::ContainerIdentity;
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-/// Helper to compute expected compose project name using same rules as core:
-/// strip chars outside [a-z0-9_-], lowercase, trim leading separators, then
-/// append the reference's `_devcontainer` suffix.
+/// Helper to compute the expected compose project name: `deacon_<workspace_hash>`
+/// (#265) — the same hash `ContainerIdentity` stamps as the
+/// `devcontainer.workspaceHash` label, computed here via the same public
+/// constructor so this test doesn't duplicate the hash algorithm.
 fn expected_project_name_for_path(base_path: &std::path::Path) -> String {
-    const FALLBACK_STEM: &str = "deacon";
-    let stem = base_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(FALLBACK_STEM);
-
-    let stripped: String = stem
-        .chars()
-        .map(|c| c.to_ascii_lowercase())
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect();
-
-    let trimmed = stripped.trim_start_matches(['-', '_']);
-    let stem = if trimmed.is_empty() {
-        FALLBACK_STEM
-    } else {
-        trimmed
-    };
-
-    format!("{stem}_devcontainer")
+    let identity = ContainerIdentity::new(base_path, &DevContainerConfig::default());
+    format!("deacon_{}", identity.workspace_hash)
 }
 
 /// Create a minimal docker-compose.yml file for testing
