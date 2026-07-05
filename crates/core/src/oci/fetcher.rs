@@ -107,13 +107,30 @@ impl<C: HttpClient> FeatureFetcher<C> {
         info!("Fetching feature: {}", feature_ref.reference());
 
         let result = async {
-            // Get the manifest
-            let manifest = self.get_manifest(feature_ref).await.map_err(|e| match e {
-                crate::errors::DeaconError::Feature(f) => f,
-                _ => FeatureError::Oci {
-                    message: format!("Get manifest error: {}", e),
-                },
-            })?;
+            // Get the raw manifest body once, then derive both the typed
+            // `Manifest` and its `sha256:`-prefixed digest from it (the
+            // digest the reference CLI records in lockfile `resolved`/
+            // `integrity` fields — see #264).
+            let manifest_data =
+                self.fetch_manifest_bytes(feature_ref)
+                    .await
+                    .map_err(|e| match e {
+                        crate::errors::DeaconError::Feature(f) => f,
+                        _ => FeatureError::Oci {
+                            message: format!("Get manifest error: {}", e),
+                        },
+                    })?;
+            let manifest_digest =
+                Self::manifest_digest(feature_ref, &manifest_data).map_err(|e| match e {
+                    crate::errors::DeaconError::Feature(f) => f,
+                    _ => FeatureError::Oci {
+                        message: format!("Manifest digest error: {}", e),
+                    },
+                })?;
+            let manifest: Manifest =
+                serde_json::from_slice(&manifest_data).map_err(|e| FeatureError::Parsing {
+                    message: format!("Failed to parse manifest: {}", e),
+                })?;
             debug!("Got manifest with {} layers", manifest.layers.len());
 
             // For now, assume single tar layer (as per requirements)
@@ -134,7 +151,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
             if is_cached {
                 info!("Found cached feature at: {}", cached_dir.display());
                 let feature = self
-                    .load_cached_feature(cached_dir, layer.digest.clone())
+                    .load_cached_feature(cached_dir, layer.digest.clone(), manifest_digest.clone())
                     .await
                     .map_err(|e| match e {
                         crate::errors::DeaconError::Feature(f) => f,
@@ -190,6 +207,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
                     path: extracted_dir,
                     metadata,
                     digest: layer.digest.clone(),
+                    manifest_digest,
                 },
                 is_cached,
             ))
@@ -244,8 +262,11 @@ impl<C: HttpClient> FeatureFetcher<C> {
         Ok(())
     }
 
-    /// Get the OCI manifest for a feature
-    pub async fn get_manifest(&self, feature_ref: &FeatureRef) -> Result<Manifest> {
+    /// Fetch the raw manifest body for a feature, retrying on transient errors.
+    ///
+    /// Shared by [`Self::get_manifest`], [`Self::get_manifest_with_digest`], and
+    /// [`Self::fetch_feature`] so the manifest is only downloaded once per call site.
+    async fn fetch_manifest_bytes(&self, feature_ref: &FeatureRef) -> Result<Bytes> {
         let manifest_url = format!(
             "https://{}/v2/{}/manifests/{}",
             feature_ref.registry,
@@ -287,6 +308,39 @@ impl<C: HttpClient> FeatureFetcher<C> {
         )
         .await?;
 
+        Ok(manifest_data)
+    }
+
+    /// Compute the `sha256:`-prefixed digest of a raw manifest body, verifying
+    /// it against a digest-pinned reference (e.g. `feature@sha256:...`) if one
+    /// was requested.
+    fn manifest_digest(feature_ref: &FeatureRef, manifest_data: &[u8]) -> Result<String> {
+        let mut hasher = Sha256::new();
+        hasher.update(manifest_data);
+        let digest_hex = format!("{:x}", hasher.finalize());
+
+        // If the reference is digest-pinned (e.g. `feature@sha256:...`, surfaced
+        // here as the tag), the returned manifest MUST hash to that digest.
+        // Otherwise the registry could serve a different manifest than the one
+        // the caller pinned.
+        if let Some(expected_hex) = feature_ref.tag().strip_prefix("sha256:") {
+            if !digest_hex.eq_ignore_ascii_case(expected_hex) {
+                return Err(FeatureError::IntegrityMismatch {
+                    context: format!("manifest for {}", feature_ref.reference()),
+                    expected: format!("sha256:{}", expected_hex),
+                    actual: format!("sha256:{}", digest_hex),
+                }
+                .into());
+            }
+        }
+
+        Ok(format!("sha256:{}", digest_hex))
+    }
+
+    /// Get the OCI manifest for a feature
+    pub async fn get_manifest(&self, feature_ref: &FeatureRef) -> Result<Manifest> {
+        let manifest_data = self.fetch_manifest_bytes(feature_ref).await?;
+
         let manifest: Manifest =
             serde_json::from_slice(&manifest_data).map_err(|e| FeatureError::Parsing {
                 message: format!("Failed to parse manifest: {}", e),
@@ -303,66 +357,15 @@ impl<C: HttpClient> FeatureFetcher<C> {
         &self,
         feature_ref: &FeatureRef,
     ) -> Result<(serde_json::Value, String)> {
-        let manifest_url = format!(
-            "https://{}/v2/{}/manifests/{}",
-            feature_ref.registry,
-            feature_ref.repository(),
-            feature_ref.tag()
-        );
+        let manifest_data = self.fetch_manifest_bytes(feature_ref).await?;
 
-        debug!("Fetching manifest with digest from: {}", manifest_url);
-
-        let mut headers = HashMap::new();
-        headers.insert(
-            "Accept".to_string(),
-            "application/vnd.oci.image.manifest.v1+json".to_string(),
-        );
-
-        // Retry the manifest download with exponential backoff
-        let manifest_data = retry_async(
-            &self.retry_config,
-            || {
-                let client = &self.client;
-                let url = &manifest_url;
-                let headers = headers.clone();
-                async move {
-                    client.get_with_headers(url, headers).await.map_err(|e| {
-                        let error_msg = e.to_string();
-                        if error_msg.contains("Authentication failed") {
-                            FeatureError::Authentication {
-                                message: format!("Failed to authenticate for manifest: {}", e),
-                            }
-                        } else {
-                            FeatureError::Download {
-                                message: format!("Failed to download manifest: {}", e),
-                            }
-                        }
-                    })
-                }
-            },
-            classify_network_error,
-        )
-        .await?;
-
-        // Compute SHA256 digest of the raw manifest body
-        let mut hasher = Sha256::new();
-        hasher.update(&manifest_data);
-        let digest = format!("{:x}", hasher.finalize());
-
-        // If the reference is digest-pinned (e.g. `feature@sha256:...`, surfaced
-        // here as the tag), the returned manifest MUST hash to that digest.
-        // Otherwise the registry could serve a different manifest than the one
-        // the caller pinned.
-        if let Some(expected_hex) = feature_ref.tag().strip_prefix("sha256:") {
-            if !digest.eq_ignore_ascii_case(expected_hex) {
-                return Err(FeatureError::IntegrityMismatch {
-                    context: format!("manifest for {}", feature_ref.reference()),
-                    expected: format!("sha256:{}", expected_hex),
-                    actual: format!("sha256:{}", digest),
-                }
-                .into());
-            }
-        }
+        // Historically this method returned the bare hex digest (no `sha256:`
+        // prefix); preserve that for existing callers computing canonical IDs.
+        let digest_with_prefix = Self::manifest_digest(feature_ref, &manifest_data)?;
+        let digest = digest_with_prefix
+            .strip_prefix("sha256:")
+            .unwrap_or(&digest_with_prefix)
+            .to_string();
 
         // Parse the manifest JSON
         let manifest: serde_json::Value =
@@ -619,6 +622,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
         &self,
         cached_dir: PathBuf,
         digest: String,
+        manifest_digest: String,
     ) -> Result<DownloadedFeature> {
         let metadata_path = cached_dir.join("devcontainer-feature.json");
         // parse_feature_metadata is sync and does file IO; offload to spawn_blocking
@@ -637,6 +641,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
             path: cached_dir,
             metadata,
             digest,
+            manifest_digest,
         })
     }
 

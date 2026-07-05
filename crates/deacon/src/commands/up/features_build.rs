@@ -545,7 +545,8 @@ async fn resolve_and_stage_features(
                 DownloadedFeature {
                     path: canonical_path.clone(),
                     metadata,
-                    digest,
+                    digest: digest.clone(),
+                    manifest_digest: digest,
                 },
             );
 
@@ -657,7 +658,8 @@ async fn resolve_and_stage_features(
                     DownloadedFeature {
                         path: canonical_path.clone(),
                         metadata,
-                        digest,
+                        digest: digest.clone(),
+                        manifest_digest: digest,
                     },
                 );
                 let dep_ref = FeatureRef::new(
@@ -944,7 +946,7 @@ fn build_lockfile_from_features(
         let entry = LockfileFeature::from_resolved(
             &feature_ref.registry,
             &feature_ref.repository(),
-            &downloaded.digest,
+            &downloaded.manifest_digest,
             version,
             depends_on,
         );
@@ -1033,6 +1035,7 @@ mod lockfile_assembly_tests {
                 ..FeatureMetadata::default()
             },
             digest: digest.to_string(),
+            manifest_digest: digest.to_string(),
         }
     }
 
@@ -1050,6 +1053,7 @@ mod lockfile_assembly_tests {
                 ..FeatureMetadata::default()
             },
             digest: digest.to_string(),
+            manifest_digest: digest.to_string(),
         }
     }
 
@@ -1099,6 +1103,59 @@ mod lockfile_assembly_tests {
             "sha256:1111111111111111111111111111111111111111111111111111111111111111"
         );
         assert!(entry.depends_on.is_none());
+    }
+
+    /// #264 guard: the lockfile writer must record the OCI *manifest* digest,
+    /// not the layer/blob digest used for on-disk caching — even when they
+    /// differ, as they always do in practice.
+    #[test]
+    fn build_lockfile_uses_manifest_digest_not_layer_digest() {
+        let feature_ref = FeatureRef::new(
+            "ghcr.io".to_string(),
+            "devcontainers".to_string(),
+            "python".to_string(),
+            Some("1".to_string()),
+        );
+        let canonical = "ghcr.io/devcontainers/python".to_string();
+        let user_id = "ghcr.io/devcontainers/python:1".to_string();
+
+        let layer_digest =
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+        let manifest_digest =
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
+        assert_ne!(layer_digest, manifest_digest);
+
+        let downloaded = DownloadedFeature {
+            path: PathBuf::from("/tmp/unused"),
+            metadata: FeatureMetadata {
+                id: "python".to_string(),
+                version: Some("1.2.3".to_string()),
+                ..FeatureMetadata::default()
+            },
+            digest: layer_digest,
+            manifest_digest: manifest_digest.clone(),
+        };
+
+        let mut downloaded_features = HashMap::new();
+        downloaded_features.insert(canonical.clone(), downloaded);
+        let mut user_id_by_canonical = HashMap::new();
+        user_id_by_canonical.insert(canonical.clone(), user_id.clone());
+
+        let lockfile = build_lockfile_from_features(
+            &[(canonical, feature_ref)],
+            &downloaded_features,
+            &user_id_by_canonical,
+        );
+
+        let entry = lockfile
+            .features
+            .get(&user_id)
+            .expect("lockfile must contain the feature entry");
+        assert_eq!(
+            entry.resolved,
+            format!("ghcr.io/devcontainers/python@{}", manifest_digest)
+        );
+        assert_eq!(entry.integrity, manifest_digest);
     }
 
     #[test]

@@ -376,7 +376,7 @@ fn lockfile_entry_for(
     LockfileFeature::from_resolved(
         &feature_ref.registry,
         &feature_ref.repository(),
-        &downloaded.digest,
+        &downloaded.manifest_digest,
         version,
         depends_on,
     )
@@ -438,6 +438,7 @@ mod tests {
                 ..FeatureMetadata::default()
             },
             digest: digest.to_string(),
+            manifest_digest: digest.to_string(),
         }
     }
 

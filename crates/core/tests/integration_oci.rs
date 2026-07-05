@@ -108,6 +108,16 @@ async fn test_oci_feature_fetch_with_mock_client() {
     let manifest_url = "https://ghcr.io/v2/test/feature/manifests/1.0.0";
     let blob_url = format!("https://ghcr.io/v2/test/feature/blobs/{}", layer_digest);
 
+    // Expected manifest digest: sha256 of the exact manifest body served over
+    // the wire — this is what the lockfile's `resolved`/`integrity` fields
+    // must carry (#264), distinct from the layer/blob digest above.
+    let expected_manifest_digest = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(manifest_json.as_bytes());
+        format!("sha256:{:x}", hasher.finalize())
+    };
+
     fetcher
         .client()
         .add_response(manifest_url.to_string(), Bytes::from(manifest_json))
@@ -139,10 +149,22 @@ async fn test_oci_feature_fetch_with_mock_client() {
     );
     assert!(downloaded_feature.path.join("install.sh").exists());
 
+    // #264 guard: manifest_digest is the manifest body digest, NOT the layer
+    // digest, and never silently regresses to it.
+    assert_eq!(downloaded_feature.manifest_digest, expected_manifest_digest);
+    assert_ne!(
+        downloaded_feature.manifest_digest,
+        downloaded_feature.digest
+    );
+    assert_ne!(downloaded_feature.manifest_digest, layer_digest);
+
     // Test caching - fetch the same feature again
     let cached_feature = fetcher.fetch_feature(&feature_ref).await.unwrap();
     assert_eq!(cached_feature.metadata.id, "test-feature");
     assert_eq!(cached_feature.path, downloaded_feature.path);
+    // The cache-hit branch must populate manifest_digest identically to the
+    // cache-miss branch (both construct DownloadedFeature independently).
+    assert_eq!(cached_feature.manifest_digest, expected_manifest_digest);
 }
 
 /// Security regression: a registry that serves blob bytes which do not match
@@ -250,6 +272,7 @@ echo "Installation completed"
         path: feature_dir,
         metadata,
         digest: "test-digest".to_string(),
+        manifest_digest: "sha256:test-manifest-digest".to_string(),
     };
 
     // Create fetcher and test installation
@@ -289,6 +312,7 @@ async fn test_oci_feature_install_no_script() {
         path: feature_dir,
         metadata,
         digest: "test-digest".to_string(),
+        manifest_digest: "sha256:test-manifest-digest".to_string(),
     };
 
     // Create fetcher and test installation

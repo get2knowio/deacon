@@ -1159,6 +1159,7 @@ async fn test_oci_install_env_secret_not_in_logs() {
         path: feature_dir,
         metadata,
         digest: "test-digest".to_string(),
+        manifest_digest: "sha256:test-manifest-digest".to_string(),
     };
 
     let client = ReqwestClient::new().unwrap();
