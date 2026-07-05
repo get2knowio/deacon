@@ -152,24 +152,52 @@ pub(crate) async fn execute_compose_up(
         );
     }
 
+    // Apply `devcontainer.json` `mounts` to the compose project (#266). The
+    // single-container path applies these via `merge_mounts`
+    // (up/container.rs); the compose path never read `config.mounts` at all.
+    // Feature-contributed mounts are out of scope here (compose feature
+    // dispatch doesn't yet resolve `ResolvedFeature` mounts the same way) —
+    // pass an empty feature slice so `merge_mounts` only substitutes +
+    // normalizes `config.mounts`.
+    if !config.mounts.is_empty() {
+        let mount_substitution_context = {
+            let mut ctx = deacon_core::variable::SubstitutionContext::new(workspace_folder)?;
+            let id_labels: Vec<(String, String)> = identity.labels().into_iter().collect();
+            ctx.devcontainer_id = deacon_core::container::compute_dev_container_id(&id_labels);
+            ctx
+        };
+        let merged_config_mounts = deacon_core::mount::merge_mounts(
+            &config.mounts,
+            &[],
+            Some(&mount_substitution_context),
+        )
+        .with_context(|| "Failed to merge devcontainer.json mounts for compose")?;
+        for mount_str in &merged_config_mounts.mounts {
+            let mount = NormalizedMount::parse(mount_str).with_context(|| {
+                format!(
+                    "Invalid mount specification in devcontainer.json: {}",
+                    mount_str
+                )
+            })?;
+            additional_mounts.push(normalized_mount_to_compose_mount(&mount));
+        }
+    }
+
     // Apply CLI mounts to compose project
     // Per CLAUDE.md: No silent fallbacks - fail fast on invalid mounts
     for mount_str in &args.mount {
         let mount = NormalizedMount::parse(mount_str)
             .with_context(|| format!("Invalid mount specification: {}", mount_str))?;
-        additional_mounts.push(deacon_core::compose::ComposeMount {
-            mount_type: match mount.mount_type {
-                MountType::Bind => "bind".to_string(),
-                MountType::Volume => "volume".to_string(),
-            },
-            source: mount.source.clone(),
-            target: mount.target.clone(),
-            read_only: mount.read_only,
-            consistency: mount.consistency.clone(),
-        });
+        additional_mounts.push(normalized_mount_to_compose_mount(&mount));
     }
+
+    // Dedupe by target, last-wins, so later sources (config, then CLI) can
+    // override the workspace-consistency mount or each other for the same
+    // target path — mirrors `merge_mounts`' union-by-target semantics
+    // (`mount.rs`), which `generate_injection_override` does NOT do on its
+    // own; it renders every `additional_mounts` entry verbatim.
     if !additional_mounts.is_empty() {
-        project.additional_mounts = additional_mounts;
+        project.additional_mounts = dedupe_compose_mounts_by_target(additional_mounts);
     }
 
     // Apply remote env to compose services
@@ -922,6 +950,40 @@ fn resolve_compose_path(base: &Path, candidate: &str) -> std::path::PathBuf {
     }
 }
 
+/// Map a validated CLI/config mount into the compose project's mount shape.
+/// Shared by the `devcontainer.json` `mounts` (#266) and CLI `--mount` loops
+/// in [`execute_compose_up`] so both normalize identically.
+fn normalized_mount_to_compose_mount(
+    mount: &NormalizedMount,
+) -> deacon_core::compose::ComposeMount {
+    deacon_core::compose::ComposeMount {
+        mount_type: match mount.mount_type {
+            MountType::Bind => "bind".to_string(),
+            MountType::Volume => "volume".to_string(),
+        },
+        source: mount.source.clone(),
+        target: mount.target.clone(),
+        read_only: mount.read_only,
+        consistency: mount.consistency.clone(),
+    }
+}
+
+/// Dedupe compose mounts by target path, last-wins, preserving each target's
+/// original position. Mirrors `merge_mounts`' union-by-target semantics
+/// (`deacon_core::mount`), which `generate_injection_override` does NOT apply
+/// on its own — it renders every `additional_mounts` entry verbatim. Without
+/// this, a later mount source (config, then CLI) for the same target would be
+/// appended alongside the earlier one instead of overriding it.
+fn dedupe_compose_mounts_by_target(
+    mounts: Vec<deacon_core::compose::ComposeMount>,
+) -> Vec<deacon_core::compose::ComposeMount> {
+    let mut by_target: IndexMap<String, deacon_core::compose::ComposeMount> = IndexMap::new();
+    for mount in mounts {
+        by_target.insert(mount.target.clone(), mount);
+    }
+    by_target.into_values().collect()
+}
+
 /// Handle shutdown for compose configurations
 #[instrument(skip(config, state_manager, docker_path))]
 pub(crate) async fn handle_compose_shutdown(
@@ -1011,5 +1073,100 @@ mod tests {
         let base = std::path::Path::new("/repo/compose-dir");
         let p = resolve_compose_path(base, "../sibling");
         assert_eq!(p, std::path::PathBuf::from("/repo/compose-dir/../sibling"));
+    }
+
+    /// #266: `merge_mounts` normalizes both string and object `config.mounts`
+    /// forms to Docker CLI mount-string format; `normalized_mount_to_compose_mount`
+    /// must map either form's parsed result into `ComposeMount` identically.
+    #[test]
+    fn config_mounts_string_and_object_forms_normalize_identically() {
+        let string_mount =
+            serde_json::json!("source=/host/a,target=/container/a,type=bind,readonly");
+        let object_mount = serde_json::json!({
+            "source": "/host/b",
+            "target": "/container/b",
+            "type": "volume"
+        });
+
+        let merged = deacon_core::mount::merge_mounts(&[string_mount, object_mount], &[], None)
+            .expect("merge_mounts should accept both string and object config mount forms");
+
+        let compose_mounts: Vec<_> = merged
+            .mounts
+            .iter()
+            .map(|s| {
+                let parsed = NormalizedMount::parse(s).expect("normalized mount string reparses");
+                normalized_mount_to_compose_mount(&parsed)
+            })
+            .collect();
+
+        let a = compose_mounts
+            .iter()
+            .find(|m| m.target == "/container/a")
+            .expect("string-form mount present");
+        assert_eq!(a.mount_type, "bind");
+        assert_eq!(a.source, "/host/a");
+        assert!(a.read_only);
+
+        let b = compose_mounts
+            .iter()
+            .find(|m| m.target == "/container/b")
+            .expect("object-form mount present");
+        assert_eq!(b.mount_type, "volume");
+        assert_eq!(b.source, "/host/b");
+        assert!(!b.read_only);
+    }
+
+    /// #266: when config and CLI mounts target the same path, the later
+    /// source (CLI, appended after config) must win — matching
+    /// `merge_mounts`' "config overrides features" precedence extended one
+    /// level further ("CLI overrides config").
+    #[test]
+    fn dedupe_compose_mounts_by_target_last_wins() {
+        let workspace_mount = deacon_core::compose::ComposeMount {
+            mount_type: "bind".to_string(),
+            source: "/host/workspace".to_string(),
+            target: "/workspaces/app".to_string(),
+            read_only: false,
+            consistency: None,
+        };
+        let config_mount = deacon_core::compose::ComposeMount {
+            mount_type: "bind".to_string(),
+            source: "/host/config-src".to_string(),
+            target: "/data".to_string(),
+            read_only: false,
+            consistency: None,
+        };
+        let cli_mount = deacon_core::compose::ComposeMount {
+            mount_type: "volume".to_string(),
+            source: "cli-vol".to_string(),
+            target: "/data".to_string(),
+            read_only: true,
+            consistency: None,
+        };
+
+        let deduped = dedupe_compose_mounts_by_target(vec![
+            workspace_mount.clone(),
+            config_mount,
+            cli_mount.clone(),
+        ]);
+
+        assert_eq!(deduped.len(), 2, "targets /workspaces/app and /data only");
+        let workspace_result = deduped
+            .iter()
+            .find(|m| m.target == "/workspaces/app")
+            .expect("workspace mount preserved");
+        assert_eq!(workspace_result.source, workspace_mount.source);
+
+        let data_result = deduped
+            .iter()
+            .find(|m| m.target == "/data")
+            .expect("deduped /data mount present");
+        assert_eq!(
+            data_result.source, cli_mount.source,
+            "CLI mount must win over config mount for the same target"
+        );
+        assert_eq!(data_result.mount_type, "volume");
+        assert!(data_result.read_only);
     }
 }

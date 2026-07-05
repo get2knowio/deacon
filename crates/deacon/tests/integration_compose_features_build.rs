@@ -36,6 +36,11 @@ fn is_docker_available() -> bool {
 /// drop any containers, networks, or volumes left behind by a failed test.
 /// Always best-effort — we ignore the exit code so cleanup never masks a
 /// real test failure.
+///
+/// This is only useful as a best-effort *pre*-test sweep (before we have a
+/// `deacon up` result to read the real project name from): deacon's compose
+/// project name does not necessarily match the directory-basename default
+/// `docker compose` would infer here (see [`compose_down_by_project`]).
 fn compose_cleanup(project_dir: &std::path::Path) {
     let _ = StdCommand::new("docker")
         .current_dir(project_dir)
@@ -48,6 +53,46 @@ fn compose_cleanup(project_dir: &std::path::Path) {
             "local",
         ])
         .output();
+}
+
+/// Tear down a compose project by the exact name `deacon up` reported.
+///
+/// `docker compose` run bare (or with `--project-directory`) derives its
+/// default project name from a directory basename, which does NOT match
+/// deacon's compose project naming — so `docker compose exec`/`down` invoked
+/// without `-p <name>` silently targets a different (usually nonexistent)
+/// project and reports "service is not running" even though deacon's
+/// container is alive. `docker compose -p <name> down` works purely from the
+/// project label, no compose file needed. Always best-effort.
+fn compose_down_by_project(project_name: &str) {
+    let _ = StdCommand::new("docker")
+        .args([
+            "compose",
+            "-p",
+            project_name,
+            "down",
+            "--remove-orphans",
+            "-v",
+            "--rmi",
+            "local",
+        ])
+        .output();
+}
+
+/// Extract the compose project name `deacon up` reported in its JSON result.
+fn up_project_name(up_output: &std::process::Output) -> Option<String> {
+    let stdout = String::from_utf8_lossy(&up_output.stdout);
+    let trimmed = stdout.trim();
+    let value: serde_json::Value = serde_json::from_str(trimmed).ok().or_else(|| {
+        trimmed
+            .rfind('{')
+            .and_then(|i| serde_json::from_str(&trimmed[i..]).ok())
+    })?;
+    value
+        .get("composeProjectName")?
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 /// Bead 14a regression: a compose service that declares `image:` plus
@@ -125,11 +170,17 @@ fn compose_features_image_shape_installs_feature() {
         );
     }
 
+    // Read back the exact project name deacon used — a bare `docker compose`
+    // here would derive a different default from the directory basename and
+    // silently miss the running project (see `compose_down_by_project`).
+    let project_name = up_project_name(&up).expect("deacon up should report a composeProjectName");
+
     // The common-utils feature drops a marker file at this canonical path.
     let exec = StdCommand::new("docker")
-        .current_dir(workspace)
         .args([
             "compose",
+            "-p",
+            &project_name,
             "exec",
             "-T",
             "app",
@@ -142,7 +193,7 @@ fn compose_features_image_shape_installs_feature() {
 
     let exec_ok = exec.status.success();
     // Always tear down before any assertions to avoid leaking resources.
-    compose_cleanup(workspace);
+    compose_down_by_project(&project_name);
 
     assert!(
         exec_ok,
@@ -244,20 +295,17 @@ fn compose_features_build_shape_installs_feature() {
     }
 
     // Compose project name is derived from the workspace folder (not the
-    // compose file's directory), so we must invoke `docker compose` with
-    // `-f <compose-file>` and `--project-directory <workspace>` to attach to
-    // the same project deacon brought up. Running from `compose_dir` would
-    // address a different project and report "service is not running".
-    let compose_file = compose_dir.join("docker-compose.yml");
+    // compose file's directory) and does not match the directory-basename
+    // default `docker compose` would otherwise infer — read back the exact
+    // name deacon used and address the project by `-p`, not by directory or
+    // `--project-directory` (neither reproduces deacon's naming).
+    let project_name = up_project_name(&up).expect("deacon up should report a composeProjectName");
     let docker_compose = |cmd: &str| -> std::process::Output {
         StdCommand::new("docker")
-            .current_dir(workspace)
             .args([
                 "compose",
-                "-f",
-                compose_file.to_str().unwrap(),
-                "--project-directory",
-                workspace.to_str().unwrap(),
+                "-p",
+                &project_name,
                 "exec",
                 "-T",
                 "app",
@@ -278,7 +326,7 @@ fn compose_features_build_shape_installs_feature() {
     let base_ok = base_exec.status.success();
     let feature_ok = feature_exec.status.success();
 
-    compose_cleanup(workspace);
+    compose_down_by_project(&project_name);
 
     assert!(
         base_ok,
