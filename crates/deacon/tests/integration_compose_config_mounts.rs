@@ -34,6 +34,16 @@ fn deacon_down(workspace: &Path) {
         .output();
 }
 
+/// RAII cleanup: tears the compose project down when dropped — including
+/// during panic unwinding, so a failed `expect`/assertion after `up` never
+/// leaks the container. Declare it right after the workspace path.
+struct DeaconDownGuard<'a>(&'a Path);
+impl Drop for DeaconDownGuard<'_> {
+    fn drop(&mut self) {
+        deacon_down(self.0);
+    }
+}
+
 /// Extract the primary service container id from `deacon up`'s JSON result.
 fn up_container_id(up_output: &std::process::Output) -> Option<String> {
     let stdout = String::from_utf8_lossy(&up_output.stdout);
@@ -88,6 +98,7 @@ fn test_compose_config_mounts_applied_to_container() {
 
     let temp_dir = TempDir::new().unwrap();
     let workspace = temp_dir.path();
+    let _down = DeaconDownGuard(workspace);
 
     // Bind-mount source lives inside the workspace so `${localWorkspaceFolder}/sib`
     // resolves to a real, known host path without exercising `/../` traversal.
@@ -142,7 +153,6 @@ volumes:
 
     let stderr = String::from_utf8_lossy(&up_output.stderr).to_string();
     if !up_output.status.success() {
-        deacon_down(workspace);
         panic!("deacon up failed: {}", stderr);
     }
 
@@ -150,11 +160,11 @@ volumes:
     let inspect = inspect_container(&container_id);
 
     // Config mount present, `${localWorkspaceFolder}` resolved to the real host path.
+    // Teardown is handled unconditionally by the `DeaconDownGuard` on scope
+    // exit / panic, so the assertions below can never leak the container.
     let sib_mount = find_mount(&inspect, "/workspaces/sib");
     let cli_mount = find_mount(&inspect, "/mnt/cli");
     let compose_volume = find_mount(&inspect, "/data");
-
-    deacon_down(workspace);
 
     let sib_mount = sib_mount.expect("config mount at /workspaces/sib should be present");
     assert_eq!(sib_mount["Type"].as_str(), Some("bind"));
