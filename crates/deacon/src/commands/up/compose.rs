@@ -178,8 +178,15 @@ pub(crate) async fn execute_compose_up(
     // single-container path where `create_container` (docker.rs) reads
     // `config.container_env` directly. Found via the #267 parity suite.
     let mut merged_container_env: IndexMap<String, String> = IndexMap::new();
-    for (key, value) in &config.container_env {
-        merged_container_env.insert(key.clone(), value.clone());
+    // `config.container_env` is a `HashMap`, whose iteration order is
+    // randomized per process. Insert in sorted-key order so the rendered
+    // compose override `environment:` block is deterministic run-to-run —
+    // otherwise the IndexMap (whose whole point is stable ordering) inherits
+    // the HashMap's nondeterminism for the containerEnv-derived lines.
+    let mut config_env_keys: Vec<&String> = config.container_env.keys().collect();
+    config_env_keys.sort();
+    for key in config_env_keys {
+        merged_container_env.insert(key.clone(), config.container_env[key].clone());
     }
     for (key, value) in effective_env {
         merged_container_env.insert(key.clone(), value.clone());

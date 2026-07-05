@@ -120,6 +120,87 @@ fn deacon_down(ws: &Path) {
     );
 }
 
+/// The canonicalized workspace path, matching the value both CLIs stamp into
+/// the `devcontainer.local_folder` label. Filtering `docker ps` by the raw
+/// (un-canonicalized) temp path misses the container on platforms where the
+/// temp dir is symlinked (e.g. macOS `/tmp` -> `/private/tmp`), which would
+/// make discovery spuriously return nothing.
+fn canonical_ws_display(ws: &Path) -> String {
+    ws.canonicalize()
+        .unwrap_or_else(|_| ws.to_path_buf())
+        .display()
+        .to_string()
+}
+
+/// Discover the first running container for `ws` by its canonicalized
+/// `devcontainer.local_folder` label — the reference-compatible discovery
+/// label both CLIs stamp. Used to locate the upstream CLI's container (which,
+/// unlike deacon, does not report a container id on stdout).
+fn upstream_container_id(ws: &Path) -> Option<String> {
+    let (ok, out, _) = docker_out_allow_fail(&[
+        "ps",
+        "--filter",
+        &format!(
+            "label=devcontainer.local_folder={}",
+            canonical_ws_display(ws)
+        ),
+        "--format",
+        "{{.ID}}",
+    ]);
+    if !ok {
+        return None;
+    }
+    out.lines().find(|s| !s.is_empty()).map(|s| s.to_string())
+}
+
+/// Best-effort teardown of every container stamped with this workspace's
+/// `devcontainer.local_folder` label (both CLIs stamp it), plus each
+/// container's compose project read from its actual
+/// `com.docker.compose.project` label. Robust to either CLI's project naming
+/// and to the reference CLI not reporting a `composeProjectName` — a guessed
+/// `<basename>_devcontainer` would miss upstream's real project because the
+/// reference strips a `TempDir`'s leading `.` from the folder basename.
+fn sweep_ws_containers(ws: &Path) {
+    let (ok, out, _) = docker_out_allow_fail(&[
+        "ps",
+        "-a",
+        "--filter",
+        &format!(
+            "label=devcontainer.local_folder={}",
+            canonical_ws_display(ws)
+        ),
+        "--format",
+        "{{.ID}}",
+    ]);
+    if !ok {
+        return;
+    }
+    for id in out.lines().filter(|s| !s.is_empty()) {
+        let (_, project, _) = docker_out_allow_fail(&[
+            "inspect",
+            "--format",
+            "{{ index .Config.Labels \"com.docker.compose.project\" }}",
+            id,
+        ]);
+        if !project.is_empty() {
+            deacon_compose_down_by_project(&project);
+        }
+        let _ = docker_out_allow_fail(&["rm", "-f", id]);
+    }
+}
+
+/// RAII cleanup: sweeps every container (and its compose project) for this
+/// workspace when dropped — including during panic unwinding, so a failed
+/// assertion can never leak Docker state. Declare it right after the
+/// workspace path so it drops before the `TempDir` (whose directory must
+/// still exist for the label canonicalization to resolve).
+struct WsCleanup<'a>(&'a Path);
+impl Drop for WsCleanup<'_> {
+    fn drop(&mut self) {
+        sweep_ws_containers(self.0);
+    }
+}
+
 // ===========================================================================
 // Area 1: Lockfile interop — deacon-generated lockfile is consumable by the
 // reference CLI's `features resolve-dependencies`. Locks in #264: the
@@ -188,9 +269,11 @@ fn parity_lockfile_manifest_digest_resolves_dependencies() {
         "ghcr.io/devcontainers/features/common-utils:2",
     ]);
     let manifest: Value = serde_json::from_str(&manifest_json).unwrap_or(Value::Null);
+    let mut checked_a_layer = false;
     if let Some(layers) = manifest["layers"].as_array() {
         for layer in layers {
             if let Some(layer_digest) = layer["digest"].as_str() {
+                checked_a_layer = true;
                 assert_ne!(
                     integrity, layer_digest,
                     "lockfile integrity must be the manifest digest, not a layer digest"
@@ -198,6 +281,15 @@ fn parity_lockfile_manifest_digest_resolves_dependencies() {
             }
         }
     }
+    // Guard against the check above passing vacuously: if `docker manifest
+    // inspect` ever returns a shape without layer digests (e.g. a multi-arch
+    // index under `manifests`), the layer-vs-manifest-digest invariant would
+    // silently hold. Fail loudly so the test is updated rather than trusted.
+    assert!(
+        checked_a_layer,
+        "manifest inspect returned no layer digests to cross-check #264 against; manifest was: {}",
+        manifest_json
+    );
     assert!(
         integrity.starts_with("sha256:"),
         "integrity should be sha256:-prefixed, got {}",
@@ -244,6 +336,7 @@ fn parity_compose_config_mounts_applied_both_clis() {
     for (label, is_upstream) in [("upstream", true), ("deacon", false)] {
         let tmp = TempDir::new().unwrap();
         let ws = tmp.path();
+        let _cleanup = WsCleanup(ws);
         let sib = ws.join("sib");
         fs::create_dir_all(&sib).unwrap();
         fs::write(sib.join("marker.txt"), "from-sib").unwrap();
@@ -286,15 +379,7 @@ fn parity_compose_config_mounts_applied_both_clis() {
         );
 
         let container_id = if is_upstream {
-            let (ok, out, _) = docker_out_allow_fail(&[
-                "ps",
-                "--filter",
-                &format!("label=devcontainer.local_folder={}", ws.display()),
-                "--format",
-                "{{.ID}}",
-            ]);
-            assert!(ok && !out.is_empty(), "no upstream container found");
-            out.lines().next().unwrap().to_string()
+            upstream_container_id(ws).expect("no upstream container found")
         } else {
             json_field(&up, "containerId").expect("deacon up should report a containerId")
         };
@@ -345,6 +430,7 @@ fn parity_compose_project_name_isolated_from_reference() {
 
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path();
+    let _cleanup = WsCleanup(ws);
     fs::write(
         ws.join("docker-compose.yml"),
         "services:\n  app:\n    image: debian:bookworm-slim\n    command: [\"sleep\", \"infinity\"]\n",
@@ -406,6 +492,7 @@ fn parity_container_and_image_labels_isolated() {
 
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path();
+    let _cleanup = WsCleanup(ws);
     fs::create_dir(ws.join(".devcontainer")).unwrap();
     fs::write(
         ws.join(".devcontainer/devcontainer.json"),
@@ -500,15 +587,7 @@ fn parity_rendered_compose_state_comparable() {
         );
 
         let container_id = if is_upstream {
-            let (ok, out, _) = docker_out_allow_fail(&[
-                "ps",
-                "--filter",
-                &format!("label=devcontainer.local_folder={}", ws.display()),
-                "--format",
-                "{{.ID}}",
-            ]);
-            assert!(ok && !out.is_empty(), "no upstream container found");
-            out.lines().next().unwrap().to_string()
+            upstream_container_id(ws).expect("no upstream container found")
         } else {
             json_field(&up, "containerId").expect("deacon up should report containerId")
         };
@@ -517,7 +596,12 @@ fn parity_rendered_compose_state_comparable() {
     }
 
     let (upstream_tmp, upstream_inspect, upstream_id) = bring_up(true);
+    // Guard the upstream container immediately so that a panic in the SECOND
+    // bring_up (or any later assertion) still tears it down — it stays live
+    // across the deacon setup below.
+    let _upstream_cleanup = WsCleanup(upstream_tmp.path());
     let (deacon_tmp, deacon_inspect, deacon_id) = bring_up(false);
+    let _deacon_cleanup = WsCleanup(deacon_tmp.path());
 
     // Tear down BEFORE asserting so a failed assertion never leaks containers.
     let _ = docker_out_allow_fail(&[
@@ -608,6 +692,7 @@ fn parity_handoff_no_cross_cli_container_reuse() {
     for deacon_first in [true, false] {
         let tmp = TempDir::new().unwrap();
         let ws = tmp.path();
+        let _cleanup = WsCleanup(ws);
         fs::create_dir(ws.join(".devcontainer")).unwrap();
         fs::write(
             ws.join(".devcontainer/docker-compose.yml"),
@@ -662,19 +747,14 @@ fn parity_handoff_no_cross_cli_container_reuse() {
             .map(|o| String::from_utf8_lossy(&o.stderr).to_string());
 
         // Tear down BEFORE asserting so a failure never leaks containers.
-        // Both CLIs' compose projects are namespaced distinctly (#265), so
-        // sweep both a bare directory-inferred name (co-located layout ->
-        // reference's `<folder>_devcontainer`) and deacon's own reported name.
-        let reference_project = format!(
-            "{}_devcontainer",
-            ws.file_name().unwrap().to_string_lossy().to_lowercase()
-        );
-        deacon_compose_down_by_project(&reference_project);
-        for up in [Some(&first_up), second_up.as_ref()].into_iter().flatten() {
-            if let Some(project_name) = json_field(up, "composeProjectName") {
-                deacon_compose_down_by_project(&project_name);
-            }
-        }
+        // Sweep by the `devcontainer.local_folder` label both CLIs stamp,
+        // reading each container's real `com.docker.compose.project` label —
+        // this catches upstream's project even though it reports no
+        // `composeProjectName` on stdout and its folder-derived project name
+        // strips the `TempDir`'s leading `.` (so a guessed
+        // `<basename>_devcontainer` would not match). The `WsCleanup` guard
+        // repeats this on panic/scope exit as a backstop.
+        sweep_ws_containers(ws);
 
         assert!(
             first_ok,
@@ -725,6 +805,7 @@ fn parity_merged_config_matches_runtime_truth() {
     for (label, is_upstream) in [("upstream", true), ("deacon", false)] {
         let tmp = TempDir::new().unwrap();
         let ws = tmp.path();
+        let _cleanup = WsCleanup(ws);
         fs::create_dir(ws.join(".devcontainer")).unwrap();
         fs::write(
             ws.join(".devcontainer/devcontainer.json"),
@@ -792,15 +873,7 @@ fn parity_merged_config_matches_runtime_truth() {
         let config_says_truth = container_env["MERGED_TRUTH"].as_str() == Some("yes");
 
         let container_id = if is_upstream {
-            let (ok, out, _) = docker_out_allow_fail(&[
-                "ps",
-                "--filter",
-                &format!("label=devcontainer.local_folder={}", ws.display()),
-                "--format",
-                "{{.ID}}",
-            ]);
-            assert!(ok && !out.is_empty(), "no upstream container found");
-            out.lines().next().unwrap().to_string()
+            upstream_container_id(ws).expect("no upstream container found")
         } else {
             json_field(&up, "containerId").expect("deacon up should report containerId")
         };
