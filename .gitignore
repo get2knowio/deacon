@@ -50,6 +50,9 @@ artifacts/nextest/full-timing.json
 # (lifecycle state + build cache written into the workspace folder)
 **/.devcontainer-state/
 **/.devcontainer/build-cache/
+# Transient image-reference build context (`deacon build`); RAII-cleaned on the
+# happy path, but gitignored so an interrupted build never leaks it into commits.
+**/.deacon-temp-build/
 # Feature lockfiles generated in-place when an example's up / feature install
 # runs. The intentionally-committed lockfile-demo lives at an example root (not
 # in a .devcontainer/ dir), so this scoped rule leaves it tracked.

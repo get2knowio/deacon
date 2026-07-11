@@ -195,17 +195,26 @@ fn test_audit_log_creation() {
         ProgressFormat, create_progress_tracker_no_redaction, get_cache_dir,
     };
 
-    // Test that audit log is created when using progress tracker
-    let cache_dir = get_cache_dir().unwrap();
-    let format = ProgressFormat::Json;
+    // Keep the test hermetic: point the cache at a tempdir so we neither depend
+    // on a writable home directory nor touch the real `~/.deacon/cache`.
+    let cache_root = TempDir::new().unwrap();
+    temp_env::with_var(
+        "DEACON_CACHE_DIR",
+        Some(cache_root.path().as_os_str()),
+        || {
+            // Test that audit log is created when using progress tracker
+            let cache_dir = get_cache_dir().unwrap();
+            let format = ProgressFormat::Json;
 
-    let _tracker = create_progress_tracker_no_redaction(&format, None, None).unwrap();
+            let _tracker = create_progress_tracker_no_redaction(&format, None, None).unwrap();
 
-    // The audit log should be created in the cache directory
-    let _audit_log_path = cache_dir.join("audit.jsonl");
+            // The audit log should be created in the cache directory
+            let _audit_log_path = cache_dir.join("audit.jsonl");
 
-    // The file might not exist yet if no events were emitted, but the directory should exist
-    assert!(cache_dir.exists(), "Cache directory should be created");
+            // The file might not exist yet if no events were emitted, but the directory should exist
+            assert!(cache_dir.exists(), "Cache directory should be created");
+        },
+    );
 }
 
 #[test]

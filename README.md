@@ -209,6 +209,18 @@ see SECURITY.md for the manual `ARG`/`COPY` convention.
 
 For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). Post-1.0 hardening landed in May 2026 — redaction wiring into the tracing pipeline, a [workspace-trust gate](#workspace-trust) for host-side lifecycle hooks, async I/O conversion across `crates/core`, typed errors throughout `crates/core`, and the `json5`→`jsonc-parser` migration (see closed [#52](https://github.com/get2knowio/deacon/issues/52)).
 
+## Filesystem Artifacts
+
+Deacon keeps machine-level state (the OCI cache, trust store, port-forward
+registry) in the host **user-data folder** (`~/.deacon/` by default), never
+inside your project. A few devcontainer artifacts — the feature lockfile,
+lifecycle-state markers, build cache — are written into the workspace, mirroring
+the reference DevContainers CLI.
+
+For the full enumeration (what each path is for, whether to commit it, and a
+ready-to-use `.gitignore` snippet), see
+[docs/FILESYSTEM_ARTIFACTS.md](docs/FILESYSTEM_ARTIFACTS.md).
+
 ## Examples
 
 Self-contained categorized examples live under [`examples/`](examples/README.md):

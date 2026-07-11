@@ -1475,6 +1475,31 @@ async fn execute_compose_build_with_features(
     })
 }
 
+/// RAII guard that removes a temporary directory on drop.
+///
+/// Covers the error/early-return (`?`), panic, and unwind paths that an explicit
+/// end-of-function cleanup would miss, so deacon does not leave a
+/// `.deacon-temp-build/` directory behind in the user's workspace when a build
+/// fails partway through (issue #280).
+struct TempDirGuard {
+    path: PathBuf,
+}
+
+impl TempDirGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        // Best-effort synchronous cleanup: the directory holds a single small
+        // Dockerfile, so the blocking remove is negligible, and it is a no-op
+        // when the happy-path async cleanup already removed it.
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 /// Execute image-reference build by creating a Dockerfile from the base image
 #[instrument(skip(config, args, workspace_folder, labels))]
 async fn execute_image_reference_build(
@@ -1493,6 +1518,12 @@ async fn execute_image_reference_build(
     // Create a temporary Dockerfile that extends the base image
     let temp_dir = workspace_folder.join(".deacon-temp-build");
     tokio::fs::create_dir_all(&temp_dir).await?;
+    // Guard cleanup against early `?` returns, panics, and unwinds — the explicit
+    // async cleanup below only covers the happy path, so a failed `fs::write` or a
+    // build error would otherwise leave `.deacon-temp-build/` in the user's
+    // workspace (#280). SIGKILL can't be handled in-process; the next run's
+    // `create_dir_all` is idempotent.
+    let _temp_guard = TempDirGuard::new(temp_dir.clone());
 
     // Build Dockerfile content with base image
     let mut dockerfile_content = format!("FROM {}\n\n", image);
@@ -2402,6 +2433,41 @@ async fn execute_scan_command(command: &str, args: &BuildArgs) -> Result<i32> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn test_temp_dir_guard_removes_dir_on_drop() {
+        // Regression for #280: an image-reference build that fails partway (early
+        // `?` / panic) must not leave `.deacon-temp-build/` behind. The RAII guard
+        // removes the directory whenever it drops, not just on the happy path.
+        let parent = tempfile::tempdir().unwrap();
+        let temp_dir = parent.path().join(".deacon-temp-build");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::fs::write(temp_dir.join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+        assert!(temp_dir.exists());
+
+        {
+            let _guard = TempDirGuard::new(temp_dir.clone());
+            // guard drops at end of this scope, simulating an early return / unwind
+        }
+
+        assert!(
+            !temp_dir.exists(),
+            "TempDirGuard must remove the temp build dir on drop"
+        );
+    }
+
+    #[test]
+    fn test_temp_dir_guard_drop_is_noop_when_already_removed() {
+        // The happy path removes the dir explicitly (async) before the guard drops;
+        // the guard's drop must then be a harmless no-op.
+        let parent = tempfile::tempdir().unwrap();
+        let temp_dir = parent.path().join(".deacon-temp-build");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let guard = TempDirGuard::new(temp_dir.clone());
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+        drop(guard); // must not panic even though the dir is already gone
+        assert!(!temp_dir.exists());
+    }
 
     #[test]
     #[allow(clippy::field_reassign_with_default)]
