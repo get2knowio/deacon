@@ -84,6 +84,10 @@ pub struct BuildArgs {
     /// from `--inject-host-ca` > `DEACON_INJECT_HOST_CA` > `settings.json`
     /// (never the workspace — FR-015).
     pub host_ca_activation: deacon_core::host_ca::HostCaActivation,
+
+    /// Host user-data folder (global `--user-data-folder`); `None` → `~/.deacon`.
+    /// Roots the build cache so it never lands inside the project (#280).
+    pub user_data_folder: Option<PathBuf>,
 }
 
 impl Default for BuildArgs {
@@ -125,6 +129,7 @@ impl Default for BuildArgs {
             no_lockfile: false,
             frozen_lockfile: false,
             host_ca_activation: deacon_core::host_ca::HostCaActivation::Off,
+            user_data_folder: None,
         }
     }
 }
@@ -568,6 +573,11 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     let workspace_folder = load_result.workspace_folder;
     let config_path = load_result.config_path;
 
+    // Stable per-workspace hash used to key the (host user-data) build cache so it
+    // never lands inside the project and never collides across projects (#280).
+    let workspace_hash =
+        deacon_core::container::ContainerIdentity::new(&workspace_folder, &config).workspace_hash;
+
     debug!("Loaded configuration: {:?}", config.name);
 
     // Validate compose mode restrictions
@@ -683,7 +693,13 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     // Re-running keeps correctness; a future refinement can fold the
     // feature digests into the hash for proper caching.
     if !args.force && !args.push && args.output.is_none() && !features_present {
-        if let Some(cached_result) = check_build_cache(&config_hash, &workspace_folder).await? {
+        if let Some(cached_result) = check_build_cache(
+            &config_hash,
+            args.user_data_folder.as_deref(),
+            &workspace_hash,
+        )
+        .await?
+        {
             info!("Using cached build result");
             output_result(
                 &cached_result,
@@ -858,7 +874,12 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     }
 
     // Cache the result
-    cache_build_result(&final_result, &workspace_folder).await?;
+    cache_build_result(
+        &final_result,
+        args.user_data_folder.as_deref(),
+        &workspace_hash,
+    )
+    .await?;
 
     // Execute vulnerability scan if requested
     if args.scan_image {
@@ -1118,9 +1139,17 @@ fn is_non_build_affecting_directory(dirname: &str) -> bool {
 /// Check for cached build result
 async fn check_build_cache(
     config_hash: &str,
-    workspace_folder: &Path,
+    user_data_folder: Option<&Path>,
+    workspace_hash: &str,
 ) -> Result<Option<BuildResult>> {
-    let cache_file = get_build_cache_path(workspace_folder, config_hash);
+    let cache_file = match get_build_cache_path(user_data_folder, workspace_hash, config_hash) {
+        Ok(p) => p,
+        Err(e) => {
+            // A missing user-data folder is a cache miss, never a build failure.
+            debug!("Build cache directory unavailable: {}", e);
+            return Ok(None);
+        }
+    };
 
     // Read cache file. NotFound is a normal cache-miss; other errors fall through too.
     let contents = match tokio::fs::read_to_string(&cache_file).await {
@@ -1159,8 +1188,18 @@ async fn check_build_cache(
 }
 
 /// Cache build result
-async fn cache_build_result(result: &BuildResult, workspace_folder: &Path) -> Result<()> {
-    let cache_dir = get_build_cache_dir(workspace_folder);
+async fn cache_build_result(
+    result: &BuildResult,
+    user_data_folder: Option<&Path>,
+    workspace_hash: &str,
+) -> Result<()> {
+    let cache_dir = match get_build_cache_dir(user_data_folder, workspace_hash) {
+        Ok(d) => d,
+        Err(e) => {
+            debug!("Build cache directory unavailable, skipping cache: {}", e);
+            return Ok(()); // Don't fail the build if caching is unavailable
+        }
+    };
 
     // Ensure cache directory exists
     if let Err(e) = tokio::fs::create_dir_all(&cache_dir).await {
@@ -1169,7 +1208,7 @@ async fn cache_build_result(result: &BuildResult, workspace_folder: &Path) -> Re
     }
 
     // Create build inputs for metadata
-    let inputs = create_build_inputs(result, workspace_folder)?;
+    let inputs = create_build_inputs(result)?;
 
     let metadata = BuildMetadata {
         config_hash: result.config_hash.clone(),
@@ -1181,7 +1220,7 @@ async fn cache_build_result(result: &BuildResult, workspace_folder: &Path) -> Re
             .as_secs(),
     };
 
-    let cache_file = get_build_cache_path(workspace_folder, &result.config_hash);
+    let cache_file = cache_dir.join(format!("{}.json", result.config_hash));
 
     match serde_json::to_string_pretty(&metadata) {
         Ok(json) => {
@@ -1199,18 +1238,34 @@ async fn cache_build_result(result: &BuildResult, workspace_folder: &Path) -> Re
     Ok(())
 }
 
-/// Get the cache directory for builds
-fn get_build_cache_dir(workspace_folder: &Path) -> PathBuf {
-    workspace_folder.join(".devcontainer").join("build-cache")
+/// Get the cache directory for builds.
+///
+/// Lives under the host user-data folder (`~/.deacon/build-cache/<workspace_hash>/`)
+/// rather than inside the project (`<workspace>/.devcontainer/build-cache/`), so a
+/// `deacon build` never leaves stray files in the user's repository (issue #280).
+/// The `config_hash` is content-based and workspace-agnostic, so the cache is keyed
+/// by an additional per-workspace subdir to avoid collisions across projects that
+/// happen to share an identical Dockerfile/context.
+fn get_build_cache_dir(user_data_folder: Option<&Path>, workspace_hash: &str) -> Result<PathBuf> {
+    Ok(deacon_core::trust::user_data_root(user_data_folder)?
+        .join("build-cache")
+        .join(workspace_hash))
 }
 
 /// Get the cache file path for a specific config hash
-fn get_build_cache_path(workspace_folder: &Path, config_hash: &str) -> PathBuf {
-    get_build_cache_dir(workspace_folder).join(format!("{}.json", config_hash))
+fn get_build_cache_path(
+    user_data_folder: Option<&Path>,
+    workspace_hash: &str,
+    config_hash: &str,
+) -> Result<PathBuf> {
+    Ok(
+        get_build_cache_dir(user_data_folder, workspace_hash)?
+            .join(format!("{}.json", config_hash)),
+    )
 }
 
 /// Create build inputs for cache metadata
-fn create_build_inputs(result: &BuildResult, _workspace_folder: &Path) -> Result<BuildInputs> {
+fn create_build_inputs(result: &BuildResult) -> Result<BuildInputs> {
     // For now, create a simplified version - full implementation would track more details
     let dockerfile_hash = result.config_hash.clone(); // Simplified
     let context_files = Vec::new(); // Would be populated from actual context scanning
@@ -1515,14 +1570,18 @@ async fn execute_image_reference_build(
 
     info!("Building from image reference: {}", image);
 
-    // Create a temporary Dockerfile that extends the base image
-    let temp_dir = workspace_folder.join(".deacon-temp-build");
+    // Create a temporary Dockerfile that extends the base image. This build
+    // context lives in the system temp dir (keyed by the workspace hash to avoid
+    // concurrent-build collisions), NOT in the project — a `deacon build` must
+    // leave no stray files in the user's repository (#280). It holds only the
+    // generated Dockerfile, so Docker can read it from anywhere.
+    let workspace_hash =
+        deacon_core::container::ContainerIdentity::new(workspace_folder, config).workspace_hash;
+    let temp_dir = std::env::temp_dir().join(format!("deacon-temp-build-{}", workspace_hash));
     tokio::fs::create_dir_all(&temp_dir).await?;
     // Guard cleanup against early `?` returns, panics, and unwinds — the explicit
-    // async cleanup below only covers the happy path, so a failed `fs::write` or a
-    // build error would otherwise leave `.deacon-temp-build/` in the user's
-    // workspace (#280). SIGKILL can't be handled in-process; the next run's
-    // `create_dir_all` is idempotent.
+    // async cleanup below only covers the happy path. SIGKILL can't be handled
+    // in-process; the next run's `create_dir_all` is idempotent.
     let _temp_guard = TempDirGuard::new(temp_dir.clone());
 
     // Build Dockerfile content with base image
@@ -3174,15 +3233,21 @@ mod tests {
 
     #[test]
     fn test_cache_paths() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let workspace = temp_dir.path();
+        // The build cache lives under the host user-data folder (never the
+        // project), keyed by a per-workspace hash subdir (#280).
+        let udf = tempfile::tempdir().unwrap();
+        let user_data = udf.path();
+        let workspace_hash = "ws01hash";
         let config_hash = "abcd1234efgh5678";
 
-        let cache_dir = get_build_cache_dir(workspace);
-        let expected_cache_dir = workspace.join(".devcontainer").join("build-cache");
+        let cache_dir = get_build_cache_dir(Some(user_data), workspace_hash).unwrap();
+        let expected_cache_dir = user_data.join("build-cache").join(workspace_hash);
         assert_eq!(cache_dir, expected_cache_dir);
+        // Must NOT be inside the project.
+        assert!(!cache_dir.to_string_lossy().contains(".devcontainer"));
 
-        let cache_file = get_build_cache_path(workspace, config_hash);
+        let cache_file =
+            get_build_cache_path(Some(user_data), workspace_hash, config_hash).unwrap();
         let expected_cache_file = expected_cache_dir.join("abcd1234efgh5678.json");
         assert_eq!(cache_file, expected_cache_file);
     }

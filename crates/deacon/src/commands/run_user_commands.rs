@@ -42,6 +42,9 @@ pub struct RunUserCommandsArgs {
     pub progress_tracker: Arc<Mutex<Option<deacon_core::progress::ProgressTracker>>>,
     pub docker_path: String,
     pub container_data_folder: Option<std::path::PathBuf>,
+    /// Host user-data folder (`--user-data-folder`); `None` → `~/.deacon`.
+    /// Roots lifecycle markers outside the project (#280).
+    pub user_data_folder: Option<std::path::PathBuf>,
 }
 
 /// Execute the run-user-commands command
@@ -210,6 +213,7 @@ async fn execute_lifecycle_commands(
         use_login_shell: true, // Default: use login shell for lifecycle commands
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::LoginShell,
         cache_folder: args.container_data_folder.clone(),
+        user_data_folder: args.user_data_folder.clone(),
         // Per FR-006: force_pty toggle only applies to 'up' workflow lifecycle exec,
         // not to run-user-commands which is a separate entry point
         force_pty: false,
@@ -415,6 +419,7 @@ mod tests {
             progress_tracker,
             docker_path: "docker".to_string(),
             container_data_folder: None,
+            user_data_folder: None,
         };
 
         assert!(!args.skip_post_create);
@@ -445,6 +450,7 @@ mod tests {
             progress_tracker,
             docker_path: "docker".to_string(),
             container_data_folder: None,
+            user_data_folder: None,
         };
 
         assert_eq!(args.container_id.as_deref(), Some("deadbeef"));

@@ -1528,6 +1528,7 @@ impl Cli {
                     no_lockfile,
                     frozen_lockfile,
                     host_ca_activation,
+                    user_data_folder: self.user_data_folder.clone(),
                 };
 
                 execute_build(args).await?;
@@ -1699,6 +1700,7 @@ impl Cli {
                     progress_tracker: progress_tracker.clone(),
                     docker_path: self.docker_path.clone(),
                     container_data_folder: self.container_data_folder.clone(),
+                    user_data_folder: self.user_data_folder.clone(),
                 };
 
                 execute_run_user_commands(args, self.runtime.map(|r| r.into())).await
@@ -1737,6 +1739,7 @@ impl Cli {
                     container_system_data_folder,
                     docker_path: self.docker_path.clone(),
                     progress_tracker: progress_tracker.clone(),
+                    user_data_folder: self.user_data_folder.clone(),
                 };
 
                 execute_set_up(args, self.runtime.map(|r| r.into())).await

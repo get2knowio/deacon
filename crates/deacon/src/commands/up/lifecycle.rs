@@ -256,6 +256,7 @@ pub(crate) async fn execute_lifecycle_commands(
         use_login_shell: true, // Default: use login shell for lifecycle commands
         user_env_probe: config.user_env_probe.unwrap_or(args.default_user_env_probe),
         cache_folder: cache_folder.clone(),
+        user_data_folder: args.user_data_folder.clone(),
         force_pty,
         dotfiles: dotfiles_config,
         is_prebuild: args.prebuild,
@@ -524,6 +525,9 @@ pub(crate) async fn execute_initialize_command(
         use_login_shell: true,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
         cache_folder: None,
+        // Host-side initializeCommand never records container phase markers, so the
+        // marker root is irrelevant here.
+        user_data_folder: None,
         force_pty: false,
         dotfiles: None,
         is_prebuild: false,

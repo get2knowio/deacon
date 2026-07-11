@@ -451,8 +451,10 @@ pub(crate) async fn execute_container_up(
 
     // For the Chained variant, generate the wrapper script and write it to a persistent
     // location on the host, then add a bind mount so it is available inside the container.
-    // We use `.devcontainer/.deacon/` under the workspace so the script survives container
-    // restarts (a temp file would be deleted on drop, breaking bind mounts on restart).
+    // The script lives in the host user-data folder
+    // (`~/.deacon/entrypoints/<workspace_hash>/`) — keyed by the stable workspace hash so
+    // the bind-mounted path survives container restarts — rather than inside the project
+    // (`<workspace>/.devcontainer/.deacon/`), so `up` leaves no stray files in the repo (#280).
     let mut merged_mounts = merged_mounts;
     if let deacon_core::features::EntrypointChain::Chained {
         ref wrapper_path,
@@ -466,12 +468,15 @@ pub(crate) async fn execute_container_up(
             "Generated entrypoint wrapper script"
         );
 
-        // Write wrapper script to a persistent location under the workspace so the
+        // Write wrapper script to a persistent location in the user-data folder so the
         // bind-mounted path remains valid across container restarts.
-        let wrapper_dir = workspace_folder.join(".devcontainer").join(".deacon");
+        let wrapper_dir = deacon_core::trust::user_data_root(args.user_data_folder.as_deref())
+            .context("Failed to resolve user-data folder for entrypoint wrapper")?
+            .join("entrypoints")
+            .join(&identity.workspace_hash);
         tokio::fs::create_dir_all(&wrapper_dir)
             .await
-            .context("Failed to create .deacon directory for entrypoint wrapper")?;
+            .context("Failed to create entrypoints directory for entrypoint wrapper")?;
 
         let wrapper_host_path = wrapper_dir.join("entrypoint-wrapper.sh");
         tokio::fs::write(&wrapper_host_path, script_content.as_bytes())
@@ -686,7 +691,13 @@ pub(crate) async fn execute_container_up(
     // build the invocation context — otherwise onCreate / updateContent /
     // postCreate are silently skipped on the fresh container.
     if args.remove_existing_container {
-        if let Err(e) = deacon_core::state::clear_markers(workspace_folder, args.prebuild).await {
+        if let Err(e) = deacon_core::state::clear_markers(
+            workspace_folder,
+            args.prebuild,
+            args.user_data_folder.as_deref(),
+        )
+        .await
+        {
             debug!(
                 "Failed to clear lifecycle markers for --remove-existing-container: {}",
                 e
@@ -703,6 +714,7 @@ pub(crate) async fn execute_container_up(
         workspace_folder,
         args.prebuild,
         Some(&identity.config_hash),
+        args.user_data_folder.as_deref(),
     )
     .await
     .unwrap_or_else(|e| {

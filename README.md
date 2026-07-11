@@ -211,14 +211,15 @@ For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). 
 
 ## Filesystem Artifacts
 
-Deacon keeps machine-level state (the OCI cache, trust store, port-forward
-registry) in the host **user-data folder** (`~/.deacon/` by default), never
-inside your project. A few devcontainer artifacts — the feature lockfile,
-lifecycle-state markers, build cache — are written into the workspace, mirroring
-the reference DevContainers CLI.
+Like the reference DevContainers CLI, deacon keeps its machine-level state (the
+OCI cache, lifecycle-resume markers, build cache, feature entrypoint wrappers,
+trust store, port-forward registry) in the host **user-data folder** (`~/.deacon/`
+by default, override with `--user-data-folder`) — never inside your project. The
+**only** file written into the workspace is the spec-mandated feature lockfile
+(`devcontainer-lock.json`), which is meant to be committed.
 
-For the full enumeration (what each path is for, whether to commit it, and a
-ready-to-use `.gitignore` snippet), see
+For the full enumeration (what each path is for, a parity comparison with the
+reference CLI, and a `.gitignore` snippet), see
 [docs/FILESYSTEM_ARTIFACTS.md](docs/FILESYSTEM_ARTIFACTS.md).
 
 ## Examples

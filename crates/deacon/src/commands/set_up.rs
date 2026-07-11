@@ -86,6 +86,9 @@ pub struct SetUpArgs {
     /// for marker-file storage, currently only forwarded to the lifecycle
     /// helper as `cache_folder`.
     pub container_data_folder: Option<PathBuf>,
+    /// Host user-data folder (`--user-data-folder`); `None` → `~/.deacon`.
+    /// Roots lifecycle markers outside the project (#280).
+    pub user_data_folder: Option<PathBuf>,
     /// Inside-container system data root for root-owned marker files; default
     /// `/var/devcontainer`. Spec §6 — `.patchEtcEnvironmentMarker` and
     /// `.patchEtcProfileMarker` live here.
@@ -392,6 +395,7 @@ async fn execute_lifecycle_hooks(
         use_login_shell: true,
         user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::LoginShell,
         cache_folder: args.container_data_folder.clone(),
+        user_data_folder: args.user_data_folder.clone(),
         force_pty: false,
         dotfiles: build_dotfiles_config(args),
         is_prebuild: false,
@@ -754,6 +758,7 @@ mod tests {
             include_configuration: false,
             include_merged_configuration: false,
             container_data_folder: None,
+            user_data_folder: None,
             container_system_data_folder: None,
             docker_path: "docker".to_string(),
             progress_tracker: empty_progress_tracker(),

@@ -838,13 +838,14 @@ impl LifecycleOrchestrator {
     /// let summary = orchestrator.execute_with_markers(|phase| {
     ///     println!("Executing phase: {}", phase.as_str());
     ///     Ok::<(), String>(())
-    /// }, false).await.unwrap();
+    /// }, false, None).await.unwrap();
     /// # }
     /// ```
     pub async fn execute_with_markers<F, E>(
         &mut self,
         mut executor: F,
         prebuild: bool,
+        user_data_folder: Option<&std::path::Path>,
     ) -> std::result::Result<RunSummary, E>
     where
         F: FnMut(LifecyclePhase) -> std::result::Result<(), E>,
@@ -858,10 +859,24 @@ impl LifecycleOrchestrator {
 
         for &phase in LifecyclePhase::spec_order() {
             let marker_path = if prebuild {
-                prebuild_marker_path_for_phase(&self.context.workspace_root, phase)
+                prebuild_marker_path_for_phase(
+                    &self.context.workspace_root,
+                    phase,
+                    user_data_folder,
+                )
             } else {
-                marker_path_for_phase(&self.context.workspace_root, phase)
-            };
+                marker_path_for_phase(&self.context.workspace_root, phase, user_data_folder)
+            }
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Marker path unavailable for phase {} ({}); using a workspace-local fallback",
+                    phase.as_str(),
+                    e
+                );
+                self.context
+                    .workspace_root
+                    .join(format!("{}.json", phase.as_str()))
+            });
 
             match self.decide_phase(phase) {
                 PhaseDecision::Execute => match executor(phase) {
@@ -925,6 +940,7 @@ impl LifecycleOrchestrator {
         &mut self,
         mut executor: F,
         prebuild: bool,
+        user_data_folder: Option<&std::path::Path>,
     ) -> std::result::Result<RunSummary, E>
     where
         F: FnMut(LifecyclePhase) -> Fut,
@@ -939,10 +955,24 @@ impl LifecycleOrchestrator {
 
         for &phase in LifecyclePhase::spec_order() {
             let marker_path = if prebuild {
-                prebuild_marker_path_for_phase(&self.context.workspace_root, phase)
+                prebuild_marker_path_for_phase(
+                    &self.context.workspace_root,
+                    phase,
+                    user_data_folder,
+                )
             } else {
-                marker_path_for_phase(&self.context.workspace_root, phase)
-            };
+                marker_path_for_phase(&self.context.workspace_root, phase, user_data_folder)
+            }
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Marker path unavailable for phase {} ({}); using a workspace-local fallback",
+                    phase.as_str(),
+                    e
+                );
+                self.context
+                    .workspace_root
+                    .join(format!("{}.json", phase.as_str()))
+            });
 
             match self.decide_phase(phase) {
                 PhaseDecision::Execute => match executor(phase).await {
@@ -2294,6 +2324,7 @@ mod tests {
                     Ok::<(), String>(())
                 },
                 false,
+                Some(workspace.as_path()),
             )
             .await
             .unwrap();
@@ -2305,7 +2336,9 @@ mod tests {
 
         // Verify markers were written to disk
         use crate::state::read_all_markers;
-        let markers = read_all_markers(&workspace, false).await.unwrap();
+        let markers = read_all_markers(&workspace, false, Some(workspace.as_path()))
+            .await
+            .unwrap();
         assert_eq!(markers.len(), 6);
 
         // Verify markers are in spec order
@@ -2327,7 +2360,11 @@ mod tests {
         let mut orchestrator = LifecycleOrchestrator::new(ctx);
 
         let summary = orchestrator
-            .execute_with_markers(|_phase| Ok::<(), String>(()), true)
+            .execute_with_markers(
+                |_phase| Ok::<(), String>(()),
+                true,
+                Some(workspace.as_path()),
+            )
             .await
             .unwrap();
 
@@ -2337,11 +2374,15 @@ mod tests {
 
         // Verify markers were written to prebuild directory
         use crate::state::read_all_markers;
-        let prebuild_markers = read_all_markers(&workspace, true).await.unwrap();
+        let prebuild_markers = read_all_markers(&workspace, true, Some(workspace.as_path()))
+            .await
+            .unwrap();
         assert_eq!(prebuild_markers.len(), 6); // All phases get markers (executed or skipped)
 
         // Verify normal directory is empty
-        let normal_markers = read_all_markers(&workspace, false).await.unwrap();
+        let normal_markers = read_all_markers(&workspace, false, Some(workspace.as_path()))
+            .await
+            .unwrap();
         assert!(normal_markers.is_empty());
 
         // Verify only onCreate and updateContent are executed
@@ -2384,6 +2425,7 @@ mod tests {
                     }
                 },
                 false,
+                Some(workspace.as_path()),
             )
             .await;
 
@@ -2393,7 +2435,9 @@ mod tests {
 
         // Verify only successfully executed phases have markers
         use crate::state::read_all_markers;
-        let markers = read_all_markers(&workspace, false).await.unwrap();
+        let markers = read_all_markers(&workspace, false, Some(workspace.as_path()))
+            .await
+            .unwrap();
         assert_eq!(markers.len(), 2); // Only onCreate and updateContent should have markers
 
         // Verify phases
@@ -2414,7 +2458,11 @@ mod tests {
         let mut orchestrator = LifecycleOrchestrator::new(ctx);
 
         let summary = orchestrator
-            .execute_with_markers_async(|_phase| async move { Ok::<(), String>(()) }, false)
+            .execute_with_markers_async(
+                |_phase| async move { Ok::<(), String>(()) },
+                false,
+                Some(workspace.as_path()),
+            )
             .await
             .unwrap();
 
@@ -2424,7 +2472,9 @@ mod tests {
 
         // Verify markers were written to disk
         use crate::state::read_all_markers;
-        let markers = read_all_markers(&workspace, false).await.unwrap();
+        let markers = read_all_markers(&workspace, false, Some(workspace.as_path()))
+            .await
+            .unwrap();
         assert_eq!(markers.len(), 6);
     }
 
@@ -2447,6 +2497,7 @@ mod tests {
                     Ok::<(), String>(())
                 },
                 false,
+                Some(workspace.as_path()),
             )
             .await
             .unwrap();
@@ -2476,7 +2527,9 @@ mod tests {
 
         // Verify markers reflect this order
         use crate::state::read_all_markers;
-        let markers = read_all_markers(&workspace, false).await.unwrap();
+        let markers = read_all_markers(&workspace, false, Some(workspace.as_path()))
+            .await
+            .unwrap();
 
         let marker_order: Vec<_> = markers.iter().map(|m| m.phase).collect();
         assert_eq!(
