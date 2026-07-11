@@ -286,11 +286,7 @@ pub async fn fetch_latest_stable_version(reference: &str) -> Option<String> {
     if repo_parts.is_empty() {
         return None;
     }
-    let name = if let Some(last) = repo_parts.pop() {
-        last.to_string()
-    } else {
-        return None;
-    };
+    let name = repo_parts.pop()?.to_string();
     let namespace = repo_parts.join("/");
 
     // Try to create a feature ref with no specific version (uses default tag 'latest')
