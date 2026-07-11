@@ -496,6 +496,9 @@ pub struct ContainerLifecycleConfig {
     pub user_env_probe: crate::container_env_probe::ContainerProbeMode,
     /// Optional cache folder for env probe results
     pub cache_folder: Option<std::path::PathBuf>,
+    /// Host user-data folder (global `--user-data-folder`); `None` → `~/.deacon`.
+    /// Roots lifecycle phase markers so they live outside the project (#280).
+    pub user_data_folder: Option<std::path::PathBuf>,
     /// Whether to force PTY allocation for lifecycle exec commands.
     /// When true, allocates a PTY even in non-interactive environments.
     /// Primarily used with JSON log mode to support interactive lifecycle commands.
@@ -817,6 +820,7 @@ where
                 LifecyclePhase::OnCreate,
                 updated_config.is_prebuild,
                 updated_config.config_hash.as_deref(),
+                updated_config.user_data_folder.as_deref(),
             )
             .await
             {
@@ -853,6 +857,7 @@ where
                 LifecyclePhase::UpdateContent,
                 updated_config.is_prebuild,
                 updated_config.config_hash.as_deref(),
+                updated_config.user_data_folder.as_deref(),
             )
             .await
             {
@@ -890,6 +895,7 @@ where
                     LifecyclePhase::PostCreate,
                     updated_config.is_prebuild,
                     updated_config.config_hash.as_deref(),
+                    updated_config.user_data_folder.as_deref(),
                 )
                 .await
                 {
@@ -931,6 +937,7 @@ where
                         LifecyclePhase::Dotfiles,
                         updated_config.is_prebuild,
                         updated_config.config_hash.as_deref(),
+                        updated_config.user_data_folder.as_deref(),
                     )
                     .await
                     {
@@ -2754,6 +2761,7 @@ impl ContainerLifecycleResult {
                             spec.phase,
                             spec.prebuild,
                             spec.config.config_hash.as_deref(),
+                            spec.config.user_data_folder.as_deref(),
                         )
                         .await
                         {
@@ -2898,6 +2906,7 @@ mod tests {
             use_login_shell: true,
             user_env_probe: crate::container_env_probe::ContainerProbeMode::LoginShell,
             cache_folder: None,
+            user_data_folder: None,
             force_pty: false,
             dotfiles: None,
             is_prebuild: false,
@@ -3049,6 +3058,7 @@ mod tests {
                 use_login_shell: false, // Use plain sh for tests
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                user_data_folder: None,
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
@@ -3114,6 +3124,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                user_data_folder: None,
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
@@ -3193,6 +3204,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                user_data_folder: None,
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
@@ -3259,6 +3271,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                user_data_folder: None,
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
@@ -3322,11 +3335,11 @@ mod tests {
 
         // Verify no markers exist before execution
         assert!(
-            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false).await,
+            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false, None).await,
             "postStart marker should not exist before execution"
         );
         assert!(
-            !marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false).await,
+            !marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false, None).await,
             "postAttach marker should not exist before execution"
         );
 
@@ -3347,6 +3360,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                user_data_folder: None,
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
@@ -3373,6 +3387,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                user_data_folder: None,
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
@@ -3398,11 +3413,11 @@ mod tests {
 
         // Verify markers were written for both phases
         assert!(
-            marker_exists(&workspace_folder, LifecyclePhase::PostStart, false).await,
+            marker_exists(&workspace_folder, LifecyclePhase::PostStart, false, None).await,
             "postStart marker should exist after successful execution"
         );
         assert!(
-            marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false).await,
+            marker_exists(&workspace_folder, LifecyclePhase::PostAttach, false, None).await,
             "postAttach marker should exist after successful execution"
         );
     }
@@ -3451,6 +3466,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                user_data_folder: None,
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
@@ -3475,7 +3491,7 @@ mod tests {
 
         // Verify marker was NOT written because phase failed
         assert!(
-            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false).await,
+            !marker_exists(&workspace_folder, LifecyclePhase::PostStart, false, None).await,
             "postStart marker should NOT exist after failed execution"
         );
     }
@@ -3535,6 +3551,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                user_data_folder: None,
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,
@@ -3561,6 +3578,7 @@ mod tests {
                 use_login_shell: false,
                 user_env_probe: crate::container_env_probe::ContainerProbeMode::None,
                 cache_folder: None,
+                user_data_folder: None,
                 force_pty: false,
                 dotfiles: None,
                 is_prebuild: false,

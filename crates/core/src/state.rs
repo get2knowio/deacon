@@ -228,7 +228,10 @@ impl StateManager {
 // marker isolation per research.md Decision 1.
 
 /// Directory name for devcontainer state files
-const DEVCONTAINER_STATE_DIR: &str = ".devcontainer-state";
+/// Subdirectory of the host user-data folder that holds per-workspace lifecycle
+/// markers (`~/.deacon/state/<workspace_hash>/`). Relocated out of the project
+/// (`<workspace>/.devcontainer-state/`) per #280.
+const STATE_SUBDIR: &str = "state";
 
 /// Subdirectory for prebuild-isolated markers
 const PREBUILD_SUBDIR: &str = "prebuild";
@@ -245,13 +248,27 @@ const MARKER_EXTENSION: &str = "json";
 ///
 /// * `workspace` - Path to the devcontainer workspace root
 /// * `prebuild` - If true, returns the isolated prebuild marker directory
-pub fn marker_base_dir(workspace: &Path, prebuild: bool) -> PathBuf {
-    let base = workspace.join(DEVCONTAINER_STATE_DIR);
+pub fn marker_base_dir(
+    workspace: &Path,
+    prebuild: bool,
+    user_data_folder: Option<&Path>,
+) -> Result<PathBuf> {
+    // Markers live in the host user-data folder
+    // (`~/.deacon/state/<workspace_hash>/[prebuild/]`), keyed by a stable
+    // per-workspace hash, NOT inside the project (`<workspace>/.devcontainer-state/`).
+    // This keeps resume state surviving `down && up` (the hash is stable across
+    // container removal) while leaving no stray files in the user's repo (#280).
+    let workspace_hash = crate::container::ContainerIdentity::hash_workspace_path(workspace);
+    let mut base = crate::trust::user_data_root(user_data_folder)
+        .map_err(|source| StateError::UserDataFolder {
+            message: source.to_string(),
+        })?
+        .join(STATE_SUBDIR)
+        .join(workspace_hash);
     if prebuild {
-        base.join(PREBUILD_SUBDIR)
-    } else {
-        base
+        base = base.join(PREBUILD_SUBDIR);
     }
+    Ok(base)
 }
 
 /// Get the marker file path for a specific lifecycle phase.
@@ -271,11 +288,21 @@ pub fn marker_base_dir(workspace: &Path, prebuild: bool) -> PathBuf {
 /// use deacon_core::lifecycle::LifecyclePhase;
 ///
 /// let workspace = Path::new("/workspace");
-/// let path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
-/// assert!(path.ends_with(".devcontainer-state/onCreate.json"));
+/// let path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate, None).unwrap();
+/// assert!(path.ends_with("onCreate.json"));
 /// ```
-pub fn marker_path_for_phase(workspace: &Path, phase: LifecyclePhase) -> PathBuf {
-    marker_base_dir(workspace, false).join(format!("{}.{}", phase.as_str(), MARKER_EXTENSION))
+pub fn marker_path_for_phase(
+    workspace: &Path,
+    phase: LifecyclePhase,
+    user_data_folder: Option<&Path>,
+) -> Result<PathBuf> {
+    Ok(
+        marker_base_dir(workspace, false, user_data_folder)?.join(format!(
+            "{}.{}",
+            phase.as_str(),
+            MARKER_EXTENSION
+        )),
+    )
 }
 
 /// Get the prebuild marker file path for a specific lifecycle phase.
@@ -298,11 +325,21 @@ pub fn marker_path_for_phase(workspace: &Path, phase: LifecyclePhase) -> PathBuf
 /// use deacon_core::lifecycle::LifecyclePhase;
 ///
 /// let workspace = Path::new("/workspace");
-/// let path = prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
-/// assert!(path.ends_with(".devcontainer-state/prebuild/onCreate.json"));
+/// let path = prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate, None).unwrap();
+/// assert!(path.ends_with("prebuild/onCreate.json"));
 /// ```
-pub fn prebuild_marker_path_for_phase(workspace: &Path, phase: LifecyclePhase) -> PathBuf {
-    marker_base_dir(workspace, true).join(format!("{}.{}", phase.as_str(), MARKER_EXTENSION))
+pub fn prebuild_marker_path_for_phase(
+    workspace: &Path,
+    phase: LifecyclePhase,
+    user_data_folder: Option<&Path>,
+) -> Result<PathBuf> {
+    Ok(
+        marker_base_dir(workspace, true, user_data_folder)?.join(format!(
+            "{}.{}",
+            phase.as_str(),
+            MARKER_EXTENSION
+        )),
+    )
 }
 
 /// Validation result for phase markers.
@@ -641,7 +678,7 @@ pub async fn write_phase_marker(path: &Path, state: &LifecyclePhaseState) -> Res
 ///
 /// # async fn run() {
 /// let workspace = Path::new("/workspace");
-/// let markers = read_all_markers(workspace, false).await.expect("Failed to read markers");
+/// let markers = read_all_markers(workspace, false, Some(workspace)).await.expect("Failed to read markers");
 /// for marker in markers {
 ///     println!("{}: {:?}", marker.phase.as_str(), marker.status);
 /// }
@@ -651,8 +688,9 @@ pub async fn write_phase_marker(path: &Path, state: &LifecyclePhaseState) -> Res
 pub async fn read_all_markers(
     workspace: &Path,
     prebuild: bool,
+    user_data_folder: Option<&Path>,
 ) -> Result<Vec<LifecyclePhaseState>> {
-    read_all_markers_for_config(workspace, prebuild, None).await
+    read_all_markers_for_config(workspace, prebuild, None, user_data_folder).await
 }
 
 /// Read every marker for `workspace`, then drop any whose recorded
@@ -666,15 +704,16 @@ pub async fn read_all_markers_for_config(
     workspace: &Path,
     prebuild: bool,
     current_config_hash: Option<&str>,
+    user_data_folder: Option<&Path>,
 ) -> Result<Vec<LifecyclePhaseState>> {
     let mut markers = Vec::new();
     let mut dropped = 0usize;
 
     for phase in LifecyclePhase::spec_order() {
         let path = if prebuild {
-            prebuild_marker_path_for_phase(workspace, *phase)
+            prebuild_marker_path_for_phase(workspace, *phase, user_data_folder)?
         } else {
-            marker_path_for_phase(workspace, *phase)
+            marker_path_for_phase(workspace, *phase, user_data_folder)?
         };
 
         if let Some(state) = read_phase_marker(&path).await? {
@@ -728,12 +767,16 @@ pub async fn read_all_markers_for_config(
 ///
 /// # async fn run() {
 /// let workspace = Path::new("/workspace");
-/// clear_markers(workspace, false).await.expect("Failed to clear markers");
+/// clear_markers(workspace, false, None).await.expect("Failed to clear markers");
 /// # }
 /// ```
 #[instrument(skip_all, fields(workspace = %workspace.display(), prebuild))]
-pub async fn clear_markers(workspace: &Path, prebuild: bool) -> Result<()> {
-    let base_dir = marker_base_dir(workspace, prebuild);
+pub async fn clear_markers(
+    workspace: &Path,
+    prebuild: bool,
+    user_data_folder: Option<&Path>,
+) -> Result<()> {
+    let base_dir = marker_base_dir(workspace, prebuild, user_data_folder)?;
 
     if tokio::fs::metadata(&base_dir).await.is_err() {
         debug!("Marker directory does not exist, nothing to clear");
@@ -865,18 +908,26 @@ pub fn all_phases_complete_up_to(
 ///
 /// # async fn run() {
 /// let workspace = Path::new("/workspace");
-/// if marker_exists(workspace, LifecyclePhase::OnCreate, false).await {
+/// if marker_exists(workspace, LifecyclePhase::OnCreate, false, None).await {
 ///     println!("onCreate marker exists");
 /// }
 /// # }
 /// ```
-pub async fn marker_exists(workspace: &Path, phase: LifecyclePhase, prebuild: bool) -> bool {
+pub async fn marker_exists(
+    workspace: &Path,
+    phase: LifecyclePhase,
+    prebuild: bool,
+    user_data_folder: Option<&Path>,
+) -> bool {
     let marker_path = if prebuild {
-        prebuild_marker_path_for_phase(workspace, phase)
+        prebuild_marker_path_for_phase(workspace, phase, user_data_folder)
     } else {
-        marker_path_for_phase(workspace, phase)
+        marker_path_for_phase(workspace, phase, user_data_folder)
     };
-    tokio::fs::metadata(&marker_path).await.is_ok()
+    match marker_path {
+        Ok(p) => tokio::fs::metadata(&p).await.is_ok(),
+        Err(_) => false,
+    }
 }
 
 /// Record a phase as successfully executed by writing its marker to disk.
@@ -904,7 +955,7 @@ pub async fn marker_exists(workspace: &Path, phase: LifecyclePhase, prebuild: bo
 ///
 /// # async fn run() {
 /// let workspace = Path::new("/workspace");
-/// let state = record_phase_executed(workspace, LifecyclePhase::OnCreate, false)
+/// let state = record_phase_executed(workspace, LifecyclePhase::OnCreate, false, None)
 ///     .await
 ///     .expect("Failed to record phase");
 /// assert_eq!(state.phase, LifecyclePhase::OnCreate);
@@ -915,8 +966,9 @@ pub async fn record_phase_executed(
     workspace: &Path,
     phase: LifecyclePhase,
     prebuild: bool,
+    user_data_folder: Option<&Path>,
 ) -> Result<LifecyclePhaseState> {
-    record_phase_executed_with_config_hash(workspace, phase, prebuild, None).await
+    record_phase_executed_with_config_hash(workspace, phase, prebuild, None, user_data_folder).await
 }
 
 /// Record a phase as executed and stamp the marker with the resolved
@@ -932,11 +984,12 @@ pub async fn record_phase_executed_with_config_hash(
     phase: LifecyclePhase,
     prebuild: bool,
     config_hash: Option<&str>,
+    user_data_folder: Option<&Path>,
 ) -> Result<LifecyclePhaseState> {
     let marker_path = if prebuild {
-        prebuild_marker_path_for_phase(workspace, phase)
+        prebuild_marker_path_for_phase(workspace, phase, user_data_folder)?
     } else {
-        marker_path_for_phase(workspace, phase)
+        marker_path_for_phase(workspace, phase, user_data_folder)?
     };
 
     let mut state = LifecyclePhaseState::new_executed(phase, marker_path.clone());
@@ -980,7 +1033,7 @@ pub async fn record_phase_executed_with_config_hash(
 ///
 /// # async fn run() {
 /// let workspace = Path::new("/workspace");
-/// let state = record_phase_skipped(workspace, LifecyclePhase::PostCreate, "prebuild mode", true)
+/// let state = record_phase_skipped(workspace, LifecyclePhase::PostCreate, "prebuild mode", true, None)
 ///     .await
 ///     .expect("Failed to record skipped phase");
 /// assert_eq!(state.reason, Some("prebuild mode".to_string()));
@@ -992,11 +1045,12 @@ pub async fn record_phase_skipped(
     phase: LifecyclePhase,
     reason: &str,
     prebuild: bool,
+    user_data_folder: Option<&Path>,
 ) -> Result<LifecyclePhaseState> {
     let marker_path = if prebuild {
-        prebuild_marker_path_for_phase(workspace, phase)
+        prebuild_marker_path_for_phase(workspace, phase, user_data_folder)?
     } else {
-        marker_path_for_phase(workspace, phase)
+        marker_path_for_phase(workspace, phase, user_data_folder)?
     };
 
     let state = LifecyclePhaseState::new_skipped(phase, marker_path.clone(), reason);
@@ -1049,7 +1103,7 @@ pub async fn record_phase_skipped(
 ///         "prebuild mode"
 ///     ),
 /// ];
-/// record_all_phase_markers(workspace, &phases, false).await.expect("Failed to record markers");
+/// record_all_phase_markers(workspace, &phases, false, None).await.expect("Failed to record markers");
 /// # }
 /// ```
 #[instrument(skip_all, fields(workspace = %workspace.display(), phase_count = phases.len(), prebuild))]
@@ -1057,6 +1111,7 @@ pub async fn record_all_phase_markers(
     workspace: &Path,
     phases: &[LifecyclePhaseState],
     prebuild: bool,
+    user_data_folder: Option<&Path>,
 ) -> Result<()> {
     let mut recorded = 0;
 
@@ -1065,9 +1120,9 @@ pub async fn record_all_phase_markers(
         match phase_state.status {
             PhaseStatus::Executed | PhaseStatus::Skipped => {
                 let marker_path = if prebuild {
-                    prebuild_marker_path_for_phase(workspace, phase_state.phase)
+                    prebuild_marker_path_for_phase(workspace, phase_state.phase, user_data_folder)?
                 } else {
-                    marker_path_for_phase(workspace, phase_state.phase)
+                    marker_path_for_phase(workspace, phase_state.phase, user_data_folder)?
                 };
 
                 // Create a new state with the correct marker path
@@ -1225,64 +1280,79 @@ mod tests {
     // Lifecycle Phase Marker Helper Tests
     // =========================================================================
 
+    // Markers now live under the host user-data folder
+    // (`<user_data>/state/<workspace_hash>/[prebuild/]<phase>.json`), NOT inside the
+    // project (`<workspace>/.devcontainer-state/`). See #280.
     #[test]
     fn test_marker_base_dir_normal() {
         let workspace = Path::new("/workspace");
-        let base = marker_base_dir(workspace, false);
-        assert_eq!(base, PathBuf::from("/workspace/.devcontainer-state"));
+        let user_data = Path::new("/udf");
+        let hash = crate::container::ContainerIdentity::hash_workspace_path(workspace);
+        let base = marker_base_dir(workspace, false, Some(user_data)).unwrap();
+        assert_eq!(base, PathBuf::from("/udf").join("state").join(&hash));
+        assert!(!base.to_string_lossy().contains(".devcontainer-state"));
     }
 
     #[test]
     fn test_marker_base_dir_prebuild() {
         let workspace = Path::new("/workspace");
-        let base = marker_base_dir(workspace, true);
+        let user_data = Path::new("/udf");
+        let hash = crate::container::ContainerIdentity::hash_workspace_path(workspace);
+        let base = marker_base_dir(workspace, true, Some(user_data)).unwrap();
         assert_eq!(
             base,
-            PathBuf::from("/workspace/.devcontainer-state/prebuild")
+            PathBuf::from("/udf")
+                .join("state")
+                .join(&hash)
+                .join("prebuild")
         );
     }
 
     #[test]
     fn test_marker_path_for_phase() {
         let workspace = Path::new("/workspace");
+        let user_data = Path::new("/udf");
+        let hash = crate::container::ContainerIdentity::hash_workspace_path(workspace);
+        let expected_dir = PathBuf::from("/udf").join("state").join(&hash);
 
-        assert_eq!(
-            marker_path_for_phase(workspace, LifecyclePhase::OnCreate),
-            PathBuf::from("/workspace/.devcontainer-state/onCreate.json")
-        );
-        assert_eq!(
-            marker_path_for_phase(workspace, LifecyclePhase::UpdateContent),
-            PathBuf::from("/workspace/.devcontainer-state/updateContent.json")
-        );
-        assert_eq!(
-            marker_path_for_phase(workspace, LifecyclePhase::PostCreate),
-            PathBuf::from("/workspace/.devcontainer-state/postCreate.json")
-        );
-        assert_eq!(
-            marker_path_for_phase(workspace, LifecyclePhase::Dotfiles),
-            PathBuf::from("/workspace/.devcontainer-state/dotfiles.json")
-        );
-        assert_eq!(
-            marker_path_for_phase(workspace, LifecyclePhase::PostStart),
-            PathBuf::from("/workspace/.devcontainer-state/postStart.json")
-        );
-        assert_eq!(
-            marker_path_for_phase(workspace, LifecyclePhase::PostAttach),
-            PathBuf::from("/workspace/.devcontainer-state/postAttach.json")
-        );
+        for (phase, file) in [
+            (LifecyclePhase::OnCreate, "onCreate.json"),
+            (LifecyclePhase::UpdateContent, "updateContent.json"),
+            (LifecyclePhase::PostCreate, "postCreate.json"),
+            (LifecyclePhase::Dotfiles, "dotfiles.json"),
+            (LifecyclePhase::PostStart, "postStart.json"),
+            (LifecyclePhase::PostAttach, "postAttach.json"),
+        ] {
+            assert_eq!(
+                marker_path_for_phase(workspace, phase, Some(user_data)).unwrap(),
+                expected_dir.join(file)
+            );
+        }
     }
 
     #[test]
     fn test_prebuild_marker_path_for_phase() {
         let workspace = Path::new("/workspace");
+        let user_data = Path::new("/udf");
+        let hash = crate::container::ContainerIdentity::hash_workspace_path(workspace);
+        let expected_dir = PathBuf::from("/udf")
+            .join("state")
+            .join(&hash)
+            .join("prebuild");
 
         assert_eq!(
-            prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate),
-            PathBuf::from("/workspace/.devcontainer-state/prebuild/onCreate.json")
+            prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(user_data))
+                .unwrap(),
+            expected_dir.join("onCreate.json")
         );
         assert_eq!(
-            prebuild_marker_path_for_phase(workspace, LifecyclePhase::UpdateContent),
-            PathBuf::from("/workspace/.devcontainer-state/prebuild/updateContent.json")
+            prebuild_marker_path_for_phase(
+                workspace,
+                LifecyclePhase::UpdateContent,
+                Some(user_data)
+            )
+            .unwrap(),
+            expected_dir.join("updateContent.json")
         );
     }
 
@@ -1299,7 +1369,8 @@ mod tests {
     async fn test_write_and_read_phase_marker() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
-        let path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
+        let path =
+            marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace)).unwrap();
 
         // Write a marker
         let state = LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, path.clone());
@@ -1316,7 +1387,9 @@ mod tests {
     async fn test_write_phase_marker_creates_directory() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
-        let path = prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
+        let path =
+            prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace))
+                .unwrap();
 
         // Parent directories should not exist yet
         assert!(!path.parent().unwrap().exists());
@@ -1347,7 +1420,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
 
-        let markers = read_all_markers(workspace, false).await.unwrap();
+        let markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert!(markers.is_empty());
     }
 
@@ -1357,14 +1432,17 @@ mod tests {
         let workspace = temp_dir.path();
 
         // Write markers for some phases
-        let on_create_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
+        let on_create_path =
+            marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace)).unwrap();
         let on_create_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, on_create_path.clone());
         write_phase_marker(&on_create_path, &on_create_state)
             .await
             .unwrap();
 
-        let update_content_path = marker_path_for_phase(workspace, LifecyclePhase::UpdateContent);
+        let update_content_path =
+            marker_path_for_phase(workspace, LifecyclePhase::UpdateContent, Some(workspace))
+                .unwrap();
         let update_content_state = LifecyclePhaseState::new_executed(
             LifecyclePhase::UpdateContent,
             update_content_path.clone(),
@@ -1374,7 +1452,9 @@ mod tests {
             .unwrap();
 
         // Read all markers
-        let markers = read_all_markers(workspace, false).await.unwrap();
+        let markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert_eq!(markers.len(), 2);
         assert_eq!(markers[0].phase, LifecyclePhase::OnCreate);
         assert_eq!(markers[1].phase, LifecyclePhase::UpdateContent);
@@ -1386,7 +1466,8 @@ mod tests {
         let workspace = temp_dir.path();
 
         // Write normal marker
-        let normal_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
+        let normal_path =
+            marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace)).unwrap();
         let normal_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, normal_path.clone());
         write_phase_marker(&normal_path, &normal_state)
@@ -1394,7 +1475,9 @@ mod tests {
             .unwrap();
 
         // Write prebuild marker
-        let prebuild_path = prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
+        let prebuild_path =
+            prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace))
+                .unwrap();
         let prebuild_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, prebuild_path.clone());
         write_phase_marker(&prebuild_path, &prebuild_state)
@@ -1402,12 +1485,16 @@ mod tests {
             .unwrap();
 
         // Normal markers should not include prebuild
-        let normal_markers = read_all_markers(workspace, false).await.unwrap();
+        let normal_markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert_eq!(normal_markers.len(), 1);
         assert_eq!(normal_markers[0].marker_path, normal_path);
 
         // Prebuild markers should not include normal
-        let prebuild_markers = read_all_markers(workspace, true).await.unwrap();
+        let prebuild_markers = read_all_markers(workspace, true, Some(workspace))
+            .await
+            .unwrap();
         assert_eq!(prebuild_markers.len(), 1);
         assert_eq!(prebuild_markers[0].marker_path, prebuild_path);
     }
@@ -1423,20 +1510,26 @@ mod tests {
             LifecyclePhase::UpdateContent,
             LifecyclePhase::PostCreate,
         ] {
-            let path = marker_path_for_phase(workspace, *phase);
+            let path = marker_path_for_phase(workspace, *phase, Some(workspace)).unwrap();
             let state = LifecyclePhaseState::new_executed(*phase, path.clone());
             write_phase_marker(&path, &state).await.unwrap();
         }
 
         // Verify markers exist
-        let markers = read_all_markers(workspace, false).await.unwrap();
+        let markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert_eq!(markers.len(), 3);
 
         // Clear markers
-        clear_markers(workspace, false).await.unwrap();
+        clear_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
 
         // Verify markers are gone
-        let markers = read_all_markers(workspace, false).await.unwrap();
+        let markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert!(markers.is_empty());
     }
 
@@ -1446,7 +1539,8 @@ mod tests {
         let workspace = temp_dir.path();
 
         // Write normal marker
-        let normal_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
+        let normal_path =
+            marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace)).unwrap();
         let normal_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, normal_path.clone());
         write_phase_marker(&normal_path, &normal_state)
@@ -1454,7 +1548,9 @@ mod tests {
             .unwrap();
 
         // Write prebuild marker
-        let prebuild_path = prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
+        let prebuild_path =
+            prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace))
+                .unwrap();
         let prebuild_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, prebuild_path.clone());
         write_phase_marker(&prebuild_path, &prebuild_state)
@@ -1462,14 +1558,20 @@ mod tests {
             .unwrap();
 
         // Clear only prebuild markers
-        clear_markers(workspace, true).await.unwrap();
+        clear_markers(workspace, true, Some(workspace))
+            .await
+            .unwrap();
 
         // Normal markers should still exist
-        let normal_markers = read_all_markers(workspace, false).await.unwrap();
+        let normal_markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert_eq!(normal_markers.len(), 1);
 
         // Prebuild markers should be gone
-        let prebuild_markers = read_all_markers(workspace, true).await.unwrap();
+        let prebuild_markers = read_all_markers(workspace, true, Some(workspace))
+            .await
+            .unwrap();
         assert!(prebuild_markers.is_empty());
     }
 
@@ -1479,8 +1581,12 @@ mod tests {
         let workspace = temp_dir.path();
 
         // Should not error when directory doesn't exist
-        clear_markers(workspace, false).await.unwrap();
-        clear_markers(workspace, true).await.unwrap();
+        clear_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
+        clear_markers(workspace, true, Some(workspace))
+            .await
+            .unwrap();
     }
 
     #[test]
@@ -1631,20 +1737,22 @@ mod tests {
         let workspace = temp_dir.path();
 
         // Record onCreate as executed
-        let state = record_phase_executed(workspace, LifecyclePhase::OnCreate, false)
-            .await
-            .unwrap();
+        let state =
+            record_phase_executed(workspace, LifecyclePhase::OnCreate, false, Some(workspace))
+                .await
+                .unwrap();
 
         assert_eq!(state.phase, LifecyclePhase::OnCreate);
         assert_eq!(state.status, PhaseStatus::Executed);
         assert!(state.timestamp.is_some());
 
         // Verify the marker was written to disk
-        let read_state =
-            read_phase_marker(&marker_path_for_phase(workspace, LifecyclePhase::OnCreate))
-                .await
-                .unwrap()
-                .unwrap();
+        let read_state = read_phase_marker(
+            &marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace)).unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(read_state.phase, LifecyclePhase::OnCreate);
         assert_eq!(read_state.status, PhaseStatus::Executed);
     }
@@ -1655,18 +1763,19 @@ mod tests {
         let workspace = temp_dir.path();
 
         // Record onCreate as executed in prebuild mode
-        let state = record_phase_executed(workspace, LifecyclePhase::OnCreate, true)
-            .await
-            .unwrap();
+        let state =
+            record_phase_executed(workspace, LifecyclePhase::OnCreate, true, Some(workspace))
+                .await
+                .unwrap();
 
         assert_eq!(state.phase, LifecyclePhase::OnCreate);
         assert_eq!(state.status, PhaseStatus::Executed);
 
         // Verify the marker was written to the prebuild directory
-        let read_state = read_phase_marker(&prebuild_marker_path_for_phase(
-            workspace,
-            LifecyclePhase::OnCreate,
-        ))
+        let read_state = read_phase_marker(
+            &prebuild_marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace))
+                .unwrap(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1675,10 +1784,13 @@ mod tests {
 
         // Verify normal marker directory does NOT have the marker
         assert!(
-            read_phase_marker(&marker_path_for_phase(workspace, LifecyclePhase::OnCreate))
-                .await
-                .unwrap()
-                .is_none()
+            read_phase_marker(
+                &marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace))
+                    .unwrap()
+            )
+            .await
+            .unwrap()
+            .is_none()
         );
     }
 
@@ -1693,6 +1805,7 @@ mod tests {
             LifecyclePhase::PostCreate,
             "prebuild mode",
             false,
+            Some(workspace),
         )
         .await
         .unwrap();
@@ -1702,10 +1815,9 @@ mod tests {
         assert_eq!(state.reason, Some("prebuild mode".to_string()));
 
         // Verify the marker was written to disk
-        let read_state = read_phase_marker(&marker_path_for_phase(
-            workspace,
-            LifecyclePhase::PostCreate,
-        ))
+        let read_state = read_phase_marker(
+            &marker_path_for_phase(workspace, LifecyclePhase::PostCreate, Some(workspace)).unwrap(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1725,6 +1837,7 @@ mod tests {
             LifecyclePhase::PostCreate,
             "--skip-post-create flag",
             true,
+            Some(workspace),
         )
         .await
         .unwrap();
@@ -1733,10 +1846,10 @@ mod tests {
         assert_eq!(state.status, PhaseStatus::Skipped);
 
         // Verify the marker was written to the prebuild directory
-        let read_state = read_phase_marker(&prebuild_marker_path_for_phase(
-            workspace,
-            LifecyclePhase::PostCreate,
-        ))
+        let read_state = read_phase_marker(
+            &prebuild_marker_path_for_phase(workspace, LifecyclePhase::PostCreate, Some(workspace))
+                .unwrap(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1775,12 +1888,14 @@ mod tests {
         ];
 
         // Record all markers
-        record_all_phase_markers(workspace, &phases, false)
+        record_all_phase_markers(workspace, &phases, false, Some(workspace))
             .await
             .unwrap();
 
         // Verify all markers were written
-        let markers = read_all_markers(workspace, false).await.unwrap();
+        let markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert_eq!(markers.len(), 4);
 
         // Check executed phases
@@ -1829,12 +1944,14 @@ mod tests {
         ];
 
         // Record all markers
-        record_all_phase_markers(workspace, &phases, false)
+        record_all_phase_markers(workspace, &phases, false, Some(workspace))
             .await
             .unwrap();
 
         // Verify only executed phase was recorded
-        let markers = read_all_markers(workspace, false).await.unwrap();
+        let markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0].phase, LifecyclePhase::OnCreate);
         assert_eq!(markers[0].status, PhaseStatus::Executed);
@@ -1857,16 +1974,20 @@ mod tests {
         ];
 
         // Record markers in prebuild mode
-        record_all_phase_markers(workspace, &phases, true)
+        record_all_phase_markers(workspace, &phases, true, Some(workspace))
             .await
             .unwrap();
 
         // Verify markers exist in prebuild directory
-        let prebuild_markers = read_all_markers(workspace, true).await.unwrap();
+        let prebuild_markers = read_all_markers(workspace, true, Some(workspace))
+            .await
+            .unwrap();
         assert_eq!(prebuild_markers.len(), 2);
 
         // Verify normal marker directory is empty
-        let normal_markers = read_all_markers(workspace, false).await.unwrap();
+        let normal_markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert!(normal_markers.is_empty());
     }
 
@@ -1877,13 +1998,15 @@ mod tests {
 
         // Record phases in lifecycle order (simulating a fresh run)
         for phase in LifecyclePhase::spec_order() {
-            record_phase_executed(workspace, *phase, false)
+            record_phase_executed(workspace, *phase, false, Some(workspace))
                 .await
                 .unwrap();
         }
 
         // Read all markers and verify they are in order
-        let markers = read_all_markers(workspace, false).await.unwrap();
+        let markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
         assert_eq!(markers.len(), 6);
 
         // Verify order matches spec order
@@ -2103,7 +2226,8 @@ mod tests {
         let workspace = temp_dir.path();
 
         // Write a valid marker for onCreate
-        let on_create_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
+        let on_create_path =
+            marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace)).unwrap();
         let on_create_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, on_create_path.clone());
         write_phase_marker(&on_create_path, &on_create_state)
@@ -2111,12 +2235,15 @@ mod tests {
             .unwrap();
 
         // Write a corrupted marker for updateContent
-        let update_content_path = marker_path_for_phase(workspace, LifecyclePhase::UpdateContent);
+        let update_content_path =
+            marker_path_for_phase(workspace, LifecyclePhase::UpdateContent, Some(workspace))
+                .unwrap();
         std::fs::create_dir_all(update_content_path.parent().unwrap()).unwrap();
         std::fs::write(&update_content_path, "corrupted json {{").unwrap();
 
         // Write a valid marker for postCreate
-        let post_create_path = marker_path_for_phase(workspace, LifecyclePhase::PostCreate);
+        let post_create_path =
+            marker_path_for_phase(workspace, LifecyclePhase::PostCreate, Some(workspace)).unwrap();
         let post_create_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::PostCreate, post_create_path.clone());
         write_phase_marker(&post_create_path, &post_create_state)
@@ -2124,7 +2251,9 @@ mod tests {
             .unwrap();
 
         // Read all markers - should skip the corrupted one
-        let markers = read_all_markers(workspace, false).await.unwrap();
+        let markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
 
         // Only 2 valid markers should be returned (onCreate and postCreate)
         assert_eq!(markers.len(), 2);
@@ -2138,7 +2267,8 @@ mod tests {
         let workspace = temp_dir.path();
 
         // Write valid markers for onCreate
-        let on_create_path = marker_path_for_phase(workspace, LifecyclePhase::OnCreate);
+        let on_create_path =
+            marker_path_for_phase(workspace, LifecyclePhase::OnCreate, Some(workspace)).unwrap();
         let on_create_state =
             LifecyclePhaseState::new_executed(LifecyclePhase::OnCreate, on_create_path.clone());
         write_phase_marker(&on_create_path, &on_create_state)
@@ -2146,12 +2276,16 @@ mod tests {
             .unwrap();
 
         // Write corrupted marker for updateContent (simulating corruption)
-        let update_content_path = marker_path_for_phase(workspace, LifecyclePhase::UpdateContent);
+        let update_content_path =
+            marker_path_for_phase(workspace, LifecyclePhase::UpdateContent, Some(workspace))
+                .unwrap();
         std::fs::create_dir_all(update_content_path.parent().unwrap()).unwrap();
         std::fs::write(&update_content_path, "").unwrap(); // Empty file = corrupted
 
         // Read markers - corrupted one will be skipped
-        let markers = read_all_markers(workspace, false).await.unwrap();
+        let markers = read_all_markers(workspace, false, Some(workspace))
+            .await
+            .unwrap();
 
         // Find earliest incomplete - should be updateContent (the corrupted one)
         let earliest = find_earliest_incomplete_phase(&markers);

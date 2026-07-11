@@ -1182,6 +1182,59 @@ mod tests {
     }
 
     #[test]
+    fn test_get_cache_dir_is_absolute_under_user_data_folder() {
+        // Regression for #280: the default cache must live in the host user-data
+        // folder (absolute, `~/.deacon/cache`), NOT a bare CWD-relative
+        // `.deacon/cache`. Redirect HOME to a tempdir and clear DEACON_CACHE_DIR
+        // so the assertion is hermetic and never touches the real home directory.
+        let fake_home = TempDir::new().unwrap();
+        temp_env::with_vars(
+            [
+                ("DEACON_CACHE_DIR", None::<&str>),
+                ("HOME", Some(fake_home.path().to_str().unwrap())),
+            ],
+            || {
+                let cache_dir = get_cache_dir().unwrap();
+                assert!(
+                    cache_dir.is_absolute(),
+                    "cache dir must be absolute, got {}",
+                    cache_dir.display()
+                );
+                assert!(
+                    cache_dir.ends_with("cache"),
+                    "cache dir must end with `cache`, got {}",
+                    cache_dir.display()
+                );
+                assert!(
+                    cache_dir.parent().unwrap().ends_with(".deacon"),
+                    "cache dir must sit under `.deacon`, got {}",
+                    cache_dir.display()
+                );
+                // On unix the redirected HOME must anchor the path; on other
+                // platforms `directories_next` uses OS-specific roots, so we only
+                // assert the shape above.
+                #[cfg(unix)]
+                assert!(
+                    cache_dir.starts_with(fake_home.path()),
+                    "cache dir must be under the (fake) HOME, got {}",
+                    cache_dir.display()
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn test_get_cache_dir_honors_env_override() {
+        let dir = TempDir::new().unwrap();
+        let override_path = dir.path().join("custom-cache");
+        temp_env::with_var("DEACON_CACHE_DIR", Some(override_path.as_os_str()), || {
+            let cache_dir = get_cache_dir().unwrap();
+            assert_eq!(cache_dir, override_path);
+            assert!(cache_dir.exists());
+        });
+    }
+
+    #[test]
     fn test_event_serialization() {
         let event = ProgressEvent::BuildBegin {
             id: 1,
@@ -1423,9 +1476,15 @@ mod tests {
 ///
 /// Resolution order (first match wins):
 /// - Environment override `DEACON_CACHE_DIR`
-/// - `./.deacon/cache` relative to the current working directory
+/// - `{user_data_folder}/cache` (defaults to `~/.deacon/cache`)
 ///
-/// The directory is created with `create_dir_all` if it does not already exist.
+/// The cache holds content-addressed OCI blobs, features, and manifests, which
+/// are workspace-agnostic and shareable across projects. It therefore lives in
+/// the host user-data folder alongside deacon's other machine-level state (the
+/// trust store, port-forward registry, …) rather than inside the project — so a
+/// `deacon up`/`build` never leaves a stray `.deacon/` directory in the user's
+/// repository (issue #280). The directory is created with `create_dir_all` if it
+/// does not already exist.
 ///
 /// # Errors
 ///
@@ -1447,19 +1506,35 @@ pub fn get_cache_dir() -> Result<PathBuf> {
         return Ok(path);
     }
 
-    // Default to a project-local cache directory to avoid writing outside the workspace
-    let cache_dir = PathBuf::from(".deacon").join("cache");
+    // Default to the host user-data folder so we never write into the user's
+    // project tree. `user_data_root(None)` resolves to `~/.deacon`; map its
+    // domain error into an `io::Error` to fit this module's `ProgressError`.
+    let cache_dir = crate::trust::user_data_root(None)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?
+        .join("cache");
     if !cache_dir.exists() {
         std::fs::create_dir_all(&cache_dir)?;
     }
 
-    // Check for legacy system cache directory and warn user about the migration
+    // Warn about caches left by earlier versions so users can reclaim the space.
+    // 1) A project-local `.deacon/cache` written by prior deacon releases (the
+    //    stray-artifact regression from #280) — relative to the current CWD.
+    let legacy_project_cache = PathBuf::from(".deacon").join("cache");
+    if legacy_project_cache.exists() && legacy_project_cache != cache_dir {
+        warn!(
+            "Found a legacy project-local cache at {}. Deacon now caches under {}. \
+             Consider removing the old directory (and adding `.deacon/` to .gitignore).",
+            legacy_project_cache.display(),
+            cache_dir.display()
+        );
+    }
+    // 2) The original system cache directory from even earlier versions.
     if let Some(proj_dirs) = ProjectDirs::from("com", "deacon", "deacon") {
         let old_cache_dir = proj_dirs.cache_dir();
         if old_cache_dir.exists() {
             warn!(
-                "Found existing cache at {}. Deacon now uses project-local cache at {}. \
-                 Consider migrating or removing the old cache directory.",
+                "Found an existing cache at {}. Deacon now caches under {}. \
+                 Consider removing the old cache directory.",
                 old_cache_dir.display(),
                 cache_dir.display()
             );

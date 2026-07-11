@@ -299,6 +299,10 @@ pub enum StateError {
     /// Underlying cache operation failed
     #[error("State cache error: {0}")]
     Cache(#[from] CacheError),
+
+    /// Could not resolve the host user-data folder that roots lifecycle markers
+    #[error("Could not resolve user-data folder for lifecycle markers: {message}")]
+    UserDataFolder { message: String },
 }
 
 /// Output / stdout-stderr separation errors
