@@ -28,7 +28,24 @@ The 1.0 release is being assembled across a series of PRs tracked in
   `--override-config` flag (the explicit flag takes precedence). Uses clap-native
   `env` support, so `--help` advertises it.
 
+- **`--merge-config <path>`** (repeatable; also `DEACON_MERGE_CONFIG` for a single
+  path) deep-overlays a `devcontainer.json` fragment onto the base config, later
+  flags winning. This is the CLI analogue of a profile `mergeConfig` and the new
+  home for the *merge* behavior that `--override-config` used to provide. See
+  [#285](https://github.com/get2knowio/deacon/issues/285).
+
 ### Changed
+
+- **Breaking: `--override-config` now REPLACES the base config** instead of
+  deep-merging a fragment onto it, matching the reference devcontainer CLI
+  (`readDocument(overrideConfigFile ?? configFile)`) and fixing the spec-parity
+  gap [#285](https://github.com/get2knowio/deacon/issues/285). The named file
+  (resolved through its own `extends` chain) becomes the base; settings/profile
+  `mergeConfig` and `--merge-config` fragments still overlay on top. To keep the
+  old overlay behavior, switch to `--merge-config` (and `DEACON_MERGE_CONFIG` in
+  place of `DEACON_OVERRIDE_CONFIG`). The user-scoped profile field is likewise
+  named `mergeConfig` (it deep-overlays); `overrideConfig` in `settings.json` is
+  no longer recognized.
 
 - **Breaking:** the container runtime environment variable is now
   `DEACON_CONTAINER_RUNTIME` (previously `DEACON_RUNTIME`), aligning the variable

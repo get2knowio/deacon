@@ -7,7 +7,10 @@ DEACON_BIN="${DEACON_BIN:-deacon}"
 echo "== Base only (README: Base only) ==" >&2
 "$DEACON_BIN" read-configuration --workspace-folder "$SCRIPT_DIR" "$@" | jq .
 
-echo "== With override applied (README: With override applied) ==" >&2
+echo "== With merge fragment applied (README: With override applied) ==" >&2
+# --merge-config deep-overlays the fragment onto the base (later wins). Since
+# #285, --override-config instead REPLACES the base, so this overlay demo uses
+# --merge-config.
 "$DEACON_BIN" read-configuration --workspace-folder "$SCRIPT_DIR" \
-	--override-config "$SCRIPT_DIR/override.jsonc" \
+	--merge-config "$SCRIPT_DIR/override.jsonc" \
 	"$@" | jq .

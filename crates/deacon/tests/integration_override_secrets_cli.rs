@@ -1,11 +1,11 @@
-//! End-to-end CLI test for override config and secrets functionality
+//! End-to-end CLI test for merge config and secrets functionality
 
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
 #[test]
-fn test_cli_with_override_config_and_secrets() {
+fn test_cli_with_merge_config_and_secrets() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create base devcontainer.json
@@ -20,16 +20,16 @@ fn test_cli_with_override_config_and_secrets() {
     }"#;
     fs::write(&base_config, base_content).unwrap();
 
-    // Create override config (must use valid devcontainer filename)
-    let override_config = temp_dir.path().join(".devcontainer.json");
-    let override_content = r#"{
+    // Create a merge fragment to deep-overlay onto the base.
+    let merge_config = temp_dir.path().join("fragment.json");
+    let merge_content = r#"{
         "name": "override-container",
         "containerEnv": {
             "OVERRIDE_VAR": "override-value",
             "API_TOKEN": "${localEnv:API_TOKEN}"
         }
     }"#;
-    fs::write(&override_config, override_content).unwrap();
+    fs::write(&merge_config, merge_content).unwrap();
 
     // Create secrets file
     let secrets_file = temp_dir.path().join("secrets.env");
@@ -40,15 +40,15 @@ API_TOKEN=abc123xyz
 "#;
     fs::write(&secrets_file, secrets_content).unwrap();
 
-    // Run read-configuration with override config and secrets
+    // Run read-configuration with a merge fragment and secrets
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.current_dir(&temp_dir).args([
         "--config",
         base_config.to_str().unwrap(),
         "--workspace-folder",
         temp_dir.path().to_str().unwrap(),
-        "--override-config",
-        override_config.to_str().unwrap(),
+        "--merge-config",
+        merge_config.to_str().unwrap(),
         "--secrets-file",
         secrets_file.to_str().unwrap(),
         "read-configuration",
@@ -57,10 +57,10 @@ API_TOKEN=abc123xyz
     let output = cmd.assert().success();
     let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
 
-    // Verify the override config took precedence
+    // Verify the merge fragment took precedence on conflicting keys
     assert!(stdout.contains("\"name\":\"override-container\""));
 
-    // Verify base config fields are still present
+    // Verify base config fields are still present (deep merge)
     assert!(stdout.contains("mcr.microsoft.com/devcontainers/base:ubuntu"));
 
     // Verify environment variables are merged

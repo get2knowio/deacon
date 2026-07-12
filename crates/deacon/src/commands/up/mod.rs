@@ -202,6 +202,8 @@ pub(crate) async fn execute_up_with_runtime(
     } = load_config(ConfigLoadArgs {
         workspace_folder: args.workspace_folder.as_deref(),
         config_path: args.config_path.as_deref(),
+        settings_merge_paths: &args.settings_merge_paths,
+        cli_merge_paths: &args.cli_merge_paths,
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
         resolve_devcontainer_id: true,

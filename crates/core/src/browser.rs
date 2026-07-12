@@ -13,33 +13,52 @@
 //! best-effort — a missing/broken browser or headless host never fails `up` or
 //! the daemon.
 
-use crate::settings::Settings;
 use std::process::Stdio;
 use tracing::debug;
 
 /// Env var the machine owner sets to choose the browser program.
-/// Precedence: this > `settings.browser` > OS default.
+/// Precedence: this > `browser` setting > OS default.
 pub const DEACON_BROWSER: &str = "DEACON_BROWSER";
 
-/// Resolve the browser program from the machine-owner sources, in precedence
-/// order: `DEACON_BROWSER` env > `settings.browser` > `None` (= OS default).
+/// Reserved `browser` value (case-insensitive) that disables port auto-open
+/// rather than naming a program to launch (FR-013a).
+pub const BROWSER_NONE: &str = "none";
+
+/// Outcome of resolving the machine-owner browser preference.
 ///
-/// Empty/whitespace values are treated as unset at each tier (mirrors
-/// [`crate::host_ca::resolve_host_ca_activation`]).
-pub fn resolve_browser(env: Option<&str>, settings: &Settings) -> Option<String> {
-    if let Some(v) = env {
-        let t = v.trim();
-        if !t.is_empty() {
-            return Some(t.to_string());
-        }
+/// Distinguishes "no configured program, use the OS default opener"
+/// ([`ResolvedBrowser::OsDefault`]) from "explicitly disabled"
+/// ([`ResolvedBrowser::Disabled`]) — the `browser: "none"` sentinel — which a
+/// plain `Option<String>` cannot express.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedBrowser {
+    /// Launch this program with the forwarded URL appended.
+    Program(String),
+    /// No configured program; fall back to the OS default opener.
+    OsDefault,
+    /// Auto-open explicitly disabled (`browser: "none"`).
+    Disabled,
+}
+
+/// Resolve the browser preference from the machine-owner sources, in precedence
+/// order: `DEACON_BROWSER` env > the effective `browser` setting > OS default.
+///
+/// `browser` is the effective (profile-resolved) settings value. Empty/whitespace
+/// values are treated as unset at each tier (mirrors
+/// [`crate::host_ca::resolve_host_ca_activation`]). The reserved value `"none"`
+/// (case-insensitive) at whichever tier wins yields [`ResolvedBrowser::Disabled`]
+/// (FR-013a).
+pub fn resolve_browser(env: Option<&str>, browser: Option<&str>) -> ResolvedBrowser {
+    let winner = [env, browser]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|t| !t.is_empty());
+    match winner {
+        Some(v) if v.eq_ignore_ascii_case(BROWSER_NONE) => ResolvedBrowser::Disabled,
+        Some(v) => ResolvedBrowser::Program(v.to_string()),
+        None => ResolvedBrowser::OsDefault,
     }
-    if let Some(v) = settings.browser.as_deref() {
-        let t = v.trim();
-        if !t.is_empty() {
-            return Some(t.to_string());
-        }
-    }
-    None
 }
 
 /// Build the `(program, args)` to open `url`. **Pure** (no spawn) so it is
@@ -109,33 +128,60 @@ pub fn open_url_blocking(browser: Option<&str>, url: &str) -> std::io::Result<()
 mod tests {
     use super::*;
 
-    fn settings_with(browser: Option<&str>) -> Settings {
-        Settings {
-            host_ca: None,
-            browser: browser.map(String::from),
-        }
-    }
-
     #[test]
     fn resolve_prefers_env_over_settings() {
-        let s = settings_with(Some("from-settings"));
         assert_eq!(
-            resolve_browser(Some("from-env"), &s).as_deref(),
-            Some("from-env")
+            resolve_browser(Some("from-env"), Some("from-settings")),
+            ResolvedBrowser::Program("from-env".to_string())
         );
     }
 
     #[test]
     fn resolve_uses_settings_when_env_unset_or_empty() {
-        let s = settings_with(Some("firefox"));
-        assert_eq!(resolve_browser(None, &s).as_deref(), Some("firefox"));
-        assert_eq!(resolve_browser(Some("   "), &s).as_deref(), Some("firefox"));
+        assert_eq!(
+            resolve_browser(None, Some("firefox")),
+            ResolvedBrowser::Program("firefox".to_string())
+        );
+        assert_eq!(
+            resolve_browser(Some("   "), Some("firefox")),
+            ResolvedBrowser::Program("firefox".to_string())
+        );
     }
 
     #[test]
-    fn resolve_none_when_both_unset() {
-        assert_eq!(resolve_browser(None, &settings_with(None)), None);
-        assert_eq!(resolve_browser(Some(""), &settings_with(Some("  "))), None);
+    fn resolve_os_default_when_both_unset() {
+        assert_eq!(resolve_browser(None, None), ResolvedBrowser::OsDefault);
+        assert_eq!(
+            resolve_browser(Some(""), Some("  ")),
+            ResolvedBrowser::OsDefault
+        );
+    }
+
+    #[test]
+    fn resolve_none_sentinel_disables_case_insensitively() {
+        assert_eq!(
+            resolve_browser(None, Some("none")),
+            ResolvedBrowser::Disabled
+        );
+        assert_eq!(
+            resolve_browser(None, Some("None")),
+            ResolvedBrowser::Disabled
+        );
+        assert_eq!(
+            resolve_browser(None, Some(" NONE ")),
+            ResolvedBrowser::Disabled
+        );
+        // Env `none` also disables (winning tier is honored).
+        assert_eq!(
+            resolve_browser(Some("none"), Some("firefox")),
+            ResolvedBrowser::Disabled
+        );
+        // A real program still launches; unset still falls back to OS default.
+        assert_eq!(
+            resolve_browser(None, Some("firefox")),
+            ResolvedBrowser::Program("firefox".to_string())
+        );
+        assert_eq!(resolve_browser(None, None), ResolvedBrowser::OsDefault);
     }
 
     #[test]

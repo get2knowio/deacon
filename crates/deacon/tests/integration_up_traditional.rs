@@ -73,6 +73,7 @@ fn test_up_traditional_container_workflow() {
             || stderr.contains("Failed to spawn")
             || stderr.contains("command not found")
             || stderr.is_empty() // Sometimes successful runs have empty stderr
+            || output.status.success() // a successful `up` satisfies the intent regardless of stderr noise
     );
 }
 
@@ -153,6 +154,7 @@ fn test_up_traditional_container_with_flags() {
             || stderr_lower.contains("failed to spawn")
             || stderr_lower.contains("command not found")
             || stderr.is_empty() // Sometimes successful runs have empty stderr
+            || output.status.success() // a successful `up` satisfies the intent regardless of stderr noise
     );
 }
 

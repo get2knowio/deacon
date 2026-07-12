@@ -49,8 +49,10 @@ pub struct ExecArgs {
     pub mount_workspace_git_root: bool,
     /// Configuration file path
     pub config_path: Option<std::path::PathBuf>,
-    /// Override configuration file path
+    /// Override configuration file path (replace base, #285)
     pub override_config_path: Option<PathBuf>,
+    /// CLI `--merge-config` fragments deep-overlaid on the base (highest layer)
+    pub cli_merge_paths: Vec<PathBuf>,
     /// Secrets file paths used for substitution
     pub secrets_files: Vec<PathBuf>,
     /// Path to docker executable
@@ -490,7 +492,8 @@ where
 
         let config_inputs_present = args.config_path.is_some()
             || args.workspace_folder.is_some()
-            || args.override_config_path.is_some();
+            || args.override_config_path.is_some()
+            || !args.cli_merge_paths.is_empty();
         let requires_workspace_resolution = args.container_id.is_none() && args.id_label.is_empty();
 
         // Mirror the up command's git-root mounting behavior (BEAD-10): when a
@@ -524,6 +527,8 @@ where
                 load_config(ConfigLoadArgs {
                     workspace_folder: args.workspace_folder.as_deref(),
                     config_path: args.config_path.as_deref(),
+                    settings_merge_paths: &[],
+                    cli_merge_paths: &args.cli_merge_paths,
                     override_config_path: args.override_config_path.as_deref(),
                     secrets_files: &args.secrets_files,
                     resolve_devcontainer_id: true,
@@ -871,6 +876,7 @@ mod tests {
             mount_workspace_git_root: true,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
@@ -902,6 +908,7 @@ mod tests {
             mount_workspace_git_root: true,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
@@ -934,6 +941,7 @@ mod tests {
             mount_workspace_git_root: true,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
@@ -1090,6 +1098,7 @@ mod tests {
             mount_workspace_git_root: true,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
@@ -1144,6 +1153,7 @@ mod tests {
             mount_workspace_git_root: true,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
@@ -1185,6 +1195,7 @@ mod tests {
             mount_workspace_git_root: true,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
@@ -1303,6 +1314,7 @@ services:
             mount_workspace_git_root: true,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
@@ -1335,6 +1347,7 @@ services:
             mount_workspace_git_root: true,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
@@ -1426,6 +1439,7 @@ services:
             mount_workspace_git_root: true,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
@@ -1442,7 +1456,8 @@ services:
         // so needs_workspace_context is false and the flag is a no-op.
         let config_inputs_present = args.config_path.is_some()
             || args.workspace_folder.is_some()
-            || args.override_config_path.is_some();
+            || args.override_config_path.is_some()
+            || !args.cli_merge_paths.is_empty();
         let requires_workspace_resolution = args.container_id.is_none() && args.id_label.is_empty();
         let needs_workspace_context = config_inputs_present || requires_workspace_resolution;
         assert!(!needs_workspace_context);

@@ -21,6 +21,7 @@ fn make_args(container_id: Option<String>, id_label: Vec<String>) -> ExecArgs {
         workspace_folder: None,
         config_path: None,
         override_config_path: None,
+        cli_merge_paths: Vec::new(),
         secrets_files: Vec::new(),
         docker_path: "docker".to_string(),
         docker_compose_path: "docker-compose".to_string(),

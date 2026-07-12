@@ -678,6 +678,8 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - Two host-side JSON files under the user-data folder (default `~/.deacon/`): a host-global `forwarded_ports.json` registry and per-container `forward_daemon_<container_id>.pid` markers; per-container `forward_daemon_<container_id>.log` log files. All writes use the temp-file + `fs::rename` atomic pattern (`crates/core/src/cache/disk.rs::save_index`). (015-auto-forward-ports)
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + `reqwest` 0.12 (rustls-tls / ring — **unchanged**), `rustls-native-certs` (new, (016-host-ca-injection)
 - `{user_data_folder}/settings.json` (atomic write, sibling of `trusted_workspaces.json`); (016-host-ca-injection)
+- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + `serde`/`serde_json` (settings + fragment parsing), `indexmap` 2.x with `serde` (declaration-ordered `profiles` map — already a core dep), `clap` (global `--profile` flag + `DEACON_PROFILE` env), `tracing` (applied-profile diagnostic), `thiserror` (core domain errors), `anyhow` (binary boundary) (017-user-profiles)
+- `{user_data_folder}/settings.json` — read-only in this feature (no write path); default `~/.deacon/settings.json`, honoring global `--user-data-folder` (017-user-profiles)
 
 ## Recent Changes
 - 009-complete-feature-support: Added Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing

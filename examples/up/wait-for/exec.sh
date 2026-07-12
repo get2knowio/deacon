@@ -56,7 +56,7 @@ assert_log_missing postAttach
 
 echo "== Scenario 2: waitFor=onCreateCommand + --skip-non-blocking-commands ==" >&2
 run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
-	--override-config ./override.onCreate.json \
+	--merge-config ./override.onCreate.json \
 	--skip-non-blocking-commands "$@" >/dev/null
 sleep 1
 assert_log_contains onCreate
@@ -65,7 +65,7 @@ assert_log_missing postCreate
 
 echo "== Scenario 3: waitFor=postCreateCommand + --skip-non-blocking-commands ==" >&2
 run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
-	--override-config ./override.postCreate.json \
+	--merge-config ./override.postCreate.json \
 	--skip-non-blocking-commands "$@" >/dev/null
 sleep 1
 assert_log_contains onCreate

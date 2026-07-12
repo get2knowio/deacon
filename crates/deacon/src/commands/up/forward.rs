@@ -12,13 +12,12 @@ use std::process::Stdio;
 
 use tracing::{info, warn};
 
-use deacon_core::browser::{DEACON_BROWSER, resolve_browser};
+use deacon_core::browser::{DEACON_BROWSER, ResolvedBrowser, resolve_browser};
 use deacon_core::config::{DevContainerConfig, PortSpec};
 use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::Docker;
 use deacon_core::port_forward::daemon::pid_alive;
 use deacon_core::port_forward::{DaemonMarker, marker_path};
-use deacon_core::settings::Settings;
 
 use crate::commands::up::args::UpArgs;
 
@@ -116,14 +115,16 @@ pub async fn spawn_or_adopt(
     }
 }
 
-/// Resolve the auto-open browser program (machine-owner only). Precedence:
-/// `DEACON_BROWSER` env, then `settings.browser`, else `None` (OS default
-/// opener). Best-effort — a settings read error degrades to "no configured
-/// browser" and never fails `up`.
-pub(crate) fn resolve_browser_cli(user_data_folder: Option<&Path>) -> Option<String> {
+/// Resolve the auto-open browser preference (machine-owner only). Precedence:
+/// `DEACON_BROWSER` env, then the effective (profile-resolved) `browser`
+/// setting, else the OS default opener. `browser: "none"` disables auto-open.
+///
+/// `browser_setting` is the effective value threaded from the profile-aware
+/// resolution at the CLI tier (017), so the forwarder honors the selected
+/// profile without re-reading settings out of process.
+pub(crate) fn resolve_browser_choice(browser_setting: Option<&str>) -> ResolvedBrowser {
     let env = std::env::var(DEACON_BROWSER).ok();
-    let settings = Settings::load(user_data_folder).unwrap_or_default();
-    resolve_browser(env.as_deref(), &settings)
+    resolve_browser(env.as_deref(), browser_setting)
 }
 
 /// Whether to enable browser auto-open. Skip in CI / when `stderr` isn't a TTY,
@@ -183,15 +184,26 @@ fn spawn_daemon(
     }
 
     // Browser auto-open (onAutoForward: openBrowser) is machine-owner-resolved
-    // here (env > settings) and the headless/CI gate is decided here too — the
-    // daemon's stdio is /dev/null so it cannot evaluate `is_terminal()` itself.
-    // Adoption returns before this, so an adopted daemon keeps its own setting.
-    let browser = resolve_browser_cli(args.user_data_folder.as_deref());
-    if let Some(b) = &browser {
-        cmd.arg("--browser").arg(b);
-    }
-    if !auto_open_enabled(browser.is_some()) {
-        cmd.arg("--no-auto-open");
+    // here (env > effective profile/root browser) and the headless/CI gate is
+    // decided here too — the daemon's stdio is /dev/null so it cannot evaluate
+    // `is_terminal()` itself. Adoption returns before this, so an adopted daemon
+    // keeps its own setting.
+    match resolve_browser_choice(args.browser_setting.as_deref()) {
+        ResolvedBrowser::Disabled => {
+            // `browser: "none"` (017): never auto-open, regardless of TTY.
+            cmd.arg("--no-auto-open");
+        }
+        ResolvedBrowser::Program(program) => {
+            cmd.arg("--browser").arg(&program);
+            if !auto_open_enabled(true) {
+                cmd.arg("--no-auto-open");
+            }
+        }
+        ResolvedBrowser::OsDefault => {
+            if !auto_open_enabled(false) {
+                cmd.arg("--no-auto-open");
+            }
+        }
     }
 
     // Detach: the child re-opens its own stdio onto the per-container log, so

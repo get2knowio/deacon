@@ -433,7 +433,17 @@ pub struct UpArgs {
     // Paths and config
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
+    /// REPLACE base (`--override-config`): replaces the discovered config as the
+    /// base the merge ladder overlays onto (reference parity #285).
     pub override_config_path: Option<PathBuf>,
+    /// Settings-sourced merge fragments from the selected profile (root
+    /// `mergeConfig` then the profile's), resolved by the profile helper.
+    /// Deep-overlaid on the base (017). Empty ⇒ today's behavior.
+    pub settings_merge_paths: Vec<PathBuf>,
+    /// CLI `--merge-config` fragments, the highest-precedence merge layer.
+    pub cli_merge_paths: Vec<PathBuf>,
+    /// Effective (profile-else-root) `browser` setting for port auto-open (017).
+    pub browser_setting: Option<String>,
     pub secrets_files: Vec<PathBuf>,
     pub container_data_folder: Option<PathBuf>,
     pub container_system_data_folder: Option<PathBuf>,
@@ -514,6 +524,9 @@ impl Default for UpArgs {
             workspace_folder: None,
             config_path: None,
             override_config_path: None,
+            settings_merge_paths: Vec::new(),
+            cli_merge_paths: Vec::new(),
+            browser_setting: None,
             secrets_files: Vec::new(),
             container_data_folder: None,
             container_system_data_folder: None,

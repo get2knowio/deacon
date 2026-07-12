@@ -80,6 +80,8 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
     let initial = load_config(ConfigLoadArgs {
         workspace_folder: args.workspace_folder.as_deref(),
         config_path: args.config_path.as_deref(),
+        settings_merge_paths: &[],
+        cli_merge_paths: &[],
         override_config_path: None,
         secrets_files: &[],
         resolve_devcontainer_id: true,
@@ -106,6 +108,8 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
         load_config(ConfigLoadArgs {
             workspace_folder: args.workspace_folder.as_deref(),
             config_path: args.config_path.as_deref(),
+            settings_merge_paths: &[],
+            cli_merge_paths: &[],
             override_config_path: None,
             secrets_files: &[],
             resolve_devcontainer_id: true,

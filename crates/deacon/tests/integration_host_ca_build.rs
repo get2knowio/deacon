@@ -129,6 +129,9 @@ fn image_only_skips_build_injection_with_log() {
     let pem = write_ca_fixture(ws.path());
 
     let out = deacon()
+        // The FR-018a skip notice is an `info!`; enable info logging so it lands
+        // on stderr (the default level is WARN and would filter it out).
+        .env("RUST_LOG", "deacon=info")
         .args(["build", "--workspace-folder"])
         .arg(ws.path())
         .args(["--inject-host-ca", &pem, "--image-name", tag])

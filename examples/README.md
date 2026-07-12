@@ -59,7 +59,7 @@ That issue lists each blocked example, the specific deacon bug it surfaces, and 
   - `read-configuration/basic/` — Minimal config discovery and output
   - `read-configuration/with-variables/` — Variable substitution for local env and workspace folder
   - `read-configuration/extends-chain/` — Chained `extends` across base/mid/leaf configs
-  - `read-configuration/override-config/` — Apply an override with `--override-config`
+  - `read-configuration/override-config/` — Overlay a fragment with `--merge-config` (since #285, `--override-config` replaces the base)
   - `read-configuration/features-minimal/` — Local Feature with `--include-features-configuration`
   - `read-configuration/features-additional/` — Inject a Feature via `--additional-features`
   - `read-configuration/compose/` — Config referencing a Docker Compose file

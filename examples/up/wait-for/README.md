@@ -15,7 +15,7 @@ the cutoff observable in `/tmp/lifecycle.log` inside the container.
   appending to `/tmp/lifecycle.log`. No explicit `waitFor` so the default
   (`updateContentCommand`) applies in scenario 1.
 - `override.onCreate.json`, `override.postCreate.json` — flip only
-  `waitFor` via `--override-config` for scenarios 2 and 3.
+  `waitFor` via `--merge-config` for scenarios 2 and 3.
 
 ## Scenarios exercised by `exec.sh`
 
@@ -37,13 +37,13 @@ deacon up --workspace-folder . --remove-existing-container \
 	--skip-non-blocking-commands
 
 deacon up --workspace-folder . --remove-existing-container \
-	--override-config ./override.postCreate.json \
+	--merge-config ./override.postCreate.json \
 	--skip-non-blocking-commands
 ```
 
 ## Known deacon issues this example surfaces
 
-- [#65](https://github.com/get2knowio/deacon/issues/65) — `--override-config`
+- [#285](https://github.com/get2knowio/deacon/issues/285) — `--merge-config` (overlay; `--override-config` now replaces the base)
   filename validation rejects `override.onCreate.json` /
   `override.postCreate.json`. The upstream `@devcontainers/cli` accepts any
   filename.

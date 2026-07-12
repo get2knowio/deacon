@@ -10,21 +10,31 @@ use deacon_core::config::{DevContainerConfig, OnAutoForward};
 use deacon_core::docker::Docker;
 use deacon_core::ports::{PortEvent, PortForwardingManager};
 use deacon_core::runtime::ContainerRuntimeImpl;
-use std::path::Path;
 use tracing::{debug, instrument, warn};
 
-use super::forward::{auto_open_enabled, resolve_browser_cli};
+use super::forward::{auto_open_enabled, resolve_browser_choice};
+use deacon_core::browser::ResolvedBrowser;
 
 /// Open the machine owner's browser for static-path port events whose
 /// `onAutoForward` is `openBrowser`/`openBrowserOnce` and which have a reachable
 /// host port (i.e. `-p`-published). Suppressed entirely when `--auto-forward` is
 /// active (the forwarder daemon owns browser-opening). Best-effort — never
 /// fails `up`; only opens a loopback URL with a machine-owner-chosen program.
-fn open_browsers_for_events(events: &[PortEvent], auto_forward: bool, udf: Option<&Path>) {
+///
+/// `browser_setting` is the effective (profile-resolved) `browser` value (017).
+fn open_browsers_for_events(
+    events: &[PortEvent],
+    auto_forward: bool,
+    browser_setting: Option<&str>,
+) {
     if auto_forward {
         return; // the --auto-forward daemon is the single opener
     }
-    let browser = resolve_browser_cli(udf);
+    let browser = match resolve_browser_choice(browser_setting) {
+        ResolvedBrowser::Disabled => return, // `browser: "none"` (017)
+        ResolvedBrowser::Program(program) => Some(program),
+        ResolvedBrowser::OsDefault => None,
+    };
     if !auto_open_enabled(browser.is_some()) {
         return;
     }
@@ -55,7 +65,7 @@ pub(crate) async fn handle_port_events(
     secret_registry: &deacon_core::redaction::SecretRegistry,
     docker_path: &str,
     auto_forward: bool,
-    user_data_folder: Option<&Path>,
+    browser_setting: Option<&str>,
 ) -> Result<()> {
     debug!("Processing port events for compose project");
 
@@ -115,7 +125,7 @@ pub(crate) async fn handle_port_events(
                 events.len(),
                 service.name
             );
-            open_browsers_for_events(&events, auto_forward, user_data_folder);
+            open_browsers_for_events(&events, auto_forward, browser_setting);
             total_events += events.len();
         }
     }
@@ -136,7 +146,7 @@ pub(crate) async fn handle_container_port_events(
     redaction_config: &deacon_core::redaction::RedactionConfig,
     secret_registry: &deacon_core::redaction::SecretRegistry,
     auto_forward: bool,
-    user_data_folder: Option<&Path>,
+    browser_setting: Option<&str>,
 ) -> Result<()> {
     debug!("Processing port events for container");
 
@@ -167,7 +177,7 @@ pub(crate) async fn handle_container_port_events(
     );
 
     debug!("Emitted {} port events", events.len());
-    open_browsers_for_events(&events, auto_forward, user_data_folder);
+    open_browsers_for_events(&events, auto_forward, browser_setting);
 
     Ok(())
 }

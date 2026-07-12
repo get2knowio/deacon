@@ -40,7 +40,13 @@ pub struct BuildArgs {
     pub fail_on_scan: bool,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
+    /// REPLACE base (`--override-config`): replaces the discovered config (#285).
     pub override_config_path: Option<PathBuf>,
+    /// Settings-sourced merge fragments from the selected profile, deep-overlaid
+    /// on the base (017). Empty ⇒ today's behavior.
+    pub settings_merge_paths: Vec<PathBuf>,
+    /// CLI `--merge-config` fragments, the highest-precedence merge layer.
+    pub cli_merge_paths: Vec<PathBuf>,
     pub secrets_files: Vec<PathBuf>,
     pub additional_features: Option<String>,
     pub prefer_cli_features: bool,
@@ -110,6 +116,8 @@ impl Default for BuildArgs {
             workspace_folder: None,
             config_path: None,
             override_config_path: None,
+            settings_merge_paths: Vec::new(),
+            cli_merge_paths: Vec::new(),
             secrets_files: Vec::new(),
             additional_features: None,
             prefer_cli_features: false,
@@ -563,6 +571,8 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     let load_result = load_config(ConfigLoadArgs {
         workspace_folder: args.workspace_folder.as_deref(),
         config_path: args.config_path.as_deref(),
+        settings_merge_paths: &args.settings_merge_paths,
+        cli_merge_paths: &args.cli_merge_paths,
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
         resolve_devcontainer_id: true,

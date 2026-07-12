@@ -24,7 +24,7 @@ already covers the `deacon exec --default-user-env-probe` flag.)
   loginInteractiveShell`. The `postCreateCommand` captures `$PATH` and a
   variable `PROBE_VAR` that is set only by `~/.bashrc` in the base image.
 - `override.interactive.json`, `override.login.json`,
-  `override.none.json` — apply via `--override-config` to flip only
+  `override.none.json` — apply via `--merge-config` to flip only
   the probe mode.
 
 ## Scenarios exercised by `exec.sh`
@@ -51,12 +51,12 @@ deacon up --workspace-folder . --remove-existing-container
 
 # Flip to interactive-only without editing the base config:
 deacon up --workspace-folder . --remove-existing-container \
-	--override-config ./override.interactive.json
+	--merge-config ./override.interactive.json
 ```
 
 ## Known deacon issues this example surfaces
 
-- [#65](https://github.com/get2knowio/deacon/issues/65) — `--override-config`
+- [#285](https://github.com/get2knowio/deacon/issues/285) — `--merge-config` (overlay; `--override-config` now replaces the base)
   filename validation rejects `override.interactive.json` /
   `override.login.json` / `override.none.json`.
 

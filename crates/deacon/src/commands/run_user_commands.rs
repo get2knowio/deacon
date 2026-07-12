@@ -38,6 +38,8 @@ pub struct RunUserCommandsArgs {
     pub workspace_folder: Option<std::path::PathBuf>,
     pub config_path: Option<std::path::PathBuf>,
     pub override_config_path: Option<std::path::PathBuf>,
+    /// CLI `--merge-config` fragments deep-overlaid on the base (highest layer)
+    pub cli_merge_paths: Vec<std::path::PathBuf>,
     pub secrets_files: Vec<std::path::PathBuf>,
     pub progress_tracker: Arc<Mutex<Option<deacon_core::progress::ProgressTracker>>>,
     pub docker_path: String,
@@ -68,6 +70,8 @@ pub async fn execute_run_user_commands(
     } = load_config(ConfigLoadArgs {
         workspace_folder: args.workspace_folder.as_deref(),
         config_path: args.config_path.as_deref(),
+        settings_merge_paths: &[],
+        cli_merge_paths: &args.cli_merge_paths,
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
         resolve_devcontainer_id: true,
@@ -415,6 +419,7 @@ mod tests {
             workspace_folder: None,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: vec![],
             secrets_files: vec![],
             progress_tracker,
             docker_path: "docker".to_string(),
@@ -446,6 +451,7 @@ mod tests {
             workspace_folder: None,
             config_path: None,
             override_config_path: None,
+            cli_merge_paths: vec![],
             secrets_files: vec![],
             progress_tracker,
             docker_path: "docker".to_string(),

@@ -19,7 +19,7 @@ Examples included:
 - `basic/` — minimal config discovery and output
 - `with-variables/` — variable substitution for local env and workspace folder
 - `extends-chain/` — config `extends` chaining across files
-- `override-config/` — overlay with `--override-config`
+- `override-config/` — overlay with `--merge-config` (since #285, `--override-config` replaces the base)
 - `features-minimal/` — local Feature with `--include-features-configuration`
 - `features-additional/` — inject Feature via `--additional-features`
 - `compose/` — config referencing a Docker Compose file

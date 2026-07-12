@@ -227,8 +227,10 @@ pub struct CliContext {
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
     pub config: Option<PathBuf>,
-    /// Override configuration file path
+    /// Override configuration file path (replace base)
     pub override_config: Option<PathBuf>,
+    /// Merge configuration fragment paths (--merge-config), repeatable
+    pub merge_config: Vec<PathBuf>,
     /// Secrets file paths
     pub secrets_files: Vec<PathBuf>,
     /// Whether secret redaction is disabled
@@ -905,7 +907,13 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
-    /// Override configuration file path (highest precedence).
+    /// Replace the discovered/base configuration with this file.
+    ///
+    /// The file is resolved through its own `extends` chain and becomes the base
+    /// config instead of the discovered `devcontainer.json` (reference parity,
+    /// #285). Any `mergeConfig` layers and `--merge-config` fragments still
+    /// overlay on top. To ADD a fragment onto the base instead of replacing it,
+    /// use `--merge-config`.
     ///
     /// Also settable via the `DEACON_OVERRIDE_CONFIG` environment variable
     /// (the flag takes precedence over the env var).
@@ -916,6 +924,35 @@ pub struct Cli {
         env = "DEACON_OVERRIDE_CONFIG"
     )]
     pub override_config: Option<PathBuf>,
+
+    /// Deep-overlay this configuration fragment onto the base config.
+    ///
+    /// Repeatable; later `--merge-config` flags win on conflicting keys. This is
+    /// the highest-precedence merge layer, above the settings/profile
+    /// `mergeConfig` fragments. Unlike `--override-config` (which replaces the
+    /// base), a merge fragment is layered on top. A single path is also settable
+    /// via `DEACON_MERGE_CONFIG` (any `--merge-config` flag overrides the env var).
+    #[arg(
+        long,
+        global = true,
+        value_name = "PATH",
+        action = clap::ArgAction::Append,
+        env = "DEACON_MERGE_CONFIG"
+    )]
+    pub merge_config: Vec<PathBuf>,
+
+    /// Select a named profile from `settings.json` for this run.
+    ///
+    /// Honored by `up`, `read-configuration`, `build`, and `outdated` (the
+    /// commands that resolve configuration). The selected profile's `mergeConfig`
+    /// fragment(s) deep-overlay onto the resolved configuration and its scalar
+    /// overrides (`browser`/`hostCa`) apply for the run. Selection precedence:
+    /// `--profile` > `DEACON_PROFILE` > `defaultProfile` > none.
+    ///
+    /// Also settable via the `DEACON_PROFILE` environment variable (the flag
+    /// takes precedence over the env var).
+    #[arg(long, global = true, value_name = "NAME", env = "DEACON_PROFILE")]
+    pub profile: Option<String>,
 
     /// Secrets file path (KEY=VALUE format, can be specified multiple times)
     #[arg(long, global = true, value_name = "PATH")]
@@ -1039,18 +1076,19 @@ pub struct Cli {
 /// only sources.
 fn resolve_host_ca_activation_cli(
     flag: Option<String>,
-    user_data_folder: Option<&std::path::Path>,
-) -> Result<deacon_core::host_ca::HostCaActivation> {
+    effective_host_ca: Option<&str>,
+) -> deacon_core::host_ca::HostCaActivation {
     use deacon_core::host_ca::{DEACON_INJECT_HOST_CA, resolve_host_ca_activation};
     use deacon_core::settings::Settings;
 
+    // `effective_host_ca` is the profile-resolved (profile-else-root) settings
+    // value; the flag/env still win above it (FR-013).
     let env = std::env::var(DEACON_INJECT_HOST_CA).ok();
-    let settings = Settings::load(user_data_folder)?;
-    Ok(resolve_host_ca_activation(
-        flag.as_deref(),
-        env.as_deref(),
-        &settings,
-    ))
+    let settings = Settings {
+        host_ca: effective_host_ca.map(String::from),
+        ..Default::default()
+    };
+    resolve_host_ca_activation(flag.as_deref(), env.as_deref(), &settings)
 }
 
 impl Cli {
@@ -1118,6 +1156,7 @@ impl Cli {
             workspace_folder: self.workspace_folder.clone(),
             config: self.config.clone(),
             override_config: self.override_config.clone(),
+            merge_config: self.merge_config.clone(),
             secrets_files: self.secrets_file.clone(),
             no_redact: self.no_redact,
 
@@ -1302,11 +1341,19 @@ impl Cli {
                     anyhow::bail!("--no-lockfile and --frozen-lockfile are mutually exclusive.");
                 }
 
-                // Machine-owner-only activation: flag > env > settings (FR-015).
+                // Resolve the selected profile (017): ordered override fragments
+                // + effective scalars. Fails fast on an unknown/dangling profile.
+                let resolved_profile = crate::commands::shared::profile::resolve_active_profile(
+                    self.user_data_folder.as_deref(),
+                    self.profile.as_deref(),
+                )?;
+
+                // Machine-owner-only activation: flag > env > (profile-else-root)
+                // settings (FR-015, FR-013).
                 let host_ca_activation = resolve_host_ca_activation_cli(
                     inject_host_ca,
-                    self.user_data_folder.as_deref(),
-                )?;
+                    resolved_profile.host_ca.as_deref(),
+                );
 
                 let args = UpArgs {
                     id_label,
@@ -1345,6 +1392,9 @@ impl Cli {
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,
+                    settings_merge_paths: resolved_profile.merge_paths,
+                    cli_merge_paths: self.merge_config,
+                    browser_setting: resolved_profile.browser,
                     additional_features,
                     prefer_cli_features,
                     feature_install_order,
@@ -1485,11 +1535,19 @@ impl Cli {
                     anyhow::bail!("--no-lockfile and --frozen-lockfile are mutually exclusive.");
                 }
 
-                // Machine-owner-only activation: flag > env > settings (FR-015).
+                // Resolve the selected profile (017): ordered override fragments
+                // + effective scalars. Fails fast on an unknown/dangling profile.
+                let resolved_profile = crate::commands::shared::profile::resolve_active_profile(
+                    self.user_data_folder.as_deref(),
+                    self.profile.as_deref(),
+                )?;
+
+                // Machine-owner-only activation: flag > env > (profile-else-root)
+                // settings (FR-015, FR-013).
                 let host_ca_activation = resolve_host_ca_activation_cli(
                     inject_host_ca,
-                    self.user_data_folder.as_deref(),
-                )?;
+                    resolved_profile.host_ca.as_deref(),
+                );
 
                 let args = BuildArgs {
                     no_cache,
@@ -1509,6 +1567,8 @@ impl Cli {
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,
+                    settings_merge_paths: resolved_profile.merge_paths,
+                    cli_merge_paths: self.merge_config,
                     secrets_files: self.secrets_file.clone(),
                     additional_features,
                     prefer_cli_features,
@@ -1572,6 +1632,7 @@ impl Cli {
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,
+                    cli_merge_paths: self.merge_config,
                     secrets_files: self.secrets_file.clone(),
                     docker_path: self.docker_path.clone(),
                     docker_compose_path: self.docker_compose_path.clone(),
@@ -1602,6 +1663,17 @@ impl Cli {
                     ReadConfigurationArgs, execute_read_configuration,
                 };
 
+                // Resolve the selected profile (017): ordered override fragments
+                // to layer beneath any `--override-config`. The subcommand-local
+                // `--user-data-folder` (a compat shim) is honored, else the
+                // global one. Fails fast on an unknown/dangling profile.
+                let resolved_profile = crate::commands::shared::profile::resolve_active_profile(
+                    user_data_folder
+                        .as_deref()
+                        .or(self.user_data_folder.as_deref()),
+                    self.profile.as_deref(),
+                )?;
+
                 let args = ReadConfigurationArgs {
                     include_merged_configuration,
                     include_features_configuration,
@@ -1618,6 +1690,8 @@ impl Cli {
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,
+                    settings_merge_paths: resolved_profile.merge_paths,
+                    cli_merge_paths: self.merge_config,
                     secrets_files: self.secrets_file,
                     redaction_config: redaction_config.clone(),
                     secret_registry: secret_registry.clone(),
@@ -1634,6 +1708,7 @@ impl Cli {
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,
+                    cli_merge_paths: self.merge_config,
                     secrets_files: self.secrets_file,
                     redaction_config: redaction_config.clone(),
                 };
@@ -1696,6 +1771,7 @@ impl Cli {
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
                     override_config_path: self.override_config,
+                    cli_merge_paths: self.merge_config,
                     secrets_files: self.secrets_file,
                     progress_tracker: progress_tracker.clone(),
                     docker_path: self.docker_path.clone(),
@@ -1796,6 +1872,13 @@ impl Cli {
             }) => {
                 use crate::commands::outdated::{OutdatedArgs, run as run_outdated};
 
+                // Resolve the selected profile (017): ordered override fragments
+                // to layer beneath any `--override-config`.
+                let resolved_profile = crate::commands::shared::profile::resolve_active_profile(
+                    self.user_data_folder.as_deref(),
+                    self.profile.as_deref(),
+                )?;
+
                 // Determine workspace folder precedence: explicit flag -> global flag -> current_dir
                 let wf = if let Some(wf) = workspace_folder {
                     wf
@@ -1809,6 +1892,8 @@ impl Cli {
                     workspace_folder: wf.to_string_lossy().to_string(),
                     config: self.config.clone(),
                     override_config: self.override_config.clone(),
+                    settings_merge_paths: resolved_profile.merge_paths,
+                    cli_merge_paths: self.merge_config.clone(),
                     output: output.clone(),
                     fail_on_outdated,
                 };
@@ -2280,6 +2365,45 @@ mod tests {
                 cli.override_config,
                 Some(PathBuf::from("/tmp/from-flag.json"))
             );
+        });
+    }
+
+    #[test]
+    fn test_merge_config_is_repeatable_and_ordered() {
+        let cli = Cli::parse_from([
+            "deacon",
+            "--merge-config",
+            "/tmp/a.json",
+            "--merge-config",
+            "/tmp/b.json",
+        ]);
+        assert_eq!(
+            cli.merge_config,
+            vec![PathBuf::from("/tmp/a.json"), PathBuf::from("/tmp/b.json")]
+        );
+    }
+
+    #[test]
+    fn test_merge_config_defaults_empty() {
+        temp_env::with_var_unset("DEACON_MERGE_CONFIG", || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert!(cli.merge_config.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_merge_config_reads_env_var_single_path() {
+        temp_env::with_var("DEACON_MERGE_CONFIG", Some("/tmp/from-env.json"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.merge_config, vec![PathBuf::from("/tmp/from-env.json")]);
+        });
+    }
+
+    #[test]
+    fn test_merge_config_flag_beats_env_var() {
+        temp_env::with_var("DEACON_MERGE_CONFIG", Some("/tmp/from-env.json"), || {
+            let cli = Cli::parse_from(["deacon", "--merge-config", "/tmp/from-flag.json"]);
+            assert_eq!(cli.merge_config, vec![PathBuf::from("/tmp/from-flag.json")]);
         });
     }
 }

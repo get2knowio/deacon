@@ -183,6 +183,62 @@ any lifecycle hook and sets the standard CA env vars (`SSL_CERT_FILE`,
 falls back to env-var-only. deacon never rewrites user-authored Dockerfiles —
 see SECURITY.md for the manual `ARG`/`COPY` convention.
 
+## User profiles (`--profile`)
+
+Profiles are named, mutually-exclusive startup configurations kept in the
+**machine-owner's** `~/.deacon/settings.json` — never in a project. A repo cannot
+define or select a profile. The file is **read-only** here (hand-edit it; a
+`deacon settings` write command is tracked as [#198](https://github.com/get2knowio/deacon/issues/198)).
+
+Select one with the global `--profile <NAME>` flag (or `DEACON_PROFILE` env var),
+honored by `up`, `read-configuration`, `build`, and `outdated` (not `set-up`).
+Selection precedence: `--profile` > `DEACON_PROFILE` > `defaultProfile` (in
+settings) > none. With no profiles — or no `defaultProfile` — a bare command
+behaves exactly as it does today.
+
+```json
+{
+  "browser": "firefox",
+  "defaultProfile": "dev",
+  "profiles": {
+    "dev":   { "mergeConfig": "overrides/dotfiles.json" },
+    "agent": { "mergeConfig": "overrides/agent.json", "browser": "none" }
+  }
+}
+```
+
+Each profile's `mergeConfig` is a `devcontainer.json` fragment **deep-overlaid**
+on the base config. Fragment paths resolve relative to `~/.deacon/` and may be a
+single string or an ordered array (later entries win). The full layering
+precedence, low→high, is:
+
+```
+base config                          (discovered devcontainer.json + extends,
+                                      OR the --override-config file if given)
+  <  root "mergeConfig"              (settings.json, always applied — optional)
+      <  selected profile "mergeConfig"
+          <  --merge-config          (CLI, repeatable, highest merge layer)
+```
+
+Two distinct CLI flags act on configuration:
+
+- **`--override-config <path>`** — **replaces** the discovered base config with
+  this file (resolved through its own `extends` chain), matching the reference
+  devcontainer CLI. Also `DEACON_OVERRIDE_CONFIG`.
+- **`--merge-config <path>`** — **deep-overlays** this fragment onto the base
+  (repeatable; later wins). This is the CLI analogue of a profile `mergeConfig`.
+  A single path is also settable via `DEACON_MERGE_CONFIG`.
+
+A profile may also override the root scalars `browser` / `hostCa` (profile value
+wins over root; a CLI flag or env var still wins over both). The reserved value
+`browser: "none"` (case-insensitive) **disables** port auto-open rather than
+naming a program.
+
+Naming an undefined profile — via `--profile` or a dangling `defaultProfile` —
+errors and lists the available profiles. When a profile is applied, deacon logs a
+diagnostic to **stderr** naming it; stdout / `--output json` documents are
+unchanged.
+
 ## Shipped Commands
 
 | Command | Description |
