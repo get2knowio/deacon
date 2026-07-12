@@ -61,7 +61,7 @@ UNUSED_SECRET=ignored-value
     // Load configuration with overrides and secrets
     let (config, substitution_report) = ConfigLoader::load_with_overrides_and_substitution(
         &base_config_path,
-        Some(&override_config_path),
+        &[override_config_path.as_path()],
         Some(&secrets),
         temp_dir.path(),
         true,

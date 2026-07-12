@@ -90,7 +90,7 @@ listed.
 | read-configuration/id-labels-and-devcontainerId | ✅ pass | 2026-05-29 | |
 | read-configuration/legacy-normalization | ✅ pass | 2026-05-29 | |
 | read-configuration/named-config-search | ✅ pass | 2026-05-29 | |
-| read-configuration/override-config | ✅ pass | 2026-05-29 | |
+| read-configuration/override-config | ❓ recheck | 2026-05-29 | switched overlay demo to `--merge-config` (#285: `--override-config` now replaces) |
 | read-configuration/with-variables | ✅ pass | 2026-05-29 | |
 | run-user-commands/basic | ✅ pass | 2026-05-29 | prebuild (#130) + feature lifecycle (#140) |
 | set-up/basic | ✅ pass | 2026-05-29 | |

@@ -44,8 +44,8 @@ run_mode() {
 }
 
 run_mode loginInteractiveShell
-run_mode interactiveShell --override-config ./override.interactive.json
-run_mode loginShell        --override-config ./override.login.json
-run_mode none              --override-config ./override.none.json
+run_mode interactiveShell --merge-config ./override.interactive.json
+run_mode loginShell        --merge-config ./override.login.json
+run_mode none              --merge-config ./override.none.json
 
 echo "All probe modes exercised." >&2

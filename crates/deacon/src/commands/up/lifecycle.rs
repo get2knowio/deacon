@@ -459,6 +459,65 @@ pub(crate) async fn enforce_host_trust(
     Ok(())
 }
 
+/// Whether the effective `initializeCommand` originates from an owner-authored
+/// profile fragment loaded from inside the user-data folder (FR-020a).
+///
+/// The merge collapses per-field provenance, so this recomputes the origin of
+/// the *effective* `initializeCommand` from the ordered merge chain: merge is
+/// last-writer-wins, so the winner is the highest-precedence layer that sets the
+/// field. The CLI `--merge-config` fragments (highest) and the base config —
+/// whether discovered or the `--override-config` replace file (lowest) — are
+/// never owner-authored; a settings-sourced `mergeConfig` fragment is
+/// owner-authored iff it was loaded from inside the user-data folder. When the
+/// winner is owner-authored the host-hook trust gate is bypassed ("trust follows
+/// author"); otherwise it stays gated ("trust follows target"), the safe default.
+///
+/// Replace-base (#285) does not affect this replay: it only swaps the lowest
+/// layer, which is gated either way, so "highest layer that sets it wins" holds.
+pub(crate) async fn initialize_command_author_trusted(
+    has_initialize_command: bool,
+    settings_merge_paths: &[std::path::PathBuf],
+    cli_merge_paths: &[std::path::PathBuf],
+    user_data_folder: Option<&Path>,
+) -> bool {
+    if !has_initialize_command {
+        return false;
+    }
+
+    async fn override_sets_initialize(path: &Path) -> bool {
+        deacon_core::config::ConfigLoader::load_from_path(path)
+            .await
+            .map(|c| c.initialize_command.is_some())
+            .unwrap_or(false)
+    }
+
+    // CLI `--merge-config` fragments are the highest layer, never owner-authored.
+    for path in cli_merge_paths.iter().rev() {
+        if override_sets_initialize(path).await {
+            return false;
+        }
+    }
+
+    let settings_dir = match deacon_core::settings::settings_dir(user_data_folder) {
+        Ok(dir) => dir,
+        Err(_) => return false,
+    };
+
+    // Settings-sourced `mergeConfig` fragments, highest precedence first.
+    for path in settings_merge_paths.iter().rev() {
+        if override_sets_initialize(path).await {
+            return crate::commands::shared::profile::override_authored_in_user_data(
+                path,
+                &settings_dir,
+            );
+        }
+    }
+
+    // The winning layer is the base config (discovered or `--override-config`
+    // replace file) → gated.
+    false
+}
+
 /// Execute initializeCommand on the host before container creation
 ///
 /// `initializeCommand` runs arbitrary shell on the **developer's host** before
@@ -468,6 +527,12 @@ pub(crate) async fn enforce_host_trust(
 /// (`--trust-workspace`, `--trust-workspace-persist`, `DEACON_NO_PROMPT`)
 /// through `trust_args`; see [`HostTrustArgs`] for the source-of-truth
 /// resolution rules.
+///
+/// `author_trusted` (FR-020a) reflects whether the effective command originates
+/// from an owner-authored profile fragment in the user-data folder (see
+/// [`initialize_command_author_trusted`]). When `true`, the workspace-trust gate
+/// is bypassed — the machine owner authored the command, so it does not require
+/// the target workspace's allowlist entry.
 #[instrument(skip(initialize_command, progress_tracker, trust_args))]
 pub(crate) async fn execute_initialize_command(
     initialize_command: &serde_json::Value,
@@ -476,6 +541,7 @@ pub(crate) async fn execute_initialize_command(
         std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>,
     >,
     trust_args: HostTrustArgs<'_>,
+    author_trusted: bool,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::ContainerLifecycleCommands;
     use deacon_core::variable::SubstitutionContext;
@@ -495,8 +561,18 @@ pub(crate) async fn execute_initialize_command(
         }
     };
 
-    // Trust gate: refuse to run host-side shell from an untrusted workspace.
-    enforce_host_trust(workspace_folder, &trust_args).await?;
+    // Trust gate: refuse to run host-side shell from an untrusted workspace —
+    // unless the command is owner-authored (from a user-data profile fragment),
+    // in which case trust follows the author and the workspace gate is bypassed
+    // (FR-020a).
+    if author_trusted {
+        debug!(
+            "initializeCommand originates from an owner-authored profile fragment; \
+             bypassing the workspace-trust gate (FR-020a)"
+        );
+    } else {
+        enforce_host_trust(workspace_folder, &trust_args).await?;
+    }
 
     // Build a LifecycleCommandList from the parsed value
     let command_list = LifecycleCommandList {
@@ -766,5 +842,151 @@ mod tests {
         let ctx = build_invocation_context(&args, &workspace, Vec::new());
 
         assert_eq!(ctx.workspace_root, workspace);
+    }
+}
+
+/// FR-020a: host-hook trust follows the fragment author (017, T028).
+#[cfg(test)]
+mod trust_provenance_tests {
+    use super::{HostTrustArgs, execute_initialize_command, initialize_command_author_trusted};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use tempfile::TempDir;
+
+    fn write(path: &std::path::Path, body: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, body).unwrap();
+    }
+
+    #[tokio::test]
+    async fn no_initialize_command_is_not_author_trusted() {
+        assert!(!initialize_command_author_trusted(false, &[], &[], None).await);
+    }
+
+    #[tokio::test]
+    async fn user_data_fragment_is_author_trusted() {
+        let udf = TempDir::new().unwrap();
+        let frag = udf.path().join("overrides/dev.json");
+        write(&frag, r#"{"initializeCommand":"echo hi"}"#);
+        assert!(
+            initialize_command_author_trusted(true, &[frag], &[], Some(udf.path())).await,
+            "a fragment inside the user-data folder is owner-authored"
+        );
+    }
+
+    #[tokio::test]
+    async fn outside_user_data_fragment_is_gated() {
+        let udf = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let frag = outside.path().join("repo.json");
+        write(&frag, r#"{"initializeCommand":"echo hi"}"#);
+        assert!(
+            !initialize_command_author_trusted(true, &[frag], &[], Some(udf.path())).await,
+            "an absolute path outside the user-data folder is not owner-guaranteed"
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_merge_winner_is_gated_even_over_user_data_fragment() {
+        let udf = TempDir::new().unwrap();
+        let frag = udf.path().join("dev.json");
+        write(&frag, r#"{"initializeCommand":"echo profile"}"#);
+        let cli = udf.path().join("cli.json");
+        write(&cli, r#"{"initializeCommand":"echo cli"}"#);
+        // A CLI --merge-config fragment is the highest layer; when it sets the
+        // command the effective value is CLI-sourced (never owner-authored),
+        // so the gate stays on even though `cli` lives in the user-data folder.
+        assert!(!initialize_command_author_trusted(true, &[frag], &[cli], Some(udf.path())).await);
+    }
+
+    #[tokio::test]
+    async fn base_workspace_winner_is_gated() {
+        let udf = TempDir::new().unwrap();
+        // A user-data fragment that does NOT set initializeCommand ⇒ the winner
+        // is the workspace base config ⇒ gated.
+        let frag = udf.path().join("dev.json");
+        write(&frag, r#"{"name":"dev"}"#);
+        assert!(!initialize_command_author_trusted(true, &[frag], &[], Some(udf.path())).await);
+    }
+
+    #[tokio::test]
+    async fn later_user_data_fragment_wins_over_earlier() {
+        let udf = TempDir::new().unwrap();
+        let a = udf.path().join("a.json");
+        write(&a, r#"{"initializeCommand":"echo a"}"#);
+        let b = udf.path().join("b.json");
+        write(&b, r#"{"initializeCommand":"echo b"}"#);
+        // Both set it; the higher-precedence (later) one wins and is owner-authored.
+        assert!(initialize_command_author_trusted(true, &[a, b], &[], Some(udf.path())).await);
+    }
+
+    // The gate itself runs a host shell command, so these are Unix-only.
+    #[cfg(unix)]
+    fn untrusted_trust_args(udf: &std::path::Path) -> HostTrustArgs<'_> {
+        // A fresh (empty) trust store ⇒ the workspace is not on the allowlist.
+        HostTrustArgs {
+            trust_workspace: false,
+            trust_workspace_persist: false,
+            user_data_folder: Some(udf),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn author_trusted_command_bypasses_gate_on_untrusted_workspace() {
+        let ws = TempDir::new().unwrap();
+        let udf = TempDir::new().unwrap();
+        let marker = ws.path().join("ran.marker");
+        let cmd = serde_json::json!(format!("touch {}", marker.display()));
+        let tracker = Arc::new(Mutex::new(None));
+
+        // author_trusted = true ⇒ gate bypassed ⇒ the host hook runs even though
+        // the workspace is untrusted (FR-020a "trust follows author").
+        execute_initialize_command(
+            &cmd,
+            ws.path(),
+            &tracker,
+            untrusted_trust_args(udf.path()),
+            true,
+        )
+        .await
+        .expect("owner-authored initializeCommand should run without the trust gate");
+        assert!(marker.exists(), "the host hook must have run");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_author_trusted_command_is_gated_on_untrusted_workspace() {
+        let ws = TempDir::new().unwrap();
+        let udf = TempDir::new().unwrap();
+        let marker = ws.path().join("ran.marker");
+        let cmd = serde_json::json!(format!("touch {}", marker.display()));
+        let tracker = Arc::new(Mutex::new(None));
+
+        // author_trusted = false ⇒ the workspace-trust gate refuses the hook.
+        let err = execute_initialize_command(
+            &cmd,
+            ws.path(),
+            &tracker,
+            untrusted_trust_args(udf.path()),
+            false,
+        )
+        .await
+        .expect_err("a non-owner-authored initializeCommand must be gated");
+        assert!(
+            err.to_string().to_lowercase().contains("not trusted"),
+            "unexpected error: {err}"
+        );
+        assert!(!marker.exists(), "the gated host hook must not have run");
+    }
+
+    // Ensure the helper accepts an owned-path slice as the callers pass it.
+    #[tokio::test]
+    async fn accepts_pathbuf_slice() {
+        let paths: Vec<PathBuf> = Vec::new();
+        assert!(!initialize_command_author_trusted(true, &paths, &[], None).await);
     }
 }

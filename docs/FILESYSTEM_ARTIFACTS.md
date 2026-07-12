@@ -24,7 +24,7 @@ to delete when you want to reclaim space.
 | `~/.deacon/build-cache/<workspace_hash>/<config_hash>.json` | `build` | Build metadata cache keyed by config hash, under a per-workspace subdir. | Auto-invalidated when the cached image disappears; safe to delete. |
 | `~/.deacon/entrypoints/<workspace_hash>/entrypoint-wrapper.sh` | `up` (only when multiple feature entrypoints must be chained) | Wrapper script bind-mounted into the container; the stable path lets it survive container restarts. | Safe to delete when the container is gone. |
 | `~/.deacon/trusted_workspaces.json` | `--trust-workspace-persist` | Workspace-trust allowlist for host-side hooks (`initializeCommand`). | Persistent. |
-| `~/.deacon/settings.json` | host-CA / settings features | Read-only host settings (e.g. CA injection). | Persistent. |
+| `~/.deacon/settings.json` | host-CA / settings / profiles features | Read-only host settings: CA injection (`hostCa`), `browser`, plus `profiles` / `defaultProfile` / `mergeConfig`. Profile `mergeConfig` fragment paths (deep-overlaid onto the base config; the CLI `--merge-config` is the analogue, and `--override-config` instead *replaces* the base per #285) resolve relative to this file's folder (absolute paths accepted as-is). Loaded/resolved only — no write command yet (deferred to #198). | Persistent. |
 | `~/.deacon/forwarded_ports.json`, `~/.deacon/forward_daemon_<id>.{pid,log}` | `up --auto-forward`, `down` | Host-global port-forward registry + per-container daemon markers/logs. | Reaped on `down` / daemon exit. |
 
 ## Project workspace

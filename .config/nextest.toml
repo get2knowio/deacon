@@ -154,7 +154,7 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
+filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen) | binary(=integration_profiles)'
 test-group = 'fs-heavy'
 slow-timeout = "5m"
 
@@ -269,7 +269,7 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
+filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen) | binary(=integration_profiles)'
 test-group = 'fs-heavy'
 
 [[profile.dev-fast.overrides]]
@@ -492,7 +492,7 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.full.overrides]]
-filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
+filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen) | binary(=integration_profiles)'
 test-group = 'fs-heavy'
 
 [[profile.full.overrides]]
@@ -594,7 +594,7 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 [[profile.ci.overrides]]
-filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen)'
+filter = 'binary(=integration_config) | binary(=integration_layered_merge) | binary(=integration_lockfile) | binary(=integration_templates) | binary(=up_lockfile_frozen) | binary(=integration_profiles)'
 test-group = 'fs-heavy'
 threads-required = 1
 

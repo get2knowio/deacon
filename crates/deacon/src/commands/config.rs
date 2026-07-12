@@ -23,7 +23,10 @@ pub struct ConfigArgs {
     pub command: ConfigCommands,
     pub workspace_folder: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
+    /// REPLACE base (`--override-config`): replaces the discovered config (#285).
     pub override_config_path: Option<PathBuf>,
+    /// CLI `--merge-config` fragments deep-overlaid on the base (highest layer).
+    pub cli_merge_paths: Vec<PathBuf>,
     pub secrets_files: Vec<PathBuf>,
     pub redaction_config: RedactionConfig,
 }
@@ -58,6 +61,7 @@ pub async fn execute_config(args: ConfigArgs) -> Result<()> {
                     workspace_folder: args.workspace_folder,
                     config_path: args.config_path,
                     override_config_path: args.override_config_path,
+                    cli_merge_paths: args.cli_merge_paths,
                     secrets_files: args.secrets_files,
                     redaction_config: args.redaction_config.clone(),
                 };
@@ -82,6 +86,7 @@ struct ConfigSubstituteArgs {
     workspace_folder: Option<PathBuf>,
     config_path: Option<PathBuf>,
     override_config_path: Option<PathBuf>,
+    cli_merge_paths: Vec<PathBuf>,
     secrets_files: Vec<PathBuf>,
     redaction_config: RedactionConfig,
 }
@@ -100,48 +105,16 @@ async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
         None
     };
 
-    // Load configuration
-    let (config, substitution_report) = if let Some(config_path) = args.config_path.as_ref() {
-        // For specified config, still apply overrides and substitution
-        let base_config = ConfigLoader::load_from_path(config_path).await?;
-        let mut configs = vec![base_config];
-
-        // Add override config if provided
-        if let Some(override_path) = args.override_config_path.as_ref() {
-            let override_config = ConfigLoader::load_from_path(override_path).await?;
-            configs.push(override_config);
-        }
-
-        let merged = deacon_core::config::ConfigMerger::merge_configs(&configs);
-
-        // Apply variable substitution with secrets and advanced options
-        let mut substitution_context = SubstitutionContext::new(workspace_folder)?;
-        if let Some(ref secrets) = secrets {
-            for (key, value) in secrets.as_env_vars() {
-                substitution_context
-                    .local_env
-                    .insert(key.clone(), value.clone());
-            }
-        }
-
-        let substitution_options = SubstitutionOptions {
-            max_depth: args.max_depth,
-            strict: args.strict_substitution,
-            enable_nested: args.enable_nested,
-        };
-
-        // Use advanced substitution with specified options
-        let mut report = deacon_core::variable::SubstitutionReport::new();
-        let substituted_config = merged.apply_variable_substitution_advanced(
-            &substitution_context,
-            &substitution_options,
-            &mut report,
-        )?;
-
-        (substituted_config, report)
+    // Base config selection (replace semantics for `--override-config`, #285):
+    // the override file replaces `--config`/discovery outright; otherwise
+    // `--config`; otherwise discovery. The CLI `--merge-config` fragments then
+    // deep-overlay on top (highest precedence).
+    let base_path = if let Some(override_path) = args.override_config_path.as_ref() {
+        override_path.clone()
+    } else if let Some(config_path) = args.config_path.as_ref() {
+        config_path.clone()
     } else {
-        // Discover configuration
-        let config_path = match ConfigLoader::discover_config(workspace_folder).await? {
+        match ConfigLoader::discover_config(workspace_folder).await? {
             DiscoveryResult::Single(path) => path,
             DiscoveryResult::Multiple(paths) => {
                 let display_paths: Vec<String> = paths
@@ -164,21 +137,20 @@ async fn execute_config_substitute(args: ConfigSubstituteArgs) -> Result<()> {
                 })
                 .into());
             }
-        };
-
-        // For discovered config, still apply overrides and substitution
-        let base_config = ConfigLoader::load_from_path(&config_path).await?;
-        let mut configs = vec![base_config];
-
-        // Add override config if provided
-        if let Some(override_path) = args.override_config_path.as_ref() {
-            let override_config = ConfigLoader::load_from_path(override_path).await?;
-            configs.push(override_config);
         }
+    };
 
-        let merged = deacon_core::config::ConfigMerger::merge_configs(&configs);
+    let base_config = ConfigLoader::load_from_path(&base_path).await?;
+    let mut configs = vec![base_config];
+    // Deep-overlay each CLI `--merge-config` fragment in order (later wins).
+    for merge_path in &args.cli_merge_paths {
+        configs.push(ConfigLoader::load_from_path(merge_path).await?);
+    }
 
-        // Apply variable substitution with secrets and advanced options
+    let merged = deacon_core::config::ConfigMerger::merge_configs(&configs);
+
+    // Apply variable substitution with secrets and advanced options
+    let (config, substitution_report) = {
         let mut substitution_context = SubstitutionContext::new(workspace_folder)?;
         if let Some(ref secrets) = secrets {
             for (key, value) in secrets.as_env_vars() {
@@ -392,6 +364,7 @@ mod tests {
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
+            cli_merge_paths: vec![],
             secrets_files: vec![],
             redaction_config: RedactionConfig::default(),
         };
@@ -423,6 +396,7 @@ mod tests {
             workspace_folder: Some(temp_dir.path().to_path_buf()),
             config_path: Some(config_path),
             override_config_path: None,
+            cli_merge_paths: vec![],
             secrets_files: vec![],
             redaction_config: RedactionConfig::default(),
         };

@@ -36,13 +36,13 @@ deacon up --workspace-folder . --remove-existing-container
 docker exec <cid> id -u   # should equal `id -u` on the host
 
 deacon up --workspace-folder . --remove-existing-container \
-	--override-config ./override.disable.json
+	--merge-config ./override.disable.json
 docker exec <cid> id -u   # 5000 (unchanged from the image)
 ```
 
 ## Known deacon issues this example surfaces
 
-- [#65](https://github.com/get2knowio/deacon/issues/65) — `--override-config`
+- [#285](https://github.com/get2knowio/deacon/issues/285) — `--merge-config` (overlay; `--override-config` now replaces the base)
   filename validation rejects `override.disable.json`.
 
 ## Notes

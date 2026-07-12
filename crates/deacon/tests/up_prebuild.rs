@@ -519,6 +519,10 @@ fn test_prebuild_marker_directory_isolation() {
     }
 
     let temp_dir = tempfile::TempDir::new().unwrap();
+    // State markers live under the host user-data folder (a97b958),
+    // `{user_data}/state/<workspace_hash>/[prebuild/]<phase>.json`, not in the
+    // project. Point it at a throwaway dir so the assertions are hermetic.
+    let user_data = tempfile::TempDir::new().unwrap();
 
     // Create a simple devcontainer config
     let devcontainer_config = r#"{
@@ -536,8 +540,17 @@ fn test_prebuild_marker_directory_isolation() {
     )
     .unwrap();
 
-    let state_dir = temp_dir.path().join(".devcontainer-state");
-    let prebuild_state_dir = state_dir.join("prebuild");
+    // The state dir is keyed by an opaque workspace hash; locate the single
+    // hashed subdir under `{user_data}/state` (created by the run below).
+    let find_state_dir = || {
+        let root = user_data.path().join("state");
+        std::fs::read_dir(&root)
+            .unwrap_or_else(|e| panic!("state root {root:?} missing: {e}"))
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.is_dir())
+            .unwrap_or_else(|| panic!("no workspace-hash subdir under {root:?}"))
+    };
 
     // ========================================================================
     // Phase 1: Run prebuild and verify markers are in prebuild subdirectory
@@ -546,6 +559,8 @@ fn test_prebuild_marker_directory_isolation() {
     let mut prebuild_cmd = Command::cargo_bin("deacon").unwrap();
     let prebuild_output = prebuild_cmd
         .current_dir(temp_dir.path())
+        .arg("--user-data-folder")
+        .arg(user_data.path())
         .arg("up")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
@@ -559,6 +574,9 @@ fn test_prebuild_marker_directory_isolation() {
         "Prebuild up failed: {}",
         String::from_utf8_lossy(&prebuild_output.stderr)
     );
+
+    let state_dir = find_state_dir();
+    let prebuild_state_dir = state_dir.join("prebuild");
 
     // Verify prebuild markers exist in the prebuild subdirectory
     let prebuild_oncreate_marker = prebuild_state_dir.join("onCreate.json");
@@ -601,6 +619,8 @@ fn test_prebuild_marker_directory_isolation() {
     let mut normal_cmd = Command::cargo_bin("deacon").unwrap();
     let normal_output = normal_cmd
         .current_dir(temp_dir.path())
+        .arg("--user-data-folder")
+        .arg(user_data.path())
         .arg("up")
         .arg("--workspace-folder")
         .arg(temp_dir.path())

@@ -23,7 +23,7 @@ its side effects.
 1. **`overrideCommand: false` honored.** After `deacon up`, the file
    `/tmp/image.cmd` exists inside the container. The image's `CMD` ran.
 2. **Compare to default (override: true).** Re-run the same workspace
-   with `--override-config` flipping `overrideCommand` back to `true`.
+   with `--merge-config` flipping `overrideCommand` back to `true`.
    `/tmp/image.cmd` is now absent — deacon replaced the command.
 
 ## Manual usage
@@ -33,13 +33,13 @@ deacon up --workspace-folder . --remove-existing-container
 docker exec <cid> cat /tmp/image.cmd   # image-cmd-ran
 
 deacon up --workspace-folder . --remove-existing-container \
-	--override-config ./override.true.json
+	--merge-config ./override.true.json
 docker exec <cid> ls /tmp/image.cmd   # ENOENT — overridden
 ```
 
 ## Known deacon issues this example surfaces
 
-- [#65](https://github.com/get2knowio/deacon/issues/65) — `--override-config`
+- [#285](https://github.com/get2knowio/deacon/issues/285) — `--merge-config` (overlay; `--override-config` now replaces the base)
   filename validation rejects `override.true.json`.
 
 ## Spec references

@@ -2629,32 +2629,41 @@ impl ConfigLoader {
         Ok((final_result, substitution_report))
     }
 
-    /// Load configuration with extends resolution and optional override config
+    /// Load configuration with extends resolution and an ordered list of
+    /// merge fragments (deep overlay).
     ///
-    /// This method loads the base configuration, resolves extends chain,
-    /// and optionally applies an override configuration with the highest precedence.
-    /// It supports variable substitution with secrets integration.
+    /// This method loads the base configuration, resolves its extends chain,
+    /// then deep-overlays each merge fragment in `merge_config_paths` order
+    /// (lowest→highest precedence), with the last entry winning on conflicting
+    /// keys via the existing last-writer-wins merge. It supports variable
+    /// substitution with secrets integration.
+    ///
+    /// The `path` base is chosen by the caller: normally the discovered
+    /// `devcontainer.json`, or — when `--override-config` is given — that file
+    /// (replace-base, reference parity #285). The fragments are the settings/
+    /// profile `mergeConfig` layers plus any CLI `--merge-config` (highest).
     ///
     /// ## Arguments
     ///
     /// * `path` - Path to the base configuration file
-    /// * `override_config_path` - Optional path to override configuration file  
+    /// * `merge_config_paths` - Ordered merge fragments, lowest to highest
+    ///   precedence (empty ⇒ base config only)
     /// * `secrets` - Optional secrets collection for variable substitution
     /// * `workspace_path` - Workspace path for variable substitution context
     ///
     /// ## Returns
     ///
     /// Returns the merged and substituted configuration with substitution report.
-    #[instrument(skip_all, fields(path = %path.display(), override_path = ?override_config_path.as_ref().map(|p| p.display())))]
+    #[instrument(skip_all, fields(path = %path.display(), merges = merge_config_paths.len()))]
     pub async fn load_with_overrides_and_substitution(
         path: &Path,
-        override_config_path: Option<&Path>,
+        merge_config_paths: &[&Path],
         secrets: Option<&crate::secrets::SecretsCollection>,
         workspace_path: &Path,
         resolve_devcontainer_id: bool,
     ) -> Result<(DevContainerConfig, crate::variable::SubstitutionReport)> {
         debug!(
-            "Loading configuration with overrides and substitution from {}",
+            "Loading configuration with merge fragments and substitution from {}",
             path.display()
         );
 
@@ -2664,18 +2673,17 @@ impl ConfigLoader {
             Self::resolve_extends_chain(path, &mut visited).await?
         };
 
-        // Add override config if provided
-        if let Some(override_path) = override_config_path {
-            debug!(
-                "Loading override configuration from {}",
-                override_path.display()
-            );
-            let override_config = Self::load_from_path(override_path).await?;
-            configs.push(override_config);
+        // Deep-overlay each merge fragment in order (low→high precedence).
+        // Fragments are single files (no extends resolution), matching the merge
+        // chain the caller expects.
+        for merge_path in merge_config_paths {
+            debug!("Loading merge fragment from {}", merge_path.display());
+            let merge_fragment = Self::load_from_path(merge_path).await?;
+            configs.push(merge_fragment);
         }
 
         debug!(
-            "Resolved configuration chain with {} configs (including override)",
+            "Resolved configuration chain with {} configs (including merge fragments)",
             configs.len()
         );
 
@@ -4015,7 +4023,7 @@ mod tests {
         let (config, _report) = rt
             .block_on(ConfigLoader::load_with_overrides_and_substitution(
                 &config_path,
-                None,
+                &[],
                 None,
                 temp_dir.path(),
                 true,

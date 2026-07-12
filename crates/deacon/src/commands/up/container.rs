@@ -214,11 +214,21 @@ pub(crate) async fn execute_container_up(
             trust_workspace_persist: args.trust_workspace_persist,
             user_data_folder: args.user_data_folder.as_deref(),
         };
+        // FR-020a: bypass the workspace-trust gate only when the effective
+        // command is owner-authored (from a user-data profile fragment).
+        let author_trusted = super::lifecycle::initialize_command_author_trusted(
+            config.initialize_command.is_some(),
+            &args.settings_merge_paths,
+            &args.cli_merge_paths,
+            args.user_data_folder.as_deref(),
+        )
+        .await;
         execute_initialize_command(
             initialize,
             workspace_folder,
             &args.progress_tracker,
             trust_args,
+            author_trusted,
         )
         .await?;
     }
@@ -754,7 +764,7 @@ pub(crate) async fn execute_container_up(
             &args.redaction_config,
             &args.secret_registry,
             args.auto_forward,
-            args.user_data_folder.as_deref(),
+            args.browser_setting.as_deref(),
         )
         .await?;
     }

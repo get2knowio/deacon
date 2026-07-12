@@ -27,6 +27,7 @@ async fn exec_honors_default_user_env_probe_login_shell() {
         mount_workspace_git_root: true,
         config_path: None,
         override_config_path: None,
+        cli_merge_paths: Vec::new(),
         secrets_files: Vec::new(),
         docker_path: "docker".to_string(),
         docker_compose_path: "docker-compose".to_string(),

@@ -27,8 +27,13 @@ pub struct OutdatedArgs {
     pub workspace_folder: String,
     /// Explicit path to configuration file (overrides auto-discovery).
     pub config: Option<PathBuf>,
-    /// Override configuration file path (highest precedence).
+    /// Override configuration file path (REPLACE base, #285).
     pub override_config: Option<PathBuf>,
+    /// Settings-sourced merge fragments from the selected profile, deep-overlaid
+    /// on the base (017). Empty ⇒ today's behavior.
+    pub settings_merge_paths: Vec<PathBuf>,
+    /// CLI `--merge-config` fragments, the highest-precedence merge layer.
+    pub cli_merge_paths: Vec<PathBuf>,
     /// Output format for the results (text or JSON).
     pub output: OutputFormat,
     /// If true, the command will exit with code 2 when outdated features are detected.
@@ -79,6 +84,8 @@ impl std::error::Error for OutdatedExitCode {}
 ///     workspace_folder: ".".to_string(),
 ///     config: None,
 ///     override_config: None,
+///     settings_merge_paths: Vec::new(),
+///     cli_merge_paths: Vec::new(),
 ///     output: OutputFormat::Text,
 ///     fail_on_outdated: false,
 /// };
@@ -105,11 +112,21 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
             })?
     };
 
-    // Resolve configuration path with precedence: override_config > config > auto-discovery
-    let config_location = resolve_config_path(&workspace_folder, &args).await?;
-
-    // Load configuration
-    let config = load_config(&config_location).await?;
+    // Load the effective configuration. With no merge fragments this is
+    // byte-for-byte today's behavior (FR-024): `--override-config` > `--config`
+    // > discovery, resolved and loaded as a single config. When settings/profile
+    // `mergeConfig` or CLI `--merge-config` contribute fragments, deep-overlay
+    // them onto that base so the precedence ladder holds (base ⊕ settings/profile
+    // ⊕ `--merge-config`). `base_config_path` anchors the lockfile lookup.
+    let (config, base_config_path) =
+        if args.settings_merge_paths.is_empty() && args.cli_merge_paths.is_empty() {
+            let config_location = resolve_config_path(&workspace_folder, &args).await?;
+            let config = load_config(&config_location).await?;
+            let base = config_location.path().to_path_buf();
+            (config, base)
+        } else {
+            load_config_with_merge_fragments(&workspace_folder, &args).await?
+        };
 
     // Extract features map preserving declaration order
     let features_map_opt = config.features.as_object();
@@ -143,7 +160,7 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
     let features_map = features_map_opt.unwrap();
 
     // Read lockfile if present
-    let lockfile_path = core_lockfile::get_lockfile_path(config_location.path());
+    let lockfile_path = core_lockfile::get_lockfile_path(&base_config_path);
     let lockfile_opt = match core_lockfile::read_lockfile(&lockfile_path).await {
         Ok(opt) => opt,
         Err(e) => {
@@ -459,5 +476,44 @@ async fn load_config(
             }
             _ => Err(e.into()),
         },
+    }
+}
+
+/// Load the configuration deep-overlaying the settings/profile `mergeConfig`
+/// and CLI `--merge-config` fragments (017, #285). The base is
+/// `--override-config` > `--config` > the discovered project config (REPLACE
+/// semantics — `--override-config` no longer competes on the merge chain); the
+/// ordered merge chain is `[settings/profile fragments…, --merge-config…]`
+/// (low→high). Returns the effective config and the base path (for the lockfile
+/// lookup). Only used when at least one merge fragment exists.
+async fn load_config_with_merge_fragments(
+    workspace_folder: &Path,
+    args: &OutdatedArgs,
+) -> Result<(deacon_core::config::DevContainerConfig, PathBuf)> {
+    // Base: `--override-config` replaces `--config`/discovery (reference parity).
+    let base = resolve_config_path(workspace_folder, args)
+        .await?
+        .path()
+        .to_path_buf();
+
+    // Merge chain (low→high): settings/profile fragments then CLI --merge-config.
+    let mut merges: Vec<PathBuf> = args.settings_merge_paths.clone();
+    merges.extend(args.cli_merge_paths.iter().cloned());
+
+    let merge_refs: Vec<&Path> = merges.iter().map(|p| p.as_path()).collect();
+    match ConfigLoader::load_with_overrides_and_substitution(
+        &base,
+        &merge_refs,
+        None,
+        workspace_folder,
+        true,
+    )
+    .await
+    {
+        Ok((config, _report)) => Ok((config, base)),
+        Err(DeaconError::Config(ConfigError::NotFound { path })) => {
+            anyhow::bail!("Dev container config ({}) not found.", path)
+        }
+        Err(e) => Err(e.into()),
     }
 }

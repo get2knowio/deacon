@@ -15,8 +15,17 @@ pub struct ConfigLoadArgs<'a> {
     pub workspace_folder: Option<&'a Path>,
     /// Explicit config path (--config)
     pub config_path: Option<&'a Path>,
-    /// Override config path (--override-config)
+    /// REPLACE base (`--override-config`): when set, THIS file (resolved through
+    /// its own `extends` chain) becomes the base config instead of discovery or
+    /// `--config`. Reference parity (#285). The merge ladder still overlays on top.
     pub override_config_path: Option<&'a Path>,
+    /// Settings-sourced merge fragments (root `mergeConfig` then the selected
+    /// profile's, resolved by the profile helper), lowest→highest precedence.
+    /// Deep-overlaid on the base. Empty ⇒ today's behavior.
+    pub settings_merge_paths: &'a [PathBuf],
+    /// CLI `--merge-config` fragments, in given order (later wins), the
+    /// highest-precedence deep-overlay layer.
+    pub cli_merge_paths: &'a [PathBuf],
     /// Secrets file paths (--secrets-file)
     pub secrets_files: &'a [PathBuf],
     /// Whether `${devcontainerId}` should be resolved during load-time
@@ -39,10 +48,15 @@ pub struct ConfigLoadResult {
 
 /// Resolve and load configuration using shared discovery rules.
 ///
-/// Resolution order:
-/// - Use `config_path` when provided.
-/// - Otherwise discover under `workspace_folder` (or current dir) via `ConfigLoader::discover_config`.
-/// - If the discovered path does not exist and an override is provided, treat the override as the base config.
+/// Base selection (the config the merge ladder overlays onto):
+/// - `--override-config` when provided (REPLACE base; resolved through its own
+///   `extends` chain — reference parity #285).
+/// - Otherwise `--config` when provided.
+/// - Otherwise discover under `workspace_folder` (or current dir) via
+///   `ConfigLoader::discover_config`.
+///
+/// The merge ladder (low→high) is the settings/profile `mergeConfig` fragments
+/// then the CLI `--merge-config` fragments, deep-overlaid on the base.
 ///
 /// Secrets from `secrets_files` are threaded into substitution. Errors are surfaced
 /// as `DeaconError::Config` variants to preserve upstream JSON contracts.
@@ -53,7 +67,12 @@ pub async fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
         std::env::current_dir().map_err(|e| DeaconError::Config(ConfigError::Io(e)))?
     };
 
-    let mut config_path = if let Some(path) = args.config_path {
+    // Base config: `--override-config` replaces discovery/`--config` outright
+    // (its own extends chain runs in the loader). Otherwise `--config`, else
+    // discovery. A merge fragment is never promoted to base — merge needs a base.
+    let config_path = if let Some(override_path) = args.override_config_path {
+        override_path.to_path_buf()
+    } else if let Some(path) = args.config_path {
         // Spec parity (#65): accept any --config filename; the loader will
         // surface the usual file-not-found error if the path does not exist.
         path.to_path_buf()
@@ -78,14 +97,14 @@ pub async fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
         }
     };
 
-    let mut override_config_path = args.override_config_path.map(|p| p.to_path_buf());
-
-    // When the discovered/base config is missing, fall back to using the override as the base.
-    if !config_path.exists() {
-        if let Some(override_path) = override_config_path.take() {
-            config_path = override_path;
-        }
-    }
+    // Assemble the ordered merge chain (low→high): settings-sourced fragments
+    // (root mergeConfig then selected profile) then the CLI `--merge-config`.
+    let mut merge_paths: Vec<PathBuf> = args
+        .settings_merge_paths
+        .iter()
+        .map(|p| p.to_path_buf())
+        .collect();
+    merge_paths.extend(args.cli_merge_paths.iter().map(|p| p.to_path_buf()));
 
     let secrets = if args.secrets_files.is_empty() {
         None
@@ -93,9 +112,10 @@ pub async fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
         Some(SecretsCollection::load_from_files(args.secrets_files)?)
     };
 
+    let merge_refs: Vec<&Path> = merge_paths.iter().map(|p| p.as_path()).collect();
     let (config, substitution_report) = ConfigLoader::load_with_overrides_and_substitution(
         &config_path,
-        override_config_path.as_deref(),
+        &merge_refs,
         secrets.as_ref(),
         &workspace_folder,
         args.resolve_devcontainer_id,
@@ -117,7 +137,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[tokio::test]
-    async fn uses_override_when_base_missing() {
+    async fn override_replaces_base() {
         let temp = TempDir::new().unwrap();
         let override_path = temp.path().join(".devcontainer.json");
         std::fs::write(
@@ -129,6 +149,8 @@ mod tests {
         let result = load_config(ConfigLoadArgs {
             workspace_folder: Some(temp.path()),
             config_path: None,
+            settings_merge_paths: &[],
+            cli_merge_paths: &[],
             override_config_path: Some(override_path.as_path()),
             secrets_files: &[],
             resolve_devcontainer_id: true,
@@ -140,6 +162,77 @@ mod tests {
         assert_eq!(result.config_path, override_path);
     }
 
+    /// Reference parity (#285): `--override-config` REPLACES the discovered base
+    /// — the discovered config's fields must NOT survive into the result.
+    #[tokio::test]
+    async fn override_config_replaces_not_merges_discovered_base() {
+        let temp = TempDir::new().unwrap();
+        // A real discovered base config with a field the override does not set.
+        let dc_dir = temp.path().join(".devcontainer");
+        std::fs::create_dir_all(&dc_dir).unwrap();
+        std::fs::write(
+            dc_dir.join("devcontainer.json"),
+            r#"{"name":"discovered","remoteUser":"baseuser","image":"ubuntu:latest"}"#,
+        )
+        .unwrap();
+        // The override file sets only `name` (+ image); no remoteUser.
+        let override_path = temp.path().join("override.json");
+        std::fs::write(
+            &override_path,
+            r#"{"name":"from-override","image":"debian:bookworm-slim"}"#,
+        )
+        .unwrap();
+
+        let result = load_config(ConfigLoadArgs {
+            workspace_folder: Some(temp.path()),
+            config_path: None,
+            settings_merge_paths: &[],
+            cli_merge_paths: &[],
+            override_config_path: Some(override_path.as_path()),
+            secrets_files: &[],
+            resolve_devcontainer_id: true,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.config.name.as_deref(), Some("from-override"));
+        // The discovered base's remoteUser must be GONE — replace, not merge.
+        assert_eq!(result.config.remote_user, None);
+        assert_eq!(result.config_path, override_path);
+    }
+
+    /// The merge ladder still overlays on top of an `--override-config` base
+    /// (composable, user-approved): `--merge-config` wins on conflicts.
+    #[tokio::test]
+    async fn merge_config_overlays_on_override_base() {
+        let temp = TempDir::new().unwrap();
+        let override_path = temp.path().join("base.json");
+        std::fs::write(
+            &override_path,
+            r#"{"name":"base","remoteUser":"baseuser","image":"ubuntu:latest"}"#,
+        )
+        .unwrap();
+        let fragment = temp.path().join("frag.json");
+        std::fs::write(&fragment, r#"{"name":"fragment-wins"}"#).unwrap();
+
+        let result = load_config(ConfigLoadArgs {
+            workspace_folder: Some(temp.path()),
+            config_path: None,
+            settings_merge_paths: &[],
+            cli_merge_paths: std::slice::from_ref(&fragment),
+            override_config_path: Some(override_path.as_path()),
+            secrets_files: &[],
+            resolve_devcontainer_id: true,
+        })
+        .await
+        .unwrap();
+
+        // Fragment overlays the override base: name from fragment, remoteUser
+        // inherited from the base (fragment did not set it).
+        assert_eq!(result.config.name.as_deref(), Some("fragment-wins"));
+        assert_eq!(result.config.remote_user.as_deref(), Some("baseuser"));
+    }
+
     #[tokio::test]
     async fn surfaces_not_found_error() {
         let temp = TempDir::new().unwrap();
@@ -147,6 +240,8 @@ mod tests {
         let err = load_config(ConfigLoadArgs {
             workspace_folder: Some(temp.path()),
             config_path: None,
+            settings_merge_paths: &[],
+            cli_merge_paths: &[],
             override_config_path: None,
             secrets_files: &[],
             resolve_devcontainer_id: true,
@@ -183,6 +278,8 @@ mod tests {
         let result = load_config(ConfigLoadArgs {
             workspace_folder: Some(temp.path()),
             config_path: Some(config_path.as_path()),
+            settings_merge_paths: &[],
+            cli_merge_paths: &[],
             override_config_path: None,
             secrets_files: &[],
             resolve_devcontainer_id: true,
@@ -221,6 +318,8 @@ mod tests {
         let result = load_config(ConfigLoadArgs {
             workspace_folder: Some(workspace),
             config_path: Some(explicit_config.as_path()),
+            settings_merge_paths: &[],
+            cli_merge_paths: &[],
             override_config_path: None,
             secrets_files: &[],
             resolve_devcontainer_id: true,
@@ -243,6 +342,8 @@ mod tests {
         let err = load_config(ConfigLoadArgs {
             workspace_folder: Some(temp.path()),
             config_path: Some(nonexistent_path.as_path()),
+            settings_merge_paths: &[],
+            cli_merge_paths: &[],
             override_config_path: None,
             secrets_files: &[],
             resolve_devcontainer_id: true,

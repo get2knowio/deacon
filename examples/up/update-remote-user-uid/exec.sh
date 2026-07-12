@@ -45,7 +45,7 @@ echo "  ok: container UID matches host" >&2
 
 echo "== Scenario 2: updateRemoteUserUID: false (keeps image UID 5000) ==" >&2
 run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
-	--override-config ./override.disable.json "$@" >/dev/null
+	--merge-config ./override.disable.json "$@" >/dev/null
 cid="$(container_id)"
 container_uid="$(docker exec "$cid" cat /tmp/uid | tr -d '\n')"
 echo "  container UID (no sync): ${container_uid}" >&2

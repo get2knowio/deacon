@@ -372,6 +372,9 @@ fn test_build_command_advanced_flags() {
 fn test_build_cache_miss_then_hit() {
     // Create a temporary directory with a simple Dockerfile
     let temp_dir = TempDir::new().unwrap();
+    // Build cache lives under the host user-data folder (a97b958), not in the
+    // project. Point it at a throwaway dir so the assertions are hermetic.
+    let user_data = TempDir::new().unwrap();
     let dockerfile_content = r#"FROM alpine:3.19
 LABEL test=cache_test
 RUN echo "Building with cache test"
@@ -407,6 +410,8 @@ RUN echo "Building with cache test"
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     let first_assert = cmd
         .current_dir(&temp_dir)
+        .arg("--user-data-folder")
+        .arg(user_data.path())
         .arg("build")
         .arg("--output-format")
         .arg("json")
@@ -421,14 +426,21 @@ RUN echo "Building with cache test"
         assert!(stdout.contains(r#""outcome":"success"#));
         assert!(stdout.contains(r#""imageName""#));
 
-        // Check that cache directory was created
-        let cache_dir = temp_dir.path().join(".devcontainer").join("build-cache");
+        // Check that the cache directory was created under the user-data folder
+        // (`{user_data}/build-cache/<workspace_hash>/`), not inside the project.
+        let cache_dir = user_data.path().join("build-cache");
         assert!(cache_dir.exists(), "Cache directory should be created");
 
-        // Check that a cache file was created
+        // Check that a cache file was created (under the per-workspace subdir).
         let cache_files: Vec<_> = fs::read_dir(&cache_dir)
             .unwrap()
             .filter_map(|entry| entry.ok())
+            .flat_map(|workspace_subdir| {
+                fs::read_dir(workspace_subdir.path())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|e| e.ok())
+            })
             .filter(|entry| {
                 entry
                     .path()
@@ -446,6 +458,8 @@ RUN echo "Building with cache test"
         let mut cmd2 = Command::cargo_bin("deacon").unwrap();
         let second_assert = cmd2
             .current_dir(&temp_dir)
+            .arg("--user-data-folder")
+            .arg(user_data.path())
             .arg("build")
             .arg("--output-format")
             .arg("json")

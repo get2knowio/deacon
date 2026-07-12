@@ -38,7 +38,7 @@ echo "  ok: image CMD ran (/tmp/image.cmd present)" >&2
 
 echo "== Scenario 2: overrideCommand=true suppresses image CMD ==" >&2
 run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container \
-	--override-config ./override.true.json "$@" >/dev/null
+	--merge-config ./override.true.json "$@" >/dev/null
 cid="$(container_id)"
 sleep 1
 if docker exec "$cid" test -f /tmp/image.cmd; then
