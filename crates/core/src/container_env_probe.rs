@@ -593,6 +593,7 @@ impl ContainerEnvironmentProber {
     pub fn build_effective_env(
         &self,
         probed_env: &HashMap<String, String>,
+        container_env_for_substitution: &HashMap<String, String>,
         config_remote_env: Option<&HashMap<String, Option<String>>>,
         cli_env: &IndexMap<String, String>,
     ) -> HashMap<String, String> {
@@ -615,7 +616,7 @@ impl ContainerEnvironmentProber {
                 local_env: HashMap::new(),
                 devcontainer_id: String::new(),
                 container_workspace_folder: None,
-                container_env: Some(probed_env.clone()),
+                container_env: Some(container_env_for_substitution.clone()),
                 feature_vars: HashMap::new(),
                 template_options: None,
                 resolve_devcontainer_id: true,
@@ -1002,7 +1003,12 @@ mod tests {
         // CLI sets C to value -> should be present
         cli_env.insert("C".to_string(), "from_cli_c".to_string());
 
-        let result = prober.build_effective_env(&probed_env, Some(&config_remote_env), &cli_env);
+        let result = prober.build_effective_env(
+            &probed_env,
+            &probed_env,
+            Some(&config_remote_env),
+            &cli_env,
+        );
 
         // A should come from config (overrides probed)
         assert_eq!(result.get("A"), Some(&"from_config".to_string()));
@@ -1034,7 +1040,12 @@ mod tests {
         );
 
         let cli_env: IndexMap<String, String> = IndexMap::new();
-        let result = prober.build_effective_env(&probed_env, Some(&config_remote_env), &cli_env);
+        let result = prober.build_effective_env(
+            &probed_env,
+            &probed_env,
+            Some(&config_remote_env),
+            &cli_env,
+        );
 
         assert_eq!(
             result.get("PATH"),
@@ -1047,6 +1058,44 @@ mod tests {
         );
         // No unresolved template should remain.
         assert!(!result.get("PATH").unwrap().contains("${"));
+    }
+
+    #[test]
+    fn test_build_effective_env_uses_container_env_not_probed_for_container_substitute() {
+        // Parity (#298): ${containerEnv:PATH} should resolve from container env
+        // (Config.Env), not userEnvProbe-augmented PATH.
+        let prober = ContainerEnvironmentProber::new();
+
+        let mut probed_env = HashMap::new();
+        probed_env.insert(
+            "PATH".to_string(),
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/vscode/.local/bin"
+                .to_string(),
+        );
+        let mut container_env = HashMap::new();
+        container_env.insert(
+            "PATH".to_string(),
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
+        );
+
+        let mut config_remote_env: HashMap<String, Option<String>> = HashMap::new();
+        config_remote_env.insert(
+            "R2_PATH".to_string(),
+            Some("${containerEnv:PATH}".to_string()),
+        );
+
+        let cli_env: IndexMap<String, String> = IndexMap::new();
+        let result = prober.build_effective_env(
+            &probed_env,
+            &container_env,
+            Some(&config_remote_env),
+            &cli_env,
+        );
+
+        assert_eq!(
+            result.get("R2_PATH"),
+            Some(&"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string())
+        );
     }
 
     /// Spec parity: the `userEnvProbe` config field (deserialized via serde from

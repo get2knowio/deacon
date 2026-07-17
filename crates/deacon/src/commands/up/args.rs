@@ -22,6 +22,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizedMount {
     pub mount_type: MountType,
+    /// Source path/volume for bind/volume mounts. Empty for tmpfs mounts.
     pub source: String,
     pub target: String,
     /// Whether the volume is externally managed (not created by deacon). Per
@@ -42,12 +43,16 @@ pub struct NormalizedMount {
 pub enum MountType {
     Bind,
     Volume,
+    Tmpfs,
 }
 
 impl NormalizedMount {
     /// Parse and validate a mount string from CLI.
     ///
-    /// Expected format: `type=(bind|volume),source=<path>,target=<path>[,external=(true|false)][,readonly|readonly=(true|false)|ro][,consistency=(cached|consistent|delegated)]`
+    /// Expected format:
+    /// `type=(bind|volume|tmpfs),target=<path>[,source=<path>][,external=(true|false)][,readonly|readonly=(true|false)|ro][,consistency=(cached|consistent|delegated)]`
+    ///
+    /// `source` is required for `bind` and `volume`, optional for `tmpfs`.
     ///
     /// Per #119, `readonly` (bare or `=true/false`) and `ro` (bare) are
     /// Docker-aligned aliases for the read-only flag — distinct from
@@ -118,14 +123,35 @@ impl NormalizedMount {
             })
         })?;
 
-        let source = source.ok_or_else(|| {
-            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                message: format!(
-                    "Invalid mount format: '{}'. Missing required field: source",
-                    mount_str
-                ),
-            })
-        })?;
+        // Validate and convert mount type
+        let mount_type = match mount_type_str {
+            "bind" => MountType::Bind,
+            "volume" => MountType::Volume,
+            "tmpfs" => MountType::Tmpfs,
+            _ => {
+                return Err(
+                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                        message: format!(
+                            "Invalid mount format: '{}'. type must be 'bind', 'volume', or 'tmpfs'",
+                            mount_str
+                        ),
+                    })
+                    .into(),
+                );
+            }
+        };
+
+        let source = match mount_type {
+            MountType::Bind | MountType::Volume => source.ok_or_else(|| {
+                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                    message: format!(
+                        "Invalid mount format: '{}'. Missing required field: source",
+                        mount_str
+                    ),
+                })
+            })?,
+            MountType::Tmpfs => source.unwrap_or(""),
+        };
 
         let target = target.ok_or_else(|| {
             DeaconError::Config(deacon_core::errors::ConfigError::Validation {
@@ -135,23 +161,6 @@ impl NormalizedMount {
                 ),
             })
         })?;
-
-        // Validate and convert mount type
-        let mount_type = match mount_type_str {
-            "bind" => MountType::Bind,
-            "volume" => MountType::Volume,
-            _ => {
-                return Err(
-                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                        message: format!(
-                            "Invalid mount format: '{}'. type must be 'bind' or 'volume'",
-                            mount_str
-                        ),
-                    })
-                    .into(),
-                );
-            }
-        };
 
         // Validate external value if provided
         let external_flag = match external {
@@ -221,11 +230,15 @@ impl NormalizedMount {
                 match self.mount_type {
                     MountType::Bind => "bind",
                     MountType::Volume => "volume",
+                    MountType::Tmpfs => "tmpfs",
                 }
             ),
-            format!("source={}", self.source),
             format!("target={}", self.target),
         ];
+
+        if matches!(self.mount_type, MountType::Bind | MountType::Volume) {
+            parts.insert(1, format!("source={}", self.source));
+        }
 
         // Per #119, `external` is a deacon-internal marker (externally-
         // managed volume) — not a valid `docker --mount` option. It lives

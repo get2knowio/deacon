@@ -227,8 +227,8 @@ pub(crate) async fn merge_image_metadata_into_config(
 ///
 /// Per the upstream spec (`docs/specs/devcontainer-reference.md` § Image
 /// Metadata): when an image is used, the CLI MUST read the
-/// `devcontainer.metadata` LABEL — a JSON array of partial `devcontainer.json`
-/// entries — and merge each entry into the resolved configuration with
+/// `devcontainer.metadata` LABEL — either a single partial `devcontainer.json`
+/// object or an array of partial entries — and merge each entry into the resolved configuration with
 /// **lower precedence than the user's devcontainer.json**.
 ///
 /// This call site runs *after* the image is locally available (i.e. after
@@ -242,7 +242,7 @@ pub(crate) async fn merge_image_metadata_into_config(
 ///   image. The container itself still runs with the image's own ENV/USER
 ///   instructions, which Docker applies at run time.
 /// - If the LABEL is absent, return the config unchanged.
-/// - If the LABEL is present but malformed (not a JSON array, or entries
+/// - If the LABEL is present but malformed (not valid JSON, or entries
 ///   that don't deserialize as `DevContainerConfig`), surface a warn with
 ///   the parse error and return the config unchanged. We do not fail the
 ///   `up` flow on a bad image label — the spec says image metadata is the
@@ -408,14 +408,56 @@ fn apply_image_metadata_label(
         return user_config;
     };
 
-    let entries: Vec<DevContainerConfig> = match serde_json::from_str(label_json) {
+    let label_value: serde_json::Value = match serde_json::from_str(label_json) {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(
-                "Image '{}' has a devcontainer.metadata label that is not a valid \
-                 JSON array of devcontainer entries; proceeding without merge: {}",
+                "Image '{}' has a devcontainer.metadata label that is not valid \
+                 JSON; proceeding without merge: {}",
                 image_ref,
                 e
+            );
+            return user_config;
+        }
+    };
+    let entries: Vec<DevContainerConfig> = match label_value {
+        serde_json::Value::Array(values) => {
+            let parsed: Result<Vec<DevContainerConfig>, _> = values
+                .into_iter()
+                .map(serde_json::from_value::<DevContainerConfig>)
+                .collect();
+            match parsed {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(
+                        "Image '{}' has a devcontainer.metadata label with array entries \
+                         that are not valid devcontainer configs; proceeding without merge: {}",
+                        image_ref,
+                        e
+                    );
+                    return user_config;
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            match serde_json::from_value::<DevContainerConfig>(serde_json::Value::Object(map)) {
+                Ok(v) => vec![v],
+                Err(e) => {
+                    tracing::warn!(
+                        "Image '{}' has a devcontainer.metadata label object that is not a \
+                         valid devcontainer config; proceeding without merge: {}",
+                        image_ref,
+                        e
+                    );
+                    return user_config;
+                }
+            }
+        }
+        _ => {
+            tracing::warn!(
+                "Image '{}' has a devcontainer.metadata label that is neither an object nor array; \
+                 proceeding without merge",
+                image_ref
             );
             return user_config;
         }
@@ -798,6 +840,35 @@ mod image_metadata_merge_tests {
     }
 
     #[test]
+    fn object_form_image_metadata_label_is_applied() {
+        let label = r#"{
+            "containerEnv": {
+                "R4_PREBUILT": "object"
+            },
+            "remoteEnv": {
+                "R4_PREBUILT_REMOTE": "remote"
+            },
+            "init": true
+        }"#
+        .to_string();
+        let user = DevContainerConfig::default();
+        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+
+        assert_eq!(
+            merged.container_env.get("R4_PREBUILT"),
+            Some(&"object".to_string())
+        );
+        assert_eq!(
+            merged
+                .remote_env
+                .get("R4_PREBUILT_REMOTE")
+                .and_then(|v| v.as_deref()),
+            Some("remote")
+        );
+        assert_eq!(merged.init, Some(true));
+    }
+
+    #[test]
     fn missing_label_is_a_noop() {
         let user = user_config_with_env(&[("X", "1")]);
         let user_clone = user.clone();
@@ -816,10 +887,10 @@ mod image_metadata_merge_tests {
         let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
         assert_eq!(merged.container_env, user_clone.container_env);
 
-        // Also handle "valid JSON but not an array of devcontainer entries".
+        // Also handle "valid JSON but not a devcontainer config object/array".
         let user = user_config_with_env(&[("X", "1")]);
         let user_clone = user.clone();
-        let label = r#"{"oops": "not-an-array"}"#.to_string();
+        let label = r#"true"#.to_string();
         let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
         assert_eq!(merged.container_env, user_clone.container_env);
     }

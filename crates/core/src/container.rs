@@ -64,6 +64,9 @@ pub struct ContainerIdentity {
     /// Newline-joined subject DNs of the injected corporate CAs (016).
     /// Informational; emitted as `devcontainer.deacon.hostCaSubjects`.
     pub host_ca_subjects: Option<String>,
+    /// User-provided identification labels (for example, from `--id-label`)
+    /// that should be stamped onto created containers.
+    pub additional_labels: HashMap<String, String>,
 }
 
 /// Container creation result
@@ -153,6 +156,7 @@ impl ContainerIdentity {
             config_file: None,
             host_ca_bundle_path: None,
             host_ca_subjects: None,
+            additional_labels: HashMap::new(),
         }
     }
 
@@ -175,6 +179,16 @@ impl ContainerIdentity {
     pub fn with_host_ca(mut self, bundle_path: impl Into<String>, subjects: &[String]) -> Self {
         self.host_ca_bundle_path = Some(bundle_path.into());
         self.host_ca_subjects = Some(subjects.join("\n"));
+        self
+    }
+
+    /// Attach additional container labels.
+    ///
+    /// Keys are stored as-is and overwrite any existing key in this identity.
+    pub fn with_additional_labels(mut self, labels: &[(String, String)]) -> Self {
+        for (key, value) in labels {
+            self.additional_labels.insert(key.clone(), value.clone());
+        }
         self
     }
 
@@ -280,6 +294,10 @@ impl ContainerIdentity {
         }
         if let Some(ref subjects) = self.host_ca_subjects {
             labels.insert(LABEL_HOST_CA_SUBJECTS.to_string(), subjects.clone());
+        }
+
+        for (key, value) in &self.additional_labels {
+            labels.insert(key.clone(), value.clone());
         }
 
         labels
@@ -469,6 +487,30 @@ mod tests {
             "devcontainer.config_file must be the absolute path to the resolved devcontainer.json"
         );
         assert!(labels.contains_key(LABEL_LOCAL_FOLDER));
+    }
+
+    #[test]
+    fn test_labels_include_additional_labels_when_set() {
+        let temp_dir = TempDir::new().unwrap();
+        let workspace_path = temp_dir.path();
+
+        let config = DevContainerConfig {
+            name: Some("extra-labels".to_string()),
+            image: Some("alpine:3.18".to_string()),
+            ..Default::default()
+        };
+
+        let identity = ContainerIdentity::new(workspace_path, &config).with_additional_labels(&[
+            ("devcontainer.conformance".to_string(), "case01".to_string()),
+            ("custom.scope".to_string(), "integration".to_string()),
+        ]);
+        let labels = identity.labels();
+
+        assert_eq!(
+            labels.get("devcontainer.conformance"),
+            Some(&"case01".to_string())
+        );
+        assert_eq!(labels.get("custom.scope"), Some(&"integration".to_string()));
     }
 
     #[test]

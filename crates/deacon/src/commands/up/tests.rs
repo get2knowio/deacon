@@ -230,6 +230,28 @@ fn test_normalized_mount_parse_volume_with_external() {
 }
 
 #[test]
+fn test_normalized_mount_parse_tmpfs_without_source() {
+    let mount = NormalizedMount::parse("type=tmpfs,target=/tmp-work").unwrap();
+    assert!(matches!(mount.mount_type, MountType::Tmpfs));
+    assert_eq!(mount.source, "");
+    assert_eq!(mount.target, "/tmp-work");
+    assert!(!mount.read_only);
+}
+
+#[test]
+fn test_normalized_mount_to_spec_string_tmpfs_omits_source() {
+    let mount = NormalizedMount {
+        mount_type: MountType::Tmpfs,
+        source: String::new(),
+        target: "/tmp-work".to_string(),
+        external: false,
+        read_only: false,
+        consistency: None,
+    };
+    assert_eq!(mount.to_spec_string(), "type=tmpfs,target=/tmp-work");
+}
+
+#[test]
 fn test_normalized_mount_parse_with_consistency_cached() {
     let mount = NormalizedMount::parse(
         "type=bind,source=/host/path,target=/container/path,consistency=cached",

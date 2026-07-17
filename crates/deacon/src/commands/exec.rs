@@ -170,6 +170,7 @@ where
     if config.uses_compose() {
         debug!("Configuration uses Docker Compose, resolving via compose manager");
         return resolve_compose_target_container(
+            docker_client,
             workspace_folder,
             config,
             config_dir,
@@ -327,8 +328,9 @@ fn create_compose_project_for_exec(
 }
 
 /// Resolve the target container for Docker Compose configurations
-#[instrument]
+#[instrument(skip(docker_client))]
 async fn resolve_compose_target_container(
+    docker_client: &impl Docker,
     workspace_folder: &Path,
     config: &DevContainerConfig,
     config_dir: &Path,
@@ -380,6 +382,32 @@ async fn resolve_compose_target_container(
             Ok(container_id.clone())
         }
         None => {
+            // Fallback parity path: if compose-project resolution fails, try the
+            // deacon identity labels + compose service label directly via `docker ps`.
+            // This recovers from project-name drift while still requiring a running
+            // container that matches this workspace/config identity.
+            let identity = canonical_reconnect_identity(workspace_folder, config, None, None);
+            let label_selector = format!(
+                "{},com.docker.compose.service={}",
+                identity.label_selector(),
+                service_name
+            );
+            let fallback_matches: Vec<_> = docker_client
+                .list_containers(Some(&label_selector))
+                .await?
+                .into_iter()
+                .filter(|c| c.state == "running")
+                .collect();
+
+            if fallback_matches.len() == 1 {
+                let container_id = fallback_matches[0].id.clone();
+                debug!(
+                    "Resolved compose service '{}' via label fallback: {}",
+                    service_name, container_id
+                );
+                return Ok(container_id);
+            }
+
             let workspace_path = workspace_folder.display();
             let config_name = config.name.as_deref().unwrap_or("unnamed");
             Err(anyhow::anyhow!(
@@ -722,18 +750,24 @@ where
         };
 
         // Pass 3 (`containerSubstitute`): resolve `${containerEnv:VAR}` tokens that
-        // pass 1 deliberately preserved in config-derived values. The probed env from
-        // resolve_env_and_user is the authoritative container env. Apply to working_dir
+        // pass 1 deliberately preserved in config-derived values. Use container inspect
+        // env (`Config.Env`) as canonical `containerEnv`, with probed env only as fallback.
+        // Apply to working_dir
         // and to every effective_env value, since either may carry tokens from
         // `workspaceFolder` / `remoteEnv` in the merged config.
         // See variableSubstitution.ts:41-44 in the reference CLI and BEAD-8.
-        let (working_dir, effective_env) = if env_user_resolution.probed_env.is_empty() {
+        let substitution_container_env = if env_user_resolution.container_env.is_empty() {
+            env_user_resolution.probed_env
+        } else {
+            env_user_resolution.container_env
+        };
+        let (working_dir, effective_env) = if substitution_container_env.is_empty() {
             (working_dir, env_user_resolution.effective_env)
         } else {
             apply_container_substitution(
                 working_dir,
                 env_user_resolution.effective_env,
-                env_user_resolution.probed_env,
+                substitution_container_env,
                 resolved_config
                     .as_ref()
                     .map(|c| c.workspace_folder.as_path()),

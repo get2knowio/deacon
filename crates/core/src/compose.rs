@@ -852,7 +852,7 @@ impl ComposeManager {
 
         // Deacon-namespaced project name, unique per devcontainer (workspace +
         // config hash), so sibling devcontainers in one repo never collide.
-        let project_name = derive_project_name(base_path, config);
+        let project_name = derive_project_name(base_path, config, &resolved_files);
 
         Ok(ComposeProject {
             name: project_name,
@@ -1363,6 +1363,15 @@ impl ComposeProject {
         if !self.additional_mounts.is_empty() {
             yaml.push_str("    volumes:\n");
             for mount in &self.additional_mounts {
+                if mount.mount_type == "tmpfs" {
+                    yaml.push_str("      - type: tmpfs\n");
+                    yaml.push_str(&format!("        target: {}\n", mount.target));
+                    if mount.read_only {
+                        yaml.push_str("        read_only: true\n");
+                    }
+                    continue;
+                }
+
                 let mut mount_str = format!("{}:{}", mount.source, mount.target);
                 // Build options suffix: ro and/or consistency
                 // Docker Compose short-form: source:target:options
@@ -1598,7 +1607,61 @@ fn parse_env_file_for_project_name(env_file_path: &Path) -> Option<String> {
     None
 }
 
-fn derive_project_name(base_path: &Path, config: &DevContainerConfig) -> String {
+/// Parse compose file and extract top-level `name` if present.
+fn parse_compose_file_for_project_name(compose_file_path: &Path) -> Option<String> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    if !compose_file_path.exists() {
+        return None;
+    }
+
+    let file = File::open(compose_file_path).ok()?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = line.ok()?;
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Top-level `name:` is unindented in compose files.
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("name:") {
+            let value = value.trim();
+            let value = value
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .unwrap_or(value);
+            let value = value
+                .strip_prefix('\'')
+                .and_then(|v| v.strip_suffix('\''))
+                .unwrap_or(value);
+
+            if !value.is_empty() {
+                debug!(
+                    "Found compose top-level project name in {}: {}",
+                    compose_file_path.display(),
+                    value
+                );
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn derive_project_name(
+    base_path: &Path,
+    config: &DevContainerConfig,
+    compose_files: &[PathBuf],
+) -> String {
     // An explicit COMPOSE_PROJECT_NAME in a sibling `.env` is used verbatim
     // (no suffix) — this is a deliberate user override, so honor it exactly
     // as docker compose and the reference CLI would.
@@ -1606,6 +1669,16 @@ fn derive_project_name(base_path: &Path, config: &DevContainerConfig) -> String 
     if let Some(project_name) = parse_env_file_for_project_name(&env_file_path) {
         debug!("Using project name from .env file: {}", project_name);
         return project_name;
+    }
+
+    for compose_file in compose_files {
+        if let Some(project_name) = parse_compose_file_for_project_name(compose_file) {
+            debug!(
+                "Using project name from compose top-level `name`: {}",
+                project_name
+            );
+            return project_name;
+        }
     }
 
     // Auto-derived default: deacon-namespaced (#265) and unique per devcontainer.
@@ -1921,7 +1994,7 @@ mod tests {
     fn test_derive_project_name_is_deacon_namespaced_and_hash_based() {
         let path = Path::new("/tmp/my-workspace");
         let config = DevContainerConfig::default();
-        let name = derive_project_name(path, &config);
+        let name = derive_project_name(path, &config, &[]);
         assert!(
             name.starts_with("deacon_"),
             "expected deacon_<hash>, got {name}"
@@ -1941,8 +2014,8 @@ mod tests {
     fn test_derive_project_name_deterministic_and_not_reference_form() {
         let path = Path::new("/home/user/myapp");
         let config = DevContainerConfig::default();
-        let first = derive_project_name(path, &config);
-        let second = derive_project_name(path, &config);
+        let first = derive_project_name(path, &config, &[]);
+        let second = derive_project_name(path, &config, &[]);
         assert_eq!(first, second, "derivation must be deterministic");
         assert_ne!(
             first, "myapp_devcontainer",
@@ -1954,8 +2027,8 @@ mod tests {
     #[test]
     fn test_derive_project_name_differs_per_workspace() {
         let config = DevContainerConfig::default();
-        let a = derive_project_name(Path::new("/tmp/workspace-a"), &config);
-        let b = derive_project_name(Path::new("/tmp/workspace-b"), &config);
+        let a = derive_project_name(Path::new("/tmp/workspace-a"), &config, &[]);
+        let b = derive_project_name(Path::new("/tmp/workspace-b"), &config, &[]);
         assert_ne!(a, b);
     }
 
@@ -1977,8 +2050,8 @@ mod tests {
             name: Some("web".to_string()),
             ..DevContainerConfig::default()
         };
-        let a = derive_project_name(path, &config_a);
-        let b = derive_project_name(path, &config_b);
+        let a = derive_project_name(path, &config_a, &[]);
+        let b = derive_project_name(path, &config_b, &[]);
         assert_ne!(
             a, b,
             "sibling devcontainers under one workspace path must not share a compose project name"
@@ -1997,7 +2070,46 @@ mod tests {
         .unwrap();
         let config = DevContainerConfig::default();
         assert_eq!(
-            derive_project_name(temp_dir.path(), &config),
+            derive_project_name(temp_dir.path(), &config, &[]),
+            "my-custom-project"
+        );
+    }
+
+    #[test]
+    fn test_derive_project_name_compose_top_level_name_used_verbatim() {
+        let temp_dir = TempDir::new().unwrap();
+        let compose_file = temp_dir.path().join("docker-compose.yml");
+        std::fs::write(
+            &compose_file,
+            "name: r4-explicit-project\nservices:\n  app:\n    image: alpine:3.18\n",
+        )
+        .unwrap();
+        let config = DevContainerConfig::default();
+
+        assert_eq!(
+            derive_project_name(temp_dir.path(), &config, &[compose_file]),
+            "r4-explicit-project"
+        );
+    }
+
+    #[test]
+    fn test_derive_project_name_env_override_wins_over_compose_name() {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::write(
+            temp_dir.path().join(".env"),
+            "COMPOSE_PROJECT_NAME=my-custom-project\n",
+        )
+        .unwrap();
+        let compose_file = temp_dir.path().join("docker-compose.yml");
+        std::fs::write(
+            &compose_file,
+            "name: r4-explicit-project\nservices:\n  app:\n    image: alpine:3.18\n",
+        )
+        .unwrap();
+        let config = DevContainerConfig::default();
+
+        assert_eq!(
+            derive_project_name(temp_dir.path(), &config, &[compose_file]),
             "my-custom-project"
         );
     }
@@ -2166,6 +2278,36 @@ mod tests {
         assert!(override_yaml.contains("volumes:"));
         assert!(override_yaml.contains("/host/path:/container/path"));
         assert!(override_yaml.contains("/another/host:/another/container:ro"));
+    }
+
+    #[test]
+    fn test_generate_injection_override_with_tmpfs_mount() {
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "myservice".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: vec![ComposeMount {
+                mount_type: "tmpfs".to_string(),
+                source: String::new(),
+                target: "/mnt/config-tmp".to_string(),
+                read_only: false,
+                consistency: None,
+            }],
+            profiles: Vec::new(),
+            additional_env: IndexMap::new(),
+            external_volumes: Vec::new(),
+            override_command: Some(false),
+            service_image_override: None,
+            deacon_labels: IndexMap::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+        assert!(override_yaml.contains("volumes:"));
+        assert!(override_yaml.contains("- type: tmpfs"));
+        assert!(override_yaml.contains("target: /mnt/config-tmp"));
     }
 
     #[test]

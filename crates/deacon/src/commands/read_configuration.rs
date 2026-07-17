@@ -206,6 +206,7 @@ fn resolve_workspace_configuration(
     workspace_folder: &Path,
     config_path: Option<&Path>,
     mount_workspace_git_root: bool,
+    config: &DevContainerConfig,
 ) -> Result<WorkspaceConfig> {
     // Determine the root folder path based on mount_workspace_git_root flag
     let root_folder_path = if mount_workspace_git_root {
@@ -237,21 +238,32 @@ fn resolve_workspace_configuration(
         }
     };
 
-    // Compute workspace folder (container path - typically /workspaces/<basename>)
-    let workspace_basename = root_folder_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("workspace");
-    let container_workspace_folder = format!("/workspaces/{}", workspace_basename);
-
-    // Compute workspace mount specification
-    // Format: type=bind,source=<host-path>,target=<container-path>
-    // Always provided to indicate the default workspace mounting behavior
-    let workspace_mount = Some(format!(
-        "type=bind,source={},target={}",
-        root_folder_path.display(),
-        container_workspace_folder
-    ));
+    // Compute workspace folder and mount. For compose flows, preserve authored
+    // workspaceFolder and do not inject single-container default mounts.
+    let (container_workspace_folder, workspace_mount) = if config.uses_compose() {
+        let folder = config
+            .workspace_folder
+            .clone()
+            .unwrap_or_else(|| "/".to_string());
+        (folder, config.workspace_mount.clone())
+    } else {
+        let workspace_basename = root_folder_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("workspace");
+        let folder = config
+            .workspace_folder
+            .clone()
+            .unwrap_or_else(|| format!("/workspaces/{}", workspace_basename));
+        let mount = config.workspace_mount.clone().or_else(|| {
+            Some(format!(
+                "type=bind,source={},target={}",
+                root_folder_path.display(),
+                folder
+            ))
+        });
+        (folder, mount)
+    };
 
     Ok(WorkspaceConfig {
         workspace_folder: container_workspace_folder,
@@ -1340,8 +1352,11 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     } else {
         resolve_workspace_configuration(
             workspace_folder,
-            args.config_path.as_deref(),
+            resolved_config_path
+                .as_deref()
+                .or(args.config_path.as_deref()),
             args.mount_workspace_git_root,
+            &config,
         )
         .ok()
     };
@@ -3291,6 +3306,43 @@ API_KEY=another-secret
 
         let result = execute_read_configuration(args).await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_resolve_workspace_configuration_compose_preserves_workspace_folder() {
+        use serde_json::json;
+
+        let temp_dir = TempDir::new().unwrap();
+        let config = DevContainerConfig {
+            docker_compose_file: Some(json!("docker-compose.yml")),
+            service: Some("app".to_string()),
+            workspace_folder: Some("/workspaces/compose-basic".to_string()),
+            ..Default::default()
+        };
+
+        let workspace =
+            resolve_workspace_configuration(temp_dir.path(), None, true, &config).unwrap();
+
+        assert_eq!(workspace.workspace_folder, "/workspaces/compose-basic");
+        assert!(workspace.workspace_mount.is_none());
+    }
+
+    #[test]
+    fn test_resolve_workspace_configuration_compose_defaults_root_without_mount() {
+        use serde_json::json;
+
+        let temp_dir = TempDir::new().unwrap();
+        let config = DevContainerConfig {
+            docker_compose_file: Some(json!("docker-compose.yml")),
+            service: Some("app".to_string()),
+            ..Default::default()
+        };
+
+        let workspace =
+            resolve_workspace_configuration(temp_dir.path(), None, true, &config).unwrap();
+
+        assert_eq!(workspace.workspace_folder, "/");
+        assert!(workspace.workspace_mount.is_none());
     }
 
     #[tokio::test]
