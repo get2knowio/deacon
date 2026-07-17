@@ -303,6 +303,11 @@ pub struct ImageInfo {
     pub id: String,
     /// Image labels (from Config.Labels)
     pub labels: HashMap<String, String>,
+    /// The image's baked-in `USER` (from `Config.User`). `None` when the image
+    /// declares no `USER` (Docker reports an empty string), which per the
+    /// features spec means the effective user is `root`. Callers resolving
+    /// `_CONTAINER_USER` use this as the lowest-precedence fallback (#89).
+    pub user: Option<String>,
 }
 
 /// Represents an exposed port from a container
@@ -647,6 +652,27 @@ pub trait Docker {
 
     /// Inspect a specific image by reference and return its info including labels
     async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>>;
+
+    /// Like [`inspect_image`](Self::inspect_image), but pulls the image first if
+    /// it isn't present locally.
+    ///
+    /// Needed when a caller must read image metadata (`devcontainer.metadata`
+    /// LABEL, `Config.User`) *before* the image would otherwise materialize —
+    /// notably the feature build, which bakes `_REMOTE_USER` into the generated
+    /// Dockerfile and therefore cannot wait for BuildKit to pull the base
+    /// itself. Mirrors upstream's `inspectDockerImage(…, pullImageOnError)`.
+    ///
+    /// A pull failure is NOT fatal here: the image may be local-only (e.g. a
+    /// just-built tag) or the registry may be unreachable while a cached copy
+    /// exists. Errors are logged and the post-pull inspect decides the outcome,
+    /// so a genuinely absent image still surfaces as `Ok(None)` to the caller.
+    ///
+    /// The default implementation ignores the pull and delegates to
+    /// `inspect_image`, which is correct for mocks and for runtimes with no
+    /// registry access.
+    async fn ensure_image_available(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        self.inspect_image(image_ref).await
+    }
 
     /// Execute a command in a running container
     async fn exec(
@@ -1781,7 +1807,45 @@ impl Docker for CliRuntime {
             })
             .unwrap_or_default();
 
-        Ok(Some(ImageInfo { id, labels }))
+        // `Config.User` is an empty string when the image declares no USER;
+        // normalize that to None so callers can distinguish "unset" from a
+        // real user name rather than propagating "" into `_CONTAINER_USER`.
+        let user = image
+            .get("Config")
+            .and_then(|c| c.get("User"))
+            .and_then(|u| u.as_str())
+            .filter(|u| !u.is_empty())
+            .map(|u| u.to_string());
+
+        Ok(Some(ImageInfo { id, labels, user }))
+    }
+
+    #[instrument(skip(self))]
+    async fn ensure_image_available(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        if let Some(info) = self.inspect_image(image_ref).await? {
+            debug!("Image '{}' already present locally", image_ref);
+            return Ok(Some(info));
+        }
+
+        debug!("Image '{}' not present locally; pulling", image_ref);
+        let qualified = self.qualify_image_ref(image_ref).await;
+        let output = Command::new(&self.runtime_path)
+            .args(["pull", &qualified])
+            .output()
+            .await
+            .map_err(|e| DockerError::CLIError(format!("Failed to run image pull: {}", e)))?;
+
+        if !output.status.success() {
+            // Best-effort: fall through to the inspect below rather than
+            // failing. See the trait docs for why a pull failure is not fatal.
+            tracing::warn!(
+                "Failed to pull image '{}': {}",
+                image_ref,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+
+        self.inspect_image(image_ref).await
     }
 
     #[instrument(skip(self))]
@@ -2935,6 +2999,7 @@ pub mod mock {
             Ok(Some(ImageInfo {
                 id: format!("sha256:mock_{}", image_ref.replace(':', "_")),
                 labels: HashMap::new(),
+                user: None,
             }))
         }
 
