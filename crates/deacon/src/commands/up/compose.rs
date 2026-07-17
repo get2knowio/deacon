@@ -1174,6 +1174,29 @@ mod tests {
         assert_eq!(compose_mount.target, "/mnt/config-tmp");
     }
 
+    #[test]
+    fn config_mounts_tmpfs_destination_key_normalizes_without_source() {
+        // #293: the reference CLI accepts `type=tmpfs,destination=…` (Docker's
+        // `destination`/`dst` alias for `target`) with no `source`. The config
+        // string is normalized by `merge_mounts` before it reaches the compose
+        // `NormalizedMount::parse`, so the alias must survive the round trip.
+        let merged = deacon_core::mount::merge_mounts(
+            &[serde_json::json!("type=tmpfs,destination=/mnt/config-tmp")],
+            &[],
+            None,
+        )
+        .expect("merge_mounts should accept tmpfs mount with destination key");
+
+        assert_eq!(merged.mounts.len(), 1);
+        let parsed =
+            NormalizedMount::parse(&merged.mounts[0]).expect("normalized mount string reparses");
+        let compose_mount = normalized_mount_to_compose_mount(&parsed);
+
+        assert_eq!(compose_mount.mount_type, "tmpfs");
+        assert!(compose_mount.source.is_empty());
+        assert_eq!(compose_mount.target, "/mnt/config-tmp");
+    }
+
     /// #266: when config and CLI mounts target the same path, the later
     /// source (CLI, appended after config) must win — matching
     /// `merge_mounts`' "config overrides features" precedence extended one

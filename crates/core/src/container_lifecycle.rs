@@ -763,7 +763,10 @@ where
             None
         };
 
-    // Merge probed environment with container_env (probed env is lowest priority)
+    // Merge probed environment with container_env (probed env is lowest priority).
+    // This is the environment *injected into* lifecycle command processes — the
+    // userEnvProbe login/interactive additions (e.g. extra PATH entries) belong
+    // here so commands run with the same environment a shell would see.
     let merged_env = if let Some(probed) = probed_env.as_ref() {
         let prober = crate::container_env_probe::ContainerEnvironmentProber::new();
         prober.merge_environments(probed, Some(&config.container_env), None)
@@ -771,13 +774,48 @@ where
         config.container_env.clone()
     };
 
-    // Create substitution context with container information and merged env
+    // The source for `${containerEnv:VAR}` substitution is the container's BASE
+    // environment (the image's `ENV` plus create-time `containerEnv`), NOT the
+    // userEnvProbe additions (#298). Absorbing probe-only PATH entries into
+    // `${containerEnv:PATH}` diverges from the reference CLI, which resolves
+    // container variables from the container environment alone. Read the base
+    // env from the container's `Config.Env` via inspect, then overlay the
+    // config's `containerEnv` so it wins on conflicts — mirroring
+    // `resolve_env_and_user`'s canonical container-env source.
+    let container_env_for_substitution = {
+        let mut base = match docker.inspect_container(&config.container_id).await {
+            Ok(Some(info)) => info.env,
+            Ok(None) => {
+                warn!(
+                    "Container '{}' not found while reading base env for containerEnv \
+                     substitution; using config containerEnv only",
+                    config.container_id
+                );
+                HashMap::new()
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to inspect container '{}' for base containerEnv substitution; \
+                     using config containerEnv only: {}",
+                    config.container_id, e
+                );
+                HashMap::new()
+            }
+        };
+        for (key, value) in &config.container_env {
+            base.insert(key.clone(), value.clone());
+        }
+        base
+    };
+
+    // Create substitution context with container information and the BASE env.
     let container_context = substitution_context
         .clone()
         .with_container_workspace_folder(config.container_workspace_folder.clone())
-        .with_container_env(merged_env.clone());
+        .with_container_env(container_env_for_substitution);
 
-    // Create an updated config with merged environment
+    // Create an updated config with the merged environment (probe additions
+    // included) so lifecycle command *processes* inherit the probed shell env.
     let updated_config = ContainerLifecycleConfig {
         container_env: merged_env,
         ..config.clone()

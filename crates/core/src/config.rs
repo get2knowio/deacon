@@ -1320,6 +1320,29 @@ impl DevContainerConfig {
     }
 }
 
+/// Parse a `devcontainer.metadata` image LABEL value into partial config entries.
+///
+/// Per the containers.dev image-metadata specification, the LABEL may hold either
+/// a single partial `devcontainer.json` **object** or an **array** of such
+/// partial entries. Both forms MUST be accepted and yield the same merge
+/// behavior (see the reference CLI's `imageMetadata` handling). Returns the
+/// parsed entries, or a serde error if the JSON is malformed or an entry does
+/// not deserialize as a `DevContainerConfig`.
+pub fn parse_image_metadata_label(
+    label_json: &str,
+) -> std::result::Result<Vec<DevContainerConfig>, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(label_json)?;
+    match value {
+        serde_json::Value::Array(values) => values
+            .into_iter()
+            .map(serde_json::from_value::<DevContainerConfig>)
+            .collect(),
+        // A single object (or any other scalar, which will fail deserialization
+        // below with a precise serde error) is treated as one entry.
+        other => Ok(vec![serde_json::from_value::<DevContainerConfig>(other)?]),
+    }
+}
+
 impl Default for DevContainerConfig {
     fn default() -> Self {
         Self {
@@ -3924,6 +3947,40 @@ mod tests {
             .unwrap();
         assert!(compose_file.ends_with("/compose.yml"));
         assert!(!compose_file.contains("${"));
+    }
+
+    #[test]
+    fn test_parse_image_metadata_label_object_and_array_forms() {
+        // Per #300 — the `devcontainer.metadata` image LABEL may be a single
+        // object OR an array of partial entries; both must parse equivalently.
+        let object_form = r#"{ "containerEnv": {"R4_PREBUILT":"object"}, "remoteEnv": {"R4_PREBUILT_REMOTE":"remote"}, "init": true }"#;
+        let array_form = r#"[{ "containerEnv": {"R4_PREBUILT":"object"}, "remoteEnv": {"R4_PREBUILT_REMOTE":"remote"}, "init": true }]"#;
+
+        let from_object = parse_image_metadata_label(object_form).expect("object form parses");
+        let from_array = parse_image_metadata_label(array_form).expect("array form parses");
+
+        assert_eq!(from_object.len(), 1);
+        assert_eq!(from_array.len(), 1);
+        for entries in [&from_object, &from_array] {
+            let entry = &entries[0];
+            assert_eq!(
+                entry.container_env.get("R4_PREBUILT"),
+                Some(&"object".to_string())
+            );
+            assert_eq!(
+                entry.remote_env.get("R4_PREBUILT_REMOTE"),
+                Some(&Some("remote".to_string()))
+            );
+            assert_eq!(entry.init, Some(true));
+        }
+    }
+
+    #[test]
+    fn test_parse_image_metadata_label_rejects_malformed() {
+        // A scalar (neither object nor array) is not a valid metadata payload.
+        assert!(parse_image_metadata_label("\"just-a-string\"").is_err());
+        // Broken JSON surfaces as an error, not a silent empty result.
+        assert!(parse_image_metadata_label("{ not json").is_err());
     }
 
     #[test]
