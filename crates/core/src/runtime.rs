@@ -144,6 +144,13 @@ impl Docker for ContainerRuntimeImpl {
         }
     }
 
+    async fn ensure_image_available(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        match self {
+            Self::Docker(runtime) => runtime.ensure_image_available(image_ref).await,
+            Self::Podman(runtime) => runtime.ensure_image_available(image_ref).await,
+        }
+    }
+
     async fn exec(
         &self,
         container_id: &str,
@@ -376,6 +383,10 @@ impl Docker for DockerRuntime {
         self.docker.inspect_image(image_ref).await
     }
 
+    async fn ensure_image_available(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        self.docker.ensure_image_available(image_ref).await
+    }
+
     async fn exec(
         &self,
         container_id: &str,
@@ -541,6 +552,10 @@ impl Docker for PodmanRuntime {
 
     async fn inspect_image(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
         self.runtime.inspect_image(image_ref).await
+    }
+
+    async fn ensure_image_available(&self, image_ref: &str) -> Result<Option<ImageInfo>> {
+        self.runtime.ensure_image_available(image_ref).await
     }
 
     async fn exec(

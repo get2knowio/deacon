@@ -10,6 +10,7 @@
 use anyhow::Result;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::docker::Docker;
+use deacon_core::dockerfile_generator::FeatureInstallEnv;
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::debug;
@@ -277,6 +278,115 @@ pub(crate) async fn merge_image_metadata_after_image_ready(
         image_ref,
         info.labels.get("devcontainer.metadata"),
         user_config,
+    )
+}
+
+/// Resolve the four spec-mandated feature-install env vars (`_REMOTE_USER`,
+/// `_REMOTE_USER_HOME`, `_CONTAINER_USER`, `_CONTAINER_USER_HOME`) for a
+/// feature build on top of `base_image`.
+///
+/// Why this exists (#89): the feature build bakes these values into the
+/// generated Dockerfile, so they must be known *before* the build runs. But
+/// `remoteUser` frequently comes from the base image's `devcontainer.metadata`
+/// LABEL rather than the user's devcontainer.json — e.g.
+/// `mcr.microsoft.com/devcontainers/base` declares `{"remoteUser": "vscode"}` —
+/// and [`merge_image_metadata_after_image_ready`] only folds that in *after*
+/// the build. Resolving from the user config alone therefore emitted
+/// `_REMOTE_USER=""`, which silently breaks any feature that does
+/// `su - "$_REMOTE_USER" -c ...`.
+///
+/// Precedence (mirrors upstream `@devcontainers/cli`):
+/// `remoteUser` → user config, else image metadata, else `containerUser`;
+/// `containerUser` → user config, else image metadata, else the image's
+/// baked-in `USER`, else `root`.
+///
+/// The metadata is applied to a **clone** of the config purely to derive the
+/// effective users; the clone is discarded. The real merge stays where it is,
+/// post-build. This is deliberate — the feature-extended image inherits the
+/// base's `devcontainer.metadata` LABEL verbatim (deacon emits no LABEL of its
+/// own), so merging here *and* post-build would fold the same entries twice and
+/// duplicate concatenated fields like `runArgs`. Sharing
+/// [`apply_image_metadata_label`] keeps this resolution byte-identical to the
+/// post-build merge.
+///
+/// Best-effort: if the image can't be inspected or pulled we warn and fall back
+/// to the user config alone. We don't fail the build — configs whose features
+/// never read `_REMOTE_USER` are unaffected — but the warning makes the gap
+/// visible instead of silent.
+pub(crate) async fn resolve_feature_install_env(
+    docker: &impl Docker,
+    base_image: &str,
+    config: &DevContainerConfig,
+) -> FeatureInstallEnv {
+    let info = match docker.ensure_image_available(base_image).await {
+        Ok(Some(info)) => Some(info),
+        Ok(None) => {
+            tracing::warn!(
+                "Image '{}' is unavailable locally and could not be pulled; resolving \
+                 feature install env (_REMOTE_USER, _CONTAINER_USER) from devcontainer.json \
+                 alone. Features that depend on these may misbehave — set \"remoteUser\" / \
+                 \"containerUser\" explicitly to be sure (#89).",
+                base_image
+            );
+            None
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to inspect image '{}' while resolving feature install env \
+                 (_REMOTE_USER, _CONTAINER_USER); falling back to devcontainer.json alone: {}",
+                base_image,
+                e
+            );
+            None
+        }
+    };
+
+    let Some(info) = info else {
+        return resolve_feature_install_env_from_image(base_image, None, None, config);
+    };
+
+    // The image was inspected successfully, so an absent `Config.User` really
+    // does mean `root` (upstream: `imageDetails.Config.User || 'root'`).
+    let image_user = info.user.as_deref().unwrap_or("root");
+
+    let env = resolve_feature_install_env_from_image(
+        base_image,
+        info.labels.get("devcontainer.metadata"),
+        Some(image_user),
+        config,
+    );
+
+    debug!(
+        remote_user = ?env.remote_user,
+        container_user = ?env.container_user,
+        image_user = %image_user,
+        "Resolved feature install env from image metadata + config (#89)"
+    );
+
+    env
+}
+
+/// Pure helper behind [`resolve_feature_install_env`]. Extracted so the
+/// precedence rules can be unit-tested without a Docker mock (mirrors
+/// [`apply_image_metadata_label`]).
+///
+/// `image_user` is `None` when the image could not be inspected at all — in
+/// which case there is no metadata label either and resolution degrades to the
+/// user config alone.
+fn resolve_feature_install_env_from_image(
+    base_image: &str,
+    label: Option<&String>,
+    image_user: Option<&str>,
+    config: &DevContainerConfig,
+) -> FeatureInstallEnv {
+    // Fold the image's metadata in at lower precedence than the user config,
+    // then read the effective users back off the result.
+    let effective = apply_image_metadata_label(base_image, label, config.clone());
+
+    FeatureInstallEnv::resolve(
+        effective.remote_user.as_deref(),
+        effective.container_user.as_deref(),
+        image_user,
     )
 }
 
@@ -721,5 +831,132 @@ mod image_metadata_merge_tests {
         let label = r#"[]"#.to_string();
         let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
         assert_eq!(merged.container_env, user_clone.container_env);
+    }
+}
+
+#[cfg(test)]
+mod feature_install_env_tests {
+    //! Spec parity (#89): the four `_*_USER` env vars handed to every feature's
+    //! `install.sh` must be resolved from the base image's
+    //! `devcontainer.metadata` LABEL and baked-in `USER` folded *under* the
+    //! user's devcontainer.json — not from the user config alone.
+
+    use super::resolve_feature_install_env_from_image;
+    use deacon_core::config::DevContainerConfig;
+
+    /// The `mcr.microsoft.com/devcontainers/base` family declares its
+    /// `remoteUser` via the image label rather than the user's config.
+    fn base_image_label() -> String {
+        r#"[
+            { "id": "ghcr.io/devcontainers/features/common-utils:2" },
+            { "remoteUser": "vscode" }
+        ]"#
+        .to_string()
+    }
+
+    #[test]
+    fn remote_user_comes_from_image_metadata_when_config_is_silent() {
+        // The regression that motivated this (#89): devcontainer.json sets
+        // neither remoteUser nor containerUser, the base image declares
+        // remoteUser=vscode, and features doing `su - "$_REMOTE_USER"` were
+        // handed an empty string and silently failed to install.
+        let env = resolve_feature_install_env_from_image(
+            "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+            Some(&base_image_label()),
+            Some("root"),
+            &DevContainerConfig::default(),
+        );
+
+        assert_eq!(
+            env.remote_user.as_deref(),
+            Some("vscode"),
+            "_REMOTE_USER must come from the image's devcontainer.metadata label"
+        );
+        assert_eq!(
+            env.remote_user_home.as_deref(),
+            Some("/home/vscode"),
+            "_REMOTE_USER_HOME must follow the resolved remote user"
+        );
+        // containerUser is unset in both config and label, so it falls back to
+        // the image's baked-in USER.
+        assert_eq!(env.container_user.as_deref(), Some("root"));
+        assert_eq!(env.container_user_home.as_deref(), Some("/root"));
+    }
+
+    #[test]
+    fn user_config_wins_over_image_metadata() {
+        let user = DevContainerConfig {
+            remote_user: Some("devuser".to_string()),
+            ..DevContainerConfig::default()
+        };
+        let env = resolve_feature_install_env_from_image(
+            "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+            Some(&base_image_label()),
+            Some("root"),
+            &user,
+        );
+        assert_eq!(env.remote_user.as_deref(), Some("devuser"));
+        assert_eq!(env.remote_user_home.as_deref(), Some("/home/devuser"));
+    }
+
+    #[test]
+    fn remote_user_falls_back_to_container_user_then_image_user() {
+        // No remoteUser anywhere, but containerUser is set: _REMOTE_USER
+        // defaults to _CONTAINER_USER per the features spec.
+        let user = DevContainerConfig {
+            container_user: Some("builder".to_string()),
+            ..DevContainerConfig::default()
+        };
+        let env = resolve_feature_install_env_from_image("img", None, Some("root"), &user);
+        assert_eq!(env.remote_user.as_deref(), Some("builder"));
+        assert_eq!(env.container_user.as_deref(), Some("builder"));
+
+        // Nothing set anywhere: both fall through to the image's USER.
+        let env = resolve_feature_install_env_from_image(
+            "img",
+            None,
+            Some("node"),
+            &DevContainerConfig::default(),
+        );
+        assert_eq!(env.remote_user.as_deref(), Some("node"));
+        assert_eq!(env.container_user.as_deref(), Some("node"));
+        assert_eq!(env.remote_user_home.as_deref(), Some("/home/node"));
+    }
+
+    #[test]
+    fn uninspectable_image_degrades_to_user_config() {
+        // Image could not be pulled/inspected (image_user = None). We still
+        // honor whatever the config states rather than inventing a user.
+        let user = DevContainerConfig {
+            remote_user: Some("devuser".to_string()),
+            ..DevContainerConfig::default()
+        };
+        let env = resolve_feature_install_env_from_image("img", None, None, &user);
+        assert_eq!(env.remote_user.as_deref(), Some("devuser"));
+
+        // With nothing to go on, everything stays None — the generator emits
+        // empty strings and the caller has already warned.
+        let env = resolve_feature_install_env_from_image(
+            "img",
+            None,
+            None,
+            &DevContainerConfig::default(),
+        );
+        assert_eq!(env.remote_user, None);
+        assert_eq!(env.container_user, None);
+    }
+
+    #[test]
+    fn malformed_label_does_not_break_resolution() {
+        let bad = "{ not a json array }".to_string();
+        let env = resolve_feature_install_env_from_image(
+            "img",
+            Some(&bad),
+            Some("root"),
+            &DevContainerConfig::default(),
+        );
+        // Falls back to the image USER rather than failing the build.
+        assert_eq!(env.remote_user.as_deref(), Some("root"));
+        assert_eq!(env.container_user.as_deref(), Some("root"));
     }
 }

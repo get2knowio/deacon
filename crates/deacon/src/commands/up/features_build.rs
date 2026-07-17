@@ -131,16 +131,14 @@ pub(crate) async fn build_image_with_features(
     //
     // Spec parity (#89): surface `_REMOTE_USER`, `_REMOTE_USER_HOME`,
     // `_CONTAINER_USER`, `_CONTAINER_USER_HOME` to every feature's
-    // `install.sh`. Resolved from the user config; we don't currently
-    // probe the image for its baked-in USER, so callers relying on that
-    // fallback should set `containerUser` explicitly. Empty values are
-    // still emitted so `${_REMOTE_USER:-}` resolves to "" rather than
-    // `<unset>`.
-    let feature_install_env = FeatureInstallEnv::resolve(
-        config.remote_user.as_deref(),
-        config.container_user.as_deref(),
-        None,
-    );
+    // `install.sh`. These are resolved from the base image's
+    // `devcontainer.metadata` LABEL + baked-in `USER` folded under the user
+    // config — NOT from the user config alone, since `remoteUser` is commonly
+    // declared by the base image. Empty values are still emitted so
+    // `${_REMOTE_USER:-}` resolves to "" rather than `<unset>`.
+    let feature_install_env =
+        crate::commands::up::merged_config::resolve_feature_install_env(cli, base_image, config)
+            .await;
 
     // Build-time host-CA injection (016, T038/T039): stage the bundle + script
     // when a non-empty corporate set was supplied.
@@ -294,6 +292,12 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     // window is closed. The literal `FROM <stage>` form sidesteps that and
     // resolves directly to the previous stage in the same Dockerfile.
     let target_stage_name = "dev_containers_target_stage";
+    // Unlike the `image:` path, the "base" here is a *stage name* inside the
+    // user's Dockerfile, not a registry ref — there is nothing to inspect for a
+    // `devcontainer.metadata` LABEL or baked-in `USER` until that stage has been
+    // built. So `_REMOTE_USER` / `_CONTAINER_USER` come from the user config
+    // alone; set `remoteUser` / `containerUser` explicitly if a feature needs
+    // them on this path (#89).
     let feature_install_env = FeatureInstallEnv::resolve(
         config.remote_user.as_deref(),
         config.container_user.as_deref(),

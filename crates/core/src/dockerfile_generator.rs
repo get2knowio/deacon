@@ -693,6 +693,86 @@ mod tests {
         assert!(dockerfile.contains("./install.sh"));
     }
 
+    /// Spec parity (#89): `FeatureInstallEnv::resolve` implements the
+    /// `_REMOTE_USER` → `_CONTAINER_USER` → image `USER` fallback chain.
+    #[test]
+    fn test_feature_install_env_resolution_rules() {
+        // remoteUser defaults to containerUser.
+        let env = FeatureInstallEnv::resolve(None, Some("builder"), Some("root"));
+        assert_eq!(env.remote_user.as_deref(), Some("builder"));
+        assert_eq!(env.container_user.as_deref(), Some("builder"));
+
+        // containerUser defaults to the image's USER.
+        let env = FeatureInstallEnv::resolve(None, None, Some("node"));
+        assert_eq!(env.remote_user.as_deref(), Some("node"));
+        assert_eq!(env.container_user.as_deref(), Some("node"));
+
+        // An explicit remoteUser does not leak into containerUser.
+        let env = FeatureInstallEnv::resolve(Some("vscode"), None, Some("root"));
+        assert_eq!(env.remote_user.as_deref(), Some("vscode"));
+        assert_eq!(env.container_user.as_deref(), Some("root"));
+
+        // Home dirs: root is /root, everyone else /home/<user>.
+        assert_eq!(env.remote_user_home.as_deref(), Some("/home/vscode"));
+        assert_eq!(env.container_user_home.as_deref(), Some("/root"));
+
+        // Nothing known: stays None so the caller can surface the gap.
+        let env = FeatureInstallEnv::resolve(None, None, None);
+        assert_eq!(env.remote_user, None);
+        assert_eq!(env.container_user_home, None);
+    }
+
+    /// Spec parity (#89): the resolved users must actually reach the generated
+    /// `install.sh` invocation. Features commonly do `su - "$_REMOTE_USER" -c`,
+    /// which fails outright on an empty value — so assert the exported values,
+    /// not merely that the variable names appear.
+    #[test]
+    fn test_feature_install_env_is_exported_into_install_command() {
+        let feature = create_test_feature("ai-clis", HashMap::new());
+        let plan = InstallationPlan::new(vec![feature]);
+
+        let config = DockerfileConfig {
+            base_image: "mcr.microsoft.com/devcontainers/base:ubuntu-24.04".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            feature_install_env: FeatureInstallEnv::resolve(Some("vscode"), None, Some("root")),
+            ..Default::default()
+        };
+
+        let dockerfile = DockerfileGenerator::new(config).generate(&plan).unwrap();
+
+        assert!(
+            dockerfile.contains(r#"export _REMOTE_USER="vscode""#),
+            "resolved _REMOTE_USER must be exported, got:\n{}",
+            dockerfile
+        );
+        assert!(dockerfile.contains(r#"export _REMOTE_USER_HOME="/home/vscode""#));
+        assert!(dockerfile.contains(r#"export _CONTAINER_USER="root""#));
+        assert!(dockerfile.contains(r#"export _CONTAINER_USER_HOME="/root""#));
+        assert!(
+            !dockerfile.contains(r#"export _REMOTE_USER="""#),
+            "an empty _REMOTE_USER breaks `su - \"$_REMOTE_USER\"` in feature install scripts"
+        );
+    }
+
+    /// Unresolvable users still emit the variables (as empty strings) so that
+    /// `${_REMOTE_USER:-}` resolves to "" rather than `<unset>`.
+    #[test]
+    fn test_unresolved_feature_install_env_still_exports_empty_values() {
+        let feature = create_test_feature("node", HashMap::new());
+        let plan = InstallationPlan::new(vec![feature]);
+
+        let config = DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            feature_install_env: FeatureInstallEnv::resolve(None, None, None),
+            ..Default::default()
+        };
+
+        let dockerfile = DockerfileGenerator::new(config).generate(&plan).unwrap();
+        assert!(dockerfile.contains(r#"export _REMOTE_USER="""#));
+        assert!(dockerfile.contains(r#"export _CONTAINER_USER="""#));
+    }
+
     /// 016 / T034: the host-CA install RUN step is emitted after the features
     /// mkdir and BEFORE the first feature RUN-mount, only when injection is on,
     /// and is byte-stable for the same CA set (FR-017).
