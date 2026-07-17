@@ -10,9 +10,11 @@ pub struct EnvUserResolution {
     pub effective_env: HashMap<String, String>,
     pub effective_user: Option<String>,
     /// Raw probed container environment (before merging with config remoteEnv / CLI overrides).
-    /// Callers use this as the `container_env` source for pass-3 (`containerSubstitute`)
-    /// substitution of `${containerEnv:VAR}` tokens left behind by pass 1.
+    /// Callers may use this for runtime behavior that depends on user shell startup.
     pub probed_env: HashMap<String, String>,
+    /// Raw container environment from container inspect (`Config.Env`), before userEnvProbe.
+    /// This is the canonical source for `${containerEnv:VAR}` substitutions.
+    pub container_env: HashMap<String, String>,
 }
 
 /// Resolve the effective environment and user by probing the container (when enabled) and
@@ -34,6 +36,26 @@ pub async fn resolve_env_and_user<D: Docker>(
     let effective_user = cli_user.or(config_remote_user);
 
     let mut probed_env = HashMap::new();
+    let mut container_env = HashMap::new();
+
+    match docker_client.inspect_container(container_id).await {
+        Ok(Some(info)) => {
+            container_env = info.env;
+        }
+        Ok(None) => {
+            warn!(
+                "Container '{}' not found during env resolution",
+                container_id
+            );
+        }
+        Err(error) => {
+            warn!(
+                "Container inspect failed while reading base container env: {}",
+                error
+            );
+        }
+    }
+
     if probe_mode != ContainerProbeMode::None {
         let prober = ContainerEnvironmentProber::new();
         match prober
@@ -56,11 +78,18 @@ pub async fn resolve_env_and_user<D: Docker>(
     }
 
     let prober = ContainerEnvironmentProber::new();
-    let effective_env = prober.build_effective_env(&probed_env, config_remote_env, cli_env);
+    let substitution_source = if container_env.is_empty() {
+        &probed_env
+    } else {
+        &container_env
+    };
+    let effective_env =
+        prober.build_effective_env(&probed_env, substitution_source, config_remote_env, cli_env);
 
     EnvUserResolution {
         effective_env,
         effective_user,
         probed_env,
+        container_env,
     }
 }

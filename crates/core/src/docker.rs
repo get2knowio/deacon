@@ -32,6 +32,10 @@ fn is_pty_allocation_error(error_msg: &str) -> bool {
         || (lower.contains("tty") && (lower.contains("not a") || lower.contains("cannot")))
 }
 
+fn shell_quote_arg(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 /// Resolve the exit code from a finished docker child process.
 ///
 /// Containerd encodes signal-killed inner processes into ExitCode as 128+N
@@ -741,6 +745,28 @@ pub trait DockerLifecycle: Docker + ContainerOps {
         merged_mounts: &crate::mount::MergedMounts,
         entrypoint_chain: &crate::features::EntrypointChain,
     ) -> Result<ContainerResult>;
+}
+
+async fn ensure_container_running<D: Docker + ?Sized>(
+    docker: &D,
+    container_id: &str,
+) -> Result<()> {
+    let info = docker
+        .inspect_container(container_id)
+        .await?
+        .ok_or_else(|| DockerError::ContainerNotFound {
+            id: container_id.to_string(),
+        })?;
+
+    if !info.state.eq_ignore_ascii_case("running") {
+        return Err(DockerError::CLIError(format!(
+            "Container '{}' is not running after start (state='{}', status='{}')",
+            container_id, info.state, info.status
+        ))
+        .into());
+    }
+
+    Ok(())
 }
 
 // Implement Docker trait for references to types that implement Docker
@@ -2303,18 +2329,29 @@ impl ContainerOps for CliRuntime {
             args.push(container_user.clone());
         }
 
-        // Apply entrypoint from chain (features + config)
-        match entrypoint_chain {
-            crate::features::EntrypointChain::None => {
-                // Use image default entrypoint
-            }
-            crate::features::EntrypointChain::Single(path) => {
-                args.push("--entrypoint".to_string());
-                args.push(path.clone());
-            }
-            crate::features::EntrypointChain::Chained { wrapper_path, .. } => {
-                args.push("--entrypoint".to_string());
-                args.push(wrapper_path.clone());
+        // Respect overrideCommand semantics (default: true)
+        let override_cmd = config.override_command.unwrap_or(true);
+
+        // Apply entrypoint from chain (features + config). When overrideCommand
+        // is enabled we mirror the reference process shape: /bin/sh entrypoint
+        // plus a command wrapper, and fold feature/config entrypoints into that
+        // wrapper command instead of Docker Config.Entrypoint.
+        if override_cmd {
+            args.push("--entrypoint".to_string());
+            args.push("/bin/sh".to_string());
+        } else {
+            match entrypoint_chain {
+                crate::features::EntrypointChain::None => {
+                    // Use image default entrypoint
+                }
+                crate::features::EntrypointChain::Single(path) => {
+                    args.push("--entrypoint".to_string());
+                    args.push(path.clone());
+                }
+                crate::features::EntrypointChain::Chained { wrapper_path, .. } => {
+                    args.push("--entrypoint".to_string());
+                    args.push(wrapper_path.clone());
+                }
             }
         }
 
@@ -2369,12 +2406,12 @@ impl ContainerOps for CliRuntime {
         // No-op under docker.
         args.push(self.qualify_image_ref(image).await);
 
-        // Respect overrideCommand semantics (default: true)
         // When enabled, ensure the container stays running so lifecycle commands can execute.
         // Use a minimal keep-alive command that is broadly available.
         // Reference: DevContainer spec "overrideCommand".
-        let override_cmd = config.override_command.unwrap_or(true);
         if override_cmd {
+            let keepalive_cmd = "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}\"; \
+                 sleep infinity || tail -f /dev/null";
             // Portable keep-alive: prefer `sleep infinity` (GNU coreutils), fall
             // back to `tail -f /dev/null` (BusyBox/Alpine, where `sleep infinity`
             // is rejected). Prepend a standard PATH first: some features (e.g.
@@ -2382,13 +2419,21 @@ impl ContainerOps for CliRuntime {
             // which would otherwise drop `/usr/bin`+`/bin` and make the bare
             // `sleep`/`tail` here resolve to "not found" (exit 127 → the
             // container dies before any lifecycle command can run).
-            args.push("/bin/sh".to_string());
+            let wrapped_cmd = match entrypoint_chain {
+                crate::features::EntrypointChain::None => keepalive_cmd.to_string(),
+                crate::features::EntrypointChain::Single(path) => format!(
+                    "{} /bin/sh -c {}",
+                    shell_quote_arg(path),
+                    shell_quote_arg(keepalive_cmd)
+                ),
+                crate::features::EntrypointChain::Chained { wrapper_path, .. } => format!(
+                    "{} /bin/sh -c {}",
+                    shell_quote_arg(wrapper_path),
+                    shell_quote_arg(keepalive_cmd)
+                ),
+            };
             args.push("-c".to_string());
-            args.push(
-                "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}\"; \
-                 sleep infinity || tail -f /dev/null"
-                    .to_string(),
-            );
+            args.push(wrapped_cmd);
         }
 
         // Execute container create command
@@ -2524,6 +2569,7 @@ impl DockerLifecycle for CliRuntime {
 
             // Start the container if it's not running
             self.start_container(&container_id).await?;
+            ensure_container_running(self, &container_id).await?;
 
             // Get the image ID
             let image_id = self.get_container_image(&container_id).await?;
@@ -2556,6 +2602,7 @@ impl DockerLifecycle for CliRuntime {
             )
             .await?;
         self.start_container(&container_id).await?;
+        ensure_container_running(self, &container_id).await?;
 
         // Get the image ID
         let image_id = self.get_container_image(&container_id).await?;
@@ -2774,6 +2821,10 @@ pub mod mock {
         pub capture_tty_flags: bool,
         /// Simulate Docker daemon unavailable
         pub daemon_unavailable: bool,
+        /// Container state reported after `start_container`
+        pub state_after_start: String,
+        /// Container status reported after `start_container`
+        pub status_after_start: String,
     }
 
     impl Default for MockDockerConfig {
@@ -2784,6 +2835,8 @@ pub mod mock {
                 exec_responses: HashMap::new(),
                 capture_tty_flags: true,
                 daemon_unavailable: false,
+                state_after_start: "running".to_string(),
+                status_after_start: "Up 1 second".to_string(),
             }
         }
     }
@@ -3166,13 +3219,16 @@ pub mod mock {
             if config.daemon_unavailable {
                 return Err(DockerError::NotInstalled.into());
             }
+            let state_after_start = config.state_after_start.clone();
+            let status_after_start = config.status_after_start.clone();
+            drop(config);
 
             // Update container state to running
             let mut containers = self.containers.lock().unwrap();
             for container in containers.iter_mut() {
                 if container.id == container_id {
-                    container.state = "running".to_string();
-                    container.status = "Up 1 second".to_string();
+                    container.state = state_after_start.clone();
+                    container.status = status_after_start.clone();
                     debug!("MockDocker container started");
                     return Ok(());
                 }
@@ -3283,6 +3339,7 @@ pub mod mock {
 
                 // Start the container if it's not running
                 self.start_container(&container_id).await?;
+                super::ensure_container_running(self, &container_id).await?;
 
                 // Get the image ID
                 let image_id = self.get_container_image(&container_id).await?;
@@ -3315,6 +3372,7 @@ pub mod mock {
                 )
                 .await?;
             self.start_container(&container_id).await?;
+            super::ensure_container_running(self, &container_id).await?;
 
             // Get the image ID
             let image_id = self.get_container_image(&container_id).await?;
@@ -3936,6 +3994,7 @@ mod tests {
             config_file: None,
             host_ca_bundle_path: None,
             host_ca_subjects: None,
+            additional_labels: HashMap::new(),
         };
 
         let config = DevContainerConfig {
@@ -3978,6 +4037,45 @@ mod tests {
         // Verify container is gone
         let result = mock_docker.get_container_image(&container_id).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_mock_docker_up_fails_if_container_not_running_after_start() {
+        let config = mock::MockDockerConfig {
+            state_after_start: "exited".to_string(),
+            status_after_start: "Exited (0)".to_string(),
+            ..Default::default()
+        };
+        let mock_docker = mock::MockDocker::with_config(config);
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let workspace_path = temp_dir.path();
+        let devcontainer = DevContainerConfig {
+            image: Some("ubuntu:20.04".to_string()),
+            ..Default::default()
+        };
+        let identity = ContainerIdentity::new(workspace_path, &devcontainer);
+        let merged_security = crate::features::MergedSecurityOptions::default();
+        let merged_mounts = crate::mount::MergedMounts::default();
+        let entrypoint_chain = crate::features::EntrypointChain::None;
+
+        let result = mock_docker
+            .up(
+                &identity,
+                &devcontainer,
+                workspace_path,
+                false,
+                crate::gpu::GpuMode::None,
+                &merged_security,
+                &merged_mounts,
+                &entrypoint_chain,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("is not running after start"));
+        assert!(msg.contains("state='exited'"));
     }
 
     // Tests for derive_container_workspace_folder heuristic

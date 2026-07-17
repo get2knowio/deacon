@@ -997,6 +997,7 @@ fn normalized_mount_to_compose_mount(
         mount_type: match mount.mount_type {
             MountType::Bind => "bind".to_string(),
             MountType::Volume => "volume".to_string(),
+            MountType::Tmpfs => "tmpfs".to_string(),
         },
         source: mount.source.clone(),
         target: mount.target.clone(),
@@ -1152,6 +1153,25 @@ mod tests {
         assert_eq!(b.mount_type, "volume");
         assert_eq!(b.source, "/host/b");
         assert!(!b.read_only);
+    }
+
+    #[test]
+    fn config_mounts_tmpfs_string_form_normalizes_without_source() {
+        let merged = deacon_core::mount::merge_mounts(
+            &[serde_json::json!("type=tmpfs,target=/mnt/config-tmp")],
+            &[],
+            None,
+        )
+        .expect("merge_mounts should accept tmpfs mount string");
+
+        assert_eq!(merged.mounts.len(), 1);
+        let parsed =
+            NormalizedMount::parse(&merged.mounts[0]).expect("normalized mount string reparses");
+        let compose_mount = normalized_mount_to_compose_mount(&parsed);
+
+        assert_eq!(compose_mount.mount_type, "tmpfs");
+        assert!(compose_mount.source.is_empty());
+        assert_eq!(compose_mount.target, "/mnt/config-tmp");
     }
 
     /// #266: when config and CLI mounts target the same path, the later

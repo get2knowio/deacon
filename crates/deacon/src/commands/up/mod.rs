@@ -538,7 +538,8 @@ pub(crate) async fn execute_up_with_runtime(
     let identity = match &host_ca_set {
         Some(set) => identity.with_host_ca(HOST_CA_BUNDLE_PATH, &set.subjects),
         None => identity,
-    };
+    }
+    .with_additional_labels(&discovered_labels);
     let workspace_hash = identity.workspace_hash.clone();
 
     // Initialize state manager
