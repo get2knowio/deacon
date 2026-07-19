@@ -53,9 +53,30 @@ mistake; preserve silently where deacon simply does not model the field.**
 
 The reference does **not resolve `extends` even at `build` time** — it errors
 with "No image information specified" rather than on the missing/cyclic target,
-i.e. it never followed the `extends` field at all. That is a deeper divergence
-worth its own investigation (is deacon's `extends` an extension beyond what the
-reference implements?) and is tracked separately, not by this tier.
+i.e. it never followed the `extends` field at all.
+
+**Resolved (issue #297):** yes — deacon's `extends` is a deliberate capability
+*ahead of* the reference, not accidental drift. `extends` is the in-flight spec
+proposal [devcontainers/spec#22], which the reference CLI (v0.87.0) does not
+implement: `read-configuration` echoes the field literally, and `up`/`build`
+fail to find an image because they never follow it. deacon resolves the full
+chain eagerly across `up`, `build`, `read-configuration`, `outdated`, `set-up`,
+and `upgrade` (see the field docs on `DevContainerConfig::extends` and
+`docs/DIFFERENTIATORS.md`). The consequences are therefore **intentional,
+characterized divergences**, not parity bugs:
+
+- `extends` → missing / cyclic target: `deacon-stricter` (deacon resolves
+  eagerly and rejects; reference never resolves). Encoded in `extends-missing`
+  and `extends-cycle`.
+- `extends` → valid target (conformance case 44): both succeed, but deacon
+  merges the base config (e.g. the base `containerEnv` appears in the resolved
+  config / created container) while the reference drops it. This is a
+  deacon-only superset, expected by design.
+
+deacon does **not** claim reference parity for configs that use `extends`; it
+claims to do strictly *more*.
+
+[devcontainers/spec#22]: https://github.com/devcontainers/spec/issues/22
 
 ## Why these are encoded as PASS, not bugs
 

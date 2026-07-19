@@ -30,8 +30,12 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, warn};
 
-/// Maximum allowed depth of the extends chain. Matches the reference
-/// devcontainer CLI; deeper chains almost certainly indicate a config bug.
+/// Maximum allowed depth of the extends chain; deeper chains almost certainly
+/// indicate a config bug (a cycle or an unbounded include graph). Note that
+/// `extends` is a deacon capability *ahead of* the reference CLI — the
+/// reference does not implement it (see the field docs on
+/// [`DevContainerConfig::extends`]) — so this bound is deacon's own, not a
+/// mirror of upstream behavior.
 const MAX_EXTENDS_DEPTH: usize = 32;
 
 /// Default function to return an empty JSON object for serde defaults.
@@ -516,7 +520,21 @@ fn parse_resource_string(s: &str) -> Result<u64> {
 pub struct DevContainerConfig {
     /// Paths to extend from. Can be a single path or array of paths.
     ///
-    /// Reference: [Configuration - extends](https://containers.dev/implementors/json_reference/#extends)
+    /// **Ahead-of-spec, intentional divergence from the reference CLI.**
+    /// `extends` is *not* part of the finalized containers.dev configuration
+    /// reference (there is no `#extends` anchor there); it is the in-flight
+    /// spec proposal [devcontainers/spec#22]. deacon implements it eagerly —
+    /// the full chain is resolved and merged (base-first, child-wins) for
+    /// `up`, `build`, `read-configuration --include-merged-configuration`,
+    /// `outdated`, `set-up`, and `upgrade`. The reference CLI does **not**
+    /// resolve `extends` at all: `read-configuration` echoes the field
+    /// literally, and `up`/`build` fail to find an image because they never
+    /// follow it. This is therefore a deliberate deacon capability, **not** a
+    /// parity guarantee — see `fixtures/parity-corpus/errors/README.md`
+    /// (characterized divergence) and `docs/DIFFERENTIATORS.md`. Tracked by
+    /// issue #297.
+    ///
+    /// [devcontainers/spec#22]: https://github.com/devcontainers/spec/issues/22
     #[serde(
         default,
         deserialize_with = "deserialize_extends",

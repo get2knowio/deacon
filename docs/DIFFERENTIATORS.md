@@ -52,6 +52,13 @@ kind of thing worth calling out in a blog post or on the project page.
   merged `containerEnv`, merged `forwardPorts`, etc. — so multi-file config
   composition just works.
 
+  This is an **ahead-of-spec capability**, tracking the in-flight proposal
+  [devcontainers/spec#22](https://github.com/devcontainers/spec/issues/22), and
+  is therefore an *intentional divergence* — deacon deliberately does more than
+  the reference here, so `extends` behavior is **not** covered by our
+  reference-parity claims. The divergence is characterized in
+  `fixtures/parity-corpus/errors/README.md`. (Issue #297.)
+
 ## Robustness
 
 - **Valid compose project names where the reference fails.** Both derive the compose
