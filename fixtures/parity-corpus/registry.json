@@ -1,0 +1,21 @@
+{
+  "live_binaries": [
+    { "name": "parity_read_configuration", "kind": "scenario", "docker_required": false },
+    { "name": "parity_exec",               "kind": "scenario", "docker_required": true },
+    { "name": "parity_build",              "kind": "scenario", "docker_required": true },
+    { "name": "parity_up_exec",            "kind": "scenario", "docker_required": true },
+    { "name": "parity_observable_state",   "kind": "scenario", "docker_required": true },
+    { "name": "parity_state_diff",         "kind": "scenario", "docker_required": true },
+    { "name": "parity_corpus_tier1",       "kind": "corpus",   "docker_required": false, "corpus": "tier1" },
+    { "name": "parity_corpus_merged",      "kind": "corpus",   "docker_required": false, "corpus": "tier1" },
+    { "name": "parity_corpus_errors",      "kind": "corpus",   "docker_required": false, "corpus": "errors" }
+  ],
+  "internal_consistency_binaries": [
+    "consistency_remote_env_flags",
+    "consistency_env_probe_flag"
+  ],
+  "corpora": [
+    { "id": "tier1",  "path": "fixtures/parity-corpus",        "min_cases": 20 },
+    { "id": "errors", "path": "fixtures/parity-corpus/errors", "min_cases": 9 }
+  ]
+}

@@ -177,8 +177,8 @@ test-nextest-bg: install-nextest ## Run nextest in background (optional: FILTER=
 	echo "Tail: tail -f $$log"
 
 .PHONY: test-nextest-bg-smoke
-test-nextest-bg-smoke: ## Run only smoke+parity tests in background (most likely long-running)
-	@FILTER="test(smoke_) | test(parity_)" $(MAKE) test-nextest-bg
+test-nextest-bg-smoke: ## Run only smoke tests in background (live parity is profile-gated — use `make test-parity`)
+	@FILTER="test(smoke_)" $(MAKE) test-nextest-bg
 
 .PHONY: test-nextest-smoke
 test-nextest-smoke: install-nextest ## Run smoke tests via cargo-nextest with conservative profile
@@ -204,11 +204,11 @@ test-nextest-smoke: install-nextest ## Run smoke tests via cargo-nextest with co
 	fi
 
 .PHONY: test-nextest-mvp-integration
-test-nextest-mvp-integration: install-nextest ## Run MVP integration tests (smoke + parity + core Docker tests)
+test-nextest-mvp-integration: install-nextest ## Run MVP integration tests (smoke + core Docker tests; live parity runs only under `make test-parity`)
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \
 	mkdir -p artifacts/nextest; \
-	echo "Running MVP integration tests (smoke + parity + core Docker)..."; \
+	echo "Running MVP integration tests (smoke + core Docker; live parity excluded — see 'make test-parity')..."; \
 	start_time=$$(date +%s); \
 	if cargo nextest run --profile mvp-integration $(THREAD_ARGS) $(OUTPUT_ARGS); then \
 		end_time=$$(date +%s); \
@@ -292,26 +292,20 @@ test-smoke: ## Run smoke tests only (all files matching tests/smoke_*.rs) (match
 	echo "Found smoke tests:"; printf '%s\n' $$SMOKE_TESTS; \
 	cargo test --verbose $$(printf -- '--test %s ' $$SMOKE_TESTS) -- --test-threads=1
 
-test-parity: ## Run parity tests (requires devcontainer CLI and Docker)
+test-parity: install-nextest ## Run live parity certification (needs the pinned devcontainer CLI + Docker)
 	@set -euo pipefail; \
-	BIN="$${DEACON_PARITY_DEVCONTAINER:-$$(command -v devcontainer || true)}"; \
-	if [[ -z "$$BIN" ]]; then \
-	  echo "devcontainer CLI not found. Set DEACON_PARITY_DEVCONTAINER=/path/to/devcontainer or add to PATH."; \
-	  exit 1; \
-	fi; \
-	echo "Using devcontainer: $$BIN"; \
-	DEACON_PARITY=1 \
-	DEACON_PARITY_DEVCONTAINER="$$BIN" \
-	DEACON_PARITY_UPSTREAM_READ_CONFIGURATION='read-configuration --config {config} --workspace-folder {workspace}' \
-	cargo test -p deacon \
-	  --test parity_read_configuration \
-	  --test parity_up_exec \
-	  --test parity_exec \
-	  --test parity_build \
-	  -- --nocapture --test-threads=1
+	./scripts/nextest/assert-installed.sh; \
+	# Thin alias (018-harden-parity-harness, research D12): the harness owns ALL \
+	# resolution/version/gating logic. Step 1 runs the live comparison under the \
+	# dedicated parity profile (each binary fails loudly on a missing/mismatched \
+	# oracle — there is no opt-in env gate). Step 2 aggregates the per-binary \
+	# report fragments and enforces the six completeness gates, exiting nonzero on \
+	# any gap. `set -e` stops at the first failing step. \
+	cargo nextest run --profile parity; \
+	cargo run -p parity-harness --bin parity-report
 
 .PHONY: test-parity-all
-test-parity-all: ## Alias for test-parity (runs parity read-config, up+exec, exec)
+test-parity-all: ## Alias for test-parity (live parity certification)
 	$(MAKE) test-parity
 
 .PHONY: test-podman
@@ -330,7 +324,11 @@ clippy: ## Run clippy with warnings as errors
 	cargo clippy --all-targets -- -D warnings
 
 coverage: ## Generate coverage report
-	cargo llvm-cov --workspace --open
+	# --ignore-run-fail: the live parity binaries fail without the pinned oracle
+	# (018-harden-parity-harness); coverage measures what ran and is not the
+	# test-correctness gate (nextest lanes are). --exclude parity-harness keeps the
+	# dev-only harness crate out of the product coverage denominator.
+	cargo llvm-cov --workspace --exclude parity-harness --ignore-run-fail --open
 
 .PHONY: install-cargo-bloat
 install-cargo-bloat: ## Install cargo-bloat if missing (auto)
@@ -369,11 +367,17 @@ clean: ## Clean build artifacts and Docker resources (for docker-in-docker devco
 		echo "Docker cleanup complete."; \
 	fi
 
-release-check: ## Full quality gate
+release-check: install-nextest ## Full quality gate
 	cargo fmt --all && cargo fmt --all -- --check && \
-	cargo clippy --all-targets -- -D warnings && \
-	cargo test -- --test-threads=1 && \
+	cargo clippy --all-targets --all-features -- -D warnings && \
+	cargo nextest run --profile full && \
+	cargo test --doc --workspace && \
 	cargo build --release
+	# NOTE: the test leg runs via nextest (profile `full`), NOT `cargo test`.
+	# The `full` profile excludes the live parity binaries by design
+	# (018-harden-parity-harness) so this gate does NOT require the pinned
+	# `@devcontainers/cli` oracle — live parity is certified separately via
+	# `make test-parity`. Doctests still run via `cargo test --doc`.
 
 .PHONY: release-run
 release-run: ## Dispatch 'Release' workflow for TAG=vX.Y.Z and watch until completion (requires gh)

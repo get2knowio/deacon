@@ -1,4 +1,7 @@
 {
-  "description": "extends chain forms a cycle (a -> b -> a). deacon resolves eagerly and detects the loop (no stack overflow — good); the reference does not resolve extends at read-configuration so it accepts. Characterized divergence: eager (deacon) vs lazy (reference) extends resolution.",
-  "expect": "deacon-stricter"
+  "id": "errors/extends-cycle",
+  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "extends-cycle" },
+  "expect": { "kind": "deacon-stricter", "signal": ["extends", "cycle"] },
+  "rationale": "extends chain forms a cycle (a -> b -> a). deacon resolves eagerly and detects the loop (no stack overflow — good); the reference does not resolve extends at read-configuration so it accepts. Characterized divergence: eager (deacon) vs lazy (reference) extends resolution. See CLAUDE.md 'Verified Non-Bugs' and errors/README.md (issue #297): extends is a deacon capability ahead of the reference, not drift.",
+  "added": "2026-07-19"
 }

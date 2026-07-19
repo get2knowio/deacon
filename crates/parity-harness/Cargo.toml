@@ -1,0 +1,27 @@
+[package]
+name = "parity-harness"
+version = "0.0.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Dev-only support crate for the deacon parity test harness: oracle resolution + exact-version verification, bounded CLI execution with raw capture, the single normalization module, waiver/registry loaders, and run-report fragments. Never published."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+# RFC3339 report timestamps. Not a [workspace.dependencies] entry (only used by
+# deacon-core today), so pinned directly here; `clock` (default) provides Utc::now.
+chrono = "0.4"
+# NEW dev-scope dependency: parses `.config/nextest.toml` in the registry check
+# (registry.rs / parity_registry_check) so profile-filter drift fails structurally.
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

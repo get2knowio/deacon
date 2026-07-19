@@ -1,52 +1,146 @@
-//! Parity tests comparing deacon vs upstream devcontainer CLI for `build` functionality.
+//! Parity: deacon vs the pinned `@devcontainers/cli` oracle for `build`.
 //!
-//! These tests verify that deacon's build command behaves functionally equivalent to
-//! the upstream devcontainer CLI in terms of image creation and discoverability.
+//! Runs ONLY under `cargo nextest run --profile parity`. There is no opt-in env
+//! gate and no silent skip: a missing/mismatched oracle or an unavailable Docker
+//! FAILS the test with a cause-specific message (018-harden-parity-harness). Both
+//! CLIs' raw output is preserved under `target/parity/raw/` and a run-report
+//! fragment is written to `target/parity/report/parity_build.json`.
+//!
+//! The six historical `build` tests are consolidated into ONE test running each
+//! as a sequential case (one report fragment per binary is the design). Two cases
+//! compare deacon against the oracle (`creates-discoverable-image`,
+//! `with-build-args`); the remaining four exercise deacon-only build surface
+//! (`--push`, `--output`, BuildKit-only flags, image-reference) that the oracle
+//! does not model — but every parity binary still certifies against the pinned
+//! oracle up front, even for deacon-only cases.
 
 use std::fs;
+use std::path::Path;
+
+use parity_harness::HarnessError;
+use parity_harness::exec::{ExecKind, Invocation, exec_deacon, exec_oracle};
+use parity_harness::oracle::Oracle;
+use parity_harness::prereq::require_docker;
+use parity_harness::report::{
+    CaseResult, Cause, OracleInfo, RawPaths, ReportFragment, now_rfc3339,
+};
 use tempfile::TempDir;
 
-mod parity_utils;
+/// This binary's name — the fragment key and raw-artifact subdirectory.
+const BINARY: &str = "parity_build";
 
-/// Test build succeeds and creates discoverable image
-#[test]
-fn parity_build_creates_discoverable_image() {
-    if !parity_utils::parity_enabled() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return;
-    }
-    if !parity_utils::docker_available() {
-        eprintln!(
-            "Skipping parity test (Docker unavailable): {}",
-            parity_utils::skip_reason()
-        );
-        return;
-    }
-    if !parity_utils::upstream_available() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return;
-    }
+/// Fail the test with the error's cause-specific `Display` message (never the
+/// `Debug` form) so an oracle/prereq failure reads as its remedy.
+fn ff<T>(r: Result<T, HarnessError>) -> T {
+    r.unwrap_or_else(|e| panic!("{e}"))
+}
 
-    let tmp = TempDir::new().unwrap();
-    let ws = tmp.path();
-    let unique_token = format!("parity-build-{}", std::process::id());
+/// The four preserved raw-output paths (report-relative) for a compared case
+/// (deacon vs oracle).
+fn raw_paths(deacon: &Invocation, oracle: &Invocation) -> RawPaths {
+    RawPaths {
+        deacon_stdout: deacon.stdout_rel.display().to_string(),
+        deacon_stderr: deacon.stderr_rel.display().to_string(),
+        oracle_stdout: oracle.stdout_rel.display().to_string(),
+        oracle_stderr: oracle.stderr_rel.display().to_string(),
+    }
+}
 
-    // Create Dockerfile at workspace root with unique label
-    fs::write(
-        ws.join("Dockerfile"),
-        format!(
-            r#"FROM alpine:3.19
+/// Raw-output paths for a deacon-only case (the oracle does not model this
+/// surface, so its two slots are empty).
+fn raw_paths_deacon(deacon: &Invocation) -> RawPaths {
+    RawPaths {
+        deacon_stdout: deacon.stdout_rel.display().to_string(),
+        deacon_stderr: deacon.stderr_rel.display().to_string(),
+        oracle_stdout: String::new(),
+        oracle_stderr: String::new(),
+    }
+}
+
+/// `docker images [-a] --filter label=<label> --format {{.ID}}` → image ids.
+/// Asserts the `docker images` invocation itself succeeded (a broken Docker CLI
+/// is a hard failure, not an empty result).
+fn docker_image_ids(label: &str, all: bool) -> Vec<String> {
+    let filter = format!("label={label}");
+    let mut args: Vec<&str> = vec!["images"];
+    if all {
+        args.push("-a");
+    }
+    args.extend_from_slice(&["--filter", &filter, "--format", "{{.ID}}"]);
+    let out = std::process::Command::new("docker")
+        .args(&args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "docker images failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// `docker inspect -f '{{ json .Config.Labels }}' <id>` → the raw labels JSON.
+fn docker_labels_json(id: &str) -> String {
+    let out = std::process::Command::new("docker")
+        .args(["inspect", "-f", "{{ json .Config.Labels }}", id])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "docker inspect failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// Best-effort `docker rmi <id>` (cleanup; never fails the run).
+fn docker_rmi(id: &str) {
+    let _ = std::process::Command::new("docker")
+        .args(["rmi", id])
+        .output();
+}
+
+#[tokio::test]
+async fn parity_build() {
+    // Fail fast for ALL cases: every parity binary certifies against the pinned
+    // oracle (even the deacon-only cases) and requires a working Docker.
+    let oracle = ff(Oracle::acquire().await);
+    ff(require_docker().await);
+    let deacon_bin = Path::new(env!("CARGO_BIN_EXE_deacon"));
+
+    let started = now_rfc3339();
+    let mut cases: Vec<CaseResult> = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
+
+    // ---------------------------------------------------------------------
+    // Case: creates-discoverable-image
+    // upstream build + deacon build; both must create an image discoverable by
+    // a unique parity.token label.
+    // ---------------------------------------------------------------------
+    {
+        let case = "creates-discoverable-image";
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path();
+        let ws_str = ws.to_string_lossy().into_owned();
+        let unique_token = format!("parity-build-{}", std::process::id());
+
+        fs::write(
+            ws.join("Dockerfile"),
+            format!(
+                r#"FROM alpine:3.19
 LABEL parity.token={}
 "#,
-            unique_token
-        ),
-    )
-    .unwrap();
-
-    // Create root-level .devcontainer.json referencing Dockerfile at workspace root
-    fs::write(
-        ws.join(".devcontainer.json"),
-        r#"{
+                unique_token
+            ),
+        )
+        .unwrap();
+        fs::write(
+            ws.join(".devcontainer.json"),
+            r#"{
         "name": "ParityBuild",
         "dockerFile": "Dockerfile",
         "build": {
@@ -54,161 +148,92 @@ LABEL parity.token={}
         }
     }
     "#,
-    )
-    .unwrap();
+        )
+        .unwrap();
 
-    // upstream: build
-    let st1 =
-        parity_utils::run_upstream(ws, &["build", "--workspace-folder", &ws.to_string_lossy()])
-            .unwrap();
-    assert!(
-        st1.status.success(),
-        "upstream build failed (code {:?}): {}",
-        st1.status.code(),
-        String::from_utf8_lossy(&st1.stderr)
-    );
+        let args = ["build", "--workspace-folder", ws_str.as_str()];
 
-    // Check if upstream created an image with our label (discover by ID with retry)
-    // Small initial delay in case the daemon hasn't flushed image metadata yet
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    let mut upstream_ids: Vec<String> = Vec::new();
-    for _ in 0..20 {
-        let images1 = std::process::Command::new("docker")
-            .args([
-                "images",
-                "-a",
-                "--filter",
-                &format!("label=parity.token={}", unique_token),
-                "--format",
-                "{{.ID}}",
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            images1.status.success(),
-            "docker images failed after upstream build: {}",
-            String::from_utf8_lossy(&images1.stderr)
-        );
-        upstream_ids = String::from_utf8_lossy(&images1.stdout)
-            .lines()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !upstream_ids.is_empty() {
-            break;
-        }
+        // upstream: build
+        let oracle_inv =
+            ff(exec_oracle(BINARY, case, ExecKind::Lifecycle, &oracle.path, &args, ws).await);
+        ff(oracle_inv.require_success());
+
+        // Discover upstream image by label (retry: daemon may not have flushed
+        // image metadata yet).
         std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    assert!(
-        !upstream_ids.is_empty(),
-        "upstream build should create an image with label parity.token={}",
-        unique_token
-    );
-
-    // Clean up the upstream image(s) to avoid conflicts
-    if !upstream_ids.is_empty() {
-        for id in &upstream_ids {
-            let _ = std::process::Command::new("docker")
-                .args(["rmi", id])
-                .output();
+        let label = format!("parity.token={}", unique_token);
+        let mut upstream_ids: Vec<String> = Vec::new();
+        for _ in 0..20 {
+            upstream_ids = docker_image_ids(&label, true);
+            if !upstream_ids.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
-    }
-
-    // deacon: build
-    let st2 = parity_utils::run_deacon(ws, &["build", "--workspace-folder", &ws.to_string_lossy()])
-        .unwrap();
-    assert!(
-        st2.status.success(),
-        "deacon build failed (code {:?}): {}",
-        st2.status.code(),
-        String::from_utf8_lossy(&st2.stderr)
-    );
-
-    // Check if deacon created an image with our label (discover by ID for robustness)
-    let images2 = std::process::Command::new("docker")
-        .args([
-            "images",
-            "-a",
-            "--filter",
-            &format!("label=parity.token={}", unique_token),
-            "--format",
-            "{{.ID}}",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        images2.status.success(),
-        "docker images failed after deacon build: {}",
-        String::from_utf8_lossy(&images2.stderr)
-    );
-    let deacon_ids: Vec<String> = String::from_utf8_lossy(&images2.stdout)
-        .lines()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    assert!(
-        !deacon_ids.is_empty(),
-        "deacon build should create an image with label parity.token={}",
-        unique_token
-    );
-
-    // Both should have created images - we don't require exact same image names
-    // but both should be discoverable via the same label
-    eprintln!("upstream created images (IDs): {}", upstream_ids.join(", "));
-    eprintln!("deacon created images (IDs): {}", deacon_ids.join(", "));
-
-    // Clean up the deacon image(s)
-    if !deacon_ids.is_empty() {
-        for id in &deacon_ids {
-            let _ = std::process::Command::new("docker")
-                .args(["rmi", id])
-                .output();
-        }
-    }
-}
-
-/// Test build with build args
-#[test]
-fn parity_build_with_build_args() {
-    if !parity_utils::parity_enabled() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return;
-    }
-    if !parity_utils::docker_available() {
-        eprintln!(
-            "Skipping parity test (Docker unavailable): {}",
-            parity_utils::skip_reason()
+        assert!(
+            !upstream_ids.is_empty(),
+            "upstream build should create an image with label parity.token={}",
+            unique_token
         );
-        return;
-    }
-    if !parity_utils::upstream_available() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return;
+        for id in &upstream_ids {
+            docker_rmi(id);
+        }
+
+        // deacon: build
+        let deacon_inv =
+            ff(exec_deacon(BINARY, case, ExecKind::Lifecycle, deacon_bin, &args, ws).await);
+        ff(deacon_inv.require_success());
+
+        let deacon_ids = docker_image_ids(&label, true);
+        let raw = raw_paths(&deacon_inv, &oracle_inv);
+        if deacon_ids.is_empty() {
+            let msg = format!(
+                "deacon build should create an image with label parity.token={}",
+                unique_token
+            );
+            cases.push(CaseResult::fail(
+                case,
+                Cause::Divergence,
+                Some(msg.clone()),
+                raw,
+            ));
+            failures.push(format!("[{case}] {msg}"));
+        } else {
+            cases.push(CaseResult::pass(case, raw));
+        }
+        for id in &deacon_ids {
+            docker_rmi(id);
+        }
     }
 
-    let tmp = TempDir::new().unwrap();
-    let ws = tmp.path();
-    let unique_token = format!("parity-build-args-{}", std::process::id());
+    // ---------------------------------------------------------------------
+    // Case: with-build-args
+    // upstream + deacon build with build args; both images must carry the
+    // build-arg-derived label.
+    // ---------------------------------------------------------------------
+    {
+        let case = "with-build-args";
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path();
+        let ws_str = ws.to_string_lossy().into_owned();
+        let unique_token = format!("parity-build-args-{}", std::process::id());
 
-    // Create Dockerfile that uses build arg
-    fs::write(
-        ws.join("Dockerfile"),
-        format!(
-            r#"FROM alpine:3.19
+        fs::write(
+            ws.join("Dockerfile"),
+            format!(
+                r#"FROM alpine:3.19
 ARG BUILD_ARG_VALUE=default
 ENV BUILD_ARG_VALUE=$BUILD_ARG_VALUE
 LABEL parity.token={}
 LABEL build.arg.value=$BUILD_ARG_VALUE
 "#,
-            unique_token
-        ),
-    )
-    .unwrap();
-
-    // Create root-level .devcontainer.json with build args
-    fs::write(
-        ws.join(".devcontainer.json"),
-        r#"{
+                unique_token
+            ),
+        )
+        .unwrap();
+        fs::write(
+            ws.join(".devcontainer.json"),
+            r#"{
         "name": "ParityBuildArgs",
         "dockerFile": "Dockerfile",
         "build": {
@@ -219,165 +244,85 @@ LABEL build.arg.value=$BUILD_ARG_VALUE
         }
     }
     "#,
-    )
-    .unwrap();
-
-    // upstream: build
-    let st1 =
-        parity_utils::run_upstream(ws, &["build", "--workspace-folder", &ws.to_string_lossy()])
-            .unwrap();
-    assert!(
-        st1.status.success(),
-        "upstream build failed (code {:?}): {}",
-        st1.status.code(),
-        String::from_utf8_lossy(&st1.stderr)
-    );
-
-    // Find image IDs by parity token first, then inspect for the build arg label
-    fn docker_list_image_ids_by_label(label: &str) -> Vec<String> {
-        let out = std::process::Command::new("docker")
-            .args([
-                "images",
-                "--filter",
-                &format!("label={}", label),
-                "--format",
-                "{{.ID}}",
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "docker images failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    }
-
-    let upstream_ids = docker_list_image_ids_by_label(&format!("parity.token={}", unique_token));
-    assert!(
-        !upstream_ids.is_empty(),
-        "upstream build should produce at least one image with parity token label"
-    );
-    let mut found_build_arg = false;
-    for id in &upstream_ids {
-        let out = std::process::Command::new("docker")
-            .args(["inspect", "-f", "{{ json .Config.Labels }}", id])
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "docker inspect failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let labels_json = String::from_utf8_lossy(&out.stdout);
-        if labels_json.contains("\"build.arg.value\":\"parity-test\"") {
-            found_build_arg = true;
-            break;
-        }
-    }
-    assert!(
-        found_build_arg,
-        "upstream image should carry build.arg.value=parity-test label"
-    );
-
-    // Clean up the upstream image(s)
-    if !upstream_ids.is_empty() {
-        for id in &upstream_ids {
-            let _ = std::process::Command::new("docker")
-                .args(["rmi", id])
-                .output();
-        }
-    }
-
-    // deacon: build
-    let st2 = parity_utils::run_deacon(ws, &["build", "--workspace-folder", &ws.to_string_lossy()])
+        )
         .unwrap();
-    assert!(
-        st2.status.success(),
-        "deacon build failed (code {:?}): {}",
-        st2.status.code(),
-        String::from_utf8_lossy(&st2.stderr)
-    );
 
-    let deacon_ids = docker_list_image_ids_by_label(&format!("parity.token={}", unique_token));
-    assert!(
-        !deacon_ids.is_empty(),
-        "deacon build should produce at least one image with parity token label"
-    );
-    let mut found_build_arg2 = false;
-    for id in &deacon_ids {
-        let out = std::process::Command::new("docker")
-            .args(["inspect", "-f", "{{ json .Config.Labels }}", id])
-            .output()
-            .unwrap();
+        let args = ["build", "--workspace-folder", ws_str.as_str()];
+        let label = format!("parity.token={}", unique_token);
+
+        // upstream: build
+        let oracle_inv =
+            ff(exec_oracle(BINARY, case, ExecKind::Lifecycle, &oracle.path, &args, ws).await);
+        ff(oracle_inv.require_success());
+
+        let upstream_ids = docker_image_ids(&label, false);
         assert!(
-            out.status.success(),
-            "docker inspect failed: {}",
-            String::from_utf8_lossy(&out.stderr)
+            !upstream_ids.is_empty(),
+            "upstream build should produce at least one image with parity token label"
         );
-        let labels_json = String::from_utf8_lossy(&out.stdout);
-        if labels_json.contains("\"build.arg.value\":\"parity-test\"") {
-            found_build_arg2 = true;
-            break;
+        let upstream_has_arg = upstream_ids
+            .iter()
+            .any(|id| docker_labels_json(id).contains("\"build.arg.value\":\"parity-test\""));
+        assert!(
+            upstream_has_arg,
+            "upstream image should carry build.arg.value=parity-test label"
+        );
+        for id in &upstream_ids {
+            docker_rmi(id);
         }
-    }
-    assert!(
-        found_build_arg2,
-        "deacon image should carry build.arg.value=parity-test label"
-    );
 
-    // Both should have processed build args correctly
-    eprintln!(
-        "upstream images with token label: {}",
-        upstream_ids.join(", ")
-    );
-    eprintln!("deacon images with token label: {}", deacon_ids.join(", "));
+        // deacon: build
+        let deacon_inv =
+            ff(exec_deacon(BINARY, case, ExecKind::Lifecycle, deacon_bin, &args, ws).await);
+        ff(deacon_inv.require_success());
 
-    // Clean up the deacon image(s)
-    if !deacon_ids.is_empty() {
+        let deacon_ids = docker_image_ids(&label, false);
+        assert!(
+            !deacon_ids.is_empty(),
+            "deacon build should produce at least one image with parity token label"
+        );
+        let deacon_has_arg = deacon_ids
+            .iter()
+            .any(|id| docker_labels_json(id).contains("\"build.arg.value\":\"parity-test\""));
+
+        let raw = raw_paths(&deacon_inv, &oracle_inv);
+        if deacon_has_arg {
+            cases.push(CaseResult::pass(case, raw));
+        } else {
+            let msg = "deacon image should carry build.arg.value=parity-test label".to_string();
+            cases.push(CaseResult::fail(
+                case,
+                Cause::Divergence,
+                Some(msg.clone()),
+                raw,
+            ));
+            failures.push(format!("[{case}] {msg}"));
+        }
         for id in &deacon_ids {
-            let _ = std::process::Command::new("docker")
-                .args(["rmi", id])
-                .output();
+            docker_rmi(id);
         }
     }
-}
 
-/// Test build with --push flag produces correct JSON output format (Phase 4)
-#[test]
-fn parity_build_push_json_output() {
-    // This test verifies that when --push is used (and succeeds or fails properly),
-    // the JSON output conforms to the BuildSuccess schema with pushed field
-    if !parity_utils::parity_enabled() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return;
-    }
-    if !parity_utils::docker_available() {
-        eprintln!(
-            "Skipping parity test (Docker unavailable): {}",
-            parity_utils::skip_reason()
-        );
-        return;
-    }
+    // ---------------------------------------------------------------------
+    // Case: push-json-output (DEACON-ONLY)
+    // Verifies --push JSON output shape whether the build succeeds or fails.
+    // ---------------------------------------------------------------------
+    {
+        let case = "push-json-output";
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path();
+        let ws_str = ws.to_string_lossy().into_owned();
 
-    let tmp = TempDir::new().unwrap();
-    let ws = tmp.path();
-
-    fs::write(
-        ws.join("Dockerfile"),
-        r#"FROM alpine:3.19
+        fs::write(
+            ws.join("Dockerfile"),
+            r#"FROM alpine:3.19
 LABEL test.push=true
 "#,
-    )
-    .unwrap();
-
-    fs::write(
-        ws.join(".devcontainer.json"),
-        r#"{
+        )
+        .unwrap();
+        fs::write(
+            ws.join(".devcontainer.json"),
+            r#"{
         "name": "ParityBuildPush",
         "dockerFile": "Dockerfile",
         "build": {
@@ -385,91 +330,92 @@ LABEL test.push=true
         }
     }
     "#,
-    )
-    .unwrap();
+        )
+        .unwrap();
 
-    // Run deacon build with --push (will fail if BuildKit not available or no registry access)
-    let st = parity_utils::run_deacon(
-        ws,
-        &[
+        let args = [
             "build",
             "--workspace-folder",
-            &ws.to_string_lossy(),
+            ws_str.as_str(),
             "--push",
             "--image-name",
             "localhost:5000/test-push:latest",
             "--output-format",
             "json",
-        ],
-    )
-    .unwrap();
+        ];
+        let inv = ff(exec_deacon(BINARY, case, ExecKind::Lifecycle, deacon_bin, &args, ws).await);
 
-    // Check output format regardless of success/failure
-    let stdout = String::from_utf8_lossy(&st.stdout);
-    let stderr = String::from_utf8_lossy(&st.stderr);
+        let stdout = inv.stdout_string();
+        let stderr = String::from_utf8_lossy(&inv.stderr);
+        let raw = raw_paths_deacon(&inv);
 
-    if st.status.success() {
-        // If successful, verify JSON output contains pushed field
-        let parsed: serde_json::Value =
-            serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
-        assert_eq!(
-            parsed["outcome"], "success",
-            "Build should have success outcome"
-        );
+        if inv.success {
+            // If successful, verify JSON output contains pushed field.
+            let parsed: serde_json::Value =
+                serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
+            let mut problems: Vec<String> = Vec::new();
+            if parsed["outcome"] != "success" {
+                problems.push("Build should have success outcome".to_string());
+            }
+            if !parsed["pushed"].is_boolean() {
+                problems.push("pushed field should be present and boolean".to_string());
+            }
+            // Clean up pushed image if any.
+            docker_rmi("localhost:5000/test-push:latest");
 
-        // Verify pushed field is present
-        assert!(
-            parsed["pushed"].is_boolean(),
-            "pushed field should be present and boolean"
-        );
-
-        // Clean up pushed image if any
-        let _ = std::process::Command::new("docker")
-            .args(["rmi", "localhost:5000/test-push:latest"])
-            .output();
-    } else {
-        // If failed, should have proper error output (BuildKit requirement or registry error)
-        assert!(
-            stdout.contains("BuildKit is required") || 
-            stderr.contains("BuildKit is required") ||
-            stdout.contains("outcome") || // JSON error format
-            stderr.contains("Docker"),
-            "Expected BuildKit or Docker error in failure case"
-        );
-    }
-}
-
-/// Test build with --output flag produces correct JSON output format (Phase 4)
-#[test]
-fn parity_build_output_json_format() {
-    // This test verifies that when --output is used, the JSON output
-    // conforms to the BuildSuccess schema with exportPath field
-    if !parity_utils::parity_enabled() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return;
-    }
-    if !parity_utils::docker_available() {
-        eprintln!(
-            "Skipping parity test (Docker unavailable): {}",
-            parity_utils::skip_reason()
-        );
-        return;
+            if problems.is_empty() {
+                cases.push(CaseResult::pass(case, raw));
+            } else {
+                let msg = problems.join("; ");
+                cases.push(CaseResult::fail(
+                    case,
+                    Cause::Divergence,
+                    Some(msg.clone()),
+                    raw,
+                ));
+                failures.push(format!("[{case}] {msg}"));
+            }
+        } else {
+            // If failed, should have proper error output (BuildKit or Docker).
+            let ok = stdout.contains("BuildKit is required")
+                || stderr.contains("BuildKit is required")
+                || stdout.contains("outcome")
+                || stderr.contains("Docker");
+            if ok {
+                cases.push(CaseResult::pass(case, raw));
+            } else {
+                let msg = "Expected BuildKit or Docker error in failure case".to_string();
+                cases.push(CaseResult::fail(
+                    case,
+                    Cause::Divergence,
+                    Some(msg.clone()),
+                    raw,
+                ));
+                failures.push(format!("[{case}] {msg}"));
+            }
+        }
     }
 
-    let tmp = TempDir::new().unwrap();
-    let ws = tmp.path();
+    // ---------------------------------------------------------------------
+    // Case: output-json-format (DEACON-ONLY)
+    // Verifies --output JSON output shape whether the build succeeds or fails.
+    // ---------------------------------------------------------------------
+    {
+        let case = "output-json-format";
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path();
+        let ws_str = ws.to_string_lossy().into_owned();
 
-    fs::write(
-        ws.join("Dockerfile"),
-        r#"FROM alpine:3.19
+        fs::write(
+            ws.join("Dockerfile"),
+            r#"FROM alpine:3.19
 LABEL test.export=true
 "#,
-    )
-    .unwrap();
-
-    fs::write(
-        ws.join(".devcontainer.json"),
-        r#"{
+        )
+        .unwrap();
+        fs::write(
+            ws.join(".devcontainer.json"),
+            r#"{
         "name": "ParityBuildOutput",
         "dockerFile": "Dockerfile",
         "build": {
@@ -477,90 +423,91 @@ LABEL test.export=true
         }
     }
     "#,
-    )
-    .unwrap();
+        )
+        .unwrap();
 
-    let export_path = tmp.path().join("export.tar");
-    let output_spec = format!("type=docker,dest={}", export_path.display());
-
-    // Run deacon build with --output
-    let st = parity_utils::run_deacon(
-        ws,
-        &[
+        let export_path = tmp.path().join("export.tar");
+        let output_spec = format!("type=docker,dest={}", export_path.display());
+        let args = [
             "build",
             "--workspace-folder",
-            &ws.to_string_lossy(),
+            ws_str.as_str(),
             "--output",
-            &output_spec,
+            output_spec.as_str(),
             "--output-format",
             "json",
-        ],
-    )
-    .unwrap();
+        ];
+        let inv = ff(exec_deacon(BINARY, case, ExecKind::Lifecycle, deacon_bin, &args, ws).await);
 
-    let stdout = String::from_utf8_lossy(&st.stdout);
-    let stderr = String::from_utf8_lossy(&st.stderr);
+        let stdout = inv.stdout_string();
+        let stderr = String::from_utf8_lossy(&inv.stderr);
+        let raw = raw_paths_deacon(&inv);
 
-    if st.status.success() {
-        // If successful, verify JSON output contains exportPath field
-        let parsed: serde_json::Value =
-            serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
-        assert_eq!(
-            parsed["outcome"], "success",
-            "Build should have success outcome"
-        );
+        if inv.success {
+            let parsed: serde_json::Value =
+                serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
+            let mut problems: Vec<String> = Vec::new();
+            if parsed["outcome"] != "success" {
+                problems.push("Build should have success outcome".to_string());
+            }
+            if !parsed["exportPath"].is_string() {
+                problems.push("exportPath field should be present and string".to_string());
+            }
+            // Clean up export file if created.
+            let _ = std::fs::remove_file(&export_path);
 
-        // Verify exportPath field is present
-        assert!(
-            parsed["exportPath"].is_string(),
-            "exportPath field should be present and string"
-        );
-
-        // Clean up export file if created
-        let _ = std::fs::remove_file(&export_path);
-    } else {
-        // If failed, should have proper error output (BuildKit requirement)
-        assert!(
-            stdout.contains("BuildKit is required")
+            if problems.is_empty() {
+                cases.push(CaseResult::pass(case, raw));
+            } else {
+                let msg = problems.join("; ");
+                cases.push(CaseResult::fail(
+                    case,
+                    Cause::Divergence,
+                    Some(msg.clone()),
+                    raw,
+                ));
+                failures.push(format!("[{case}] {msg}"));
+            }
+        } else {
+            let ok = stdout.contains("BuildKit is required")
                 || stderr.contains("BuildKit is required")
                 || stdout.contains("outcome")
-                || stderr.contains("Docker"),
-            "Expected BuildKit or Docker error in failure case"
-        );
-    }
-}
-
-/// Test BuildKit-only feature detection (Phase 4 - T014A)
-#[test]
-fn parity_build_buildkit_only_features_regression() {
-    // This is a regression test to ensure that BuildKit-only features
-    // (like advanced cache, push, export) are properly gated
-    if !parity_utils::parity_enabled() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return;
-    }
-    if !parity_utils::docker_available() {
-        eprintln!(
-            "Skipping parity test (Docker unavailable): {}",
-            parity_utils::skip_reason()
-        );
-        return;
+                || stderr.contains("Docker");
+            if ok {
+                cases.push(CaseResult::pass(case, raw));
+            } else {
+                let msg = "Expected BuildKit or Docker error in failure case".to_string();
+                cases.push(CaseResult::fail(
+                    case,
+                    Cause::Divergence,
+                    Some(msg.clone()),
+                    raw,
+                ));
+                failures.push(format!("[{case}] {msg}"));
+            }
+        }
     }
 
-    let tmp = TempDir::new().unwrap();
-    let ws = tmp.path();
+    // ---------------------------------------------------------------------
+    // Case: buildkit-only-features (DEACON-ONLY)
+    // Regression: BuildKit-only flags must fail gracefully without BuildKit.
+    // ---------------------------------------------------------------------
+    {
+        let case = "buildkit-only-features";
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path();
+        let ws_str = ws.to_string_lossy().into_owned();
 
-    fs::write(
-        ws.join("Dockerfile"),
-        r#"FROM alpine:3.19
+        fs::write(
+            ws.join("Dockerfile"),
+            r#"FROM alpine:3.19
 LABEL test.buildkit=true
 "#,
-    )
-    .unwrap();
-
-    fs::write(
-        ws.join(".devcontainer.json"),
-        r#"{
+        )
+        .unwrap();
+        fs::write(
+            ws.join(".devcontainer.json"),
+            r#"{
         "name": "ParityBuildKitOnly",
         "dockerFile": "Dockerfile",
         "build": {
@@ -568,163 +515,181 @@ LABEL test.buildkit=true
         }
     }
     "#,
-    )
-    .unwrap();
+        )
+        .unwrap();
 
-    // Test multiple BuildKit-only flags
-    let buildkit_flags = vec![
-        ("--platform", "linux/amd64"),
-        ("--cache-to", "type=local,dest=/tmp/cache"),
-    ];
+        let buildkit_flags = [
+            ("--platform", "linux/amd64"),
+            ("--cache-to", "type=local,dest=/tmp/cache"),
+        ];
 
-    for (flag_name, flag_value) in buildkit_flags {
-        let st = parity_utils::run_deacon(
-            ws,
-            &[
+        let mut last_inv: Option<Invocation> = None;
+        let mut problems: Vec<String> = Vec::new();
+        for (flag_name, flag_value) in buildkit_flags {
+            let args = [
                 "build",
                 "--workspace-folder",
-                &ws.to_string_lossy(),
+                ws_str.as_str(),
                 flag_name,
                 flag_value,
                 "--output-format",
                 "json",
-            ],
-        )
-        .unwrap();
+            ];
+            let inv =
+                ff(exec_deacon(BINARY, case, ExecKind::Lifecycle, deacon_bin, &args, ws).await);
+            let stdout = inv.stdout_string();
+            let stderr = String::from_utf8_lossy(&inv.stderr);
 
-        let stdout = String::from_utf8_lossy(&st.stdout);
-        let stderr = String::from_utf8_lossy(&st.stderr);
-
-        // If BuildKit is not available, should fail with proper error
-        if !st.status.success() {
-            assert!(
-                stdout.contains("BuildKit is required")
+            // If BuildKit is not available, should fail with proper error. If it
+            // succeeded, BuildKit was available and the feature worked.
+            if !inv.success {
+                let ok = stdout.contains("BuildKit is required")
                     || stderr.contains("BuildKit is required")
                     || stdout.contains("outcome")
-                    || stderr.contains("Docker"),
-                "BuildKit-only flag {} should fail gracefully without BuildKit",
-                flag_name
-            );
+                    || stderr.contains("Docker");
+                if !ok {
+                    problems.push(format!(
+                        "BuildKit-only flag {} should fail gracefully without BuildKit",
+                        flag_name
+                    ));
+                }
+            }
+            drop(stdout);
+            drop(stderr);
+            last_inv = Some(inv);
         }
-        // If successful, BuildKit was available and feature worked
-    }
-}
 
-/// Test image-reference build with feature application and tagging (Phase 5)
-#[test]
-fn parity_build_image_reference() {
-    // This test verifies that deacon can build from an image reference
-    // and apply features and tags correctly
-    if !parity_utils::parity_enabled() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return;
-    }
-    if !parity_utils::docker_available() {
-        eprintln!(
-            "Skipping parity test (Docker unavailable): {}",
-            parity_utils::skip_reason()
-        );
-        return;
+        let raw = last_inv.as_ref().map(raw_paths_deacon).unwrap_or(RawPaths {
+            deacon_stdout: String::new(),
+            deacon_stderr: String::new(),
+            oracle_stdout: String::new(),
+            oracle_stderr: String::new(),
+        });
+        if problems.is_empty() {
+            cases.push(CaseResult::pass(case, raw));
+        } else {
+            let msg = problems.join("; ");
+            cases.push(CaseResult::fail(
+                case,
+                Cause::Divergence,
+                Some(msg.clone()),
+                raw,
+            ));
+            failures.push(format!("[{case}] {msg}"));
+        }
     }
 
-    let tmp = TempDir::new().unwrap();
-    let ws = tmp.path();
-    let unique_token = format!("parity-image-ref-{}", std::process::id());
+    // ---------------------------------------------------------------------
+    // Case: image-reference (DEACON-ONLY)
+    // deacon builds from an image ref, applying features + custom tags; must
+    // succeed, emit valid JSON with the custom tag, and create a labeled image.
+    // ---------------------------------------------------------------------
+    {
+        let case = "image-reference";
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path();
+        let ws_str = ws.to_string_lossy().into_owned();
+        let unique_token = format!("parity-image-ref-{}", std::process::id());
 
-    // Create devcontainer.json with image reference
-    fs::write(
-        ws.join(".devcontainer.json"),
-        r#"{
+        fs::write(
+            ws.join(".devcontainer.json"),
+            r#"{
         "name": "ParityBuildImageRef",
         "image": "alpine:3.19"
     }
     "#,
-    )
-    .unwrap();
+        )
+        .unwrap();
 
-    // Run deacon build with image reference and custom tag
-    let custom_tag = format!("test-image-ref:{}", unique_token);
-    let st = parity_utils::run_deacon(
-        ws,
-        &[
+        let custom_tag = format!("test-image-ref:{}", unique_token);
+        let label_arg = format!("parity.token={}", unique_token);
+        let args = [
             "build",
             "--workspace-folder",
-            &ws.to_string_lossy(),
+            ws_str.as_str(),
             "--image-name",
-            &custom_tag,
+            custom_tag.as_str(),
             "--label",
-            &format!("parity.token={}", unique_token),
+            label_arg.as_str(),
             "--output-format",
             "json",
-        ],
-    )
-    .unwrap();
+        ];
+        let inv = ff(exec_deacon(BINARY, case, ExecKind::Lifecycle, deacon_bin, &args, ws).await);
+        // This case hard-asserted success in the original — preserve that.
+        ff(inv.require_success());
 
-    assert!(
-        st.status.success(),
-        "deacon image-reference build failed (code {:?}): {}",
-        st.status.code(),
-        String::from_utf8_lossy(&st.stderr)
-    );
+        let raw = raw_paths_deacon(&inv);
+        let stdout = inv.stdout_string();
+        let parsed: serde_json::Value =
+            serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
+        assert_eq!(
+            parsed["outcome"], "success",
+            "Build should have success outcome"
+        );
 
-    // Verify JSON output
-    let stdout = String::from_utf8_lossy(&st.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
-    assert_eq!(
-        parsed["outcome"], "success",
-        "Build should have success outcome"
-    );
+        // Verify imageName array contains the custom tag.
+        let image_names = parsed["imageName"]
+            .as_array()
+            .expect("imageName should be an array");
+        let tags: Vec<String> = image_names
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(|s| s.to_string())
+            .collect();
+        let tag_ok = tags.iter().any(|t| t.contains(&unique_token));
 
-    // Verify imageName array contains custom tag
-    let image_names = parsed["imageName"]
-        .as_array()
-        .expect("imageName should be an array");
-    let tags: Vec<String> = image_names
-        .iter()
-        .filter_map(|v| v.as_str())
-        .map(|s| s.to_string())
-        .collect();
-    assert!(
-        tags.iter().any(|t| t.contains(&unique_token)),
-        "imageName should contain custom tag with unique token: {:?}",
-        tags
-    );
+        // Verify an image was created with the label.
+        let image_ids = docker_image_ids(&label_arg, false);
+        let image_ok = !image_ids.is_empty();
 
-    // Verify image was created with label
-    let images_check = std::process::Command::new("docker")
-        .args([
-            "images",
-            "--filter",
-            &format!("label=parity.token={}", unique_token),
-            "--format",
-            "{{.ID}}",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        images_check.status.success(),
-        "docker images check failed: {}",
-        String::from_utf8_lossy(&images_check.stderr)
-    );
+        if tag_ok && image_ok {
+            cases.push(CaseResult::pass(case, raw));
+        } else {
+            let mut problems: Vec<String> = Vec::new();
+            if !tag_ok {
+                problems.push(format!(
+                    "imageName should contain custom tag with unique token: {:?}",
+                    tags
+                ));
+            }
+            if !image_ok {
+                problems.push(
+                    "Image-reference build should create an image with parity token label"
+                        .to_string(),
+                );
+            }
+            let msg = problems.join("; ");
+            cases.push(CaseResult::fail(
+                case,
+                Cause::Divergence,
+                Some(msg.clone()),
+                raw,
+            ));
+            failures.push(format!("[{case}] {msg}"));
+        }
 
-    let image_ids: Vec<String> = String::from_utf8_lossy(&images_check.stdout)
-        .lines()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    assert!(
-        !image_ids.is_empty(),
-        "Image-reference build should create an image with parity token label"
-    );
-
-    // Clean up
-    for id in &image_ids {
-        let _ = std::process::Command::new("docker")
-            .args(["rmi", id])
-            .output();
+        // Clean up.
+        for id in &image_ids {
+            docker_rmi(id);
+        }
+        docker_rmi(&custom_tag);
     }
-    let _ = std::process::Command::new("docker")
-        .args(["rmi", &custom_tag])
-        .output();
+
+    let finished = now_rfc3339();
+    let fragment = ReportFragment::new(
+        BINARY,
+        OracleInfo::from(&oracle),
+        started,
+        finished,
+        cases,
+        Vec::new(),
+    );
+    ff(fragment.write().await);
+
+    assert!(
+        failures.is_empty(),
+        "build parity divergence(s) vs oracle {}:\n{}",
+        oracle.version,
+        failures.join("\n\n"),
+    );
 }

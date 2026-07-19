@@ -42,3 +42,6 @@ zip.workspace = true
 serde_json.workspace = true
 testcontainers.workspace = true
 temp-env.workspace = true
+# Dev-only parity harness (publish = false). Consumed by the `parity_*` and
+# `consistency_*` test binaries; never linked into the shipped deacon binary.
+parity-harness = { path = "../parity-harness" }

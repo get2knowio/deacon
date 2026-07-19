@@ -1,4 +1,7 @@
 {
-  "description": "forwardPorts is a bare string instead of an array. deacon deserializes into a typed struct and rejects the type mismatch; the reference keeps the raw JSON and accepts. Characterized divergence: typed (deacon) vs untyped (reference) read-configuration. Note deacon is NOT uniformly strict here — see wrong-type-features, which deacon accepts.",
-  "expect": "deacon-stricter"
+  "id": "errors/wrong-type-forwardports",
+  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "wrong-type-forwardports" },
+  "expect": { "kind": "deacon-stricter" },
+  "rationale": "forwardPorts is a bare string instead of an array. deacon deserializes into a typed struct and rejects the type mismatch; the reference keeps the raw JSON and accepts. Characterized divergence: typed (deacon) vs untyped (reference) read-configuration. Note deacon is NOT uniformly strict here — see wrong-type-features.",
+  "added": "2026-07-19"
 }

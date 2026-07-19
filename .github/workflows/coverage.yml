@@ -59,7 +59,14 @@ jobs:
     - name: Generate coverage (fail under ${{ env.MIN_COVERAGE }}%)
       run: |
         mkdir -p coverage
-        cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info --text --fail-under-lines ${{ env.MIN_COVERAGE }} -- --test-threads=1 | tee -a "$GITHUB_STEP_SUMMARY"
+        # --ignore-run-fail: the live parity binaries (018-harden-parity-harness) fail
+        #   without the pinned @devcontainers/cli oracle, which is NOT provisioned here
+        #   (it is provisioned + gated in the `parity / live-certification` lane,
+        #   .github/workflows/parity.yml). Coverage measures whatever ran and is a
+        #   coverage-% gate, not the test-correctness gate -- the PR nextest lanes are.
+        # --exclude parity-harness: keep the dev-only harness crate out of the product
+        #   coverage denominator (its bin/lib are tooling, not shipped surface).
+        cargo llvm-cov --workspace --exclude parity-harness --ignore-run-fail --lcov --output-path coverage/lcov.info --text --fail-under-lines ${{ env.MIN_COVERAGE }} -- --test-threads=1 | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Upload lcov artifact
       uses: actions/upload-artifact@v7

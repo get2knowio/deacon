@@ -344,6 +344,50 @@ let env_user = resolve_env_and_user(
 
 See `docs/ARCHITECTURE.md` for implementation checklist and code references.
 
+## Parity Test Harness (`crates/parity-harness/`)
+
+Live parity tests compare deacon against the **pinned** `@devcontainers/cli`
+oracle (version in `fixtures/parity-corpus/oracle.json`). The dev-only
+`parity-harness` crate (`publish = false`) owns every shared mechanic: oracle
+resolution + **exact**-version verification (`oracle`), Docker/fixture
+prerequisite checks (`prereq`), bounded CLI execution with raw stdout/stderr
+capture (`exec`), the **single** normalization/equivalence module (`normalize` —
+`config`/`merged_config`/`container_state`/`diff*`; there is no second copy), the
+waiver + registry loaders (`waiver`, `registry`), run-report fragments
+(`report`), and the `parity-report` aggregator bin. Live parity test binaries in
+`crates/deacon/tests/parity_*.rs` are thin shells over these helpers.
+
+**Selection is profile-based, never an env-var opt-in.** The legacy
+`DEACON_PARITY=1` gate and the `cargo test` side-channel are retired. The nine
+live binaries run **only** under `cargo nextest run --profile parity` (whose
+`default-filter` is an explicit `binary(=…)` allow-list of exactly those nine —
+NOT a `parity_*` glob, which would wrongly capture the hermetic guards
+`parity_harness_faults` / `parity_registry_check`). Every other profile
+(`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) excludes the nine, so those
+lanes are truthful by **non-selection**: a green fast/CI run never implies live
+parity ran. There is no silent skip — a missing/mismatched oracle, missing
+Docker, or a normalization failure **fails** the run with a cause-specific
+`HarnessError`. `make test-parity` is a thin alias:
+`cargo nextest run --profile parity` then `cargo run -p parity-harness --bin
+parity-report`.
+
+**Registry + waiver model.** `fixtures/parity-corpus/registry.json` enumerates
+the live binaries, the internal-consistency binaries, and the corpora (with
+`min_cases` floors); the hermetic `parity_registry_check` test enforces
+registry ↔ `tests/*.rs` ↔ `.config/nextest.toml` agreement structurally on every
+PR. Characterized divergences are **waiver records** under
+`fixtures/parity-corpus/waivers/` (and `errors/*/expect.json`) — each with `id`,
+`scope`, `expect`, required `rationale`, `added` — loaded by `waiver.rs`. Waivers
+are self-invalidating: one whose difference stops reproducing fails as *stale*.
+Never silently waive a real divergence; fix deacon or characterize with rationale.
+
+**CI:** the `parity / live-certification` lane (`.github/workflows/parity.yml`)
+provisions the pinned oracle and runs the profile + aggregator; it is separate
+from the normal PR lanes. When adding a live binary, register it in
+`registry.json` AND add nextest overrides in ALL profiles (parity selection +
+the exclusions), or `parity_registry_check` fails. See
+`specs/018-harden-parity-harness/quickstart.md`.
+
 ## Pre-Implementation Checklist
 
 Before implementing any new subcommand or feature:
@@ -470,7 +514,9 @@ rediscover-and-investigate loop:
   wrong-typed values verbatim — deferring all of that to `up`/`build`. deacon validates
   eagerly and strictly by design (constitution IV: fail fast). These are characterized,
   intended divergences, NOT bugs — encoded as `deacon-stricter` in the Tier 1c error corpus
-  (`fixtures/parity-corpus/errors/`, `run_tier1_errors.py`). Conversely, deacon preserving
+  (`fixtures/parity-corpus/errors/`, driven by `crates/deacon/tests/parity_corpus_errors.rs`;
+  the former `run_tier1_errors.py` was ported to Rust and deleted in
+  018-harden-parity-harness). Conversely, deacon preserving
   unknown fields matches the reference (`both-accept`); silently dropping them WOULD be a bug.
 
 ## Output Streams Contract
@@ -680,6 +726,9 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - `{user_data_folder}/settings.json` (atomic write, sibling of `trusted_workspaces.json`); (016-host-ca-injection)
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + `serde`/`serde_json` (settings + fragment parsing), `indexmap` 2.x with `serde` (declaration-ordered `profiles` map — already a core dep), `clap` (global `--profile` flag + `DEACON_PROFILE` env), `tracing` (applied-profile diagnostic), `thiserror` (core domain errors), `anyhow` (binary boundary) (017-user-profiles)
 - `{user_data_folder}/settings.json` — read-only in this feature (no write path); default `~/.deacon/settings.json`, honoring global `--user-data-folder` (017-user-profiles)
+- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide); no Python after porting (the three corpus-runner scripts are retired) + existing workspace deps only — `serde`/`serde_json`, `tokio` (process + time for bounded oracle invocations), `thiserror`, `tracing`; `cargo-nextest` as the sole test executor; Node 20+/npm in the certification lane to install the oracle (018-harden-parity-harness)
+- files — `fixtures/parity-corpus/oracle.json` (pin), `fixtures/parity-corpus/registry.json` (parity registry), waiver records adjacent to cases (`errors/*/expect.json`, `waivers/*.json`); run artifacts under `target/parity/` (report fragments + raw outputs), overridable via `DEACON_PARITY_REPORT_DIR` (018-harden-parity-harness)
 
 ## Recent Changes
+- 018-harden-parity-harness: Added the dev-only `crates/parity-harness/` crate (oracle resolution + exact-version verify, bounded exec with raw capture, the single `normalize` module, waiver/registry loaders, report fragments + `parity-report` aggregator bin); moved live parity onto the dedicated `[profile.parity]` nextest profile; retired the `DEACON_PARITY=1` gate and the three Python corpus runners; added the `parity / live-certification` CI lane. See the "Parity Test Harness" section.
 - 009-complete-feature-support: Added Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing

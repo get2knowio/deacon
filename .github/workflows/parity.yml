@@ -1,0 +1,97 @@
+# Live parity certification (018-harden-parity-harness, research D11).
+#
+# The SINGLE lane that provisions the pinned reference `@devcontainers/cli` and
+# runs the live comparison. Every OTHER lane excludes the live parity binaries by
+# nextest profile, so status stays truthful (FR-014). The check appears as
+# `parity / live-certification` — a snapshot/replay mode, if ever added, MUST use
+# a distinct name and report `mode` (FR-017).
+#
+# Provisioning ONLY happens here; ALL pass/fail/gating logic lives in the harness
+# and the aggregator. There is deliberately NO `continue-on-error` anywhere: any
+# failing step fails the lane, and `target/parity/` is uploaded even on red runs
+# so the raw outputs + report fragments are always diagnosable.
+name: parity
+
+on:
+  # Nightly on the default branch — catches oracle republish / base-image drift.
+  schedule:
+    - cron: '0 5 * * *'
+  # On-demand (release certification).
+  workflow_dispatch:
+  # Guard the harness/corpus/pin themselves on PRs that touch them.
+  pull_request:
+    paths:
+      - 'crates/parity-harness/**'
+      - 'crates/deacon/tests/parity_*'
+      - 'crates/deacon/tests/consistency_*'
+      - 'fixtures/parity-corpus/**'
+      - '.config/nextest.toml'
+      - 'Makefile'
+      - '.github/workflows/parity.yml'
+
+jobs:
+  live-certification:
+    name: live-certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-parity-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-parity-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Provision the pinned oracle
+        # Install EXACTLY the version in the pin file — the harness re-verifies it,
+        # so provisioning and harness can never disagree about the reference.
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r .version fixtures/parity-corpus/oracle.json)"
+          echo "Installing @devcontainers/cli@${VERSION} from fixtures/parity-corpus/oracle.json"
+          npm install -g "@devcontainers/cli@${VERSION}"
+
+      - name: Verify oracle version
+        run: devcontainer --version
+
+      - name: Build deacon
+        run: cargo build -p deacon
+
+      - name: Run live parity comparison
+        run: cargo nextest run --profile parity
+
+      - name: Aggregate + enforce completeness gate
+        run: cargo run -p parity-harness --bin parity-report
+
+      - name: Upload parity artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: parity-report
+          path: target/parity/
+          if-no-files-found: warn

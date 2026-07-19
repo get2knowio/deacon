@@ -7,21 +7,32 @@ launch: a missing mount (#266, #272), a dropped env var, a colliding project
 name (#265). The differ snapshots each CLI's container via `docker inspect`,
 normalizes away legitimate differences, and fails on anything left over.
 
-- Differ implementation: `crates/deacon/tests/parity_utils.rs`
-  (`StateSnapshot`, `snapshot_from_inspect`, `diff_states`,
-  `classify_divergence`, `assert_state_parity` / `assert_snapshots_parity`).
-- Pure-logic unit tests (fast loop, no Docker):
-  `crates/deacon/tests/integration_state_diff.rs`.
-- Docker fixtures (opt-in, gated): `crates/deacon/tests/parity_state_diff.rs`.
+- Differ implementation: `crates/parity-harness/src/normalize.rs`
+  (`StateSnapshot`, `container_state` — snapshot from `docker inspect`,
+  `diff_states` — ranked divergences, `Divergence`). This is the single,
+  shared normalization/equivalence module for the whole parity harness
+  (018-harden-parity-harness); there is no per-test copy.
+- Pure-logic unit tests (fast loop, no Docker): `#[cfg(test)]` blocks in
+  `crates/parity-harness/src/normalize.rs` plus the cross-runner equivalence
+  suite `crates/parity-harness/tests/normalize_consistency.rs`. Both run in the
+  default/`dev-fast` lanes (hermetic).
+- Docker fixtures (live, oracle-gated): `crates/deacon/tests/parity_state_diff.rs`.
 
-Run (triple-gated on `DEACON_PARITY=1` + Docker + `devcontainer` in PATH):
+Run via the dedicated nextest profile (the single sanctioned entry point;
+requires the pinned `@devcontainers/cli` oracle + Docker):
 
 ```bash
-DEACON_PARITY=1 cargo test --test parity_state_diff -- --test-threads=1 --nocapture
+# whole certified surface + aggregated report
+make test-parity
+# or target just this binary
+cargo nextest run --profile parity -E 'binary(=parity_state_diff)'
 ```
 
-Every subtracted divergence is printed as a `[state-diff]` line so the
-normalization/allowlist is visible on each run.
+There is **no** `DEACON_PARITY=1` opt-in gate and no silent skip: a
+missing/mismatched oracle, missing Docker, or a normalization failure fails the
+test with a cause-specific message. Every subtracted divergence is printed as a
+`[state-diff]` line so the normalization/allowlist is visible on each run, and
+each CLI's raw `docker inspect`/stdout is preserved under `target/parity/raw/`.
 
 ## Fields compared
 
@@ -57,19 +68,31 @@ strategy differs by CLI), `networks` (compose-project-prefixed).
 | Compose-project prefix on volume/network names | Volumes/networks are named after the (deliberately different) project name (#265). |
 | `Config.User` empty vs `"root"` | Empty means "image default", which is root for these bases. A real non-root `remoteUser`/`containerUser` still diverges. |
 
-## Intentional divergences (`KNOWN_INTENTIONAL_DIVERGENCES`)
+## Characterized divergences (waiver records)
 
-Currently **empty** — every intentional deacon divergence (project name,
-identity labels, keep-alive command, project-prefixed networks) is already
-handled by normalization or by a field the differ does not compare. New entries
-here must be justified; they are the reviewable record of where deacon is
-knowingly different.
+The former in-source `KNOWN_INTENTIONAL_DIVERGENCES` / `KNOWN_GAPS` const lists
+are gone (018-harden-parity-harness, research D6). Every characterized divergence
+— whether an intentional deacon choice or a reported-but-not-failing gap — is now
+a **waiver record** under `fixtures/parity-corpus/waivers/`, loaded and enforced
+by `crates/parity-harness/src/waiver.rs`
+(`Waiver`/`WaiverSet`/`Scope`/`field_matches`). A waiver carries an `id`, a
+`scope` (which case/field it applies to), an `expect` (the difference it
+tolerates), a required `rationale`, and an `added` date. Divergence
+classification in `parity_state_diff.rs` and `parity_observable_state.rs` runs
+through this loader.
 
-## Known gaps (`KNOWN_GAPS`) — open bugs, reported but not failing
+Waivers are **self-invalidating**: a record whose tolerated difference stops
+reproducing fails the run as *stale* (`HarnessError::WaiverStale`), so the
+reviewable record can never silently rot — delete or update it in the same PR
+that changes the behavior. New entries must be justified; they are the reviewable
+record of where deacon is knowingly different. The `waivers/` directory is empty
+today (both former const lists were empty), so the harness currently expects full
+state parity on every fixture.
 
-Currently **empty**. [#272](https://github.com/get2knowio/deacon/issues/272)
-(feature-contributed `mounts` dropped on deacon's compose path) was the only
-global entry and is now **fixed**: `execute_compose_up` resolves features
+Historical note (both were fixed before the const lists were retired):
+[#272](https://github.com/get2knowio/deacon/issues/272)
+(feature-contributed `mounts` dropped on deacon's compose path) is now
+**fixed**: `execute_compose_up` resolves features
 before folding their `mounts` into `additional_mounts` (same `merge_mounts`
 call the single-container path uses), so compose feature mounts now match
 upstream (`crates/deacon/src/commands/up/compose.rs`).
