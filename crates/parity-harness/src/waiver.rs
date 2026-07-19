@@ -62,17 +62,30 @@ pub enum Expect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         signal: Option<Vec<String>>,
     },
+    /// deacon ACCEPTS where the reference REJECTS — the inverse of
+    /// [`Expect::DeaconStricter`]: an intentional ahead-of-spec capability
+    /// (e.g. deacon resolves `extends` at merged-config time; the reference
+    /// leaves the chain unresolved and errors on the missing `image`). Optional
+    /// `signal` lists informational stderr substrings (not part of the pass/fail
+    /// decision), mirroring `DeaconStricter`.
+    ReferenceStricter {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signal: Option<Vec<String>>,
+    },
     /// A specific normalized-value difference is expected between the two CLIs.
     FieldDivergence { ours: Value, reference: Value },
 }
 
 impl Expect {
     /// Whether this expectation characterizes a divergence (deacon-stricter /
-    /// field-divergence) rather than an agreement (both-reject / both-accept).
+    /// reference-stricter / field-divergence) rather than an agreement
+    /// (both-reject / both-accept).
     pub fn is_divergence(&self) -> bool {
         matches!(
             self,
-            Expect::DeaconStricter { .. } | Expect::FieldDivergence { .. }
+            Expect::DeaconStricter { .. }
+                | Expect::ReferenceStricter { .. }
+                | Expect::FieldDivergence { .. }
         )
     }
 }
@@ -312,6 +325,98 @@ mod tests {
             other => panic!("expected deacon-stricter, got {other:?}"),
         }
         assert!(w.expect.is_divergence());
+    }
+
+    fn valid_reference_stricter_record() -> &'static str {
+        r#"{
+          "id": "extends-child-merged",
+          "scope": { "kind": "corpus_case", "corpus": "tier1", "case": "extends-child" },
+          "expect": { "kind": "reference-stricter", "signal": ["image"] },
+          "rationale": "deacon resolves extends at merged-config time; the reference errors",
+          "added": "2026-07-19"
+        }"#
+    }
+
+    #[test]
+    fn parses_corpus_case_reference_stricter() {
+        let w = parse(valid_reference_stricter_record()).expect("valid record parses");
+        assert_eq!(w.id, "extends-child-merged");
+        assert!(matches!(w.scope, Scope::CorpusCase { .. }));
+        match &w.expect {
+            Expect::ReferenceStricter { signal } => {
+                assert_eq!(signal.as_deref(), Some(["image".to_string()].as_slice()));
+            }
+            other => panic!("expected reference-stricter, got {other:?}"),
+        }
+        assert!(w.expect.is_divergence());
+    }
+
+    #[test]
+    fn reference_stricter_signal_is_optional() {
+        // `signal` may be omitted entirely (mirrors `DeaconStricter`).
+        let raw = r#"{
+          "id": "x",
+          "scope": { "kind": "corpus_case", "corpus": "tier1", "case": "extends-child" },
+          "expect": { "kind": "reference-stricter" },
+          "rationale": "r", "added": "d"
+        }"#;
+        let w = parse(raw).expect("record without signal parses");
+        match &w.expect {
+            Expect::ReferenceStricter { signal } => assert!(signal.is_none()),
+            other => panic!("expected reference-stricter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reference_stricter_rejects_unknown_nested_field() {
+        let raw = r#"{
+          "id": "x",
+          "scope": { "kind": "corpus_case", "corpus": "tier1", "case": "extends-child" },
+          "expect": { "kind": "reference-stricter", "oops": 1 },
+          "rationale": "r", "added": "d"
+        }"#;
+        assert!(
+            parse(raw).is_err(),
+            "unknown nested reference-stricter field must be rejected"
+        );
+    }
+
+    #[test]
+    fn reference_stricter_lookup_and_staleness() {
+        let w: Waiver = serde_json::from_str(valid_reference_stricter_record()).unwrap();
+        let set = WaiverSet::from_records(vec![(PathBuf::from("a.json"), w)]).unwrap();
+        assert!(set.corpus_case("tier1", "extends-child").is_some());
+        assert!(set.corpus_case("tier1", "nope").is_none());
+
+        // Not consumed → stale (case gone or divergence no longer observed).
+        let none = HashSet::new();
+        let stale = set.stale_among(
+            |w| matches!(&w.scope, Scope::CorpusCase { corpus, .. } if corpus == "tier1"),
+            &none,
+        );
+        assert_eq!(stale, vec!["extends-child-merged".to_string()]);
+
+        // Consumed → not stale.
+        let mut consumed = HashSet::new();
+        consumed.insert("extends-child-merged".to_string());
+        let stale = set.stale_among(
+            |w| matches!(&w.scope, Scope::CorpusCase { corpus, .. } if corpus == "tier1"),
+            &consumed,
+        );
+        assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn loads_real_reference_stricter_waiver() {
+        // The extends-child-merged fixture waiver must load, validate, and be
+        // discoverable as a tier1 corpus-case record against the live repository.
+        let root = crate::workspace_root().join("fixtures/parity-corpus");
+        let set = WaiverSet::load(&root).expect("real corpus must load");
+        let w = set
+            .corpus_case("tier1", "extends-child")
+            .expect("extends-child-merged waiver must be present");
+        assert_eq!(w.id, "extends-child-merged");
+        assert!(matches!(w.expect, Expect::ReferenceStricter { .. }));
     }
 
     #[test]

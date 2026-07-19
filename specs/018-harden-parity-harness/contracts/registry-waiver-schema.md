@@ -61,6 +61,16 @@ scope) and `fixtures/parity-corpus/waivers/*.json` (state-field scope).
 
 ```json
 {
+  "id": "extends-child-merged",
+  "scope": { "kind": "corpus_case", "corpus": "tier1", "case": "extends-child" },
+  "expect": { "kind": "reference-stricter", "signal": ["image"] },
+  "rationale": "deacon resolves extends eagerly and produces a full merged config; the reference CLI does not resolve extends and errors (exit 1). Ahead-of-spec deacon capability, see REPORT.md 'extends-child' and issue #297.",
+  "added": "2026-07-19"
+}
+```
+
+```json
+{
   "id": "state/compose-project-label",
   "scope": { "kind": "state_field", "binary": "parity_observable_state", "fixture": "compose-postgres", "field": "Config.Labels.com.docker.compose.project" },
   "expect": { "kind": "field-divergence", "ours": "deacon-…", "reference": "devcontainer-…" },
@@ -72,7 +82,15 @@ scope) and `fixtures/parity-corpus/waivers/*.json` (state-field scope).
 Rules:
 
 - `expect.kind` ∈ `both-reject` | `both-accept` | `deacon-stricter` |
-  `field-divergence`.
+  `reference-stricter` | `field-divergence`.
+- `deacon-stricter` (deacon rejects, reference accepts) and `reference-stricter`
+  (deacon accepts, reference rejects — the inverse ahead-of-spec capability, e.g.
+  eager `extends` resolution at merged-config time) both take an optional `signal`
+  (informational stderr substrings, not part of the pass/fail decision). In the
+  Tier-1 config/merged corpora these two also govern the process-exit-class
+  decision: a matching, right-direction `corpus_case` waiver turns a
+  deacon-success/oracle-failure (or the inverse) mismatch into a waived pass;
+  wrong-direction or missing → the case fails.
 - Optional `config` (string): corpus-case input detail — an explicit `--config`
   argument for the case (carried over from the legacy `expect.json` shape). It is
   a modeled, schema-known field passed through to case execution; it plays no

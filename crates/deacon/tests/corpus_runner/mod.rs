@@ -17,7 +17,7 @@ use parity_harness::registry::{self, ParityRegistry};
 use parity_harness::report::{
     CaseResult, Cause, OracleInfo, RawPaths, ReportFragment, now_rfc3339,
 };
-use parity_harness::waiver::{Scope, WaiverSet};
+use parity_harness::waiver::{Expect, Scope, Waiver, WaiverSet};
 use parity_harness::{HarnessError, normalize, workspace_root};
 
 /// The corpus id these Tier-1 runners drive (registry.json `corpora`).
@@ -37,6 +37,64 @@ fn raw_paths(deacon: &Invocation, oracle: &Invocation) -> RawPaths {
         oracle_stdout: oracle.stdout_rel.display().to_string(),
         oracle_stderr: oracle.stderr_rel.display().to_string(),
     }
+}
+
+/// Outcome of the process-exit-class comparison for one case, decided BEFORE
+/// value normalization. Extracted as a pure classifier so the waiver-vs-hard-fail
+/// decision is unit-testable without spawning real CLIs.
+#[derive(Debug, PartialEq, Eq)]
+enum ProcessOutcome {
+    /// Both CLIs exited successfully — proceed to value normalization/diff.
+    BothSucceeded,
+    /// A process failed and a `corpus_case` waiver characterizes exactly this
+    /// success/failure direction — a waived pass referencing the record id.
+    Waived { waiver_id: String },
+    /// A process failed with no matching (right-direction, active) waiver — a
+    /// hard failure carrying the report summary.
+    Failed { summary: String },
+}
+
+/// Whether a `corpus_case` waiver's expectation characterizes THIS process
+/// failure direction. Mirrors the error-corpus decision matrix at the
+/// process-exit level: `reference-stricter` waives deacon-success/oracle-failure
+/// (the inverse capability, e.g. eager `extends` resolution); `deacon-stricter`
+/// waives deacon-failure/oracle-success. Agreement expectations
+/// (`both-*`/`field-divergence`) never waive a process failure. Direction must
+/// match — a right-kind but wrong-direction waiver does NOT apply.
+fn process_waiver_applies(expect: &Expect, deacon_success: bool, oracle_success: bool) -> bool {
+    match expect {
+        Expect::ReferenceStricter { .. } => deacon_success && !oracle_success,
+        Expect::DeaconStricter { .. } => !deacon_success && oracle_success,
+        Expect::BothReject { .. } | Expect::BothAccept { .. } | Expect::FieldDivergence { .. } => {
+            false
+        }
+    }
+}
+
+/// Classify the two CLIs' exit outcomes, consulting an optional `corpus_case`
+/// waiver BEFORE deciding to hard-fail (mirrors the value-divergence path, which
+/// also consults a waiver before failing). Pure: no IO, no process spawning.
+fn classify_process_outcome(
+    deacon_success: bool,
+    deacon_exit: Option<i32>,
+    oracle_success: bool,
+    oracle_exit: Option<i32>,
+    waiver: Option<&Waiver>,
+) -> ProcessOutcome {
+    if deacon_success && oracle_success {
+        return ProcessOutcome::BothSucceeded;
+    }
+    if let Some(w) = waiver {
+        if process_waiver_applies(&w.expect, deacon_success, oracle_success) {
+            return ProcessOutcome::Waived {
+                waiver_id: w.id.clone(),
+            };
+        }
+    }
+    let which = if !deacon_success { "deacon" } else { "oracle" };
+    let summary =
+        format!("{which} exited unsuccessfully (deacon={deacon_exit:?} oracle={oracle_exit:?})");
+    ProcessOutcome::Failed { summary }
 }
 
 /// Run the Tier-1 config corpus for `binary`. `base_args` are the leading
@@ -72,6 +130,16 @@ pub async fn run_config_corpus(
     let mut case_results = Vec::new();
     let mut failures = Vec::new();
     let mut consumed_waivers: HashSet<String> = HashSet::new();
+    // Cases this binary passed by clean agreement (both CLIs succeed AND resolve to
+    // equal configs). A waiver whose case cleanly passed HERE is not stale-for-this-
+    // binary: the same tier1 corpus is compared by two binaries with different modes
+    // (plain `read-configuration` vs `--include-merged-configuration`), so a
+    // divergence characterized by a `corpus_case` waiver may manifest in only one of
+    // them (e.g. eager `extends` resolution diverges only under merged). Global
+    // staleness across both binaries is the aggregator's gate 4 (cross-runner
+    // backstop); the per-runner check would otherwise false-positive on the binary
+    // that legitimately saw agreement.
+    let mut cleanly_passed: HashSet<String> = HashSet::new();
 
     for case_dir in &cases {
         let case = case_dir
@@ -90,25 +158,34 @@ pub async fn run_config_corpus(
         let oracle_inv = ff(exec_oracle(binary, &case, kind, &oracle.path, &args, case_dir).await);
         let raw = raw_paths(&deacon_inv, &oracle_inv);
 
-        // A CLI expected to succeed but that failed is a process failure.
-        if !deacon_inv.success || !oracle_inv.success {
-            let which = if !deacon_inv.success {
-                "deacon"
-            } else {
-                "oracle"
-            };
-            let summary = format!(
-                "{which} exited unsuccessfully (deacon={:?} oracle={:?})",
-                deacon_inv.exit_code, oracle_inv.exit_code
-            );
-            case_results.push(CaseResult::fail(
-                &case,
-                Cause::OracleFailure,
-                Some(summary.clone()),
-                raw,
-            ));
-            failures.push(format!("[{case}] {summary}"));
-            continue;
+        // A CLI expected to succeed but that failed is a process failure — but a
+        // `corpus_case` waiver may characterize this exit-class divergence as an
+        // intentional direction (e.g. `reference-stricter`: deacon succeeds where
+        // the reference errors). Consult the waiver BEFORE hard-failing, mirroring
+        // the value-divergence path below.
+        match classify_process_outcome(
+            deacon_inv.success,
+            deacon_inv.exit_code,
+            oracle_inv.success,
+            oracle_inv.exit_code,
+            waivers.corpus_case(CORPUS, &case),
+        ) {
+            ProcessOutcome::BothSucceeded => {}
+            ProcessOutcome::Waived { waiver_id } => {
+                consumed_waivers.insert(waiver_id.clone());
+                case_results.push(CaseResult::pass_waived(&case, vec![waiver_id], raw));
+                continue;
+            }
+            ProcessOutcome::Failed { summary } => {
+                case_results.push(CaseResult::fail(
+                    &case,
+                    Cause::OracleFailure,
+                    Some(summary.clone()),
+                    raw,
+                ));
+                failures.push(format!("[{case}] {summary}"));
+                continue;
+            }
         }
 
         // Normalize both sides through the single equivalence definition; a
@@ -139,6 +216,7 @@ pub async fn run_config_corpus(
 
         let divergences = normalize::diff(&deacon_norm, &oracle_norm);
         if divergences.is_empty() {
+            cleanly_passed.insert(case.clone());
             case_results.push(CaseResult::pass(&case, raw));
             continue;
         }
@@ -164,9 +242,14 @@ pub async fn run_config_corpus(
 
     // Staleness: a corpus-case waiver for this corpus loaded but never consumed
     // (case gone, or its characterized divergence no longer observed) is stale and
-    // fails the run naming it (FR-011).
+    // fails the run naming it (FR-011). Exclude cases this binary cleanly passed —
+    // their (possibly other-binary) divergence is the aggregator gate 4's job, not
+    // this runner's (see `cleanly_passed`).
     let stale = waivers.stale_among(
-        |w| matches!(&w.scope, Scope::CorpusCase { corpus, .. } if corpus == CORPUS),
+        |w| {
+            matches!(&w.scope, Scope::CorpusCase { corpus, case }
+                if corpus == CORPUS && !cleanly_passed.contains(case))
+        },
         &consumed_waivers,
     );
     for id in &stale {
@@ -193,4 +276,133 @@ pub async fn run_config_corpus(
         cases.len(),
         failures.join("\n\n"),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parity_harness::waiver::Scope;
+
+    /// A `tier1` corpus-case waiver for `extends-child` with the given expectation.
+    fn tier1_waiver(id: &str, expect: Expect) -> Waiver {
+        Waiver {
+            id: id.to_string(),
+            scope: Scope::CorpusCase {
+                corpus: CORPUS.to_string(),
+                case: "extends-child".to_string(),
+            },
+            expect,
+            rationale: "test".to_string(),
+            added: "2026-07-19".to_string(),
+            config: None,
+        }
+    }
+
+    #[test]
+    fn both_succeed_proceeds_to_diff() {
+        let out = classify_process_outcome(true, Some(0), true, Some(0), None);
+        assert_eq!(out, ProcessOutcome::BothSucceeded);
+    }
+
+    #[test]
+    fn unwaived_process_failure_fails() {
+        // deacon succeeds, oracle fails, but no waiver → hard fail naming oracle.
+        let out = classify_process_outcome(true, Some(0), false, Some(1), None);
+        match out {
+            ProcessOutcome::Failed { summary } => assert!(summary.contains("oracle")),
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reference_stricter_waives_deacon_success_oracle_failure() {
+        // The extends-child scenario: deacon succeeds where the reference errors.
+        let w = tier1_waiver(
+            "extends-child-merged",
+            Expect::ReferenceStricter { signal: None },
+        );
+        let out = classify_process_outcome(true, Some(0), false, Some(1), Some(&w));
+        assert_eq!(
+            out,
+            ProcessOutcome::Waived {
+                waiver_id: "extends-child-merged".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn reference_stricter_wrong_direction_still_fails() {
+        // Right waiver KIND but WRONG direction (deacon fails, oracle succeeds) must
+        // NOT be waived — it fails as today.
+        let w = tier1_waiver(
+            "extends-child-merged",
+            Expect::ReferenceStricter { signal: None },
+        );
+        let out = classify_process_outcome(false, Some(1), true, Some(0), Some(&w));
+        match out {
+            ProcessOutcome::Failed { summary } => assert!(summary.contains("deacon")),
+            other => panic!("expected Failed on wrong direction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deacon_stricter_waives_inverse_direction() {
+        // Symmetric: a deacon-stricter waiver waives deacon-failure/oracle-success.
+        let w = tier1_waiver(
+            "some-deacon-stricter",
+            Expect::DeaconStricter { signal: None },
+        );
+        let out = classify_process_outcome(false, Some(1), true, Some(0), Some(&w));
+        assert_eq!(
+            out,
+            ProcessOutcome::Waived {
+                waiver_id: "some-deacon-stricter".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn agreement_expectations_never_waive_process_failure() {
+        for expect in [Expect::BothReject {}, Expect::BothAccept {}] {
+            let w = tier1_waiver("agreement", expect);
+            let out = classify_process_outcome(true, Some(0), false, Some(1), Some(&w));
+            assert!(
+                matches!(out, ProcessOutcome::Failed { .. }),
+                "agreement expectation must not waive a process failure"
+            );
+        }
+    }
+
+    /// The exact per-runner staleness predicate (`corpus == CORPUS` AND the case
+    /// was NOT cleanly passed here) as used in `run_config_corpus`. Locks in that a
+    /// waiver whose case cleanly passed in THIS binary is not flagged stale by it —
+    /// the aggregator's gate 4 owns cross-binary staleness.
+    fn stale_predicate(cleanly_passed: &HashSet<String>) -> impl Fn(&Waiver) -> bool + '_ {
+        move |w| {
+            matches!(&w.scope, Scope::CorpusCase { corpus, case }
+                if corpus == CORPUS && !cleanly_passed.contains(case))
+        }
+    }
+
+    #[test]
+    fn cleanly_passed_case_is_excluded_from_per_runner_staleness() {
+        // Mirrors the plain-tier1 binary: extends-child both-succeed + values equal =>
+        // clean pass; the merged-only reference-stricter waiver must NOT be in this
+        // binary's staleness scope (the merged binary consumes it; the aggregator's
+        // gate 4 is the cross-binary backstop). `WaiverSet::stale_among` itself is
+        // covered in `waiver.rs`; here we lock in the predicate this runner passes it.
+        let w = tier1_waiver(
+            "extends-child-merged",
+            Expect::ReferenceStricter { signal: None },
+        );
+
+        // Not cleanly passed here => in staleness scope (would flag if unconsumed).
+        let none = HashSet::new();
+        assert!(stale_predicate(&none)(&w));
+
+        // Cleanly passed here => out of staleness scope (deferred to aggregator gate 4).
+        let mut cleanly = HashSet::new();
+        cleanly.insert("extends-child".to_string());
+        assert!(!stale_predicate(&cleanly)(&w));
+    }
 }

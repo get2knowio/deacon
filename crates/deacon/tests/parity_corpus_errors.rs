@@ -113,6 +113,17 @@ fn evaluate(
                 ))
             }
         }
+        Expect::ReferenceStricter { .. } => {
+            if d_accept && !r_accept {
+                Ok(())
+            } else {
+                Err(format!(
+                    "expected deacon-accept / ref-reject, got deacon {} / ref {}",
+                    decided(d_accept),
+                    decided(r_accept)
+                ))
+            }
+        }
         Expect::FieldDivergence { .. } => {
             Err("field-divergence expectation is not applicable to the error corpus".to_string())
         }

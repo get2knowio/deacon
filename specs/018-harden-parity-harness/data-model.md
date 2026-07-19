@@ -84,6 +84,7 @@ live adjacent to what they waive.
 - `{ "kind": "both-reject" }` — both CLIs reject; comparable outcome, pass
 - `{ "kind": "both-accept" }` — both accept; values compared normally
 - `{ "kind": "deacon-stricter", "signal": ["substr", …]? }` — deacon rejects, oracle accepts; intentional (constitution IV)
+- `{ "kind": "reference-stricter", "signal": ["substr", …]? }` — deacon accepts, oracle rejects (the inverse of `deacon-stricter`); an intentional ahead-of-spec capability (e.g. eager `extends` resolution: `read-configuration --include-merged-configuration` produces a full merged config while the reference errors on the unresolved chain, issue #297). In the Tier-1 config/merged corpora, `reference-stricter` and `deacon-stricter` also govern the process-exit-class decision — a matching, right-direction `corpus_case` waiver turns a success/failure exit mismatch into a waived pass; wrong-direction or missing → the case fails.
 - `{ "kind": "field-divergence", "ours": <json>, "reference": <json> }` — a specific normalized-value difference is expected
 
 **State transitions**: `active` (matched case AND observed expected difference) →
