@@ -1,0 +1,9 @@
+{
+  "id": "wvr-wrong-type-features",
+  "behaviors": ["bhv-readconfig-wrong-type-features-rejected"],
+  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "wrong-type-features" },
+  "expect": { "kind": "deacon-stricter" },
+  "rationale": "features is a bare string instead of a map. deacon now rejects this (type-strict, matching forwardPorts) instead of passing it through untyped. This is the deliberate consistency fix: modeled fields enforce their spec shape and fail fast on a clear mistake. The reference keeps the raw JSON and accepts.",
+  "added": "2026-07-19",
+  "expires": "2027-01-19"
+}

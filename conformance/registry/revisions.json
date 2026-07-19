@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "rev-cli-surface-0-87-0",
+      "kind": "cli-surface",
+      "pin": "0.87.0",
+      "url": "https://github.com/devcontainers/cli/tree/v0.87.0"
+    },
+    {
+      "id": "rev-oracle-0-87-0",
+      "kind": "oracle",
+      "pin": "0.87.0",
+      "url": "https://www.npmjs.com/package/@devcontainers/cli/v/0.87.0",
+      "verifiedAgainst": "fixtures/parity-corpus/oracle.json"
+    },
+    {
+      "id": "rev-schema-113500f4",
+      "kind": "schema",
+      "pin": "113500f4",
+      "url": "https://github.com/devcontainers/spec/tree/113500f4/schemas"
+    },
+    {
+      "id": "rev-spec-113500f4",
+      "kind": "spec",
+      "pin": "113500f4",
+      "url": "https://github.com/devcontainers/spec/tree/113500f4"
+    }
+  ]
+}

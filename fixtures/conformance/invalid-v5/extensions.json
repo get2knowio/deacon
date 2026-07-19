@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "ext-secrets-file-dotenv",
+      "behaviors": ["bhv-secrets-dotenv-superset"],
+      "description": "deacon's --secrets-file accepts a .env-format superset the reference CLI does not model; recorded as an intentional extension so it is never reported as a divergence.",
+      "docs": "docs/DIFFERENTIATORS.md"
+    }
+  ]
+}

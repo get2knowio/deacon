@@ -119,7 +119,9 @@ pub async fn run_config_corpus(
     let corpus_root = root.join(&corpus.path);
     ff(require_fixture(&corpus_root));
 
-    let waivers = ff(WaiverSet::load(&corpus_root));
+    // Waivers come from the conformance registry now (research 019 D3); the corpus
+    // root still drives case discovery below.
+    let waivers = ff(WaiverSet::load(&parity_harness::conformance_registry_root()));
 
     // Discover cases (immediate subdirs with `.devcontainer/`, excluding
     // errors/waivers/dot/pycache) and enforce the registry minimum.
@@ -287,6 +289,7 @@ mod tests {
     fn tier1_waiver(id: &str, expect: Expect) -> Waiver {
         Waiver {
             id: id.to_string(),
+            behaviors: vec!["bhv-readconfig-extends-merged".to_string()],
             scope: Scope::CorpusCase {
                 corpus: CORPUS.to_string(),
                 case: "extends-child".to_string(),
@@ -294,6 +297,7 @@ mod tests {
             expect,
             rationale: "test".to_string(),
             added: "2026-07-19".to_string(),
+            expires: "2027-01-19".to_string(),
             config: None,
         }
     }

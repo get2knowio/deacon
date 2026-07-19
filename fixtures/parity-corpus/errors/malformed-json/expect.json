@@ -1,7 +1,0 @@
-{
-  "id": "errors/malformed-json",
-  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "malformed-json" },
-  "expect": { "kind": "deacon-stricter" },
-  "rationale": "JSONC with a hard syntax error (key with no value). deacon rejects at parse; the reference uses a recovering jsonc parser that drops the broken property and accepts. Characterized divergence: deacon fails fast (constitution IV: no silent fallbacks), reference is lenient at read-configuration.",
-  "added": "2026-07-19"
-}

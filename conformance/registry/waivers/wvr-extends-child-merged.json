@@ -1,0 +1,9 @@
+{
+  "id": "wvr-extends-child-merged",
+  "behaviors": ["bhv-readconfig-extends-merged"],
+  "scope": { "kind": "corpus_case", "corpus": "tier1", "case": "extends-child" },
+  "expect": { "kind": "reference-stricter", "signal": ["image"] },
+  "rationale": "deacon resolves `extends` eagerly, so `read-configuration --include-merged-configuration` produces a full merged config (image=base:bookworm, containerEnv={CHILD,BASE}, forwardPorts=[3000,4000]); the reference CLI v0.87.0 does NOT resolve extends and errors (exit 1, empty stdout: 'No image information specified'). This is a deliberate ahead-of-spec deacon capability, not a regression -- do not 'fix' by dropping extends support. Characterized in fixtures/parity-corpus/REPORT.md ('extends-child: deacon resolves extends at up/merged; reference errors'), docs/DIFFERENTIATORS.md, and DevContainerConfig::extends field docs (issue #297). Inverse of the sibling errors/extends-missing deacon-stricter waiver.",
+  "added": "2026-07-19",
+  "expires": "2027-01-19"
+}

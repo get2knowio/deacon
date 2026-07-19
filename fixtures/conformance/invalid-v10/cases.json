@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-readconfig-surface",
+      "behaviors": [
+        "bhv-readconfig-basic-parse",
+        "bhv-secrets-dotenv-superset"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "integration_read_configuration"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-exit-code",
+          "expectation": "exits 0 for a well-formed configuration"
+        },
+        {
+          "channel": "chan-stdout",
+          "expectation": "emits the resolved configuration as a single JSON document"
+        }
+      ]
+    },
+    {
+      "id": "case-exec-docker-conflict",
+      "behaviors": [
+        "bhv-exec-podman-keep-id"
+      ],
+      "context": [
+        {
+          "dimension": "dim-runtime",
+          "values": [
+            "docker"
+          ]
+        }
+      ],
+      "executable": {
+        "binary": "integration_read_configuration"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-exit-code",
+          "expectation": "exits 0"
+        }
+      ]
+    }
+  ]
+}

@@ -11,7 +11,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 **Workspace Structure:**
 - `crates/deacon/` - CLI binary crate (argument parsing, command orchestration, UI)
 - `crates/core/` - Core library with domain logic (config parsing, container runtime, OCI registry, features/templates)
-- `docs/subcommand-specs/*/SPEC.md` - Authoritative CLI specifications (source of truth for all behavior)
+- upstream [devcontainers/spec](https://github.com/devcontainers/spec) (pinned commit `113500f4`) - authoritative CLI behavior; `conformance/registry/` records deacon's conformance and every characterized divergence against it (see the Conformance Registry section)
 - `.specify/memory/constitution.md` - Development constitution defining principles and constraints
 - `examples/` - Executable examples with `exec.sh` scripts demonstrating features
 
@@ -26,7 +26,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 ## Critical Development Principles
 
 **1. Spec-Parity as Source of Truth**
-- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, October 2025) and `docs/subcommand-specs/*/SPEC.md`. When the two conflict, the upstream spec wins.
+- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, October 2025) — the single source of truth. Deacon's conformance against it, including every characterized divergence, is recorded in the repository-owned `conformance/registry/` (see the Conformance Registry section), not in prose.
 - Data structures MUST match spec shapes exactly (map vs vec, field ordering, null handling)
 - Configuration resolution MUST use full extends chains via `ConfigLoader::load_with_extends`
 - Never implement shortcuts that deviate from spec-defined algorithms
@@ -376,8 +376,11 @@ the live binaries, the internal-consistency binaries, and the corpora (with
 `min_cases` floors); the hermetic `parity_registry_check` test enforces
 registry ↔ `tests/*.rs` ↔ `.config/nextest.toml` agreement structurally on every
 PR. Characterized divergences are **waiver records** under
-`fixtures/parity-corpus/waivers/` (and `errors/*/expect.json`) — each with `id`,
-`scope`, `expect`, required `rationale`, `added` — loaded by `waiver.rs`. Waivers
+`conformance/registry/waivers/` (the conformance registry is the authoritative
+pin/waiver location as of 019-conformance-registry; the legacy
+`fixtures/parity-corpus/waivers/` and `errors/*/expect.json` files were retired) —
+each with `id`, `scope`, `expect`, required `rationale`, `added` — loaded by
+`waiver.rs` via the conformance loader. Waivers
 are self-invalidating: one whose difference stops reproducing fails as *stale*.
 Never silently waive a real divergence; fix deacon or characterize with rationale.
 
@@ -387,6 +390,41 @@ from the normal PR lanes. When adding a live binary, register it in
 `registry.json` AND add nextest overrides in ALL profiles (parity selection +
 the exclusions), or `parity_registry_check` fails. See
 `specs/018-harden-parity-harness/quickstart.md`.
+
+## Conformance Registry (`conformance/`)
+
+The repository-owned conformance registry is the **authoritative record** of deacon's
+conformance — and every characterized divergence — against the upstream spec. It is also
+the authoritative source-pin and **waiver** location (`parity-harness` loads waivers from
+it via the conformance loader; the legacy `fixtures/parity-corpus/waivers/` +
+`errors/*/expect.json` are retired).
+
+**Data layout** (strict-JSON, version-controlled, hand-edited under `conformance/registry/`):
+- `revisions.json` (source pins, e.g. spec commit + oracle version), `dimensions.json`,
+  `channels.json`, `profiles.json`, `cases.json`, `gaps.json`, `extensions.json`
+- `behaviors/*.json` — per-area behavior records, each with a **three-axis disposition**
+  (`spec` × `reference` × `decision`); there is no "different but acceptable" state
+- `sources/*.json` — source-unit provenance (`spec`/`schema`/`cli`/`observed`)
+- `waivers/wvr-*.json` — one file per waiver (`scope`/`expect`/`rationale`/`added`/`expires`)
+- `conformance/RULES.md` — the contradiction rules R1–R8, gap-vs-waiver distinction,
+  and the out-of-scope note for non-behavioral differentiators
+
+**Commands** (dev-only, `cargo run -p deacon-conformance -- <cmd>`; NOT part of the
+`deacon` consumer CLI):
+- `validate` — structural integrity (violation classes V1–V10 + SCHEMA); reports all
+  violations in one run. Gates every PR via the hermetic `registry_valid` test.
+- `report` — deterministic `report.json` + `report.md` into `target/conformance/`
+  (byte-stable, no timestamps/absolute-paths). Knobs: `--registry <dir>` (fixtures),
+  `--today <YYYY-MM-DD>` (waiver-expiry evaluation), `report --out-dir`.
+- `certify` — strict release gate: exit `1` iff any gap record exists OR any in-profile
+  behavior is uncovered; waivers are listed but non-blocking. Wired (blocking) into the
+  `verify` job of `.github/workflows/release.yml`.
+
+**Record a divergence:** follow the recipe in `conformance/RULES.md` and
+`specs/019-conformance-registry/quickstart.md` (add/extend a behavior with all three
+axes, link its source unit, cover it with a case/waiver/gap, then `validate`). Statuses
+are **evidence-backed** claims — no test case or waiver yet means `reference: unknown` →
+`decision: unresolved-gap` → a `gap-*` record.
 
 ## Pre-Implementation Checklist
 
@@ -509,15 +547,20 @@ rediscover-and-investigate loop:
   `execute_compose_post_create` doesn't consult markers. Parity-only cleanup.
 - **deacon `read-configuration` rejects things the reference CLI accepts** (malformed
   JSONC, missing/cyclic `extends`, wrong-typed `features`/`forwardPorts`). The reference's
-  `read-configuration` is a **lenient parse-and-echo**: it recovers from malformed JSONC by
-  dropping the broken key, does NOT resolve `extends` (echoes it literally), and keeps
-  wrong-typed values verbatim — deferring all of that to `up`/`build`. deacon validates
-  eagerly and strictly by design (constitution IV: fail fast). These are characterized,
-  intended divergences, NOT bugs — encoded as `deacon-stricter` in the Tier 1c error corpus
-  (`fixtures/parity-corpus/errors/`, driven by `crates/deacon/tests/parity_corpus_errors.rs`;
-  the former `run_tier1_errors.py` was ported to Rust and deleted in
-  018-harden-parity-harness). Conversely, deacon preserving
-  unknown fields matches the reference (`both-accept`); silently dropping them WOULD be a bug.
+  `read-configuration` is a **lenient parse-and-echo**; deacon validates eagerly and
+  strictly by design (constitution IV: fail fast). These are characterized, intended
+  divergences, NOT bugs — recorded in the **conformance registry** (the authoritative
+  source; don't re-state the per-case detail here) under the `read-configuration` area:
+  `bhv-readconfig-malformed-jsonc-rejected`,
+  `bhv-readconfig-wrong-type-{features,forwardports}-rejected` (all
+  `intentional-divergence`), and the `extends` family
+  `bhv-readconfig-extends-{missing,cycle}-rejected` / `bhv-readconfig-extends-merged`
+  (`deacon-extension`, linked from `ext-extends-resolution`), each with a migrated
+  `wvr-*` waiver. Conversely, deacon **preserving** unknown fields matches the reference
+  (`bhv-readconfig-unknown-field-preserved`, `follow-spec`); silently dropping them WOULD
+  be a bug. The differential runner is `crates/deacon/tests/parity_corpus_errors.rs`
+  (Tier 1c error corpus under `fixtures/parity-corpus/errors/`); waivers load from
+  `conformance/registry/waivers/` via `deacon-conformance`.
 
 ## Output Streams Contract
 
@@ -568,7 +611,7 @@ echo "$OUTPUT" | jq '.configuration'
 **Must-Read Documentation:**
 - `.specify/memory/constitution.md` - Development principles and constraints
 - `AGENTS.md` - Quick reference for AI assistants
-- `docs/subcommand-specs/*/SPEC.md` - Authoritative behavior specifications
+- `conformance/registry/` + `conformance/RULES.md` - Authoritative conformance record (behaviors, dispositions, waivers, gaps) against the upstream spec; see the Conformance Registry section
 - `docs/ARCHITECTURE.md` - Cross-cutting patterns (env probe caching, etc.)
 - `.github/copilot-instructions.md` - Detailed development guidelines
 
@@ -727,7 +770,9 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + `serde`/`serde_json` (settings + fragment parsing), `indexmap` 2.x with `serde` (declaration-ordered `profiles` map — already a core dep), `clap` (global `--profile` flag + `DEACON_PROFILE` env), `tracing` (applied-profile diagnostic), `thiserror` (core domain errors), `anyhow` (binary boundary) (017-user-profiles)
 - `{user_data_folder}/settings.json` — read-only in this feature (no write path); default `~/.deacon/settings.json`, honoring global `--user-data-folder` (017-user-profiles)
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide); no Python after porting (the three corpus-runner scripts are retired) + existing workspace deps only — `serde`/`serde_json`, `tokio` (process + time for bounded oracle invocations), `thiserror`, `tracing`; `cargo-nextest` as the sole test executor; Node 20+/npm in the certification lane to install the oracle (018-harden-parity-harness)
-- files — `fixtures/parity-corpus/oracle.json` (pin), `fixtures/parity-corpus/registry.json` (parity registry), waiver records adjacent to cases (`errors/*/expect.json`, `waivers/*.json`); run artifacts under `target/parity/` (report fragments + raw outputs), overridable via `DEACON_PARITY_REPORT_DIR` (018-harden-parity-harness)
+- files — `fixtures/parity-corpus/oracle.json` (pin), `fixtures/parity-corpus/registry.json` (parity registry), waiver records under `conformance/registry/waivers/` (the authoritative location since 019-conformance-registry; formerly `errors/*/expect.json` + `waivers/*.json`); run artifacts under `target/parity/` (report fragments + raw outputs), overridable via `DEACON_PARITY_REPORT_DIR` (018-harden-parity-harness)
+- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only (`serde`/`serde_json`, `indexmap`, (019-conformance-registry)
+- strict-JSON files under `conformance/registry/` (version-controlled, hand-edited, (019-conformance-registry)
 
 ## Recent Changes
 - 018-harden-parity-harness: Added the dev-only `crates/parity-harness/` crate (oracle resolution + exact-version verify, bounded exec with raw capture, the single `normalize` module, waiver/registry loaders, report fragments + `parity-report` aggregator bin); moved live parity onto the dedicated `[profile.parity]` nextest profile; retired the `DEACON_PARITY=1` gate and the three Python corpus runners; added the `parity / live-certification` CI lane. See the "Parity Test Harness" section.

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-readconfig-basic-parse",
+      "area": "read-configuration",
+      "statement": "Reading a well-formed devcontainer.json exits 0 and emits the resolved configuration as a single JSON document.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned"
+    },
+    {
+      "id": "bhv-readconfig-malformed-jsonc-rejected",
+      "area": "read-configuration",
+      "statement": "A devcontainer.json with a hard JSONC syntax error is rejected rather than silently recovered.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "deacon fails fast (constitution IV); the reference CLI recovers via a lenient JSONC parser. Backed by wvr-readconfig-malformed-jsonc."
+    },
+    {
+      "id": "bhv-readconfig-remote-user-probe",
+      "area": "read-configuration",
+      "statement": "The remoteUser reported for an image without an explicit remoteUser is derived from the probed container user.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "unknown",
+      "decision": "unresolved-gap",
+      "notes": "Reference behavior not yet characterized; tracked by gap-readconfig-remote-user."
+    }
+  ]
+}

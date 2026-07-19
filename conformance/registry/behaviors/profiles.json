@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-user-profiles",
+      "area": "profiles",
+      "statement": "deacon applies a user-defined profile from settings.json (selected via the global --profile flag or DEACON_PROFILE) to layer default flags and configuration; the reference CLI has no user-profile concept.",
+      "applicability": [],
+      "spec": "not-applicable",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "Deacon-only capability (feature 017-user-profiles). Recorded by ext-user-profiles; backed by case-user-profiles. Reads {user_data_folder}/settings.json."
+    }
+  ]
+}

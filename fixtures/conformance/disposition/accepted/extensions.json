@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "ext-accepted-capability",
+      "behaviors": ["bhv-accepted-deacon-extension"],
+      "description": "A deacon-only capability recorded as an intentional extension so it is reported under Extensions, never as a divergence.",
+      "docs": "docs/DIFFERENTIATORS.md"
+    }
+  ]
+}

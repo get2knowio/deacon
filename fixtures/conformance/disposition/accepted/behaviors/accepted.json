@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-accepted-follow-spec-vs-divergent-ref",
+      "area": "accepted",
+      "statement": "Deacon follows the written spec for this behavior while the reference CLI deviates from it.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "divergent",
+      "decision": "follow-spec",
+      "notes": "US3 scenario 1: spec conformant, reference divergent, decision follow-spec. Case-backed."
+    },
+    {
+      "id": "bhv-accepted-unspecified-align-with-reference",
+      "area": "accepted",
+      "statement": "The spec does not address this behavior, so deacon matches the reference implementation.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "aligned",
+      "decision": "align-with-reference",
+      "notes": "US3 scenario 2: spec unspecified, reference aligned, decision align-with-reference. Case-backed."
+    },
+    {
+      "id": "bhv-accepted-deacon-extension",
+      "area": "accepted",
+      "statement": "A deacon-only capability with no spec clause and no reference counterpart.",
+      "applicability": [],
+      "spec": "not-applicable",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "US3 scenario 3: spec not-applicable, reference not-applicable, decision deacon-extension. Reported under Extensions, never Divergences."
+    },
+    {
+      "id": "bhv-accepted-intentional-divergence",
+      "area": "accepted",
+      "statement": "Deacon deliberately does not conform to the spec and diverges from the reference here.",
+      "applicability": [],
+      "spec": "nonconformant",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "spec nonconformant, reference divergent, decision intentional-divergence. Case-backed."
+    }
+  ]
+}

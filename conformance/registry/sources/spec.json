@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "src-spec-build-image",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "Image building",
+      "summary": "A devcontainer image is built from the resolved configuration and the build outcome is reported.",
+      "behaviors": ["bhv-build-image-parity"]
+    },
+    {
+      "id": "src-spec-container-inspect",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "Container creation and metadata",
+      "summary": "A created container's observable state (running status, labels, mounts, environment) reflects the resolved configuration.",
+      "behaviors": ["bhv-state-container-parity", "bhv-state-diff-parity"]
+    },
+    {
+      "id": "src-spec-exec-command",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "Command execution",
+      "summary": "A command is executed inside the container with its output streamed and its exit code propagated.",
+      "behaviors": ["bhv-exec-command-parity"]
+    },
+    {
+      "id": "src-spec-lifecycle-up",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "Up / lifecycle",
+      "summary": "The up flow creates a container from the resolved configuration with the expected environment and remote user.",
+      "behaviors": ["bhv-up-exec-parity"]
+    },
+    {
+      "id": "src-spec-readconfig-resolution",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "Configuration resolution",
+      "summary": "A well-formed devcontainer.json is parsed and its resolved (and optionally merged) configuration is emitted.",
+      "behaviors": [
+        "bhv-readconfig-basic-parse",
+        "bhv-readconfig-merged-configuration",
+        "bhv-readconfig-tier1-corpus"
+      ]
+    }
+  ]
+}

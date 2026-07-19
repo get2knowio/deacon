@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-up-compose-marker-cleanup",
+      "area": "up",
+      "statement": "On `up --remove-existing-container` for a compose project, the workspace-scoped lifecycle state markers are cleared, matching the single-container path.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "unknown",
+      "decision": "unresolved-gap",
+      "notes": "Parity-only cleanup difference: the compose path does not call clear_markers() on --remove-existing-container (crates/deacon/src/commands/up/compose.rs). It does not surface functionally because execute_compose_post_create does not consult markers. Tracked by gap-compose-marker-cleanup; not yet backed by an executable case (CLAUDE.md Verified Non-Bugs)."
+    },
+    {
+      "id": "bhv-up-exec-parity",
+      "area": "up",
+      "statement": "up creates a container from the resolved configuration such that a subsequent exec observes the expected environment and remote user, matching the reference.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Backed by case-up-exec-parity (parity_up_exec)."
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "src-cli-auto-forward-ports",
+      "inventory": "cli",
+      "revision": "rev-cli-surface-0-87-0",
+      "locator": "auto port-forward daemon",
+      "summary": "deacon exposes a host-side port-forward daemon (a superset the reference CLI does not provide).",
+      "behaviors": ["bhv-auto-forward-ports"]
+    },
+    {
+      "id": "src-cli-host-ca",
+      "inventory": "cli",
+      "revision": "rev-cli-surface-0-87-0",
+      "locator": "host CA injection (settings.json)",
+      "summary": "deacon can inject host CA certificates into its TLS trust store (a superset the reference CLI does not provide).",
+      "behaviors": ["bhv-host-ca-injection"]
+    },
+    {
+      "id": "src-cli-profile",
+      "inventory": "cli",
+      "revision": "rev-cli-surface-0-87-0",
+      "locator": "--profile / DEACON_PROFILE",
+      "summary": "deacon applies a user-defined profile from settings.json (a superset the reference CLI does not provide).",
+      "behaviors": ["bhv-user-profiles"]
+    },
+    {
+      "id": "src-cli-secrets-file",
+      "inventory": "cli",
+      "revision": "rev-cli-surface-0-87-0",
+      "locator": "--secrets-file",
+      "summary": "deacon's --secrets-file accepts both JSON and a .env-format file (a superset the reference CLI does not model).",
+      "behaviors": ["bhv-secrets-dotenv-superset"]
+    },
+    {
+      "id": "src-cli-trust-workspace",
+      "inventory": "cli",
+      "revision": "rev-cli-surface-0-87-0",
+      "locator": "--trust-workspace / --trust-workspace-persist",
+      "summary": "deacon gates host-side lifecycle hooks behind an explicit workspace-trust opt-in (a protection the reference CLI does not provide).",
+      "behaviors": ["bhv-trust-host-hook-gate"]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "src-obs-malformed-jsonc",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "errors/malformed-json",
+      "summary": "The reference CLI recovers from a hard JSONC syntax error by dropping the broken property and accepting the file.",
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ]
+    },
+    {
+      "id": "src-obs-remote-user-probe",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration remoteUser",
+      "summary": "The reference CLI's remoteUser probing behavior for this scenario has not yet been characterized.",
+      "behaviors": [
+        "bhv-readconfig-remote-user-probe"
+      ]
+    },
+    {
+      "id": "src-obs-uncovered",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration uncovered",
+      "summary": "Provenance for the deliberately uncovered behavior.",
+      "behaviors": [
+        "bhv-readconfig-uncovered"
+      ]
+    }
+  ]
+}

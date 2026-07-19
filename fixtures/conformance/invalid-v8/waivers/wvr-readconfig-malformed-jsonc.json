@@ -1,0 +1,9 @@
+{
+  "id": "wvr-readconfig-malformed-jsonc",
+  "behaviors": ["bhv-readconfig-malformed-jsonc-rejected"],
+  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "malformed-json" },
+  "expect": { "kind": "deacon-stricter" },
+  "rationale": "JSONC with a hard syntax error: deacon rejects at parse (constitution IV, no silent fallbacks) while the reference CLI's recovering parser drops the broken property and accepts. Characterized, intentional strictness divergence.",
+  "added": "2026-07-19",
+  "expires": "2027-01-19"
+}

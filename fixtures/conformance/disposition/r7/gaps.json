@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "gap-exec-podman",
+      "kind": "coverage",
+      "behaviors": [
+        "bhv-exec-podman-keep-id"
+      ],
+      "description": "No executable case yet exists for the Podman keep-id exec behavior; its only structural coverage is this gap."
+    },
+    {
+      "id": "gap-readconfig-remote-user",
+      "kind": "knowledge",
+      "behaviors": [
+        "bhv-readconfig-remote-user-probe"
+      ],
+      "description": "The reference CLI's remoteUser derivation for an image without an explicit remoteUser is not yet characterized, so the behavior's reference status is unknown.",
+      "tracking": "https://github.com/get2knowio/deacon/issues/0"
+    }
+  ]
+}

@@ -1,0 +1,232 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-auto-forward",
+      "behaviors": ["bhv-auto-forward-ports"],
+      "context": [],
+      "executable": { "binary": "integration_auto_forward" },
+      "outcomes": [
+        { "channel": "chan-container-state", "expectation": "a forwarded container port is reachable on the host via the port-forward daemon" }
+      ]
+    },
+    {
+      "id": "case-build-parity",
+      "behaviors": ["bhv-build-image-parity"],
+      "context": [],
+      "executable": { "binary": "parity_build" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "exits 0 on a successful build" },
+        { "channel": "chan-stdout", "expectation": "reports a build outcome matching the reference after normalization" }
+      ]
+    },
+    {
+      "id": "case-compose-project-name",
+      "behaviors": ["bhv-compose-project-name-robust"],
+      "context": [],
+      "executable": { "binary": "parity_observable_state" },
+      "outcomes": [
+        { "channel": "chan-container-state", "expectation": "the created container's com.docker.compose.project label is a valid, deacon-namespaced project name that docker compose accepts" }
+      ]
+    },
+    {
+      "id": "case-errors-bad-config-path",
+      "behaviors": ["bhv-readconfig-bad-config-path"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_errors", "corpus": "errors", "case": "bad-config-path" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "both CLIs exit non-zero (both-reject agreement)" }
+      ]
+    },
+    {
+      "id": "case-errors-duplicate-keys",
+      "behaviors": ["bhv-readconfig-duplicate-keys"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_errors", "corpus": "errors", "case": "duplicate-keys" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "both CLIs exit 0 (both-accept agreement)" },
+        { "channel": "chan-stdout", "expectation": "resolved config applies last-wins and matches the reference after pruning" }
+      ]
+    },
+    {
+      "id": "case-errors-extends-cycle",
+      "behaviors": ["bhv-readconfig-extends-cycle-rejected"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_errors", "corpus": "errors", "case": "extends-cycle" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "deacon exits non-zero (loop detected); the reference exits 0 (extends unresolved) — characterized deacon-stricter divergence" },
+        { "channel": "chan-stderr", "expectation": "deacon diagnostic signals an extends cycle" }
+      ]
+    },
+    {
+      "id": "case-errors-extends-missing",
+      "behaviors": ["bhv-readconfig-extends-missing-rejected"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_errors", "corpus": "errors", "case": "extends-missing" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "deacon exits non-zero (missing extends target); the reference exits 0 (extends unresolved) — characterized deacon-stricter divergence" },
+        { "channel": "chan-stderr", "expectation": "deacon diagnostic signals the missing extends target" }
+      ]
+    },
+    {
+      "id": "case-errors-malformed-json",
+      "behaviors": ["bhv-readconfig-malformed-jsonc-rejected"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_errors", "corpus": "errors", "case": "malformed-json" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "deacon exits non-zero (parse error); the reference exits 0 (lenient recovery) — characterized deacon-stricter divergence" },
+        { "channel": "chan-stderr", "expectation": "deacon diagnostic names the JSONC parse error and location" }
+      ]
+    },
+    {
+      "id": "case-errors-missing-config",
+      "behaviors": ["bhv-readconfig-missing-config"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_errors", "corpus": "errors", "case": "missing-config" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "both CLIs exit non-zero (both-reject agreement)" }
+      ]
+    },
+    {
+      "id": "case-errors-unknown-field-preserved",
+      "behaviors": ["bhv-readconfig-unknown-field-preserved"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_errors", "corpus": "errors", "case": "unknown-field-preserved" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "both CLIs exit 0 (both-accept agreement)" },
+        { "channel": "chan-stdout", "expectation": "unknown top-level fields are preserved verbatim, matching the reference after pruning" }
+      ]
+    },
+    {
+      "id": "case-errors-wrong-type-features",
+      "behaviors": ["bhv-readconfig-wrong-type-features-rejected"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_errors", "corpus": "errors", "case": "wrong-type-features" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "deacon exits non-zero (type-strict); the reference exits 0 (raw JSON kept) — characterized deacon-stricter divergence" },
+        { "channel": "chan-stderr", "expectation": "deacon diagnostic reports the expected object shape for features" }
+      ]
+    },
+    {
+      "id": "case-errors-wrong-type-forwardports",
+      "behaviors": ["bhv-readconfig-wrong-type-forwardports-rejected"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_errors", "corpus": "errors", "case": "wrong-type-forwardports" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "deacon exits non-zero (typed deserialization); the reference exits 0 (raw JSON kept) — characterized deacon-stricter divergence" },
+        { "channel": "chan-stderr", "expectation": "deacon diagnostic reports the expected array shape for forwardPorts" }
+      ]
+    },
+    {
+      "id": "case-exec-parity",
+      "behaviors": ["bhv-exec-command-parity"],
+      "context": [],
+      "executable": { "binary": "parity_exec" },
+      "outcomes": [
+        { "channel": "chan-stdout", "expectation": "the executed command's stdout matches the reference" },
+        { "channel": "chan-exit-code", "expectation": "the executed command's exit code is propagated, matching the reference" }
+      ]
+    },
+    {
+      "id": "case-host-ca",
+      "behaviors": ["bhv-host-ca-injection"],
+      "context": [],
+      "executable": { "binary": "integration_host_ca_runtime" },
+      "outcomes": [
+        { "channel": "chan-container-state", "expectation": "host CA certificates are present in the injected trust store used for registry/network access" }
+      ]
+    },
+    {
+      "id": "case-merged-corpus",
+      "behaviors": ["bhv-readconfig-merged-configuration"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_merged", "corpus": "tier1" },
+      "outcomes": [
+        { "channel": "chan-stdout", "expectation": "the merged configuration matches the reference after normalization for non-extends tier1 cases" }
+      ]
+    },
+    {
+      "id": "case-observable-state",
+      "behaviors": ["bhv-state-container-parity"],
+      "context": [],
+      "executable": { "binary": "parity_observable_state" },
+      "outcomes": [
+        { "channel": "chan-container-state", "expectation": "container running status, labels, mounts, and environment match the reference for the observed fixtures" }
+      ]
+    },
+    {
+      "id": "case-readconfig-basic",
+      "behaviors": ["bhv-readconfig-basic-parse"],
+      "context": [],
+      "executable": { "binary": "parity_read_configuration" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "exits 0 for a well-formed configuration" },
+        { "channel": "chan-stdout", "expectation": "emits the resolved configuration as a single JSON document matching the reference after normalization" }
+      ]
+    },
+    {
+      "id": "case-secrets-dotenv",
+      "behaviors": ["bhv-secrets-dotenv-superset"],
+      "context": [],
+      "executable": { "binary": "integration_override_secrets" },
+      "outcomes": [
+        { "channel": "chan-container-state", "expectation": "secrets from a .env-format --secrets-file are applied to the container environment" }
+      ]
+    },
+    {
+      "id": "case-state-diff",
+      "behaviors": ["bhv-state-diff-parity"],
+      "context": [],
+      "executable": { "binary": "parity_state_diff" },
+      "outcomes": [
+        { "channel": "chan-container-state", "expectation": "the normalized observable-state diff between deacon and the reference is empty" }
+      ]
+    },
+    {
+      "id": "case-tier1-corpus",
+      "behaviors": ["bhv-readconfig-tier1-corpus"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_tier1", "corpus": "tier1" },
+      "outcomes": [
+        { "channel": "chan-stdout", "expectation": "each tier1 corpus config resolves to output matching the reference after normalization" }
+      ]
+    },
+    {
+      "id": "case-tier1-extends-child",
+      "behaviors": ["bhv-readconfig-extends-merged"],
+      "context": [],
+      "executable": { "binary": "parity_corpus_merged", "corpus": "tier1", "case": "extends-child" },
+      "outcomes": [
+        { "channel": "chan-stdout", "expectation": "deacon emits the full merged config (base image, merged containerEnv and forwardPorts); the reference errors — characterized reference-stricter divergence" }
+      ]
+    },
+    {
+      "id": "case-trust-gate",
+      "behaviors": ["bhv-trust-host-hook-gate"],
+      "context": [],
+      "executable": { "binary": "integration_trust" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "an untrusted workspace fails closed rather than executing host-side hooks" },
+        { "channel": "chan-stderr", "expectation": "the diagnostic names the workspace and the trust opt-in flags" }
+      ]
+    },
+    {
+      "id": "case-up-exec-parity",
+      "behaviors": ["bhv-up-exec-parity"],
+      "context": [],
+      "executable": { "binary": "parity_up_exec" },
+      "outcomes": [
+        { "channel": "chan-container-state", "expectation": "the created container's environment and remote user match the reference for the observed fixtures" }
+      ]
+    },
+    {
+      "id": "case-user-profiles",
+      "behaviors": ["bhv-user-profiles"],
+      "context": [],
+      "executable": { "binary": "integration_profiles" },
+      "outcomes": [
+        { "channel": "chan-exit-code", "expectation": "the selected profile's flags/config are applied to the invocation" }
+      ]
+    }
+  ]
+}

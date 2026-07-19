@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-host-ca-injection",
+      "area": "host-ca",
+      "statement": "deacon can inject the host's CA certificates into the TLS trust store used for OCI registry and network access; the reference CLI does not model host-CA injection.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "Deacon-only capability (feature 016-host-ca-injection), enabled via {user_data_folder}/settings.json. Recorded by ext-host-ca-injection; backed by case-host-ca."
+    }
+  ]
+}

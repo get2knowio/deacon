@@ -42,6 +42,24 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Unit tests (no Docker-dependent tests)
         run: cargo test --workspace --lib -- --test-threads=1
+      # Generate the deterministic coverage report BEFORE the blocking gate so the
+      # artifacts exist for maintainers to inspect even when certification blocks.
+      - name: Generate conformance report
+        run: cargo run -p deacon-conformance -- report
+      - name: Upload conformance report
+        # Run even if a later step fails so a blocked release still ships its report.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: conformance-report
+          path: |
+            target/conformance/report.json
+            target/conformance/report.md
+      # Strict release gate (FR-025, clarification Q5): fails the release iff any gap
+      # record exists or any in-profile behavior is uncovered. Blocking by design —
+      # an open gap or uncovered behavior must be resolved or waived before release.
+      - name: Strict conformance certification (release gate)
+        run: cargo run -p deacon-conformance -- certify
 
   create-release:
     name: Create Release

@@ -362,11 +362,13 @@ fn h_matching_waiver_yields_pass_waived() {
     std::fs::write(
         waivers_dir.join("h.json"),
         r#"{
-          "id": "tier1/h-injected",
+          "id": "wvr-injected-h",
+          "behaviors": ["bhv-injected-h"],
           "scope": { "kind": "corpus_case", "corpus": "tier1", "case": "h" },
           "expect": { "kind": "field-divergence", "ours": "demo", "reference": "demo-ref" },
           "rationale": "acceptance fixture — characterized injected difference",
-          "added": "2026-07-19"
+          "added": "2026-07-19",
+          "expires": "2027-01-19"
         }"#,
     )
     .unwrap();
@@ -375,13 +377,13 @@ fn h_matching_waiver_yields_pass_waived() {
     let w = waivers
         .corpus_case("tier1", "h")
         .expect("a matching waiver must be found for the injected case");
-    assert_eq!(w.id, "tier1/h-injected");
+    assert_eq!(w.id, "wvr-injected-h");
     assert!(w.expect.is_divergence());
 
     // Mirror the corpus runner: divergence observed + waiver present → pass-waived.
     let result = CaseResult::pass_waived("h", vec![w.id.clone()], sample_raw());
     assert_eq!(result.outcome, Outcome::PassWaived);
-    assert_eq!(result.waivers_applied, vec!["tier1/h-injected".to_string()]);
+    assert_eq!(result.waivers_applied, vec!["wvr-injected-h".to_string()]);
 
     // Consumed → not stale.
     let mut consumed = HashSet::new();
@@ -404,11 +406,13 @@ fn i_kept_waiver_without_difference_is_stale() {
     std::fs::write(
         waivers_dir.join("i.json"),
         r#"{
-          "id": "tier1/h-injected",
+          "id": "wvr-injected-h",
+          "behaviors": ["bhv-injected-h"],
           "scope": { "kind": "corpus_case", "corpus": "tier1", "case": "h" },
           "expect": { "kind": "field-divergence", "ours": "demo", "reference": "demo-ref" },
           "rationale": "acceptance fixture — characterized injected difference",
-          "added": "2026-07-19"
+          "added": "2026-07-19",
+          "expires": "2027-01-19"
         }"#,
     )
     .unwrap();
@@ -422,7 +426,7 @@ fn i_kept_waiver_without_difference_is_stale() {
     );
     assert_eq!(
         stale,
-        vec!["tier1/h-injected".to_string()],
+        vec!["wvr-injected-h".to_string()],
         "a loaded-but-unconsumed waiver must be reported stale"
     );
 
@@ -431,7 +435,7 @@ fn i_kept_waiver_without_difference_is_stale() {
     };
     let msg = err.to_string();
     assert!(
-        msg.contains("tier1/h-injected") && msg.contains("stale") && msg.contains("Remedy"),
+        msg.contains("wvr-injected-h") && msg.contains("stale") && msg.contains("Remedy"),
         "Display must name the stale record and a remedy: {msg}"
     );
 }

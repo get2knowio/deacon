@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-build-image-parity",
+      "area": "build",
+      "statement": "build produces a container image and reports the build outcome, matching the reference.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Backed by case-build-parity (parity_build)."
+    }
+  ]
+}

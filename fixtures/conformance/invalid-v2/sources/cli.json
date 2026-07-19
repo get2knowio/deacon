@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "src-cli-exec-userns",
+      "inventory": "cli",
+      "revision": "rev-cli-surface-0-87-0",
+      "locator": "exec --userns",
+      "summary": "Under Podman, exec maps the host uid via rootless keep-id.",
+      "behaviors": ["bhv-exec-podman-keep-id"]
+    },
+    {
+      "id": "src-cli-secrets-file",
+      "inventory": "cli",
+      "revision": "rev-cli-surface-0-87-0",
+      "locator": "--secrets-file",
+      "summary": "The --secrets-file flag accepts a .env-format secrets file.",
+      "behaviors": ["bhv-secrets-dotenv-superset"]
+    }
+  ]
+}

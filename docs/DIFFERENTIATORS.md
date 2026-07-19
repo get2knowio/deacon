@@ -16,7 +16,9 @@ kind of thing worth calling out in a blog post or on the project page.
   `Error: Invalid json data`. Deacon auto-detects the format (leading `{` → JSON,
   otherwise `KEY=VALUE`) and accepts either. JSON support is a strict superset, so a
   user can drop in the `.env` file they already have for `docker`/`compose` instead of
-  hand-converting it to JSON. (`crates/core/src/secrets.rs`.)
+  hand-converting it to JSON. (`crates/core/src/secrets.rs`.) Recorded in the
+  conformance registry as extension `ext-secrets-file-env-format` (behavior
+  `bhv-secrets-dotenv-superset`).
 
 - **Config validation that fails fast on *your* mistakes, but never loses *your* data.**
   Deacon applies one consistent rule the reference CLI does not: **fail fast and
@@ -43,6 +45,15 @@ kind of thing worth calling out in a blog post or on the project page.
     `features`/`customizations`; `#[serde(flatten)] extra` round-trips unknown
     top-level fields. Differential coverage: `fixtures/parity-corpus/errors/`.)
 
+  Recorded in the conformance registry under the `read-configuration` area: the
+  strict-early-error cases as `intentional-divergence` behaviors
+  (`bhv-readconfig-malformed-jsonc-rejected`,
+  `bhv-readconfig-wrong-type-forwardports-rejected`,
+  `bhv-readconfig-wrong-type-features-rejected`) and the preservation case as the
+  `follow-spec` behavior `bhv-readconfig-unknown-field-preserved` — each with its
+  three-axis disposition and migrated waiver. See the conformance registry for the
+  full per-case detail rather than duplicating it here.
+
 ## Capability
 
 - **`extends` is resolved for `up` and `read-configuration --include-merged-configuration`.**
@@ -56,8 +67,11 @@ kind of thing worth calling out in a blog post or on the project page.
   [devcontainers/spec#22](https://github.com/devcontainers/spec/issues/22), and
   is therefore an *intentional divergence* — deacon deliberately does more than
   the reference here, so `extends` behavior is **not** covered by our
-  reference-parity claims. The divergence is characterized in
-  `fixtures/parity-corpus/errors/README.md`. (Issue #297.)
+  reference-parity claims. Recorded in the conformance registry as extension
+  `ext-extends-resolution` (behaviors `bhv-readconfig-extends-merged`,
+  `bhv-readconfig-extends-missing-rejected`, `bhv-readconfig-extends-cycle-rejected`;
+  waivers `wvr-extends-child-merged`, `wvr-extends-missing`, `wvr-extends-cycle`);
+  also characterized in `fixtures/parity-corpus/errors/README.md`. (Issue #297.)
 
 ## Robustness
 
@@ -66,7 +80,8 @@ kind of thing worth calling out in a blog post or on the project page.
   like `-myproj` produces an invalid `--project-name` that `docker compose` rejects
   (exit 1). Deacon trims leading separators / falls back to a safe stem, so the same
   folder still comes up. (Normal folders produce the identical `<folder>_devcontainer`
-  name as the reference.) (`crates/core/src/compose.rs`.)
+  name as the reference.) (`crates/core/src/compose.rs`.) Recorded in the conformance
+  registry as behavior `bhv-compose-project-name-robust`.
 
 ## Security
 
@@ -75,7 +90,8 @@ kind of thing worth calling out in a blog post or on the project page.
   container sandboxing. Deacon gates these behind an explicit trust opt-in
   (`--trust-workspace[-persist]`, a persisted allowlist, or `DEACON_NO_PROMPT=1` to
   fail closed in CI) — a protection the upstream spec does not mandate. See
-  `SECURITY.md` and `crates/core/src/trust.rs`.
+  `SECURITY.md` and `crates/core/src/trust.rs`. Recorded in the conformance registry
+  as extension `ext-workspace-trust-gate` (behavior `bhv-trust-host-hook-gate`).
 
 ## Performance & deployment
 

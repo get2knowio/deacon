@@ -319,16 +319,17 @@ pub async fn write_report(
 }
 
 /// The full aggregation pipeline the `parity-report` bin runs: load waivers from
-/// the corpus root, read fragments from the report root, evaluate the gate, and
-/// write the report. Gate 6 (report writability) is folded into the returned
-/// violations so a write failure still fails the run with an enumerated message.
+/// the conformance registry, read fragments from the report root, evaluate the
+/// gate, and write the report. Gate 6 (report writability) is folded into the
+/// returned violations so a write failure still fails the run with an enumerated
+/// message.
 pub async fn run(
     report_root: &Path,
-    corpus_root: &Path,
+    registry_root: &Path,
     registry: &ParityRegistry,
     pin: &OraclePin,
 ) -> Result<Aggregation, HarnessError> {
-    let waivers = WaiverSet::load(corpus_root)?;
+    let waivers = WaiverSet::load(registry_root)?;
     let fragments = read_fragments(report_root)?;
     let (report, mut violations) = evaluate(registry, pin, &fragments, &waivers);
 

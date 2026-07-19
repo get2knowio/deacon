@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-compose-project-name-robust",
+      "area": "observable-state",
+      "statement": "deacon derives a valid, deacon-namespaced compose project name (deacon_<workspaceHash>_<configHash>) that docker compose always accepts and that does not collide with the reference's <folder>_devcontainer project, where the reference can emit an invalid or colliding name.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Robustness differentiator (issue #265; docs/DIFFERENTIATORS.md). The reference derives <folder>_devcontainer verbatim, so a folder like `-myproj` yields an invalid --project-name docker compose rejects. deacon's derived name is always valid and isolated. Backed by case-compose-project-name (parity_observable_state, which observes com.docker.compose.project)."
+    },
+    {
+      "id": "bhv-state-container-parity",
+      "area": "observable-state",
+      "statement": "The observable container state after up (running status, labels, mounts, environment) matches the reference for the observed fixtures.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Backed by case-observable-state (parity_observable_state)."
+    },
+    {
+      "id": "bhv-state-diff-parity",
+      "area": "observable-state",
+      "statement": "The normalized observable-state diff between deacon and the reference is empty for the observed fixtures.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Backed by case-state-diff (parity_state_diff)."
+    }
+  ]
+}

@@ -194,12 +194,13 @@ async fn stale_waiver_fails_gate_four() {
     fs::write(
         waivers.join("stale.json"),
         r#"{
-          "id": "state/unused",
+          "id": "wvr-state-unused",
+          "behaviors": ["bhv-state-unused"],
           "scope": { "kind": "state_field", "binary": "parity_observable_state",
                      "fixture": "f", "field": "label:x" },
           "expect": { "kind": "field-divergence", "ours": "a", "reference": "b" },
           "rationale": "test fixture — intentionally never applied",
-          "added": "2026-07-19"
+          "added": "2026-07-19", "expires": "2027-01-19"
         }"#,
     )
     .unwrap();
@@ -218,11 +219,11 @@ async fn stale_waiver_fails_gate_four() {
         .await
         .expect("aggregation runs");
 
-    assert_eq!(agg.report.stale_waivers, vec!["state/unused"]);
+    assert_eq!(agg.report.stale_waivers, vec!["wvr-state-unused"]);
     assert!(
         agg.violations
             .iter()
-            .any(|v| v.contains("gate 4") && v.contains("state/unused")),
+            .any(|v| v.contains("gate 4") && v.contains("wvr-state-unused")),
         "stale waiver must be enumerated, got: {:?}",
         agg.violations
     );

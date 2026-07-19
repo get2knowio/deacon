@@ -73,13 +73,15 @@ strategy differs by CLI), `networks` (compose-project-prefixed).
 The former in-source `KNOWN_INTENTIONAL_DIVERGENCES` / `KNOWN_GAPS` const lists
 are gone (018-harden-parity-harness, research D6). Every characterized divergence
 — whether an intentional deacon choice or a reported-but-not-failing gap — is now
-a **waiver record** under `fixtures/parity-corpus/waivers/`, loaded and enforced
-by `crates/parity-harness/src/waiver.rs`
-(`Waiver`/`WaiverSet`/`Scope`/`field_matches`). A waiver carries an `id`, a
-`scope` (which case/field it applies to), an `expect` (the difference it
-tolerates), a required `rationale`, and an `added` date. Divergence
-classification in `parity_state_diff.rs` and `parity_observable_state.rs` runs
-through this loader.
+a **waiver record** in the conformance registry
+(`conformance/registry/waivers/wvr-*.json`), consumed through `deacon-conformance`
+by the thin query wrapper `crates/parity-harness/src/waiver.rs`
+(`Waiver`/`WaiverSet`/`Scope`/`field_matches`) — the record schema/loader moved
+into the registry in 019-conformance-registry (research D3). A waiver carries an
+`id`, a `scope` (which case/field it applies to), an `expect` (the difference it
+tolerates), a required `rationale`, an `added` date, an `expires` date, and
+`behaviors` links. Divergence classification in `parity_state_diff.rs` and
+`parity_observable_state.rs` runs through this loader.
 
 Waivers are **self-invalidating**: a record whose tolerated difference stops
 reproducing fails the run as *stale* (`HarnessError::WaiverStale`), so the

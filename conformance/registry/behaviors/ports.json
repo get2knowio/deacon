@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-auto-forward-ports",
+      "area": "ports",
+      "statement": "deacon can auto-forward container ports to the host via a host-side daemon backed by a per-container registry and PID markers; the reference CLI does not model a host-side port-forward daemon.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "Deacon-only capability (feature 015-auto-forward-ports). Recorded by ext-auto-forward-ports; backed by case-auto-forward. Uses host-side forwarded_ports.json and forward_daemon_<container_id> markers under the user-data folder."
+    }
+  ]
+}

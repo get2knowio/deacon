@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-exec-command-parity",
+      "area": "exec",
+      "statement": "exec runs a command inside the target container and streams its stdout/stderr and propagates its exit code, matching the reference.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Backed by case-exec-parity (parity_exec)."
+    }
+  ]
+}

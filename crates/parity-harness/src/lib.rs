@@ -174,6 +174,14 @@ pub fn workspace_root() -> PathBuf {
         .unwrap_or(manifest)
 }
 
+/// The conformance registry root: `<workspace_root>/conformance/registry`. Waiver
+/// records live under its `waivers/` subdirectory and are consumed through
+/// `deacon-conformance` (019-conformance-registry, research D3). Delegates to the
+/// conformance crate so there is a single definition of the registry location.
+pub fn conformance_registry_root() -> PathBuf {
+    deacon_conformance::default_registry_dir()
+}
+
 /// The report/artifact root: `DEACON_PARITY_REPORT_DIR` when set, else
 /// `<workspace_root>/target/parity`. Both the test binaries and the aggregator
 /// resolve it identically (contracts/execution-contract.md).
