@@ -357,6 +357,22 @@ pub(crate) async fn execute_compose_up(
         if let Err(e) = compose_manager.stop_project(&project).await {
             warn!("Failed to stop existing project: {}", e);
         }
+        // Spec parity (#117): recreating containers means a fresh project that has
+        // never had any lifecycle phase run, so wipe the workspace's prior markers —
+        // matching the single-container path (container.rs). Best-effort; markers are
+        // deacon-internal state, so a failure here never blocks the up flow.
+        if let Err(e) = deacon_core::state::clear_markers(
+            workspace_folder,
+            args.prebuild,
+            args.user_data_folder.as_deref(),
+        )
+        .await
+        {
+            debug!(
+                "Failed to clear lifecycle markers for --remove-existing-container: {}",
+                e
+            );
+        }
     }
 
     // Bead 14a + 14b: when features are declared, install them by building a

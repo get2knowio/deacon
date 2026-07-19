@@ -10,14 +10,6 @@
       "behaviors": ["bhv-readconfig-bad-config-path"]
     },
     {
-      "id": "src-obs-compose-marker-cleanup",
-      "inventory": "observed",
-      "revision": "rev-oracle-0-87-0",
-      "locator": "up --remove-existing-container (compose)",
-      "summary": "The reference CLI's compose teardown behavior versus deacon's marker cleanup on --remove-existing-container is not yet characterized by an executable case.",
-      "behaviors": ["bhv-up-compose-marker-cleanup"]
-    },
-    {
       "id": "src-obs-compose-project-name",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
