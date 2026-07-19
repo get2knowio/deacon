@@ -426,6 +426,69 @@ axes, link its source unit, cover it with a case/waiver/gap, then `validate`). S
 are **evidence-backed** claims — no test case or waiver yet means `reference: unknown` →
 `decision: unresolved-gap` → a `gap-*` record.
 
+## Parity & Conformance: Vocabulary, Gates, and the Build-Out Loop
+
+This ties the two preceding sections together. The **harness** (`parity-harness`) *surfaces*
+deacon-vs-oracle differences; the **registry** (`deacon-conformance`) *characterizes* each
+one. They are separate machinery — keep them distinct even though both say "parity".
+
+**Vocabulary — divergence vs gap vs out-of-scope** (full rules in `conformance/RULES.md`):
+
+- **Divergence** — a difference we have **characterized**: we know what deacon does, what the
+  reference does, and why (`reference: divergent`, backed by a **case or waiver**). Two
+  flavors:
+  - *deacon behind/wrong → fix*: deacon is nonconformant and we want parity. Decision
+    `follow-spec` / `align-with-reference`. Tracked as a GitHub `parity-drift`/`bug` issue
+    until the fix lands. (Current examples live under the `parity-drift` label.)
+  - *intentional → accept*: a deliberate difference or deacon capability. Decision
+    `intentional-divergence` (backed by a `wvr-` waiver) or `deacon-extension` (an `ext-`
+    record). Never blocks; waivers self-invalidate when the difference stops reproducing.
+- **Gap** — an **admission of missing work/knowledge**: `reference: unknown`,
+  `decision: unresolved-gap`, a `gap-*` record. No evidence stands behind it. **Always blocks
+  `certify`.** A gap can never be certified around; resolve it (add a case → it becomes a
+  divergence/conformant, delete the gap in the same change) or it stays a release blocker.
+- **Out of scope** — deacon-internal or non-behavioral differences with **no observable
+  effect** on stdout/stderr/exit-code/container-state/filesystem, or **no reference
+  equivalent** at all. Recorded **nowhere** (RULES.md). Do NOT seed these as gaps — the
+  compose lifecycle-marker case (issue #117, closed in the PR that added this note) was
+  exactly such a mis-seed: markers are deacon-internal, the reference has no concept of them.
+
+**Two gates — do NOT conflate them** (this genuinely confuses):
+
+- **`parity / live-certification` lane** (`.github/workflows/parity.yml`) — surfaces the live
+  divergences. It is **NOT in the release path**: `release.yml` never runs it, so a **red
+  parity lane never blocks a release**. Triggers on PRs touching parity paths
+  (`crates/parity-harness/**`, `crates/deacon/tests/parity_*`, `fixtures/parity-corpus/**`,
+  `.config/nextest.toml`, `Makefile`, the workflow itself) + nightly. Needs Docker + the
+  pinned oracle, so it cannot run locally in this workspace — verify hermetic pieces locally,
+  rely on this lane for the live comparison.
+- **Conformance `certify`** (wired into `release.yml`'s `verify` job) — the **only**
+  conformance gate **in** the release path. Blocks a release iff a `gap-*` record exists or an
+  in-profile behavior is uncovered; waivers are listed but non-blocking. Keep the registry
+  gap-free (or every open gap consciously accepted) so releases aren't surprise-blocked.
+
+**The build-out loop (apply these defaults).** When the harness surfaces a difference:
+
+1. **Classify** it: divergence (which flavor?), gap, or out-of-scope (→ record nowhere).
+2. **Record it in the registry** — the authoritative, durable home. Add/extend a behavior
+   (three axes) + its source unit + coverage (case / waiver / gap), then `validate`.
+3. For a *fix-flavored* divergence, **also file/link a GitHub issue** (`parity-drift` label)
+   for the fix work, and cross-link it from the behavior's `notes`. Issue = the fix task;
+   registry = the characterization. **Both, cross-linked** — that is the default.
+4. **Fix or waive.** Fixing a gap means adding a real case and deleting the `gap-*` record in
+   the same change; accepting an intentional divergence means a `wvr-` waiver (rationale +
+   `expires`), never weakening `certify`.
+
+Defaults for the work itself:
+- **Each build-out step is its own small, CI-gated PR** (Conventional-Commit title;
+  `feat`/`fix`/`chore` — never `test`/`style`).
+- **A new live parity binary** MUST be registered in `fixtures/parity-corpus/registry.json`
+  AND get nextest overrides in ALL profiles (parity selection + the exclusions), or
+  `parity_registry_check` fails. Keep it **fail-loud** — no `#[ignore]`, no silent skip (the
+  harness's whole value is truthful non-selection).
+- **Never** make `certify` non-blocking or silently delete a real gap to go green; that is the
+  one move the whole model exists to prevent.
+
 ## Pre-Implementation Checklist
 
 Before implementing any new subcommand or feature:
