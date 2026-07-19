@@ -1,5 +1,5 @@
-//! #267: opt-in observable-state parity suite between deacon and the
-//! reference `@devcontainers/cli`.
+//! #267: observable-state parity suite between deacon and the pinned
+//! reference `@devcontainers/cli` oracle.
 //!
 //! Locks in the interop fixes from #264 (lockfile manifest digest), #266
 //! (compose `mounts` applied), and #265 (compose project name isolation), and
@@ -7,33 +7,55 @@
 //! merged-config-vs-runtime drift, cross-CLI handoff) so this class of
 //! regression is caught going forward.
 //!
-//! Triple-gated like the rest of the `parity_*` suite: `DEACON_PARITY=1`,
-//! Docker reachable, and the `devcontainer` CLI in `PATH` (or
-//! `DEACON_PARITY_DEVCONTAINER`). Cleanly skips (never panics) when any gate
-//! is unmet. Lives in the `parity` nextest group (docker-exclusive-adjacent,
-//! serialized) via the `binary(#parity_*)` glob in `.config/nextest.toml`.
+//! Runs ONLY under `cargo nextest run --profile parity`. There is no opt-in env
+//! gate and no silent skip: a missing/mismatched oracle or an unavailable Docker
+//! FAILS the test with a cause-specific message (018-harden-parity-harness,
+//! FR-002, FR-004..FR-006). Both CLIs' raw output is preserved under
+//! `target/parity/raw/` and a run-report fragment is written to
+//! `target/parity/report/parity_observable_state.json`. Lives in the `parity`
+//! nextest group (docker-exclusive-adjacent, serialized) via the
+//! `binary(#parity_*)` glob in `.config/nextest.toml`.
 
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
-mod parity_utils;
+use parity_harness::HarnessError;
+use parity_harness::exec::{ExecKind, Invocation, exec_deacon, exec_oracle};
+use parity_harness::oracle::Oracle;
+use parity_harness::prereq::require_docker;
+use parity_harness::report::{CaseResult, OracleInfo, RawPaths, ReportFragment, now_rfc3339};
 
-fn gated() -> bool {
-    if !parity_utils::parity_enabled() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return false;
+/// This binary's name — the fragment key and raw-artifact subdirectory.
+const BINARY: &str = "parity_observable_state";
+
+/// Fail the test with the error's cause-specific `Display` message (never the
+/// `Debug` form) so an oracle/prereq/normalization failure reads as its remedy.
+fn ff<T>(r: Result<T, HarnessError>) -> T {
+    r.unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// The four preserved raw-output paths (report-relative) for one compared case
+/// that exercised both CLIs.
+fn raw_paths(deacon: &Invocation, oracle: &Invocation) -> RawPaths {
+    RawPaths {
+        deacon_stdout: deacon.stdout_rel.display().to_string(),
+        deacon_stderr: deacon.stderr_rel.display().to_string(),
+        oracle_stdout: oracle.stdout_rel.display().to_string(),
+        oracle_stderr: oracle.stderr_rel.display().to_string(),
     }
-    if !parity_utils::docker_available() {
-        eprintln!("Skipping parity test: Docker not available");
-        return false;
+}
+
+/// Raw-output paths for a case that only invoked deacon; the oracle slots are
+/// left empty (no compared oracle invocation for this case).
+fn raw_paths_deacon_only(deacon: &Invocation) -> RawPaths {
+    RawPaths {
+        deacon_stdout: deacon.stdout_rel.display().to_string(),
+        deacon_stderr: deacon.stderr_rel.display().to_string(),
+        oracle_stdout: String::new(),
+        oracle_stderr: String::new(),
     }
-    if !parity_utils::upstream_available() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return false;
-    }
-    true
 }
 
 fn docker_out(args: &[&str]) -> String {
@@ -77,9 +99,9 @@ fn find_mount<'a>(inspect: &'a Value, target: &str) -> Option<&'a Value> {
         .find(|m| m["Destination"].as_str() == Some(target))
 }
 
-/// Extract a top-level string field from a `deacon up`/`deacon build` JSON result.
-fn json_field(output: &std::process::Output, field: &str) -> Option<String> {
-    let stdout = String::from_utf8_lossy(&output.stdout);
+/// Extract a top-level string field from a `deacon up`/`deacon build` JSON
+/// result. Tolerant of leading log lines via `rfind('{')`.
+fn json_field(stdout: &str, field: &str) -> Option<String> {
     let trimmed = stdout.trim();
     let value: Value = serde_json::from_str(trimmed).ok().or_else(|| {
         trimmed
@@ -108,16 +130,16 @@ fn deacon_compose_down_by_project(project_name: &str) {
         .output();
 }
 
+/// Best-effort teardown of a deacon-owned workspace. Spawns the deacon binary
+/// under test directly — teardown is NOT a compared invocation, so it never
+/// goes through the harness exec path.
 fn deacon_down(ws: &Path) {
-    let _ = parity_utils::run_deacon(
-        ws,
-        &[
-            "down",
-            "--workspace-folder",
-            &ws.to_string_lossy(),
-            "--remove",
-        ],
-    );
+    let _ = std::process::Command::new(Path::new(env!("CARGO_BIN_EXE_deacon")))
+        .arg("down")
+        .arg("--workspace-folder")
+        .arg(ws)
+        .arg("--remove")
+        .output();
 }
 
 /// The canonicalized workspace path, matching the value both CLIs stamp into
@@ -207,11 +229,13 @@ impl Drop for WsCleanup<'_> {
 // lockfile must carry the OCI *manifest* digest, not the layer digest.
 // ===========================================================================
 
-#[test]
-fn parity_lockfile_manifest_digest_resolves_dependencies() {
-    if !gated() {
-        return;
-    }
+#[tokio::test]
+async fn parity_lockfile_manifest_digest_resolves_dependencies() {
+    const CASE: &str = "lockfile-manifest-digest";
+    let oracle = ff(Oracle::acquire().await);
+    ff(require_docker().await);
+    let deacon_bin = Path::new(env!("CARGO_BIN_EXE_deacon"));
+    let started = now_rfc3339();
 
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path();
@@ -233,14 +257,20 @@ fn parity_lockfile_manifest_digest_resolves_dependencies() {
     )
     .unwrap();
 
+    let ws_str = ws.to_string_lossy().into_owned();
+
     // deacon: regenerate the lockfile from the resolved feature set.
-    let upgrade = parity_utils::run_deacon(
+    let upgrade = ff(exec_deacon(
+        BINARY,
+        &format!("{CASE}-upgrade-deacon"),
+        ExecKind::Lifecycle,
+        deacon_bin,
+        &["upgrade", "--workspace-folder", &ws_str],
         ws,
-        &["upgrade", "--workspace-folder", &ws.to_string_lossy()],
     )
-    .unwrap();
+    .await);
     assert!(
-        upgrade.status.success(),
+        upgrade.success,
         "deacon upgrade failed: {}",
         String::from_utf8_lossy(&upgrade.stderr)
     );
@@ -304,21 +334,38 @@ fn parity_lockfile_manifest_digest_resolves_dependencies() {
 
     // The real interop check: the reference CLI's dependency resolver must
     // accept deacon's lockfile as-is.
-    let resolve = parity_utils::run_upstream(
-        ws,
+    let resolve = ff(exec_oracle(
+        BINARY,
+        &format!("{CASE}-resolve-oracle"),
+        ExecKind::Lifecycle,
+        &oracle.path,
         &[
             "features",
             "resolve-dependencies",
             "--workspace-folder",
-            &ws.to_string_lossy(),
+            &ws_str,
         ],
+        ws,
     )
-    .unwrap();
+    .await);
     assert!(
-        resolve.status.success(),
+        resolve.success,
         "devcontainer features resolve-dependencies rejected deacon's lockfile: {}",
         String::from_utf8_lossy(&resolve.stderr)
     );
+
+    let finished = now_rfc3339();
+    let raw = raw_paths(&upgrade, &resolve);
+    ff(ReportFragment::new(
+        BINARY,
+        OracleInfo::from(&oracle),
+        started,
+        finished,
+        vec![CaseResult::pass(CASE, raw)],
+        Vec::new(),
+    )
+    .write()
+    .await);
 }
 
 // ===========================================================================
@@ -326,11 +373,16 @@ fn parity_lockfile_manifest_digest_resolves_dependencies() {
 // BOTH CLIs on the compose path. Locks in #266.
 // ===========================================================================
 
-#[test]
-fn parity_compose_config_mounts_applied_both_clis() {
-    if !gated() {
-        return;
-    }
+#[tokio::test]
+async fn parity_compose_config_mounts_applied_both_clis() {
+    const CASE: &str = "compose-config-mounts";
+    let oracle = ff(Oracle::acquire().await);
+    ff(require_docker().await);
+    let deacon_bin = Path::new(env!("CARGO_BIN_EXE_deacon"));
+    let started = now_rfc3339();
+
+    let mut deacon_up: Option<Invocation> = None;
+    let mut upstream_up: Option<Invocation> = None;
 
     // Two independent workspaces (one per CLI) so their compose projects never collide.
     for (label, is_upstream) in [("upstream", true), ("deacon", false)] {
@@ -364,15 +416,30 @@ fn parity_compose_config_mounts_applied_both_clis() {
         )
         .unwrap();
 
+        let ws_str = ws.to_string_lossy().into_owned();
         let up = if is_upstream {
-            parity_utils::run_upstream(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                .unwrap()
+            ff(exec_oracle(
+                BINARY,
+                &format!("{CASE}-up-upstream"),
+                ExecKind::Lifecycle,
+                &oracle.path,
+                &["up", "--workspace-folder", &ws_str],
+                ws,
+            )
+            .await)
         } else {
-            parity_utils::run_deacon(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                .unwrap()
+            ff(exec_deacon(
+                BINARY,
+                &format!("{CASE}-up-deacon"),
+                ExecKind::Lifecycle,
+                deacon_bin,
+                &["up", "--workspace-folder", &ws_str],
+                ws,
+            )
+            .await)
         };
         assert!(
-            up.status.success(),
+            up.success,
             "{} up failed: {}",
             label,
             String::from_utf8_lossy(&up.stderr)
@@ -381,7 +448,8 @@ fn parity_compose_config_mounts_applied_both_clis() {
         let container_id = if is_upstream {
             upstream_container_id(ws).expect("no upstream container found")
         } else {
-            json_field(&up, "containerId").expect("deacon up should report a containerId")
+            json_field(&up.stdout_string(), "containerId")
+                .expect("deacon up should report a containerId")
         };
 
         let inspect = inspect_json(&container_id);
@@ -399,8 +467,8 @@ fn parity_compose_config_mounts_applied_both_clis() {
                 "-v",
             ]);
         } else {
-            let project_name =
-                json_field(&up, "composeProjectName").unwrap_or_else(|| "unknown".to_string());
+            let project_name = json_field(&up.stdout_string(), "composeProjectName")
+                .unwrap_or_else(|| "unknown".to_string());
             deacon_compose_down_by_project(&project_name);
         }
 
@@ -414,7 +482,28 @@ fn parity_compose_config_mounts_applied_both_clis() {
             label,
             source
         );
+
+        if is_upstream {
+            upstream_up = Some(up);
+        } else {
+            deacon_up = Some(up);
+        }
     }
+
+    let deacon_up = deacon_up.expect("deacon up captured");
+    let upstream_up = upstream_up.expect("upstream up captured");
+    let finished = now_rfc3339();
+    let raw = raw_paths(&deacon_up, &upstream_up);
+    ff(ReportFragment::new(
+        BINARY,
+        OracleInfo::from(&oracle),
+        started,
+        finished,
+        vec![CaseResult::pass(CASE, raw)],
+        Vec::new(),
+    )
+    .write()
+    .await);
 }
 
 // ===========================================================================
@@ -422,11 +511,13 @@ fn parity_compose_config_mounts_applied_both_clis() {
 // Locks in #265.
 // ===========================================================================
 
-#[test]
-fn parity_compose_project_name_isolated_from_reference() {
-    if !gated() {
-        return;
-    }
+#[tokio::test]
+async fn parity_compose_project_name_isolated_from_reference() {
+    const CASE: &str = "compose-project-name-isolated";
+    let oracle = ff(Oracle::acquire().await);
+    ff(require_docker().await);
+    let deacon_bin = Path::new(env!("CARGO_BIN_EXE_deacon"));
+    let started = now_rfc3339();
 
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path();
@@ -449,15 +540,23 @@ fn parity_compose_project_name_isolated_from_reference() {
     )
     .unwrap();
 
-    let up =
-        parity_utils::run_deacon(ws, &["up", "--workspace-folder", &ws.to_string_lossy()]).unwrap();
+    let ws_str = ws.to_string_lossy().into_owned();
+    let up = ff(exec_deacon(
+        BINARY,
+        &format!("{CASE}-up-deacon"),
+        ExecKind::Lifecycle,
+        deacon_bin,
+        &["up", "--workspace-folder", &ws_str],
+        ws,
+    )
+    .await);
     assert!(
-        up.status.success(),
+        up.success,
         "deacon up failed: {}",
         String::from_utf8_lossy(&up.stderr)
     );
-    let project_name =
-        json_field(&up, "composeProjectName").expect("deacon up should report composeProjectName");
+    let project_name = json_field(&up.stdout_string(), "composeProjectName")
+        .expect("deacon up should report composeProjectName");
 
     deacon_compose_down_by_project(&project_name);
 
@@ -477,6 +576,19 @@ fn parity_compose_project_name_isolated_from_reference() {
         project_name, reference_form,
         "deacon's project name must not collide with the reference CLI's own default"
     );
+
+    let finished = now_rfc3339();
+    let raw = raw_paths_deacon_only(&up);
+    ff(ReportFragment::new(
+        BINARY,
+        OracleInfo::from(&oracle),
+        started,
+        finished,
+        vec![CaseResult::pass(CASE, raw)],
+        Vec::new(),
+    )
+    .write()
+    .await);
 }
 
 // ===========================================================================
@@ -484,11 +596,13 @@ fn parity_compose_project_name_isolated_from_reference() {
 // via `docker inspect`.
 // ===========================================================================
 
-#[test]
-fn parity_container_and_image_labels_isolated() {
-    if !gated() {
-        return;
-    }
+#[tokio::test]
+async fn parity_container_and_image_labels_isolated() {
+    const CASE: &str = "container-and-image-labels";
+    let oracle = ff(Oracle::acquire().await);
+    ff(require_docker().await);
+    let deacon_bin = Path::new(env!("CARGO_BIN_EXE_deacon"));
+    let started = now_rfc3339();
 
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path();
@@ -504,14 +618,23 @@ fn parity_container_and_image_labels_isolated() {
     )
     .unwrap();
 
-    let up =
-        parity_utils::run_deacon(ws, &["up", "--workspace-folder", &ws.to_string_lossy()]).unwrap();
+    let ws_str = ws.to_string_lossy().into_owned();
+    let up = ff(exec_deacon(
+        BINARY,
+        &format!("{CASE}-up-deacon"),
+        ExecKind::Lifecycle,
+        deacon_bin,
+        &["up", "--workspace-folder", &ws_str],
+        ws,
+    )
+    .await);
     assert!(
-        up.status.success(),
+        up.success,
         "deacon up failed: {}",
         String::from_utf8_lossy(&up.stderr)
     );
-    let container_id = json_field(&up, "containerId").expect("deacon up should report containerId");
+    let container_id = json_field(&up.stdout_string(), "containerId")
+        .expect("deacon up should report containerId");
     let inspect = inspect_json(&container_id);
     let labels = inspect["Config"]["Labels"]
         .as_object()
@@ -536,6 +659,19 @@ fn parity_container_and_image_labels_isolated() {
         labels.contains_key("devcontainer.workspaceHash"),
         "devcontainer.workspaceHash label missing"
     );
+
+    let finished = now_rfc3339();
+    let raw = raw_paths_deacon_only(&up);
+    ff(ReportFragment::new(
+        BINARY,
+        OracleInfo::from(&oracle),
+        started,
+        finished,
+        vec![CaseResult::pass(CASE, raw)],
+        Vec::new(),
+    )
+    .write()
+    .await);
 }
 
 // ===========================================================================
@@ -544,13 +680,20 @@ fn parity_container_and_image_labels_isolated() {
 // input.
 // ===========================================================================
 
-#[test]
-fn parity_rendered_compose_state_comparable() {
-    if !gated() {
-        return;
-    }
+#[tokio::test]
+async fn parity_rendered_compose_state_comparable() {
+    const CASE: &str = "rendered-compose-state";
+    let oracle = ff(Oracle::acquire().await);
+    ff(require_docker().await);
+    let deacon_bin = Path::new(env!("CARGO_BIN_EXE_deacon"));
+    let started = now_rfc3339();
 
-    fn bring_up(is_upstream: bool) -> (TempDir, Value, String) {
+    async fn bring_up(
+        is_upstream: bool,
+        oracle_path: &Path,
+        deacon_bin: &Path,
+        case: &str,
+    ) -> (TempDir, Value, String, Invocation) {
         let tmp = TempDir::new().unwrap();
         let ws = tmp.path();
         fs::write(
@@ -572,15 +715,30 @@ fn parity_rendered_compose_state_comparable() {
         )
         .unwrap();
 
+        let ws_str = ws.to_string_lossy().into_owned();
         let up = if is_upstream {
-            parity_utils::run_upstream(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                .unwrap()
+            ff(exec_oracle(
+                BINARY,
+                &format!("{case}-up-upstream"),
+                ExecKind::Lifecycle,
+                oracle_path,
+                &["up", "--workspace-folder", &ws_str],
+                ws,
+            )
+            .await)
         } else {
-            parity_utils::run_deacon(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                .unwrap()
+            ff(exec_deacon(
+                BINARY,
+                &format!("{case}-up-deacon"),
+                ExecKind::Lifecycle,
+                deacon_bin,
+                &["up", "--workspace-folder", &ws_str],
+                ws,
+            )
+            .await)
         };
         assert!(
-            up.status.success(),
+            up.success,
             "up failed (upstream={}): {}",
             is_upstream,
             String::from_utf8_lossy(&up.stderr)
@@ -589,18 +747,21 @@ fn parity_rendered_compose_state_comparable() {
         let container_id = if is_upstream {
             upstream_container_id(ws).expect("no upstream container found")
         } else {
-            json_field(&up, "containerId").expect("deacon up should report containerId")
+            json_field(&up.stdout_string(), "containerId")
+                .expect("deacon up should report containerId")
         };
         let inspect = inspect_json(&container_id);
-        (tmp, inspect, container_id)
+        (tmp, inspect, container_id, up)
     }
 
-    let (upstream_tmp, upstream_inspect, upstream_id) = bring_up(true);
+    let (upstream_tmp, upstream_inspect, upstream_id, upstream_up) =
+        bring_up(true, &oracle.path, deacon_bin, CASE).await;
     // Guard the upstream container immediately so that a panic in the SECOND
     // bring_up (or any later assertion) still tears it down — it stays live
     // across the deacon setup below.
     let _upstream_cleanup = WsCleanup(upstream_tmp.path());
-    let (deacon_tmp, deacon_inspect, deacon_id) = bring_up(false);
+    let (deacon_tmp, deacon_inspect, deacon_id, deacon_up) =
+        bring_up(false, &oracle.path, deacon_bin, CASE).await;
     let _deacon_cleanup = WsCleanup(deacon_tmp.path());
 
     // Tear down BEFORE asserting so a failed assertion never leaks containers.
@@ -654,6 +815,19 @@ fn parity_rendered_compose_state_comparable() {
             env
         );
     }
+
+    let finished = now_rfc3339();
+    let raw = raw_paths(&deacon_up, &upstream_up);
+    ff(ReportFragment::new(
+        BINARY,
+        OracleInfo::from(&oracle),
+        started,
+        finished,
+        vec![CaseResult::pass(CASE, raw)],
+        Vec::new(),
+    )
+    .write()
+    .await);
 }
 
 // ===========================================================================
@@ -683,11 +857,16 @@ fn parity_rendered_compose_state_comparable() {
 // container — asserted here via reported container ID.
 // ===========================================================================
 
-#[test]
-fn parity_handoff_no_cross_cli_container_reuse() {
-    if !gated() {
-        return;
-    }
+#[tokio::test]
+async fn parity_handoff_no_cross_cli_container_reuse() {
+    const CASE: &str = "handoff-no-reuse";
+    let oracle = ff(Oracle::acquire().await);
+    ff(require_docker().await);
+    let deacon_bin = Path::new(env!("CARGO_BIN_EXE_deacon"));
+    let started = now_rfc3339();
+
+    let mut deacon_inv: Option<Invocation> = None;
+    let mut upstream_inv: Option<Invocation> = None;
 
     for deacon_first in [true, false] {
         let tmp = TempDir::new().unwrap();
@@ -717,34 +896,73 @@ fn parity_handoff_no_cross_cli_container_reuse() {
             ("upstream", "deacon")
         };
 
+        let ws_str = ws.to_string_lossy().into_owned();
         let first_up = if deacon_first {
-            parity_utils::run_deacon(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                .unwrap()
+            ff(exec_deacon(
+                BINARY,
+                &format!("{CASE}-first-deacon"),
+                ExecKind::Lifecycle,
+                deacon_bin,
+                &["up", "--workspace-folder", &ws_str],
+                ws,
+            )
+            .await)
         } else {
-            parity_utils::run_upstream(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                .unwrap()
+            ff(exec_oracle(
+                BINARY,
+                &format!("{CASE}-first-upstream"),
+                ExecKind::Lifecycle,
+                &oracle.path,
+                &["up", "--workspace-folder", &ws_str],
+                ws,
+            )
+            .await)
         };
-        let first_ok = first_up.status.success();
-        let first_id = json_field(&first_up, "containerId");
+        let first_ok = first_up.success;
+        let first_id = json_field(&first_up.stdout_string(), "containerId");
 
         let second_up = if first_ok {
             Some(if deacon_first {
-                parity_utils::run_upstream(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                    .unwrap()
+                ff(exec_oracle(
+                    BINARY,
+                    &format!("{CASE}-second-upstream"),
+                    ExecKind::Lifecycle,
+                    &oracle.path,
+                    &["up", "--workspace-folder", &ws_str],
+                    ws,
+                )
+                .await)
             } else {
-                parity_utils::run_deacon(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                    .unwrap()
+                ff(exec_deacon(
+                    BINARY,
+                    &format!("{CASE}-second-deacon"),
+                    ExecKind::Lifecycle,
+                    deacon_bin,
+                    &["up", "--workspace-folder", &ws_str],
+                    ws,
+                )
+                .await)
             })
         } else {
             None
         };
-        let second_ok = second_up.as_ref().map(|o| o.status.success());
+        let second_ok = second_up.as_ref().map(|o| o.success);
         let second_id = second_up
             .as_ref()
-            .and_then(|o| json_field(o, "containerId"));
+            .and_then(|o| json_field(&o.stdout_string(), "containerId"));
         let second_stderr = second_up
             .as_ref()
             .map(|o| String::from_utf8_lossy(&o.stderr).to_string());
+
+        // Capture representative invocations for the fragment (clone so the
+        // originals remain usable in the assertions below).
+        if deacon_first {
+            deacon_inv = Some(first_up.clone());
+            upstream_inv = second_up.clone();
+        } else {
+            upstream_inv = Some(first_up.clone());
+            deacon_inv = second_up.clone();
+        }
 
         // Tear down BEFORE asserting so a failure never leaks containers.
         // Sweep by the `devcontainer.local_folder` label both CLIs stamp,
@@ -787,6 +1005,21 @@ fn parity_handoff_no_cross_cli_container_reuse() {
             second_id
         );
     }
+
+    let deacon_inv = deacon_inv.expect("deacon invocation captured");
+    let upstream_inv = upstream_inv.expect("upstream invocation captured");
+    let finished = now_rfc3339();
+    let raw = raw_paths(&deacon_inv, &upstream_inv);
+    ff(ReportFragment::new(
+        BINARY,
+        OracleInfo::from(&oracle),
+        started,
+        finished,
+        vec![CaseResult::pass(CASE, raw)],
+        Vec::new(),
+    )
+    .write()
+    .await);
 }
 
 // ===========================================================================
@@ -796,11 +1029,16 @@ fn parity_handoff_no_cross_cli_container_reuse() {
 // config-says / runtime-doesn't drift).
 // ===========================================================================
 
-#[test]
-fn parity_merged_config_matches_runtime_truth() {
-    if !gated() {
-        return;
-    }
+#[tokio::test]
+async fn parity_merged_config_matches_runtime_truth() {
+    const CASE: &str = "merged-config-vs-runtime";
+    let oracle = ff(Oracle::acquire().await);
+    ff(require_docker().await);
+    let deacon_bin = Path::new(env!("CARGO_BIN_EXE_deacon"));
+    let started = now_rfc3339();
+
+    let mut deacon_up: Option<Invocation> = None;
+    let mut upstream_up: Option<Invocation> = None;
 
     for (label, is_upstream) in [("upstream", true), ("deacon", false)] {
         let tmp = TempDir::new().unwrap();
@@ -818,52 +1056,74 @@ fn parity_merged_config_matches_runtime_truth() {
         )
         .unwrap();
 
+        let ws_str = ws.to_string_lossy().into_owned();
         let up = if is_upstream {
-            parity_utils::run_upstream(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                .unwrap()
+            ff(exec_oracle(
+                BINARY,
+                &format!("{CASE}-up-upstream"),
+                ExecKind::Lifecycle,
+                &oracle.path,
+                &["up", "--workspace-folder", &ws_str],
+                ws,
+            )
+            .await)
         } else {
-            parity_utils::run_deacon(ws, &["up", "--workspace-folder", &ws.to_string_lossy()])
-                .unwrap()
+            ff(exec_deacon(
+                BINARY,
+                &format!("{CASE}-up-deacon"),
+                ExecKind::Lifecycle,
+                deacon_bin,
+                &["up", "--workspace-folder", &ws_str],
+                ws,
+            )
+            .await)
         };
         assert!(
-            up.status.success(),
+            up.success,
             "{} up failed: {}",
             label,
             String::from_utf8_lossy(&up.stderr)
         );
 
         let read_config = if is_upstream {
-            parity_utils::run_upstream(
-                ws,
+            ff(exec_oracle(
+                BINARY,
+                &format!("{CASE}-readconfig-upstream"),
+                ExecKind::Lifecycle,
+                &oracle.path,
                 &[
                     "read-configuration",
                     "--workspace-folder",
-                    &ws.to_string_lossy(),
+                    &ws_str,
                     "--include-merged-configuration",
                 ],
+                ws,
             )
-            .unwrap()
+            .await)
         } else {
-            parity_utils::run_deacon(
-                ws,
+            ff(exec_deacon(
+                BINARY,
+                &format!("{CASE}-readconfig-deacon"),
+                ExecKind::Lifecycle,
+                deacon_bin,
                 &[
                     "read-configuration",
                     "--workspace-folder",
-                    &ws.to_string_lossy(),
+                    &ws_str,
                     "--include-merged-configuration",
                 ],
+                ws,
             )
-            .unwrap()
+            .await)
         };
         assert!(
-            read_config.status.success(),
+            read_config.success,
             "{} read-configuration failed: {}",
             label,
             String::from_utf8_lossy(&read_config.stderr)
         );
         let read_config_json: Value =
-            serde_json::from_str(String::from_utf8_lossy(&read_config.stdout).trim())
-                .unwrap_or(Value::Null);
+            serde_json::from_str(read_config.stdout_string().trim()).unwrap_or(Value::Null);
         let merged = read_config_json
             .get("mergedConfiguration")
             .or_else(|| read_config_json.get("configuration"))
@@ -875,7 +1135,8 @@ fn parity_merged_config_matches_runtime_truth() {
         let container_id = if is_upstream {
             upstream_container_id(ws).expect("no upstream container found")
         } else {
-            json_field(&up, "containerId").expect("deacon up should report containerId")
+            json_field(&up.stdout_string(), "containerId")
+                .expect("deacon up should report containerId")
         };
         let inspect = inspect_json(&container_id);
         let runtime_env: Vec<String> = inspect["Config"]["Env"]
@@ -909,5 +1170,26 @@ fn parity_merged_config_matches_runtime_truth() {
             "{}: merged-configuration-says vs runtime-truth drift for containerEnv.MERGED_TRUTH",
             label
         );
+
+        if is_upstream {
+            upstream_up = Some(up);
+        } else {
+            deacon_up = Some(up);
+        }
     }
+
+    let deacon_up = deacon_up.expect("deacon up captured");
+    let upstream_up = upstream_up.expect("upstream up captured");
+    let finished = now_rfc3339();
+    let raw = raw_paths(&deacon_up, &upstream_up);
+    ff(ReportFragment::new(
+        BINARY,
+        OracleInfo::from(&oracle),
+        started,
+        finished,
+        vec![CaseResult::pass(CASE, raw)],
+        Vec::new(),
+    )
+    .write()
+    .await);
 }

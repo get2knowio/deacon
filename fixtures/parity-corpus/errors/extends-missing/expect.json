@@ -1,4 +1,7 @@
 {
-  "description": "extends points at a nonexistent file. deacon resolves extends eagerly at read-configuration and errors on the missing target; the reference does NOT resolve extends during read-configuration (echoes the literal field). Characterized divergence: eager (deacon) vs lazy (reference) extends resolution.",
-  "expect": "deacon-stricter"
+  "id": "errors/extends-missing",
+  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "extends-missing" },
+  "expect": { "kind": "deacon-stricter", "signal": ["extends"] },
+  "rationale": "extends points at a nonexistent file. deacon resolves extends eagerly at read-configuration and errors on the missing target; the reference does NOT resolve extends during read-configuration (echoes the literal field). Characterized divergence: eager (deacon) vs lazy (reference) extends resolution. See CLAUDE.md 'Verified Non-Bugs' and errors/README.md (issue #297).",
+  "added": "2026-07-19"
 }

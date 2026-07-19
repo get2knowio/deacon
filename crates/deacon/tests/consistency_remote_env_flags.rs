@@ -1,4 +1,10 @@
-//! Parity checks for remote environment flag handling across up and exec.
+//! Internal-consistency checks (no oracle) for remote environment flag handling
+//! across `up` and `exec`. Reclassified from `parity_*` — this binary compares
+//! deacon's OWN flag handling for cross-subcommand consistency; it never invokes
+//! the `@devcontainers/cli` oracle, so it is NOT a parity binary and is listed in
+//! `registry.json` under `internal_consistency_binaries` (018-harden-parity-
+//! harness, research D9). Runs in the regular fast/default lanes, never in
+//! `[profile.parity]`.
 
 use assert_cmd::Command;
 use tempfile::TempDir;

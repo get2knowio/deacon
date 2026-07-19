@@ -1,5 +1,8 @@
 {
-  "description": "Explicit --config points at a file that does not exist. Both CLIs must reject (the file was named explicitly, so silent discovery fallback is wrong).",
-  "expect": "both-reject",
-  "config": "nope.json"
+  "id": "errors/bad-config-path",
+  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "bad-config-path" },
+  "expect": { "kind": "both-reject" },
+  "config": "nope.json",
+  "rationale": "Explicit --config points at a file that does not exist. Both CLIs must reject (the file was named explicitly, so silent discovery fallback is wrong). True both-reject agreement case.",
+  "added": "2026-07-19"
 }

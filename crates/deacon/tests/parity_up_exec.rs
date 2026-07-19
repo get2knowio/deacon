@@ -1,27 +1,61 @@
-//! Parity tests comparing deacon vs upstream devcontainer CLI for `up` and `exec`.
+//! Parity: deacon vs the pinned `@devcontainers/cli` oracle for `up` + `exec`.
 //!
-//! Assumes Docker is available and `devcontainer` is installed. No gating.
+//! Runs ONLY under `cargo nextest run --profile parity`. There is no opt-in env
+//! gate and no silent skip: a missing/mismatched oracle or an unavailable Docker
+//! FAILS the test with a cause-specific message (018-harden-parity-harness,
+//! FR-002, FR-004..FR-006). Both CLIs are driven through the bounded harness
+//! executor, so their raw output is preserved under `target/parity/raw/` and a
+//! run-report fragment is written to `target/parity/report/parity_up_exec.json`.
+//!
+//! Beyond the marker round-trip, this test inspects each launched container's
+//! `devcontainer.*` labels. Those `docker` inspections are plain local commands —
+//! they interrogate containers, not the two compared CLIs — and a best-effort
+//! teardown runs before the label assertions so a failed assertion never leaks a
+//! container.
 
-use assert_cmd::Command;
 use serde_json::Value;
 use std::fs;
 use tempfile::TempDir;
 
-mod parity_utils;
+use parity_harness::HarnessError;
+use parity_harness::exec::{ExecKind, Invocation, exec_deacon, exec_oracle};
+use parity_harness::oracle::Oracle;
+use parity_harness::prereq::require_docker;
+use parity_harness::report::{CaseResult, OracleInfo, RawPaths, ReportFragment, now_rfc3339};
 
-fn upstream_bin() -> String {
-    std::env::var("DEACON_PARITY_DEVCONTAINER").unwrap_or_else(|_| "devcontainer".to_string())
+/// This binary's name — the fragment key and raw-artifact subdirectory.
+const BINARY: &str = "parity_up_exec";
+
+/// Fail the test with the error's cause-specific `Display` message (never the
+/// `Debug` form) so an oracle/prereq failure reads as its remedy.
+fn ff<T>(r: Result<T, HarnessError>) -> T {
+    r.unwrap_or_else(|e| panic!("{e}"))
 }
 
-#[test]
-fn parity_up_and_exec_traditional() {
-    if !parity_utils::upstream_available() {
-        eprintln!("Skipping parity test: {}", parity_utils::skip_reason());
-        return;
+/// The four preserved raw-output paths (report-relative) for one compared case.
+fn raw_paths(deacon: &Invocation, oracle: &Invocation) -> RawPaths {
+    RawPaths {
+        deacon_stdout: deacon.stdout_rel.display().to_string(),
+        deacon_stderr: deacon.stderr_rel.display().to_string(),
+        oracle_stdout: oracle.stdout_rel.display().to_string(),
+        oracle_stderr: oracle.stderr_rel.display().to_string(),
     }
-    // workspace with alpine image and a postCreate marker
+}
+
+#[tokio::test]
+async fn parity_up_and_exec_traditional() {
+    // Fail fast if the pinned oracle is absent/mismatched or Docker is unavailable —
+    // never skip to pass.
+    let oracle = ff(Oracle::acquire().await);
+    ff(require_docker().await);
+    let deacon_bin = std::path::Path::new(env!("CARGO_BIN_EXE_deacon"));
+
+    let started = now_rfc3339();
+
+    // Workspace with an alpine image and a postCreate marker.
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path();
+    let ws_str = ws.to_string_lossy().into_owned();
 
     fs::create_dir(ws.join(".devcontainer")).unwrap();
     fs::write(
@@ -36,75 +70,77 @@ fn parity_up_and_exec_traditional() {
     )
     .unwrap();
 
-    // upstream: up + exec cat marker
-    let mut up1 = std::process::Command::new(upstream_bin());
-    up1.current_dir(ws);
-    up1.arg("up");
-    up1.arg("--workspace-folder");
-    up1.arg(ws);
-    let st1 = up1.output().unwrap();
-    assert!(
-        st1.status.success(),
-        "upstream up failed: {}",
-        String::from_utf8_lossy(&st1.stderr)
-    );
+    let up_args = ["up", "--workspace-folder", ws_str.as_str()];
 
-    let mut ex1 = std::process::Command::new(upstream_bin());
-    ex1.current_dir(ws);
-    ex1.arg("exec");
-    ex1.arg("--workspace-folder");
-    ex1.arg(ws);
-    ex1.arg("sh");
-    ex1.arg("-lc");
-    ex1.arg("cat /tmp/parity_marker && pwd");
-    let e1 = ex1.output().unwrap();
-    assert!(
-        e1.status.success(),
-        "upstream exec failed: {}",
-        String::from_utf8_lossy(&e1.stderr)
-    );
-    let out1 = String::from_utf8_lossy(&e1.stdout);
+    // Upstream (oracle): up + exec cat marker. Upstream takes the command WITHOUT a
+    // `--` separator.
+    let oracle_up_inv = ff(exec_oracle(
+        BINARY,
+        "traditional",
+        ExecKind::Lifecycle,
+        &oracle.path,
+        &up_args,
+        ws,
+    )
+    .await);
+    ff(oracle_up_inv.require_success());
+
+    let oracle_exec_args = [
+        "exec",
+        "--workspace-folder",
+        ws_str.as_str(),
+        "sh",
+        "-lc",
+        "cat /tmp/parity_marker && pwd",
+    ];
+    let oracle_exec_inv = ff(exec_oracle(
+        BINARY,
+        "traditional",
+        ExecKind::Lifecycle,
+        &oracle.path,
+        &oracle_exec_args,
+        ws,
+    )
+    .await);
+    ff(oracle_exec_inv.require_success());
+    let out1 = oracle_exec_inv.stdout_string();
     assert!(out1.contains("ready"), "upstream marker missing: {}", out1);
 
-    // ours: up + exec cat marker
-    let mut up2 = Command::cargo_bin("deacon").unwrap();
-    let st2 = up2
-        .current_dir(ws)
-        .arg("up")
-        .arg("--workspace-folder")
-        .arg(ws)
-        .assert()
-        .get_output()
-        .to_owned();
-    assert!(
-        st2.status.success(),
-        "deacon up failed: {}",
-        String::from_utf8_lossy(&st2.stderr)
-    );
+    // Ours (deacon): up + exec cat marker. deacon takes the command AFTER a `--`.
+    let deacon_up_inv = ff(exec_deacon(
+        BINARY,
+        "traditional",
+        ExecKind::Lifecycle,
+        deacon_bin,
+        &up_args,
+        ws,
+    )
+    .await);
+    ff(deacon_up_inv.require_success());
 
-    let mut ex2 = Command::cargo_bin("deacon").unwrap();
-    let e2 = ex2
-        .current_dir(ws)
-        .arg("exec")
-        .arg("--workspace-folder")
-        .arg(ws)
-        .arg("--")
-        .arg("sh")
-        .arg("-lc")
-        .arg("cat /tmp/parity_marker && pwd")
-        .assert()
-        .get_output()
-        .to_owned();
-    assert!(
-        e2.status.success(),
-        "deacon exec failed: {}",
-        String::from_utf8_lossy(&e2.stderr)
-    );
-    let out2 = String::from_utf8_lossy(&e2.stdout);
+    let deacon_exec_args = [
+        "exec",
+        "--workspace-folder",
+        ws_str.as_str(),
+        "--",
+        "sh",
+        "-lc",
+        "cat /tmp/parity_marker && pwd",
+    ];
+    let deacon_exec_inv = ff(exec_deacon(
+        BINARY,
+        "traditional",
+        ExecKind::Lifecycle,
+        deacon_bin,
+        &deacon_exec_args,
+        ws,
+    )
+    .await);
+    ff(deacon_exec_inv.require_success());
+    let out2 = deacon_exec_inv.stdout_string();
     assert!(out2.contains("ready"), "deacon marker missing: {}", out2);
 
-    // Label parity checks
-    // Upstream container: should be identifiable by devcontainer.local_folder and config_file labels
+    // --- Label parity checks (plain local docker inspection of the containers) ---
     fn docker_out(args: &[&str]) -> String {
         let out = std::process::Command::new("docker")
             .args(args)
@@ -119,8 +155,7 @@ fn parity_up_and_exec_traditional() {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
-    let ws_str = ws.to_string_lossy().to_string();
-    // Find upstream container ID by matching labels and image
+    // Find upstream container ID by matching labels and image.
     let upstream_id = {
         let format = "{{.ID}}";
         let list = docker_out(&[
@@ -139,31 +174,11 @@ fn parity_up_and_exec_traditional() {
         );
         list.lines().next().unwrap().to_string()
     };
+    // Capture labels while the container is still alive (before teardown).
     let upstream_labels_json =
         docker_out(&["inspect", "-f", "{{ json .Config.Labels }}", &upstream_id]);
-    let upstream_labels: Value = serde_json::from_str(&upstream_labels_json).unwrap_or(Value::Null);
-    let ul = upstream_labels.as_object().expect("upstream labels object");
-    // Assert key upstream labels exist and match workspace
-    assert_eq!(
-        ul.get("devcontainer.local_folder").and_then(|v| v.as_str()),
-        Some(ws_str.as_str()),
-        "upstream devcontainer.local_folder mismatch"
-    );
-    assert_eq!(
-        ul.get("devcontainer.config_file").and_then(|v| v.as_str()),
-        Some(
-            ws.join(".devcontainer/devcontainer.json")
-                .to_string_lossy()
-                .as_ref()
-        ),
-        "upstream devcontainer.config_file mismatch"
-    );
-    assert!(
-        ul.keys().any(|k| k.starts_with("devcontainer.")),
-        "upstream labels missing devcontainer.* keys"
-    );
 
-    // Deacon container: identify by devcontainer.name and devcontainer.source=deacon
+    // Deacon container: identify by devcontainer.name and devcontainer.source=deacon.
     let deacon_id = {
         let format = "{{.ID}}";
         let list = docker_out(&[
@@ -185,6 +200,39 @@ fn parity_up_and_exec_traditional() {
     };
     let deacon_labels_json =
         docker_out(&["inspect", "-f", "{{ json .Config.Labels }}", &deacon_id]);
+
+    // Best-effort teardown BEFORE the label assertions so a failed assertion never
+    // leaks containers. Errors are intentionally ignored.
+    let _ = std::process::Command::new("docker")
+        .args(["rm", "-f", &upstream_id])
+        .output();
+    let _ = std::process::Command::new(deacon_bin)
+        .args(["down", "--remove", "--workspace-folder", ws_str.as_str()])
+        .current_dir(ws)
+        .output();
+
+    // Assert key upstream labels exist and match workspace.
+    let upstream_labels: Value = serde_json::from_str(&upstream_labels_json).unwrap_or(Value::Null);
+    let ul = upstream_labels.as_object().expect("upstream labels object");
+    assert_eq!(
+        ul.get("devcontainer.local_folder").and_then(|v| v.as_str()),
+        Some(ws_str.as_str()),
+        "upstream devcontainer.local_folder mismatch"
+    );
+    assert_eq!(
+        ul.get("devcontainer.config_file").and_then(|v| v.as_str()),
+        Some(
+            ws.join(".devcontainer/devcontainer.json")
+                .to_string_lossy()
+                .as_ref()
+        ),
+        "upstream devcontainer.config_file mismatch"
+    );
+    assert!(
+        ul.keys().any(|k| k.starts_with("devcontainer.")),
+        "upstream labels missing devcontainer.* keys"
+    );
+
     let deacon_labels: Value = serde_json::from_str(&deacon_labels_json).unwrap_or(Value::Null);
     let dl = deacon_labels.as_object().expect("deacon labels object");
     assert_eq!(
@@ -202,7 +250,22 @@ fn parity_up_and_exec_traditional() {
         "deacon labels missing devcontainer.* keys"
     );
 
-    // Note: We don't assert exact label key equality across CLIs because upstream and deacon
-    // use different labeling schemes. We verify that each assigns the expected, identifying
-    // devcontainer.* labels tied to the workspace/name semantics.
+    // Note: We don't assert exact label key equality across CLIs because upstream and
+    // deacon use different labeling schemes. We verify that each assigns the expected,
+    // identifying devcontainer.* labels tied to the workspace/name semantics.
+
+    // Record the successful case and write the per-binary report fragment. The raw
+    // paths reference the primary compared outputs — the two `exec` invocations.
+    let raw = raw_paths(&deacon_exec_inv, &oracle_exec_inv);
+    let cases = vec![CaseResult::pass("traditional", raw)];
+    let finished = now_rfc3339();
+    let fragment = ReportFragment::new(
+        BINARY,
+        OracleInfo::from(&oracle),
+        started,
+        finished,
+        cases,
+        Vec::new(),
+    );
+    ff(fragment.write().await);
 }

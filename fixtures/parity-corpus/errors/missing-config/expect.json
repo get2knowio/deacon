@@ -1,4 +1,7 @@
 {
-  "description": "Workspace folder with NO devcontainer config at all. Both CLIs must reject — a true 'both-reject' agreement case that guards deacon doesn't silently invent an empty config.",
-  "expect": "both-reject"
+  "id": "errors/missing-config",
+  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "missing-config" },
+  "expect": { "kind": "both-reject" },
+  "rationale": "Workspace folder with NO devcontainer config at all. Both CLIs must reject — a true both-reject agreement case that guards deacon doesn't silently invent an empty config.",
+  "added": "2026-07-19"
 }

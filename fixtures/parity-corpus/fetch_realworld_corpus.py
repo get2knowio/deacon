@@ -3,10 +3,17 @@
 
 This materializes reproducible workspace snapshots from public GitHub repos
 without vendoring any third-party content into the repository. Each entry is a
-workspace root that can be passed to the existing Tier-1 parity drivers:
+workspace root.
 
-    python3 fixtures/parity-corpus/run_tier1.py target/debug/deacon /tmp/realworld-corpus
-    python3 fixtures/parity-corpus/run_tier1_merged.py target/debug/deacon /tmp/realworld-corpus
+The Tier-1 parity drivers were ported from Python to Rust nextest binaries and
+deleted (018-harden-parity-harness): the runners are now
+`crates/deacon/tests/parity_corpus_tier1.rs` /
+`parity_corpus_merged.rs`, which discover cases under the in-repo corpus root
+`fixtures/parity-corpus/` (see `registry.json`) and run under
+`cargo nextest run --profile parity` / `make test-parity`. This helper remains an
+exploratory aid: to exercise a fetched snapshot, copy it as a case directory
+under the corpus root (raising the corpus `min_cases` if you want the floor to
+rise) and run `make test-parity`.
 
 The script uses pinned commit SHAs and GitHub's contents API via `gh api`.
 """

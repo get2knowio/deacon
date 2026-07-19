@@ -176,26 +176,52 @@ filter = 'test(smoke_)'
 threads-required = 1
 ```
 
-### 6. `parity`
+### 6. `parity` / `parity-cli` (live parity, profile-gated)
 
 **Characteristics:**
-- Compares behavior against upstream TypeScript CLI
-- Requires controlled environment for deterministic comparison
-- Must run serially to avoid interference
+- Compares deacon's behavior against the pinned upstream `@devcontainers/cli`
+  oracle (version in `fixtures/parity-corpus/oracle.json`)
+- Requires a controlled environment for deterministic comparison (the oracle on
+  `PATH`, plus Docker for the container-scenario binaries)
+- Mildly throttled (`parity` = `max-threads 2`, `parity-cli` = `max-threads 8`)
 
-**Concurrency:** `max-threads = 1` (serial execution)
+**Selection is by a dedicated profile, not an env-var opt-in.** As of
+018-harden-parity-harness the legacy `DEACON_PARITY=1` triple-gate and the
+`cargo test` side-channel are **retired**. The live parity binaries run **only**
+under the dedicated `[profile.parity]` nextest profile, whose `default-filter`
+selects **exactly** the nine live binaries by an explicit `binary(=name)`
+allow-list:
 
-**When to use:**
-- Test validates compatibility with upstream devcontainers/cli
-- Test compares output formats or behavior
-- Test requires reference implementation availability
-
-**Selectors in `.config/nextest.toml`:**
 ```toml
-[[profile.default.overrides]]
-filter = 'test(parity_)'
-threads-required = 1
+[profile.parity]
+default-filter = 'binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors)'
 ```
+
+The allow-list is deliberate: a `binary(#parity_*)` glob would also match the two
+**hermetic guard** binaries (`parity_harness_faults`, `parity_registry_check`),
+which must run in the fast/default lanes and must NOT run under
+`[profile.parity]`. Correspondingly, every other profile
+(`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) **excludes** those nine live
+binaries from its `default-filter`, so those lanes are truthful by
+non-selection — a green fast/CI run never implies live parity ran. The
+`parity`/`parity-cli` **test-groups** still exist to throttle the live binaries
+*within* the parity profile.
+
+**When to use:** live comparison against the reference CLI. There is no silent
+skip — a missing/mismatched oracle, missing Docker, or a normalization failure
+fails the run with a cause-specific message.
+
+**Entry point:**
+```bash
+# provision the pinned oracle once, then run the whole certified surface:
+npm install -g @devcontainers/cli@"$(jq -r .version fixtures/parity-corpus/oracle.json)"
+make test-parity        # = cargo nextest run --profile parity  +  parity-report aggregator
+```
+
+CI runs this as the `parity / live-certification` lane
+(`.github/workflows/parity.yml`), never as part of the normal PR test lanes. See
+`crates/parity-harness/` and `specs/018-harden-parity-harness/quickstart.md` for
+the full model.
 
 ### 7. `long-running`
 
@@ -226,7 +252,9 @@ The project defines three nextest profiles in `.config/nextest.toml`:
 **Purpose:** Maximum speed for local development feedback loops
 
 **Characteristics:**
-- Excludes slow smoke and parity tests
+- Excludes slow smoke tests and Docker suites; runs the hermetic parity guards
+  (`parity_harness_faults`, `parity_registry_check`) but NOT the live parity
+  binaries (those run only under `--profile parity`)
 - High parallelism for unit tests
 - Limited concurrency for Docker tests
 - Ideal for rapid iteration during development
@@ -245,9 +273,11 @@ cargo nextest run --profile dev-fast
 **Purpose:** Run all tests with appropriate grouping before pushing
 
 **Characteristics:**
-- Includes all test groups (unit, integration, smoke, parity)
-- Respects serialization for smoke/parity
-- Appropriate concurrency for each group
+- Includes all test groups (unit, integration, smoke, hermetic parity guards)
+- Does NOT select the live parity binaries — those run only under
+  `--profile parity` (see the `parity` group above); `full` is truthful by
+  non-selection
+- Respects serialization for smoke; appropriate concurrency for each group
 - Use before submitting PRs
 
 **Usage:**
@@ -265,7 +295,9 @@ cargo nextest run --profile full
 
 **Characteristics:**
 - All tests execute with conservative concurrency
-- Serial execution for smoke/parity enforced
+- Serial execution for smoke enforced; live parity binaries are NOT selected
+  (they run only under `--profile parity` / the `parity / live-certification`
+  CI lane)
 - Generates structured JSON output for CI systems
 - Captures timing data for performance tracking
 

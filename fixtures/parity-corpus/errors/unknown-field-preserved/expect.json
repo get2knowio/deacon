@@ -1,4 +1,7 @@
 {
-  "description": "Config carries unknown/forward-compat top-level fields the tool does not model. Both CLIs must accept AND preserve them verbatim in read-configuration output. Guards against deacon silently dropping unmodeled fields (the pre-fix behavior): the spec's extensibility model assumes tools pass unknown fields through. Value comparison (after pruning) confirms deacon now matches the reference.",
-  "expect": "both-accept"
+  "id": "errors/unknown-field-preserved",
+  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "unknown-field-preserved" },
+  "expect": { "kind": "both-accept" },
+  "rationale": "Config carries unknown/forward-compat top-level fields the tool does not model. Both CLIs must accept AND preserve them verbatim in read-configuration output. Guards against deacon silently dropping unmodeled fields (the pre-fix behavior): the spec's extensibility model assumes tools pass unknown fields through. Value comparison (after pruning) confirms deacon matches the reference.",
+  "added": "2026-07-19"
 }

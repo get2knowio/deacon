@@ -6,14 +6,18 @@ on whether the input is an error?* The valid-config tiers diff successful
 output; this tier diffs the accept/reject decision (and, when both accept, the
 resolved value after pruning).
 
-Run it:
+Run it (the Python `run_tier1_errors.py` driver was ported to Rust and deleted —
+018-harden-parity-harness):
 
 ```bash
-python3 fixtures/parity-corpus/run_tier1_errors.py [deacon_bin] [corpus_dir]
+make test-parity            # cargo nextest run --profile parity, then the aggregator
 ```
 
-Exit 0 when every fixture matches its encoded `expect`, else 1 (CI-gateable).
-Each fixture is `errors/<name>/expect.json` + (usually) a `.devcontainer/`.
+The runner is `crates/deacon/tests/parity_corpus_errors.rs`. It FAILS the run
+naming the case when a fixture's decision no longer matches its recorded
+expectation, and names any stale waiver record (FR-011). Each fixture is
+`errors/<name>/expect.json` (a schema-validated waiver record) + (usually) a
+`.devcontainer/`.
 
 ## Headline finding
 
@@ -89,20 +93,44 @@ goes red only if EITHER CLI's behavior *changes* (e.g. a deacon refactor makes
 read-config lenient, or a reference upgrade makes it strict). True agreement
 cases (`both-reject`, `both-accept`) guard the other direction.
 
-## `expect` vocabulary
+## Waiver schema
+
+Each `errors/<name>/expect.json` is a full waiver record validated by the single
+loader `parity_harness::waiver` (schema in
+`specs/018-harden-parity-harness/contracts/registry-waiver-schema.md`,
+`data-model.md` §4). Unknown fields are rejected; `id` is globally unique;
+`rationale` is non-empty.
+
+```json
+{
+  "id": "errors/<name>",
+  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "<name>" },
+  "expect": { "kind": "both-reject" | "both-accept" | "deacon-stricter" },
+  "config": "<rel/path>",
+  "rationale": "why this divergence is characterized / why parity is expected",
+  "added": "YYYY-MM-DD"
+}
+```
+
+`expect.kind` vocabulary:
 
 - `both-reject` — both CLIs must reject (exit != 0). True error-parity agreement.
 - `both-accept` — both accept **and** emit the same resolved config after pruning.
 - `deacon-stricter` — deacon rejects, reference leniently accepts (characterized).
+  Carries an optional `"signal": ["substr", …]` of informational stderr
+  substrings (not part of the pass/fail decision).
+
+`config` (optional, string) is a schema-known field carrying an explicit
+`--config` argument for the case; it plays no part in waiver semantics.
 
 ## Adding a fixture
 
 1. `errors/<name>/.devcontainer/devcontainer.json` (or supporting files; omit
    it entirely for a "no config" case).
-2. `errors/<name>/expect.json` with `description` + `expect` (+ optional
-   `config` for an explicit `--config`, `signal` for stderr substrings).
-3. Run the driver; if it flags a DIVERGENCE, triage whether it's a deacon bug or
-   a defensible characterized divergence, and set `expect` accordingly.
+2. `errors/<name>/expect.json` as the full waiver record above.
+3. Run `make test-parity`; if it flags a DIVERGENCE, triage whether it's a deacon
+   bug or a defensible characterized divergence, and set `expect.kind`
+   accordingly (`errors/` cases require `min_cases` ≥ 9 in `registry.json`).
 
 ## Natural next step
 

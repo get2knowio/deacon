@@ -1,3 +1,10 @@
+//! Internal-consistency checks (no oracle) for the container env-probe flag.
+//! Reclassified from `parity_*` — this binary exercises deacon's OWN env-probe
+//! behavior with mocked Docker; it never invokes the `@devcontainers/cli` oracle,
+//! so it is NOT a parity binary and is listed in `registry.json` under
+//! `internal_consistency_binaries` (018-harden-parity-harness, research D9). Runs
+//! in the regular fast/default lanes, never in `[profile.parity]`.
+
 use deacon::commands::exec::{ExecArgs, execute_exec_with_docker};
 use deacon::commands::shared::resolve_env_and_user;
 use deacon_core::IndexMap;
