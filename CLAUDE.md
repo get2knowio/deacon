@@ -541,10 +541,9 @@ rediscover-and-investigate loop:
   acceptance criteria.
 - **`down` doesn't clear `.devcontainer-state/<phase>.json` markers.** Intentional —
   markers should survive `down && up` for resume workflows. Markers are workspace-scoped,
-  not container-scoped; they get cleared on `up --remove-existing-container` (per #117).
-- **compose path doesn't call `clear_markers()` on `--remove-existing-container`**
-  (`commands/up/compose.rs:287`). Doesn't surface functionally because
-  `execute_compose_post_create` doesn't consult markers. Parity-only cleanup.
+  not container-scoped; they get cleared on `up --remove-existing-container` (per #117) —
+  on BOTH the single-container path (`commands/up/container.rs`) and the compose path
+  (`commands/up/compose.rs`, which now calls `clear_markers()` symmetrically).
 - **deacon `read-configuration` rejects things the reference CLI accepts** (malformed
   JSONC, missing/cyclic `extends`, wrong-typed `features`/`forwardPorts`). The reference's
   `read-configuration` is a **lenient parse-and-echo**; deacon validates eagerly and

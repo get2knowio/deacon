@@ -1,12 +1,4 @@
 {
   "schemaVersion": 1,
-  "records": [
-    {
-      "id": "gap-compose-marker-cleanup",
-      "kind": "coverage",
-      "behaviors": ["bhv-up-compose-marker-cleanup"],
-      "description": "The compose up path does not call clear_markers() on --remove-existing-container (crates/deacon/src/commands/up/compose.rs), unlike the single-container path. It does not surface functionally because execute_compose_post_create does not consult markers, so this is a parity-only cleanup difference with no executable case yet. Characterized in CLAUDE.md 'Verified Non-Bugs'.",
-      "tracking": "https://github.com/get2knowio/deacon/issues/117"
-    }
-  ]
+  "records": []
 }

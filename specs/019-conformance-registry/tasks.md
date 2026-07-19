@@ -129,29 +129,26 @@ hermetic (no network, no Docker) and must compile on the Windows `dev-fast` lane
 
 **All 38 feature tasks (T001–T038) are complete; no feature task is deferred.**
 
-One caveat is recorded here for transparency — it is registry *data* the feature is
-designed to hold, **not** an unfinished task:
+### Resolved after implementation: `gap-compose-marker-cleanup` (closed)
 
-- **Open registry gap `gap-compose-marker-cleanup` (seeded in T030, research.md Decision 6
-  item 4).** The active profile is therefore **not certified** — `certify` exits 1 and, as
-  wired in T035, the release workflow's `verify` job will block until this gap is resolved
-  or explicitly waived. This is the feature working **as designed** (FR-025 / clarification
-  Q5: strict release-gating on genuine, tracked gaps), not a defect in the implementation.
-  - **Why not resolved in this feature**: The gap is the CLAUDE.md "Verified Non-Bugs"
-    compose marker-cleanup parity note (issue #117) — the compose `up` path does not call
-    `clear_markers()` on `--remove-existing-container`, unlike the single-container path.
-    Confirmed empirically that `commands/up/compose.rs` never consults lifecycle phase
-    markers (only `ComposeState`/`StateManager`), so the difference is non-surfacing,
-    parity-only cleanup with **no observable behavior to test**. Adding the call would be a
-    behavioral no-op with no evidence for a conformance case, so the gap cannot be
-    legitimately closed under the registry's evidence-backed-status rule; and modifying
-    compose lifecycle behavior is outside 019-conformance-registry's scope.
-  - **Acceptance to close (maintainer decision, not this feature)**: either (a) add the
-    `clear_markers()` call to the compose `--remove-existing-container` path AND an
-    executable case proving the behavior, then update the linked behavior's dispositions
-    and delete `gaps.json`'s `gap-compose-marker-cleanup`; or (b) characterize it as an
-    intentional divergence with a waiver (rationale + `expires`). Either path makes
-    `certify` exit 0 and unblocks the release gate.
+The one open gap seeded during the feature (`gap-compose-marker-cleanup`, from the CLAUDE.md
+"Verified Non-Bugs" compose marker-cleanup note, issue #117) has since been **closed**, so the
+active profile now **certifies cleanly** (`certify` exits 0; the release-gate step passes):
+
+- **Investigation.** `commands/up/compose.rs` neither reads nor writes lifecycle phase markers
+  (only `ComposeState`/`StateManager`); markers are a **deacon-internal** mechanism the
+  reference CLI has no concept of. So there is no spec- or reference-observable behavior here —
+  it is a "non-behavioral differentiator" that RULES.md's out-of-scope rule says the registry
+  should record **nowhere**. It was mis-seeded as a gap.
+- **Resolution (both halves).**
+  - *Code:* the compose `--remove-existing-container` path now calls `clear_markers()`
+    symmetrically with the single-container path (`commands/up/container.rs`), removing the
+    real internal inconsistency the note flagged (best-effort; a failure never blocks `up`).
+  - *Registry:* removed the mis-seeded `gap-compose-marker-cleanup`, the
+    `bhv-up-compose-marker-cleanup` behavior, and the `src-obs-compose-marker-cleanup` source
+    unit as out-of-scope (deacon-internal, no reference equivalent, no observable effect).
+- This is the FR-025 gate working as designed: the gap was genuinely resolved, not waived
+  away — `validate` and `certify` both pass, and no gap record remains.
 
 ---
 
