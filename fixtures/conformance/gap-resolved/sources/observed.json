@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "src-obs-malformed-jsonc",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "errors/malformed-json",
+      "summary": "The reference CLI recovers from a hard JSONC syntax error by dropping the broken property and accepting the file.",
+      "behaviors": ["bhv-readconfig-malformed-jsonc-rejected"]
+    },
+    {
+      "id": "src-obs-remote-user-probe",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration remoteUser",
+      "summary": "The reference CLI derives remoteUser from the probed container user, matching deacon; characterized and case-backed.",
+      "behaviors": ["bhv-readconfig-remote-user-probe"]
+    }
+  ]
+}

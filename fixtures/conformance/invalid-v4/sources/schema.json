@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "src-schema-image-required",
+      "inventory": "schema",
+      "revision": "rev-schema-113500f4",
+      "locator": "#/properties/image",
+      "summary": "The schema's image/build/compose one-of constraint is structural and not yet mapped to an observable behavior.",
+      "behaviors": []
+    }
+  ]
+}

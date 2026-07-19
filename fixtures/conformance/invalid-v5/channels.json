@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "chan-container-state",
+      "description": "Container lifecycle state and inspected metadata."
+    },
+    {
+      "id": "chan-exit-code",
+      "description": "Process exit status of the invoked command."
+    },
+    {
+      "id": "chan-file-content",
+      "description": "Contents of a file the command reads or writes."
+    },
+    {
+      "id": "chan-filesystem",
+      "description": "Presence, absence, or attributes of files and directories."
+    },
+    {
+      "id": "chan-stderr",
+      "description": "Bytes written to standard error."
+    },
+    {
+      "id": "chan-stdout",
+      "description": "Bytes written to standard output (the result document)."
+    }
+  ]
+}

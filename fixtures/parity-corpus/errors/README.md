@@ -15,9 +15,14 @@ make test-parity            # cargo nextest run --profile parity, then the aggre
 
 The runner is `crates/deacon/tests/parity_corpus_errors.rs`. It FAILS the run
 naming the case when a fixture's decision no longer matches its recorded
-expectation, and names any stale waiver record (FR-011). Each fixture is
-`errors/<name>/expect.json` (a schema-validated waiver record) + (usually) a
-`.devcontainer/`.
+expectation, and names any stale waiver record (FR-011). Each case is a directory
+`errors/<name>/` holding the test input — a `.devcontainer/` (or a `.gitkeep` for
+the deliberately config-less `bad-config-path` / `missing-config` cases). Its
+accept/reject expectation is a `corpus_case`-scoped `wvr-<name>` record in the
+**conformance registry** (`conformance/registry/waivers/wvr-<name>.json`), linked
+to a `bhv-readconfig-<name>` behavior with its three-axis disposition — no longer a
+per-case `expect.json` (migrated in 019-conformance-registry; see the "Waiver
+records" section below).
 
 ## Headline finding
 
@@ -70,8 +75,10 @@ and `upgrade` (see the field docs on `DevContainerConfig::extends` and
 characterized divergences**, not parity bugs:
 
 - `extends` → missing / cyclic target: `deacon-stricter` (deacon resolves
-  eagerly and rejects; reference never resolves). Encoded in `extends-missing`
-  and `extends-cycle`.
+  eagerly and rejects; reference never resolves). Recorded as behaviors
+  `bhv-readconfig-extends-missing-rejected` / `bhv-readconfig-extends-cycle-rejected`
+  (waivers `wvr-extends-missing` / `wvr-extends-cycle`), linked from the
+  `ext-extends-resolution` extension in the conformance registry.
 - `extends` → valid target (conformance case 44): both succeed, but deacon
   merges the base config (e.g. the base `containerEnv` appears in the resolved
   config / created container) while the reference drops it. This is a
@@ -93,26 +100,19 @@ goes red only if EITHER CLI's behavior *changes* (e.g. a deacon refactor makes
 read-config lenient, or a reference upgrade makes it strict). True agreement
 cases (`both-reject`, `both-accept`) guard the other direction.
 
-## Waiver schema
+## Waiver records
 
-Each `errors/<name>/expect.json` is a full waiver record validated by the single
-loader `parity_harness::waiver` (schema in
-`specs/018-harden-parity-harness/contracts/registry-waiver-schema.md`,
-`data-model.md` §4). Unknown fields are rejected; `id` is globally unique;
-`rationale` is non-empty.
+Each case's accept/reject expectation is a `wvr-<name>` record in the
+**conformance registry** (`conformance/registry/waivers/wvr-<name>.json`), loaded
+by `parity_harness::waiver` through `deacon-conformance` — the single waiver schema
+now lives there (`crates/conformance/src/model.rs`; contract
+`specs/019-conformance-registry/contracts/registry-schema.md`). Unknown fields are
+rejected; `id` is globally unique; `rationale` is non-empty; `expires` is
+mandatory. Each record links a `bhv-readconfig-<name>` behavior
+(`conformance/registry/behaviors/read-configuration.json`) that carries the
+three-axis disposition (spec / reference / decision).
 
-```json
-{
-  "id": "errors/<name>",
-  "scope": { "kind": "corpus_case", "corpus": "errors", "case": "<name>" },
-  "expect": { "kind": "both-reject" | "both-accept" | "deacon-stricter" },
-  "config": "<rel/path>",
-  "rationale": "why this divergence is characterized / why parity is expected",
-  "added": "YYYY-MM-DD"
-}
-```
-
-`expect.kind` vocabulary:
+`expect.kind` vocabulary (unchanged from the migrated schema):
 
 - `both-reject` — both CLIs must reject (exit != 0). True error-parity agreement.
 - `both-accept` — both accept **and** emit the same resolved config after pruning.
@@ -120,17 +120,25 @@ loader `parity_harness::waiver` (schema in
   Carries an optional `"signal": ["substr", …]` of informational stderr
   substrings (not part of the pass/fail decision).
 
-`config` (optional, string) is a schema-known field carrying an explicit
-`--config` argument for the case; it plays no part in waiver semantics.
+The nine records are `wvr-bad-config-path`, `wvr-duplicate-keys`,
+`wvr-extends-cycle`, `wvr-extends-missing`, `wvr-malformed-json`,
+`wvr-missing-config`, `wvr-unknown-field-preserved`, `wvr-wrong-type-features`,
+and `wvr-wrong-type-forwardports`. `config` (optional, string) carries an explicit
+`--config` argument for a case and plays no part in waiver semantics.
 
 ## Adding a fixture
 
-1. `errors/<name>/.devcontainer/devcontainer.json` (or supporting files; omit
-   it entirely for a "no config" case).
-2. `errors/<name>/expect.json` as the full waiver record above.
+1. `errors/<name>/.devcontainer/devcontainer.json` (or supporting files; add a
+   `.gitkeep` instead for a deliberately "no config" case).
+2. A `bhv-readconfig-<name>` behavior and a `wvr-<name>` waiver in the conformance
+   registry (see `conformance/RULES.md` and
+   `specs/019-conformance-registry/quickstart.md` for the record-a-divergence
+   recipe); a `case-errors-<name>` record in `conformance/registry/cases.json`.
 3. Run `make test-parity`; if it flags a DIVERGENCE, triage whether it's a deacon
-   bug or a defensible characterized divergence, and set `expect.kind`
-   accordingly (`errors/` cases require `min_cases` ≥ 9 in `registry.json`).
+   bug or a defensible characterized divergence, and set the behavior's dispositions
+   + `wvr` `expect.kind` accordingly (`errors/` cases require `min_cases` ≥ 9 in
+   `registry.json`). Run `cargo run -p deacon-conformance -- validate` to check the
+   new records.
 
 ## Natural next step
 

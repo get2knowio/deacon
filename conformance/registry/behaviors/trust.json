@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-trust-host-hook-gate",
+      "area": "trust",
+      "statement": "Host-side lifecycle hooks (initializeCommand and other workspace-resident host hooks) are gated behind an explicit workspace-trust opt-in before any host execution.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "Deacon-specific security gate the upstream spec does not mandate (--trust-workspace[-persist], a persisted allowlist, DEACON_NO_PROMPT=1 to fail closed). Recorded by ext-workspace-trust-gate; backed by case-trust-gate. See SECURITY.md and crates/core/src/trust.rs."
+    }
+  ]
+}

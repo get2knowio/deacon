@@ -8,6 +8,10 @@ publish = false
 description = "Dev-only support crate for the deacon parity test harness: oracle resolution + exact-version verification, bounded CLI execution with raw capture, the single normalization module, waiver/registry loaders, and run-report fragments. Never published."
 
 [dependencies]
+# The conformance registry owns the single waiver record schema + loader
+# (019-conformance-registry, research D3). `parity-harness::waiver` is a thin
+# query wrapper over records this crate loads from `conformance/registry/waivers/`.
+deacon-conformance = { path = "../conformance" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-accepted-combos",
+      "behaviors": [
+        "bhv-accepted-follow-spec-vs-divergent-ref",
+        "bhv-accepted-unspecified-align-with-reference",
+        "bhv-accepted-deacon-extension",
+        "bhv-accepted-intentional-divergence"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "integration_read_configuration"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-exit-code",
+          "expectation": "each accepted-combo behavior is exercised by a real test binary so its status is evidence-backed"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "chan-container-state",
+      "description": "Container lifecycle state and inspected metadata (running/created, labels, mounts, env)."
+    },
+    {
+      "id": "chan-exit-code",
+      "description": "Process exit status of the invoked command."
+    },
+    {
+      "id": "chan-file-content",
+      "description": "Contents of a file the command reads or writes."
+    },
+    {
+      "id": "chan-filesystem",
+      "description": "Presence, absence, or attributes of files and directories on the workspace or container filesystem."
+    },
+    {
+      "id": "chan-stderr",
+      "description": "Bytes written to standard error (diagnostics, logs, progress)."
+    },
+    {
+      "id": "chan-stdout",
+      "description": "Bytes written to standard output (the command result document)."
+    }
+  ]
+}

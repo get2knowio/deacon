@@ -1,0 +1,2 @@
+Intentionally empty: this error case has NO devcontainer config.
+Its accept/reject expectation is wvr-missing-config in conformance/registry/waivers/.

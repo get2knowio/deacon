@@ -1,0 +1,29 @@
+[package]
+name = "deacon-conformance"
+version = "0.0.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Dev-only crate for the repository-owned conformance registry: record model, registry loader, and the `conformance` binary (validate/report/certify). Never published."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Pinned directly (not a [workspace.dependencies] entry) mirroring crates/core;
+# `serde` feature preserves declaration order for the profile context map.
+indexmap = { version = "2.0", features = ["serde"] }
+thiserror = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+# Civil-date handling (current UTC date + ISO `YYYY-MM-DD` parsing) for
+# waiver-expiry evaluation. New dev-only dependency, confined to this crate
+# (research Decision 4); deliberately NOT added to [workspace.dependencies] so it
+# never leaks into the published deacon/deacon-core surface.
+jiff = "0.2"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

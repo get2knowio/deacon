@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-exec-podman-keep-id",
+      "area": "exec",
+      "statement": "Under Podman, exec runs as a non-root remoteUser with the host uid mapped via rootless keep-id.",
+      "applicability": [
+        { "dimension": "dim-runtime", "values": ["podman"] }
+      ],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Out of the active docker profile; excluded from the profile denominator (FR-017)."
+    }
+  ]
+}

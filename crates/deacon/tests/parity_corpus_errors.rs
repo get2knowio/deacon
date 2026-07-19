@@ -7,7 +7,8 @@
 //! a Rust CLI and a Node CLI, so this runner diffs the accept/reject *decision*
 //! (exit-code class) and, when both accept, the resolved configuration value
 //! (after the shared `normalize::config` pruning). The decision matrix is driven
-//! entirely by the schema-validated waiver records (`errors/<name>/expect.json`):
+//! entirely by the schema-validated waiver records in the conformance registry
+//! (`conformance/registry/waivers/wvr-<name>.json`, consumed via `deacon-conformance`):
 //!
 //! - `both-reject`     — both CLIs must reject.
 //! - `both-accept`     — both accept AND, after pruning, resolve to equal configs.
@@ -144,13 +145,11 @@ async fn parity_corpus_errors() {
     let errors_root = root.join(&corpus.path);
     ff(require_fixture(&errors_root));
 
-    // Waivers load from the corpus PARENT (which contains `errors/` and
-    // `waivers/`); each `errors/<case>/expect.json` is a corpus-case record.
-    let corpus_root = errors_root
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| errors_root.clone());
-    let waivers = ff(WaiverSet::load(&corpus_root));
+    // Waivers now live in the conformance registry
+    // (`conformance/registry/waivers/wvr-*.json`); each errors case has a
+    // corpus-case-scoped `wvr-` record consumed through `deacon-conformance`
+    // (019-conformance-registry, research D3).
+    let waivers = ff(WaiverSet::load(&parity_harness::conformance_registry_root()));
 
     let cases = ff(registry::discover_error_cases(&errors_root));
     ff(registry.check_corpus_min(corpus, cases.len()));
@@ -172,7 +171,8 @@ async fn parity_corpus_errors() {
             Some(w) => w,
             None => {
                 failures.push(format!(
-                    "[{case}] no expectation record (errors/{case}/expect.json)"
+                    "[{case}] no expectation record (conformance/registry/waivers/ \
+                     for corpus=errors case={case})"
                 ));
                 continue;
             }

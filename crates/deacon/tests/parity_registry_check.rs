@@ -154,6 +154,68 @@ fn no_parity_source_uses_ignore_or_legacy_skip_idioms() {
     );
 }
 
+/// 5. Waiver location: the conformance registry owns every parity waiver now
+///    (019-conformance-registry, research D3). The migrated records must live under
+///    `conformance/registry/waivers/`, and the legacy parity-corpus locations
+///    (`fixtures/parity-corpus/waivers/` and `fixtures/parity-corpus/errors/*/expect.json`)
+///    must be GONE — so a stray reintroduction of the retired two-file duplication
+///    fails structurally on every PR (FR-027, FR-028).
+#[test]
+fn waivers_live_in_conformance_registry_not_legacy_locations() {
+    let root = workspace_root();
+
+    // New location exists and holds at least the migrated set (9 errors + 1 tier1).
+    let registry_waivers = root.join("conformance/registry/waivers");
+    assert!(
+        registry_waivers.is_dir(),
+        "conformance/registry/waivers/ must exist as the single waiver location: {}",
+        registry_waivers.display()
+    );
+    let wvr_count = std::fs::read_dir(&registry_waivers)
+        .unwrap_or_else(|e| panic!("read {registry_waivers:?}: {e}"))
+        .filter_map(Result::ok)
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("wvr-") && name.ends_with(".json")
+        })
+        .count();
+    assert!(
+        wvr_count >= 10,
+        "expected >= 10 migrated wvr-*.json records, found {wvr_count} in {}",
+        registry_waivers.display()
+    );
+
+    // Legacy location 1: the parity-corpus waivers/ directory must be removed
+    // entirely (migrated into the registry, including its README).
+    let legacy_waivers = root.join("fixtures/parity-corpus/waivers");
+    assert!(
+        !legacy_waivers.exists(),
+        "legacy waiver directory {} must be removed — waivers now live in \
+         conformance/registry/waivers/ (research 019 D3)",
+        legacy_waivers.display()
+    );
+
+    // Legacy location 2: NO errors case may carry an `expect.json` (each was
+    // migrated to a corpus-case-scoped wvr- record). The case directories and their
+    // `.devcontainer/` inputs stay; only the waiver files are gone.
+    let errors_root = root.join("fixtures/parity-corpus/errors");
+    let mut stragglers = Vec::new();
+    let rd =
+        std::fs::read_dir(&errors_root).unwrap_or_else(|e| panic!("read {errors_root:?}: {e}"));
+    for entry in rd.filter_map(Result::ok) {
+        let case_dir = entry.path();
+        if case_dir.is_dir() && case_dir.join("expect.json").is_file() {
+            stragglers.push(case_dir.display().to_string());
+        }
+    }
+    assert!(
+        stragglers.is_empty(),
+        "legacy per-case expect.json waiver file(s) must be removed (migrated to \
+         conformance/registry/waivers/): {stragglers:?}"
+    );
+}
+
 /// Guard: the tests dir this file audits is the real one (fail loud if the anchor
 /// ever drifts, rather than silently auditing nothing).
 #[test]

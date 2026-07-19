@@ -18,7 +18,7 @@ use std::process::ExitCode;
 use parity_harness::aggregate;
 use parity_harness::oracle::OraclePin;
 use parity_harness::registry::ParityRegistry;
-use parity_harness::{report_root, workspace_root};
+use parity_harness::{conformance_registry_root, report_root};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
@@ -39,10 +39,11 @@ async fn main() -> ExitCode {
     };
 
     let report_root = report_root();
-    // Waivers live alongside the tier1 corpus (it holds `errors/` and `waivers/`).
-    let corpus_root = workspace_root().join("fixtures/parity-corpus");
+    // Waivers now live in the conformance registry (`conformance/registry/waivers/`),
+    // consumed through `deacon-conformance` (019-conformance-registry, research D3).
+    let registry_root = conformance_registry_root();
 
-    let aggregation = match aggregate::run(&report_root, &corpus_root, &registry, &pin).await {
+    let aggregation = match aggregate::run(&report_root, &registry_root, &registry, &pin).await {
         Ok(a) => a,
         Err(e) => {
             eprintln!("parity-report: aggregation failed: {e}");

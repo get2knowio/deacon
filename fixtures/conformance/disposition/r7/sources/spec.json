@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "src-spec-readconfig-resolution",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "Configuration resolution",
+      "summary": "A well-formed devcontainer.json is parsed and its resolved configuration is emitted.",
+      "behaviors": ["bhv-readconfig-basic-parse"]
+    }
+  ]
+}

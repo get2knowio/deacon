@@ -577,14 +577,31 @@ pub fn discover_tier1_cases(root: &Path) -> Result<Vec<PathBuf>, HarnessError> {
     Ok(out)
 }
 
-/// Discover error corpus cases: IMMEDIATE subdirectories of `errors_root`
-/// containing an `expect.json`.
+/// Discover error corpus cases: IMMEDIATE subdirectories of `errors_root`,
+/// excluding dot-directories.
+///
+/// Each case directory carries the test input (a `.devcontainer/`, or a `.gitkeep`
+/// for the "no config" / "bad `--config` path" cases that deliberately have no
+/// config). Its accept/reject expectation is a `corpus_case`-scoped `wvr-` record
+/// in the conformance registry (`conformance/registry/waivers/wvr-*.json`), no
+/// longer a per-case `expect.json` (019-conformance-registry, research D3) — the
+/// legacy `expect.json` files were migrated and removed.
 pub fn discover_error_cases(errors_root: &Path) -> Result<Vec<PathBuf>, HarnessError> {
     let mut out = Vec::new();
     for path in immediate_subdirs(errors_root)? {
-        if path.join("expect.json").is_file() {
-            out.push(path);
+        let name = match path.file_name().and_then(|s| s.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        // Skip non-case artifacts: dot-directories and a stray Python `__pycache__`
+        // (mirrors `discover_tier1_cases`). Every remaining subdir is a real error
+        // case whose accept/reject expectation is a `wvr-` record in the conformance
+        // registry; a genuinely mis-named directory still surfaces loudly downstream
+        // as a missing expectation record.
+        if name.starts_with('.') || name == "__pycache__" {
+            continue;
         }
+        out.push(path);
     }
     out.sort();
     Ok(out)

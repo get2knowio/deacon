@@ -13,8 +13,11 @@ Each `<name>/.devcontainer/devcontainer.json` is a realistic config shape
 comments, array/object lifecycle, extends chains, `${...}` substitution, etc.).
 Supporting files (Dockerfile, docker-compose.yml, package.json, base.json) live
 alongside as needed. `errors/` holds invalid / edge-case inputs (see
-[`errors/README.md`](./errors/README.md)); `waivers/` holds observable-state
-waiver records (see [`waivers/README.md`](./waivers/README.md)).
+[`errors/README.md`](./errors/README.md)). Waiver records (the accept/reject
+expectations and characterized divergences) now live in the **conformance
+registry** at `conformance/registry/waivers/wvr-*.json`, consumed through
+`deacon-conformance` — the legacy `waivers/` directory and the per-case
+`errors/*/expect.json` files were migrated there in 019-conformance-registry.
 
 ## Running the parity suite
 
@@ -55,8 +58,9 @@ The Rust runners that drive this corpus:
   over `errors/` (replaces `run_tier1_errors.py`); see `errors/README.md`.
 
 The single normalization/equivalence definition lives in
-`crates/parity-harness/src/normalize.rs`; the waiver schema/loader in
-`crates/parity-harness/src/waiver.rs`; the registry loader in
+`crates/parity-harness/src/normalize.rs`; the waiver record schema + loader in
+`crates/conformance/src/{model,load}.rs` (consumed via the thin query wrapper
+`crates/parity-harness/src/waiver.rs`); the parity registry loader in
 `crates/parity-harness/src/registry.rs`.
 
 ## Tier 3 — pinned real-world corpus fetch

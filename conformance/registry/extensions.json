@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "ext-auto-forward-ports",
+      "behaviors": ["bhv-auto-forward-ports"],
+      "description": "deacon can auto-forward container ports to the host via a host-side daemon backed by a per-container registry and PID markers under the user-data folder — a capability the reference CLI does not model.",
+      "docs": "specs/015-auto-forward-ports/spec.md"
+    },
+    {
+      "id": "ext-extends-resolution",
+      "behaviors": [
+        "bhv-readconfig-extends-cycle-rejected",
+        "bhv-readconfig-extends-merged",
+        "bhv-readconfig-extends-missing-rejected"
+      ],
+      "description": "deacon resolves the full `extends` chain eagerly across read-configuration/up/build (merging base config, rejecting missing/cyclic targets), an ahead-of-spec capability tracking the in-flight proposal devcontainers/spec#22 that the reference CLI v0.87.0 does not implement. Recorded as an extension so the extends divergences are never misreported as parity drift.",
+      "docs": "docs/DIFFERENTIATORS.md"
+    },
+    {
+      "id": "ext-host-ca-injection",
+      "behaviors": ["bhv-host-ca-injection"],
+      "description": "deacon can inject the host's CA certificates into its TLS trust store (for OCI registry and network access), enabled via settings.json — a capability the reference CLI does not model.",
+      "docs": "specs/016-host-ca-injection/spec.md"
+    },
+    {
+      "id": "ext-secrets-file-env-format",
+      "behaviors": ["bhv-secrets-dotenv-superset"],
+      "description": "deacon's --secrets-file auto-detects and accepts a .env-format KEY=VALUE file in addition to the flat JSON the reference CLI requires — a strict superset so an existing docker/compose .env drops in unchanged.",
+      "docs": "docs/DIFFERENTIATORS.md"
+    },
+    {
+      "id": "ext-user-profiles",
+      "behaviors": ["bhv-user-profiles"],
+      "description": "deacon applies user-defined profiles from settings.json (selected via --profile / DEACON_PROFILE) to layer default flags and configuration — a concept the reference CLI does not have.",
+      "docs": "specs/017-user-profiles/spec.md"
+    },
+    {
+      "id": "ext-workspace-trust-gate",
+      "behaviors": ["bhv-trust-host-hook-gate"],
+      "description": "deacon gates host-side lifecycle hooks (initializeCommand and future workspace-resident host hooks) behind an explicit workspace-trust opt-in before any host execution — a protection the upstream spec does not mandate.",
+      "docs": "SECURITY.md"
+    }
+  ]
+}

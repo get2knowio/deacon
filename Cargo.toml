@@ -2,7 +2,8 @@
 members = [
     "crates/deacon",
     "crates/core",
-    "crates/parity-harness"
+    "crates/parity-harness",
+    "crates/conformance"
 ]
 # resolver "3" enables the MSRV-aware dependency resolver (Rust 1.84+), so
 # `cargo update` will not select dependency versions whose own rust-version

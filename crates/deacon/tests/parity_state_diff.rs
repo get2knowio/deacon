@@ -23,6 +23,7 @@ use std::path::Path;
 use serde_json::Value;
 use tempfile::TempDir;
 
+use parity_harness::HarnessError;
 use parity_harness::exec::{ExecKind, Invocation, exec_deacon, exec_oracle};
 use parity_harness::normalize::{StateSnapshot, container_state, diff_states};
 use parity_harness::oracle::{Oracle, VerifiedOracle};
@@ -31,7 +32,6 @@ use parity_harness::report::{
     CaseResult, Cause, OracleInfo, RawPaths, ReportFragment, now_rfc3339,
 };
 use parity_harness::waiver::{Scope, Waiver, WaiverSet, field_matches};
-use parity_harness::{HarnessError, workspace_root};
 
 /// This binary's name — the fragment key and raw-artifact subdirectory.
 const BINARY: &str = "parity_state_diff";
@@ -229,12 +229,12 @@ fn raw_paths(deacon: &Invocation, oracle: &Invocation) -> RawPaths {
 /// - `extra_allowed`: inline, genuinely test-structural allowances (e.g. two
 ///   distinct fixtures deliberately using different `containerEnv` KEYS) that are
 ///   NOT divergences versus the reference and thus need no recorded waiver.
-/// - state-field waivers under `fixtures/parity-corpus/waivers/` scoped to this
-///   binary and `fixture == case`: characterized observable-state divergences
+/// - state-field waivers in the conformance registry
+///   (`conformance/registry/waivers/`, consumed via `deacon-conformance`) scoped to
+///   this binary and `fixture == case`: characterized observable-state divergences
 ///   that MIRROR the reference, routed through the single `waiver::load` loader
-///   (018-harden-parity-harness, research D6). This replaces the retired
-///   `KNOWN_INTENTIONAL_DIVERGENCES` / `KNOWN_GAPS` consts; the directory is
-///   currently empty, so this consults zero records today. A loaded state-field
+///   (019-conformance-registry, research D3). No state-field waiver is seeded today,
+///   so this consults zero such records. A loaded state-field
 ///   waiver that matches no observed divergence for this fixture is STALE and
 ///   fails the run naming its id (FR-011).
 async fn assert_parity(
@@ -248,10 +248,9 @@ async fn assert_parity(
     let started = now_rfc3339();
     let divs = diff_states(deacon, upstream);
 
-    // State-field waivers scoped to this binary + fixture (the single loader
-    // reads them from `fixtures/parity-corpus/waivers/`).
-    let corpus_root = workspace_root().join("fixtures/parity-corpus");
-    let waivers = ff(WaiverSet::load(&corpus_root));
+    // State-field waivers scoped to this binary + fixture (the single loader reads
+    // them from the conformance registry, `conformance/registry/waivers/`).
+    let waivers = ff(WaiverSet::load(&parity_harness::conformance_registry_root()));
     let field_waivers: Vec<&Waiver> = waivers
         .state_field_waivers(BINARY)
         .into_iter()

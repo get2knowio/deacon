@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "src-obs-accepted-combos",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "disposition/accepted",
+      "summary": "Empirically observed reference behavior for the four accepted three-axis disposition combinations.",
+      "behaviors": [
+        "bhv-accepted-follow-spec-vs-divergent-ref",
+        "bhv-accepted-unspecified-align-with-reference",
+        "bhv-accepted-deacon-extension",
+        "bhv-accepted-intentional-divergence"
+      ]
+    }
+  ]
+}

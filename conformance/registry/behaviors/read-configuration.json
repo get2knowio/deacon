@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-readconfig-bad-config-path",
+      "area": "read-configuration",
+      "statement": "An explicit --config pointing at a file that does not exist is rejected (no silent discovery fallback).",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "both-reject agreement case. Backed by case-errors-bad-config-path and wvr-bad-config-path (migrated from fixtures/parity-corpus/errors/bad-config-path/expect.json)."
+    },
+    {
+      "id": "bhv-readconfig-basic-parse",
+      "area": "read-configuration",
+      "statement": "Reading a well-formed devcontainer.json exits 0 and emits the resolved configuration as a single JSON document.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec"
+    },
+    {
+      "id": "bhv-readconfig-duplicate-keys",
+      "area": "read-configuration",
+      "statement": "A JSON object with a duplicate top-level key is accepted with last-wins semantics, matching the reference after pruning.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "both-accept agreement case. Backed by case-errors-duplicate-keys and wvr-duplicate-keys."
+    },
+    {
+      "id": "bhv-readconfig-extends-cycle-rejected",
+      "area": "read-configuration",
+      "statement": "A cyclic extends chain (a -> b -> a) is detected and rejected during read-configuration; the reference CLI v0.87.0 does not resolve extends and accepts.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "deacon-extension",
+      "notes": "extends is the in-flight proposal devcontainers/spec#22 (unspecified in the pinned spec). deacon resolves eagerly and detects the loop; the reference echoes extends literally. Recorded by ext-extends-resolution; backed by case-errors-extends-cycle and wvr-extends-cycle (issue #297)."
+    },
+    {
+      "id": "bhv-readconfig-extends-merged",
+      "area": "read-configuration",
+      "statement": "read-configuration --include-merged-configuration resolves the full extends chain (base image, merged containerEnv and forwardPorts); the reference CLI v0.87.0 does not resolve extends and errors with 'No image information specified'.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "deacon-extension",
+      "notes": "Ahead-of-spec deacon capability (devcontainers/spec#22, issue #297). Recorded by ext-extends-resolution; backed by case-tier1-extends-child and wvr-extends-child-merged (migrated from fixtures/parity-corpus/waivers/extends-child-merged.json). See docs/DIFFERENTIATORS.md."
+    },
+    {
+      "id": "bhv-readconfig-extends-missing-rejected",
+      "area": "read-configuration",
+      "statement": "An extends chain pointing at a nonexistent target file is rejected during read-configuration; the reference CLI v0.87.0 does not resolve extends and accepts.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "deacon-extension",
+      "notes": "extends is the in-flight proposal devcontainers/spec#22 (unspecified in the pinned spec). deacon resolves eagerly and errors on the missing target; the reference echoes extends literally. Recorded by ext-extends-resolution; backed by case-errors-extends-missing and wvr-extends-missing (issue #297)."
+    },
+    {
+      "id": "bhv-readconfig-malformed-jsonc-rejected",
+      "area": "read-configuration",
+      "statement": "A devcontainer.json with a hard JSONC syntax error is rejected at parse rather than silently recovered; the reference CLI's recovering parser drops the broken property and accepts.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "deacon fails fast (constitution IV, no silent fallbacks); the reference is lenient at read-configuration. Backed by case-errors-malformed-json and wvr-malformed-json."
+    },
+    {
+      "id": "bhv-readconfig-merged-configuration",
+      "area": "read-configuration",
+      "statement": "read-configuration --include-merged-configuration over the tier1 corpus emits a merged configuration that matches the reference after normalization (excluding extends, which is the deacon-extension bhv-readconfig-extends-merged).",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Backed by case-merged-corpus (parity_corpus_merged over the tier1 corpus)."
+    },
+    {
+      "id": "bhv-readconfig-missing-config",
+      "area": "read-configuration",
+      "statement": "A workspace folder with no devcontainer configuration at all is rejected rather than resolved to an invented empty config.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "both-reject agreement case. Backed by case-errors-missing-config and wvr-missing-config."
+    },
+    {
+      "id": "bhv-readconfig-tier1-corpus",
+      "area": "read-configuration",
+      "statement": "Reading real-world devcontainer.json configurations from the tier1 corpus produces resolved configurations that match the reference after normalization.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Backed by case-tier1-corpus (parity_corpus_tier1 over the tier1 corpus)."
+    },
+    {
+      "id": "bhv-readconfig-unknown-field-preserved",
+      "area": "read-configuration",
+      "statement": "Unknown / forward-compatible top-level fields are accepted and preserved verbatim in read-configuration output, matching the reference's fidelity.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "both-accept agreement case; guards against silently dropping unmodeled fields (spec extensibility model). Backed by case-errors-unknown-field-preserved and wvr-unknown-field-preserved."
+    },
+    {
+      "id": "bhv-readconfig-wrong-type-features-rejected",
+      "area": "read-configuration",
+      "statement": "A `features` value that is a bare string instead of an object is rejected (type-strict, matching the schema shape); the reference keeps the raw JSON and accepts.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Deliberate consistency fix: modeled object-shaped fields enforce their spec shape and fail fast on a clear mistake, matching the typed strictness forwardPorts already had. Backed by case-errors-wrong-type-features and wvr-wrong-type-features."
+    },
+    {
+      "id": "bhv-readconfig-wrong-type-forwardports-rejected",
+      "area": "read-configuration",
+      "statement": "A `forwardPorts` value that is a bare string instead of an array is rejected (typed deserialization); the reference keeps the raw JSON and accepts.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Typed (deacon) vs untyped (reference) read-configuration. Backed by case-errors-wrong-type-forwardports and wvr-wrong-type-forwardports."
+    }
+  ]
+}
