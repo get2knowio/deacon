@@ -52,6 +52,52 @@ fn exact_unit_counts_per_document() {
     assert_eq!(inv.revision, "rev-schema-113500f4");
 }
 
+/// The pinned schemas must yield NO `unmodeled-keyword` units — a re-vendoring tripwire.
+///
+/// The extractor recurses into a fixed set of sub-schema positions; any keyword outside
+/// that set is captured verbatim as a single `unmodeled-keyword` unit and is NOT
+/// recursed into. That is deliberate (nothing is ever silently dropped) but coarse: a
+/// keyword whose value CONTAINS sub-schemas collapses a whole subtree into one opaque
+/// unit, which a human then classifies with one disposition instead of classifying the
+/// constraints inside it.
+///
+/// The base document is draft 2019-09, so `dependentSchemas`, `dependentRequired`, and
+/// `unevaluatedItems` are all live possibilities at the next pin bump (`dependencies`
+/// likewise for the draft-07 feature document). None appear today, so this holds at
+/// zero.
+///
+/// If a re-vendoring trips this, do NOT just bump the expectation: decide how the new
+/// keyword should be modelled (its own `ConstraintKind`, folded into an existing one, or
+/// legitimately opaque) and teach `schema::extract` to recurse into it if it carries
+/// sub-schemas. Substance participates in the unit ID hash, so choosing the model late
+/// is far cheaper than choosing it wrong and re-hashing every affected classification.
+#[test]
+fn pinned_schemas_yield_no_unmodeled_keywords() {
+    let inv = committed();
+    let unmodeled: Vec<(&str, String)> = inv
+        .units
+        .iter()
+        .filter(|u| u.kind == ConstraintKind::UnmodeledKeyword)
+        .map(|u| {
+            let keyword = u
+                .substance
+                .get("keyword")
+                .and_then(|k| k.as_str())
+                .unwrap_or("<none>")
+                .to_string();
+            (u.pointer.as_str(), keyword)
+        })
+        .collect();
+
+    assert!(
+        unmodeled.is_empty(),
+        "the pinned schemas introduced {} unmodeled keyword(s): {unmodeled:?}\n\
+         Decide how to model each one (see this test's doc comment) — do not simply \
+         update the expectation.",
+        unmodeled.len()
+    );
+}
+
 #[test]
 fn forward_ports_array_type_unit_exists() {
     let inv = committed();
