@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-schema-driftold",
+  "documents": [
+    {
+      "key": "drift",
+      "file": "drift.json",
+      "upstreamUrl": "https://example.invalid/fixtures/inventory-drift/old/drift.json",
+      "sha256": "f956c40921a61867276458a149f625a746f0b8f3fc87bfcd90e7da68ec918fc3"
+    }
+  ]
+}

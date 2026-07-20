@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "description": "Productive self-reference: a node refers to itself through structural keywords (properties/items), which is NOT a pure-$ref cycle.",
+  "type": "object",
+  "properties": {
+    "value": {
+      "type": "string"
+    },
+    "children": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/node"
+      }
+    }
+  },
+  "definitions": {
+    "node": {
+      "type": "object",
+      "properties": {
+        "self": {
+          "$ref": "#/definitions/node"
+        }
+      }
+    }
+  }
+}

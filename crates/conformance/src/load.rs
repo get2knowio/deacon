@@ -20,10 +20,12 @@
 use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
 
 use crate::model::{
-    BehaviorUnit, CertificationProfile, Collection, ContextDimension, DeaconExtension, Gap,
-    ObservableChannel, SourceRevision, SourceUnit, TestCase, Waiver,
+    BehaviorUnit, CertificationProfile, Classification, Collection, ConstraintInventory,
+    ContextDimension, DeaconExtension, Gap, ObservableChannel, SchemasManifest, SourceRevision,
+    SourceUnit, TestCase, Waiver,
 };
 
 /// A schema-class load failure for a single file: an unreadable file, malformed
@@ -46,7 +48,15 @@ impl std::fmt::Display for SchemaError {
     }
 }
 
-/// The load-time error taxonomy (`thiserror` domain errors).
+/// The load-time (and schema-inventory generation) error taxonomy (`thiserror`
+/// domain errors).
+///
+/// The `Root`/`Schema` variants cover registry loading; the remaining variants are
+/// the schema constraint inventory's cause-specific failures (data-model.md §5,
+/// FR-009) — malformed schemas/refs, unresolved or external refs, `$ref` cycles,
+/// manifest fingerprint mismatch, stable-ID collision, and a stale committed
+/// inventory. They are fail-loud: no partial inventory is ever produced
+/// (constitution IV).
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
     /// The registry root itself is unreadable / not a directory — a usage/IO error
@@ -58,6 +68,63 @@ pub enum LoadError {
     /// is reported (FR-019); the `Display` lists them one per line.
     #[error("{}", format_schema_errors(.0))]
     Schema(Vec<SchemaError>),
+
+    /// A schema document (vendored or fixture) is not valid JSON or not a
+    /// well-formed schema object. Fail-loud: no partial inventory is produced.
+    #[error("malformed schema {document:?}: {cause}")]
+    MalformedSchema { document: String, cause: String },
+
+    /// A `$ref` value could not be parsed as an RFC 6901 JSON Pointer reference.
+    #[error("malformed $ref {reference:?} at {pointer:?} in {document:?}")]
+    MalformedRef {
+        document: String,
+        pointer: String,
+        reference: String,
+    },
+
+    /// A fragment `$ref` names a target pointer absent from the pinned document.
+    #[error("unresolved $ref {reference:?} (target {target:?} not found) in {document:?}")]
+    UnresolvedRef {
+        document: String,
+        reference: String,
+        target: String,
+    },
+
+    /// A `$ref` points outside the explicitly pinned schema set (a live URL or a
+    /// path naming no manifest document). Never fetched — a hard error by design.
+    #[error(
+        "unresolved external $ref {reference:?} in {document:?}: \
+         not an explicitly pinned document"
+    )]
+    UnresolvedExternalRef { document: String, reference: String },
+
+    /// A pure `$ref` chain forms a cycle. The message renders the full chain so the
+    /// offending loop is directly reviewable.
+    #[error("reference cycle: {}", .chain.join(" -> "))]
+    RefCycle { chain: Vec<String> },
+
+    /// A vendored schema file's SHA-256 does not match the manifest fingerprint
+    /// (V14). Blocking: the vendored copy no longer matches the claimed revision.
+    #[error("manifest fingerprint mismatch for {file:?}: manifest {expected}, file {actual}")]
+    ManifestFingerprintMismatch {
+        file: PathBuf,
+        expected: String,
+        actual: String,
+    },
+
+    /// Two constraint units derived the same stable id — an astronomically unlikely
+    /// `hash8` collision. Remedy: widen that unit's hash, never silent renumbering.
+    #[error("stable id collision on {id:?}: pointers {first:?} and {second:?}")]
+    IdCollision {
+        id: String,
+        first: String,
+        second: String,
+    },
+
+    /// The committed inventory does not match a fresh regeneration (V14) — either a
+    /// hand edit to the machine-owned file or a stale commit.
+    #[error("committed inventory is out of date: regeneration differs from {path:?}")]
+    InventoryOutOfDate { path: PathBuf },
 }
 
 /// Render a collected batch of schema errors, one per line, for `LoadError::Schema`.
@@ -88,6 +155,10 @@ pub struct Registry {
     pub gaps: Vec<Gap>,
     pub waivers: Vec<Waiver>,
     pub extensions: Vec<DeaconExtension>,
+    /// Hand-authored classification records — `classifications/*.json`, one file
+    /// per manifest document key (020-schema-constraint-inventory). A missing
+    /// directory is empty (loaded before any classifications are authored).
+    pub classifications: Vec<Classification>,
 }
 
 impl Registry {
@@ -132,6 +203,8 @@ impl Registry {
             behaviors: load_dir_collections(&root.join("behaviors"), &mut errors),
             // waivers/*.json — one single-record object per waiver.
             waivers: load_waivers(&root.join("waivers"), &mut errors),
+            // classifications/*.json — one collection per manifest document key.
+            classifications: load_dir_collections(&root.join("classifications"), &mut errors),
         };
 
         if errors.is_empty() {
@@ -276,6 +349,108 @@ fn deserialize_located<T: DeserializeOwned>(path: &Path, raw: &str) -> Result<T,
     })
 }
 
+/// Lowercase-hex encode a byte slice (avoids an external `hex` dependency).
+fn hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        // Infallible: writing to a String never errors.
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+/// The lowercase-hex SHA-256 digest of `bytes` — the manifest fingerprint format.
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex_lower(&hasher.finalize())
+}
+
+/// Load and fingerprint-verify a schemas manifest at `schemas_dir/manifest.json`
+/// (data-model.md §1, 020-schema-constraint-inventory).
+///
+/// For every `documents[]` entry, reads the sibling vendored file, computes its
+/// SHA-256, and compares it to the manifest's recorded `sha256`; a mismatch is a
+/// blocking [`LoadError::ManifestFingerprintMismatch`] (V14) — the vendored copy no
+/// longer matches the claimed revision. A missing or malformed manifest, or an
+/// unreadable vendored file, is a located [`LoadError::Schema`].
+pub fn load_schemas_manifest(schemas_dir: &Path) -> Result<SchemasManifest, LoadError> {
+    let manifest_path = schemas_dir.join("manifest.json");
+    let raw = read_file(&manifest_path).map_err(|e| LoadError::Schema(vec![e]))?;
+    let manifest: SchemasManifest =
+        deserialize_located(&manifest_path, &raw).map_err(|e| LoadError::Schema(vec![e]))?;
+
+    // Rule 4 (contracts/inventory-schema.md): `documents[].key` values are UNIQUE and
+    // safe to use as the `<doc>` component of `cst-<doc>-…` constraint IDs. Enforce
+    // non-empty, lowercase `[a-z0-9-]` (kebab-safe — the extractor fixtures use keys
+    // like `base-fixture`, so hyphens are admitted; uppercase / whitespace / `.` / `/`
+    // and duplicates — the genuinely id-breaking shapes — are rejected fail-loud). The
+    // real vendored manifest uses `base`/`feature`, both compliant.
+    let mut seen_keys: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for doc in &manifest.documents {
+        if doc.key.is_empty()
+            || !doc
+                .key
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return Err(LoadError::MalformedSchema {
+                document: doc.key.clone(),
+                cause: format!(
+                    "manifest document key {:?} is not a valid `<doc>` id component \
+                     (require non-empty lowercase [a-z0-9-])",
+                    doc.key
+                ),
+            });
+        }
+        if !seen_keys.insert(doc.key.as_str()) {
+            return Err(LoadError::MalformedSchema {
+                document: doc.key.clone(),
+                cause: format!(
+                    "duplicate manifest document key {:?} (keys must be unique)",
+                    doc.key
+                ),
+            });
+        }
+    }
+
+    for doc in &manifest.documents {
+        let file = schemas_dir.join(&doc.file);
+        let bytes = std::fs::read(&file).map_err(|e| {
+            LoadError::Schema(vec![SchemaError {
+                file: file.clone(),
+                location: None,
+                message: format!("could not read vendored schema: {e}"),
+            }])
+        })?;
+        let actual = sha256_hex(&bytes);
+        if actual != doc.sha256 {
+            return Err(LoadError::ManifestFingerprintMismatch {
+                file,
+                expected: doc.sha256.clone(),
+                actual,
+            });
+        }
+    }
+    Ok(manifest)
+}
+
+/// Load the committed constraint inventory at `path` (data-model.md §2).
+///
+/// Returns `Ok(None)` when the file is absent — later phases generate it, so
+/// loading before the first generation is not an error. A present-but-malformed
+/// file is a located [`LoadError::Schema`].
+pub fn load_inventory(path: &Path) -> Result<Option<ConstraintInventory>, LoadError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = read_file(path).map_err(|e| LoadError::Schema(vec![e]))?;
+    let inventory: ConstraintInventory =
+        deserialize_located(path, &raw).map_err(|e| LoadError::Schema(vec![e]))?;
+    Ok(Some(inventory))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,6 +577,159 @@ mod tests {
         );
         let err = load_waiver_files(&dir.path().join("waivers")).unwrap_err();
         assert!(matches!(err, LoadError::Schema(ref e) if e.len() == 1));
+    }
+
+    #[test]
+    fn loads_classifications_collection() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "classifications/base.json",
+            r#"{ "schemaVersion": 1, "records": [
+                { "id": "cls-base-forwardports-type-3fa9c214",
+                  "constraint": "cst-base-forwardports-type-3fa9c214",
+                  "disposition": "behavior-mapped",
+                  "behaviors": ["bhv-readconfig-wrong-type-forwardports-rejected"] }
+            ] }"#,
+        );
+        let reg = Registry::load(dir.path()).expect("loads");
+        assert_eq!(reg.classifications.len(), 1);
+        assert_eq!(
+            reg.classifications[0].constraint,
+            "cst-base-forwardports-type-3fa9c214"
+        );
+        // The scaffold sentinel disposition is a hard SCHEMA failure at load.
+        write(
+            dir.path(),
+            "classifications/feature.json",
+            r#"{ "schemaVersion": 1, "records": [
+                { "id": "cls-x", "constraint": "cst-x", "disposition": "UNREVIEWED" }
+            ] }"#,
+        );
+        let err = Registry::load(dir.path()).unwrap_err();
+        assert!(matches!(err, LoadError::Schema(_)));
+    }
+
+    #[test]
+    fn load_schemas_manifest_verifies_fingerprints() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema_bytes = br#"{"type":"object"}"#;
+        let good = sha256_hex(schema_bytes);
+        fs::write(dir.path().join("doc.schema.json"), schema_bytes).unwrap();
+
+        // Matching fingerprint loads.
+        let manifest_json = format!(
+            r#"{{ "schemaVersion": 1, "revision": "rev-schema-113500f4", "documents": [
+                {{ "key": "base", "file": "doc.schema.json",
+                   "upstreamUrl": "https://example/doc.json", "sha256": "{good}" }}
+            ] }}"#
+        );
+        fs::write(dir.path().join("manifest.json"), &manifest_json).unwrap();
+        let manifest = load_schemas_manifest(dir.path()).expect("verified manifest loads");
+        assert_eq!(manifest.revision, "rev-schema-113500f4");
+        assert_eq!(manifest.documents[0].key, "base");
+
+        // Tampered file bytes → fingerprint mismatch, naming the file.
+        fs::write(dir.path().join("doc.schema.json"), br#"{"type":"array"}"#).unwrap();
+        let err = load_schemas_manifest(dir.path()).unwrap_err();
+        match err {
+            LoadError::ManifestFingerprintMismatch {
+                file,
+                expected,
+                actual,
+            } => {
+                assert!(file.ends_with("doc.schema.json"));
+                assert_eq!(expected, good);
+                assert_ne!(actual, good);
+            }
+            other => panic!("expected fingerprint mismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_schemas_manifest_rejects_malformed_and_duplicate_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema_bytes = br#"{"type":"object"}"#;
+        let good = sha256_hex(schema_bytes);
+        fs::write(dir.path().join("doc.schema.json"), schema_bytes).unwrap();
+
+        // An uppercase key is not a valid `<doc>` id component → MalformedSchema.
+        let bad_key = format!(
+            r#"{{ "schemaVersion": 1, "revision": "rev-schema-113500f4", "documents": [
+                {{ "key": "Base", "file": "doc.schema.json",
+                   "upstreamUrl": "https://example/doc.json", "sha256": "{good}" }}
+            ] }}"#
+        );
+        fs::write(dir.path().join("manifest.json"), &bad_key).unwrap();
+        assert!(matches!(
+            load_schemas_manifest(dir.path()).unwrap_err(),
+            LoadError::MalformedSchema { .. }
+        ));
+
+        // Duplicate keys → MalformedSchema.
+        let dup = format!(
+            r#"{{ "schemaVersion": 1, "revision": "rev-schema-113500f4", "documents": [
+                {{ "key": "base", "file": "doc.schema.json",
+                   "upstreamUrl": "https://example/doc.json", "sha256": "{good}" }},
+                {{ "key": "base", "file": "doc.schema.json",
+                   "upstreamUrl": "https://example/doc.json", "sha256": "{good}" }}
+            ] }}"#
+        );
+        fs::write(dir.path().join("manifest.json"), &dup).unwrap();
+        assert!(matches!(
+            load_schemas_manifest(dir.path()).unwrap_err(),
+            LoadError::MalformedSchema { .. }
+        ));
+
+        // A kebab key (as the extractor fixtures use) is accepted.
+        let kebab = format!(
+            r#"{{ "schemaVersion": 1, "revision": "rev-schema-113500f4", "documents": [
+                {{ "key": "base-fixture", "file": "doc.schema.json",
+                   "upstreamUrl": "https://example/doc.json", "sha256": "{good}" }}
+            ] }}"#
+        );
+        fs::write(dir.path().join("manifest.json"), &kebab).unwrap();
+        assert_eq!(
+            load_schemas_manifest(dir.path()).unwrap().documents[0].key,
+            "base-fixture"
+        );
+    }
+
+    #[test]
+    fn load_schemas_manifest_missing_manifest_is_schema_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = load_schemas_manifest(dir.path()).unwrap_err();
+        assert!(matches!(err, LoadError::Schema(_)));
+    }
+
+    #[test]
+    fn load_inventory_missing_is_none_and_present_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("constraints.json");
+        assert!(
+            load_inventory(&path).expect("missing is ok").is_none(),
+            "absent inventory loads as None"
+        );
+
+        fs::write(
+            &path,
+            r#"{ "schemaVersion": 1, "revision": "rev-schema-113500f4", "units": [
+                { "id": "cst-base-forwardports-type-3fa9c214", "document": "base",
+                  "pointer": "/definitions/devContainerCommon/properties/forwardPorts",
+                  "kind": "type", "substance": { "type": "array" }, "context": null }
+            ] }"#,
+        )
+        .unwrap();
+        let inv = load_inventory(&path).expect("present loads").expect("some");
+        assert_eq!(inv.units.len(), 1);
+        assert_eq!(inv.units[0].document, "base");
+
+        // A malformed inventory is a located schema error.
+        fs::write(&path, "{ not json").unwrap();
+        assert!(matches!(
+            load_inventory(&path).unwrap_err(),
+            LoadError::Schema(_)
+        ));
     }
 
     #[test]

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-schema-fixture",
+  "documents": [
+    {
+      "key": "fixture",
+      "file": "recursive-ok.json",
+      "upstreamUrl": "https://example.invalid/fixtures/recursive-ok.json",
+      "sha256": "57ba5bf51acb8c77c44540a86b601c7547abb8cfb8b64c8dfed30c05f1de481e"
+    }
+  ]
+}

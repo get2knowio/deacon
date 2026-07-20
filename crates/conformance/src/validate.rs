@@ -1,11 +1,17 @@
-//! Structural validation engine (violation classes V1–V10 + SCHEMA), FR-019.
+//! Structural validation engine (violation classes V1–V14 + SCHEMA), FR-019.
 //!
-//! [`run`] evaluates every violation class over a loaded [`Registry`] and returns
-//! ALL violations found in a single pass (never first-failure), sorted by code then
-//! record ID (contracts/cli.md). [`validate_path`] is the load-then-validate
-//! convenience the CLI and acceptance tests share: a schema-invalid registry folds
-//! its located [`SchemaError`]s into `SCHEMA`-class violations; a genuinely
-//! unreadable registry root is the only outcome surfaced as an `Err` (CLI exit 2).
+//! [`run`] evaluates the registry-only violation classes (V1–V10) over a loaded
+//! [`Registry`] and returns ALL violations found in a single pass (never
+//! first-failure), sorted by code then record ID (contracts/cli.md).
+//! [`check_inventory`] adds the schema-constraint-inventory join classes (V11–V14),
+//! which need the committed inventory + vendored schemas alongside the registry
+//! (020-schema-constraint-inventory). [`validate_path`] is the registry-only
+//! load-then-validate convenience the V1–V10 acceptance tests and the `report` /
+//! `certify` gates share; [`validate_path_with_inventory`] is the superset the
+//! `validate` CLI command runs (V1–V14 together in one pass). A schema-invalid
+//! registry folds its located [`SchemaError`]s into `SCHEMA`-class violations; a
+//! genuinely unreadable registry root is the only outcome surfaced as an `Err` (CLI
+//! exit 2).
 //!
 //! The violation classes (data-model.md):
 //!
@@ -22,7 +28,17 @@
 //!   extension↔decision consistency;
 //! - **V9** an expected outcome referencing an undeclared observable channel;
 //! - **V10** a test case whose context has an empty intersection with a linked
-//!   behavior's applicability.
+//!   behavior's applicability;
+//! - **V11** a classification whose `constraint` is absent from the committed
+//!   inventory (stale);
+//! - **V12** a constraint unit with zero classification records (unclassified) or
+//!   more than one (duplicated) — every unit of every kind requires exactly one;
+//! - **V13** a classification whose shape/linkage is broken: id-tail mirror, the
+//!   `behaviors` arity/existence rule vs `disposition`, or a missing `rationale`
+//!   on a `non-testable` / `not-applicable` record;
+//! - **V14** provenance breakage: schemas manifest fingerprint mismatch, an
+//!   inventory `revision` that does not name the registry's `schema`-kind revision,
+//!   or a committed inventory that no longer byte-matches a fresh regeneration.
 //!
 //! Pure sync file IO only (V1 executable existence, V7 pin file); no Unix-only APIs
 //! and no path-string parsing, so the crate compiles and validates identically on
@@ -33,10 +49,12 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use crate::load::{LoadError, Registry, SchemaError};
+use crate::inventory::{generate_inventory, render};
+use crate::load::{LoadError, Registry, SchemaError, load_inventory};
 use crate::model::{
-    BehaviorUnit, CertificationProfile, Condition, Decision, RecordType, ReferenceStatus,
-    SpecStatus, parse_id,
+    BehaviorUnit, CertificationProfile, Classification, Condition, ConstraintInventory,
+    ConstraintUnit, Decision, Disposition, RecordType, ReferenceStatus, RevisionKind, SpecStatus,
+    parse_id,
 };
 
 /// A single structural violation. `code` is the stable class (`"V1"`..`"V10"` or
@@ -95,7 +113,383 @@ pub fn validate_path(
     match Registry::load(root) {
         Ok(registry) => Ok(run(&registry, today, repo_root)),
         Err(LoadError::Schema(errors)) => Ok(schema_violations(&errors)),
-        Err(root_err @ LoadError::Root { .. }) => Err(root_err),
+        // `Root` and the inventory-domain errors (never produced by
+        // `Registry::load`, only by the schema/inventory loaders) surface as an Err
+        // — the CLI maps them to exit 2. Only `Schema` folds into SCHEMA violations.
+        Err(other) => Err(other),
+    }
+}
+
+/// Where to find the schema-constraint-inventory provenance inputs for the V11–V14
+/// join (020-schema-constraint-inventory). The committed inventory is the join target
+/// for V11/V12/V13; the pinned schemas directory drives the V14 regeneration and
+/// fingerprint verification. Tests point both at fixtures; the `validate` CLI command
+/// uses the workspace defaults.
+#[derive(Debug, Clone, Copy)]
+pub struct InventoryInputs<'a> {
+    /// The pinned schemas directory (`manifest.json` + the vendored schema files).
+    pub schemas_dir: &'a Path,
+    /// The committed constraint inventory file.
+    pub inventory_file: &'a Path,
+}
+
+/// Load the registry at `root`, validate it (V1–V10 via [`run`]), AND enforce the
+/// schema-constraint-inventory join classes (V11–V14 via [`check_inventory`]) in the
+/// SAME single pass, returning ALL violations sorted by code then record ID.
+///
+/// This is the entry point the `validate` CLI command runs. The registry-only
+/// [`validate_path`] is retained for the `report` / `certify` gates and the V1–V10
+/// acceptance fixtures, which must NOT see V11–V14 (the inventory join is scoped to the
+/// real inventory + vendored schemas, not per-fixture). Schema-load failures fold into
+/// `SCHEMA`-class violations exactly as [`validate_path`] does; the inventory join is
+/// then skipped (there is no cleanly-loaded registry to join against).
+pub fn validate_path_with_inventory(
+    root: &Path,
+    today: &str,
+    repo_root: &Path,
+    inputs: &InventoryInputs,
+) -> Result<Vec<Violation>, LoadError> {
+    match Registry::load(root) {
+        Ok(registry) => {
+            let mut violations = run(&registry, today, repo_root);
+            violations.extend(check_inventory(&registry, inputs));
+            sort_violations(&mut violations);
+            Ok(violations)
+        }
+        Err(LoadError::Schema(errors)) => Ok(schema_violations(&errors)),
+        Err(other) => Err(other),
+    }
+}
+
+/// The join of the committed inventory against the hand-authored classification
+/// records: the raw material behind V11 (stale) and V12 (unclassified / duplicated).
+///
+/// Extracted so `validate`'s enforcement and `report`'s review queues are computed by
+/// ONE implementation — the two must never disagree about what is unclassified or stale.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InventoryJoin {
+    /// Unit IDs carrying zero classification records (V12), ID-sorted.
+    pub unclassified: Vec<String>,
+    /// Classification IDs whose constraint is absent from the inventory (V11), ID-sorted.
+    pub stale: Vec<String>,
+    /// Units classified more than once (V12): `(unit id, the offending classification
+    /// ids)`, both levels ID-sorted.
+    pub duplicated: Vec<(String, Vec<String>)>,
+}
+
+/// Join `units` against `classifications` (see [`InventoryJoin`]). Pure and total — it
+/// never reads the filesystem, so both callers can share it.
+pub fn join_inventory(
+    units: &[ConstraintUnit],
+    classifications: &[Classification],
+) -> InventoryJoin {
+    let mut per_constraint: HashMap<&str, Vec<&str>> = HashMap::new();
+    for cls in classifications {
+        per_constraint
+            .entry(cls.constraint.as_str())
+            .or_default()
+            .push(cls.id.as_str());
+    }
+    let unit_ids: HashSet<&str> = units.iter().map(|u| u.id.as_str()).collect();
+
+    let mut join = InventoryJoin::default();
+    for unit in units {
+        match per_constraint.get(unit.id.as_str()) {
+            None => join.unclassified.push(unit.id.clone()),
+            Some(ids) if ids.len() > 1 => {
+                let mut ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
+                ids.sort();
+                join.duplicated.push((unit.id.clone(), ids));
+            }
+            Some(_) => {}
+        }
+    }
+    for cls in classifications {
+        if !unit_ids.contains(cls.constraint.as_str()) {
+            join.stale.push(cls.id.clone());
+        }
+    }
+
+    join.unclassified.sort();
+    join.stale.sort();
+    join.duplicated.sort();
+    join
+}
+
+/// Enforce the schema-constraint-inventory join classes (V11–V14) by joining the
+/// loaded registry's classification records against the committed inventory and the
+/// vendored pinned schemas (contracts/classification-schema.md,
+/// 020-schema-constraint-inventory). Returns every violation found (sorted); an empty
+/// vector means the join is clean.
+///
+/// - **V11 (stale)**: a classification's `constraint` is absent from the committed
+///   inventory.
+/// - **V12 (unclassified / duplicated)**: a constraint unit with zero classification
+///   records, or with more than one. Every unit of every kind (including `annotation`
+///   and `unmodeled-keyword`) requires exactly one.
+/// - **V13 (shape / linkage)**: id-tail mirror, `behaviors` arity + existence vs
+///   `disposition`, and `rationale` presence for `non-testable` / `not-applicable`.
+/// - **V14 (provenance)**: manifest fingerprint mismatch, an inventory `revision` that
+///   does not name the registry's `schema`-kind revision, or a committed inventory that
+///   no longer byte-matches a fresh regeneration (reusing the `inventory check`
+///   comparison via [`generate_inventory`] + [`render`]).
+///
+/// V11/V12 are derived from the shared [`join_inventory`], so `validate` and `report`
+/// can never disagree about the review queues.
+pub fn check_inventory(registry: &Registry, inputs: &InventoryInputs) -> Vec<Violation> {
+    let mut out: Vec<Violation> = Vec::new();
+
+    // A registry with NEITHER a committed inventory nor a vendored schemas directory is
+    // not subject to the inventory contract (e.g. the V1–V10 acceptance fixtures, which
+    // ship no inventory). The join has nothing to check. This is scoping, not a silent
+    // fallback: wherever an inventory OR its schemas exist — as they always do for the
+    // real `conformance/` tree — the corresponding V11–V14 checks run in full (a deleted
+    // inventory with schemas still present, or vice-versa, still trips V14).
+    if !inputs.inventory_file.exists() && !inputs.schemas_dir.exists() {
+        return out;
+    }
+
+    // The committed inventory is the join target for V11/V12/V13. A malformed or
+    // unreadable committed file is itself provenance breakage (V14): the join cannot
+    // proceed, so units stay empty (every classification then reads as stale — V11 —
+    // which is the correct "the machine-owned artifact is broken" signal).
+    let committed: Option<ConstraintInventory> = match load_inventory(inputs.inventory_file) {
+        Ok(inv) => inv,
+        Err(e) => {
+            out.push(Violation::new(
+                "V14",
+                inputs.inventory_file.display().to_string(),
+                format!("could not load the committed inventory for the classification join: {e}"),
+            ));
+            None
+        }
+    };
+
+    let units: &[ConstraintUnit] = committed
+        .as_ref()
+        .map(|c| c.units.as_slice())
+        .unwrap_or(&[]);
+    let behavior_ids: HashSet<&str> = registry.behaviors.iter().map(|b| b.id.as_str()).collect();
+    let join = join_inventory(units, &registry.classifications);
+
+    // V11 (stale), from the shared join.
+    let stale: HashSet<&str> = join.stale.iter().map(String::as_str).collect();
+    for cls in &registry.classifications {
+        if stale.contains(cls.id.as_str()) {
+            out.push(Violation::new(
+                "V11",
+                &cls.id,
+                format!(
+                    "classification references constraint {:?}, which is absent from the \
+                     committed inventory (stale — delete or re-point it)",
+                    cls.constraint
+                ),
+            ));
+        }
+        // V13 (shape/linkage), per classification record.
+        check_classification_shape(cls, &behavior_ids, &mut out);
+    }
+
+    // V12 (unclassified / duplicated), per constraint unit — no unit is exempt.
+    for id in &join.unclassified {
+        out.push(Violation::new(
+            "V12",
+            id,
+            "constraint unit has no classification record (unclassified — exactly one is \
+             required)",
+        ));
+    }
+    for (id, cls_ids) in &join.duplicated {
+        out.push(Violation::new(
+            "V12",
+            id,
+            format!(
+                "constraint unit is classified by {} records ({}); exactly one is required \
+                 (duplicated)",
+                cls_ids.len(),
+                cls_ids.join(", ")
+            ),
+        ));
+    }
+
+    // V14 (provenance).
+    check_provenance(registry, inputs, committed.as_ref(), &mut out);
+
+    sort_violations(&mut out);
+    out
+}
+
+/// V13 shape/linkage checks for a single classification record
+/// (contracts/classification-schema.md "Record rules").
+fn check_classification_shape(
+    cls: &Classification,
+    behavior_ids: &HashSet<&str>,
+    out: &mut Vec<Violation>,
+) {
+    // Rule 1: `id` = `cls-` + the exact tail of the `constraint`'s `cst-` id.
+    match cls.constraint.strip_prefix("cst-") {
+        Some(tail) => {
+            let expected = format!("cls-{tail}");
+            if cls.id != expected {
+                out.push(Violation::new(
+                    "V13",
+                    &cls.id,
+                    format!(
+                        "classification id must mirror its constraint tail (expected {expected:?} \
+                         for constraint {:?})",
+                        cls.constraint
+                    ),
+                ));
+            }
+        }
+        None => out.push(Violation::new(
+            "V13",
+            &cls.id,
+            format!(
+                "classification constraint {:?} is not a `cst-` id; the id-tail mirror is undefined",
+                cls.constraint
+            ),
+        )),
+    }
+
+    // Rules 2/3: `behaviors` arity + existence, keyed to the disposition.
+    match cls.disposition {
+        Disposition::BehaviorMapped => {
+            if cls.behaviors.is_empty() {
+                out.push(Violation::new(
+                    "V13",
+                    &cls.id,
+                    "disposition `behavior-mapped` requires a non-empty `behaviors` list",
+                ));
+            }
+            for behavior in &cls.behaviors {
+                if !behavior_ids.contains(behavior.as_str()) {
+                    out.push(Violation::new(
+                        "V13",
+                        &cls.id,
+                        format!(
+                            "maps to behavior {behavior:?}, which is not an existing `bhv-` record"
+                        ),
+                    ));
+                }
+            }
+        }
+        Disposition::NonTestable | Disposition::NotApplicable => {
+            if !cls.behaviors.is_empty() {
+                out.push(Violation::new(
+                    "V13",
+                    &cls.id,
+                    format!(
+                        "disposition {} must have an empty `behaviors` list",
+                        disposition_name(cls.disposition)
+                    ),
+                ));
+            }
+        }
+    }
+
+    // Rule 4: `non-testable` / `not-applicable` require a non-empty `rationale`.
+    if matches!(
+        cls.disposition,
+        Disposition::NonTestable | Disposition::NotApplicable
+    ) {
+        let has_rationale = cls
+            .rationale
+            .as_deref()
+            .is_some_and(|r| !r.trim().is_empty());
+        if !has_rationale {
+            out.push(Violation::new(
+                "V13",
+                &cls.id,
+                format!(
+                    "disposition {} requires a non-empty `rationale`",
+                    disposition_name(cls.disposition)
+                ),
+            ));
+        }
+    }
+}
+
+/// V14 provenance checks: regeneration byte-equality + manifest fingerprint (both via
+/// [`generate_inventory`], reusing the `inventory check` comparison) and the inventory
+/// revision ↔ registry `schema`-kind revision pin.
+fn check_provenance(
+    registry: &Registry,
+    inputs: &InventoryInputs,
+    committed: Option<&ConstraintInventory>,
+    out: &mut Vec<Violation>,
+) {
+    // Fingerprint (surfaced by `generate_inventory`) + committed-vs-regenerated bytes.
+    match generate_inventory(inputs.schemas_dir) {
+        Ok(regenerated) => match std::fs::read_to_string(inputs.inventory_file) {
+            Ok(committed_raw) => {
+                if committed_raw != render(&regenerated) {
+                    out.push(Violation::new(
+                        "V14",
+                        inputs.inventory_file.display().to_string(),
+                        "committed inventory does not byte-match a fresh regeneration from the \
+                         pinned schemas (run `inventory generate`)",
+                    ));
+                }
+            }
+            Err(e) => out.push(Violation::new(
+                "V14",
+                inputs.inventory_file.display().to_string(),
+                format!(
+                    "could not read the committed inventory for the regeneration comparison: {e}"
+                ),
+            )),
+        },
+        Err(LoadError::ManifestFingerprintMismatch {
+            file,
+            expected,
+            actual,
+        }) => out.push(Violation::new(
+            "V14",
+            file.display().to_string(),
+            format!(
+                "schemas manifest fingerprint mismatch: manifest records {expected}, vendored file \
+                 is {actual}"
+            ),
+        )),
+        Err(e) => out.push(Violation::new(
+            "V14",
+            inputs.schemas_dir.display().to_string(),
+            format!(
+                "could not regenerate the inventory from the pinned schemas for provenance: {e}"
+            ),
+        )),
+    }
+
+    // The inventory `revision` must NAME AN EXISTING `schema`-kind revision record
+    // (data-model.md §1). Matching against "the first such record" would spuriously fire
+    // during a pin bump, when the registry legitimately carries both the outgoing and the
+    // incoming `rev-schema-*` records.
+    if let Some(committed) = committed {
+        let schema_revisions: Vec<&str> = registry
+            .revisions
+            .iter()
+            .filter(|r| r.kind == RevisionKind::Schema)
+            .map(|r| r.id.as_str())
+            .collect();
+        if schema_revisions.is_empty() {
+            out.push(Violation::new(
+                "V14",
+                committed.revision.clone(),
+                "the registry declares no `schema`-kind revision to pin the inventory against",
+            ));
+        } else if !schema_revisions.contains(&committed.revision.as_str()) {
+            out.push(Violation::new(
+                "V14",
+                committed.revision.clone(),
+                format!(
+                    "inventory revision {:?} names no `schema`-kind revision record in the \
+                     registry (declared: {})",
+                    committed.revision,
+                    schema_revisions.join(", ")
+                ),
+            ));
+        }
     }
 }
 
@@ -309,6 +703,13 @@ impl<'a> Checker<'a> {
             r.extensions
                 .iter()
                 .map(|x| (x.id.as_str(), RecordType::Extension)),
+        );
+        // Classification records are registry records like any other, so the V2 id
+        // grammar / uniqueness / prefix↔type checks cover them too (data-model.md §5).
+        out.extend(
+            r.classifications
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::Classification)),
         );
         out
     }
@@ -857,6 +1258,8 @@ fn record_type_name(ty: RecordType) -> &'static str {
         RecordType::Gap => "gap",
         RecordType::Waiver => "waiver",
         RecordType::Extension => "extension",
+        RecordType::Constraint => "constraint-unit",
+        RecordType::Classification => "classification",
     }
 }
 
@@ -885,6 +1288,14 @@ fn decision_name(decision: Decision) -> &'static str {
         Decision::DeaconExtension => "deacon-extension",
         Decision::IntentionalDivergence => "intentional-divergence",
         Decision::UnresolvedGap => "unresolved-gap",
+    }
+}
+
+fn disposition_name(disposition: Disposition) -> &'static str {
+    match disposition {
+        Disposition::BehaviorMapped => "behavior-mapped",
+        Disposition::NonTestable => "non-testable",
+        Disposition::NotApplicable => "not-applicable",
     }
 }
 

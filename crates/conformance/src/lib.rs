@@ -13,13 +13,18 @@
 //! - [`validate`] — the violation-class engine V1–V10 + SCHEMA (US1, T006–T010);
 //! - [`coverage`] — derived per-behavior coverage evaluation (US2, T016);
 //! - [`report`] — deterministic `report.json` / `report.md` generation (US2, T017–T018);
-//! - [`certify`] — strict certification for the active profile (US2, T019).
+//! - [`certify`] — strict certification for the active profile (US2, T019);
+//! - [`diff`] — deterministic revision diff between two constraint inventories
+//!   (US3, T030–T031).
 
 pub mod certify;
 pub mod coverage;
+pub mod diff;
+pub mod inventory;
 pub mod load;
 pub mod model;
 pub mod report;
+pub mod schema;
 pub mod validate;
 
 /// Absolute path to the workspace root, derived from this crate's
@@ -41,6 +46,40 @@ pub fn default_registry_dir() -> std::path::PathBuf {
     workspace_root().join("conformance").join("registry")
 }
 
+/// The default schemas root: `<workspace_root>/conformance/schemas`. Contains one
+/// `<rev-pin>/` subdirectory per vendored schema revision (each with a
+/// `manifest.json` and its byte-exact schema files). The CLI's `--schemas <dir>`
+/// flag overrides it (tests point it at fixtures)
+/// (020-schema-constraint-inventory).
+pub fn default_schemas_dir() -> std::path::PathBuf {
+    workspace_root().join("conformance").join("schemas")
+}
+
+/// The pin of the currently vendored mandatory schema revision (the subdirectory of
+/// [`default_schemas_dir`] holding the manifest + byte-exact schema files). Matches the
+/// `pin` of the `rev-schema-<pin>` revision record. Bumped only on a conscious
+/// re-vendoring (quickstart.md "Re-vendoring") (020-schema-constraint-inventory).
+pub const CURRENT_SCHEMA_PIN: &str = "113500f4";
+
+/// The default manifest directory for `inventory generate`/`check`:
+/// `<workspace_root>/conformance/schemas/<CURRENT_SCHEMA_PIN>/`. The CLI's `--schemas
+/// <dir>` flag overrides it (tests point it at single-document fixture manifests)
+/// (020-schema-constraint-inventory).
+pub fn default_pinned_schemas_dir() -> std::path::PathBuf {
+    default_schemas_dir().join(CURRENT_SCHEMA_PIN)
+}
+
+/// The default committed inventory file:
+/// `<workspace_root>/conformance/inventory/constraints.json` — the machine-owned,
+/// byte-stable constraint inventory. The CLI's `--inventory <file>` /  `--out
+/// <file>` flags override it (020-schema-constraint-inventory).
+pub fn default_inventory_file() -> std::path::PathBuf {
+    workspace_root()
+        .join("conformance")
+        .join("inventory")
+        .join("constraints.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,6 +90,26 @@ mod tests {
         assert!(
             root.join("crates/conformance/Cargo.toml").is_file(),
             "workspace_root() should locate this crate, got {root:?}"
+        );
+    }
+
+    #[test]
+    fn default_schemas_dir_contains_the_vendored_pin() {
+        // The vendored pinned schemas + manifest live under the schemas root, keyed
+        // by the `rev-schema-113500f4` pin (020-schema-constraint-inventory).
+        let manifest = default_schemas_dir().join("113500f4").join("manifest.json");
+        assert!(
+            manifest.is_file(),
+            "default_schemas_dir() should contain the vendored manifest, got {manifest:?}"
+        );
+    }
+
+    #[test]
+    fn default_inventory_file_path_is_stable() {
+        let inv = default_inventory_file();
+        assert!(
+            inv.ends_with("conformance/inventory/constraints.json"),
+            "got {inv:?}"
         );
     }
 }

@@ -8,9 +8,13 @@
 //!
 //! The full source → behavior → context → case → outcome chain (FR-022) is carried
 //! on each behavior entry via `sources`, `applicability`, `cases` (with per-channel
-//! `outcomes`), `waivers`, and `gaps`. The seven-section `report.md` layout follows
+//! `outcomes`), `waivers`, and `gaps`. The first seven `report.md` sections follow
 //! contracts/report-schema.md exactly: header, summary, gaps (always present),
 //! divergences & waivers, extensions, traceability index, out-of-profile behaviors.
+//! An eighth "Constraint inventory" section (020-schema-constraint-inventory, T028)
+//! summarizes the committed constraint inventory joined against the hand-authored
+//! classification records — unit counts by document/kind, disposition tallies, and the
+//! normally-empty unclassified/stale review queues.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -21,8 +25,10 @@ use serde::Serialize;
 use crate::coverage::{BehaviorCoverage, Coverage, CoverageState};
 use crate::load::Registry;
 use crate::model::{
-    Condition, Decision, ExpectedOutcome, GapKind, ReferenceStatus, RevisionKind, SpecStatus,
+    Classification, Condition, ConstraintInventory, ConstraintKind, Decision, Disposition,
+    ExpectedOutcome, GapKind, ReferenceStatus, RevisionKind, SpecStatus,
 };
+use crate::validate::join_inventory;
 
 /// The `report.json` schema version (contracts/report-schema.md).
 const SCHEMA_VERSION: u32 = 1;
@@ -49,7 +55,72 @@ pub struct ReportJson {
     /// Always empty in a valid registry (a source unit with neither behaviors nor
     /// `outOfScope` is V4); present for shape stability (contracts/report-schema.md).
     pub unclassified_source_units: Vec<String>,
+    /// The schema-constraint inventory summary (020-schema-constraint-inventory,
+    /// T028): committed-unit counts joined against the hand-authored classification
+    /// records. Present-but-zeroed when the registry ships no sibling inventory
+    /// (mirrors the validate V11–V14 scoping).
+    pub inventory: InventorySection,
 }
+
+/// The constraint-inventory section of `report.json` (020-schema-constraint-inventory,
+/// FR-014). Summarizes the committed inventory (`conformance/inventory/constraints.json`)
+/// joined against the hand-authored `cls-` classification records: unit counts by
+/// document and by kind, disposition tallies, and the (normally empty) unclassified
+/// and stale review queues. Every collection is deterministically ordered — document
+/// counts by document key, kind counts in the closed `ConstraintKind` declaration
+/// order (all 15 always present), listings ID-sorted — so it stays byte-stable (SC-004).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InventorySection {
+    /// The manifest revision the committed inventory was extracted from; empty string
+    /// when no inventory is present.
+    pub revision: String,
+    /// Total extracted constraint units across all documents.
+    pub total_units: usize,
+    /// Unit counts keyed by manifest document, emitted in document-key-sorted order.
+    pub units_by_document: IndexMap<String, usize>,
+    /// Unit counts for every `ConstraintKind`, in the enum's declaration order — all
+    /// 15 kinds always present (zero when unobserved), so the shape is stable.
+    pub units_by_kind: IndexMap<String, usize>,
+    /// Classification-disposition tallies across all classification records.
+    pub dispositions: DispositionTally,
+    /// Constraint unit IDs with zero classification records (the V12 review queue —
+    /// normally empty), ID-sorted.
+    pub unclassified: Vec<String>,
+    /// Classification IDs whose `constraint` is absent from the committed inventory
+    /// (the V11 stale queue — normally empty), ID-sorted.
+    pub stale: Vec<String>,
+}
+
+/// Classification-disposition counts (`behavior-mapped` / `non-testable` /
+/// `not-applicable`) — the consumer-only-scope boundary, kept visible per FR-014.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DispositionTally {
+    pub behavior_mapped: usize,
+    pub non_testable: usize,
+    pub not_applicable: usize,
+}
+
+/// Every `ConstraintKind` in declaration order — the deterministic emission order for
+/// the inventory section's per-kind counts (all 15 always present).
+const ALL_CONSTRAINT_KINDS: [ConstraintKind; 15] = [
+    ConstraintKind::PropertyExistence,
+    ConstraintKind::Required,
+    ConstraintKind::Type,
+    ConstraintKind::Enum,
+    ConstraintKind::Const,
+    ConstraintKind::Default,
+    ConstraintKind::UnionAlternative,
+    ConstraintKind::AllOf,
+    ConstraintKind::Conditional,
+    ConstraintKind::AdditionalProperties,
+    ConstraintKind::ArrayShape,
+    ConstraintKind::ValueShape,
+    ConstraintKind::Reference,
+    ConstraintKind::Annotation,
+    ConstraintKind::UnmodeledKeyword,
+];
 
 /// The active profile's identity and its ID-sorted context assignment.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -145,14 +216,21 @@ pub struct WaiverEntry {
 // ---------------------------------------------------------------------------
 
 /// Build the `report.json` model from a validated registry (evaluates coverage
-/// internally). All collections are ID-sorted (SC-004).
-pub fn build_report(registry: &Registry) -> ReportJson {
+/// internally). All collections are ID-sorted (SC-004). `inventory` supplies the
+/// committed constraint inventory for the inventory section — `None` when the
+/// registry ships no sibling inventory (e.g. the V1–V10 acceptance fixtures), in
+/// which case that section is present-but-zeroed.
+pub fn build_report(registry: &Registry, inventory: Option<&ConstraintInventory>) -> ReportJson {
     let coverage = Coverage::evaluate(registry);
-    build_report_from_coverage(registry, &coverage)
+    build_report_from_coverage(registry, &coverage, inventory)
 }
 
 /// Build the report model from a registry and its already-computed coverage.
-fn build_report_from_coverage(registry: &Registry, coverage: &Coverage<'_>) -> ReportJson {
+fn build_report_from_coverage(
+    registry: &Registry,
+    coverage: &Coverage<'_>,
+    inventory: Option<&ConstraintInventory>,
+) -> ReportJson {
     let profile = coverage.profile.map(|p| {
         // Emit the context map in dimension-ID-sorted order (determinism rule).
         let mut pairs: Vec<(&String, &String)> = p.context.iter().collect();
@@ -245,6 +323,8 @@ fn build_report_from_coverage(registry: &Registry, coverage: &Coverage<'_>) -> R
         .collect();
     unclassified_source_units.sort();
 
+    let inventory_section = build_inventory_section(inventory, &registry.classifications);
+
     ReportJson {
         schema_version: SCHEMA_VERSION,
         profile,
@@ -256,6 +336,70 @@ fn build_report_from_coverage(registry: &Registry, coverage: &Coverage<'_>) -> R
         gaps,
         waivers,
         unclassified_source_units,
+        inventory: inventory_section,
+    }
+}
+
+/// Summarize the committed constraint inventory joined against the hand-authored
+/// classification records (020-schema-constraint-inventory, T028). Deterministic:
+/// document counts are document-key-sorted, kind counts follow the closed
+/// `ConstraintKind` declaration order (all 15 present), and the unclassified/stale
+/// listings are ID-sorted. When `inventory` is `None` the section is present-but-zeroed
+/// (no inventory to join), and the stale queue is likewise empty — a classification
+/// cannot be judged stale without an inventory to check it against (this mirrors the
+/// validate V11–V14 scoping, not a silent fallback).
+fn build_inventory_section(
+    inventory: Option<&ConstraintInventory>,
+    classifications: &[Classification],
+) -> InventorySection {
+    // Seed all 15 kinds at zero in declaration order so the shape is stable.
+    let mut units_by_kind: IndexMap<String, usize> = IndexMap::new();
+    for kind in ALL_CONSTRAINT_KINDS {
+        units_by_kind.insert(enum_str(&kind), 0);
+    }
+
+    let mut units_by_document: IndexMap<String, usize> = IndexMap::new();
+    let mut revision = String::new();
+    let mut total_units = 0usize;
+
+    if let Some(inv) = inventory {
+        revision = inv.revision.clone();
+        total_units = inv.units.len();
+        for unit in &inv.units {
+            *units_by_document.entry(unit.document.clone()).or_insert(0) += 1;
+            *units_by_kind.entry(enum_str(&unit.kind)).or_insert(0) += 1;
+        }
+    }
+    // Document counts in document-key order (determinism rule).
+    units_by_document.sort_keys();
+
+    // Disposition tallies over every classification record.
+    let mut dispositions = DispositionTally::default();
+    for c in classifications {
+        match c.disposition {
+            Disposition::BehaviorMapped => dispositions.behavior_mapped += 1,
+            Disposition::NonTestable => dispositions.non_testable += 1,
+            Disposition::NotApplicable => dispositions.not_applicable += 1,
+        }
+    }
+
+    // The unclassified (V12) and stale (V11) review queues, computed by the SAME join
+    // `validate` enforces with, so the report can never disagree with the gate. Both are
+    // empty without an inventory: a classification cannot be judged stale with nothing to
+    // check it against.
+    let join = inventory
+        .map(|inv| join_inventory(&inv.units, classifications))
+        .unwrap_or_default();
+    let (unclassified, stale) = (join.unclassified, join.stale);
+
+    InventorySection {
+        revision,
+        total_units,
+        units_by_document,
+        units_by_kind,
+        dispositions,
+        unclassified,
+        stale,
     }
 }
 
@@ -296,9 +440,11 @@ fn sorted(ids: &[String]) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Serialize the `report.json` document — pretty-printed, newline-terminated, and
-/// byte-stable for identical registry content (SC-004).
+/// byte-stable for identical registry content (SC-004). The inventory section is
+/// present-but-zeroed (no committed inventory joined); use [`write_reports`] to emit a
+/// populated inventory section.
 pub fn render_report_json(registry: &Registry) -> String {
-    let report = build_report(registry);
+    let report = build_report(registry, None);
     render_json(&report)
 }
 
@@ -316,10 +462,11 @@ fn render_json(report: &ReportJson) -> String {
 // report.md — human-readable rendering (seven sections, contract order)
 // ---------------------------------------------------------------------------
 
-/// Render `report.md` — the seven contract sections in order, derived from the same
-/// ID-sorted model as `report.json` (FR-020, FR-022, FR-023). No timestamps.
+/// Render `report.md` — the contract sections in order, derived from the same
+/// ID-sorted model as `report.json` (FR-020, FR-022, FR-023). No timestamps. The
+/// inventory section is present-but-zeroed; use [`write_reports`] for a populated one.
 pub fn render_report_md(registry: &Registry) -> String {
-    let report = build_report(registry);
+    let report = build_report(registry, None);
     render_md(&report)
 }
 
@@ -484,7 +631,67 @@ fn render_md(report: &ReportJson) -> String {
         }
     }
 
+    // 8. Constraint inventory — committed units joined against classifications.
+    render_inventory_md(&mut md, &report.inventory);
+
     md
+}
+
+/// Render the constraint-inventory section of `report.md`
+/// (020-schema-constraint-inventory, T028). Derived from the same deterministic model
+/// as the JSON section; empty-inventory registries render an explicit "none" state.
+fn render_inventory_md(md: &mut String, inv: &InventorySection) {
+    md.push_str("\n## Constraint inventory\n\n");
+    if inv.total_units == 0 {
+        md.push_str("No committed inventory.\n");
+        return;
+    }
+    let _ = writeln!(md, "**Revision:** `{}`\n", inv.revision);
+    let _ = writeln!(md, "**Total units:** {}\n", inv.total_units);
+
+    md.push_str("### Units by document\n\n");
+    md.push_str("| Document | Units |\n|----------|-------|\n");
+    for (doc, count) in &inv.units_by_document {
+        let _ = writeln!(md, "| `{doc}` | {count} |");
+    }
+
+    md.push_str("\n### Units by kind\n\n");
+    md.push_str("| Kind | Units |\n|------|-------|\n");
+    for (kind, count) in &inv.units_by_kind {
+        let _ = writeln!(md, "| `{kind}` | {count} |");
+    }
+
+    md.push_str("\n### Dispositions\n\n");
+    md.push_str("| Disposition | Count |\n|-------------|-------|\n");
+    let _ = writeln!(
+        md,
+        "| `behavior-mapped` | {} |",
+        inv.dispositions.behavior_mapped
+    );
+    let _ = writeln!(md, "| `non-testable` | {} |", inv.dispositions.non_testable);
+    let _ = writeln!(
+        md,
+        "| `not-applicable` | {} |",
+        inv.dispositions.not_applicable
+    );
+
+    md.push_str("\n### Unclassified units\n\n");
+    if inv.unclassified.is_empty() {
+        md.push_str("None.\n");
+    } else {
+        for id in &inv.unclassified {
+            let _ = writeln!(md, "- `{id}`");
+        }
+    }
+
+    md.push_str("\n### Stale classifications\n\n");
+    if inv.stale.is_empty() {
+        md.push_str("None.\n");
+    } else {
+        for id in &inv.stale {
+            let _ = writeln!(md, "- `{id}`");
+        }
+    }
 }
 
 /// Serialize a closed enum to its wire spelling (via serde_json), stripping the JSON
@@ -526,13 +733,15 @@ fn conditions_str(conditions: &[Condition]) -> String {
 
 /// Write `report.json` and `report.md` into `out_dir` (created if absent). Returns
 /// the two written paths. IO failures propagate as `std::io::Error` (the CLI maps
-/// them to exit code 2).
+/// them to exit code 2). `inventory` supplies the committed constraint inventory for
+/// the inventory section (`None` → present-but-zeroed).
 pub fn write_reports(
     registry: &Registry,
+    inventory: Option<&ConstraintInventory>,
     out_dir: &Path,
 ) -> std::io::Result<(std::path::PathBuf, std::path::PathBuf)> {
     std::fs::create_dir_all(out_dir)?;
-    let report = build_report(registry);
+    let report = build_report(registry, inventory);
 
     let json_path = out_dir.join("report.json");
     std::fs::write(&json_path, render_json(&report))?;
@@ -582,7 +791,7 @@ mod tests {
     #[test]
     fn summary_counts_match_the_valid_fixture() {
         let registry = valid_registry();
-        let report = build_report(&registry);
+        let report = build_report(&registry, None);
         let s = &report.summary;
         assert_eq!(s.behaviors_in_profile, 4);
         assert_eq!(s.conformant, 1);
@@ -599,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn report_md_has_the_seven_sections_in_order() {
+    fn report_md_has_the_eight_sections_in_order() {
         let registry = valid_registry();
         let md = render_report_md(&registry);
         let sections = [
@@ -610,6 +819,7 @@ mod tests {
             "## Extensions",
             "## Behavior traceability index",
             "## Out-of-profile behaviors",
+            "## Constraint inventory",
         ];
         let mut last = 0usize;
         for section in sections {
@@ -619,5 +829,119 @@ mod tests {
             assert!(at >= last, "section {section:?} out of order in report.md");
             last = at;
         }
+    }
+
+    /// A synthetic inventory + classifications exercising the populated section:
+    /// counts by document/kind, disposition tallies, and the unclassified/stale queues.
+    fn synthetic_inventory() -> ConstraintInventory {
+        use crate::model::{ConstraintKind, ConstraintUnit};
+        let unit = |id: &str, document: &str, kind: ConstraintKind| ConstraintUnit {
+            id: id.to_string(),
+            document: document.to_string(),
+            pointer: "/x".to_string(),
+            kind,
+            substance: serde_json::json!({}),
+            context: None,
+        };
+        ConstraintInventory {
+            schema_version: 1,
+            revision: "rev-schema-113500f4".to_string(),
+            units: vec![
+                unit("cst-base-a-type-00000000", "base", ConstraintKind::Type),
+                unit("cst-base-b-type-11111111", "base", ConstraintKind::Type),
+                unit(
+                    "cst-feature-c-enum-22222222",
+                    "feature",
+                    ConstraintKind::Enum,
+                ),
+            ],
+        }
+    }
+
+    #[test]
+    fn inventory_section_is_zeroed_when_no_inventory() {
+        let section = build_inventory_section(None, &[]);
+        assert_eq!(section.revision, "");
+        assert_eq!(section.total_units, 0);
+        assert!(section.units_by_document.is_empty());
+        // All 15 kinds are present, every count zero (stable shape).
+        assert_eq!(section.units_by_kind.len(), 15);
+        assert!(section.units_by_kind.values().all(|&c| c == 0));
+        assert_eq!(section.dispositions, DispositionTally::default());
+        assert!(section.unclassified.is_empty());
+        assert!(section.stale.is_empty());
+    }
+
+    #[test]
+    fn inventory_section_counts_and_join_are_correct() {
+        let inv = synthetic_inventory();
+        // Classify two of three units; one classification is stale (unknown constraint).
+        let classifications = vec![
+            Classification {
+                id: "cls-base-a-type-00000000".to_string(),
+                constraint: "cst-base-a-type-00000000".to_string(),
+                disposition: Disposition::BehaviorMapped,
+                behaviors: vec!["bhv-x".to_string()],
+                rationale: None,
+                notes: None,
+            },
+            Classification {
+                id: "cls-feature-c-enum-22222222".to_string(),
+                constraint: "cst-feature-c-enum-22222222".to_string(),
+                disposition: Disposition::NotApplicable,
+                behaviors: vec![],
+                rationale: Some("editor-only".to_string()),
+                notes: None,
+            },
+            Classification {
+                id: "cls-gone-type-99999999".to_string(),
+                constraint: "cst-gone-type-99999999".to_string(),
+                disposition: Disposition::NonTestable,
+                behaviors: vec![],
+                rationale: Some("removed upstream".to_string()),
+                notes: None,
+            },
+        ];
+        let section = build_inventory_section(Some(&inv), &classifications);
+
+        assert_eq!(section.revision, "rev-schema-113500f4");
+        assert_eq!(section.total_units, 3);
+        assert_eq!(section.units_by_document.get("base"), Some(&2));
+        assert_eq!(section.units_by_document.get("feature"), Some(&1));
+        // Document keys are sorted.
+        let docs: Vec<&String> = section.units_by_document.keys().collect();
+        assert_eq!(docs, vec!["base", "feature"]);
+
+        assert_eq!(section.units_by_kind.get("type"), Some(&2));
+        assert_eq!(section.units_by_kind.get("enum"), Some(&1));
+        assert_eq!(section.units_by_kind.get("required"), Some(&0));
+        // Declaration order preserved (type precedes enum).
+        let kinds: Vec<&String> = section.units_by_kind.keys().collect();
+        assert_eq!(
+            kinds.first().map(|s| s.as_str()),
+            Some("property-existence")
+        );
+
+        assert_eq!(section.dispositions.behavior_mapped, 1);
+        assert_eq!(section.dispositions.not_applicable, 1);
+        assert_eq!(section.dispositions.non_testable, 1);
+
+        // The unclassified unit (b) and the stale classification (gone) are surfaced.
+        assert_eq!(section.unclassified, vec!["cst-base-b-type-11111111"]);
+        assert_eq!(section.stale, vec!["cls-gone-type-99999999"]);
+    }
+
+    #[test]
+    fn inventory_section_renders_deterministic_markdown() {
+        let inv = synthetic_inventory();
+        let mut a = String::new();
+        render_inventory_md(&mut a, &build_inventory_section(Some(&inv), &[]));
+        let mut b = String::new();
+        render_inventory_md(&mut b, &build_inventory_section(Some(&inv), &[]));
+        assert_eq!(a, b, "inventory markdown must be byte-identical");
+        assert!(a.contains("## Constraint inventory"));
+        assert!(a.contains("| `base` | 2 |"));
+        assert!(a.contains("| `feature` | 1 |"));
+        assert!(a.contains("| `type` | 2 |"));
     }
 }

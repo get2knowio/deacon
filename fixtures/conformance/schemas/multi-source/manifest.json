@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-schema-fixture",
+  "documents": [
+    {
+      "key": "base-fixture",
+      "file": "base-fixture.json",
+      "upstreamUrl": "https://example.invalid/fixtures/multi-source/base-fixture.json",
+      "sha256": "27423c73325ef62129f3c256438c2978b262b98356380920acc7e7f376044a07"
+    },
+    {
+      "key": "extra",
+      "file": "extra.json",
+      "upstreamUrl": "https://example.invalid/fixtures/multi-source/extra.json",
+      "sha256": "222d2bd07d89bf5750b4b5580fc64a07fa1f4c8f0b345646f62049c90ab47886"
+    }
+  ]
+}

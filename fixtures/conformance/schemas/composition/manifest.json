@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-schema-fixture",
+  "documents": [
+    {
+      "key": "fixture",
+      "file": "composition.json",
+      "upstreamUrl": "https://example.invalid/fixtures/composition.json",
+      "sha256": "91337d9ffb496de27db2f32e55b856300c4a69cceb9146d3d90349f61f39d5bc"
+    }
+  ]
+}

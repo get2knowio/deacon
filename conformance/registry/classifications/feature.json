@@ -1,0 +1,1273 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "cls-feature-anyof-2-properties-proposals-items-type-7b337d8f",
+      "constraint": "cst-feature-anyof-2-properties-proposals-items-type-7b337d8f",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-addprop-5791b1d6",
+      "constraint": "cst-feature-definitions-feature-addprop-5791b1d6",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-capadd-anno-2b550b83",
+      "constraint": "cst-feature-definitions-feature-properties-capadd-anno-2b550b83",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-capadd-anno-3b4cc859",
+      "constraint": "cst-feature-definitions-feature-properties-capadd-anno-3b4cc859",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-capadd-arr-a29462a0",
+      "constraint": "cst-feature-definitions-feature-properties-capadd-arr-a29462a0",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-capadd-items-type-5cb3eba5",
+      "constraint": "cst-feature-definitions-feature-properties-capadd-items-type-5cb3eba5",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-capadd-prop-7790bd19",
+      "constraint": "cst-feature-definitions-feature-properties-capadd-prop-7790bd19",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-capadd-type-ea32fce8",
+      "constraint": "cst-feature-definitions-feature-properties-capadd-type-ea32fce8",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-containerenv-addprop-9be6ee26",
+      "constraint": "cst-feature-definitions-feature-properties-containerenv-addprop-9be6ee26",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-containerenv-anno-62ab09bb",
+      "constraint": "cst-feature-definitions-feature-properties-containerenv-anno-62ab09bb",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-containerenv-prop-7315fdcb",
+      "constraint": "cst-feature-definitions-feature-properties-containerenv-prop-7315fdcb",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-containerenv-type-f51b3287",
+      "constraint": "cst-feature-definitions-feature-properties-containerenv-type-f51b3287",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-customizations-addprop-914ad3e1",
+      "constraint": "cst-feature-definitions-feature-properties-customizations-addprop-914ad3e1",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-customizations-anno-bf6cc5f8",
+      "constraint": "cst-feature-definitions-feature-properties-customizations-anno-bf6cc5f8",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-customizations-prop-36a59bc7",
+      "constraint": "cst-feature-definitions-feature-properties-customizations-prop-36a59bc7",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-customizations-type-ea8db6d0",
+      "constraint": "cst-feature-definitions-feature-properties-customizations-type-ea8db6d0",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-dependson-addprop-413c8879",
+      "constraint": "cst-feature-definitions-feature-properties-dependson-addprop-413c8879",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-dependson-anno-66d9c534",
+      "constraint": "cst-feature-definitions-feature-properties-dependson-anno-66d9c534",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-dependson-prop-c2d30a67",
+      "constraint": "cst-feature-definitions-feature-properties-dependson-prop-c2d30a67",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-dependson-type-21e2c2c8",
+      "constraint": "cst-feature-definitions-feature-properties-dependson-type-21e2c2c8",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-deprecated-anno-c298cb86",
+      "constraint": "cst-feature-definitions-feature-properties-deprecated-anno-c298cb86",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-deprecated-prop-ddba2962",
+      "constraint": "cst-feature-definitions-feature-properties-deprecated-prop-ddba2962",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-deprecated-type-e5b03292",
+      "constraint": "cst-feature-definitions-feature-properties-deprecated-type-e5b03292",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-description-anno-ec503cb4",
+      "constraint": "cst-feature-definitions-feature-properties-description-anno-ec503cb4",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-description-prop-f788a204",
+      "constraint": "cst-feature-definitions-feature-properties-description-prop-f788a204",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-description-type-46c07be8",
+      "constraint": "cst-feature-definitions-feature-properties-description-type-46c07be8",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-documentationurl-anno-4d27ad9b",
+      "constraint": "cst-feature-definitions-feature-properties-documentationurl-anno-4d27ad9b",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-documentationurl-prop-c1c851d8",
+      "constraint": "cst-feature-definitions-feature-properties-documentationurl-prop-c1c851d8",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-documentationurl-type-d828ebfd",
+      "constraint": "cst-feature-definitions-feature-properties-documentationurl-type-d828ebfd",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-entrypoint-anno-df48b5eb",
+      "constraint": "cst-feature-definitions-feature-properties-entrypoint-anno-df48b5eb",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-entrypoint-prop-b3ab280b",
+      "constraint": "cst-feature-definitions-feature-properties-entrypoint-prop-b3ab280b",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-entrypoint-type-27034e59",
+      "constraint": "cst-feature-definitions-feature-properties-entrypoint-type-27034e59",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-id-anno-224bff96",
+      "constraint": "cst-feature-definitions-feature-properties-id-anno-224bff96",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-id-prop-652e7b02",
+      "constraint": "cst-feature-definitions-feature-properties-id-prop-652e7b02",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-id-type-9a110d46",
+      "constraint": "cst-feature-definitions-feature-properties-id-type-9a110d46",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-init-anno-583044a6",
+      "constraint": "cst-feature-definitions-feature-properties-init-anno-583044a6",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-init-prop-ccca9f53",
+      "constraint": "cst-feature-definitions-feature-properties-init-prop-ccca9f53",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-init-type-dd4a050a",
+      "constraint": "cst-feature-definitions-feature-properties-init-type-dd4a050a",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-installsafter-anno-8a51a939",
+      "constraint": "cst-feature-definitions-feature-properties-installsafter-anno-8a51a939",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-installsafter-arr-4fae3a3c",
+      "constraint": "cst-feature-definitions-feature-properties-installsafter-arr-4fae3a3c",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-installsafter-prop-99178f36",
+      "constraint": "cst-feature-definitions-feature-properties-installsafter-prop-99178f36",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-installsafter-type-277a6d72",
+      "constraint": "cst-feature-definitions-feature-properties-installsafter-type-277a6d72",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-keywords-anno-3164ff70",
+      "constraint": "cst-feature-definitions-feature-properties-keywords-anno-3164ff70",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-keywords-arr-7b7d8580",
+      "constraint": "cst-feature-definitions-feature-properties-keywords-arr-7b7d8580",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-keywords-items-type-33ed52cd",
+      "constraint": "cst-feature-definitions-feature-properties-keywords-items-type-33ed52cd",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-keywords-prop-23e6e0e3",
+      "constraint": "cst-feature-definitions-feature-properties-keywords-prop-23e6e0e3",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-keywords-type-f94436a1",
+      "constraint": "cst-feature-definitions-feature-properties-keywords-type-f94436a1",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-legacyids-anno-194ee61c",
+      "constraint": "cst-feature-definitions-feature-properties-legacyids-anno-194ee61c",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-legacyids-arr-8c0958af",
+      "constraint": "cst-feature-definitions-feature-properties-legacyids-arr-8c0958af",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-legacyids-items-type-080daed7",
+      "constraint": "cst-feature-definitions-feature-properties-legacyids-items-type-080daed7",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-legacyids-prop-336ee5c3",
+      "constraint": "cst-feature-definitions-feature-properties-legacyids-prop-336ee5c3",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-legacyids-type-4571866d",
+      "constraint": "cst-feature-definitions-feature-properties-legacyids-type-4571866d",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-licenseurl-anno-6a7d8362",
+      "constraint": "cst-feature-definitions-feature-properties-licenseurl-anno-6a7d8362",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-licenseurl-prop-f6271b78",
+      "constraint": "cst-feature-definitions-feature-properties-licenseurl-prop-f6271b78",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-licenseurl-type-f1a5b101",
+      "constraint": "cst-feature-definitions-feature-properties-licenseurl-type-f1a5b101",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-mounts-anno-c83de5ec",
+      "constraint": "cst-feature-definitions-feature-properties-mounts-anno-c83de5ec",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-mounts-arr-e287e813",
+      "constraint": "cst-feature-definitions-feature-properties-mounts-arr-e287e813",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-mounts-items-ref-62bf8c06",
+      "constraint": "cst-feature-definitions-feature-properties-mounts-items-ref-62bf8c06",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-mounts-prop-c8c80b96",
+      "constraint": "cst-feature-definitions-feature-properties-mounts-prop-c8c80b96",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-mounts-type-fec62b73",
+      "constraint": "cst-feature-definitions-feature-properties-mounts-type-fec62b73",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-name-anno-374fcf4f",
+      "constraint": "cst-feature-definitions-feature-properties-name-anno-374fcf4f",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-name-prop-c0a0dd5d",
+      "constraint": "cst-feature-definitions-feature-properties-name-prop-c0a0dd5d",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-name-type-faa47331",
+      "constraint": "cst-feature-definitions-feature-properties-name-type-faa47331",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-oncreatecommand-addprop-3b2cedcf",
+      "constraint": "cst-feature-definitions-feature-properties-oncreatecommand-addprop-3b2cedcf",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-oncreatecommand-anno-f9db7c2d",
+      "constraint": "cst-feature-definitions-feature-properties-oncreatecommand-anno-f9db7c2d",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-oncreatecommand-arr-abecc55c",
+      "constraint": "cst-feature-definitions-feature-properties-oncreatecommand-arr-abecc55c",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-oncreatecommand-prop-5c25535a",
+      "constraint": "cst-feature-definitions-feature-properties-oncreatecommand-prop-5c25535a",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-oncreatecommand-type-d91bacb3",
+      "constraint": "cst-feature-definitions-feature-properties-oncreatecommand-type-d91bacb3",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-options-addprop-2f39e389",
+      "constraint": "cst-feature-definitions-feature-properties-options-addprop-2f39e389",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-options-anno-99f42ebe",
+      "constraint": "cst-feature-definitions-feature-properties-options-anno-99f42ebe",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-options-prop-5a9123c6",
+      "constraint": "cst-feature-definitions-feature-properties-options-prop-5a9123c6",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-options-type-dc7bf256",
+      "constraint": "cst-feature-definitions-feature-properties-options-type-dc7bf256",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postattachcommand-addprop-1c2e88e3",
+      "constraint": "cst-feature-definitions-feature-properties-postattachcommand-addprop-1c2e88e3",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postattachcommand-anno-d34b596a",
+      "constraint": "cst-feature-definitions-feature-properties-postattachcommand-anno-d34b596a",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postattachcommand-arr-04c47e84",
+      "constraint": "cst-feature-definitions-feature-properties-postattachcommand-arr-04c47e84",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postattachcommand-prop-bd7e5f51",
+      "constraint": "cst-feature-definitions-feature-properties-postattachcommand-prop-bd7e5f51",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postattachcommand-type-72f50e85",
+      "constraint": "cst-feature-definitions-feature-properties-postattachcommand-type-72f50e85",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postcreatecommand-addprop-375b8218",
+      "constraint": "cst-feature-definitions-feature-properties-postcreatecommand-addprop-375b8218",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postcreatecommand-anno-beb220a6",
+      "constraint": "cst-feature-definitions-feature-properties-postcreatecommand-anno-beb220a6",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postcreatecommand-arr-cc31edce",
+      "constraint": "cst-feature-definitions-feature-properties-postcreatecommand-arr-cc31edce",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postcreatecommand-prop-bf09a289",
+      "constraint": "cst-feature-definitions-feature-properties-postcreatecommand-prop-bf09a289",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-postcreatecommand-type-03c8c498",
+      "constraint": "cst-feature-definitions-feature-properties-postcreatecommand-type-03c8c498",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-poststartcommand-addprop-ab0231b2",
+      "constraint": "cst-feature-definitions-feature-properties-poststartcommand-addprop-ab0231b2",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-poststartcommand-anno-081e3877",
+      "constraint": "cst-feature-definitions-feature-properties-poststartcommand-anno-081e3877",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-poststartcommand-arr-f05cb565",
+      "constraint": "cst-feature-definitions-feature-properties-poststartcommand-arr-f05cb565",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-poststartcommand-prop-ccf8878a",
+      "constraint": "cst-feature-definitions-feature-properties-poststartcommand-prop-ccf8878a",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-poststartcommand-type-97f9c9b0",
+      "constraint": "cst-feature-definitions-feature-properties-poststartcommand-type-97f9c9b0",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-privileged-anno-147ccadf",
+      "constraint": "cst-feature-definitions-feature-properties-privileged-anno-147ccadf",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-privileged-prop-a6278d41",
+      "constraint": "cst-feature-definitions-feature-properties-privileged-prop-a6278d41",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-privileged-type-b39359e2",
+      "constraint": "cst-feature-definitions-feature-properties-privileged-type-b39359e2",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-securityopt-anno-c6c40105",
+      "constraint": "cst-feature-definitions-feature-properties-securityopt-anno-c6c40105",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-securityopt-arr-1fea66bf",
+      "constraint": "cst-feature-definitions-feature-properties-securityopt-arr-1fea66bf",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-securityopt-items-type-c4e698b5",
+      "constraint": "cst-feature-definitions-feature-properties-securityopt-items-type-c4e698b5",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-securityopt-prop-74c8079f",
+      "constraint": "cst-feature-definitions-feature-properties-securityopt-prop-74c8079f",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-securityopt-type-e98e13f4",
+      "constraint": "cst-feature-definitions-feature-properties-securityopt-type-e98e13f4",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-version-anno-a23e64fb",
+      "constraint": "cst-feature-definitions-feature-properties-version-anno-a23e64fb",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-version-prop-65048577",
+      "constraint": "cst-feature-definitions-feature-properties-version-prop-65048577",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-properties-version-type-5940a093",
+      "constraint": "cst-feature-definitions-feature-properties-version-type-5940a093",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-feature-required-id-req-0e03259c",
+      "constraint": "cst-feature-definitions-feature-required-id-req-0e03259c",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon's FeatureMetadata::validate() enforces a non-empty feature id at consume time (integration_features::test_parse_invalid_fixture), but this is deacon's own consumer check, not validation of the feature file against this authoring schema."
+    },
+    {
+      "id": "cls-feature-definitions-feature-required-version-req-da8bc333",
+      "constraint": "cst-feature-definitions-feature-required-version-req-da8bc333",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema.",
+      "notes": "deacon models a feature's version as optional (Option<String>) and does NOT enforce this authoring `required: version` rule — a deliberate lenient-consumer divergence, and feature-file validation is out of scope (constitution II)."
+    },
+    {
+      "id": "cls-feature-definitions-feature-type-fd2cd29b",
+      "constraint": "cst-feature-definitions-feature-type-fd2cd29b",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-0-addprop-a9b62e00",
+      "constraint": "cst-feature-definitions-featureoption-anyof-0-addprop-a9b62e00",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-0-anno-c37288a4",
+      "constraint": "cst-feature-definitions-featureoption-anyof-0-anno-c37288a4",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-0-required-type-req-992f2e9a",
+      "constraint": "cst-feature-definitions-featureoption-anyof-0-required-type-req-992f2e9a",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-0-type-5d2875f9",
+      "constraint": "cst-feature-definitions-featureoption-anyof-0-type-5d2875f9",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-0-union-120a57fa",
+      "constraint": "cst-feature-definitions-featureoption-anyof-0-union-120a57fa",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-1-addprop-0726d23f",
+      "constraint": "cst-feature-definitions-featureoption-anyof-1-addprop-0726d23f",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-1-required-enum-req-d61fb6c5",
+      "constraint": "cst-feature-definitions-featureoption-anyof-1-required-enum-req-d61fb6c5",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-1-required-type-req-22e21e9c",
+      "constraint": "cst-feature-definitions-featureoption-anyof-1-required-type-req-22e21e9c",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-1-type-f9afe136",
+      "constraint": "cst-feature-definitions-featureoption-anyof-1-type-f9afe136",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-1-union-259e7d7b",
+      "constraint": "cst-feature-definitions-featureoption-anyof-1-union-259e7d7b",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-2-addprop-278c72b5",
+      "constraint": "cst-feature-definitions-featureoption-anyof-2-addprop-278c72b5",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-2-required-type-req-6080d1e6",
+      "constraint": "cst-feature-definitions-featureoption-anyof-2-required-type-req-6080d1e6",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-2-type-d0bd7bd5",
+      "constraint": "cst-feature-definitions-featureoption-anyof-2-type-d0bd7bd5",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-featureoption-anyof-2-union-fe4e7714",
+      "constraint": "cst-feature-definitions-featureoption-anyof-2-union-fe4e7714",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-definitions-mount-addprop-2403696e",
+      "constraint": "cst-feature-definitions-mount-addprop-2403696e",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-anno-959da3aa",
+      "constraint": "cst-feature-definitions-mount-anno-959da3aa",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-source-anno-8457ad70",
+      "constraint": "cst-feature-definitions-mount-properties-source-anno-8457ad70",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-source-prop-e0f72f5e",
+      "constraint": "cst-feature-definitions-mount-properties-source-prop-e0f72f5e",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-source-type-9563445f",
+      "constraint": "cst-feature-definitions-mount-properties-source-type-9563445f",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-target-anno-0beb38da",
+      "constraint": "cst-feature-definitions-mount-properties-target-anno-0beb38da",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-target-prop-711d6c1c",
+      "constraint": "cst-feature-definitions-mount-properties-target-prop-711d6c1c",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-target-type-3918b16b",
+      "constraint": "cst-feature-definitions-mount-properties-target-type-3918b16b",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-type-anno-c9ae9893",
+      "constraint": "cst-feature-definitions-mount-properties-type-anno-c9ae9893",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-type-enum-8a3611bf",
+      "constraint": "cst-feature-definitions-mount-properties-type-enum-8a3611bf",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-type-prop-bccc29b5",
+      "constraint": "cst-feature-definitions-mount-properties-type-prop-bccc29b5",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-properties-type-type-2244b5c0",
+      "constraint": "cst-feature-definitions-mount-properties-type-type-2244b5c0",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-required-target-req-f1eb5274",
+      "constraint": "cst-feature-definitions-mount-required-target-req-f1eb5274",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-required-type-req-48b23518",
+      "constraint": "cst-feature-definitions-mount-required-type-req-48b23518",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-definitions-mount-type-7e3b9128",
+      "constraint": "cst-feature-definitions-mount-type-7e3b9128",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon applies a feature's declared mounts at install (features::feature_mount_to_string) but deserializes them leniently and does not enforce this Mount object schema."
+    },
+    {
+      "id": "cls-feature-feature-properties-installsafter-items-type-17e4bf30",
+      "constraint": "cst-feature-feature-properties-installsafter-items-type-17e4bf30",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-oncreatecommand-items-type-3e71553a",
+      "constraint": "cst-feature-feature-properties-oncreatecommand-items-type-3e71553a",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-options-additionalproperties-ref-aa3848e1",
+      "constraint": "cst-feature-feature-properties-options-additionalproperties-ref-aa3848e1",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-postattachcommand-items-type-7d2425e4",
+      "constraint": "cst-feature-feature-properties-postattachcommand-items-type-7d2425e4",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-postcreatecommand-items-type-797d95e0",
+      "constraint": "cst-feature-feature-properties-postcreatecommand-items-type-797d95e0",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-poststartcommand-items-type-f3e00893",
+      "constraint": "cst-feature-feature-properties-poststartcommand-items-type-f3e00893",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-updatecontentcommand-addprop-d863fa16",
+      "constraint": "cst-feature-feature-properties-updatecontentcommand-addprop-d863fa16",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-updatecontentcommand-anno-ab5595c8",
+      "constraint": "cst-feature-feature-properties-updatecontentcommand-anno-ab5595c8",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-feature-properties-updatecontentcommand-arr-1c33d5b0",
+      "constraint": "cst-feature-feature-properties-updatecontentcommand-arr-1c33d5b0",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-updatecontentcommand-items-type-c9f9760f",
+      "constraint": "cst-feature-feature-properties-updatecontentcommand-items-type-c9f9760f",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-updatecontentcommand-prop-d5980d08",
+      "constraint": "cst-feature-feature-properties-updatecontentcommand-prop-d5980d08",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-feature-properties-updatecontentcommand-type-21dd9c81",
+      "constraint": "cst-feature-feature-properties-updatecontentcommand-type-21dd9c81",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-default-anno-bd80855c",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-default-anno-bd80855c",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-default-prop-cb874cfb",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-default-prop-cb874cfb",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-default-type-8f9ebaae",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-default-type-8f9ebaae",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-description-anno-409e94d2",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-description-anno-409e94d2",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-description-prop-033b2203",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-description-prop-033b2203",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-description-type-e1a7c308",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-description-type-e1a7c308",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-type-anno-25e17cae",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-type-anno-25e17cae",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-type-const-8d5f4d98",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-type-const-8d5f4d98",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-type-prop-dce34be5",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-type-prop-dce34be5",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-properties-type-type-18f9222c",
+      "constraint": "cst-feature-featureoption-anyof-0-properties-type-type-18f9222c",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-0-required-default-req-90ae9995",
+      "constraint": "cst-feature-featureoption-anyof-0-required-default-req-90ae9995",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-default-anno-3708db57",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-default-anno-3708db57",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-default-prop-5fa1dca1",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-default-prop-5fa1dca1",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-default-type-62d67352",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-default-type-62d67352",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-description-anno-a9fc40e2",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-description-anno-a9fc40e2",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-description-prop-2885c6d3",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-description-prop-2885c6d3",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-description-type-106d7d2a",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-description-type-106d7d2a",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-enum-anno-c80800ff",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-enum-anno-c80800ff",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-enum-arr-954c4ade",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-enum-arr-954c4ade",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-enum-items-type-e9a351eb",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-enum-items-type-e9a351eb",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-enum-prop-185c5eea",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-enum-prop-185c5eea",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-enum-type-9cf8dee3",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-enum-type-9cf8dee3",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-type-anno-e76110f3",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-type-anno-e76110f3",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-type-const-ad92f8a2",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-type-const-ad92f8a2",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-type-prop-d1abdc68",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-type-prop-d1abdc68",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-properties-type-type-977e547e",
+      "constraint": "cst-feature-featureoption-anyof-1-properties-type-type-977e547e",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-1-required-default-req-a750003e",
+      "constraint": "cst-feature-featureoption-anyof-1-required-default-req-a750003e",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-default-anno-6b64610e",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-default-anno-6b64610e",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-default-prop-6a725062",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-default-prop-6a725062",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-default-type-f6665681",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-default-type-f6665681",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-description-anno-d72ec806",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-description-anno-d72ec806",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-description-prop-b3f57631",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-description-prop-b3f57631",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-description-type-12b5e53e",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-description-type-12b5e53e",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-proposals-anno-4ab06321",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-proposals-anno-4ab06321",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-proposals-arr-0cc1536d",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-proposals-arr-0cc1536d",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-proposals-prop-e184d967",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-proposals-prop-e184d967",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-proposals-type-8c482e0d",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-proposals-type-8c482e0d",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-type-anno-362e4f5e",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-type-anno-362e4f5e",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-type-const-ed949997",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-type-const-ed949997",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-type-prop-67c30404",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-type-prop-67c30404",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-properties-type-type-4926a7ba",
+      "constraint": "cst-feature-featureoption-anyof-2-properties-type-type-4926a7ba",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope.",
+      "notes": "deacon reads the option type/enum/default to validate CONSUMER-supplied option values (integration_features::test_option_value_validation_with_fixtures); the authoring-shape constraint on the declaration itself is out of consumer scope."
+    },
+    {
+      "id": "cls-feature-featureoption-anyof-2-required-default-req-32427434",
+      "constraint": "cst-feature-featureoption-anyof-2-required-default-req-32427434",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-oncreatecommand-additionalproperties-items-type-9c50c6ec",
+      "constraint": "cst-feature-oncreatecommand-additionalproperties-items-type-9c50c6ec",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-oneof-0-ref-3011a21e",
+      "constraint": "cst-feature-oneof-0-ref-3011a21e",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-oneof-0-type-83c9e941",
+      "constraint": "cst-feature-oneof-0-type-83c9e941",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-oneof-0-union-9781b8b6",
+      "constraint": "cst-feature-oneof-0-union-9781b8b6",
+      "disposition": "not-applicable",
+      "rationale": "Feature-authoring schema constraint: it governs the structure/metadata an author must place in devcontainer-feature.json. Feature authoring and feature-file validation are permanently out of deacon's consumer-only scope (constitution II); deacon only consumes already-published features and never validates them against this schema."
+    },
+    {
+      "id": "cls-feature-postattachcommand-additionalproperties-arr-4e1827bf",
+      "constraint": "cst-feature-postattachcommand-additionalproperties-arr-4e1827bf",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-postattachcommand-additionalproperties-items-type-cbf0fc08",
+      "constraint": "cst-feature-postattachcommand-additionalproperties-items-type-cbf0fc08",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-postattachcommand-additionalproperties-type-d99c8a43",
+      "constraint": "cst-feature-postattachcommand-additionalproperties-type-d99c8a43",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-postcreatecommand-additionalproperties-arr-41cfa04c",
+      "constraint": "cst-feature-postcreatecommand-additionalproperties-arr-41cfa04c",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-postcreatecommand-additionalproperties-items-type-64608b4a",
+      "constraint": "cst-feature-postcreatecommand-additionalproperties-items-type-64608b4a",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-postcreatecommand-additionalproperties-type-9a2a4c92",
+      "constraint": "cst-feature-postcreatecommand-additionalproperties-type-9a2a4c92",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-poststartcommand-additionalproperties-arr-642cc476",
+      "constraint": "cst-feature-poststartcommand-additionalproperties-arr-642cc476",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-poststartcommand-additionalproperties-items-type-29e155dd",
+      "constraint": "cst-feature-poststartcommand-additionalproperties-items-type-29e155dd",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-poststartcommand-additionalproperties-type-0dabae64",
+      "constraint": "cst-feature-poststartcommand-additionalproperties-type-0dabae64",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-properties-containerenv-additionalproperties-type-ee138e00",
+      "constraint": "cst-feature-properties-containerenv-additionalproperties-type-ee138e00",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-properties-oncreatecommand-additionalproperties-arr-db7baa55",
+      "constraint": "cst-feature-properties-oncreatecommand-additionalproperties-arr-db7baa55",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-properties-oncreatecommand-additionalproperties-type-c226a8c8",
+      "constraint": "cst-feature-properties-oncreatecommand-additionalproperties-type-c226a8c8",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-root-anno-4ba592ec",
+      "constraint": "cst-feature-root-anno-4ba592ec",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-root-anno-bf4acabd",
+      "constraint": "cst-feature-root-anno-bf4acabd",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-root-anno-ec5a7514",
+      "constraint": "cst-feature-root-anno-ec5a7514",
+      "disposition": "non-testable",
+      "rationale": "Annotation-kind facet (title/description/examples/$schema) carrying no externally observable, testable behavior. The devContainerFeature schema is a feature-authoring surface deacon (consumer-only, constitution II) never validates (research Decision 11, rule 1)."
+    },
+    {
+      "id": "cls-feature-updatecontentcommand-additionalproperties-arr-8e07412c",
+      "constraint": "cst-feature-updatecontentcommand-additionalproperties-arr-8e07412c",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-updatecontentcommand-additionalproperties-items-type-b5b279a1",
+      "constraint": "cst-feature-updatecontentcommand-additionalproperties-items-type-b5b279a1",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    },
+    {
+      "id": "cls-feature-updatecontentcommand-additionalproperties-type-4f36bc56",
+      "constraint": "cst-feature-updatecontentcommand-additionalproperties-type-4f36bc56",
+      "disposition": "not-applicable",
+      "rationale": "This property is consumed by deacon's feature installer at install time, but the facet here is a feature-authoring schema constraint (how an author must declare it in devcontainer-feature.json). Deacon (consumer-only, constitution II) never validates feature files against this schema; it reads the value through its own lenient FeatureMetadata model and has no reference-aligned conformance coverage for the authoring rule. Out of consumer-only scope."
+    }
+  ]
+}

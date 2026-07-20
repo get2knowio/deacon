@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "stable": {
+      "type": "string"
+    },
+    "widened": {
+      "type": "string"
+    },
+    "documented": {
+      "type": "string",
+      "description": "Original wording."
+    }
+  },
+  "definitions": {
+    "leaf": {
+      "type": "boolean"
+    },
+    "goner": {
+      "type": "integer"
+    }
+  }
+}
