@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "description": "Composition fixture: nested allOf/anyOf/oneOf, null-in-type unions, required, and the three additionalProperties tri-states.",
+  "type": "object",
+  "properties": {
+    "closed": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "openMap": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "schemaMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "nullable": {
+      "type": ["string", "null"],
+      "description": "A value that may be null."
+    },
+    "encoded": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "x-vendor-note": "an unmodeled keyword the extractor must capture verbatim"
+    },
+    "choice": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        {
+          "type": "string",
+          "pattern": "^x"
+        }
+      ]
+    },
+    "either": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/leaf"
+        }
+      ]
+    },
+    "combined": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "string"
+            }
+          },
+          "required": ["a"]
+        },
+        {
+          "$ref": "#/definitions/leaf"
+        }
+      ]
+    },
+    "conditional": {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "a"
+          }
+        }
+      },
+      "then": {
+        "required": ["a"]
+      },
+      "else": {
+        "required": ["b"]
+      }
+    }
+  },
+  "required": ["closed", "choice"],
+  "definitions": {
+    "leaf": {
+      "type": "object",
+      "properties": {
+        "b": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

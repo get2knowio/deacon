@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-schema-fixture",
+  "documents": [
+    {
+      "key": "fixture",
+      "file": "malformed.json",
+      "upstreamUrl": "https://example.invalid/fixtures/malformed.json",
+      "sha256": "9e3bf8be53dadb964cff65ffaeb3a580824aee76c4089c5850ba01ccfdcbe6ba"
+    }
+  ]
+}

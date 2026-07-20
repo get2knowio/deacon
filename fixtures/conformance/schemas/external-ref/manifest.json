@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-schema-fixture",
+  "documents": [
+    {
+      "key": "fixture",
+      "file": "external-ref.json",
+      "upstreamUrl": "https://example.invalid/fixtures/external-ref.json",
+      "sha256": "057c81fb3bdd96e0da1bb927cd530c8399d520c3626c5d17b95558e0fb46496d"
+    }
+  ]
+}

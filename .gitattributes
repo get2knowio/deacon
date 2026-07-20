@@ -1,0 +1,20 @@
+# Byte-exact artifacts — git MUST NOT translate line endings for these.
+#
+# The conformance schema-constraint inventory (020-schema-constraint-inventory)
+# verifies vendored upstream schemas against SHA-256 fingerprints recorded in a
+# manifest, and byte-compares the committed inventory against a fresh
+# regeneration. On a Windows checkout, git's autocrlf would rewrite LF to CRLF
+# and change those bytes, failing every fingerprint and byte-comparison check.
+#
+# `-text` disables all end-of-line conversion, so the working tree always holds
+# exactly the committed bytes on every platform.
+
+# Vendored upstream schemas + their fingerprint manifests (never edited in place).
+conformance/schemas/** -text
+
+# The machine-owned canonical inventory (byte-compared by `inventory check` / V14).
+conformance/inventory/constraints.json -text
+
+# Fixture schemas and inventories carrying their own fingerprints/expected bytes.
+fixtures/conformance/schemas/** -text
+fixtures/conformance/inventory-drift/** -text

@@ -407,18 +407,50 @@ it via the conformance loader; the legacy `fixtures/parity-corpus/waivers/` +
 - `sources/*.json` — source-unit provenance (`spec`/`schema`/`cli`/`observed`)
 - `waivers/wvr-*.json` — one file per waiver (`scope`/`expect`/`rationale`/`added`/`expires`)
 - `conformance/RULES.md` — the contradiction rules R1–R8, gap-vs-waiver distinction,
-  and the out-of-scope note for non-behavioral differentiators
+  the out-of-scope note, AND the "Constraint inventory" section (V11–V14, disposition
+  arity, drift workflow) — kept in validate.rs/RULES.md lockstep
+
+**Schema constraint inventory** (020-schema-constraint-inventory) — the pinned schema
+surface, machine-extracted and classified under the consumer-only scope:
+- `conformance/schemas/<pin>/` — the byte-exact vendored upstream schemas + `manifest.json`
+  (SHA-256 fingerprints); re-vendored only at a new pin, never edited in place
+- `conformance/inventory/constraints.json` — **machine-owned** canonical inventory (`cst-`
+  units); the sole output of `inventory generate`, hand edits caught as V14
+- `conformance/registry/classifications/<doc>.json` — **hand-authored** `cls-` records, one
+  per manifest document key; each `cst-` unit carries exactly one disposition
+  (`behavior-mapped` / `non-testable` / `not-applicable`). `inventory generate` NEVER
+  touches these.
 
 **Commands** (dev-only, `cargo run -p deacon-conformance -- <cmd>`; NOT part of the
 `deacon` consumer CLI):
-- `validate` — structural integrity (violation classes V1–V10 + SCHEMA); reports all
+- `validate` — structural integrity (violation classes V1–V14 + SCHEMA); reports all
   violations in one run. Gates every PR via the hermetic `registry_valid` test.
 - `report` — deterministic `report.json` + `report.md` into `target/conformance/`
   (byte-stable, no timestamps/absolute-paths). Knobs: `--registry <dir>` (fixtures),
-  `--today <YYYY-MM-DD>` (waiver-expiry evaluation), `report --out-dir`.
+  `--today <YYYY-MM-DD>` (waiver-expiry evaluation), `report --out-dir`. Includes an
+  inventory section (unit counts, disposition tallies, unclassified/stale queues).
 - `certify` — strict release gate: exit `1` iff any gap record exists OR any in-profile
-  behavior is uncovered; waivers are listed but non-blocking. Wired (blocking) into the
-  `verify` job of `.github/workflows/release.yml`.
+  behavior is uncovered OR any V11/V12/V13/V14 (unclassified/stale/malformed/provenance);
+  `not-applicable`/`non-testable` and waivers are listed but non-blocking. Wired (blocking)
+  into the `verify` job of `.github/workflows/release.yml`.
+- `inventory generate` — extract the vendored pinned schemas into the canonical committed
+  inventory (fingerprint-verified, atomic write).
+- `inventory check` — regenerate in memory and byte-compare against the committed inventory
+  (the CLI face of the hermetic determinism test).
+- `inventory diff <old> <new> [--format json|md]` — deterministic revision diff (match key
+  `document`/`pointer`/`kind`; added/removed/changed/non-material) for drift review.
+- `inventory scaffold` — emit skeleton `cls-` records (sentinel `"UNREVIEWED"`, loader-
+  rejected) to stdout for every unclassified unit; never writes the registry.
+
+**Inventory violation classes**: **V11** stale classification (`constraint` absent from the
+inventory); **V12** unclassified (zero) or duplicated (>1) unit — every unit of every kind
+needs exactly one; **V13** malformed classification (id-tail mirror, `behaviors` arity/
+existence vs disposition, `rationale` presence); **V14** provenance (manifest fingerprint,
+inventory `revision` ≠ registry schema pin, committed ≠ regenerated). The committed inventory
+is machine-owned; classifications are hand-authored; **generation never touches classification
+files**. Re-vendoring on a pin bump: see `specs/020-schema-constraint-inventory/quickstart.md`
+("Re-vendoring") — regenerate, `inventory diff`, V11/V12 enumerate the review queue, classify
+until `certify` unblocks; disposition is never inherited by name.
 
 **Record a divergence:** follow the recipe in `conformance/RULES.md` and
 `specs/019-conformance-registry/quickstart.md` (add/extend a behavior with all three
@@ -835,6 +867,8 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - files — `fixtures/parity-corpus/oracle.json` (pin), `fixtures/parity-corpus/registry.json` (parity registry), waiver records under `conformance/registry/waivers/` (the authoritative location since 019-conformance-registry; formerly `errors/*/expect.json` + `waivers/*.json`); run artifacts under `target/parity/` (report fragments + raw outputs), overridable via `DEACON_PARITY_REPORT_DIR` (018-harden-parity-harness)
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only (`serde`/`serde_json`, `indexmap`, (019-conformance-registry)
 - strict-JSON files under `conformance/registry/` (version-controlled, hand-edited, (019-conformance-registry)
+- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json` (schema (020-schema-constraint-inventory)
+- strict-JSON files — vendored schemas under `conformance/schemas/<rev>/` (020-schema-constraint-inventory)
 
 ## Recent Changes
 - 018-harden-parity-harness: Added the dev-only `crates/parity-harness/` crate (oracle resolution + exact-version verify, bounded exec with raw capture, the single `normalize` module, waiver/registry loaders, report fragments + `parity-report` aggregator bin); moved live parity onto the dedicated `[profile.parity]` nextest profile; retired the `DEACON_PARITY=1` gate and the three Python corpus runners; added the `parity / live-certification` CI lane. See the "Parity Test Harness" section.

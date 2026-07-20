@@ -13,6 +13,10 @@ serde_json = { workspace = true }
 # Pinned directly (not a [workspace.dependencies] entry) mirroring crates/core;
 # `serde` feature preserves declaration order for the profile context map.
 indexmap = { version = "2.0", features = ["serde"] }
+# Content fingerprints (manifest SHA-256 verification) and stable-ID hashes for the
+# schema constraint inventory (020-schema-constraint-inventory). Already a workspace
+# dependency used by deacon/deacon-core; wired into this crate here.
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-schema-fixture",
+  "documents": [
+    {
+      "key": "fixture",
+      "file": "unresolved-ref.json",
+      "upstreamUrl": "https://example.invalid/fixtures/unresolved-ref.json",
+      "sha256": "16bc8c79d4b1dc361659e547e53b9e9941c44db2d4c7f6a7f74afb4caa1f4b31"
+    }
+  ]
+}

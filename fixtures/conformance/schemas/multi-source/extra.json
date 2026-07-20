@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "description": "Extra pinned document: a genuinely separate schema file whose $ref crosses documents via a manifest-relative path into `base-fixture` (research Decision 5).",
+  "type": "object",
+  "properties": {
+    "linked": {
+      "$ref": "./base-fixture.json#/definitions/Something"
+    }
+  }
+}

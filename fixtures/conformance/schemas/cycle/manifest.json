@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-schema-fixture",
+  "documents": [
+    {
+      "key": "fixture",
+      "file": "cycle.json",
+      "upstreamUrl": "https://example.invalid/fixtures/cycle.json",
+      "sha256": "4523388b93256c6241d8d49b39825af900d7b481fd2a5a15e9747d6d2bf3a144"
+    }
+  ]
+}

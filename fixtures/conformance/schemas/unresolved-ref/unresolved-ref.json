@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "description": "A $ref to a fragment pointer that does not exist in this document.",
+  "type": "object",
+  "properties": {
+    "x": {
+      "$ref": "#/definitions/missing"
+    }
+  }
+}

@@ -121,3 +121,70 @@ into behavior records (which would then have no meaningful reference status and 
 distort the coverage denominator). If a purported differentiator has no externally
 observable effect on stdout, stderr, exit code, container state, or the filesystem, it is
 out of scope for the registry.
+
+## Constraint inventory (V11 – V14)
+
+This section is the human-readable companion to the schema-constraint-inventory join
+enforced in `crates/conformance/src/validate.rs::check_inventory`
+(020-schema-constraint-inventory). It stands in the same validate.rs/RULES.md lockstep
+as R1 – R8 / V1 – V10: the classes below are updated in the SAME change that alters the
+enforcement.
+
+The **inventory** is the machine-extracted set of every constraint in the two vendored,
+pinned upstream schemas. Each unit carries exactly one hand-authored **classification**
+recording its disposition under deacon's consumer-only scope. Validation joins the two
+(and the vendored schemas) and reports these four classes alongside V1 – V10 in one run;
+all four also **block `certify`** (the release gate) — an unclassified, stale, malformed,
+or provenance-broken inventory can no more be certified around than a `gap-` record can.
+
+| Class | Statement | Remedy |
+|-------|-----------|--------|
+| **V11** | a classification's `constraint` names a `cst-` unit absent from the committed inventory (**stale**) | Delete or re-point the record in the same change that moved the inventory. Waiver-style self-invalidation — a classification whose unit vanished never lingers. |
+| **V12** | a constraint unit has **zero** classifications (**unclassified** — this IS the drift item; there is no separate drift record type) or **more than one** (**duplicated**) | Author exactly one classification for it (or remove the duplicate). Every unit of every kind requires one — including `annotation` and `unmodeled-keyword` units. |
+| **V13** | a classification's shape/linkage is broken: the `id`-tail mirror, the `behaviors` arity/existence rule vs its `disposition`, or a missing `rationale` on a `non-testable`/`not-applicable` record | Fix the record to satisfy the arity table below. |
+| **V14** | **provenance** breakage: the schemas manifest fingerprint mismatches a vendored file, the inventory's `revision` ≠ the registry's `schema`-kind revision pin, or the committed inventory no longer byte-matches a fresh regeneration | Re-vendor / re-`inventory generate`; never hand-edit the machine-owned inventory. |
+
+### Disposition arity (V13)
+
+Every classification carries exactly one `disposition`. The `behaviors` and `rationale`
+fields are required or forbidden per disposition; the scaffold sentinel `"UNREVIEWED"` is
+not a member of the closed set and is rejected at **load** as a `SCHEMA` failure (never a
+V-class).
+
+| Disposition | `behaviors` | `rationale` | Blocks `certify`? | Meaning |
+|-------------|-------------|-------------|-------------------|---------|
+| `behavior-mapped` | **required**, non-empty, every id an existing `bhv-` record | optional | only if V11–V14 (a well-formed one never blocks) | The constraint is consumer-runtime behavior, covered by real behavior(s) under the existing coverage rules (research Decision 11's evidence rule — no evidence-free behaviors). |
+| `non-testable` | **forbidden** (must be empty) | **required**, non-empty | never | The constraint carries no testable behavior (titles/descriptions, `$schema`, JSONC directives). Kept visible in `report` (FR-014). |
+| `not-applicable` | **forbidden** (must be empty) | **required**, non-empty | never | The constraint is outside deacon's consumer-only scope (e.g. feature-authoring surface, editor-only keywords). The honest consumer-scope boundary, kept visible in `report`. |
+
+`not-applicable` / `non-testable` are the honest scope boundary: a well-formed one
+produces **no** violation, so it is listed in `report` but never blocks certification.
+
+### Drift review workflow (upstream pin bump)
+
+Because a unit's stable id hashes its substance, a materially changed constraint gets a
+NEW id — its old classification goes stale (V11) and the new unit is unclassified (V12).
+No disposition is ever inherited by name. So a re-vendoring mechanically enumerates its
+own review queue:
+
+```
+re-vendor at the new pin  →  inventory generate  →  inventory diff old new (review doc)
+        →  validate:  V11 = stale classifications to delete/re-point
+                      V12 = new/changed units to classify
+        →  classify + delete stale records  →  validate clean  →  certify unblocks
+```
+
+`certify` stays blocked until the queue is empty; nothing is silently carried forward.
+
+### Machine-owned vs hand-authored file boundary
+
+| Path | Ownership | Edited by |
+|------|-----------|-----------|
+| `conformance/schemas/<pin>/` | vendored, byte-exact upstream copies + manifest | the human, only when re-vendoring at a new pin (never in place) |
+| `conformance/inventory/constraints.json` | **machine-owned** — canonical output of `inventory generate` | `inventory generate` ONLY; hand edits are caught as V14 |
+| `conformance/registry/classifications/<doc>.json` | **hand-authored** — one file per manifest document key | humans; `inventory generate` NEVER touches these |
+
+Generation and classification are strictly separated: regenerating the inventory can add
+or remove `cst-` units (surfacing V11/V12 for review) but can never rewrite a human's
+disposition. Never delete a unit to go green — units are machine-owned; classify it, or
+accept the honest blocking gap.

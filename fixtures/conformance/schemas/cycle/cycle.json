@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "description": "Pure $ref cycle: a -> b -> a where every node is a ref-only schema object (unproductive).",
+  "definitions": {
+    "a": {
+      "$ref": "#/definitions/b"
+    },
+    "b": {
+      "$ref": "#/definitions/a"
+    }
+  }
+}

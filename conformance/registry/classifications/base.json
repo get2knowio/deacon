@@ -1,0 +1,3118 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "cls-base-0-properties-build-allof-0-properties-context-anno-c12286fd",
+      "constraint": "cst-base-0-properties-build-allof-0-properties-context-anno-c12286fd",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-0-properties-build-allof-0-properties-context-prop-105dccc1",
+      "constraint": "cst-base-0-properties-build-allof-0-properties-context-prop-105dccc1",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-0-properties-build-allof-0-properties-context-type-53524244",
+      "constraint": "cst-base-0-properties-build-allof-0-properties-context-type-53524244",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-0-properties-build-allof-0-required-dockerfile-req-f6cde3fe",
+      "constraint": "cst-base-0-properties-build-allof-0-required-dockerfile-req-f6cde3fe",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-a-za-z-a-za-z0-9-properties-description-anno-3253945d",
+      "constraint": "cst-base-a-za-z-a-za-z0-9-properties-description-anno-3253945d",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-a-za-z-a-za-z0-9-properties-description-prop-acf82a80",
+      "constraint": "cst-base-a-za-z-a-za-z0-9-properties-description-prop-acf82a80",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-a-za-z-a-za-z0-9-properties-description-type-ab70d532",
+      "constraint": "cst-base-a-za-z-a-za-z0-9-properties-description-type-ab70d532",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-a-za-z-a-za-z0-9-properties-documentationurl-anno-7d49bbf9",
+      "constraint": "cst-base-a-za-z-a-za-z0-9-properties-documentationurl-anno-7d49bbf9",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-a-za-z-a-za-z0-9-properties-documentationurl-prop-faaae34b",
+      "constraint": "cst-base-a-za-z-a-za-z0-9-properties-documentationurl-prop-faaae34b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-a-za-z-a-za-z0-9-properties-documentationurl-type-7859e77b",
+      "constraint": "cst-base-a-za-z-a-za-z0-9-properties-documentationurl-type-7859e77b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-a-za-z-a-za-z0-9-properties-documentationurl-val-43067bea",
+      "constraint": "cst-base-a-za-z-a-za-z0-9-properties-documentationurl-val-43067bea",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema value assertion (`format`) used for editor authoring validation. deacon parses the field by its declared type and, like the reference CLI's lenient read-configuration, does not run JSON-Schema value-range/pattern/format validation, so the assertion has no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-buildoptions-properties-cachefrom-items-type-d738573c",
+      "constraint": "cst-base-buildoptions-properties-cachefrom-items-type-d738573c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-buildoptions-properties-options-items-type-53213148",
+      "constraint": "cst-base-buildoptions-properties-options-items-type-53213148",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-dockercomposefile-anno-65e7c300",
+      "constraint": "cst-base-composecontainer-properties-dockercomposefile-anno-65e7c300",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-composecontainer-properties-dockercomposefile-arr-329e606f",
+      "constraint": "cst-base-composecontainer-properties-dockercomposefile-arr-329e606f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-dockercomposefile-prop-2fa41056",
+      "constraint": "cst-base-composecontainer-properties-dockercomposefile-prop-2fa41056",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-dockercomposefile-type-800bfdad",
+      "constraint": "cst-base-composecontainer-properties-dockercomposefile-type-800bfdad",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-overridecommand-anno-82b6409c",
+      "constraint": "cst-base-composecontainer-properties-overridecommand-anno-82b6409c",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-composecontainer-properties-overridecommand-prop-ee9f68af",
+      "constraint": "cst-base-composecontainer-properties-overridecommand-prop-ee9f68af",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-overridecommand-type-9ee31b45",
+      "constraint": "cst-base-composecontainer-properties-overridecommand-type-9ee31b45",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-runservices-anno-53ade152",
+      "constraint": "cst-base-composecontainer-properties-runservices-anno-53ade152",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-composecontainer-properties-runservices-arr-049f9939",
+      "constraint": "cst-base-composecontainer-properties-runservices-arr-049f9939",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-runservices-items-type-0895f2f8",
+      "constraint": "cst-base-composecontainer-properties-runservices-items-type-0895f2f8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-runservices-prop-5a33e119",
+      "constraint": "cst-base-composecontainer-properties-runservices-prop-5a33e119",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-runservices-type-0722c1c1",
+      "constraint": "cst-base-composecontainer-properties-runservices-type-0722c1c1",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-shutdownaction-anno-3ae857b7",
+      "constraint": "cst-base-composecontainer-properties-shutdownaction-anno-3ae857b7",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-composecontainer-properties-shutdownaction-enum-55661ce7",
+      "constraint": "cst-base-composecontainer-properties-shutdownaction-enum-55661ce7",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-shutdownaction-prop-1fb78d66",
+      "constraint": "cst-base-composecontainer-properties-shutdownaction-prop-1fb78d66",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-shutdownaction-type-f28cee89",
+      "constraint": "cst-base-composecontainer-properties-shutdownaction-type-f28cee89",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-workspacefolder-anno-210bcd7c",
+      "constraint": "cst-base-composecontainer-properties-workspacefolder-anno-210bcd7c",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-composecontainer-properties-workspacefolder-prop-359ffe71",
+      "constraint": "cst-base-composecontainer-properties-workspacefolder-prop-359ffe71",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-properties-workspacefolder-type-d627c732",
+      "constraint": "cst-base-composecontainer-properties-workspacefolder-type-d627c732",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-required-dockercomposefile-req-38a0d847",
+      "constraint": "cst-base-composecontainer-required-dockercomposefile-req-38a0d847",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-composecontainer-required-workspacefolder-req-9447f372",
+      "constraint": "cst-base-composecontainer-required-workspacefolder-req-9447f372",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-d-d-properties-elevateifneeded-anno-3756e54f",
+      "constraint": "cst-base-d-d-properties-elevateifneeded-anno-3756e54f",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-d-d-properties-elevateifneeded-def-62e80402",
+      "constraint": "cst-base-d-d-properties-elevateifneeded-def-62e80402",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema `default` is a non-validating annotation (an editor/tooling authoring hint); per the JSON Schema spec it MUST NOT affect validation, and deacon does not inject schema-declared defaults into the resolved configuration, so it carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-d-d-properties-elevateifneeded-prop-038db1b2",
+      "constraint": "cst-base-d-d-properties-elevateifneeded-prop-038db1b2",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-d-d-properties-elevateifneeded-type-3fcf9b64",
+      "constraint": "cst-base-d-d-properties-elevateifneeded-type-3fcf9b64",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-d-d-properties-requirelocalport-anno-9d422190",
+      "constraint": "cst-base-d-d-properties-requirelocalport-anno-9d422190",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`markdownDescription`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-d-d-properties-requirelocalport-def-9fa07deb",
+      "constraint": "cst-base-d-d-properties-requirelocalport-def-9fa07deb",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema `default` is a non-validating annotation (an editor/tooling authoring hint); per the JSON Schema spec it MUST NOT affect validation, and deacon does not inject schema-declared defaults into the resolved configuration, so it carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-d-d-properties-requirelocalport-prop-d7b1892d",
+      "constraint": "cst-base-d-d-properties-requirelocalport-prop-d7b1892d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-d-d-properties-requirelocalport-type-6a1a0013",
+      "constraint": "cst-base-d-d-properties-requirelocalport-type-6a1a0013",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-args-addprop-cfd0a917",
+      "constraint": "cst-base-definitions-buildoptions-properties-args-addprop-cfd0a917",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-args-anno-ac3c06b2",
+      "constraint": "cst-base-definitions-buildoptions-properties-args-anno-ac3c06b2",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-args-prop-340effd5",
+      "constraint": "cst-base-definitions-buildoptions-properties-args-prop-340effd5",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-args-type-843f2c9d",
+      "constraint": "cst-base-definitions-buildoptions-properties-args-type-843f2c9d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-cachefrom-anno-d4779fb5",
+      "constraint": "cst-base-definitions-buildoptions-properties-cachefrom-anno-d4779fb5",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-cachefrom-arr-b1778846",
+      "constraint": "cst-base-definitions-buildoptions-properties-cachefrom-arr-b1778846",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-cachefrom-prop-638fecce",
+      "constraint": "cst-base-definitions-buildoptions-properties-cachefrom-prop-638fecce",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-cachefrom-type-ebedfbeb",
+      "constraint": "cst-base-definitions-buildoptions-properties-cachefrom-type-ebedfbeb",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-options-anno-ba033857",
+      "constraint": "cst-base-definitions-buildoptions-properties-options-anno-ba033857",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-options-arr-f6ef1a2f",
+      "constraint": "cst-base-definitions-buildoptions-properties-options-arr-f6ef1a2f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-options-prop-04b1293e",
+      "constraint": "cst-base-definitions-buildoptions-properties-options-prop-04b1293e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-options-type-3e051d51",
+      "constraint": "cst-base-definitions-buildoptions-properties-options-type-3e051d51",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-target-anno-fc1f8184",
+      "constraint": "cst-base-definitions-buildoptions-properties-target-anno-fc1f8184",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-target-prop-90eba7cc",
+      "constraint": "cst-base-definitions-buildoptions-properties-target-prop-90eba7cc",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-properties-target-type-6b1835cd",
+      "constraint": "cst-base-definitions-buildoptions-properties-target-type-6b1835cd",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-buildoptions-type-e35c8635",
+      "constraint": "cst-base-definitions-buildoptions-type-e35c8635",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-composecontainer-properties-service-anno-2c7af1d9",
+      "constraint": "cst-base-definitions-composecontainer-properties-service-anno-2c7af1d9",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-composecontainer-properties-service-prop-9f6b98dc",
+      "constraint": "cst-base-definitions-composecontainer-properties-service-prop-9f6b98dc",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-composecontainer-properties-service-type-7595292b",
+      "constraint": "cst-base-definitions-composecontainer-properties-service-type-7595292b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-composecontainer-required-service-req-19b96659",
+      "constraint": "cst-base-definitions-composecontainer-required-service-req-19b96659",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-composecontainer-type-e9defe6f",
+      "constraint": "cst-base-definitions-composecontainer-type-e9defe6f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-capadd-anno-8d0cc087",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-capadd-anno-8d0cc087",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-capadd-anno-becbfb7f",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-capadd-anno-becbfb7f",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Editor authoring annotation (`examples`) — no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-capadd-arr-cbfdd982",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-capadd-arr-cbfdd982",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-capadd-prop-00757f15",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-capadd-prop-00757f15",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-capadd-type-256880a8",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-capadd-type-256880a8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-init-anno-cdf652fb",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-init-anno-cdf652fb",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-init-prop-2fc933d6",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-init-prop-2fc933d6",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-init-type-667ab5ae",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-init-type-667ab5ae",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-mounts-anno-0a9c4513",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-mounts-anno-0a9c4513",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-mounts-arr-8a791114",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-mounts-arr-8a791114",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-mounts-prop-ca554440",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-mounts-prop-ca554440",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-mounts-type-70d7ebeb",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-mounts-type-70d7ebeb",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-name-anno-d0c4b002",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-name-anno-d0c4b002",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-name-prop-84e2cd18",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-name-prop-84e2cd18",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-name-type-053eb8d4",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-name-type-053eb8d4",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-schema-anno-c327288e",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-schema-anno-c327288e",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-schema-prop-ee072fcb",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-schema-prop-ee072fcb",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-schema-type-2d32d7a5",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-schema-type-2d32d7a5",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-properties-schema-val-f5c02f03",
+      "constraint": "cst-base-definitions-devcontainercommon-properties-schema-val-f5c02f03",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema value assertion (`format`) used for editor authoring validation. deacon parses the field by its declared type and, like the reference CLI's lenient read-configuration, does not run JSON-Schema value-range/pattern/format validation, so the assertion has no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-devcontainercommon-type-c4bd97e3",
+      "constraint": "cst-base-definitions-devcontainercommon-type-c4bd97e3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-dockerfilecontainer-oneof-0-type-ca8779e7",
+      "constraint": "cst-base-definitions-dockerfilecontainer-oneof-0-type-ca8779e7",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-dockerfilecontainer-oneof-0-union-222441c0",
+      "constraint": "cst-base-definitions-dockerfilecontainer-oneof-0-union-222441c0",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-dockerfilecontainer-oneof-1-allof-0-type-73bc887d",
+      "constraint": "cst-base-definitions-dockerfilecontainer-oneof-1-allof-0-type-73bc887d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-dockerfilecontainer-oneof-1-allof-1-type-3e8d52e3",
+      "constraint": "cst-base-definitions-dockerfilecontainer-oneof-1-allof-1-type-3e8d52e3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-dockerfilecontainer-oneof-1-allof-702784a2",
+      "constraint": "cst-base-definitions-dockerfilecontainer-oneof-1-allof-702784a2",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-dockerfilecontainer-oneof-1-union-6d81d4f3",
+      "constraint": "cst-base-definitions-dockerfilecontainer-oneof-1-union-6d81d4f3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-imagecontainer-properties-image-anno-55624532",
+      "constraint": "cst-base-definitions-imagecontainer-properties-image-anno-55624532",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-imagecontainer-properties-image-prop-57eecf47",
+      "constraint": "cst-base-definitions-imagecontainer-properties-image-prop-57eecf47",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-imagecontainer-properties-image-type-cb87deec",
+      "constraint": "cst-base-definitions-imagecontainer-properties-image-type-cb87deec",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-imagecontainer-required-image-req-f0d7b94e",
+      "constraint": "cst-base-definitions-imagecontainer-required-image-req-f0d7b94e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-imagecontainer-type-69c25cda",
+      "constraint": "cst-base-definitions-imagecontainer-type-69c25cda",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-addprop-77d86046",
+      "constraint": "cst-base-definitions-mount-addprop-77d86046",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-source-anno-63b146a2",
+      "constraint": "cst-base-definitions-mount-properties-source-anno-63b146a2",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-source-prop-301ba35c",
+      "constraint": "cst-base-definitions-mount-properties-source-prop-301ba35c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-source-type-faee7dd3",
+      "constraint": "cst-base-definitions-mount-properties-source-type-faee7dd3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-target-anno-58177a8c",
+      "constraint": "cst-base-definitions-mount-properties-target-anno-58177a8c",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-target-prop-b06f5c14",
+      "constraint": "cst-base-definitions-mount-properties-target-prop-b06f5c14",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-target-type-ecf795e3",
+      "constraint": "cst-base-definitions-mount-properties-target-type-ecf795e3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-type-anno-d72a1208",
+      "constraint": "cst-base-definitions-mount-properties-type-anno-d72a1208",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-type-enum-dc75f2f2",
+      "constraint": "cst-base-definitions-mount-properties-type-enum-dc75f2f2",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-type-prop-fb60ca60",
+      "constraint": "cst-base-definitions-mount-properties-type-prop-fb60ca60",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-properties-type-type-13cf6f89",
+      "constraint": "cst-base-definitions-mount-properties-type-type-13cf6f89",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-required-target-req-aed8e3ba",
+      "constraint": "cst-base-definitions-mount-required-target-req-aed8e3ba",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-required-type-req-efe9fa38",
+      "constraint": "cst-base-definitions-mount-required-type-req-efe9fa38",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-mount-type-f5d08829",
+      "constraint": "cst-base-definitions-mount-type-f5d08829",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-noncomposebase-properties-appport-anno-a006fba3",
+      "constraint": "cst-base-definitions-noncomposebase-properties-appport-anno-a006fba3",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-noncomposebase-properties-appport-arr-86983ec4",
+      "constraint": "cst-base-definitions-noncomposebase-properties-appport-arr-86983ec4",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-noncomposebase-properties-appport-prop-7269bbe8",
+      "constraint": "cst-base-definitions-noncomposebase-properties-appport-prop-7269bbe8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-noncomposebase-properties-appport-type-f1d4e9fa",
+      "constraint": "cst-base-definitions-noncomposebase-properties-appport-type-f1d4e9fa",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-noncomposebase-properties-runargs-anno-78830e90",
+      "constraint": "cst-base-definitions-noncomposebase-properties-runargs-anno-78830e90",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-definitions-noncomposebase-properties-runargs-arr-85bf929c",
+      "constraint": "cst-base-definitions-noncomposebase-properties-runargs-arr-85bf929c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-noncomposebase-properties-runargs-prop-3d4bc68b",
+      "constraint": "cst-base-definitions-noncomposebase-properties-runargs-prop-3d4bc68b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-noncomposebase-properties-runargs-type-4cd9ce7d",
+      "constraint": "cst-base-definitions-noncomposebase-properties-runargs-type-4cd9ce7d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-definitions-noncomposebase-type-ea23f9d9",
+      "constraint": "cst-base-definitions-noncomposebase-type-ea23f9d9",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-capadd-items-type-dd0679ce",
+      "constraint": "cst-base-devcontainercommon-properties-capadd-items-type-dd0679ce",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-containerenv-addprop-2e361088",
+      "constraint": "cst-base-devcontainercommon-properties-containerenv-addprop-2e361088",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-containerenv-anno-96ffff5e",
+      "constraint": "cst-base-devcontainercommon-properties-containerenv-anno-96ffff5e",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-containerenv-prop-6f3b87ee",
+      "constraint": "cst-base-devcontainercommon-properties-containerenv-prop-6f3b87ee",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-containerenv-type-502c2254",
+      "constraint": "cst-base-devcontainercommon-properties-containerenv-type-502c2254",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-containeruser-anno-9997227f",
+      "constraint": "cst-base-devcontainercommon-properties-containeruser-anno-9997227f",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-containeruser-prop-aa88ed39",
+      "constraint": "cst-base-devcontainercommon-properties-containeruser-prop-aa88ed39",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-containeruser-type-abeade47",
+      "constraint": "cst-base-devcontainercommon-properties-containeruser-type-abeade47",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-customizations-anno-ddb83c90",
+      "constraint": "cst-base-devcontainercommon-properties-customizations-anno-ddb83c90",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-customizations-prop-b7d333f1",
+      "constraint": "cst-base-devcontainercommon-properties-customizations-prop-b7d333f1",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-customizations-type-45e93b2f",
+      "constraint": "cst-base-devcontainercommon-properties-customizations-type-45e93b2f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-features-addprop-9d6a22d6",
+      "constraint": "cst-base-devcontainercommon-properties-features-addprop-9d6a22d6",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-features-rejected"
+      ],
+      "notes": "Covers the `features` object/map shape (type: object + additionalProperties). Supersedes the retired src-schema-features-type source unit (FR-022)."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-features-anno-3ae9259e",
+      "constraint": "cst-base-devcontainercommon-properties-features-anno-3ae9259e",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-features-prop-2f3ede61",
+      "constraint": "cst-base-devcontainercommon-properties-features-prop-2f3ede61",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-features-type-d0495e9a",
+      "constraint": "cst-base-devcontainercommon-properties-features-type-d0495e9a",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-features-rejected"
+      ],
+      "notes": "Covers the `features` object/map shape (type: object + additionalProperties). Supersedes the retired src-schema-features-type source unit (FR-022)."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-forwardports-anno-65ea1ab7",
+      "constraint": "cst-base-devcontainercommon-properties-forwardports-anno-65ea1ab7",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-forwardports-arr-3df517c9",
+      "constraint": "cst-base-devcontainercommon-properties-forwardports-arr-3df517c9",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-forwardports-rejected"
+      ],
+      "notes": "Covers the `forwardPorts` array shape (type: array + items). Supersedes the retired src-schema-forwardports-type source unit (FR-022)."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-forwardports-prop-a849d02c",
+      "constraint": "cst-base-devcontainercommon-properties-forwardports-prop-a849d02c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-forwardports-type-8597fb89",
+      "constraint": "cst-base-devcontainercommon-properties-forwardports-type-8597fb89",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-forwardports-rejected"
+      ],
+      "notes": "Covers the `forwardPorts` array shape (type: array + items). Supersedes the retired src-schema-forwardports-type source unit (FR-022)."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-hostrequirements-addprop-ad5809aa",
+      "constraint": "cst-base-devcontainercommon-properties-hostrequirements-addprop-ad5809aa",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-hostrequirements-anno-e79ec72e",
+      "constraint": "cst-base-devcontainercommon-properties-hostrequirements-anno-e79ec72e",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-hostrequirements-prop-14a3c443",
+      "constraint": "cst-base-devcontainercommon-properties-hostrequirements-prop-14a3c443",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-hostrequirements-type-c4193f18",
+      "constraint": "cst-base-devcontainercommon-properties-hostrequirements-type-c4193f18",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-initializecommand-addprop-8a3e493e",
+      "constraint": "cst-base-devcontainercommon-properties-initializecommand-addprop-8a3e493e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-initializecommand-anno-31f0375f",
+      "constraint": "cst-base-devcontainercommon-properties-initializecommand-anno-31f0375f",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-initializecommand-arr-1877f395",
+      "constraint": "cst-base-devcontainercommon-properties-initializecommand-arr-1877f395",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-initializecommand-prop-4a427837",
+      "constraint": "cst-base-devcontainercommon-properties-initializecommand-prop-4a427837",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-initializecommand-type-dd009d82",
+      "constraint": "cst-base-devcontainercommon-properties-initializecommand-type-dd009d82",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-oncreatecommand-addprop-3f2166ab",
+      "constraint": "cst-base-devcontainercommon-properties-oncreatecommand-addprop-3f2166ab",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-oncreatecommand-anno-4cce83b4",
+      "constraint": "cst-base-devcontainercommon-properties-oncreatecommand-anno-4cce83b4",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-oncreatecommand-arr-6cf01fca",
+      "constraint": "cst-base-devcontainercommon-properties-oncreatecommand-arr-6cf01fca",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-oncreatecommand-prop-93e33284",
+      "constraint": "cst-base-devcontainercommon-properties-oncreatecommand-prop-93e33284",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-oncreatecommand-type-3973026f",
+      "constraint": "cst-base-devcontainercommon-properties-oncreatecommand-type-3973026f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-portsattributes-addprop-bcdb2e64",
+      "constraint": "cst-base-devcontainercommon-properties-portsattributes-addprop-bcdb2e64",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-portsattributes-addprop-ef6cc1df",
+      "constraint": "cst-base-devcontainercommon-properties-portsattributes-addprop-ef6cc1df",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-portsattributes-anno-39de2eed",
+      "constraint": "cst-base-devcontainercommon-properties-portsattributes-anno-39de2eed",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`markdownDescription`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-portsattributes-anno-ae79b90b",
+      "constraint": "cst-base-devcontainercommon-properties-portsattributes-anno-ae79b90b",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Editor authoring annotation (`defaultSnippets`) — no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-portsattributes-prop-7e82ebe4",
+      "constraint": "cst-base-devcontainercommon-properties-portsattributes-prop-7e82ebe4",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-portsattributes-type-133c9a8e",
+      "constraint": "cst-base-devcontainercommon-properties-portsattributes-type-133c9a8e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postattachcommand-addprop-efd07850",
+      "constraint": "cst-base-devcontainercommon-properties-postattachcommand-addprop-efd07850",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postattachcommand-anno-a7a4634e",
+      "constraint": "cst-base-devcontainercommon-properties-postattachcommand-anno-a7a4634e",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postattachcommand-arr-daa5022e",
+      "constraint": "cst-base-devcontainercommon-properties-postattachcommand-arr-daa5022e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postattachcommand-prop-32f14de3",
+      "constraint": "cst-base-devcontainercommon-properties-postattachcommand-prop-32f14de3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postattachcommand-type-fa2fed48",
+      "constraint": "cst-base-devcontainercommon-properties-postattachcommand-type-fa2fed48",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postcreatecommand-addprop-cd1eff62",
+      "constraint": "cst-base-devcontainercommon-properties-postcreatecommand-addprop-cd1eff62",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postcreatecommand-anno-1e68cc14",
+      "constraint": "cst-base-devcontainercommon-properties-postcreatecommand-anno-1e68cc14",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postcreatecommand-arr-703f7990",
+      "constraint": "cst-base-devcontainercommon-properties-postcreatecommand-arr-703f7990",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postcreatecommand-prop-c5261796",
+      "constraint": "cst-base-devcontainercommon-properties-postcreatecommand-prop-c5261796",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-postcreatecommand-type-30facdfd",
+      "constraint": "cst-base-devcontainercommon-properties-postcreatecommand-type-30facdfd",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-poststartcommand-addprop-d28db5de",
+      "constraint": "cst-base-devcontainercommon-properties-poststartcommand-addprop-d28db5de",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-poststartcommand-anno-d66947f2",
+      "constraint": "cst-base-devcontainercommon-properties-poststartcommand-anno-d66947f2",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-poststartcommand-arr-6aa827a3",
+      "constraint": "cst-base-devcontainercommon-properties-poststartcommand-arr-6aa827a3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-poststartcommand-prop-54deeb88",
+      "constraint": "cst-base-devcontainercommon-properties-poststartcommand-prop-54deeb88",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-poststartcommand-type-3a0c15ed",
+      "constraint": "cst-base-devcontainercommon-properties-poststartcommand-type-3a0c15ed",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-privileged-anno-6b629be8",
+      "constraint": "cst-base-devcontainercommon-properties-privileged-anno-6b629be8",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-privileged-prop-21203548",
+      "constraint": "cst-base-devcontainercommon-properties-privileged-prop-21203548",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-privileged-type-c49a1a73",
+      "constraint": "cst-base-devcontainercommon-properties-privileged-type-c49a1a73",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-remoteenv-addprop-d9b38355",
+      "constraint": "cst-base-devcontainercommon-properties-remoteenv-addprop-d9b38355",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-remoteenv-anno-bc579676",
+      "constraint": "cst-base-devcontainercommon-properties-remoteenv-anno-bc579676",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-remoteenv-prop-ec12c34e",
+      "constraint": "cst-base-devcontainercommon-properties-remoteenv-prop-ec12c34e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-remoteenv-type-74acad1e",
+      "constraint": "cst-base-devcontainercommon-properties-remoteenv-type-74acad1e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-remoteuser-anno-ce31e00d",
+      "constraint": "cst-base-devcontainercommon-properties-remoteuser-anno-ce31e00d",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-remoteuser-prop-c1d2c8d3",
+      "constraint": "cst-base-devcontainercommon-properties-remoteuser-prop-c1d2c8d3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-remoteuser-type-e2bda07b",
+      "constraint": "cst-base-devcontainercommon-properties-remoteuser-type-e2bda07b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-secrets-addprop-341c22a8",
+      "constraint": "cst-base-devcontainercommon-properties-secrets-addprop-341c22a8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-secrets-addprop-7b0971c7",
+      "constraint": "cst-base-devcontainercommon-properties-secrets-addprop-7b0971c7",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-secrets-addprop-8ff126b7",
+      "constraint": "cst-base-devcontainercommon-properties-secrets-addprop-8ff126b7",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-secrets-anno-9c3914cc",
+      "constraint": "cst-base-devcontainercommon-properties-secrets-anno-9c3914cc",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-secrets-prop-2d23d68a",
+      "constraint": "cst-base-devcontainercommon-properties-secrets-prop-2d23d68a",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-secrets-type-64dc4e41",
+      "constraint": "cst-base-devcontainercommon-properties-secrets-type-64dc4e41",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-securityopt-anno-75cf9a6c",
+      "constraint": "cst-base-devcontainercommon-properties-securityopt-anno-75cf9a6c",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-securityopt-anno-78491fbd",
+      "constraint": "cst-base-devcontainercommon-properties-securityopt-anno-78491fbd",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Editor authoring annotation (`examples`) — no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-securityopt-arr-1e2a5573",
+      "constraint": "cst-base-devcontainercommon-properties-securityopt-arr-1e2a5573",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-securityopt-items-type-238f3006",
+      "constraint": "cst-base-devcontainercommon-properties-securityopt-items-type-238f3006",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-securityopt-prop-f519f816",
+      "constraint": "cst-base-devcontainercommon-properties-securityopt-prop-f519f816",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-securityopt-type-6df1e005",
+      "constraint": "cst-base-devcontainercommon-properties-securityopt-type-6df1e005",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-userenvprobe-anno-73dd77dc",
+      "constraint": "cst-base-devcontainercommon-properties-userenvprobe-anno-73dd77dc",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-userenvprobe-enum-8f9f01a9",
+      "constraint": "cst-base-devcontainercommon-properties-userenvprobe-enum-8f9f01a9",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-userenvprobe-prop-90520fca",
+      "constraint": "cst-base-devcontainercommon-properties-userenvprobe-prop-90520fca",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-userenvprobe-type-c6f5ebd7",
+      "constraint": "cst-base-devcontainercommon-properties-userenvprobe-type-c6f5ebd7",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-waitfor-anno-d0b6cd37",
+      "constraint": "cst-base-devcontainercommon-properties-waitfor-anno-d0b6cd37",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-waitfor-enum-c4abcc5f",
+      "constraint": "cst-base-devcontainercommon-properties-waitfor-enum-c4abcc5f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-waitfor-prop-670f81c7",
+      "constraint": "cst-base-devcontainercommon-properties-waitfor-prop-670f81c7",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-devcontainercommon-properties-waitfor-type-bc9e8f25",
+      "constraint": "cst-base-devcontainercommon-properties-waitfor-type-bc9e8f25",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-dockerfilecontainer-oneof-0-properties-build-addprop-d9e37dc3",
+      "constraint": "cst-base-dockerfilecontainer-oneof-0-properties-build-addprop-d9e37dc3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-dockerfilecontainer-oneof-0-properties-build-allof-888e31e5",
+      "constraint": "cst-base-dockerfilecontainer-oneof-0-properties-build-allof-888e31e5",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-dockerfilecontainer-oneof-0-properties-build-anno-b0390761",
+      "constraint": "cst-base-dockerfilecontainer-oneof-0-properties-build-anno-b0390761",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-dockerfilecontainer-oneof-0-properties-build-prop-d420734c",
+      "constraint": "cst-base-dockerfilecontainer-oneof-0-properties-build-prop-d420734c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-dockerfilecontainer-oneof-0-properties-build-type-a09976d3",
+      "constraint": "cst-base-dockerfilecontainer-oneof-0-properties-build-type-a09976d3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-dockerfilecontainer-oneof-0-required-build-req-52ce744b",
+      "constraint": "cst-base-dockerfilecontainer-oneof-0-required-build-req-52ce744b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-hostrequirements-properties-gpu-oneof-0-anno-11db39bc",
+      "constraint": "cst-base-hostrequirements-properties-gpu-oneof-0-anno-11db39bc",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-hostrequirements-properties-gpu-oneof-0-enum-9f9483a0",
+      "constraint": "cst-base-hostrequirements-properties-gpu-oneof-0-enum-9f9483a0",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-hostrequirements-properties-gpu-oneof-0-type-5dfc9caa",
+      "constraint": "cst-base-hostrequirements-properties-gpu-oneof-0-type-5dfc9caa",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-hostrequirements-properties-gpu-oneof-0-union-019fb43b",
+      "constraint": "cst-base-hostrequirements-properties-gpu-oneof-0-union-019fb43b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-hostrequirements-properties-gpu-oneof-1-addprop-fd7e3d9c",
+      "constraint": "cst-base-hostrequirements-properties-gpu-oneof-1-addprop-fd7e3d9c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-hostrequirements-properties-gpu-oneof-1-anno-be97cea1",
+      "constraint": "cst-base-hostrequirements-properties-gpu-oneof-1-anno-be97cea1",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-hostrequirements-properties-gpu-oneof-1-type-63a16f17",
+      "constraint": "cst-base-hostrequirements-properties-gpu-oneof-1-type-63a16f17",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-hostrequirements-properties-gpu-oneof-1-union-621aa129",
+      "constraint": "cst-base-hostrequirements-properties-gpu-oneof-1-union-621aa129",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-initializecommand-additionalproperties-arr-05fb86f3",
+      "constraint": "cst-base-initializecommand-additionalproperties-arr-05fb86f3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-initializecommand-additionalproperties-items-type-fd6022d2",
+      "constraint": "cst-base-initializecommand-additionalproperties-items-type-fd6022d2",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-initializecommand-additionalproperties-type-e7acc048",
+      "constraint": "cst-base-initializecommand-additionalproperties-type-e7acc048",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-appport-items-type-e32c92c1",
+      "constraint": "cst-base-noncomposebase-properties-appport-items-type-e32c92c1",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-overridecommand-anno-93ac5767",
+      "constraint": "cst-base-noncomposebase-properties-overridecommand-anno-93ac5767",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-overridecommand-prop-2160970c",
+      "constraint": "cst-base-noncomposebase-properties-overridecommand-prop-2160970c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-overridecommand-type-d50f0b57",
+      "constraint": "cst-base-noncomposebase-properties-overridecommand-type-d50f0b57",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-runargs-items-type-dcde552d",
+      "constraint": "cst-base-noncomposebase-properties-runargs-items-type-dcde552d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-shutdownaction-anno-0ce28617",
+      "constraint": "cst-base-noncomposebase-properties-shutdownaction-anno-0ce28617",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-shutdownaction-enum-00a7debe",
+      "constraint": "cst-base-noncomposebase-properties-shutdownaction-enum-00a7debe",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-shutdownaction-prop-f16a321b",
+      "constraint": "cst-base-noncomposebase-properties-shutdownaction-prop-f16a321b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-shutdownaction-type-9835bcf2",
+      "constraint": "cst-base-noncomposebase-properties-shutdownaction-type-9835bcf2",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-workspacefolder-anno-28db9122",
+      "constraint": "cst-base-noncomposebase-properties-workspacefolder-anno-28db9122",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-workspacefolder-prop-473911b1",
+      "constraint": "cst-base-noncomposebase-properties-workspacefolder-prop-473911b1",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-workspacefolder-type-4987f2f2",
+      "constraint": "cst-base-noncomposebase-properties-workspacefolder-type-4987f2f2",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-workspacemount-anno-edfd65e7",
+      "constraint": "cst-base-noncomposebase-properties-workspacemount-anno-edfd65e7",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-workspacemount-prop-575ef97d",
+      "constraint": "cst-base-noncomposebase-properties-workspacemount-prop-575ef97d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-noncomposebase-properties-workspacemount-type-cb5fe395",
+      "constraint": "cst-base-noncomposebase-properties-workspacemount-type-cb5fe395",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oncreatecommand-additionalproperties-items-type-edff1d24",
+      "constraint": "cst-base-oncreatecommand-additionalproperties-items-type-edff1d24",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-0-oneof-0-allof-0-oneof-0-ref-e44986d6",
+      "constraint": "cst-base-oneof-0-allof-0-oneof-0-allof-0-oneof-0-ref-e44986d6",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-0-oneof-0-allof-0-oneof-0-union-9798f967",
+      "constraint": "cst-base-oneof-0-allof-0-oneof-0-allof-0-oneof-0-union-9798f967",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-0-oneof-0-allof-0-oneof-1-ref-269dacc1",
+      "constraint": "cst-base-oneof-0-allof-0-oneof-0-allof-0-oneof-1-ref-269dacc1",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-0-oneof-0-allof-0-oneof-1-union-79e4da24",
+      "constraint": "cst-base-oneof-0-allof-0-oneof-0-allof-0-oneof-1-union-79e4da24",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-0-oneof-0-allof-1-ref-f076d442",
+      "constraint": "cst-base-oneof-0-allof-0-oneof-0-allof-1-ref-f076d442",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-0-oneof-0-allof-592a96aa",
+      "constraint": "cst-base-oneof-0-allof-0-oneof-0-allof-592a96aa",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-0-oneof-0-union-a77954c2",
+      "constraint": "cst-base-oneof-0-allof-0-oneof-0-union-a77954c2",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-0-oneof-1-ref-a0436af8",
+      "constraint": "cst-base-oneof-0-allof-0-oneof-1-ref-a0436af8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-0-oneof-1-union-73b177ed",
+      "constraint": "cst-base-oneof-0-allof-0-oneof-1-union-73b177ed",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-1-ref-5bc91494",
+      "constraint": "cst-base-oneof-0-allof-1-ref-5bc91494",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-allof-1ae30012",
+      "constraint": "cst-base-oneof-0-allof-1ae30012",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-properties-build-allof-0-type-ff346792",
+      "constraint": "cst-base-oneof-0-properties-build-allof-0-type-ff346792",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-properties-build-allof-1-ref-17ebe4f6",
+      "constraint": "cst-base-oneof-0-properties-build-allof-1-ref-17ebe4f6",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-0-union-78239e52",
+      "constraint": "cst-base-oneof-0-union-78239e52",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-addprop-0e9e1202",
+      "constraint": "cst-base-oneof-1-addprop-0e9e1202",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-unknown-field-preserved"
+      ],
+      "notes": "Top-level object openness: deacon deliberately preserves unknown / forward-compatible top-level fields rather than enforcing the schema's closed top-level object, matching the reference CLI's fidelity."
+    },
+    {
+      "id": "cls-base-oneof-1-allof-0-properties-context-anno-bb27fce0",
+      "constraint": "cst-base-oneof-1-allof-0-properties-context-anno-bb27fce0",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-oneof-1-allof-0-properties-context-prop-4fb64ad7",
+      "constraint": "cst-base-oneof-1-allof-0-properties-context-prop-4fb64ad7",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-allof-0-properties-context-type-4c2eadba",
+      "constraint": "cst-base-oneof-1-allof-0-properties-context-type-4c2eadba",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-allof-0-properties-dockerfile-anno-98b9fbb5",
+      "constraint": "cst-base-oneof-1-allof-0-properties-dockerfile-anno-98b9fbb5",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-oneof-1-allof-0-properties-dockerfile-prop-409e7743",
+      "constraint": "cst-base-oneof-1-allof-0-properties-dockerfile-prop-409e7743",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-allof-0-properties-dockerfile-type-1ec00c2c",
+      "constraint": "cst-base-oneof-1-allof-0-properties-dockerfile-type-1ec00c2c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-allof-0-required-dockerfile-req-405a1eaa",
+      "constraint": "cst-base-oneof-1-allof-0-required-dockerfile-req-405a1eaa",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-allof-1-properties-build-anno-689776bf",
+      "constraint": "cst-base-oneof-1-allof-1-properties-build-anno-689776bf",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-oneof-1-allof-1-properties-build-prop-3c55c095",
+      "constraint": "cst-base-oneof-1-allof-1-properties-build-prop-3c55c095",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-allof-1-properties-build-ref-64923e17",
+      "constraint": "cst-base-oneof-1-allof-1-properties-build-ref-64923e17",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-ref-62b8aacd",
+      "constraint": "cst-base-oneof-1-ref-62b8aacd",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-type-04b23c28",
+      "constraint": "cst-base-oneof-1-type-04b23c28",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-oneof-1-union-400b25fc",
+      "constraint": "cst-base-oneof-1-union-400b25fc",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-elevateifneeded-anno-b02855e5",
+      "constraint": "cst-base-otherportsattributes-properties-elevateifneeded-anno-b02855e5",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-elevateifneeded-def-8890ba5f",
+      "constraint": "cst-base-otherportsattributes-properties-elevateifneeded-def-8890ba5f",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema `default` is a non-validating annotation (an editor/tooling authoring hint); per the JSON Schema spec it MUST NOT affect validation, and deacon does not inject schema-declared defaults into the resolved configuration, so it carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-elevateifneeded-prop-7a2f7c09",
+      "constraint": "cst-base-otherportsattributes-properties-elevateifneeded-prop-7a2f7c09",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-elevateifneeded-type-8722f85d",
+      "constraint": "cst-base-otherportsattributes-properties-elevateifneeded-type-8722f85d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-label-anno-49b0eada",
+      "constraint": "cst-base-otherportsattributes-properties-label-anno-49b0eada",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-label-def-aac62b82",
+      "constraint": "cst-base-otherportsattributes-properties-label-def-aac62b82",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema `default` is a non-validating annotation (an editor/tooling authoring hint); per the JSON Schema spec it MUST NOT affect validation, and deacon does not inject schema-declared defaults into the resolved configuration, so it carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-label-prop-ac767ac8",
+      "constraint": "cst-base-otherportsattributes-properties-label-prop-ac767ac8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-label-type-eca3ce31",
+      "constraint": "cst-base-otherportsattributes-properties-label-type-eca3ce31",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-onautoforward-anno-882c2d60",
+      "constraint": "cst-base-otherportsattributes-properties-onautoforward-anno-882c2d60",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Editor annotation (`enumDescriptions`) describing enum members for authoring UIs — no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-onautoforward-anno-986a0463",
+      "constraint": "cst-base-otherportsattributes-properties-onautoforward-anno-986a0463",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-onautoforward-def-bb3ae527",
+      "constraint": "cst-base-otherportsattributes-properties-onautoforward-def-bb3ae527",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema `default` is a non-validating annotation (an editor/tooling authoring hint); per the JSON Schema spec it MUST NOT affect validation, and deacon does not inject schema-declared defaults into the resolved configuration, so it carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-onautoforward-enum-b97e471f",
+      "constraint": "cst-base-otherportsattributes-properties-onautoforward-enum-b97e471f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-onautoforward-prop-636a3031",
+      "constraint": "cst-base-otherportsattributes-properties-onautoforward-prop-636a3031",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-onautoforward-type-d94620c0",
+      "constraint": "cst-base-otherportsattributes-properties-onautoforward-type-d94620c0",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-protocol-anno-48826318",
+      "constraint": "cst-base-otherportsattributes-properties-protocol-anno-48826318",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-protocol-enum-fdb2c432",
+      "constraint": "cst-base-otherportsattributes-properties-protocol-enum-fdb2c432",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-protocol-prop-336df93e",
+      "constraint": "cst-base-otherportsattributes-properties-protocol-prop-336df93e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-otherportsattributes-properties-protocol-type-d12b3249",
+      "constraint": "cst-base-otherportsattributes-properties-protocol-type-d12b3249",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-label-anno-59c13e7a",
+      "constraint": "cst-base-patternproperties-d-d-properties-label-anno-59c13e7a",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-label-def-60c28d5e",
+      "constraint": "cst-base-patternproperties-d-d-properties-label-def-60c28d5e",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema `default` is a non-validating annotation (an editor/tooling authoring hint); per the JSON Schema spec it MUST NOT affect validation, and deacon does not inject schema-declared defaults into the resolved configuration, so it carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-label-prop-9cdf3c47",
+      "constraint": "cst-base-patternproperties-d-d-properties-label-prop-9cdf3c47",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-label-type-64914f68",
+      "constraint": "cst-base-patternproperties-d-d-properties-label-type-64914f68",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-onautoforward-anno-47f4d837",
+      "constraint": "cst-base-patternproperties-d-d-properties-onautoforward-anno-47f4d837",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-onautoforward-anno-a82b421d",
+      "constraint": "cst-base-patternproperties-d-d-properties-onautoforward-anno-a82b421d",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Editor annotation (`enumDescriptions`) describing enum members for authoring UIs — no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-onautoforward-def-bcde6587",
+      "constraint": "cst-base-patternproperties-d-d-properties-onautoforward-def-bcde6587",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema `default` is a non-validating annotation (an editor/tooling authoring hint); per the JSON Schema spec it MUST NOT affect validation, and deacon does not inject schema-declared defaults into the resolved configuration, so it carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-onautoforward-enum-f6796ced",
+      "constraint": "cst-base-patternproperties-d-d-properties-onautoforward-enum-f6796ced",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-onautoforward-prop-ed0a4097",
+      "constraint": "cst-base-patternproperties-d-d-properties-onautoforward-prop-ed0a4097",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-onautoforward-type-691d1b36",
+      "constraint": "cst-base-patternproperties-d-d-properties-onautoforward-type-691d1b36",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-protocol-anno-e75cba0a",
+      "constraint": "cst-base-patternproperties-d-d-properties-protocol-anno-e75cba0a",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-protocol-enum-eab56aa3",
+      "constraint": "cst-base-patternproperties-d-d-properties-protocol-enum-eab56aa3",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-protocol-prop-4cc03ee8",
+      "constraint": "cst-base-patternproperties-d-d-properties-protocol-prop-4cc03ee8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-patternproperties-d-d-properties-protocol-type-e0448cb7",
+      "constraint": "cst-base-patternproperties-d-d-properties-protocol-type-e0448cb7",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-portsattributes-patternproperties-d-d-anno-2534113a",
+      "constraint": "cst-base-portsattributes-patternproperties-d-d-anno-2534113a",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-portsattributes-patternproperties-d-d-def-16ed5b58",
+      "constraint": "cst-base-portsattributes-patternproperties-d-d-def-16ed5b58",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema `default` is a non-validating annotation (an editor/tooling authoring hint); per the JSON Schema spec it MUST NOT affect validation, and deacon does not inject schema-declared defaults into the resolved configuration, so it carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-portsattributes-patternproperties-d-d-type-7220aa87",
+      "constraint": "cst-base-portsattributes-patternproperties-d-d-type-7220aa87",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-postattachcommand-additionalproperties-arr-99af92e1",
+      "constraint": "cst-base-postattachcommand-additionalproperties-arr-99af92e1",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-postattachcommand-additionalproperties-items-type-92a5b3aa",
+      "constraint": "cst-base-postattachcommand-additionalproperties-items-type-92a5b3aa",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-postattachcommand-additionalproperties-type-9de94365",
+      "constraint": "cst-base-postattachcommand-additionalproperties-type-9de94365",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-postcreatecommand-additionalproperties-arr-0699f2bb",
+      "constraint": "cst-base-postcreatecommand-additionalproperties-arr-0699f2bb",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-postcreatecommand-additionalproperties-items-type-76f94d78",
+      "constraint": "cst-base-postcreatecommand-additionalproperties-items-type-76f94d78",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-postcreatecommand-additionalproperties-type-9fac6ba9",
+      "constraint": "cst-base-postcreatecommand-additionalproperties-type-9fac6ba9",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-poststartcommand-additionalproperties-arr-636d0c07",
+      "constraint": "cst-base-poststartcommand-additionalproperties-arr-636d0c07",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-poststartcommand-additionalproperties-items-type-e2ce8a81",
+      "constraint": "cst-base-poststartcommand-additionalproperties-items-type-e2ce8a81",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-poststartcommand-additionalproperties-type-d19fc646",
+      "constraint": "cst-base-poststartcommand-additionalproperties-type-d19fc646",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-additionalproperties-addprop-b1030764",
+      "constraint": "cst-base-properties-additionalproperties-addprop-b1030764",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-unknown-field-preserved"
+      ],
+      "notes": "Top-level object openness: deacon deliberately preserves unknown / forward-compatible top-level fields rather than enforcing the schema's closed top-level object, matching the reference CLI's fidelity."
+    },
+    {
+      "id": "cls-base-properties-additionalproperties-prop-286fdfc4",
+      "constraint": "cst-base-properties-additionalproperties-prop-286fdfc4",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-additionalproperties-type-29503dad",
+      "constraint": "cst-base-properties-additionalproperties-type-29503dad",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-args-additionalproperties-type-b7ae210a",
+      "constraint": "cst-base-properties-args-additionalproperties-type-b7ae210a",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-build-allof-0-properties-dockerfile-anno-ff7e0431",
+      "constraint": "cst-base-properties-build-allof-0-properties-dockerfile-anno-ff7e0431",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-build-allof-0-properties-dockerfile-prop-1b7eaf89",
+      "constraint": "cst-base-properties-build-allof-0-properties-dockerfile-prop-1b7eaf89",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-build-allof-0-properties-dockerfile-type-d30aa5b8",
+      "constraint": "cst-base-properties-build-allof-0-properties-dockerfile-type-d30aa5b8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-containerenv-additionalproperties-type-5b1d09a5",
+      "constraint": "cst-base-properties-containerenv-additionalproperties-type-5b1d09a5",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-dockercomposefile-items-type-c7f96218",
+      "constraint": "cst-base-properties-dockercomposefile-items-type-c7f96218",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-features-properties-fish-anno-4db0a298",
+      "constraint": "cst-base-properties-features-properties-fish-anno-4db0a298",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecationMessage`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-fish-anno-659b9859",
+      "constraint": "cst-base-properties-features-properties-fish-anno-659b9859",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecated`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-fish-prop-525c1ca7",
+      "constraint": "cst-base-properties-features-properties-fish-prop-525c1ca7",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Legacy/deprecated feature id listed as a named key under the open `features` map purely to carry editor deprecation hints. deacon treats `features` as an open map (any feature reference is accepted) and applies no distinct behavior to these specific keys, so the property carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-gradle-anno-6fa74135",
+      "constraint": "cst-base-properties-features-properties-gradle-anno-6fa74135",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecationMessage`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-gradle-anno-fb28ec42",
+      "constraint": "cst-base-properties-features-properties-gradle-anno-fb28ec42",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecated`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-gradle-prop-8620cbda",
+      "constraint": "cst-base-properties-features-properties-gradle-prop-8620cbda",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Legacy/deprecated feature id listed as a named key under the open `features` map purely to carry editor deprecation hints. deacon treats `features` as an open map (any feature reference is accepted) and applies no distinct behavior to these specific keys, so the property carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-homebrew-anno-1ec30899",
+      "constraint": "cst-base-properties-features-properties-homebrew-anno-1ec30899",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecated`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-homebrew-anno-a1a6d29d",
+      "constraint": "cst-base-properties-features-properties-homebrew-anno-a1a6d29d",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecationMessage`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-homebrew-prop-24a40ec7",
+      "constraint": "cst-base-properties-features-properties-homebrew-prop-24a40ec7",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Legacy/deprecated feature id listed as a named key under the open `features` map purely to carry editor deprecation hints. deacon treats `features` as an open map (any feature reference is accepted) and applies no distinct behavior to these specific keys, so the property carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-jupyterlab-anno-9176177e",
+      "constraint": "cst-base-properties-features-properties-jupyterlab-anno-9176177e",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecated`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-jupyterlab-anno-b743b950",
+      "constraint": "cst-base-properties-features-properties-jupyterlab-anno-b743b950",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecationMessage`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-jupyterlab-prop-27fa543b",
+      "constraint": "cst-base-properties-features-properties-jupyterlab-prop-27fa543b",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Legacy/deprecated feature id listed as a named key under the open `features` map purely to carry editor deprecation hints. deacon treats `features` as an open map (any feature reference is accepted) and applies no distinct behavior to these specific keys, so the property carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-maven-anno-0cee35c8",
+      "constraint": "cst-base-properties-features-properties-maven-anno-0cee35c8",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecationMessage`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-maven-anno-ea2357a8",
+      "constraint": "cst-base-properties-features-properties-maven-anno-ea2357a8",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Deprecation annotation (`deprecated`) — an editor authoring hint. deacon emits no deprecation warning and applies no distinct behavior to the field, so it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-features-properties-maven-prop-c99ee01d",
+      "constraint": "cst-base-properties-features-properties-maven-prop-c99ee01d",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Legacy/deprecated feature id listed as a named key under the open `features` map purely to carry editor deprecation hints. deacon treats `features` as an open map (any feature reference is accepted) and applies no distinct behavior to these specific keys, so the property carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-forwardports-items-oneof-0-type-8eed3352",
+      "constraint": "cst-base-properties-forwardports-items-oneof-0-type-8eed3352",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-forwardports-items-oneof-0-union-ba4328fc",
+      "constraint": "cst-base-properties-forwardports-items-oneof-0-union-ba4328fc",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-forwardports-items-oneof-0-val-77f2c91c",
+      "constraint": "cst-base-properties-forwardports-items-oneof-0-val-77f2c91c",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema value assertion (`maximum`, `minimum`) used for editor authoring validation. deacon parses the field by its declared type and, like the reference CLI's lenient read-configuration, does not run JSON-Schema value-range/pattern/format validation, so the assertion has no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-forwardports-items-oneof-1-type-ec2e119d",
+      "constraint": "cst-base-properties-forwardports-items-oneof-1-type-ec2e119d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-forwardports-items-oneof-1-union-f62e5f15",
+      "constraint": "cst-base-properties-forwardports-items-oneof-1-union-f62e5f15",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-forwardports-items-oneof-1-val-319cc54f",
+      "constraint": "cst-base-properties-forwardports-items-oneof-1-val-319cc54f",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema value assertion (`pattern`) used for editor authoring validation. deacon parses the field by its declared type and, like the reference CLI's lenient read-configuration, does not run JSON-Schema value-range/pattern/format validation, so the assertion has no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-gpu-oneof-1-properties-cores-anno-c06a1deb",
+      "constraint": "cst-base-properties-gpu-oneof-1-properties-cores-anno-c06a1deb",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-gpu-oneof-1-properties-cores-prop-7afe2db7",
+      "constraint": "cst-base-properties-gpu-oneof-1-properties-cores-prop-7afe2db7",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-gpu-oneof-1-properties-cores-type-d7fed368",
+      "constraint": "cst-base-properties-gpu-oneof-1-properties-cores-type-d7fed368",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-gpu-oneof-1-properties-cores-val-539247b9",
+      "constraint": "cst-base-properties-gpu-oneof-1-properties-cores-val-539247b9",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema value assertion (`minimum`) used for editor authoring validation. deacon parses the field by its declared type and, like the reference CLI's lenient read-configuration, does not run JSON-Schema value-range/pattern/format validation, so the assertion has no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-gpu-oneof-1-properties-memory-anno-338c3254",
+      "constraint": "cst-base-properties-gpu-oneof-1-properties-memory-anno-338c3254",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-gpu-oneof-1-properties-memory-prop-866c6d5e",
+      "constraint": "cst-base-properties-gpu-oneof-1-properties-memory-prop-866c6d5e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-gpu-oneof-1-properties-memory-type-ecc30d7b",
+      "constraint": "cst-base-properties-gpu-oneof-1-properties-memory-type-ecc30d7b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-gpu-oneof-1-properties-memory-val-acbf35c9",
+      "constraint": "cst-base-properties-gpu-oneof-1-properties-memory-val-acbf35c9",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema value assertion (`pattern`) used for editor authoring validation. deacon parses the field by its declared type and, like the reference CLI's lenient read-configuration, does not run JSON-Schema value-range/pattern/format validation, so the assertion has no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-cpus-anno-7b50cfa6",
+      "constraint": "cst-base-properties-hostrequirements-properties-cpus-anno-7b50cfa6",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-cpus-prop-76e21653",
+      "constraint": "cst-base-properties-hostrequirements-properties-cpus-prop-76e21653",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-cpus-type-7d4163a6",
+      "constraint": "cst-base-properties-hostrequirements-properties-cpus-type-7d4163a6",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-cpus-val-4c4147c8",
+      "constraint": "cst-base-properties-hostrequirements-properties-cpus-val-4c4147c8",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema value assertion (`minimum`) used for editor authoring validation. deacon parses the field by its declared type and, like the reference CLI's lenient read-configuration, does not run JSON-Schema value-range/pattern/format validation, so the assertion has no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-gpu-prop-493ccf92",
+      "constraint": "cst-base-properties-hostrequirements-properties-gpu-prop-493ccf92",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-memory-anno-c51e15d7",
+      "constraint": "cst-base-properties-hostrequirements-properties-memory-anno-c51e15d7",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-memory-prop-3fb5923c",
+      "constraint": "cst-base-properties-hostrequirements-properties-memory-prop-3fb5923c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-memory-type-f49877b4",
+      "constraint": "cst-base-properties-hostrequirements-properties-memory-type-f49877b4",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-memory-val-3d7b9c5b",
+      "constraint": "cst-base-properties-hostrequirements-properties-memory-val-3d7b9c5b",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema value assertion (`pattern`) used for editor authoring validation. deacon parses the field by its declared type and, like the reference CLI's lenient read-configuration, does not run JSON-Schema value-range/pattern/format validation, so the assertion has no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-storage-anno-8c1a775b",
+      "constraint": "cst-base-properties-hostrequirements-properties-storage-anno-8c1a775b",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-storage-prop-9fe7ce5a",
+      "constraint": "cst-base-properties-hostrequirements-properties-storage-prop-9fe7ce5a",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-storage-type-298b0e46",
+      "constraint": "cst-base-properties-hostrequirements-properties-storage-type-298b0e46",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-hostrequirements-properties-storage-val-a66b90ab",
+      "constraint": "cst-base-properties-hostrequirements-properties-storage-val-a66b90ab",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema value assertion (`pattern`) used for editor authoring validation. deacon parses the field by its declared type and, like the reference CLI's lenient read-configuration, does not run JSON-Schema value-range/pattern/format validation, so the assertion has no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-initializecommand-items-type-c049f3b9",
+      "constraint": "cst-base-properties-initializecommand-items-type-c049f3b9",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-mounts-items-anyof-0-ref-2aaa1cf8",
+      "constraint": "cst-base-properties-mounts-items-anyof-0-ref-2aaa1cf8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-mounts-items-anyof-0-union-813060ba",
+      "constraint": "cst-base-properties-mounts-items-anyof-0-union-813060ba",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-mounts-items-anyof-1-type-024cbd07",
+      "constraint": "cst-base-properties-mounts-items-anyof-1-type-024cbd07",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-mounts-items-anyof-1-union-20dff99a",
+      "constraint": "cst-base-properties-mounts-items-anyof-1-union-20dff99a",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-oncreatecommand-additionalproperties-arr-857a2585",
+      "constraint": "cst-base-properties-oncreatecommand-additionalproperties-arr-857a2585",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-oncreatecommand-additionalproperties-type-ba898f19",
+      "constraint": "cst-base-properties-oncreatecommand-additionalproperties-type-ba898f19",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-oncreatecommand-items-type-7f4d728e",
+      "constraint": "cst-base-properties-oncreatecommand-items-type-7f4d728e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-otherportsattributes-addprop-ccac2c71",
+      "constraint": "cst-base-properties-otherportsattributes-addprop-ccac2c71",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-otherportsattributes-anno-03a07a47",
+      "constraint": "cst-base-properties-otherportsattributes-anno-03a07a47",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`markdownDescription`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-otherportsattributes-anno-33b39daf",
+      "constraint": "cst-base-properties-otherportsattributes-anno-33b39daf",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Editor authoring annotation (`defaultSnippets`) — no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-otherportsattributes-prop-3da73d12",
+      "constraint": "cst-base-properties-otherportsattributes-prop-3da73d12",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-otherportsattributes-type-eaa245fb",
+      "constraint": "cst-base-properties-otherportsattributes-type-eaa245fb",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-overridefeatureinstallorder-anno-9133b581",
+      "constraint": "cst-base-properties-overridefeatureinstallorder-anno-9133b581",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-overridefeatureinstallorder-arr-d2ab7fa1",
+      "constraint": "cst-base-properties-overridefeatureinstallorder-arr-d2ab7fa1",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-overridefeatureinstallorder-items-type-00089b5c",
+      "constraint": "cst-base-properties-overridefeatureinstallorder-items-type-00089b5c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-overridefeatureinstallorder-prop-0d022d81",
+      "constraint": "cst-base-properties-overridefeatureinstallorder-prop-0d022d81",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-overridefeatureinstallorder-type-88848c39",
+      "constraint": "cst-base-properties-overridefeatureinstallorder-type-88848c39",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-postattachcommand-items-type-7edfbe88",
+      "constraint": "cst-base-properties-postattachcommand-items-type-7edfbe88",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-postcreatecommand-items-type-d287451f",
+      "constraint": "cst-base-properties-postcreatecommand-items-type-d287451f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-poststartcommand-items-type-bd5725fe",
+      "constraint": "cst-base-properties-poststartcommand-items-type-bd5725fe",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-remoteenv-additionalproperties-type-df6e47d6",
+      "constraint": "cst-base-properties-remoteenv-additionalproperties-type-df6e47d6",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-requirelocalport-anno-467e3875",
+      "constraint": "cst-base-properties-requirelocalport-anno-467e3875",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`markdownDescription`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-requirelocalport-def-02f0c977",
+      "constraint": "cst-base-properties-requirelocalport-def-02f0c977",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSON Schema `default` is a non-validating annotation (an editor/tooling authoring hint); per the JSON Schema spec it MUST NOT affect validation, and deacon does not inject schema-declared defaults into the resolved configuration, so it carries no separately-observable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-requirelocalport-prop-6bacc726",
+      "constraint": "cst-base-properties-requirelocalport-prop-6bacc726",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-requirelocalport-type-2e942392",
+      "constraint": "cst-base-properties-requirelocalport-type-2e942392",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-updatecontentcommand-addprop-c6ad140b",
+      "constraint": "cst-base-properties-updatecontentcommand-addprop-c6ad140b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-updatecontentcommand-anno-471c07ab",
+      "constraint": "cst-base-properties-updatecontentcommand-anno-471c07ab",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-updatecontentcommand-arr-0ec6a04f",
+      "constraint": "cst-base-properties-updatecontentcommand-arr-0ec6a04f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-updatecontentcommand-items-type-3cf8d0d0",
+      "constraint": "cst-base-properties-updatecontentcommand-items-type-3cf8d0d0",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-updatecontentcommand-prop-ccd912ce",
+      "constraint": "cst-base-properties-updatecontentcommand-prop-ccd912ce",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-updatecontentcommand-type-6f88b89f",
+      "constraint": "cst-base-properties-updatecontentcommand-type-6f88b89f",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-updateremoteuseruid-anno-3bbe0882",
+      "constraint": "cst-base-properties-updateremoteuseruid-anno-3bbe0882",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-properties-updateremoteuseruid-prop-2966e92d",
+      "constraint": "cst-base-properties-updateremoteuseruid-prop-2966e92d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-properties-updateremoteuseruid-type-bd3f4317",
+      "constraint": "cst-base-properties-updateremoteuseruid-type-bd3f4317",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-root-addprop-b3387e3d",
+      "constraint": "cst-base-root-addprop-b3387e3d",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-unknown-field-preserved"
+      ],
+      "notes": "Top-level object openness: deacon deliberately preserves unknown / forward-compatible top-level fields rather than enforcing the schema's closed top-level object, matching the reference CLI's fidelity."
+    },
+    {
+      "id": "cls-base-root-anno-08eefd78",
+      "constraint": "cst-base-root-anno-08eefd78",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-root-anno-1aac1b1c",
+      "constraint": "cst-base-root-anno-1aac1b1c",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSONC editor/tooling directive (`allowTrailingCommas`) declared on the schema document for editors — editor/tooling metadata with no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-root-anno-2ae957e4",
+      "constraint": "cst-base-root-anno-2ae957e4",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "JSONC editor/tooling directive (`allowComments`) declared on the schema document for editors — editor/tooling metadata with no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-root-anno-2df098a2",
+      "constraint": "cst-base-root-anno-2df098a2",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "`$schema` is editor/tooling metadata identifying the schema document — no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-secrets-patternproperties-a-za-z-a-za-z0-9-addprop-8da99b34",
+      "constraint": "cst-base-secrets-patternproperties-a-za-z-a-za-z0-9-addprop-8da99b34",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-secrets-patternproperties-a-za-z-a-za-z0-9-anno-606d3d80",
+      "constraint": "cst-base-secrets-patternproperties-a-za-z-a-za-z0-9-anno-606d3d80",
+      "disposition": "non-testable",
+      "behaviors": [],
+      "rationale": "Documentation annotation (`description`) — authoring/editor guidance only; it carries no testable consumer behavior."
+    },
+    {
+      "id": "cls-base-secrets-patternproperties-a-za-z-a-za-z0-9-type-f8f81bb5",
+      "constraint": "cst-base-secrets-patternproperties-a-za-z-a-za-z0-9-type-f8f81bb5",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-updatecontentcommand-additionalproperties-arr-1bb380cb",
+      "constraint": "cst-base-updatecontentcommand-additionalproperties-arr-1bb380cb",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-updatecontentcommand-additionalproperties-items-type-345cbb48",
+      "constraint": "cst-base-updatecontentcommand-additionalproperties-items-type-345cbb48",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    },
+    {
+      "id": "cls-base-updatecontentcommand-additionalproperties-type-f59a533c",
+      "constraint": "cst-base-updatecontentcommand-additionalproperties-type-f59a533c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
+    }
+  ]
+}

@@ -1,21 +1,4 @@
 {
   "schemaVersion": 1,
-  "records": [
-    {
-      "id": "src-schema-features-type",
-      "inventory": "schema",
-      "revision": "rev-schema-113500f4",
-      "locator": "#/properties/features",
-      "summary": "The `features` property is schema-shaped as an object (map<string, …>); a non-object value violates the schema shape.",
-      "behaviors": ["bhv-readconfig-wrong-type-features-rejected"]
-    },
-    {
-      "id": "src-schema-forwardports-type",
-      "inventory": "schema",
-      "revision": "rev-schema-113500f4",
-      "locator": "#/properties/forwardPorts",
-      "summary": "The `forwardPorts` property is schema-shaped as an array; a bare-string value violates the schema shape.",
-      "behaviors": ["bhv-readconfig-wrong-type-forwardports-rejected"]
-    }
-  ]
+  "records": []
 }

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-schema-113500f4",
+  "documents": [
+    {
+      "key": "base",
+      "file": "devContainer.base.schema.json",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/schemas/devContainer.base.schema.json",
+      "sha256": "a0883c0405ff433db188849d458fb20b9c0d73e0ba1a6e44c1d83f3b485408dd"
+    },
+    {
+      "key": "feature",
+      "file": "devContainerFeature.schema.json",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/schemas/devContainerFeature.schema.json",
+      "sha256": "671fcd80cbb3510793412746b35505d12b6a4b8e68d38a01960e440aa5af32eb"
+    }
+  ]
+}

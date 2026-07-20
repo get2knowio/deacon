@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "description": "Base fixture document of a pinned multi-document set: exposes a named definition (`Something`) that a separate pinned document cross-references by a manifest-relative path (research Decision 5, User Story 4).",
+  "type": "object",
+  "properties": {
+    "base": {
+      "type": "boolean"
+    }
+  },
+  "definitions": {
+    "Something": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  }
+}

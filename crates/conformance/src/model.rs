@@ -14,8 +14,11 @@
 //! schema (plan.md; research Decision 3).
 //!
 //! Identity rules (all record types) live in [`RecordType`] / [`parse_id`]: the ID
-//! format regex `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext)-[a-z0-9]+(-[a-z0-9]+)*$`
-//! and the prefix↔type agreement helper. Duplicate/sort checks (V2) land in T006 —
+//! format regex
+//! `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls)-[a-z0-9]+(-[a-z0-9]+)*$`
+//! and the prefix↔type agreement helper. The `cst` (constraint unit) and `cls`
+//! (classification) prefixes are the schema constraint inventory's record types
+//! (020-schema-constraint-inventory). Duplicate/sort checks (V2) land in T006 —
 //! this module only models and parses IDs.
 
 use indexmap::IndexMap;
@@ -35,7 +38,10 @@ pub struct Collection<T> {
     pub records: Vec<T>,
 }
 
-/// The ten record types, one per stable ID prefix (data-model.md Identity rules).
+/// The record types, one per stable ID prefix (data-model.md Identity rules).
+///
+/// `Constraint` (`cst`) and `Classification` (`cls`) are the schema constraint
+/// inventory's record types (020-schema-constraint-inventory §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RecordType {
     Revision,
@@ -48,6 +54,8 @@ pub enum RecordType {
     Gap,
     Waiver,
     Extension,
+    Constraint,
+    Classification,
 }
 
 impl RecordType {
@@ -64,6 +72,8 @@ impl RecordType {
             RecordType::Gap => "gap",
             RecordType::Waiver => "wvr",
             RecordType::Extension => "ext",
+            RecordType::Constraint => "cst",
+            RecordType::Classification => "cls",
         }
     }
 
@@ -80,6 +90,8 @@ impl RecordType {
             "gap" => RecordType::Gap,
             "wvr" => RecordType::Waiver,
             "ext" => RecordType::Extension,
+            "cst" => RecordType::Constraint,
+            "cls" => RecordType::Classification,
             _ => return None,
         })
     }
@@ -93,7 +105,7 @@ pub enum IdError {
     /// uppercase, or disallowed characters.
     #[error(
         "id {id:?} is malformed: expected \
-         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext)-[a-z0-9]+(-[a-z0-9]+)*$`"
+         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls)-[a-z0-9]+(-[a-z0-9]+)*$`"
     )]
     Format { id: String },
     /// The id is well-formed but its leading segment is not a known record prefix.
@@ -481,6 +493,171 @@ pub struct DeaconExtension {
     pub docs: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Schema constraint inventory (020-schema-constraint-inventory, data-model.md §1–§3)
+// ---------------------------------------------------------------------------
+
+/// The schemas manifest — `conformance/schemas/<rev-pin>/manifest.json`
+/// (data-model.md §1). Records the vendored pinned schema documents and their
+/// SHA-256 fingerprints, keyed to a `schema`-kind [`SourceRevision`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SchemasManifest {
+    /// Schema version of the manifest format.
+    pub schema_version: u32,
+    /// MUST name an existing `rev-` record of kind `schema` in `revisions.json`
+    /// (V14 on mismatch).
+    pub revision: String,
+    /// One entry per vendored schema document, in file order.
+    pub documents: Vec<ManifestDocument>,
+}
+
+/// One vendored schema document within a [`SchemasManifest`] (data-model.md §1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManifestDocument {
+    /// Document key used in constraint IDs and diff match keys. Lowercase
+    /// `[a-z0-9]+`, unique within the manifest.
+    pub key: String,
+    /// Filename of the vendored schema, a sibling of the manifest.
+    pub file: String,
+    /// Upstream URL at the pinned commit — provenance only, never fetched.
+    pub upstream_url: String,
+    /// SHA-256 of the vendored file bytes; verified before every parse
+    /// (V14 / [`InventoryError::ManifestFingerprintMismatch`] on mismatch).
+    pub sha256: String,
+}
+
+/// The generated, committed constraint inventory —
+/// `conformance/inventory/constraints.json` (data-model.md §2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConstraintInventory {
+    /// Schema version of the inventory format.
+    pub schema_version: u32,
+    /// Equals the manifest's revision (and therefore the registry schema pin).
+    pub revision: String,
+    /// Extracted constraint units, sorted by `id` in the committed artifact.
+    pub units: Vec<ConstraintUnit>,
+}
+
+/// One extracted constraint facet (data-model.md §2). Identity lives in the
+/// substance-and-location-derived `id`; a material change to `substance` produces a
+/// new `id` (drift-forcing, research Decision 6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConstraintUnit {
+    /// `cst-<doc>-<slug>-<kind code>-<hash8>` — grammar-valid per [`parse_id`].
+    pub id: String,
+    /// Manifest document key this facet was extracted from.
+    pub document: String,
+    /// RFC 6901 JSON Pointer to the schema object owning the facet (definition
+    /// site — research Decision 3).
+    pub pointer: String,
+    /// The facet's constraint kind.
+    pub kind: ConstraintKind,
+    /// Canonicalized JSON value of the facet — the testable rule itself.
+    pub substance: Value,
+    /// Composition/condition context when the owning object sits inside a branch;
+    /// serialized as `null` when the unit is at top level.
+    #[serde(default)]
+    pub context: Option<UnitContext>,
+}
+
+/// The closed constraint-kind taxonomy (data-model.md §2, research Decision 4).
+/// `UnmodeledKeyword` is the fail-faithful catch-all: any keyword the extractor
+/// does not model lands here rather than being dropped (constitution IV).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConstraintKind {
+    PropertyExistence,
+    Required,
+    Type,
+    Enum,
+    Const,
+    Default,
+    UnionAlternative,
+    AllOf,
+    Conditional,
+    AdditionalProperties,
+    ArrayShape,
+    ValueShape,
+    Reference,
+    Annotation,
+    UnmodeledKeyword,
+}
+
+/// Composition/condition context for a [`ConstraintUnit`] (data-model.md §2). An
+/// untagged enum over the two documented shapes: a `oneOf`/`anyOf`/`allOf` branch
+/// arm (`{ branch, index }`) or an `if`/`then`/`else` condition
+/// (`{ condition }`). The inner structs carry `deny_unknown_fields` so the two
+/// disjoint field sets discriminate the variant unambiguously (serde does not
+/// permit `deny_unknown_fields` on the untagged enum itself).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum UnitContext {
+    /// The owning object is a branch arm of a composition keyword.
+    Branch(BranchContext),
+    /// The owning object is the target of a conditional keyword.
+    Condition(ConditionContext),
+}
+
+/// `{ "branch": "oneOf", "index": 2 }` — a composition branch arm.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BranchContext {
+    /// The composition keyword owning the arm (`oneOf`, `anyOf`, `allOf`).
+    pub branch: String,
+    /// Zero-based arm index within that keyword's array.
+    pub index: usize,
+}
+
+/// `{ "condition": "/definitions/x/if" }` — an `if`/`then`/`else` condition pointer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConditionContext {
+    /// JSON Pointer to the governing condition schema.
+    pub condition: String,
+}
+
+/// A hand-authored classification record (`cls-`) —
+/// `conformance/registry/classifications/{base,feature}.json` (data-model.md §3).
+/// Exactly one per constraint unit; joins to the inventory by ID (V11/V12/V13).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Classification {
+    /// `cls-` + the exact tail of `constraint`'s `cst-` id (structural mirror; V13
+    /// if mismatched).
+    pub id: String,
+    /// The `cst-` constraint id this classifies; MUST exist in the committed
+    /// inventory (V11 when stale).
+    pub constraint: String,
+    /// The disposition under the consumer-only scope.
+    pub disposition: Disposition,
+    /// Non-empty and every id an existing behavior iff `behavior-mapped`; MUST be
+    /// absent/empty otherwise (V13).
+    #[serde(default)]
+    pub behaviors: Vec<String>,
+    /// REQUIRED non-empty for `non-testable` / `not-applicable`; optional for
+    /// `behavior-mapped` (V13).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    /// Free-form notes (e.g. migration provenance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+/// A classification disposition (data-model.md §3, closed set). `NotApplicable` and
+/// `NonTestable` never block certification; `BehaviorMapped` requires covered
+/// behaviors (research Decision 11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Disposition {
+    BehaviorMapped,
+    NonTestable,
+    NotApplicable,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,6 +687,40 @@ mod tests {
             parse_id("ext-workspace-trust").unwrap(),
             RecordType::Extension
         );
+        assert_eq!(
+            parse_id("cst-base-forwardports-type-3fa9c214").unwrap(),
+            RecordType::Constraint
+        );
+        assert_eq!(
+            parse_id("cls-base-forwardports-type-3fa9c214").unwrap(),
+            RecordType::Classification
+        );
+    }
+
+    #[test]
+    fn parse_id_accepts_constraint_and_classification_prefixes() {
+        // The two schema-constraint-inventory prefixes parse to their record types
+        // and round-trip through prefix()/from_prefix()
+        // (020-schema-constraint-inventory).
+        assert_eq!(RecordType::Constraint.prefix(), "cst");
+        assert_eq!(RecordType::Classification.prefix(), "cls");
+        assert_eq!(RecordType::from_prefix("cst"), Some(RecordType::Constraint));
+        assert_eq!(
+            RecordType::from_prefix("cls"),
+            Some(RecordType::Classification)
+        );
+        // Realistic multi-segment ids (slug + kind + hash8 tail) parse cleanly.
+        assert_eq!(
+            parse_id("cst-feature-options-additional-properties-0a1b2c3d").unwrap(),
+            RecordType::Constraint
+        );
+        assert_eq!(
+            parse_id("cls-feature-options-additional-properties-0a1b2c3d").unwrap(),
+            RecordType::Classification
+        );
+        // Malformed cst/cls ids are still rejected by the shared format check.
+        assert!(matches!(parse_id("cst-"), Err(IdError::Format { .. })));
+        assert!(matches!(parse_id("cls-Base"), Err(IdError::Format { .. })));
     }
 
     #[test]
@@ -553,6 +764,8 @@ mod tests {
             RecordType::Gap,
             RecordType::Waiver,
             RecordType::Extension,
+            RecordType::Constraint,
+            RecordType::Classification,
         ] {
             assert_eq!(RecordType::from_prefix(ty.prefix()), Some(ty));
             // A valid id built from the prefix parses back to the same type
@@ -726,5 +939,199 @@ mod tests {
         );
         let back: Collection<SourceRevision> = serde_json::from_value(value).unwrap();
         assert_eq!(back, collection);
+    }
+
+    // ---- Schema constraint inventory (020) --------------------------------
+
+    #[test]
+    fn constraint_kind_spellings() {
+        round_trip(
+            ConstraintKind::PropertyExistence,
+            json!("property-existence"),
+        );
+        round_trip(ConstraintKind::Required, json!("required"));
+        round_trip(ConstraintKind::Type, json!("type"));
+        round_trip(ConstraintKind::Enum, json!("enum"));
+        round_trip(ConstraintKind::Const, json!("const"));
+        round_trip(ConstraintKind::Default, json!("default"));
+        round_trip(ConstraintKind::UnionAlternative, json!("union-alternative"));
+        round_trip(ConstraintKind::AllOf, json!("all-of"));
+        round_trip(ConstraintKind::Conditional, json!("conditional"));
+        round_trip(
+            ConstraintKind::AdditionalProperties,
+            json!("additional-properties"),
+        );
+        round_trip(ConstraintKind::ArrayShape, json!("array-shape"));
+        round_trip(ConstraintKind::ValueShape, json!("value-shape"));
+        round_trip(ConstraintKind::Reference, json!("reference"));
+        round_trip(ConstraintKind::Annotation, json!("annotation"));
+        round_trip(ConstraintKind::UnmodeledKeyword, json!("unmodeled-keyword"));
+    }
+
+    #[test]
+    fn disposition_spellings() {
+        round_trip(Disposition::BehaviorMapped, json!("behavior-mapped"));
+        round_trip(Disposition::NonTestable, json!("non-testable"));
+        round_trip(Disposition::NotApplicable, json!("not-applicable"));
+    }
+
+    #[test]
+    fn schemas_manifest_round_trips() {
+        let manifest = SchemasManifest {
+            schema_version: 1,
+            revision: "rev-schema-113500f4".into(),
+            documents: vec![
+                ManifestDocument {
+                    key: "base".into(),
+                    file: "devContainer.base.schema.json".into(),
+                    upstream_url: "https://example/base.json".into(),
+                    sha256: "a0883c04".into(),
+                },
+                ManifestDocument {
+                    key: "feature".into(),
+                    file: "devContainerFeature.schema.json".into(),
+                    upstream_url: "https://example/feature.json".into(),
+                    sha256: "671fcd80".into(),
+                },
+            ],
+        };
+        let value = serde_json::to_value(&manifest).unwrap();
+        // camelCase field name on the wire.
+        assert_eq!(
+            value["documents"][0]["upstreamUrl"],
+            json!("https://example/base.json")
+        );
+        assert_eq!(value["schemaVersion"], json!(1));
+        let back: SchemasManifest = serde_json::from_value(value).unwrap();
+        assert_eq!(back, manifest);
+    }
+
+    #[test]
+    fn constraint_inventory_round_trips_with_branch_context() {
+        let inventory = ConstraintInventory {
+            schema_version: 1,
+            revision: "rev-schema-113500f4".into(),
+            units: vec![
+                ConstraintUnit {
+                    id: "cst-base-forwardports-type-3fa9c214".into(),
+                    document: "base".into(),
+                    pointer: "/definitions/devContainerCommon/properties/forwardPorts".into(),
+                    kind: ConstraintKind::Type,
+                    substance: json!({ "type": "array" }),
+                    context: None,
+                },
+                ConstraintUnit {
+                    id: "cst-base-container-union-alternative-0a1b2c3d".into(),
+                    document: "base".into(),
+                    pointer: "/oneOf/2".into(),
+                    kind: ConstraintKind::UnionAlternative,
+                    substance: json!({ "$ref": "#/definitions/composeContainer" }),
+                    context: Some(UnitContext::Branch(BranchContext {
+                        branch: "oneOf".into(),
+                        index: 2,
+                    })),
+                },
+            ],
+        };
+        let value = serde_json::to_value(&inventory).unwrap();
+        // Top-level unit serializes context as an explicit null.
+        assert_eq!(value["units"][0]["context"], json!(null));
+        assert_eq!(
+            value["units"][1]["context"],
+            json!({ "branch": "oneOf", "index": 2 })
+        );
+        let back: ConstraintInventory = serde_json::from_value(value).unwrap();
+        assert_eq!(back, inventory);
+    }
+
+    #[test]
+    fn unit_context_condition_round_trips_and_discriminates() {
+        // Condition shape.
+        let condition = UnitContext::Condition(ConditionContext {
+            condition: "/definitions/x/if".into(),
+        });
+        round_trip(condition, json!({ "condition": "/definitions/x/if" }));
+        // Untagged discrimination: a branch object never parses as a condition.
+        let branch: UnitContext =
+            serde_json::from_value(json!({ "branch": "anyOf", "index": 0 })).unwrap();
+        assert!(matches!(branch, UnitContext::Branch(_)));
+        // deny_unknown_fields on the inner structs: an extra key fails BOTH variants.
+        assert!(
+            serde_json::from_value::<UnitContext>(json!({ "branch": "oneOf", "index": 1, "x": 2 }))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn classification_round_trips_behavior_mapped() {
+        let cls = Classification {
+            id: "cls-base-forwardports-type-3fa9c214".into(),
+            constraint: "cst-base-forwardports-type-3fa9c214".into(),
+            disposition: Disposition::BehaviorMapped,
+            behaviors: vec!["bhv-readconfig-wrong-type-forwardports-rejected".into()],
+            rationale: None,
+            notes: Some("Supersedes retired src-schema-forwardports-type.".into()),
+        };
+        let value = serde_json::to_value(&cls).unwrap();
+        assert_eq!(value["disposition"], json!("behavior-mapped"));
+        // rationale None is skipped; notes Some is present.
+        assert!(value.get("rationale").is_none());
+        assert_eq!(
+            value["notes"],
+            json!("Supersedes retired src-schema-forwardports-type.")
+        );
+        let back: Classification = serde_json::from_value(value).unwrap();
+        assert_eq!(back, cls);
+    }
+
+    #[test]
+    fn classification_round_trips_not_applicable_with_rationale() {
+        let cls = Classification {
+            id: "cls-feature-options-additional-properties-0a1b2c3d".into(),
+            constraint: "cst-feature-options-additional-properties-0a1b2c3d".into(),
+            disposition: Disposition::NotApplicable,
+            behaviors: vec![],
+            rationale: Some("Feature-authoring surface, out of consumer scope.".into()),
+            notes: None,
+        };
+        let value = serde_json::to_value(&cls).unwrap();
+        assert_eq!(value["disposition"], json!("not-applicable"));
+        assert_eq!(value["behaviors"], json!([]));
+        let back: Classification = serde_json::from_value(value).unwrap();
+        assert_eq!(back, cls);
+    }
+
+    #[test]
+    fn inventory_records_reject_unknown_fields() {
+        // Manifest.
+        assert!(
+            serde_json::from_str::<SchemasManifest>(
+                r#"{ "schemaVersion": 1, "revision": "rev-schema-x", "documents": [], "oops": 1 }"#
+            )
+            .is_err()
+        );
+        // Constraint unit.
+        assert!(
+            serde_json::from_str::<ConstraintUnit>(
+                r#"{ "id": "cst-x-y-type-00000000", "document": "base", "pointer": "/a",
+                 "kind": "type", "substance": {}, "context": null, "typo": true }"#
+            )
+            .is_err()
+        );
+        // Classification.
+        assert!(
+            serde_json::from_str::<Classification>(
+                r#"{ "id": "cls-x", "constraint": "cst-x", "disposition": "non-testable",
+                 "rationale": "r", "extra": 1 }"#
+            )
+            .is_err()
+        );
+        // Unknown disposition (e.g. the scaffold sentinel) is a hard schema failure.
+        assert!(
+            serde_json::from_str::<Classification>(
+                r#"{ "id": "cls-x", "constraint": "cst-x", "disposition": "UNREVIEWED" }"#
+            )
+            .is_err()
+        );
     }
 }

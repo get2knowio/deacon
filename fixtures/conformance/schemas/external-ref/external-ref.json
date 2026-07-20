@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "description": "A $ref to a live URL outside the pinned set. Resolution must fail with UnresolvedExternalRef WITHOUT any network fetch.",
+  "type": "object",
+  "properties": {
+    "x": {
+      "$ref": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/configuration/schema.json#/definitions/x"
+    }
+  }
+}

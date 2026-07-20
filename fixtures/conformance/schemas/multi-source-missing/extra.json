@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "description": "Extra pinned document whose $ref names base-fixture, but the variant manifest omits base-fixture from the pinned set — the ref now points outside the pinned documents and MUST fail UnresolvedExternalRef without any fetch.",
+  "type": "object",
+  "properties": {
+    "linked": {
+      "$ref": "./base-fixture.json#/definitions/Something"
+    }
+  }
+}
