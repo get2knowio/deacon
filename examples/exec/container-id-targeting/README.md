@@ -38,9 +38,17 @@ When you know the exact container ID, `--container-id` provides the most direct 
    deacon exec --container-id $CONTAINER_ID bash /workspace/test-script.sh
    ```
 
-5. Check environment variables:
+5. Check environment variables — you get the **container's own** environment,
+   with none of the config's `remoteEnv` applied:
    ```bash
-   deacon exec --container-id $CONTAINER_ID env | grep CONTAINER_
+   deacon exec --container-id $CONTAINER_ID env
+   ```
+
+6. Contrast: naming the workspace gives deacon a config to resolve, so
+   `remoteEnv` **is** applied:
+   ```bash
+   deacon exec --workspace-folder . --mount-workspace-git-root false env | grep CONTAINER_ENV_VAR
+   # CONTAINER_ENV_VAR=set-by-config
    ```
 
 ## Expected Behavior
@@ -55,3 +63,21 @@ When you know the exact container ID, `--container-id` provides the most direct 
 - Container ID can be abbreviated (first 12 characters typically sufficient)
 - This method bypasses workspace/config discovery entirely
 - The container must be running; stopped containers will error
+
+### Targeting mode determines config fidelity
+
+`--container-id` names a *container*, not a *workspace*. deacon loads no
+`devcontainer.json` on this path, so nothing from the config applies — notably
+`remoteUser` and `remoteEnv`. That is what "bypasses workspace/config discovery
+entirely" means above, and step 5 asserts it positively so the two targeting
+modes stay legible.
+
+If you want config semantics, name the config: `--workspace-folder` (step 6),
+`--config`, or `--id-label`.
+
+A fuller `--container-id` — one that recovers the merged config from the
+container's `devcontainer.metadata` label, the way `set-up` and
+`read-configuration` already do — would need deacon to *write* that label in the
+first place; today it inherits the base image's label verbatim and emits none of
+its own. Tracked separately; until then, this example documents the behavior
+that actually exists rather than the one we might prefer.
