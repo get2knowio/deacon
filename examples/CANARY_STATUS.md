@@ -23,16 +23,18 @@ pass, so they don't have to be re-evaluated from scratch every session.
 - `❓ unverified` — not evaluated this cycle.
 
 Last broad sweep: **2026-07-20** against `main` @ `de5b045` (post-#318/#319) —
-all 91 canaries run with the release binary. **87 pass, 4 do not**:
+all 91 canaries run with the release binary. **87 pass, 4 do not** — one of
+which (`features/oci-digest-pin`) was a real deacon bug, since fixed in PR #321
+and re-verified ✅ at `8179744`:
 
-- `features/oci-digest-pin` — **✗ deacon bug**, a regression of #131. A
-  digest-pinned ref round-trips lossily: `FeatureRef::reference()` rejoins
-  `name` + `version` with `:`, so a `version` of `sha256:<hex>` yields
-  `…/git:sha256:<hex>`, which re-parses as name `git:sha256` + tag `<hex>` and
-  requests `/v2/devcontainers/features/git:sha256/manifests/<hex>` → 404.
-  `parse_name_and_tag` itself is correct; the defect is `reference()` in
-  `crates/core/src/oci/types.rs` (same shape on `TemplateRef`). Needs `@` for a
-  digest.
+- `features/oci-digest-pin` — was **✗ deacon bug** (a regression of #131), now
+  **fixed and re-verified ✅** at `8179744` (PR #321). A digest-pinned ref
+  round-tripped lossily: `FeatureRef::reference()` rejoined `name` + `version`
+  with `:`, so a `version` of `sha256:<hex>` yielded `…/git:sha256:<hex>`,
+  which re-parsed as name `git:sha256` + tag `<hex>` and requested
+  `/v2/devcontainers/features/git:sha256/manifests/<hex>` → 404.
+  `parse_name_and_tag` was never at fault — the lossy half was the *render*.
+  Fixed by joining with `@` for a digest (`TemplateRef` had the same defect).
 - `up/compose-profiles` — **⚠️ fixture**: `nginx.conf` is referenced by
   `docker-compose.yml` but was never committed, so Docker auto-creates it as a
   *directory* and the bind mount fails ("not a directory"). Add the file.
@@ -109,7 +111,7 @@ and aren't listed.
 | features/feature-env-injection | ✅ pass | 2026-07-20 `de5b045` |  |
 | features/local-feature | ✅ pass | 2026-07-20 `de5b045` | local `./` feature install + option override (new) |
 | features/lockfile | ✅ pass | 2026-07-20 `de5b045` | lockfile generate / `--frozen-lockfile` pass + mismatch fail; needs ghcr (new) |
-| features/oci-digest-pin | ✗ fail | 2026-07-20 `de5b045` | **deacon bug** — digest ref round-trip regression of #131; `reference()` rejoins with `:` not `@` → 404. See header. |
+| features/oci-digest-pin | ✅ pass | 2026-07-20 `8179744` | digest ref round-trip regression of #131, fixed in PR #321 (`reference()` now joins a digest with `@`); re-verified green post-merge. |
 | features/option-sanitization | ✅ pass | 2026-07-20 `de5b045` |  |
 | features/override-install-order | ✅ pass | 2026-07-20 `de5b045` |  |
 | observability/json-logs | ✅ pass | 2026-07-20 `de5b045` | Output Streams Contract: `--log-format json` stdout=1 JSON doc, stderr=JSON log lines, no log leakage to stdout; hermetic (read-configuration, no Docker) (new) |
