@@ -28,6 +28,39 @@ fn regeneration_matches_the_committed_inventory_byte_for_byte() {
     );
 }
 
+/// Every byte-exact artifact must be free of CR bytes on ANY platform.
+///
+/// Without the `-text` rules in `.gitattributes`, a Windows checkout rewrites LF to
+/// CRLF, which changes the vendored schema bytes and fails every SHA-256 fingerprint
+/// (and the committed-inventory byte comparison). That surfaced as 26 opaque
+/// "manifest fingerprint mismatch" failures in the Windows `dev-fast` lane; this test
+/// names the actual cause instead, and catches a CRLF artifact committed from Windows.
+#[test]
+fn byte_exact_artifacts_contain_no_cr_bytes() {
+    let mut offenders: Vec<String> = Vec::new();
+
+    let mut check = |path: &std::path::Path| {
+        if let Ok(bytes) = std::fs::read(path) {
+            if bytes.contains(&b'\r') {
+                offenders.push(path.display().to_string());
+            }
+        }
+    };
+
+    check(&default_inventory_file());
+    let schemas = default_pinned_schemas_dir();
+    let entries = std::fs::read_dir(&schemas).expect("pinned schemas directory exists");
+    for entry in entries.flatten() {
+        check(&entry.path());
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "byte-exact artifacts contain CR bytes (line endings were translated — check the \
+         `-text` rules in .gitattributes): {offenders:?}"
+    );
+}
+
 #[test]
 fn two_in_memory_regenerations_are_identical() {
     let a = render(&generate_inventory(&default_pinned_schemas_dir()).unwrap());
