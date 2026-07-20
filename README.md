@@ -265,6 +265,23 @@ unchanged.
 
 For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). Post-1.0 hardening landed in May 2026 — redaction wiring into the tracing pipeline, a [workspace-trust gate](#workspace-trust) for host-side lifecycle hooks, async I/O conversion across `crates/core`, typed errors throughout `crates/core`, and the `json5`→`jsonc-parser` migration (see closed [#52](https://github.com/get2knowio/deacon/issues/52)).
 
+## How deacon verifies correctness
+
+deacon is a reimplementation, so "is it correct?" is really two questions: does it
+match the pinned [containers.dev spec](https://containers.dev), and does it match the
+pinned reference CLI (`@devcontainers/cli` v0.87.0)? Those can disagree — and
+sometimes deacon differs from both on purpose.
+
+**[docs/PARITY_AND_CONFORMANCE.md](docs/PARITY_AND_CONFORMANCE.md)** explains the
+machinery that keeps those questions separate and answerable: the parity harness
+(which *finds* differences) versus the conformance registry (which *explains*
+them), what **divergence**, **gap**, **waiver**, and **out of scope** each mean,
+which of the two CI gates actually blocks a release, and what to do when you find a
+difference.
+
+Start there if you've seen those words in a PR and weren't sure whether they meant
+the same thing.
+
 ## Filesystem Artifacts
 
 Like the reference DevContainers CLI, deacon keeps its machine-level state (the
