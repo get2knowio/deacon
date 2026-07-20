@@ -7,6 +7,31 @@ use std::path::PathBuf;
 
 use crate::features::FeatureMetadata;
 
+/// Join a repository path with a version into a reference string that
+/// [`crate::registry_parser::parse_registry_reference`] parses back to the SAME parts.
+///
+/// A digest version (`sha256:<hex>`) MUST be joined with `@`, not `:`. Joining a digest
+/// with `:` yields `…/git:sha256:<hex>`, which re-parses on the last colon into name
+/// `git:sha256` + tag `<hex>` and requests
+/// `/v2/…/git:sha256/manifests/<hex>` → 404. Reference strings round-trip through
+/// parse/render in several flows (notably `read-configuration`'s
+/// `--include-features-configuration`), so the join has to be lossless.
+fn join_reference(registry: &str, repository: &str, version: &str) -> String {
+    if is_digest(version) {
+        format!("{registry}/{repository}@{version}")
+    } else {
+        format!("{registry}/{repository}:{version}")
+    }
+}
+
+/// Whether a version string is a content digest (`<algorithm>:<hex>`) rather than a tag.
+///
+/// An OCI tag may not contain `:`, so any colon marks a digest. Kept deliberately broad
+/// (not `sha256`-only) so future algorithms are handled without another round-trip bug.
+fn is_digest(version: &str) -> bool {
+    version.contains(':')
+}
+
 /// Reference to a feature in an OCI registry
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeatureRef {
@@ -41,9 +66,13 @@ impl FeatureRef {
         format!("{}/{}", self.namespace, self.name)
     }
 
-    /// Get the full reference string
+    /// Get the full reference string.
+    ///
+    /// Round-trips through [`crate::registry_parser::parse_registry_reference`]: a
+    /// digest-pinned version is joined with `@`, a tag with `:` (see
+    /// [`join_reference`]).
     pub fn reference(&self) -> String {
-        format!("{}/{}:{}", self.registry, self.repository(), self.tag())
+        join_reference(&self.registry, &self.repository(), self.tag())
     }
 }
 
@@ -81,9 +110,12 @@ impl TemplateRef {
         format!("{}/{}", self.namespace, self.name)
     }
 
-    /// Get the full reference string
+    /// Get the full reference string.
+    ///
+    /// Same digest-safe join as [`FeatureRef::reference`] — templates are parsed by the
+    /// same `parse_registry_reference`, so they carry the identical round-trip hazard.
     pub fn reference(&self) -> String {
-        format!("{}/{}:{}", self.registry, self.repository(), self.tag())
+        join_reference(&self.registry, &self.repository(), self.tag())
     }
 }
 
@@ -207,4 +239,106 @@ pub struct HttpResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
     pub body: Bytes,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry_parser::parse_registry_reference;
+
+    /// A digest-pinned reference must survive render → parse → render unchanged.
+    ///
+    /// Regression guard for the `name:tag@digest` round trip (originally fixed in #131,
+    /// re-broken via `reference()` joining with `:`): `read-configuration
+    /// --include-features-configuration` renders a resolved feature's source with
+    /// `reference()` and then parses it back with `parse_registry_reference`. Joining a
+    /// digest with `:` made that round trip lossy, producing repository
+    /// `devcontainers/features/git:sha256` and a 404 on the manifest fetch.
+    #[test]
+    fn digest_pinned_reference_round_trips() {
+        const DIGEST: &str =
+            "sha256:fd75977de13a9979000e0e78baf949adb0ca71d2398995fa22e0a36d7e7e7fe2";
+
+        let original = FeatureRef::new(
+            "ghcr.io".to_string(),
+            "devcontainers/features".to_string(),
+            "git".to_string(),
+            Some(DIGEST.to_string()),
+        );
+
+        // A digest joins with '@', never ':'.
+        let rendered = original.reference();
+        assert_eq!(
+            rendered,
+            format!("ghcr.io/devcontainers/features/git@{DIGEST}"),
+            "a digest version must be joined with '@'"
+        );
+
+        // …and parses back to the SAME parts.
+        let (registry, namespace, name, version) = parse_registry_reference(&rendered).unwrap();
+        assert_eq!(registry, "ghcr.io");
+        assert_eq!(namespace, "devcontainers/features");
+        assert_eq!(name, "git", "the digest must not bleed into the name");
+        assert_eq!(version.as_deref(), Some(DIGEST));
+
+        // The re-parsed ref renders identically — the round trip is a fixed point.
+        let reparsed = FeatureRef::new(registry, namespace, name, version);
+        assert_eq!(reparsed.reference(), rendered);
+        assert_eq!(
+            reparsed.repository(),
+            "devcontainers/features/git",
+            "repository must not absorb the digest algorithm"
+        );
+    }
+
+    /// The pre-existing tag behavior is unchanged: tags still join with ':'.
+    #[test]
+    fn tagged_reference_round_trips_unchanged() {
+        let r = FeatureRef::new(
+            "ghcr.io".to_string(),
+            "devcontainers/features".to_string(),
+            "git".to_string(),
+            Some("1".to_string()),
+        );
+        assert_eq!(r.reference(), "ghcr.io/devcontainers/features/git:1");
+
+        let (registry, namespace, name, version) =
+            parse_registry_reference(&r.reference()).unwrap();
+        assert_eq!((name.as_str(), version.as_deref()), ("git", Some("1")));
+        assert_eq!(
+            FeatureRef::new(registry, namespace, name, version).reference(),
+            r.reference()
+        );
+    }
+
+    /// An absent version still defaults to the `latest` TAG (colon join).
+    #[test]
+    fn missing_version_defaults_to_latest_tag() {
+        let r = FeatureRef::new(
+            "ghcr.io".to_string(),
+            "devcontainers".to_string(),
+            "node".to_string(),
+            None,
+        );
+        assert_eq!(r.reference(), "ghcr.io/devcontainers/node:latest");
+    }
+
+    /// `TemplateRef` carries the identical hazard and the identical fix.
+    #[test]
+    fn template_digest_reference_round_trips() {
+        const DIGEST: &str = "sha256:abc123";
+        let t = TemplateRef::new(
+            "ghcr.io".to_string(),
+            "devcontainers/templates".to_string(),
+            "python".to_string(),
+            Some(DIGEST.to_string()),
+        );
+        assert_eq!(
+            t.reference(),
+            format!("ghcr.io/devcontainers/templates/python@{DIGEST}")
+        );
+        let (_, _, name, version) = parse_registry_reference(&t.reference()).unwrap();
+        assert_eq!(name, "python");
+        assert_eq!(version.as_deref(), Some(DIGEST));
+    }
 }
