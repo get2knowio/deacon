@@ -13,7 +13,7 @@
 	"remoteUser": "vscode",
 	"workspaceFolder": "/workspace",
 	
-	"onCreateCommand": "echo 'Installing base dependencies...' && apt-get update && apt-get install -y build-essential",
+	"onCreateCommand": "echo 'Installing base dependencies...' && sudo apt-get update && sudo apt-get install -y build-essential",
 	"updateContentCommand": "echo 'Updating content at:' && date && npm cache clean --force 2>/dev/null || true",
 	"postCreateCommand": "echo 'Setting up project...' && mkdir -p /workspace/node_modules",
 	"postStartCommand": "echo 'Container started!' && node --version",

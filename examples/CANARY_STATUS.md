@@ -23,9 +23,9 @@ pass, so they don't have to be re-evaluated from scratch every session.
 - `❓ unverified` — not evaluated this cycle.
 
 Last broad sweep: **2026-07-20** against `main` @ `de5b045` (post-#318/#319) —
-all 91 canaries run with the release binary. **87 pass, 4 do not** — one of
-which (`features/oci-digest-pin`) was a real deacon bug, since fixed in PR #321
-and re-verified ✅ at `8179744`:
+all 91 canaries run with the release binary. **90 pass, 1 fixture**. One was a real deacon bug
+(`features/oci-digest-pin`), fixed in PR #321 and re-verified ✅ at `8179744`;
+two were unclassified and have since been decided (both fixture-side):
 
 - `features/oci-digest-pin` — was **✗ deacon bug** (a regression of #131), now
   **fixed and re-verified ✅** at `8179744` (PR #321). A digest-pinned ref
@@ -38,19 +38,22 @@ and re-verified ✅ at `8179744`:
 - `up/compose-profiles` — **⚠️ fixture**: `nginx.conf` is referenced by
   `docker-compose.yml` but was never committed, so Docker auto-creates it as a
   *directory* and the bind mount fails ("not a directory"). Add the file.
-- `exec/container-id-targeting` — **❓ behavior change, unclassified**: with
-  `--container-id` (and no `--workspace-folder`) `exec` no longer applies the
-  config's `remoteUser`/`remoteEnv` — it runs as `root` with
-  `CONTAINER_ENV_VAR` unset, so the canary's `| grep CONTAINER_` fails under
-  `pipefail`. May well be correct (nothing names a config), but it is a change
-  from the 2026-05-29 result; decide intended semantics before editing either
-  side.
-- `up/prebuild-mode` — **❓ unclassified**: `onCreate` `apt-get` fails with
-  `Permission denied` (exit 100). Config sets `remoteUser: vscode` on
-  `ubuntu:22.04`, which has no `vscode` user — the same latent shape that
-  `up/lifecycle-hooks` was fixed for on 2026-05-29 ("non-existent `devuser`→root,
-  apt needs root"). Likely fixture, but user resolution changed in #276/#299, so
-  confirm rather than assume.
+- `exec/container-id-targeting` and `up/prebuild-mode` — both were **❓
+  unclassified**; semantics have since been decided and both now **✅ pass**.
+  Neither was a deacon regression:
+  - `exec/container-id-targeting`: `--container-id` names a *container*, not a
+    *workspace*, so no config is loaded and `remoteEnv`/`remoteUser` do not
+    apply. The example's own README already documented exactly this; the
+    `exec.sh` had drifted from it. Script realigned, plus a contrast step
+    showing `remoteEnv` applying via `--workspace-folder`. A fuller
+    `--container-id` (recovering merged config from `devcontainer.metadata`,
+    as `set-up` and `read-configuration` already do) first requires deacon to
+    *write* that label — it currently inherits the base image's verbatim and
+    emits none of its own. Tracked in issue #322.
+  - `up/prebuild-mode`: `vscode` DOES exist (created by the common-utils
+    feature, uid 1000) and has passwordless sudo. Lifecycle correctly ran as
+    `remoteUser`; the example simply omitted `sudo` on `apt-get`. Same defect
+    class as the `up/lifecycle-hooks` fixture fix (#151). Fixed in the example.
 
 Sweep hygiene note: canaries left 9 stray `*devcontainer-lock.json` files and
 (via the missing `nginx.conf`) one root-owned directory in the working tree.
@@ -96,7 +99,7 @@ and aren't listed.
 | doctor/gpu-host-requirements | ✅ pass | 2026-07-20 `de5b045` |  |
 | doctor/host-requirements-failure | ✅ pass | 2026-07-20 `de5b045` |  |
 | down/basic | ✅ pass | 2026-07-20 `de5b045` | `--all` now sweeps by `devcontainer.local_folder` + idempotent down on gone container (#147) |
-| exec/container-id-targeting | ❓ recheck | 2026-07-20 `de5b045` | `--container-id` no longer applies config `remoteUser`/`remoteEnv` (runs as root, `CONTAINER_ENV_VAR` unset); intended semantics undecided. |
+| exec/container-id-targeting | ✅ pass | 2026-07-20 `8179744` | **Semantics decided:** `--container-id` names a container, not a workspace — no config is loaded, so `remoteEnv`/`remoteUser` do NOT apply. The example README always said this ("bypasses workspace/config discovery entirely"); `exec.sh` had drifted. Script realigned + contrast step added. Fuller recovery via `devcontainer.metadata` needs deacon to write that label: issue #322. |
 | exec/exit-code-handling | ✅ pass | 2026-07-20 `de5b045` | baked `--mount-workspace-git-root false` (#149) |
 | exec/id-label-targeting | ✅ pass | 2026-07-20 `de5b045` | non-spec `containerLabels`→`runArgs --label`; git-root mount flag (#149) |
 | exec/interactive-pty | ✅ pass | 2026-07-20 `de5b045` |  |
@@ -146,7 +149,7 @@ and aren't listed.
 | up/lifecycle-hooks | ✅ pass | 2026-07-20 `de5b045` | non-existent `devuser`→root (apt needs root); array hooks→argv `["bash","-c",…]` (#151) |
 | up/override-command | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/ports-config | ✅ pass | 2026-07-20 `de5b045` |  |
-| up/prebuild-mode | ❓ recheck | 2026-07-20 `de5b045` | onCreate `apt-get` Permission denied (exit 100); `remoteUser: vscode` on `ubuntu:22.04` has no such user. Same shape as the lifecycle-hooks fixture fix; confirm vs #276/#299. |
+| up/prebuild-mode | ✅ pass | 2026-07-20 `8179744` | **Fixture bug, deacon correct.** `vscode` DOES exist (created by common-utils, uid 1000) and has passwordless sudo; lifecycle correctly runs as `remoteUser`, and the example just omitted `sudo` on `apt-get`. Same defect class as the lifecycle-hooks fix (#151). Fixed with `sudo`, keeping `remoteUser: vscode` per the README. |
 | up/remote-env-secrets | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/remove-existing | ✅ pass | 2026-07-20 `de5b045` | full-ID reuse (#143) |
 | up/security-options | ✅ pass | 2026-07-20 `de5b045` |  |
