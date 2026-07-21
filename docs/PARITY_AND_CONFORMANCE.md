@@ -88,10 +88,27 @@ evidence: a test case or a waiver. Two flavors:
 > Decision: `intentional-divergence` (backed by a waiver) or `deacon-extension`
 > (a capability the reference lacks). Never blocks anything.
 
-### Gap — an admission of missing knowledge
+### Gap — an admission of missing *evidence*
 
-We *don't know* what the reference does, or we haven't done the work to find out.
-No evidence stands behind it.
+A gap means the registry has **no admissible evidence** for a claim and the work to
+produce it isn't done. The key word is *evidence*, **not awareness** — this trips
+people up, so be precise. Two different situations both land here:
+
+- **We don't know** what the reference does (haven't characterized it yet), **or**
+- **We know exactly** what it does — we may have *seen* the difference with our own
+  eyes — but there's no passing test case and no waiver behind it, and we haven't
+  resolved it.
+
+That second case is the counter-intuitive one. *Seeing* a bug is not evidence the
+registry accepts. The only two evidence types are a **passing case** or a
+**waiver**. When deacon is on the wrong side of a difference you can't add a passing
+case (it would fail) and you won't add a waiver (a waiver means "characterized and
+*accepted*", which you don't). So a known-but-unfixed-and-unaccepted difference has
+no honest home *other than* a gap — until you either **fix it** (→ `reference:
+aligned` + a passing case) or **accept it** (→ a waiver). It never gets to call
+itself a "divergence" while it has nothing backing it. (Live example: issue #309 —
+we know precisely how `${containerWorkspaceFolder}` differs, but until the fix lands
+it's a gap, not a divergence.)
 
 > `reference: unknown` → `decision: unresolved-gap` → a `gap-*` record.
 >
@@ -125,14 +142,17 @@ state, filesystem), or with **no reference equivalent at all**.
 
 | | Divergence | Gap |
 |---|---|---|
-| Do we know what the reference does? | **Yes** | No |
-| Is there evidence? | Yes — case or waiver | No |
+| Is there admissible evidence — a case or waiver? | **Yes** | No |
+| Do we know what the reference does? | Yes | Yes **or** no — knowing isn't enough |
 | Does it block release? | No | **Yes, always** |
-| What it says | "We differ, and here's why" | "We haven't done the work" |
+| What it says | "We differ, and here's the evidence" | "We owe work here" |
 
-Calling a gap a divergence hides work. Calling a divergence a gap blocks a release
-for no reason. **The dividing line is evidence**, not confidence — "I'm pretty
-sure the reference does X" is a gap until a test proves it.
+Note the second row: a gap does **not** require ignorance. You can know a difference
+cold — even watch it fail in CI — and it's *still* a gap until evidence backs a
+resolution. Calling a gap a divergence hides work. Calling a divergence a gap blocks
+a release for no reason. **The dividing line is evidence**, not confidence and not
+awareness — "I'm pretty sure the reference does X" is a gap until a test proves it,
+and "I've *seen* deacon do X wrong" is a gap until the fix (or a waiver) lands.
 
 ---
 
