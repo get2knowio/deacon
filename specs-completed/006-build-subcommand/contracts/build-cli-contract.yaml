@@ -117,12 +117,13 @@ components:
           type: string
           const: success
         imageName:
-          oneOf:
-            - type: string
-            - type: array
-              items:
-                type: string
-          description: Deterministic fallback tag or list of tags when multiple provided.
+          type: array
+          items:
+            type: string
+          description: >-
+            The tag(s) the build produced, always as an array (even for a single
+            tag), matching the reference CLI (issue #310). A bare string is still
+            accepted on input for tolerance but is never emitted.
         exportPath:
           type: string
           nullable: true
