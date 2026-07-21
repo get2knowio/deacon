@@ -15,11 +15,16 @@ use serde::{Deserialize, Serialize};
 /// ```json
 /// {
 ///   "outcome": "success",
-///   "imageName": "myimage:latest" | ["myimage:latest", "myimage:v1.0"],
+///   "imageName": ["myimage:latest", "myimage:v1.0"],  // always an array on output (issue #310)
 ///   "exportPath": "/path/to/export.tar",  // optional
 ///   "pushed": true  // optional
 /// }
 /// ```
+///
+/// On output `imageName` is always a JSON array, matching the reference CLI, even
+/// for a single tag. The [`ImageNameOutput::Single`] variant remains only so a
+/// bare-string value still *deserializes* (input tolerance); it is never produced
+/// on the success path.
 #[allow(dead_code)] // Used in Phase 3 implementation
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,8 +32,8 @@ pub struct BuildSuccess {
     /// Always "success" for successful builds
     outcome: String,
 
-    /// Deterministic fallback tag or list of tags when multiple provided.
-    /// Can be either a single string or an array of strings.
+    /// The tag(s) the build produced. Always serialized as an array on output
+    /// (issue #310); the `Single` variant exists only for deserialization tolerance.
     #[serde(skip_serializing_if = "Option::is_none")]
     image_name: Option<ImageNameOutput>,
 
@@ -221,6 +226,24 @@ mod tests {
 
         assert!(json.contains(r#""outcome":"success"#));
         assert!(json.contains(r#""imageName":["myimage:latest","myimage:v1.0"]"#));
+    }
+
+    #[test]
+    fn test_build_success_single_tag_serializes_as_array() {
+        // The success path builds imageName via new_multiple even for one tag, so a
+        // single custom tag must render as a one-element ARRAY, not a bare string,
+        // matching the reference CLI (issue #310).
+        let result = BuildSuccess::new_multiple(vec!["myimage:latest".to_string()]);
+        let json = serde_json::to_string(&result).unwrap();
+
+        assert!(json.contains(r#""imageName":["myimage:latest"]"#));
+        // Guard against the regression: never a bare-string imageName on output.
+        assert!(!json.contains(r#""imageName":"myimage:latest"#));
+
+        // And it round-trips back to the array variant.
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["imageName"].is_array());
+        assert_eq!(parsed["imageName"][0], "myimage:latest");
     }
 
     #[test]

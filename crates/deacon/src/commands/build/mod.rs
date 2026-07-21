@@ -2255,10 +2255,12 @@ fn output_result(
                 result.tags.clone()
             };
 
+            // The reference CLI always emits `imageName` as an array, regardless of
+            // tag count (issue #310). Emit a (possibly one-element) array for any
+            // non-empty tag list rather than collapsing the single-tag case to a
+            // bare string.
             let mut success_result = if display_tags.is_empty() {
                 result::BuildSuccess::default()
-            } else if display_tags.len() == 1 {
-                result::BuildSuccess::new_single(display_tags[0].clone())
             } else {
                 result::BuildSuccess::new_multiple(display_tags)
             };
