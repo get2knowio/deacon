@@ -25,7 +25,7 @@
 use crate::container_env_probe::ContainerProbeMode;
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, warn};
@@ -394,13 +394,35 @@ pub enum DiscoveryResult {
 /// - CPU: number of cores (e.g., "2", "4")  
 /// - Memory: bytes with units (e.g., "4GB", "512MB", "1024")
 /// - Storage: bytes with units (e.g., "10GB", "500MB")
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum ResourceSpec {
     /// Numeric value (interpreted as base unit)
     Number(f64),
     /// String with optional unit suffix
     String(String),
+}
+
+// Custom `Serialize` (rather than `#[derive]`) so that an integral numeric value
+// round-trips as a JSON integer, not a float: serde_json's default `f64`
+// serializer always emits a decimal point (`4` → `4.0`), which diverges from the
+// reference CLI, which preserves the integer shape (issue #308). A non-integral
+// value (e.g. `2.5` cores) still serializes as a float.
+impl Serialize for ResourceSpec {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        match self {
+            ResourceSpec::Number(n)
+                if n.is_finite()
+                    && n.fract() == 0.0
+                    && *n >= i64::MIN as f64
+                    && *n <= i64::MAX as f64 =>
+            {
+                serializer.serialize_i64(*n as i64)
+            }
+            ResourceSpec::Number(n) => serializer.serialize_f64(*n),
+            ResourceSpec::String(s) => serializer.serialize_str(s),
+        }
+    }
 }
 
 impl ResourceSpec {
@@ -4937,6 +4959,43 @@ mod tests {
             merged.forward_ports,
             vec![PortSpec::Number(3000), PortSpec::Number(8080)]
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // ResourceSpec serialization: an integral numeric value must round-trip as a
+    // JSON integer, matching the reference CLI (issue #308), not as `4.0`.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_resource_spec_integral_number_serializes_as_integer() {
+        // Deserialize a bare JSON integer, then re-serialize: must stay `4`.
+        let spec: ResourceSpec = serde_json::from_str("4").unwrap();
+        assert_eq!(spec, ResourceSpec::Number(4.0));
+        assert_eq!(serde_json::to_string(&spec).unwrap(), "4");
+
+        // Fractional values keep their float shape.
+        let frac: ResourceSpec = serde_json::from_str("2.5").unwrap();
+        assert_eq!(serde_json::to_string(&frac).unwrap(), "2.5");
+
+        // String specs (e.g. memory with units) are unaffected.
+        let mem = ResourceSpec::String("4GB".to_string());
+        assert_eq!(serde_json::to_string(&mem).unwrap(), "\"4GB\"");
+    }
+
+    #[test]
+    fn test_host_requirements_cpus_serializes_as_integer() {
+        let hr = HostRequirements {
+            cpus: Some(ResourceSpec::Number(4.0)),
+            memory: Some(ResourceSpec::String("8589934592".to_string())),
+            storage: None,
+            gpu: None,
+        };
+        let json = serde_json::to_value(&hr).unwrap();
+        assert_eq!(json["cpus"], serde_json::json!(4));
+        // Serialize the whole config fragment: the regression was `4.0` in the
+        // JSON text, so assert on the rendered string, not just the Value.
+        assert_eq!(serde_json::to_string(&hr.cpus).unwrap(), "4");
+        assert!(!serde_json::to_string(&hr).unwrap().contains("4.0"));
     }
 
     // -------------------------------------------------------------------------
