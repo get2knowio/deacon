@@ -109,6 +109,7 @@ fn test_run_user_commands_runs_feature_lifecycle_commands() {
   "image": "debian:bookworm-slim",
   "remoteUser": "root",
   "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${{localWorkspaceFolder}},target=/workspace,type=bind",
   "features": {{ "./features/lc": {{}} }},
   "postCreateCommand": "echo cfg > /tmp/cfg-postcreate.flag"
 }}"#

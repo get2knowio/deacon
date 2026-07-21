@@ -302,6 +302,7 @@ fn test_prebuild_to_normal_transition_reruns_oncreate_updatecontent() {
     "name": "Prebuild Transition SC004/FR008 Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "onCreateCommand": "count=$(cat /tmp/counter_onCreate 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_onCreate",
     "updateContentCommand": "count=$(cat /tmp/counter_updateContent 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_updateContent",
     "postCreateCommand": "count=$(cat /tmp/counter_postCreate 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_postCreate",
@@ -529,6 +530,7 @@ fn test_prebuild_marker_directory_isolation() {
     "name": "Marker Isolation Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "onCreateCommand": "echo 'onCreate ran'",
     "updateContentCommand": "echo 'updateContent ran'"
 }"#;
