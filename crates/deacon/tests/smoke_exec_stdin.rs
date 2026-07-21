@@ -34,7 +34,8 @@ fn test_exec_stdin_basic() {
     let devcontainer_config = r#"{
     "name": "Exec Stdin Test Container",
     "image": "alpine:3.19",
-    "workspaceFolder": "/workspace"
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }"#;
 
     fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
@@ -108,7 +109,8 @@ fn test_exec_stdin_streaming() {
     let devcontainer_config = r#"{
     "name": "Exec Stdin Streaming Test Container",
     "image": "alpine:3.19",
-    "workspaceFolder": "/workspace"
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }"#;
 
     fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
@@ -197,7 +199,8 @@ fn test_exec_stdin_shell_commands() {
     let devcontainer_config = r#"{
     "name": "Exec Stdin Shell Commands Test Container",
     "image": "alpine:3.19",
-    "workspaceFolder": "/workspace"
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }"#;
 
     fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();

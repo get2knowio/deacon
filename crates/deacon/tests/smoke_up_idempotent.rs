@@ -37,6 +37,7 @@ fn test_up_idempotency() {
     "name": "Up Idempotency Test Container",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "postCreateCommand": "echo 'postCreate executed' > /tmp/marker_postCreate",
     "postStartCommand": "echo 'postStart executed' > /tmp/marker_postStart"
 }"#;
@@ -113,6 +114,7 @@ fn test_skip_non_blocking_commands() {
     "name": "Skip Non-Blocking Commands Test Container",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "onCreateCommand": "echo 'onCreate executed' > /tmp/marker_onCreate",
     "postCreateCommand": "echo 'postCreate executed' > /tmp/marker_postCreate",
     "postStartCommand": "echo 'postStart executed' > /tmp/marker_postStart",
@@ -194,6 +196,7 @@ fn test_skip_flag_combinations() {
     "name": "Skip Flag Combinations Test Container",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "postCreateCommand": "echo 'postCreate executed'"
 }"#;
 
