@@ -93,6 +93,7 @@ fn test_run_user_commands_prebuild_stops_after_update_content() {
     "image": "alpine:3.18",
     "remoteUser": "root",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${{localWorkspaceFolder}},target=/workspace,type=bind",
     "onCreateCommand": "echo onCreate > /tmp/onCreate.flag",
     "updateContentCommand": "echo updateContent > /tmp/updateContent.flag",
     "postCreateCommand": "echo postCreate > /tmp/postCreate.flag",

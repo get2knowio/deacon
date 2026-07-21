@@ -74,6 +74,7 @@ fn test_parallel_lifecycle_output_is_key_prefixed() {
   "image": "debian:bookworm-slim",
   "remoteUser": "root",
   "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${{localWorkspaceFolder}},target=/workspace,type=bind",
   "postCreateCommand": {{
     "alpha": "echo hello-from-alpha",
     "beta": "echo hello-from-beta"

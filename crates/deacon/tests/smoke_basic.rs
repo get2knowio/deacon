@@ -126,7 +126,8 @@ fn smoke_up_then_exec_traditional() {
     let config = r#"{
         "name": "SmokeUpExec",
         "image": "nginx:alpine",
-        "workspaceFolder": "/workspace"
+        "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
     }"#;
     fs::create_dir(tmp.path().join(".devcontainer")).unwrap();
     fs::write(tmp.path().join(".devcontainer/devcontainer.json"), config).unwrap();
@@ -240,7 +241,8 @@ fn test_exec_environment_and_working_directory() {
     let devcontainer_config = r#"{
     "name": "Exec Test Container",
     "image": "alpine:3.19",
-    "workspaceFolder": "/custom/workspace"
+    "workspaceFolder": "/custom/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/custom/workspace,type=bind"
 }
 "#;
 
@@ -394,6 +396,7 @@ fn test_up_exec_happy_path() {
     "name": "Happy Path Test Container",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "postCreateCommand": "echo 'Container ready'"
 }
 "#;

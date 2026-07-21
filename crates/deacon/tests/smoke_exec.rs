@@ -36,7 +36,8 @@ fn test_exec_stdout_without_tty() {
     let devcontainer_config = r#"{
     "name": "Exec Test Container",
     "image": "alpine:3.19",
-    "workspaceFolder": "/workspace"
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }"#;
 
     fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
@@ -109,7 +110,8 @@ fn test_exec_exit_code_propagation() {
     let devcontainer_config = r#"{
     "name": "Exec Exit Code Test",
     "image": "alpine:3.19",
-    "workspaceFolder": "/workspace"
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }"#;
 
     fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
@@ -181,7 +183,8 @@ fn test_exec_working_directory() {
     let devcontainer_config = r#"{
     "name": "Exec Working Dir Test",
     "image": "alpine:3.19", 
-    "workspaceFolder": "/workspace"
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }"#;
 
     fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
@@ -255,7 +258,8 @@ fn test_exec_env_merges() {
     let devcontainer_config = r#"{
     "name": "Exec Env Test",
     "image": "alpine:3.19",
-    "workspaceFolder": "/workspace"
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }"#;
 
     fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();
@@ -340,6 +344,7 @@ fn test_up_remote_env_in_config() {
     "name": "Remote Env Config Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "remoteEnv": {
         "CONFIG_VAR": "config_value",
         "EMPTY_VAR": ""
@@ -413,6 +418,7 @@ fn test_exec_subfolder_config() {
     "name": "Subfolder Config Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "postCreateCommand": "echo 'subfolder-postCreate' > /tmp/marker_subfolder"
 }"#;
 
@@ -477,7 +483,8 @@ fn test_exec_tty_detection() {
     let devcontainer_config = r#"{
     "name": "TTY Detection Test",
     "image": "alpine:3.19",
-    "workspaceFolder": "/workspace"
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }"#;
 
     fs::create_dir(temp_dir.path().join(".devcontainer")).unwrap();

@@ -213,6 +213,7 @@ fn test_feature_lifecycle_commands_execute_before_config() {
         "name": "Lifecycle Ordering Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./feature-a": {},
             "./feature-b": {}
@@ -302,6 +303,7 @@ fn test_feature_lifecycle_commands_in_installation_order() {
         "name": "Installation Order Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./first-feature": {},
             "./second-feature": {},
@@ -359,6 +361,7 @@ fn test_multiple_lifecycle_phases_ordering() {
         "name": "Multi-Phase Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./multi-phase-feature": {}
         },
@@ -469,6 +472,7 @@ fn test_empty_feature_lifecycle_commands_filtered() {
         "name": "Empty Commands Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./null-feature": {},
             "./empty-feature": {},
@@ -525,6 +529,7 @@ fn test_array_format_feature_lifecycle_commands() {
         "name": "Array Command Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./array-cmd-feature": {}
         }
@@ -582,6 +587,7 @@ fn test_object_format_feature_lifecycle_commands() {
         "name": "Object Command Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./object-cmd-feature": {}
         }
@@ -642,6 +648,7 @@ fn test_feature_oncreate_command_fails_immediately() {
         "name": "Feature Lifecycle Fail Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./failing-feature": {}
         },
@@ -730,6 +737,7 @@ fn test_feature_postcreate_command_fails_before_config_command() {
         "name": "Feature PostCreate Fail Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${{localWorkspaceFolder}},target=/workspace,type=bind",
         "features": {{
             "./failing-postcreate": {{}}
         }},
@@ -811,6 +819,7 @@ fn test_feature_updatecontent_command_fails_immediately() {
         "name": "Feature UpdateContent Fail Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./failing-update": {}
         },
@@ -894,6 +903,7 @@ fn test_multiple_features_second_feature_fails() {
         "name": "Multiple Features Fail Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./succeeding-feature": {},
             "./failing-feature": {}
@@ -970,6 +980,7 @@ fn test_error_attribution_identifies_failing_feature() {
         "name": "Error Attribution Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./my-custom-feature": {}
         }
@@ -1035,6 +1046,7 @@ fn test_feature_poststart_command_failure_does_not_fail_up() {
         "name": "PostStart Fail Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./failing-poststart": {}
         },
@@ -1091,6 +1103,7 @@ fn test_feature_postattach_command_failure_does_not_fail_up() {
         "name": "PostAttach Fail Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./failing-postattach": {}
         },
@@ -1149,6 +1162,7 @@ fn test_feature_command_timeout_behavior() {
         "name": "Timeout Test",
         "image": "alpine:3.19",
         "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
         "features": {
             "./hanging-feature": {}
         }

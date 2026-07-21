@@ -36,6 +36,7 @@ fn test_lifecycle_hooks_stable_order() {
     "name": "Lifecycle Order Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "onCreateCommand": "echo 'onCreate-1' > /tmp/marker_onCreate",
     "updateContentCommand": "echo 'updateContent-2' > /tmp/marker_updateContent", 
     "postCreateCommand": "echo 'postCreate-3' > /tmp/marker_postCreate",
@@ -97,6 +98,7 @@ fn test_lifecycle_resume_sc002_only_runtime_hooks_rerun() {
     "name": "Lifecycle Resume SC002 Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "onCreateCommand": "count=$(cat /tmp/counter_onCreate 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_onCreate",
     "updateContentCommand": "count=$(cat /tmp/counter_updateContent 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_updateContent",
     "postCreateCommand": "count=$(cat /tmp/counter_postCreate 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_postCreate",
@@ -270,6 +272,7 @@ echo $count > /tmp/counter_dotfiles
     "name": "Lifecycle Resume Dotfiles SC002 Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "onCreateCommand": "count=$(cat /tmp/counter_onCreate 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_onCreate",
     "postCreateCommand": "count=$(cat /tmp/counter_postCreate 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_postCreate",
     "postStartCommand": "count=$(cat /tmp/counter_postStart 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_postStart",
@@ -420,6 +423,7 @@ fn test_lifecycle_resume_sc002_multiple_resumes() {
     "name": "Lifecycle Multiple Resumes Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "onCreateCommand": "count=$(cat /tmp/counter_onCreate 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_onCreate",
     "postCreateCommand": "count=$(cat /tmp/counter_postCreate 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_postCreate",
     "postStartCommand": "count=$(cat /tmp/counter_postStart 2>/dev/null || echo 0); count=$((count + 1)); echo $count > /tmp/counter_postStart",
@@ -546,7 +550,8 @@ fn test_lifecycle_skip_non_blocking_commands() {
     let devcontainer_config = r#"{
     "name": "Skip Non-blocking Test",
     "image": "alpine:3.19",
-    "workspaceFolder": "/workspace", 
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "postStartCommand": "echo 'postStart-ran' > /tmp/marker_postStart",
     "postAttachCommand": "echo 'postAttach-ran' > /tmp/marker_postAttach"
 }"#;
@@ -593,6 +598,7 @@ fn test_secret_masking_in_lifecycle_logs() {
     "name": "Secret Masking Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "remoteEnv": {
         "SECRET_VALUE": "my-secret-password",
         "PUBLIC_VALUE": "public-info"
@@ -689,6 +695,7 @@ fn test_lifecycle_phase_order_sc001() {
     "name": "Lifecycle Order SC001 Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "onCreateCommand": "seq=1; ts=$(date +%s%N); echo \"$seq,$ts\" > /tmp/lifecycle_order_onCreate; sleep 0.1",
     "updateContentCommand": "seq=2; ts=$(date +%s%N); echo \"$seq,$ts\" > /tmp/lifecycle_order_updateContent; sleep 0.1",
     "postCreateCommand": "seq=3; ts=$(date +%s%N); echo \"$seq,$ts\" > /tmp/lifecycle_order_postCreate; sleep 0.1",
@@ -881,6 +888,7 @@ echo "$seq,$ts" > /tmp/lifecycle_order_dotfiles
     "name": "Lifecycle Dotfiles Order Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "onCreateCommand": "seq=1; ts=$(date +%s%N); echo \"$seq,$ts\" > /tmp/lifecycle_order_onCreate; sleep 0.1",
     "updateContentCommand": "seq=2; ts=$(date +%s%N); echo \"$seq,$ts\" > /tmp/lifecycle_order_updateContent; sleep 0.1",
     "postCreateCommand": "seq=3; ts=$(date +%s%N); echo \"$seq,$ts\" > /tmp/lifecycle_order_postCreate; sleep 0.1",
@@ -1069,6 +1077,7 @@ fn test_features_accessible_in_container() {
     "name": "Feature Access Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "postCreateCommand": "echo 'Container ready for feature test'"
 }"#;
 
