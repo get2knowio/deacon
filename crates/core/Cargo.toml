@@ -20,7 +20,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-jsonc-parser = { version = "0.32", default-features = false, features = ["preserve_order"] }
+jsonc-parser = { version = "0.33", default-features = false, features = ["preserve_order"] }
 regex.workspace = true
 tokio.workspace = true
 once_cell.workspace = true
