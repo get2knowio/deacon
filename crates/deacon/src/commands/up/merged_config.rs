@@ -408,60 +408,21 @@ fn apply_image_metadata_label(
         return user_config;
     };
 
-    let label_value: serde_json::Value = match serde_json::from_str(label_json) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "Image '{}' has a devcontainer.metadata label that is not valid \
-                 JSON; proceeding without merge: {}",
-                image_ref,
-                e
-            );
-            return user_config;
-        }
-    };
-    let entries: Vec<DevContainerConfig> = match label_value {
-        serde_json::Value::Array(values) => {
-            let parsed: Result<Vec<DevContainerConfig>, _> = values
-                .into_iter()
-                .map(serde_json::from_value::<DevContainerConfig>)
-                .collect();
-            match parsed {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(
-                        "Image '{}' has a devcontainer.metadata label with array entries \
-                         that are not valid devcontainer configs; proceeding without merge: {}",
-                        image_ref,
-                        e
-                    );
-                    return user_config;
-                }
+    // The label may be a single object or an array of partial config entries;
+    // both forms are accepted per the image-metadata spec (#70, #300).
+    let entries: Vec<DevContainerConfig> =
+        match deacon_core::config::parse_image_metadata_label(label_json) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "Image '{}' has a devcontainer.metadata label that is not a valid \
+                     devcontainer metadata object/array; proceeding without merge: {}",
+                    image_ref,
+                    e
+                );
+                return user_config;
             }
-        }
-        serde_json::Value::Object(map) => {
-            match serde_json::from_value::<DevContainerConfig>(serde_json::Value::Object(map)) {
-                Ok(v) => vec![v],
-                Err(e) => {
-                    tracing::warn!(
-                        "Image '{}' has a devcontainer.metadata label object that is not a \
-                         valid devcontainer config; proceeding without merge: {}",
-                        image_ref,
-                        e
-                    );
-                    return user_config;
-                }
-            }
-        }
-        _ => {
-            tracing::warn!(
-                "Image '{}' has a devcontainer.metadata label that is neither an object nor array; \
-                 proceeding without merge",
-                image_ref
-            );
-            return user_config;
-        }
-    };
+        };
 
     if entries.is_empty() {
         return user_config;

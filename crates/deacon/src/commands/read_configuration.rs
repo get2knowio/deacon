@@ -845,11 +845,13 @@ async fn parse_image_metadata_entries(
         return Vec::new();
     };
 
-    match serde_json::from_str::<Vec<deacon_core::config::DevContainerConfig>>(label_json) {
+    // The label may be a single object or an array of partial config entries;
+    // both forms are accepted per the image-metadata spec (#300).
+    match deacon_core::config::parse_image_metadata_label(label_json) {
         Ok(entries) => entries,
         Err(e) => {
             tracing::warn!(
-                "Image '{}' has a devcontainer.metadata label that is not a valid JSON array of devcontainer entries; proceeding without it: {}",
+                "Image '{}' has a devcontainer.metadata label that is not a valid devcontainer metadata object/array; proceeding without it: {}",
                 image_ref,
                 e
             );
