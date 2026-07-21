@@ -57,7 +57,7 @@ fn convert(value: JsonValue<'_>) -> Result<Value> {
         JsonValue::Object(obj) => {
             let mut map = Map::with_capacity(obj.len());
             for (k, v) in obj.into_iter() {
-                map.insert(k, convert(v)?);
+                map.insert(k.into_owned(), convert(v)?);
             }
             Value::Object(map)
         }
