@@ -189,7 +189,7 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Install cross (for musl targets)
         if: contains(matrix.target, 'musl')
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.83.2
         with:
           tool: cross
       - name: Install musl tools (x86_64)
