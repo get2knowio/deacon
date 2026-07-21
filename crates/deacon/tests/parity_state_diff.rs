@@ -747,8 +747,8 @@ async fn state_diff_intra_deacon_single_vs_compose() {
 // ===========================================================================
 
 #[tokio::test]
-async fn state_diff_default_workspace_mount_target_divergence() {
-    const CASE: &str = "default-workspace-mount-target-divergence";
+async fn state_diff_default_workspace_mount_target_parity() {
+    const CASE: &str = "default-workspace-mount-target-parity";
     let oracle = ff(Oracle::acquire().await);
     ff(require_docker().await);
     let deacon_bin = Path::new(env!("CARGO_BIN_EXE_deacon"));
@@ -782,26 +782,33 @@ async fn state_diff_default_workspace_mount_target_divergence() {
             .is_some_and(|m| m.mount_type == "bind")
     };
 
-    // deacon: workspace mounted AT workspaceFolder.
+    // After aligning the default mount target (issue #273), deacon and the
+    // reference must AGREE: both mount the workspace at the spec default
+    // /workspaces/<basename>, and NEITHER mounts it at `workspaceFolder`
+    // (/workspace), which is the working directory, not the mount target.
+    let mounts_under_workspaces = |snap: &StateSnapshot| {
+        snap.mounts
+            .keys()
+            .any(|d| d.starts_with("/workspaces/") && is_workspace_bind(snap, d))
+    };
     assert!(
-        is_workspace_bind(&d_snap, "/workspace"),
-        "deacon should mount the workspace at workspaceFolder (/workspace): {:?}",
+        !d_snap.mounts.contains_key("/workspace"),
+        "deacon still mounts the workspace at workspaceFolder (/workspace) instead \
+         of /workspaces/<basename>; #273 alignment regressed: {:?}",
         d_snap.mounts
     );
-    // upstream: workspace mounted at the spec default /workspaces/<basename>,
-    // NOT at workspaceFolder.
+    assert!(
+        mounts_under_workspaces(&d_snap),
+        "deacon should mount the workspace under /workspaces/<basename> after #273: {:?}",
+        d_snap.mounts
+    );
     assert!(
         !up_snap.mounts.contains_key("/workspace"),
-        "reference CLI unexpectedly mounted the workspace at /workspace; the \
-         default-mount-target divergence may be gone — reconcile deacon's \
-         default (docker.rs) and update this test: {:?}",
+        "reference CLI unexpectedly mounted the workspace at /workspace: {:?}",
         up_snap.mounts
     );
     assert!(
-        up_snap
-            .mounts
-            .keys()
-            .any(|d| d.starts_with("/workspaces/") && is_workspace_bind(&up_snap, d)),
+        mounts_under_workspaces(&up_snap),
         "reference CLI should mount the workspace under /workspaces/<basename>: {:?}",
         up_snap.mounts
     );

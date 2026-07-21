@@ -441,6 +441,25 @@ pub fn derive_container_workspace_folder(mounts: &[Mount]) -> Option<String> {
     longest_bind_mount.map(|mount| mount.destination.clone())
 }
 
+/// The default container path where the workspace bind-mount is placed when the
+/// config declares no explicit `workspaceMount`.
+///
+/// The reference CLI ALWAYS mounts the workspace at `/workspaces/<basename>`,
+/// where `<basename>` is the final component of the mount source (the git root
+/// when git-root mounting is active, otherwise the workspace folder) — it never
+/// uses `workspaceFolder` as the mount target. `workspaceFolder` is the working
+/// directory / `${containerWorkspaceFolder}`, resolved separately. Aligning here
+/// closes issue #273.
+fn default_workspace_mount_target(workspace_path: &Path) -> String {
+    format!(
+        "/workspaces/{}",
+        workspace_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("workspace")
+    )
+}
+
 /// Convert a single `appPort` specification into a docker `-p` value, matching
 /// the reference CLI exactly:
 ///
@@ -2238,18 +2257,13 @@ impl ContainerOps for CliRuntime {
                 .map_err(|e| DockerError::CLIError(format!("Invalid workspaceMount: {}", e)))?;
             args.extend(mount.to_docker_args());
         } else {
-            // Use default workspace mount - respect workspaceFolder from config if specified
-            let target_path = if let Some(ref workspace_folder) = config.workspace_folder {
-                workspace_folder.clone()
-            } else {
-                format!(
-                    "/workspaces/{}",
-                    workspace_path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("workspace")
-                )
-            };
+            // Default workspace mount target. The reference CLI ALWAYS mounts the
+            // workspace at `/workspaces/<basename>`, independent of `workspaceFolder`
+            // (which is the working directory / containerWorkspaceFolder, not the
+            // mount target). Earlier deacon mounted at `workspaceFolder` when set,
+            // which diverged (issue #273). Align to the reference; the working dir
+            // is set separately from `container_workspace_folder`.
+            let target_path = default_workspace_mount_target(workspace_path);
             let workspace_mount = {
                 // Use platform-aware path conversion for Docker Desktop compatibility
                 let platform = crate::platform::Platform::detect();
@@ -4095,6 +4109,27 @@ mod tests {
 
         let result = derive_container_workspace_folder(&mounts);
         assert_eq!(result, Some("/workspace".to_string()));
+    }
+
+    #[test]
+    fn test_default_workspace_mount_target_uses_basename() {
+        // The default mount target is always /workspaces/<basename> of the mount
+        // source, matching the reference CLI — never `workspaceFolder` (issue #273).
+        assert_eq!(
+            default_workspace_mount_target(Path::new("/home/user/deacon")),
+            "/workspaces/deacon"
+        );
+        // Git-root mounting: the source is the git root, so its basename wins even
+        // when the actual workspace lives in a subdir.
+        assert_eq!(
+            default_workspace_mount_target(Path::new("/home/runner/work/deacon/deacon")),
+            "/workspaces/deacon"
+        );
+        // Trailing-slash / degenerate paths fall back safely.
+        assert_eq!(
+            default_workspace_mount_target(Path::new("/")),
+            "/workspaces/workspace"
+        );
     }
 
     #[test]
