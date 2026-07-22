@@ -129,7 +129,7 @@ pub enum LogFormat {
 }
 
 /// Log level options
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, ValueEnum, PartialEq, Eq)]
 pub enum LogLevel {
     /// Error messages only
     Error,
@@ -883,7 +883,14 @@ pub struct Cli {
     pub log_format: Option<LogFormat>,
 
     /// Log level (baseline verbosity). Shifted by repeated `-v`/`-q`.
-    #[arg(long, global = true, value_enum, default_value = "warn")]
+    /// Also settable via the `DEACON_LOG_LEVEL` environment variable.
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value = "warn",
+        env = "DEACON_LOG_LEVEL"
+    )]
     pub log_level: LogLevel,
 
     /// Increase log verbosity, repeatable: `-v`=info, `-vv`=debug, `-vvv`=trace.
@@ -958,8 +965,9 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub secrets_file: Vec<PathBuf>,
 
-    /// Disable secret redaction in output (debugging only - WARNING: may expose secrets)
-    #[arg(long, global = true)]
+    /// Disable secret redaction in output (debugging only - WARNING: may expose secrets).
+    /// Also settable via the `DEACON_NO_REDACT` environment variable.
+    #[arg(long, global = true, env = "DEACON_NO_REDACT")]
     pub no_redact: bool,
 
     /// Progress format (json|none|auto). Auto is silent unless --progress-file is set.
@@ -976,7 +984,7 @@ pub struct Cli {
     pub plugin: Vec<String>,
 
     /// Container runtime to use (docker or podman; can be set via DEACON_CONTAINER_RUNTIME env var)
-    #[arg(long, global = true, value_enum)]
+    #[arg(long, global = true, value_enum, env = "DEACON_CONTAINER_RUNTIME")]
     pub runtime: Option<RuntimeOption>,
 
     /// Path to docker executable
@@ -2365,6 +2373,90 @@ mod tests {
                 cli.override_config,
                 Some(PathBuf::from("/tmp/from-flag.json"))
             );
+        });
+    }
+
+    // --- #180 Category B: clap-native env= migrations ---
+
+    #[test]
+    fn test_runtime_flag_parses() {
+        let cli = Cli::parse_from(["deacon", "--runtime", "podman"]);
+        assert_eq!(cli.runtime, Some(RuntimeOption::Podman));
+    }
+
+    #[test]
+    fn test_runtime_defaults_none() {
+        temp_env::with_var_unset("DEACON_CONTAINER_RUNTIME", || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.runtime, None);
+        });
+    }
+
+    #[test]
+    fn test_runtime_reads_env_var() {
+        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("podman"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.runtime, Some(RuntimeOption::Podman));
+        });
+    }
+
+    #[test]
+    fn test_runtime_flag_beats_env_var() {
+        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("podman"), || {
+            let cli = Cli::parse_from(["deacon", "--runtime", "docker"]);
+            assert_eq!(cli.runtime, Some(RuntimeOption::Docker));
+        });
+    }
+
+    #[test]
+    fn test_no_redact_flag_parses() {
+        let cli = Cli::parse_from(["deacon", "--no-redact"]);
+        assert!(cli.no_redact);
+    }
+
+    #[test]
+    fn test_no_redact_defaults_false() {
+        temp_env::with_var_unset("DEACON_NO_REDACT", || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert!(!cli.no_redact);
+        });
+    }
+
+    #[test]
+    fn test_no_redact_reads_env_var() {
+        temp_env::with_var("DEACON_NO_REDACT", Some("true"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert!(cli.no_redact);
+        });
+    }
+
+    #[test]
+    fn test_log_level_flag_parses() {
+        let cli = Cli::parse_from(["deacon", "--log-level", "debug"]);
+        assert_eq!(cli.log_level, LogLevel::Debug);
+    }
+
+    #[test]
+    fn test_log_level_defaults_warn() {
+        temp_env::with_var_unset("DEACON_LOG_LEVEL", || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.log_level, LogLevel::Warn);
+        });
+    }
+
+    #[test]
+    fn test_log_level_reads_env_var() {
+        temp_env::with_var("DEACON_LOG_LEVEL", Some("trace"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.log_level, LogLevel::Trace);
+        });
+    }
+
+    #[test]
+    fn test_log_level_flag_beats_env_var() {
+        temp_env::with_var("DEACON_LOG_LEVEL", Some("trace"), || {
+            let cli = Cli::parse_from(["deacon", "--log-level", "error"]);
+            assert_eq!(cli.log_level, LogLevel::Error);
         });
     }
 
