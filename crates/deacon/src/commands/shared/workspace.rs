@@ -72,6 +72,34 @@ pub fn container_workspace_folder_from_mounts(
     }
 }
 
+/// Resolve the container working directory for `exec` / `run-user-commands` /
+/// lifecycle, applying the full reference-matching precedence:
+///   1. explicit `config.workspaceFolder`, or the running container's actual
+///      workspace bind-mount (both via [`container_workspace_folder_from_mounts`]);
+///   2. for a **Compose** config with no explicit `workspaceFolder`, `/` — the
+///      reference's effective Compose workspace, and always a valid `chdir`
+///      target (deacon previously used the single-container default
+///      `/workspaces/<basename>`, which the Compose service doesn't mount, so
+///      `exec`/lifecycle `chdir` failed with rc 127 — issues #294/#295);
+///   3. otherwise the single-container host-side derivation
+///      (`/workspaces/<basename(root)>[/<subpath>]`).
+pub fn resolve_container_cwd(
+    config: &DevContainerConfig,
+    host_workspace_folder: &Path,
+    mounts: &[Mount],
+    mount_workspace_git_root: bool,
+) -> String {
+    if let Some(folder) =
+        container_workspace_folder_from_mounts(config, host_workspace_folder, mounts)
+    {
+        return folder;
+    }
+    if config.uses_compose() {
+        return "/".to_string();
+    }
+    derive_container_workspace_folder(config, host_workspace_folder, mount_workspace_git_root)
+}
+
 /// Derive the container workspace folder (the lifecycle & exec working directory)
 /// from configuration and the host workspace path.
 ///
@@ -203,6 +231,49 @@ mod tests {
         let got =
             container_workspace_folder_from_mounts(&config, Path::new("/host/repo/pkg"), &mounts);
         assert_eq!(got.as_deref(), Some("/pkg"));
+    }
+
+    fn compose_config() -> DevContainerConfig {
+        let mut c = minimal_config();
+        c.docker_compose_file = Some(serde_json::json!("docker-compose.yml"));
+        c.service = Some("app".to_string());
+        c
+    }
+
+    #[test]
+    fn cwd_compose_without_workspace_folder_is_root() {
+        // Reference default for a Compose config without an explicit workspaceFolder
+        // is `/` (a valid chdir target), NOT `/workspaces/<basename>` (#294/#295).
+        let config = compose_config();
+        assert!(config.uses_compose());
+        let got = resolve_container_cwd(&config, Path::new("/host/my-project"), &[], false);
+        assert_eq!(got, "/");
+    }
+
+    #[test]
+    fn cwd_compose_honors_explicit_workspace_folder() {
+        let mut config = compose_config();
+        config.workspace_folder = Some("/workspaces/compose-basic".to_string());
+        let got = resolve_container_cwd(&config, Path::new("/host/my-project"), &[], false);
+        assert_eq!(got, "/workspaces/compose-basic");
+    }
+
+    #[test]
+    fn cwd_single_container_uses_workspaces_basename() {
+        // Non-compose without an explicit folder keeps the single-container default.
+        let config = minimal_config();
+        let got = resolve_container_cwd(&config, Path::new("/host/my-project"), &[], false);
+        assert_eq!(got, "/workspaces/my-project");
+    }
+
+    #[test]
+    fn cwd_prefers_workspace_mount_over_compose_root() {
+        // A Compose service that DOES mount the workspace resolves from the mount,
+        // not the `/` fallback.
+        let config = compose_config();
+        let mounts = vec![bind("/host/my-project", "/workspaces/my-project")];
+        let got = resolve_container_cwd(&config, Path::new("/host/my-project"), &mounts, false);
+        assert_eq!(got, "/workspaces/my-project");
     }
 
     #[test]
