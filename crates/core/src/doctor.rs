@@ -453,6 +453,8 @@ fn collect_environment_info() -> EnvironmentInfo {
         "TERM",
         "DEACON_LOG_LEVEL",
         "DEACON_LOG_FORMAT",
+        "DEACON_CONTAINER_RUNTIME",
+        "DEACON_NO_REDACT",
         "DOCKER_HOST",
         "DOCKER_CONFIG",
         "DOCKER_CERT_PATH",

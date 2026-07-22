@@ -62,20 +62,14 @@ impl std::fmt::Display for RuntimeKind {
 pub struct RuntimeFactory;
 
 impl RuntimeFactory {
-    /// Detect runtime from CLI flag, environment variable, or default
+    /// Resolve the runtime from the (already env-resolved) CLI flag, or default.
     ///
-    /// Precedence: CLI flag > `DEACON_CONTAINER_RUNTIME` env var > default (docker).
+    /// Precedence: CLI flag > default (docker). The `DEACON_CONTAINER_RUNTIME`
+    /// environment variable is resolved at the CLI layer by clap's `env=`
+    /// attribute on `--runtime`, so by the time a value reaches here it already
+    /// reflects flag-over-env-over-default. See `deacon::cli::Cli::runtime`.
     pub fn detect_runtime(cli_runtime: Option<RuntimeKind>) -> RuntimeKind {
-        if let Some(runtime) = cli_runtime {
-            runtime
-        } else if let Some(env_runtime) = std::env::var("DEACON_CONTAINER_RUNTIME")
-            .ok()
-            .and_then(|v| v.parse().ok())
-        {
-            env_runtime
-        } else {
-            RuntimeKind::Docker
-        }
+        cli_runtime.unwrap_or(RuntimeKind::Docker)
     }
 
     /// Create runtime instance based on RuntimeKind
@@ -725,35 +719,24 @@ mod tests {
 
     #[test]
     fn test_detect_runtime_default() {
-        temp_env::with_var_unset("DEACON_CONTAINER_RUNTIME", || {
-            assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
-        });
+        // `None` (no CLI flag / env resolved) falls back to Docker. The
+        // `DEACON_CONTAINER_RUNTIME` env var is now resolved at the CLI layer by
+        // clap's `env=` on `--runtime`, so `detect_runtime` no longer reads the
+        // environment itself — the flag-vs-env precedence is covered by the clap
+        // parse tests in `deacon::cli`.
+        assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
     }
 
     #[test]
     fn test_detect_runtime_cli_precedence() {
-        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("podman"), || {
-            assert_eq!(
-                RuntimeFactory::detect_runtime(Some(RuntimeKind::Docker)),
-                RuntimeKind::Docker
-            );
-        });
-    }
-
-    #[test]
-    fn test_detect_runtime_env_var() {
-        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("podman"), || {
-            assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Podman);
-        });
-
-        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("docker"), || {
-            assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
-        });
-
-        // Invalid env var should fall back to default
-        temp_env::with_var("DEACON_CONTAINER_RUNTIME", Some("invalid"), || {
-            assert_eq!(RuntimeFactory::detect_runtime(None), RuntimeKind::Docker);
-        });
+        assert_eq!(
+            RuntimeFactory::detect_runtime(Some(RuntimeKind::Docker)),
+            RuntimeKind::Docker
+        );
+        assert_eq!(
+            RuntimeFactory::detect_runtime(Some(RuntimeKind::Podman)),
+            RuntimeKind::Podman
+        );
     }
 
     #[test]

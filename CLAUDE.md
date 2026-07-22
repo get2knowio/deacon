@@ -199,6 +199,16 @@ current code before "implementing" a deferral.
   that delegates to an existing method (e.g. `Docker::exec_with_line_prefix` defaults to
   `exec`). Mocks and delegating runtimes then need no change; only override where the new
   behavior matters (and in the enum/wrapper runtimes that must forward it).
+- **Flag-backed env vars use clap's native `env=`, never a hand-rolled `std::env::var`
+  read.** A CLI flag that is also settable via the environment MUST declare it on the
+  `#[arg(...)]` (`env = "DEACON_<SCREAMING_FLAG>"`), so clap owns the precedence
+  (flag > env > default) and `--help` advertises `[env: …]` for free. Do NOT read the same
+  var by hand below the CLI layer — resolve at the `Cli` struct and thread the value down
+  (see `--runtime`/`DEACON_CONTAINER_RUNTIME`, `--log-level`, `--no-redact`,
+  `--override-config`; #180). `doctor`'s env snapshot in `core::doctor` is a *diagnostic*
+  read (it reports which vars are set) and is the one legitimate exception — keep its list
+  in sync with the canonical names actually consumed. Env-only knobs with **no** backing
+  flag (`DEACON_NO_PROMPT`, `DEACON_CACHE_DIR`, `DEACON_LOG`/`RUST_LOG`, …) stay manual.
 
 **Logging:**
 - Use `tracing` spans for workflows: `config.resolve`, `feature.install`, `lifecycle.run`
