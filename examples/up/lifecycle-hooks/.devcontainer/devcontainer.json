@@ -3,6 +3,7 @@
 	"image": "ubuntu:22.04",
 	"remoteUser": "root",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	
 	"onCreateCommand": {
 		"install-deps": "apt-get update && apt-get install -y curl git",

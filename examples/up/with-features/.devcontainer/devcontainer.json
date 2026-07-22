@@ -19,5 +19,6 @@
 		"infinity"
 	],
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"postCreateCommand": "node --version && zsh --version"
 }

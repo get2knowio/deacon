@@ -8,5 +8,6 @@
     "LOG_LEVEL": "info",
     "CONFIG_SOURCE": "devcontainer.json"
   },
-  "workspaceFolder": "/workspace"
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }

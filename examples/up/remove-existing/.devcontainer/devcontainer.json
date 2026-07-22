@@ -3,6 +3,7 @@
 	"image": "alpine:3.18",
 	"remoteUser": "root",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"onCreateCommand": "echo 'Container created at:' > /tmp/created.txt && date >> /tmp/created.txt",
 	"postCreateCommand": "cat /tmp/created.txt"
 }

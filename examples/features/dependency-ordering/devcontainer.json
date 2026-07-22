@@ -3,6 +3,7 @@
 	"image": "alpine:3.18",
 	"remoteUser": "root",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"features": {
 		"./feature-app": {},
 		"./feature-base": {},

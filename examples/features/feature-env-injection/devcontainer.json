@@ -4,6 +4,7 @@
 	"remoteUser": "vscode",
 	"containerUser": "vscode",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"features": {
 		"./capture-env": {}
 	}

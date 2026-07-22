@@ -2,5 +2,6 @@
 	"name": "Workspace trust gate",
 	"image": "alpine:3.18",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"initializeCommand": "touch ./initialize-ran.marker"
 }

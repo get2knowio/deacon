@@ -2,6 +2,7 @@
   "name": "Observability JSON Logs Example",
   "image": "ubuntu:22.04",
   "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
       "username": "devcontainer"

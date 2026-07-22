@@ -6,6 +6,7 @@
 	"remoteUser": "devuser",
 	"containerUser": "devuser",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"updateRemoteUserUID": true,
 	"postCreateCommand": "id -u > /tmp/uid && id -g > /tmp/gid && stat -c '%u' /workspace > /tmp/workspace.uid"
 }

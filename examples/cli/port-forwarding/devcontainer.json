@@ -2,6 +2,7 @@
   "name": "CLI Port Forwarding Example",
   "image": "nginx:alpine",
   "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "portsAttributes": {
     "80": {
       "label": "Nginx Web Server",

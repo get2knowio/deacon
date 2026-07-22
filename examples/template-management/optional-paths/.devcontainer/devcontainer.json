@@ -2,5 +2,6 @@
 	"name": "${templateOption:projectName}",
 	"image": "alpine:3.18",
 	"remoteUser": "root",
-	"workspaceFolder": "/workspace"
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }

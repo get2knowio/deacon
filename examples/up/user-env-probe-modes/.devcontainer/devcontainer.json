@@ -3,6 +3,7 @@
 	"image": "mcr.microsoft.com/devcontainers/base:debian",
 	"remoteUser": "vscode",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"userEnvProbe": "loginInteractiveShell",
 	"postCreateCommand": "echo $PATH > /tmp/probe.path && (echo \"PROBE_VAR=${PROBE_VAR:-<unset>}\") > /tmp/probe.var"
 }

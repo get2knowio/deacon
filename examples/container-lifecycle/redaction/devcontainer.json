@@ -2,6 +2,7 @@
   "name": "Redaction Demo",
   "image": "alpine:3.19",
   "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "containerEnv": {
     "PUBLIC_VALUE": "this-is-public-info",
     "API_KEY": "secret-api-key-12345",

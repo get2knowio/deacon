@@ -2,6 +2,7 @@
   "name": "Non-Blocking and Skip Flags Demo",
   "image": "alpine:3.19",
   "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "containerEnv": {
     "DEMO_PHASE": "lifecycle-skip-example"
   },

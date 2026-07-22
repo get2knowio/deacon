@@ -3,5 +3,6 @@
   "image": "mcr.microsoft.com/devcontainers/base:debian",
   "remoteUser": "vscode",
   "userEnvProbe": "loginInteractiveShell",
-  "workspaceFolder": "/workspace"
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }

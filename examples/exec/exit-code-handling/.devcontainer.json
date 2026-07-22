@@ -2,5 +2,6 @@
   "name": "Exec Exit Code Example",
   "image": "mcr.microsoft.com/devcontainers/base:debian",
   "remoteUser": "vscode",
-  "workspaceFolder": "/workspace"
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }

@@ -2,6 +2,7 @@
   "name": "Lifecycle Execution Order Demo",
   "image": "alpine:3.18",
   "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "containerEnv": {
     "DEMO_START_TIME": "$(date +%s)"
   },

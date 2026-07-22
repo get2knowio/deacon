@@ -2,6 +2,7 @@
 	"name": "Ports: forwardPorts, portsAttributes, otherPortsAttributes, appPort",
 	"image": "nginx:1.25-alpine",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"appPort": 8080,
 	"forwardPorts": [
 		80,
