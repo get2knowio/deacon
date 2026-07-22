@@ -371,7 +371,7 @@ pub(crate) async fn execute_container_up(
     // `read_configuration.rs:1185`).
     let mount_substitution_context = {
         let mut ctx = deacon_core::variable::SubstitutionContext::new(workspace_folder)?;
-        let id_labels: Vec<(String, String)> = identity.labels().into_iter().collect();
+        let id_labels: Vec<(String, String)> = identity.id_hash_labels();
         ctx.devcontainer_id = deacon_core::container::compute_dev_container_id(&id_labels);
         ctx
     };

@@ -421,7 +421,7 @@ pub(crate) async fn execute_compose_up(
     if !config.mounts.is_empty() || !resolved_features_for_mounts.is_empty() {
         let mount_substitution_context = {
             let mut ctx = deacon_core::variable::SubstitutionContext::new(workspace_folder)?;
-            let id_labels: Vec<(String, String)> = identity.labels().into_iter().collect();
+            let id_labels: Vec<(String, String)> = identity.id_hash_labels();
             ctx.devcontainer_id = deacon_core::container::compute_dev_container_id(&id_labels);
             ctx
         };

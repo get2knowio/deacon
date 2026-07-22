@@ -32,6 +32,10 @@ pub const LABEL_CONFIG_FILE: &str = "devcontainer.config_file";
 /// `local_folder`).
 pub const LABEL_HOST_CA_BUNDLE_PATH: &str = "devcontainer.deacon.hostCaBundlePath";
 pub const LABEL_HOST_CA_SUBJECTS: &str = "devcontainer.deacon.hostCaSubjects";
+/// The spec's `devcontainer.metadata` label carrying the merged config array
+/// (#322). Written by deacon on container create; read back by
+/// exec/read-configuration/set-up to recover config without the workspace.
+pub const LABEL_DEVCONTAINER_METADATA: &str = "devcontainer.metadata";
 
 /// Source identifier for containers created by deacon
 pub const DEACON_SOURCE: &str = "deacon";
@@ -67,6 +71,13 @@ pub struct ContainerIdentity {
     /// User-provided identification labels (for example, from `--id-label`)
     /// that should be stamped onto created containers.
     pub additional_labels: HashMap<String, String>,
+    /// The merged `devcontainer.metadata` array (JSON string) to stamp on the
+    /// created container, so config that lives only in `devcontainer.json`
+    /// (notably `remoteEnv`) survives on the container and is recoverable by
+    /// `exec`/`read-configuration`/`set-up` without the workspace — matching the
+    /// reference CLI (#322). Informational only: like the host-CA labels it is
+    /// written AFTER identity hashing and never feeds `devcontainerId`.
+    pub metadata_label: Option<String>,
 }
 
 /// Container creation result
@@ -157,6 +168,7 @@ impl ContainerIdentity {
             host_ca_bundle_path: None,
             host_ca_subjects: None,
             additional_labels: HashMap::new(),
+            metadata_label: None,
         }
     }
 
@@ -179,6 +191,14 @@ impl ContainerIdentity {
     pub fn with_host_ca(mut self, bundle_path: impl Into<String>, subjects: &[String]) -> Self {
         self.host_ca_bundle_path = Some(bundle_path.into());
         self.host_ca_subjects = Some(subjects.join("\n"));
+        self
+    }
+
+    /// Attach the merged `devcontainer.metadata` JSON to stamp on the created
+    /// container (#322). Set *before* `create_container`; informational, never
+    /// feeds `devcontainerId` (see [`Self::id_hash_labels`]).
+    pub fn with_metadata_label(mut self, metadata_json: impl Into<String>) -> Self {
+        self.metadata_label = Some(metadata_json.into());
         self
     }
 
@@ -300,7 +320,48 @@ impl ContainerIdentity {
             labels.insert(key.clone(), value.clone());
         }
 
+        // The merged `devcontainer.metadata` array (#322). Informational; written
+        // after identity hashing so config living only in devcontainer.json (esp.
+        // `remoteEnv`) survives on the container for exec/read-config/set-up.
+        if let Some(ref metadata) = self.metadata_label {
+            labels.insert(LABEL_DEVCONTAINER_METADATA.to_string(), metadata.clone());
+        }
+
         labels
+    }
+
+    /// The subset of labels that define container IDENTITY and therefore feed
+    /// `${devcontainerId}` ([`compute_dev_container_id`]). Excludes the purely
+    /// informational labels (`host_ca*`, `--id-label` additions, and the
+    /// `devcontainer.metadata` payload) so adding any of them never churns the
+    /// user-visible `devcontainerId` (which keys named volumes, caches, etc.).
+    /// For a container with no informational labels this equals [`Self::labels`],
+    /// so the common-case `devcontainerId` is unchanged.
+    pub fn id_hash_labels(&self) -> Vec<(String, String)> {
+        let mut out = vec![
+            (LABEL_SOURCE.to_string(), DEACON_SOURCE.to_string()),
+            (
+                LABEL_WORKSPACE_HASH.to_string(),
+                self.workspace_hash.clone(),
+            ),
+            (LABEL_CONFIG_HASH.to_string(), self.config_hash.clone()),
+        ];
+        if let Some(ref name) = self.name {
+            out.push((LABEL_NAME.to_string(), name.clone()));
+        }
+        if let Some(ref local_folder) = self.local_folder {
+            out.push((
+                LABEL_LOCAL_FOLDER.to_string(),
+                local_folder.display().to_string(),
+            ));
+        }
+        if let Some(ref config_file) = self.config_file {
+            out.push((
+                LABEL_CONFIG_FILE.to_string(),
+                config_file.display().to_string(),
+            ));
+        }
+        out
     }
 
     /// Create a label selector string for finding matching containers
@@ -782,6 +843,36 @@ mod tests {
             selector.workspace_folder,
             Some(std::path::PathBuf::from("/workspace/.devcontainer"))
         );
+    }
+
+    #[test]
+    fn test_id_hash_labels_excludes_informational_labels() {
+        // devcontainerId must NOT change when purely-informational labels
+        // (host-CA, --id-label additions, the devcontainer.metadata payload) are
+        // attached — they are written after identity hashing (#322).
+        let config: DevContainerConfig =
+            serde_json::from_str(r#"{ "name": "demo", "image": "alpine:3.19" }"#).unwrap();
+        let base = ContainerIdentity::new(Path::new("/ws/proj"), &config);
+        let id_base = compute_dev_container_id(&base.id_hash_labels());
+
+        let decorated = base
+            .clone()
+            .with_host_ca("/etc/ca/bundle.crt", &["CN=Corp".to_string()])
+            .with_additional_labels(&[("custom.k".to_string(), "v".to_string())])
+            .with_metadata_label(r#"[{"remoteEnv":{"X":"1"}}]"#);
+        let id_decorated = compute_dev_container_id(&decorated.id_hash_labels());
+
+        assert_eq!(
+            id_base, id_decorated,
+            "informational labels must not churn devcontainerId"
+        );
+        // But those labels ARE stamped on the container via `labels()`.
+        let labels = decorated.labels();
+        assert_eq!(
+            labels.get(LABEL_DEVCONTAINER_METADATA).map(String::as_str),
+            Some(r#"[{"remoteEnv":{"X":"1"}}]"#)
+        );
+        assert!(labels.contains_key(LABEL_HOST_CA_BUNDLE_PATH));
     }
 
     #[test]
