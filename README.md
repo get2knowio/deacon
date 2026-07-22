@@ -77,7 +77,7 @@ The install script supports a `--prerelease` flag and these environment variable
 
 ```bash
 # Install a specific version
-curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_VERSION=0.2.0-rc.2 bash
+curl -fsSL https://get2knowio.github.io/deacon/install.sh | DEACON_VERSION=0.2.0-rc.15 bash
 
 # Install the latest pre-release
 curl -fsSL https://get2knowio.github.io/deacon/install.sh | bash -s -- --prerelease
