@@ -58,13 +58,20 @@ async fn parity_up_and_exec_traditional() {
     let ws_str = ws.to_string_lossy().into_owned();
 
     fs::create_dir(ws.join(".devcontainer")).unwrap();
+    // `containerEnv` + a lifecycle command that references `${containerEnv:*}`
+    // exercises the #332 parity: the reference CLI does NOT substitute
+    // `${containerEnv:VAR}` inside lifecycle command strings — it leaves the token
+    // literal for the container shell (which expands it to empty). deacon aligns
+    // (it used to inject the value, a command-injection hazard). Both CLIs must
+    // produce the SAME empty marker (verified below).
     fs::write(
         ws.join(".devcontainer/devcontainer.json"),
         r#"{
   "name": "ParityUpExec",
   "image": "alpine:3.19",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
-  "postCreateCommand": "sh -lc 'echo ready > /tmp/parity_marker'"
+  "containerEnv": { "PARITY_TOKEN": "tkn-42" },
+  "postCreateCommand": "sh -lc 'echo ready > /tmp/parity_marker; printf \"env=[%s]\\n\" \"${containerEnv:PARITY_TOKEN}\" > /tmp/parity_env_marker'"
 }
 "#,
     )
@@ -91,7 +98,7 @@ async fn parity_up_and_exec_traditional() {
         ws_str.as_str(),
         "sh",
         "-lc",
-        "cat /tmp/parity_marker && pwd",
+        "cat /tmp/parity_marker && cat /tmp/parity_env_marker",
     ];
     let oracle_exec_inv = ff(exec_oracle(
         BINARY,
@@ -125,7 +132,7 @@ async fn parity_up_and_exec_traditional() {
         "--",
         "sh",
         "-lc",
-        "cat /tmp/parity_marker && pwd",
+        "cat /tmp/parity_marker && cat /tmp/parity_env_marker",
     ];
     let deacon_exec_inv = ff(exec_deacon(
         BINARY,
@@ -139,6 +146,27 @@ async fn parity_up_and_exec_traditional() {
     ff(deacon_exec_inv.require_success());
     let out2 = deacon_exec_inv.stdout_string();
     assert!(out2.contains("ready"), "deacon marker missing: {}", out2);
+
+    // #332: `${containerEnv:PARITY_TOKEN}` in the postCreateCommand must resolve
+    // IDENTICALLY for both CLIs. The reference leaves it literal → the shell
+    // expands it to empty → `env=[]`. deacon aligns, so both markers match. A
+    // regression that made deacon inject the value would surface here as
+    // `env=[tkn-42]` vs `env=[]`.
+    fn env_marker_line(out: &str) -> &str {
+        out.lines()
+            .find(|l| l.starts_with("env="))
+            .unwrap_or_else(|| panic!("env marker line missing in exec output: {out:?}"))
+    }
+    let oracle_env = env_marker_line(&out1);
+    let deacon_env = env_marker_line(&out2);
+    assert_eq!(
+        deacon_env, oracle_env,
+        "lifecycle `${{containerEnv:*}}` substitution diverged (deacon vs oracle)"
+    );
+    assert_eq!(
+        deacon_env, "env=[]",
+        "reference leaves `${{containerEnv:*}}` literal (shell → empty); deacon must match"
+    );
 
     // --- Label parity checks (plain local docker inspection of the containers) ---
     fn docker_out(args: &[&str]) -> String {

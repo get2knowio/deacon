@@ -774,45 +774,25 @@ where
         config.container_env.clone()
     };
 
-    // The source for `${containerEnv:VAR}` substitution is the container's BASE
-    // environment (the image's `ENV` plus create-time `containerEnv`), NOT the
-    // userEnvProbe additions (#298). Absorbing probe-only PATH entries into
-    // `${containerEnv:PATH}` diverges from the reference CLI, which resolves
-    // container variables from the container environment alone. Read the base
-    // env from the container's `Config.Env` via inspect, then overlay the
-    // config's `containerEnv` so it wins on conflicts — mirroring
-    // `resolve_env_and_user`'s canonical container-env source.
-    let container_env_for_substitution = {
-        let mut base = match docker.inspect_container(&config.container_id).await {
-            Ok(Some(info)) => info.env,
-            Ok(None) => {
-                warn!(
-                    "Container '{}' not found while reading base env for containerEnv \
-                     substitution; using config containerEnv only",
-                    config.container_id
-                );
-                HashMap::new()
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to inspect container '{}' for base containerEnv substitution; \
-                     using config containerEnv only: {}",
-                    config.container_id, e
-                );
-                HashMap::new()
-            }
-        };
-        for (key, value) in &config.container_env {
-            base.insert(key.clone(), value.clone());
-        }
-        base
-    };
-
-    // Create substitution context with container information and the BASE env.
+    // The reference CLI does NOT resolve `${containerEnv:VAR}` inside lifecycle
+    // COMMAND STRINGS — it leaves the token literal, so the container shell that
+    // runs the command produces an empty expansion (verified against the pinned
+    // oracle: a `postCreateCommand` referencing `${containerEnv:PATH}` yields the
+    // same empty result as `sh -c` on the raw token). `${containerEnv:*}` is
+    // resolved only in `remoteEnv` — a separate, post-start pass deacon handles
+    // elsewhere — never in lifecycle command strings.
+    //
+    // So the lifecycle substitution context deliberately leaves `container_env`
+    // UNSET: the substitution engine then leaves `${containerEnv:*}` tokens
+    // literal (variable.rs three-pass model), matching the reference. Resolving
+    // them here would both diverge from the reference AND inject a containerEnv
+    // value into the command string host-side — a command-injection / word-split
+    // hazard the reference structurally avoids (a value like `x; rm -rf /` would
+    // execute). The command PROCESS still receives the full container env via
+    // `updated_config.container_env` below; only textual substitution is dropped.
     let container_context = substitution_context
         .clone()
-        .with_container_workspace_folder(config.container_workspace_folder.clone())
-        .with_container_env(container_env_for_substitution);
+        .with_container_workspace_folder(config.container_workspace_folder.clone());
 
     // Create an updated config with the merged environment (probe additions
     // included) so lifecycle command *processes* inherit the probed shell env.
@@ -4812,6 +4792,40 @@ mod tests {
                 assert_ne!(args[1], "${localWorkspaceFolder}");
             }
             _ => panic!("Expected Exec variant after substitution"),
+        }
+    }
+
+    #[test]
+    fn test_lifecycle_leaves_container_env_token_literal() {
+        // Alignment with the reference CLI (#332): `${containerEnv:VAR}` in a
+        // lifecycle COMMAND string is NOT resolved — it stays literal so the
+        // container shell expands it (to empty), exactly as the oracle does.
+        // Other container-context variables (`${containerWorkspaceFolder}`) DO
+        // resolve. `run_lifecycle` guarantees this by building the substitution
+        // context WITHOUT `container_env` (the default here), so this test pins
+        // the invariant the fix relies on.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let context = SubstitutionContext::new(temp_dir.path())
+            .unwrap()
+            .with_container_workspace_folder("/workspaces/proj".to_string());
+        // No `.with_container_env(...)` — mirrors the lifecycle path.
+        assert!(context.container_env.is_none());
+
+        let cmd = LifecycleCommandValue::Shell(
+            "echo ${containerEnv:PATH} at ${containerWorkspaceFolder}".to_string(),
+        );
+        match cmd.substitute_variables(&context) {
+            LifecycleCommandValue::Shell(s) => {
+                assert!(
+                    s.contains("${containerEnv:PATH}"),
+                    "containerEnv token must stay literal for the shell to expand: {s}"
+                );
+                assert!(
+                    s.contains("/workspaces/proj"),
+                    "containerWorkspaceFolder must still resolve: {s}"
+                );
+            }
+            _ => panic!("expected Shell variant"),
         }
     }
 
