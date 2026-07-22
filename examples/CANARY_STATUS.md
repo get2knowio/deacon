@@ -22,7 +22,31 @@ pass, so they don't have to be re-evaluated from scratch every session.
 - `🚫 deferred` — exercises a deacon capability that isn't implemented yet.
 - `❓ unverified` — not evaluated this cycle.
 
-Last broad sweep: **2026-07-20** against `main` @ `de5b045` (post-#318/#319) —
+Last broad sweep: **2026-07-22** against `main` @ `3db4306` (post-#338/#339/#340/#341,
+the merged-config base-image + lifecycle-`containerEnv` parity work) — all 91 canaries
+run with the release binary. **87 pass, 3 fixture, 1 deacon-bug** on first pass; after the
+fixes below, **all 91 pass**:
+
+- `up/image-metadata-merge` — was **✗ deacon-bug**: a regression from #339. Warm
+  `read-configuration --include-merged-configuration` (container already up, resolved by
+  `--workspace-folder`) dropped the running container's image `devcontainer.metadata`
+  label because #339's cold static FROM-base resolution ran *before* container discovery.
+  Fixed in **PR #342** (container-first precedence); scenario 4 passes again. ✅
+- `build/duplicate-tags` — was **⚠️ fixture** (stale after #330, `447b2ab`): deacon now
+  emits `imageName` as an array to match the reference CLI, but the exec.sh asserted a bare
+  string. Updated the assertion to the de-duplicated single-element array. ✅
+- `up/up-exec-down` — was **⚠️ fixture**: the exec.sh passed `--mount-workspace-git-root
+  false` to `up`/`exec` only. Since #273/#309 that flag governs the in-container workspace
+  folder, but `run-user-commands`/`down` don't accept it, so they derived a different cwd →
+  `chdir` rc 127. Dropped the flag so all four subcommands git-root-anchor consistently. ✅
+  (Latent deacon inconsistency to follow up: `run-user-commands` lacks the
+  `--mount-workspace-git-root` flag that `up`/`exec` have; the robust fix is to read the
+  resolved container's `remoteWorkspaceFolder` instead of re-deriving cwd host-side.)
+- `up/compose-profiles` — still **⚠️ fixture** (missing `nginx.conf`, unchanged baseline).
+- `compose/multiple-compose-files`, `compose/multiservice-down` — transient environment
+  (Docker address-pool exhaustion from leftover networks); pass cleanly after cleanup.
+
+Prior sweep: **2026-07-20** against `main` @ `de5b045` (post-#318/#319) —
 all 91 canaries run with the release binary. **90 pass, 1 fixture**. One was a real deacon bug
 (`features/oci-digest-pin`), fixed in PR #321 and re-verified ✅ at `8179744`;
 two were unclassified and have since been decided (both fixture-side):
@@ -77,7 +101,7 @@ and aren't listed.
 | build/compose-unsupported-flags | ✅ pass | 2026-07-20 `de5b045` | asserts errors (`--push`/`--output`) |
 | build/compose-with-features | ✅ pass | 2026-07-20 `de5b045` | compose+features build (#139) |
 | build/dockerfile-with-features | ✅ pass | 2026-07-20 `de5b045` | feature layering (#129) |
-| build/duplicate-tags | ✅ pass | 2026-07-20 `de5b045` | tag de-dup (#129) |
+| build/duplicate-tags | ✅ pass | 2026-07-22 `3db4306` | tag de-dup (#129); exec.sh updated to assert `imageName` array form (#330) |
 | build/image-reference | ✅ pass | 2026-07-20 `de5b045` |  |
 | build/image-reference-with-features | ✅ pass | 2026-07-20 `de5b045` | image-ref+features (#134) |
 | build/invalid-config-name | ✅ pass | 2026-07-20 `de5b045` | asserts error |
@@ -144,7 +168,7 @@ and aren't listed.
 | up/gpu-modes | ✅ pass | 2026-07-20 `de5b045` | GPU `all` failure expected on non-GPU hosts (tolerated) |
 | up/host-ca | ✅ pass | 2026-07-20 `de5b045` | `--inject-host-ca` explicit bundle; debian-slim → env-var-only fallback (no `ca-certificates`), canonical bundle + CA env vars present (016) |
 | up/id-labels-reconnect | ✅ pass | 2026-07-20 `de5b045` | full-ID on reconnect (#143) |
-| up/image-metadata-merge | ✅ pass | 2026-07-20 `de5b045` |  |
+| up/image-metadata-merge | ✅ pass | 2026-07-22 `3db4306` | scenario 4 (warm read-config) regressed by #339, fixed in PR #342 (container-first metadata resolution) |
 | up/initialize-command | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/lifecycle-hooks | ✅ pass | 2026-07-20 `de5b045` | non-existent `devuser`→root (apt needs root); array hooks→argv `["bash","-c",…]` (#151) |
 | up/override-command | ✅ pass | 2026-07-20 `de5b045` |  |
@@ -154,7 +178,7 @@ and aren't listed.
 | up/remove-existing | ✅ pass | 2026-07-20 `de5b045` | full-ID reuse (#143) |
 | up/security-options | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/skip-lifecycle | ✅ pass | 2026-07-20 `de5b045` |  |
-| up/up-exec-down | ✅ pass | 2026-07-20 `de5b045` | compound-flow up→exec→run-user-commands→down by --workspace-folder (#187 configHash fix) |
+| up/up-exec-down | ✅ pass | 2026-07-22 `3db4306` | compound-flow up→exec→run-user-commands→down by --workspace-folder (#187 configHash fix); exec.sh drops `--mount-workspace-git-root false` so all four subcommands anchor consistently (run-user-commands/down lack the flag) |
 | up/update-remote-user-uid | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/user-env-probe-modes | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/wait-for | ✅ pass | 2026-07-20 `de5b045` |  |

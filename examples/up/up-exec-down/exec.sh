@@ -20,12 +20,19 @@ MARKER="up-exec-down-ok"
 # Identity resolution is anchored to --workspace-folder for every subcommand,
 # which is exactly what this canary verifies — so this is all exec /
 # run-user-commands / down need to find up's container.
+#
+# Every subcommand must ALSO derive the same in-container workspace folder as
+# `up` mounted, because `exec`/`run-user-commands` chdir into it before running.
+# Since #273/#309 that derivation is governed by `--mount-workspace-git-root`,
+# but `run-user-commands` (and `down`) don't accept that flag while `up`/`exec`
+# do — so passing `--mount-workspace-git-root false` only to some subcommands
+# makes them disagree on the path and `chdir` fails (rc 127). The one choice that
+# is consistent across ALL four here is the default (git-root anchoring): inside
+# this monorepo `up` mounts the git root and every subcommand derives the same
+# `/workspaces/<repo>/examples/up/up-exec-down` cwd. (The identity marker lives at
+# `/tmp`, so the mount location doesn't affect what this canary asserts.)
 WS_ARGS=(--workspace-folder "$SCRIPT_DIR")
-
-# `up` additionally bind-mounts the workspace. Mount only THIS example folder
-# (not the enclosing monorepo git root) so the canary is self-contained when
-# run from within this repo. The mount source does not affect identity.
-UP_ARGS=("${WS_ARGS[@]}" --mount-workspace-git-root false)
+UP_ARGS=("${WS_ARGS[@]}")
 
 run() {
 	echo "+ $*" >&2
