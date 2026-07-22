@@ -551,6 +551,17 @@ Document this checklist in plan.md or PR description to prevent spec drift.
 3. If fixed identifier: leave it out, and add a comment explaining why (see `wait_for`
    for the pattern).
 
+**Object-shaped raw-JSON fields carrying user templates must ALSO be substituted.**
+The checklist above is worded for `String`/`Option<String>` fields, but a
+`serde_json::Value` field that holds user template strings (`build`, `mounts`,
+`customizations`) must be recursively substituted via
+`VariableSubstitution::substitute_json_value{,_with_options}` in BOTH passes — the
+reference CLI resolves `${localWorkspaceFolder}` / `${localEnv:*}` /
+`${containerWorkspaceFolder}` inside them (e.g. `customizations.vscode.settings`).
+`customizations` was missed this way (#312). This is distinct from the
+`#[serde(flatten)] extra` UNMODELED passthrough, which stays **verbatim** — modeled
+object fields carrying templates are substituted; unknown top-level keys are not.
+
 **Config validation philosophy (constitution IV — "strict on mistakes, faithful on the
 unmodeled"):** two-sided, applied consistently.
 - **Modeled fields fail fast on the developer's mistakes.** Typed fields already do this
