@@ -329,9 +329,16 @@ pub struct StateSnapshot {
     pub exposed_ports: BTreeSet<String>,
     /// `HostConfig.PortBindings` keys actually PUBLISHED to the host.
     pub published_ports: BTreeSet<String>,
-    /// Captured for debugging; NOT diffed (keep-alive strategy differs by CLI).
+    /// Captured for debugging; NOT diffed. The container process shape is a
+    /// deacon-internal keep-alive/entrypoint-wrapper detail with no observable
+    /// behavioral difference — both CLIs keep the container running so `exec`,
+    /// lifecycle hooks, and feature entrypoints work identically. deacon uses a
+    /// PATH-robust `sh -c '… sleep infinity || tail -f /dev/null'`; the reference
+    /// an `exec "$@"` keep-alive loop. Intentional, characterized divergence (#290);
+    /// the behaviorally-significant cases (overrideCommand exit #291, feature
+    /// entrypoint composition #292) ARE observable and covered elsewhere.
     pub entrypoint: Vec<String>,
-    /// Captured for debugging; NOT diffed.
+    /// Captured for debugging; NOT diffed — see `entrypoint` (#290).
     pub cmd: Vec<String>,
     /// Captured (compose-project-prefix-normalized) for debugging; NOT diffed.
     pub networks: BTreeSet<String>,
