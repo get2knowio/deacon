@@ -82,6 +82,25 @@ jobs:
       - name: Build deacon
         run: cargo build -p deacon
 
+      - name: Pre-pull corpus base images
+        # `read-configuration --include-merged-configuration` reads an image's
+        # `devcontainer.metadata` LABEL, pulling on a cache miss to match the
+        # reference CLI (#307). On a cold runner a multi-GB base (e.g. the
+        # `universal` image) would blow the harness's 120s per-invocation bound.
+        # Warm the cache once, up front, so both CLIs resolve labels by local
+        # inspect — the bound then guards real hangs, not first-pull latency.
+        run: |
+          set -euo pipefail
+          grep -rhoE '"image"[[:space:]]*:[[:space:]]*"[^"]+"' \
+            fixtures/parity-corpus/*/.devcontainer/devcontainer.json \
+            | sed -E 's/.*"image"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
+            | sort -u \
+            | while read -r img; do
+                echo "::group::docker pull ${img}"
+                docker pull "${img}" || echo "warn: failed to pre-pull ${img} (continuing)"
+                echo "::endgroup::"
+              done
+
       - name: Run live parity comparison
         run: cargo nextest run --profile parity
 
