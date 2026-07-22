@@ -556,6 +556,12 @@ where
             );
         }
 
+        // The resolved container's actual mounts, captured during resolution so the
+        // working directory can be recovered from the real workspace bind-mount
+        // (robust to `--mount-workspace-git-root` asymmetry) rather than re-derived
+        // host-side. Left empty when resolution doesn't inspect (falls back below).
+        let mut resolved_container_mounts: Vec<deacon_core::docker::Mount> = Vec::new();
+
         // Resolve target container using ContainerSelector priority:
         // 1. Direct container ID (--container-id)
         // 2. Label-based lookup (--id-label)
@@ -597,6 +603,7 @@ where
                     if info.state != "running" {
                         return Err(anyhow::anyhow!("Dev container is not running."));
                     }
+                    resolved_container_mounts = info.mounts.clone();
                     info.id
                 }
                 None => {
@@ -638,6 +645,9 @@ where
         if let Some(config_ctx) = resolved_config.as_ref() {
             let resolved = match docker_client.inspect_container(&container_id).await {
                 Ok(Some(container_info)) => {
+                    if resolved_container_mounts.is_empty() {
+                        resolved_container_mounts = container_info.mounts.clone();
+                    }
                     // #223: `up` resolves `remoteUser` (and other fields) from the
                     // image's `devcontainer.metadata` LABEL as a lower-precedence
                     // layer. `exec` only loads the raw devcontainer.json, so a
@@ -722,11 +732,25 @@ where
             cli_workdir.clone()
         } else {
             match resolved_config.as_ref() {
-                Some(config_ctx) => determine_container_working_dir(
-                    &config_ctx.config,
-                    config_ctx.workspace_folder.as_path(),
-                    args.mount_workspace_git_root,
-                ),
+                Some(config_ctx) => {
+                    // Prefer the running container's ACTUAL workspace bind-mount
+                    // (flag-independent, matches where `up` mounted) over host-side
+                    // re-derivation from `--mount-workspace-git-root`, which breaks
+                    // when this invocation's flag differs from `up`'s. Fall back to
+                    // the host-side derivation when no mount is available.
+                    crate::commands::shared::container_workspace_folder_from_mounts(
+                        &config_ctx.config,
+                        config_ctx.workspace_folder.as_path(),
+                        &resolved_container_mounts,
+                    )
+                    .unwrap_or_else(|| {
+                        determine_container_working_dir(
+                            &config_ctx.config,
+                            config_ctx.workspace_folder.as_path(),
+                            args.mount_workspace_git_root,
+                        )
+                    })
+                }
                 None => {
                     debug!("No config context; resolving home folder as cwd");
                     deacon_core::container_env_probe::resolve_home_folder(

@@ -42,4 +42,4 @@ pub use env_user::resolve_env_and_user;
 pub use identity::canonical_reconnect_identity;
 pub use remote_env::NormalizedRemoteEnv;
 pub use terminal::TerminalDimensions;
-pub use workspace::derive_container_workspace_folder;
+pub use workspace::{container_workspace_folder_from_mounts, derive_container_workspace_folder};
