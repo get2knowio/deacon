@@ -2,34 +2,26 @@
 
 use std::path::Path;
 
-/// Derive the container workspace folder from configuration or the host workspace path.
+/// Derive the container workspace folder (the lifecycle & exec working directory)
+/// from configuration and the host workspace path.
 ///
-/// If `config.workspace_folder` is set, returns that value directly.
-/// Otherwise, derives it as `/workspaces/{dir_name}` where `dir_name` is the
-/// last component of the host `workspace_folder` path (falling back to `"workspace"`
-/// if the path has no final component).
-///
-/// NOTE (issue #309): `read-configuration` already routes through
-/// [`deacon_core::workspace::container_workspace_folder`], which additionally
-/// walks to the git root and appends the workspace subpath to match the reference
-/// CLI. This container-aware `up`/`exec`/`run-user-commands` path does NOT yet do
-/// so — it lacks the `mount_workspace_git_root` flag in scope. Converging it (so
-/// the *used* lifecycle/exec working dir matches the mount for git-subdir
-/// workspaces) is a tracked follow-up; the common and non-git-temp cases already
-/// agree.
+/// Delegates to [`deacon_core::workspace::container_workspace_folder`] so the used
+/// working dir matches `read-configuration` and the reference CLI (issue #309): an
+/// explicit `workspaceFolder` wins verbatim, otherwise `/workspaces/<basename(root)>
+/// [/<subpath>]` where `root` is the git root when `mount_workspace_git_root` is
+/// set (else the workspace folder), with the root→workspace subpath appended. This
+/// keeps the working dir on the actual mounted path for git-subdir workspaces
+/// instead of a `/workspaces/<userFolderBasename>` that does not exist.
 pub fn derive_container_workspace_folder(
     config: &deacon_core::config::DevContainerConfig,
     workspace_folder: &Path,
+    mount_workspace_git_root: bool,
 ) -> String {
-    if let Some(ref folder) = config.workspace_folder {
-        folder.clone()
-    } else {
-        let dir_name = workspace_folder
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("workspace");
-        format!("/workspaces/{}", dir_name)
-    }
+    deacon_core::workspace::container_workspace_folder(
+        workspace_folder,
+        config.workspace_folder.as_deref(),
+        mount_workspace_git_root,
+    )
 }
 
 #[cfg(test)]
@@ -47,7 +39,7 @@ mod tests {
         config.workspace_folder = Some("/custom/path".to_string());
         let host_path = PathBuf::from("/home/user/my-project");
 
-        let result = derive_container_workspace_folder(&config, &host_path);
+        let result = derive_container_workspace_folder(&config, &host_path, true);
         assert_eq!(result, "/custom/path");
     }
 
@@ -56,7 +48,7 @@ mod tests {
         let config = minimal_config();
         let host_path = PathBuf::from("/home/user/my-project");
 
-        let result = derive_container_workspace_folder(&config, &host_path);
+        let result = derive_container_workspace_folder(&config, &host_path, false);
         assert_eq!(result, "/workspaces/my-project");
     }
 
@@ -65,7 +57,7 @@ mod tests {
         let config = minimal_config();
         let host_path = PathBuf::from("/");
 
-        let result = derive_container_workspace_folder(&config, &host_path);
+        let result = derive_container_workspace_folder(&config, &host_path, false);
         assert_eq!(result, "/workspaces/workspace");
     }
 }

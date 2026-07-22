@@ -25,25 +25,21 @@ const EROFS: i32 = 30;
 /// Resolve the container workspace folder reported to callers.
 ///
 /// When the config sets an explicit `workspaceFolder`, that value is used
-/// verbatim. Otherwise the spec default is
-/// `/workspaces/${localWorkspaceFolderBasename}` — the basename of
-/// `mount_source` (the actual bind-mount source, i.e. the git root under
-/// `--mount-workspace-git-root`). A bare `/workspaces` (no basename) diverged
-/// from the reference CLI, which always reports `/workspaces/<basename>`.
+/// verbatim. Otherwise the spec/reference default is
+/// `/workspaces/<basename(root)>[/<subpath>]` — the git root basename (under
+/// `--mount-workspace-git-root`) plus the root→workspace subpath (issue #309),
+/// so the reported value matches the mount and the used working dir. Delegates to
+/// the single source of truth, [`deacon_core::workspace::container_workspace_folder`].
 pub(crate) fn default_remote_workspace_folder(
+    workspace_folder: &Path,
     config_workspace_folder: Option<&str>,
-    mount_source: &Path,
+    mount_workspace_git_root: bool,
 ) -> String {
-    match config_workspace_folder {
-        Some(wf) => wf.to_string(),
-        None => format!(
-            "/workspaces/{}",
-            mount_source
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("workspace")
-        ),
-    }
+    deacon_core::workspace::container_workspace_folder(
+        workspace_folder,
+        config_workspace_folder,
+        mount_workspace_git_root,
+    )
 }
 
 /// Check if any features are disallowed and return an error if found.
@@ -490,20 +486,23 @@ mod remote_workspace_folder_tests {
     fn defaults_to_workspaces_basename_when_unset() {
         // Parity with the reference CLI: `/workspaces/<basename>`, never a bare
         // `/workspaces`.
-        let got = default_remote_workspace_folder(None, Path::new("/home/me/myproject"));
+        let got = default_remote_workspace_folder(Path::new("/home/me/myproject"), None, false);
         assert_eq!(got, "/workspaces/myproject");
     }
 
     #[test]
     fn honors_explicit_workspace_folder() {
-        let got =
-            default_remote_workspace_folder(Some("/custom/app"), Path::new("/home/me/myproject"));
+        let got = default_remote_workspace_folder(
+            Path::new("/home/me/myproject"),
+            Some("/custom/app"),
+            true,
+        );
         assert_eq!(got, "/custom/app");
     }
 
     #[test]
     fn falls_back_to_workspace_when_basename_missing() {
-        let got = default_remote_workspace_folder(None, Path::new("/"));
+        let got = default_remote_workspace_folder(Path::new("/"), None, false);
         assert_eq!(got, "/workspaces/workspace");
     }
 }

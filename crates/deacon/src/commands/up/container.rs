@@ -815,8 +815,9 @@ pub(crate) async fn execute_container_up(
     // source under `--mount-workspace-git-root`), so the reported value always
     // matches what is really mounted inside the container.
     let remote_workspace_folder = super::helpers::default_remote_workspace_folder(
+        workspace_folder,
         config.workspace_folder.as_deref(),
-        &workspace_mount_source,
+        args.mount_workspace_git_root,
     );
 
     // Serialize configuration if requested
