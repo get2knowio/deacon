@@ -59,8 +59,17 @@ fn setup_git_worktree_fixture() -> Result<(TempDir, PathBuf, PathBuf), Box<dyn s
         .args(["commit", "-m", "Initial commit"])
         .output()?;
 
-    // Create a worktree
-    let worktree_path = main_path.join("../worktree-feature");
+    // Create a worktree as a sibling of the main repo. The sibling name is
+    // derived from the main repo's unique TempDir basename so concurrent test
+    // processes (nextest runs each test in its own process) never collide on a
+    // shared `<system-temp>/worktree-feature` path — that shared-path race made
+    // this suite intermittently fail, most visibly on Windows' slower/locking
+    // filesystem (the walk-up would find no `.git` and return the subdir).
+    let unique = main_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo");
+    let worktree_path = main_path.join(format!("../{unique}-worktree-feature"));
     Command::new("git")
         .current_dir(&main_path)
         .args([
@@ -281,8 +290,14 @@ fn test_multiple_worktrees_isolation() {
         return;
     }
 
-    // Create two worktrees
-    let worktree1_path = main_path.join("../worktree1");
+    // Create two worktrees as siblings, with names derived from the main repo's
+    // unique TempDir basename so concurrent test processes don't collide on
+    // shared `<system-temp>/worktree{1,2}` paths (see setup_git_worktree_fixture).
+    let unique = main_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo");
+    let worktree1_path = main_path.join(format!("../{unique}-worktree1"));
     if Command::new("git")
         .current_dir(&main_path)
         .args([
@@ -299,7 +314,7 @@ fn test_multiple_worktrees_isolation() {
         return;
     }
 
-    let worktree2_path = main_path.join("../worktree2");
+    let worktree2_path = main_path.join(format!("../{unique}-worktree2"));
     if Command::new("git")
         .current_dir(&main_path)
         .args([
