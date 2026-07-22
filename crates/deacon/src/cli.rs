@@ -120,7 +120,7 @@ pub enum OutputFormat {
 }
 
 /// Log format options
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, ValueEnum, PartialEq, Eq)]
 pub enum LogFormat {
     /// Human-readable text format
     Text,
@@ -879,7 +879,7 @@ pub enum ConfigCommands {
 )]
 pub struct Cli {
     /// Log format (text or json, defaults to text, can be set via DEACON_LOG_FORMAT env var)
-    #[arg(long, global = true, value_enum)]
+    #[arg(long, global = true, value_enum, env = "DEACON_LOG_FORMAT")]
     pub log_format: Option<LogFormat>,
 
     /// Log level (baseline verbosity). Shifted by repeated `-v`/`-q`.
@@ -1025,7 +1025,7 @@ pub struct Cli {
     ///
     /// When disabled (default), lifecycle commands run without PTY allocation. This is suitable
     /// for non-interactive scripts and automated environments.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, env = "DEACON_FORCE_TTY_IF_JSON")]
     pub force_tty_if_json: bool,
 
     /// Default user env probe mode (none|loginInteractiveShell|interactiveShell|loginShell)
@@ -1142,16 +1142,12 @@ impl Cli {
     /// assert!(ctx.workspace_folder.is_none());
     /// ```
     /// Returns true when the effective log format is JSON.
-    /// `--log-format json` wins; if unset, `DEACON_LOG_FORMAT=json` counts too
-    /// (matches the fallback in deacon_core::logging::init).
+    ///
+    /// `self.log_format` already reflects flag-over-env-over-unset: clap's `env=`
+    /// on `--log-format` resolves `DEACON_LOG_FORMAT` into the field, so no manual
+    /// env read is needed here.
     pub fn is_json_log_format(&self) -> bool {
-        match self.log_format {
-            Some(LogFormat::Json) => true,
-            Some(LogFormat::Text) => false,
-            None => std::env::var("DEACON_LOG_FORMAT")
-                .map(|v| v == "json")
-                .unwrap_or(false),
-        }
+        matches!(self.log_format, Some(LogFormat::Json))
     }
 
     #[allow(dead_code)] // Reserved for future command implementations; see runtime_utils
@@ -1423,6 +1419,7 @@ impl Cli {
                     // JSON log format auto-forces PTY allocation so lifecycle exec output
                     // stays usable; the explicit flag remains as a manual override.
                     force_tty_if_json: self.force_tty_if_json || json_format,
+                    json_log_format: json_format,
                     trust_workspace: self.trust_workspace,
                     trust_workspace_persist: self.trust_workspace_persist,
                     host_ca_activation,
@@ -2018,33 +2015,99 @@ mod tests {
 
     /// BEAD-11-T03: --log-format json must auto-force PTY allocation so the
     /// downstream ExecArgs.force_tty_if_json is true even without the explicit flag.
+    ///
+    /// Both fields now read the environment via clap `env=` (#180), so the env is
+    /// pinned explicitly to keep the assertion deterministic under any test runner.
     #[test]
     fn test_json_log_format_implies_force_tty() {
-        let cli = Cli::parse_from(["deacon", "--log-format", "json"]);
-        assert!(cli.is_json_log_format());
-        assert!(!cli.force_tty_if_json); // user didn't pass the explicit flag
-        // The dispatch site ORs these two together; the test of that wiring
-        // is here at the source of truth (cli.is_json_log_format()) since
-        // dispatch is async and harder to unit-test in isolation.
-        let effective_force_tty = cli.force_tty_if_json || cli.is_json_log_format();
-        assert!(effective_force_tty);
+        temp_env::with_vars(
+            [
+                ("DEACON_LOG_FORMAT", None::<&str>),
+                ("DEACON_FORCE_TTY_IF_JSON", None::<&str>),
+            ],
+            || {
+                let cli = Cli::parse_from(["deacon", "--log-format", "json"]);
+                assert!(cli.is_json_log_format());
+                assert!(!cli.force_tty_if_json); // user didn't pass the explicit flag
+                // The dispatch site ORs these two together; the test of that wiring
+                // is here at the source of truth (cli.is_json_log_format()) since
+                // dispatch is async and harder to unit-test in isolation.
+                let effective_force_tty = cli.force_tty_if_json || cli.is_json_log_format();
+                assert!(effective_force_tty);
+            },
+        );
     }
 
     /// Inverse: explicit --log-format text leaves the auto-derive off.
     #[test]
     fn test_text_log_format_does_not_imply_force_tty() {
-        let cli = Cli::parse_from(["deacon", "--log-format", "text"]);
-        assert!(!cli.is_json_log_format());
-        let effective_force_tty = cli.force_tty_if_json || cli.is_json_log_format();
-        assert!(!effective_force_tty);
+        temp_env::with_vars(
+            [
+                ("DEACON_LOG_FORMAT", None::<&str>),
+                ("DEACON_FORCE_TTY_IF_JSON", None::<&str>),
+            ],
+            || {
+                let cli = Cli::parse_from(["deacon", "--log-format", "text"]);
+                assert!(!cli.is_json_log_format());
+                let effective_force_tty = cli.force_tty_if_json || cli.is_json_log_format();
+                assert!(!effective_force_tty);
+            },
+        );
     }
 
     /// Explicit --force-tty-if-json still works without --log-format json.
     #[test]
     fn test_explicit_force_tty_without_json_log_format() {
-        let cli = Cli::parse_from(["deacon", "--force-tty-if-json"]);
-        assert!(cli.force_tty_if_json);
-        assert!(!cli.is_json_log_format());
+        temp_env::with_var_unset("DEACON_LOG_FORMAT", || {
+            let cli = Cli::parse_from(["deacon", "--force-tty-if-json"]);
+            assert!(cli.force_tty_if_json);
+            assert!(!cli.is_json_log_format());
+        });
+    }
+
+    // --- #180 Category B (part 2): clap-native env= for --log-format / --force-tty-if-json ---
+
+    #[test]
+    fn test_log_format_defaults_none() {
+        temp_env::with_var_unset("DEACON_LOG_FORMAT", || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.log_format, None);
+            assert!(!cli.is_json_log_format());
+        });
+    }
+
+    #[test]
+    fn test_log_format_reads_env_var() {
+        temp_env::with_var("DEACON_LOG_FORMAT", Some("json"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.log_format, Some(LogFormat::Json));
+            assert!(cli.is_json_log_format());
+        });
+    }
+
+    #[test]
+    fn test_log_format_flag_beats_env_var() {
+        temp_env::with_var("DEACON_LOG_FORMAT", Some("json"), || {
+            let cli = Cli::parse_from(["deacon", "--log-format", "text"]);
+            assert_eq!(cli.log_format, Some(LogFormat::Text));
+            assert!(!cli.is_json_log_format());
+        });
+    }
+
+    #[test]
+    fn test_force_tty_reads_env_var() {
+        temp_env::with_var("DEACON_FORCE_TTY_IF_JSON", Some("true"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert!(cli.force_tty_if_json);
+        });
+    }
+
+    #[test]
+    fn test_force_tty_env_falsey_stays_off() {
+        temp_env::with_var("DEACON_FORCE_TTY_IF_JSON", Some("false"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert!(!cli.force_tty_if_json);
+        });
     }
 
     /// Helper for the BEAD-07 tests: parse an exec invocation and pull out the

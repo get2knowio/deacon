@@ -5,7 +5,6 @@
 //! - `execute_compose_post_create` - Post-create lifecycle for compose
 //! - `handle_compose_shutdown` - Shutdown handling for compose
 
-use super::ENV_LOG_FORMAT;
 use super::args::{MountType, NormalizedMount, UpArgs};
 use super::features_build::{
     FeatureBuildOutput, build_image_with_features, build_image_with_features_from_dockerfile,
@@ -537,11 +536,9 @@ pub(crate) async fn execute_compose_up(
 
     // Execute post-create lifecycle if not skipped
     if !args.skip_post_create {
-        // Resolve PTY preference for compose post-create (same logic as lifecycle commands)
-        let json_mode = std::env::var(ENV_LOG_FORMAT)
-            .map(|v| v == "json")
-            .unwrap_or(false);
-        let force_pty = resolve_force_pty(args.force_tty_if_json, json_mode);
+        // Resolve PTY preference for compose post-create (same logic as lifecycle commands).
+        // json_mode is threaded from the clap-resolved --log-format/DEACON_LOG_FORMAT (#180).
+        let force_pty = resolve_force_pty(args.force_tty_if_json, args.json_log_format);
         execute_compose_post_create(
             &project,
             config,

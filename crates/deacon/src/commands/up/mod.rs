@@ -74,9 +74,6 @@ use merged_config::merge_image_metadata_into_config;
 /// for lifecycle exec commands during `deacon up` when JSON logging is active.
 pub(crate) const ENV_FORCE_TTY_IF_JSON: &str = "DEACON_FORCE_TTY_IF_JSON";
 
-/// Environment variable name for log format detection.
-pub(crate) const ENV_LOG_FORMAT: &str = "DEACON_LOG_FORMAT";
-
 /// Starts development containers for the current workspace according to the resolved devcontainer configuration.
 ///
 /// This is the top-level entry point for the `up` command. It:
