@@ -82,6 +82,25 @@ jobs:
       - name: Build deacon
         run: cargo build -p deacon
 
+      - name: Build corpus fixture images
+        # Some corpus cases pin a LOCALLY-built image (tag ends `:local`) that no
+        # public registry provides — e.g. the object-form `devcontainer.metadata`
+        # label (#300/#332), which every published image dropped in favor of the
+        # array form. Build each `fixtures/parity-corpus/*/image/Dockerfile` to the
+        # tag its sibling devcontainer.json references, so both CLIs resolve the
+        # label by local `docker inspect` (no registry involved). Runs BEFORE the
+        # pre-pull so those tags already exist locally.
+        run: |
+          set -euo pipefail
+          for df in fixtures/parity-corpus/*/image/Dockerfile; do
+            [ -e "$df" ] || continue
+            dir="$(dirname "$df")"
+            tag="$(jq -r '.image' "$(dirname "$dir")/.devcontainer/devcontainer.json")"
+            echo "::group::docker build -t ${tag} ${dir}"
+            docker build -t "${tag}" "${dir}"
+            echo "::endgroup::"
+          done
+
       - name: Pre-pull corpus base images
         # `read-configuration --include-merged-configuration` reads an image's
         # `devcontainer.metadata` LABEL, pulling on a cache miss to match the
@@ -89,12 +108,14 @@ jobs:
         # `universal` image) would blow the harness's 120s per-invocation bound.
         # Warm the cache once, up front, so both CLIs resolve labels by local
         # inspect — the bound then guards real hangs, not first-pull latency.
+        # `:local` tags are built above (no registry), so skip them here.
         run: |
           set -euo pipefail
           grep -rhoE '"image"[[:space:]]*:[[:space:]]*"[^"]+"' \
             fixtures/parity-corpus/*/.devcontainer/devcontainer.json \
             | sed -E 's/.*"image"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
             | sort -u \
+            | grep -v ':local$' \
             | while read -r img; do
                 echo "::group::docker pull ${img}"
                 docker pull "${img}" || echo "warn: failed to pre-pull ${img} (continuing)"
