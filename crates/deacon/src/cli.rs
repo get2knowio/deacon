@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use deacon_core::container_env_probe::ContainerProbeMode;
 
 /// CLI-facing probe enum (value_enum for clap) to map into core probe mode
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum DefaultUserEnvProbe {
     #[value(name = "none")]
     None,
@@ -906,12 +906,19 @@ pub struct Cli {
     #[arg(short = 'q', long, global = true, action = clap::ArgAction::Count)]
     pub quiet: u8,
 
-    /// Workspace folder path
-    #[arg(long, global = true, value_name = "PATH")]
+    /// Workspace folder path.
+    /// Also settable via the `DEACON_WORKSPACE_FOLDER` environment variable.
+    #[arg(
+        long,
+        global = true,
+        value_name = "PATH",
+        env = "DEACON_WORKSPACE_FOLDER"
+    )]
     pub workspace_folder: Option<PathBuf>,
 
-    /// Configuration file path
-    #[arg(long, global = true, value_name = "PATH")]
+    /// Configuration file path.
+    /// Also settable via the `DEACON_CONFIG` environment variable.
+    #[arg(long, global = true, value_name = "PATH", env = "DEACON_CONFIG")]
     pub config: Option<PathBuf>,
 
     /// Replace the discovered/base configuration with this file.
@@ -961,8 +968,10 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME", env = "DEACON_PROFILE")]
     pub profile: Option<String>,
 
-    /// Secrets file path (KEY=VALUE format, can be specified multiple times)
-    #[arg(long, global = true, value_name = "PATH")]
+    /// Secrets file path (KEY=VALUE format, can be specified multiple times).
+    /// Also settable via the `DEACON_SECRETS_FILE` environment variable (which
+    /// supplies a single file; use repeated `--secrets-file` flags for several).
+    #[arg(long, global = true, value_name = "PATH", env = "DEACON_SECRETS_FILE")]
     pub secrets_file: Vec<PathBuf>,
 
     /// Disable secret redaction in output (debugging only - WARNING: may expose secrets).
@@ -987,12 +996,24 @@ pub struct Cli {
     #[arg(long, global = true, value_enum, env = "DEACON_CONTAINER_RUNTIME")]
     pub runtime: Option<RuntimeOption>,
 
-    /// Path to docker executable
-    #[arg(long, global = true, default_value = "docker")]
+    /// Path to docker executable.
+    /// Also settable via the `DEACON_DOCKER_PATH` environment variable.
+    #[arg(
+        long,
+        global = true,
+        default_value = "docker",
+        env = "DEACON_DOCKER_PATH"
+    )]
     pub docker_path: String,
 
-    /// Path to docker-compose executable
-    #[arg(long, global = true, default_value = "docker-compose")]
+    /// Path to docker-compose executable.
+    /// Also settable via the `DEACON_DOCKER_COMPOSE_PATH` environment variable.
+    #[arg(
+        long,
+        global = true,
+        default_value = "docker-compose",
+        env = "DEACON_DOCKER_COMPOSE_PATH"
+    )]
     pub docker_compose_path: String,
 
     /// Container-side data folder for user state inside the container
@@ -1028,12 +1049,14 @@ pub struct Cli {
     #[arg(long, global = true, env = "DEACON_FORCE_TTY_IF_JSON")]
     pub force_tty_if_json: bool,
 
-    /// Default user env probe mode (none|loginInteractiveShell|interactiveShell|loginShell)
+    /// Default user env probe mode (none|loginInteractiveShell|interactiveShell|loginShell).
+    /// Also settable via the `DEACON_DEFAULT_USER_ENV_PROBE` environment variable.
     #[arg(
         long,
         global = true,
         value_enum,
-        default_value = "loginInteractiveShell"
+        default_value = "loginInteractiveShell",
+        env = "DEACON_DEFAULT_USER_ENV_PROBE"
     )]
     pub default_user_env_probe: DefaultUserEnvProbe,
 
@@ -1960,11 +1983,21 @@ mod tests {
 
     #[test]
     fn test_global_flags_default_values() {
-        let cli = Cli::parse_from(["deacon"]);
-        assert_eq!(cli.docker_path, "docker");
-        assert_eq!(cli.docker_compose_path, "docker-compose");
-        assert!(cli.terminal_columns.is_none());
-        assert!(cli.terminal_rows.is_none());
+        // docker_path/docker_compose_path now read env via clap `env=` (#180);
+        // pin the vars so the defaults are deterministic under a shared-process runner.
+        temp_env::with_vars(
+            [
+                ("DEACON_DOCKER_PATH", None::<&str>),
+                ("DEACON_DOCKER_COMPOSE_PATH", None::<&str>),
+            ],
+            || {
+                let cli = Cli::parse_from(["deacon"]);
+                assert_eq!(cli.docker_path, "docker");
+                assert_eq!(cli.docker_compose_path, "docker-compose");
+                assert!(cli.terminal_columns.is_none());
+                assert!(cli.terminal_rows.is_none());
+            },
+        );
     }
 
     #[test]
@@ -2521,6 +2554,91 @@ mod tests {
             let cli = Cli::parse_from(["deacon", "--log-level", "error"]);
             assert_eq!(cli.log_level, LogLevel::Error);
         });
+    }
+
+    // --- #180 Category A: net-new env= on existing flags ---
+
+    #[test]
+    fn test_workspace_folder_reads_env_var() {
+        temp_env::with_var("DEACON_WORKSPACE_FOLDER", Some("/tmp/ws"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.workspace_folder, Some(PathBuf::from("/tmp/ws")));
+        });
+    }
+
+    #[test]
+    fn test_workspace_folder_flag_beats_env_var() {
+        temp_env::with_var("DEACON_WORKSPACE_FOLDER", Some("/tmp/from-env"), || {
+            let cli = Cli::parse_from(["deacon", "--workspace-folder", "/tmp/from-flag"]);
+            assert_eq!(cli.workspace_folder, Some(PathBuf::from("/tmp/from-flag")));
+        });
+    }
+
+    #[test]
+    fn test_config_reads_env_var() {
+        temp_env::with_var("DEACON_CONFIG", Some("/tmp/dc.json"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.config, Some(PathBuf::from("/tmp/dc.json")));
+        });
+    }
+
+    #[test]
+    fn test_secrets_file_reads_env_var() {
+        temp_env::with_var("DEACON_SECRETS_FILE", Some("/tmp/secrets.env"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.secrets_file, vec![PathBuf::from("/tmp/secrets.env")]);
+        });
+    }
+
+    #[test]
+    fn test_docker_path_reads_env_var() {
+        temp_env::with_var("DEACON_DOCKER_PATH", Some("/usr/local/bin/docker"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.docker_path, "/usr/local/bin/docker");
+        });
+    }
+
+    #[test]
+    fn test_docker_path_flag_beats_env_var() {
+        temp_env::with_var("DEACON_DOCKER_PATH", Some("/from/env"), || {
+            let cli = Cli::parse_from(["deacon", "--docker-path", "/from/flag"]);
+            assert_eq!(cli.docker_path, "/from/flag");
+        });
+    }
+
+    #[test]
+    fn test_docker_compose_path_reads_env_var() {
+        temp_env::with_var("DEACON_DOCKER_COMPOSE_PATH", Some("/opt/compose"), || {
+            let cli = Cli::parse_from(["deacon"]);
+            assert_eq!(cli.docker_compose_path, "/opt/compose");
+        });
+    }
+
+    #[test]
+    fn test_default_user_env_probe_reads_env_var() {
+        temp_env::with_var(
+            "DEACON_DEFAULT_USER_ENV_PROBE",
+            Some("interactiveShell"),
+            || {
+                let cli = Cli::parse_from(["deacon"]);
+                assert_eq!(
+                    cli.default_user_env_probe,
+                    DefaultUserEnvProbe::InteractiveShell
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn test_default_user_env_probe_flag_beats_env_var() {
+        temp_env::with_var(
+            "DEACON_DEFAULT_USER_ENV_PROBE",
+            Some("interactiveShell"),
+            || {
+                let cli = Cli::parse_from(["deacon", "--default-user-env-probe", "none"]);
+                assert_eq!(cli.default_user_env_probe, DefaultUserEnvProbe::None);
+            },
+        );
     }
 
     #[test]
