@@ -27,13 +27,14 @@ OUTPUT="$(run "$DEACON_BIN" build --workspace-folder "$SCRIPT_DIR" \
 
 echo "build output: ${OUTPUT}" >&2
 
-# The duplicate tag must collapse to a single string in `imageName`, not a
-# duplicated array. Parse with python to assert the exact shape.
+# The duplicate tag must collapse to a single entry. `imageName` is always a JSON
+# array (matching the reference CLI; see #330), so two identical `--image-name`
+# flags yield a one-element array, not a two-element one. Assert the exact shape.
 python3 -c '
 import json, sys
 data = json.loads(sys.argv[1])
 assert data["outcome"] == "success", data
 name = data["imageName"]
-assert name == "myorg/dups:latest", "expected single string imageName, got: %r" % (name,)
-print("OK: imageName de-duplicated to a single string")
+assert name == ["myorg/dups:latest"], "expected de-duplicated single-element array, got: %r" % (name,)
+print("OK: imageName de-duplicated to a single-element array")
 ' "$OUTPUT"
