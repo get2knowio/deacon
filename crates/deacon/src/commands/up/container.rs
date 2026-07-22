@@ -91,6 +91,12 @@ pub(crate) async fn execute_container_up(
     // Merge CLI forward_ports into config
     let mut config = config.clone();
 
+    // #322: capture the pure USER config BEFORE any image-metadata merge, so the
+    // `devcontainer.metadata` config entry we stamp carries only devcontainer.json's
+    // own picked properties (remoteEnv/remoteUser/…) and does NOT duplicate the base
+    // image's metadata (which is already present as separate label entries).
+    let user_config_for_metadata = config.clone();
+
     // Host-CA injection (016, T028): synthesize the six CA env vars into the
     // container environment at create time, insert-if-absent so user
     // containerEnv values win (FR-024). The canonical bundle is written by the
@@ -568,6 +574,31 @@ pub(crate) async fn execute_container_up(
         &config
     };
 
+    // #322: stamp the merged `devcontainer.metadata` on the container so config
+    // that lives only in devcontainer.json (esp. `remoteEnv`) survives on the
+    // container and is recoverable by exec/read-configuration/set-up without the
+    // workspace — matching the reference CLI. Informational label; never feeds
+    // `devcontainerId` (see `ContainerIdentity::id_hash_labels`).
+    let create_identity_owned;
+    let create_identity: &ContainerIdentity = match config.image.as_deref() {
+        Some(image_ref) => {
+            match super::merged_config::build_container_metadata_label(
+                docker,
+                image_ref,
+                &user_config_for_metadata,
+            )
+            .await
+            {
+                Some(json) => {
+                    create_identity_owned = identity.clone().with_metadata_label(json);
+                    &create_identity_owned
+                }
+                None => identity,
+            }
+        }
+        None => identity,
+    };
+
     // Create container using DockerLifecycle trait.
     //
     // We pass `workspace_mount_source` (#67), not the raw workspace folder,
@@ -578,7 +609,7 @@ pub(crate) async fn execute_container_up(
     // affects the bind mount and not workspace+config hashing.
     let container_result = docker
         .up(
-            identity,
+            create_identity,
             config_for_create,
             &workspace_mount_source,
             args.remove_existing_container,

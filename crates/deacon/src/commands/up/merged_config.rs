@@ -443,6 +443,99 @@ fn apply_image_metadata_label(
     ConfigMerger::merge_configs(&chain)
 }
 
+/// Serialize the config's metadata-relevant ("picked") properties into a single
+/// `devcontainer.metadata` entry (#322). This is the entry deacon appends after
+/// the image's own metadata entries, so config living only in devcontainer.json —
+/// notably `remoteEnv` — is recoverable from the container by
+/// exec/read-configuration/set-up. Mirrors upstream `pickConfigProperties`.
+/// Null/empty values are dropped so the entry stays minimal.
+pub(crate) fn config_metadata_entry(config: &DevContainerConfig) -> serde_json::Value {
+    const PICK: &[&str] = &[
+        "init",
+        "privileged",
+        "capAdd",
+        "securityOpt",
+        "entrypoint",
+        "mounts",
+        "onCreateCommand",
+        "updateContentCommand",
+        "postCreateCommand",
+        "postStartCommand",
+        "postAttachCommand",
+        "waitFor",
+        "remoteUser",
+        "containerUser",
+        "updateRemoteUserUID",
+        "userEnvProbe",
+        "remoteEnv",
+        "containerEnv",
+        "customizations",
+        "overrideCommand",
+        "portsAttributes",
+        "otherPortsAttributes",
+        "shutdownAction",
+        "hostRequirements",
+    ];
+    let mut entry = serde_json::Map::new();
+    if let Ok(serde_json::Value::Object(full)) = serde_json::to_value(config) {
+        for k in PICK {
+            if let Some(v) = full.get(*k) {
+                let empty = match v {
+                    serde_json::Value::Null => true,
+                    serde_json::Value::Array(a) => a.is_empty(),
+                    serde_json::Value::Object(o) => o.is_empty(),
+                    serde_json::Value::String(s) => s.is_empty(),
+                    _ => false,
+                };
+                if !empty {
+                    entry.insert((*k).to_string(), v.clone());
+                }
+            }
+        }
+    }
+    serde_json::Value::Object(entry)
+}
+
+/// Build the `devcontainer.metadata` JSON to stamp on the created container
+/// (#322): the image's own metadata entries (from its `devcontainer.metadata`
+/// LABEL, which the feature-extended image inherits from the base) followed by
+/// the config entry from [`config_metadata_entry`].
+///
+/// Returns `None` when there's nothing config-only to preserve (no image label
+/// and an empty config entry) — the container then just keeps the base image's
+/// inherited label, which is already correct.
+pub(crate) async fn build_container_metadata_label(
+    docker: &impl Docker,
+    image_ref: &str,
+    config: &DevContainerConfig,
+) -> Option<String> {
+    let mut entries: Vec<serde_json::Value> = match docker.inspect_image(image_ref).await {
+        Ok(Some(info)) => match info.labels.get("devcontainer.metadata") {
+            Some(label) => match serde_json::from_str::<serde_json::Value>(label) {
+                Ok(serde_json::Value::Array(a)) => a,
+                Ok(other) => vec![other], // single-object legacy form
+                Err(_) => Vec::new(),
+            },
+            None => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+
+    let cfg_entry = config_metadata_entry(config);
+    let cfg_nonempty = cfg_entry
+        .as_object()
+        .map(|o| !o.is_empty())
+        .unwrap_or(false);
+    // Nothing config-only to add and no image entries → leave the inherited label.
+    if !cfg_nonempty && entries.is_empty() {
+        return None;
+    }
+    if cfg_nonempty {
+        entries.push(cfg_entry);
+    }
+    serde_json::to_string(&serde_json::Value::Array(entries)).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -450,6 +543,51 @@ mod tests {
     use deacon_core::features::{FeatureMetadata, OptionValue, ResolvedFeature};
 
     use super::*;
+
+    #[test]
+    fn config_metadata_entry_picks_only_config_properties() {
+        // remoteEnv/remoteUser/capAdd/customizations are picked; image/build/name/
+        // features/forwardPorts and null/empty values are dropped (#322).
+        let config: DevContainerConfig = serde_json::from_str(
+            r#"{
+                "name": "demo",
+                "image": "alpine:3.19",
+                "forwardPorts": [3000],
+                "features": { "ghcr.io/x/y:1": {} },
+                "remoteUser": "root",
+                "remoteEnv": { "R": "1" },
+                "capAdd": ["NET_ADMIN"],
+                "securityOpt": [],
+                "customizations": { "vscode": { "extensions": ["x"] } }
+            }"#,
+        )
+        .unwrap();
+        let entry = config_metadata_entry(&config);
+        let obj = entry.as_object().unwrap();
+        // picked:
+        assert_eq!(obj.get("remoteUser").and_then(|v| v.as_str()), Some("root"));
+        assert!(obj.contains_key("remoteEnv"));
+        assert!(obj.contains_key("capAdd"));
+        assert!(obj.contains_key("customizations"));
+        // NOT picked / dropped:
+        assert!(!obj.contains_key("image"));
+        assert!(!obj.contains_key("name"));
+        assert!(!obj.contains_key("features"));
+        assert!(!obj.contains_key("forwardPorts"));
+        assert!(!obj.contains_key("securityOpt"), "empty arrays are dropped");
+    }
+
+    #[test]
+    fn config_metadata_entry_empty_for_bare_config() {
+        let config: DevContainerConfig =
+            serde_json::from_str(r#"{ "name": "x", "image": "alpine:3.19" }"#).unwrap();
+        assert!(
+            config_metadata_entry(&config)
+                .as_object()
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     // ============================================================================
     // T016: Tests for feature order preservation in metadata extraction
