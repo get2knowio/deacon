@@ -666,6 +666,30 @@ where
 
             config_remote_user = resolved.remote_user.clone();
             config_remote_env = Some(resolved.remote_env.clone());
+        } else {
+            // #322: `exec --container-id` (no --workspace-folder/--config) has no
+            // workspace config, so recover `remoteUser`/`remoteEnv` from the
+            // container's own `devcontainer.metadata` label — which `up` now stamps.
+            // This makes exec consistent with `set-up` and `read-configuration`,
+            // which already read the label, and matches the reference CLI (#322).
+            if let Ok(Some(container_info)) = docker_client.inspect_container(&container_id).await {
+                if resolved_container_mounts.is_empty() {
+                    resolved_container_mounts = container_info.mounts.clone();
+                }
+                match crate::commands::shared::container_metadata::config_from_metadata_label(
+                    &container_info,
+                ) {
+                    Ok(Some(meta)) => {
+                        config_remote_user = meta.remote_user.clone();
+                        config_remote_env = Some(meta.remote_env.clone());
+                    }
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!(
+                        "Failed to recover config from devcontainer.metadata label: {}",
+                        e
+                    ),
+                }
+            }
         }
 
         // Host-CA reconnect (016, T032): if `up` injected a corporate CA, the
