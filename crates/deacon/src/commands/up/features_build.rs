@@ -794,7 +794,7 @@ async fn resolve_and_stage_features(
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."));
         let mut ctx = deacon_core::variable::SubstitutionContext::new(config_dir)?;
-        let id_labels: Vec<(String, String)> = identity.labels().into_iter().collect();
+        let id_labels: Vec<(String, String)> = identity.id_hash_labels();
         ctx.devcontainer_id = deacon_core::container::compute_dev_container_id(&id_labels);
         ctx
     };
