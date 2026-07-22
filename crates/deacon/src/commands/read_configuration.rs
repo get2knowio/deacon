@@ -818,11 +818,19 @@ async fn parse_image_metadata_entries(
 ) -> Vec<deacon_core::config::DevContainerConfig> {
     use deacon_core::docker::Docker;
 
-    let info = match docker.inspect_image(image_ref).await {
+    // Resolve the image's `devcontainer.metadata` label. The reference CLI reads
+    // it even when the image isn't cached locally (it pulls on demand), so
+    // `--include-merged-configuration` reflects image-baked entrypoints/init/
+    // mounts/customizations regardless of local cache (issue #307). Use
+    // `ensure_image_available` (inspect, then `docker pull` on miss) instead of a
+    // local-only `inspect_image`, matching upstream `inspectDockerImage(…,
+    // pullImageOnError=true)`. Best-effort: a pull failure falls through to the
+    // empty-metadata path below, so the command still succeeds offline.
+    let info = match docker.ensure_image_available(image_ref).await {
         Ok(Some(info)) => info,
         Ok(None) => {
             debug!(
-                "Image '{}' not locally available; mergedConfiguration will not include image metadata",
+                "Image '{}' not available (inspect+pull); mergedConfiguration will not include image metadata",
                 image_ref
             );
             return Vec::new();
