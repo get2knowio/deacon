@@ -1,14 +1,13 @@
 //! Lifecycle command execution for the up command.
 //!
 //! This module contains:
-//! - `resolve_force_pty` - Resolve PTY preference based on flags and environment
+//! - `resolve_force_pty` - Resolve PTY preference based on the resolved flag and JSON mode
 //! - `build_invocation_context` - Build InvocationContext from CLI args and prior state
 //! - `execute_lifecycle_commands` - Execute lifecycle phases in container
 //! - `execute_initialize_command` - Execute initializeCommand on host (with workspace-trust gate)
 //! - `HostTrustArgs` / `enforce_host_trust` - Workspace-trust gate primitives
 
 use super::args::UpArgs;
-use super::{ENV_FORCE_TTY_IF_JSON, ENV_LOG_FORMAT};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
@@ -25,27 +24,15 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{Level, debug, info, instrument, span, warn};
 
-/// Resolve PTY preference for lifecycle commands based on flag, environment, and JSON mode
+/// Resolve PTY preference for lifecycle commands based on the resolved flag and JSON mode.
 ///
-/// Per FR-002, FR-005: PTY toggle only applies in JSON log mode.
-/// Precedence: CLI flag > env var `DEACON_FORCE_TTY_IF_JSON` > default (false)
+/// Per FR-002, FR-005: PTY toggle only applies in JSON log mode. `flag` already
+/// reflects `--force-tty-if-json`/`DEACON_FORCE_TTY_IF_JSON` — clap's `env=`
+/// resolves the env var into the field at the CLI tier (#180), so no manual env
+/// read is needed here.
 pub(crate) fn resolve_force_pty(flag: bool, json_mode: bool) -> bool {
-    // PTY toggle only applies when in JSON log mode
-    if !json_mode {
-        return false;
-    }
-
-    // CLI flag takes precedence
-    if flag {
-        return true;
-    }
-
-    // Check environment variable (truthy: true/1/yes; falsey: false/0/no or unset)
-    if let Ok(val) = std::env::var(ENV_FORCE_TTY_IF_JSON) {
-        matches!(val.to_lowercase().as_str(), "true" | "1" | "yes")
-    } else {
-        false // default: no PTY
-    }
+    // PTY toggle only applies when in JSON log mode.
+    json_mode && flag
 }
 
 /// Build an `InvocationContext` from CLI arguments and prior state markers.
@@ -207,21 +194,19 @@ pub(crate) async fn execute_lifecycle_commands(
         args.mount_workspace_git_root,
     );
 
-    // Determine if JSON log mode is active by checking DEACON_LOG_FORMAT env var
-    // Per FR-001, FR-002: PTY toggle only applies in JSON log mode
-    let json_mode = std::env::var(ENV_LOG_FORMAT)
-        .map(|v| v == "json")
-        .unwrap_or(false);
+    // Whether JSON log mode is active — resolved by clap from
+    // `--log-format`/`DEACON_LOG_FORMAT` at the CLI tier and threaded via
+    // UpArgs. Per FR-001, FR-002: PTY toggle only applies in JSON log mode.
+    // (Previously re-read the env var here, which missed `--log-format json`
+    // passed as a flag — #180.)
+    let json_mode = args.json_log_format;
 
-    // Resolve PTY preference based on flag, env, and JSON mode
+    // Resolve PTY preference based on flag and JSON mode.
     let force_pty = resolve_force_pty(args.force_tty_if_json, json_mode);
 
     debug!(
-        "PTY preference resolved: force_pty={}, json_mode={}, flag={}, env={}",
-        force_pty,
-        json_mode,
-        args.force_tty_if_json,
-        std::env::var(ENV_FORCE_TTY_IF_JSON).unwrap_or_else(|_| "unset".to_string())
+        "PTY preference resolved: force_pty={}, json_mode={}, flag={}",
+        force_pty, json_mode, args.force_tty_if_json,
     );
 
     let wait_for = wait_for_phase(config.wait_for.as_deref())?;
