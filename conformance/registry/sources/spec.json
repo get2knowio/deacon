@@ -26,6 +26,14 @@
       "behaviors": ["bhv-exec-command-parity"]
     },
     {
+      "id": "src-spec-container-metadata-recovery",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "Container metadata label recovery",
+      "summary": "The merged configuration is written to the container's devcontainer.metadata label at create time, so config that lives only in devcontainer.json (e.g. remoteEnv) is recoverable from the running container by exec/read-configuration/set-up without the workspace.",
+      "behaviors": ["bhv-exec-container-id-metadata"]
+    },
+    {
       "id": "src-spec-lifecycle-up",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",

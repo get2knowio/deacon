@@ -71,6 +71,7 @@ async fn parity_up_and_exec_traditional() {
   "image": "alpine:3.19",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "containerEnv": { "PARITY_TOKEN": "tkn-42" },
+  "remoteEnv": { "REMOTE_ONLY": "from-devcontainer-json" },
   "postCreateCommand": "sh -lc 'echo ready > /tmp/parity_marker; printf \"env=[%s]\\n\" \"${containerEnv:PARITY_TOKEN}\" > /tmp/parity_env_marker'"
 }
 "#,
@@ -228,6 +229,57 @@ async fn parity_up_and_exec_traditional() {
     };
     let deacon_labels_json =
         docker_out(&["inspect", "-f", "{{ json .Config.Labels }}", &deacon_id]);
+
+    // #322: `exec --container-id` (no --workspace-folder/--config) must recover the
+    // config-only `remoteEnv` from the container's `devcontainer.metadata` label —
+    // which `up` now stamps — identically to the reference. Runs while the
+    // containers are still alive, before teardown below.
+    let deacon_cid_inv = ff(exec_deacon(
+        BINARY,
+        "container-id",
+        ExecKind::Lifecycle,
+        deacon_bin,
+        &[
+            "exec",
+            "--container-id",
+            deacon_id.as_str(),
+            "--",
+            "sh",
+            "-lc",
+            "printf 'remote=[%s]' \"$REMOTE_ONLY\"",
+        ],
+        ws,
+    )
+    .await);
+    ff(deacon_cid_inv.require_success());
+    let oracle_cid_inv = ff(exec_oracle(
+        BINARY,
+        "container-id",
+        ExecKind::Lifecycle,
+        &oracle.path,
+        &[
+            "exec",
+            "--container-id",
+            upstream_id.as_str(),
+            "sh",
+            "-lc",
+            "printf 'remote=[%s]' \"$REMOTE_ONLY\"",
+        ],
+        ws,
+    )
+    .await);
+    ff(oracle_cid_inv.require_success());
+    let deacon_cid_env = deacon_cid_inv.stdout_string();
+    let oracle_cid_env = oracle_cid_inv.stdout_string();
+    assert!(
+        deacon_cid_env.contains("remote=[from-devcontainer-json]"),
+        "deacon exec --container-id did not recover remoteEnv from the metadata label: {deacon_cid_env:?}"
+    );
+    assert_eq!(
+        deacon_cid_env.trim(),
+        oracle_cid_env.trim(),
+        "exec --container-id remoteEnv recovery diverged (deacon vs oracle)"
+    );
 
     // Best-effort teardown BEFORE the label assertions so a failed assertion never
     // leaks containers. Errors are intentionally ignored.

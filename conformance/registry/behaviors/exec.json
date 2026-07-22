@@ -10,6 +10,16 @@
       "reference": "aligned",
       "decision": "follow-spec",
       "notes": "Backed by case-exec-parity (parity_exec)."
+    },
+    {
+      "id": "bhv-exec-container-id-metadata",
+      "area": "exec",
+      "statement": "exec --container-id (no --workspace-folder/--config) recovers remoteUser and remoteEnv from the container's devcontainer.metadata label — which up stamps at create time — and applies them, matching the reference. remoteEnv, which lives only in devcontainer.json, is thereby recoverable without the workspace.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "#322: up writes the merged devcontainer.metadata label (single-container, Dockerfile, and compose paths); exec/read-configuration/set-up read it back via the shared container_metadata::config_from_metadata_label helper. Backed by case-exec-container-id-metadata (parity_up_exec)."
     }
   ]
 }

@@ -220,6 +220,15 @@
       ]
     },
     {
+      "id": "case-exec-container-id-metadata",
+      "behaviors": ["bhv-exec-container-id-metadata"],
+      "context": [],
+      "executable": { "binary": "parity_up_exec" },
+      "outcomes": [
+        { "channel": "chan-stdout", "expectation": "exec --container-id recovers the config-only remoteEnv from the container's devcontainer.metadata label, byte-identical to the reference" }
+      ]
+    },
+    {
       "id": "case-user-profiles",
       "behaviors": ["bhv-user-profiles"],
       "context": [],
