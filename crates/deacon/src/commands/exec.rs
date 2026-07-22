@@ -421,24 +421,6 @@ async fn resolve_compose_target_container(
     }
 }
 
-/// Determine the working directory inside the container
-#[instrument(skip(config))]
-pub fn determine_container_working_dir(
-    config: &DevContainerConfig,
-    workspace_folder: &Path,
-    mount_workspace_git_root: bool,
-) -> String {
-    // Matches read-configuration / the mount / the reference (issue #309): explicit
-    // workspaceFolder verbatim, else /workspaces/<basename(root)>[/<subpath>].
-    let dir = deacon_core::workspace::container_workspace_folder(
-        workspace_folder,
-        config.workspace_folder.as_deref(),
-        mount_workspace_git_root,
-    );
-    debug!("Container working directory: {}", dir);
-    dir
-}
-
 /// Apply pass-3 (`containerSubstitute`) to working_dir and effective_env values.
 ///
 /// Tokens like `${containerEnv:HOME}` are deliberately preserved by pass 1 (config
@@ -735,21 +717,16 @@ where
                 Some(config_ctx) => {
                     // Prefer the running container's ACTUAL workspace bind-mount
                     // (flag-independent, matches where `up` mounted) over host-side
-                    // re-derivation from `--mount-workspace-git-root`, which breaks
-                    // when this invocation's flag differs from `up`'s. Fall back to
-                    // the host-side derivation when no mount is available.
-                    crate::commands::shared::container_workspace_folder_from_mounts(
+                    // re-derivation; for a Compose config without an explicit
+                    // workspaceFolder this resolves to `/` (the reference default,
+                    // a valid chdir target) instead of the single-container
+                    // `/workspaces/<basename>` the Compose service never mounts.
+                    crate::commands::shared::resolve_container_cwd(
                         &config_ctx.config,
                         config_ctx.workspace_folder.as_path(),
                         &resolved_container_mounts,
+                        args.mount_workspace_git_root,
                     )
-                    .unwrap_or_else(|| {
-                        determine_container_working_dir(
-                            &config_ctx.config,
-                            config_ctx.workspace_folder.as_path(),
-                            args.mount_workspace_git_root,
-                        )
-                    })
                 }
                 None => {
                     debug!("No config context; resolving home folder as cwd");
@@ -822,47 +799,6 @@ mod tests {
     use super::*;
     use deacon_core::config::DevContainerConfig;
     use tempfile::TempDir;
-
-    #[test]
-    fn test_determine_container_working_dir_with_config() {
-        let config = DevContainerConfig {
-            workspace_folder: Some("/custom/workspace".to_string()),
-            ..Default::default()
-        };
-
-        let temp_dir = TempDir::new().unwrap();
-        let workspace_path = temp_dir.path();
-
-        let working_dir = determine_container_working_dir(&config, workspace_path, true);
-        assert_eq!(working_dir, "/custom/workspace");
-    }
-
-    #[test]
-    fn test_determine_container_working_dir_default() {
-        let config = DevContainerConfig {
-            workspace_folder: None,
-            ..Default::default()
-        };
-
-        let temp_dir = TempDir::new().unwrap();
-        let workspace_path = temp_dir.path();
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
-
-        let working_dir = determine_container_working_dir(&config, workspace_path, false);
-        assert_eq!(working_dir, format!("/workspaces/{}", workspace_name));
-    }
-
-    #[test]
-    fn test_determine_container_working_dir_fallback() {
-        let config = DevContainerConfig {
-            workspace_folder: None,
-            ..Default::default()
-        };
-
-        // Use a path that might not have a proper file name
-        let working_dir = determine_container_working_dir(&config, Path::new("/"), false);
-        assert_eq!(working_dir, "/workspaces/workspace");
-    }
 
     #[test]
     fn test_compose_config_detection() {

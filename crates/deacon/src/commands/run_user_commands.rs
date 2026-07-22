@@ -198,30 +198,21 @@ async fn execute_lifecycle_commands(
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
 
     // Determine the container workspace folder = the lifecycle cwd. Prefer the
-    // RUNNING container's ACTUAL workspace bind-mount over host-side re-derivation:
-    // `run-user-commands` doesn't expose `--mount-workspace-git-root`, so a
-    // host-side guess (previously hardcoded to the git-root default) disagrees with
-    // an `up --mount-workspace-git-root false` and the lifecycle `chdir` fails.
-    // Reading the mount reflects exactly where `up` mounted, regardless of flags.
-    // Fall back to host-side derivation when the mount can't be read.
-    let container_workspace_folder = {
+    // RUNNING container's ACTUAL workspace bind-mount over host-side re-derivation
+    // (`run-user-commands` doesn't expose `--mount-workspace-git-root`, so a
+    // host-side guess disagrees with an `up --mount-workspace-git-root false`); a
+    // Compose config without an explicit workspaceFolder resolves to `/` (the
+    // reference default), not the single-container `/workspaces/<basename>` the
+    // service never mounts (#294/#295).
+    let mounts = {
         use deacon_core::docker::Docker;
-        let from_mount = match cli.inspect_container(container_id).await {
-            Ok(Some(info)) => crate::commands::shared::container_workspace_folder_from_mounts(
-                config,
-                workspace_folder,
-                &info.mounts,
-            ),
-            _ => None,
-        };
-        from_mount.unwrap_or_else(|| {
-            crate::commands::shared::derive_container_workspace_folder(
-                config,
-                workspace_folder,
-                true,
-            )
-        })
+        match cli.inspect_container(container_id).await {
+            Ok(Some(info)) => info.mounts,
+            _ => Vec::new(),
+        }
     };
+    let container_workspace_folder =
+        crate::commands::shared::resolve_container_cwd(config, workspace_folder, &mounts, true);
 
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {
