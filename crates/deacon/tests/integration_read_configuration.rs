@@ -558,10 +558,11 @@ fn test_acceptance_container_only_mode_empty_configuration() -> Result<()> {
     Ok(())
 }
 
-/// Divergence A: `${containerWorkspaceFolder}` must resolve even when the
-/// config declares no explicit `workspaceFolder` and there is no container.
-/// The reference CLI resolves it to the host workspace path (the same value as
-/// `${localWorkspaceFolder}`); deacon previously left the literal in place.
+/// `${containerWorkspaceFolder}` must resolve even when the config declares no
+/// explicit `workspaceFolder` and there is no container. The reference CLI
+/// resolves it to the CONTAINER-side default `/workspaces/<basename>[/<subpath>]`
+/// — NOT the host path — so it does not equal `${localWorkspaceFolder}` (issue
+/// #309, oracle-verified against @devcontainers/cli@0.87.0).
 #[test]
 fn test_container_workspace_folder_resolves_without_explicit_workspace_folder() -> Result<()> {
     let helper = ReadConfigurationTestHelper::new()?;
@@ -590,10 +591,17 @@ fn test_container_workspace_folder_resolves_without_explicit_workspace_folder() 
         !workspace.contains("${"),
         "containerWorkspaceFolder must be resolved, got literal: {workspace}"
     );
-    // Reference parity: with no container, containerWorkspaceFolder == localWorkspaceFolder.
-    assert_eq!(
+    // #309: the container-side default is `/workspaces/<basename>`, NOT the host
+    // path. The fixture workspace is a (non-git) temp dir, so the value is
+    // `/workspaces/<tempBasename>` and must differ from `${localWorkspaceFolder}`
+    // (the host temp path), matching the reference CLI.
+    assert!(
+        workspace.starts_with("/workspaces/"),
+        "containerWorkspaceFolder should be a /workspaces/<basename> path, got: {workspace}"
+    );
+    assert_ne!(
         workspace, local_ws,
-        "containerWorkspaceFolder should equal localWorkspaceFolder when there is no container"
+        "containerWorkspaceFolder must NOT equal localWorkspaceFolder (host path) — see #309"
     );
 
     Ok(())

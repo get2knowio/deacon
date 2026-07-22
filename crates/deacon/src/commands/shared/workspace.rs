@@ -8,6 +8,15 @@ use std::path::Path;
 /// Otherwise, derives it as `/workspaces/{dir_name}` where `dir_name` is the
 /// last component of the host `workspace_folder` path (falling back to `"workspace"`
 /// if the path has no final component).
+///
+/// NOTE (issue #309): `read-configuration` already routes through
+/// [`deacon_core::workspace::container_workspace_folder`], which additionally
+/// walks to the git root and appends the workspace subpath to match the reference
+/// CLI. This container-aware `up`/`exec`/`run-user-commands` path does NOT yet do
+/// so — it lacks the `mount_workspace_git_root` flag in scope. Converging it (so
+/// the *used* lifecycle/exec working dir matches the mount for git-subdir
+/// workspaces) is a tracked follow-up; the common and non-git-temp cases already
+/// agree.
 pub fn derive_container_workspace_folder(
     config: &deacon_core::config::DevContainerConfig,
     workspace_folder: &Path,

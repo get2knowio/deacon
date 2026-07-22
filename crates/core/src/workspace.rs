@@ -76,6 +76,60 @@ pub fn resolve_workspace_root(path: &Path) -> Result<PathBuf> {
     Ok(canonical)
 }
 
+/// Compute the container-side workspace folder (`${containerWorkspaceFolder}`),
+/// matching the reference CLI's algorithm (verified against `@devcontainers/cli`).
+///
+/// - If the config declares an explicit `workspaceFolder`, it is used verbatim.
+/// - Otherwise the value is `/workspaces/<basename(root)>[/<subpath>]`, where
+///   `root` is the git worktree/repository root when `mount_workspace_git_root`
+///   is set (else the workspace folder itself), and `<subpath>` is the path from
+///   `root` down to the workspace folder (empty when the workspace *is* the root
+///   or is not inside a git repository).
+///
+/// This is the single source of truth for the value; `read-configuration`, and
+/// `up`/`exec`/`run-user-commands` lifecycle working-dir derivation all route
+/// through it so the reported and the used value never diverge (issue #309).
+pub fn container_workspace_folder(
+    workspace_folder: &Path,
+    config_workspace_folder: Option<&str>,
+    mount_workspace_git_root: bool,
+) -> String {
+    // (a) explicit workspaceFolder wins verbatim.
+    if let Some(wf) = config_workspace_folder {
+        if !wf.trim().is_empty() {
+            return wf.to_string();
+        }
+    }
+
+    let canonical_ws = workspace_folder
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_folder.to_path_buf());
+
+    // Root the container path at the git root (default) or the workspace folder.
+    let root = if mount_workspace_git_root {
+        resolve_workspace_root(&canonical_ws).unwrap_or_else(|_| canonical_ws.clone())
+    } else {
+        canonical_ws.clone()
+    };
+
+    let base = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("workspace");
+
+    // (c) subpath from the root down to the workspace folder; empty for (d)/(e).
+    let subpath = canonical_ws
+        .strip_prefix(&root)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .filter(|s| !s.is_empty());
+
+    match subpath {
+        Some(sub) => format!("/workspaces/{base}/{sub}"),
+        None => format!("/workspaces/{base}"),
+    }
+}
+
 /// Find the git repository root by walking up the directory tree
 ///
 /// This function searches for the directory containing `.git` (whether it's
@@ -535,6 +589,81 @@ mod tests {
             "resolve_workspace_root should find git repository root from subdirectory"
         );
 
+        Ok(())
+    }
+
+    // container_workspace_folder — matches the reference CLI (issue #309).
+    // Oracle-verified against @devcontainers/cli@0.87.0 for all four cases.
+
+    #[test]
+    fn test_container_workspace_folder_explicit_wins_verbatim() -> anyhow::Result<()> {
+        // (a) An explicit workspaceFolder is used as-is, ignoring git/subpath.
+        let temp = TempDir::new()?;
+        let sub = temp.path().join("sub").join("pkg");
+        fs::create_dir_all(&sub)?;
+        assert_eq!(
+            container_workspace_folder(&sub, Some("/opt/app"), true),
+            "/opt/app"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_container_workspace_folder_git_subdir_appends_subpath() -> anyhow::Result<()> {
+        // (c) git root + subdir → /workspaces/<gitRootBasename>/<subpath>.
+        let temp = TempDir::new()?;
+        fs::create_dir(temp.path().join(".git"))?;
+        let sub = temp.path().join("sub").join("pkg");
+        fs::create_dir_all(&sub)?;
+        let base = temp
+            .path()
+            .canonicalize()?
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(
+            container_workspace_folder(&sub, None, true),
+            format!("/workspaces/{base}/sub/pkg")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_container_workspace_folder_at_git_root_no_subpath() -> anyhow::Result<()> {
+        // (d) workspace IS the git root → /workspaces/<basename> (no subpath).
+        let temp = TempDir::new()?;
+        fs::create_dir(temp.path().join(".git"))?;
+        let base = temp
+            .path()
+            .canonicalize()?
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(
+            container_workspace_folder(temp.path(), None, true),
+            format!("/workspaces/{base}")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_container_workspace_folder_non_git_uses_basename() -> anyhow::Result<()> {
+        // (e) not in a git repo → /workspaces/<workspaceFolderBasename>.
+        let temp = TempDir::new()?;
+        let ws = temp.path().join("myproj");
+        fs::create_dir_all(&ws)?;
+        assert_eq!(
+            container_workspace_folder(&ws, None, true),
+            "/workspaces/myproj"
+        );
+        // With git-root mounting disabled the workspace folder is the root, so a
+        // git-subdir still resolves to its own basename (no walk, no subpath).
+        assert_eq!(
+            container_workspace_folder(&ws, None, false),
+            "/workspaces/myproj"
+        );
         Ok(())
     }
 }

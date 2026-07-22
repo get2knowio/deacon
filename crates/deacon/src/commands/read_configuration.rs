@@ -1522,14 +1522,18 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     // `${containerWorkspaceFolder}` unresolved on purpose — `up` fills it from
     // the real mount target during its container-aware pass, and seeding a
     // default in the shared loader would corrupt that. But `read-configuration`
-    // never reaches that pass, so the literal leaks into the output. The
-    // reference CLI resolves it to the host workspace path (the same value as
-    // `${localWorkspaceFolder}`) in this case, so do the same here on the output
-    // config only. Substitution is idempotent for already-resolved fields.
+    // never reaches that pass, so the literal leaks into the output. Seed the
+    // container-side default the reference CLI uses —
+    // `/workspaces/<basename(root)>[/<subpath>]` (issue #309), NOT the host path.
     let config =
         if !container_only_mode && container_info.is_none() && config.workspace_folder.is_none() {
             let mut ctx = SubstitutionContext::new(workspace_folder)?;
-            ctx.container_workspace_folder = Some(ctx.local_workspace_folder.clone());
+            ctx.container_workspace_folder =
+                Some(deacon_core::workspace::container_workspace_folder(
+                    workspace_folder,
+                    None,
+                    args.mount_workspace_git_root,
+                ));
             // No container identity yet: keep ${devcontainerId} literal (#219).
             ctx.resolve_devcontainer_id = false;
             if let Some(secrets) = &secrets {
@@ -1571,7 +1575,11 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                         }
                         None => {
                             ctx.container_workspace_folder =
-                                Some(ctx.local_workspace_folder.clone());
+                                Some(deacon_core::workspace::container_workspace_folder(
+                                    workspace_folder,
+                                    None,
+                                    args.mount_workspace_git_root,
+                                ));
                         }
                         _ => {}
                     }
