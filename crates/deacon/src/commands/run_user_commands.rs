@@ -197,11 +197,31 @@ async fn execute_lifecycle_commands(
     // Create substitution context
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
 
-    // Determine container workspace folder. `run-user-commands` does not expose
-    // `--mount-workspace-git-root`, so it uses the git-root default (true) — which
-    // matches how `up` (also defaulting to true) created the container and mount.
-    let container_workspace_folder =
-        crate::commands::shared::derive_container_workspace_folder(config, workspace_folder, true);
+    // Determine the container workspace folder = the lifecycle cwd. Prefer the
+    // RUNNING container's ACTUAL workspace bind-mount over host-side re-derivation:
+    // `run-user-commands` doesn't expose `--mount-workspace-git-root`, so a
+    // host-side guess (previously hardcoded to the git-root default) disagrees with
+    // an `up --mount-workspace-git-root false` and the lifecycle `chdir` fails.
+    // Reading the mount reflects exactly where `up` mounted, regardless of flags.
+    // Fall back to host-side derivation when the mount can't be read.
+    let container_workspace_folder = {
+        use deacon_core::docker::Docker;
+        let from_mount = match cli.inspect_container(container_id).await {
+            Ok(Some(info)) => crate::commands::shared::container_workspace_folder_from_mounts(
+                config,
+                workspace_folder,
+                &info.mounts,
+            ),
+            _ => None,
+        };
+        from_mount.unwrap_or_else(|| {
+            crate::commands::shared::derive_container_workspace_folder(
+                config,
+                workspace_folder,
+                true,
+            )
+        })
+    };
 
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {
