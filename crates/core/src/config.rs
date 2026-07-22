@@ -925,6 +925,18 @@ impl DevContainerConfig {
             ));
         }
 
+        // Substitute customizations: template strings inside customizations (e.g.
+        // `terminal.integrated.cwd = "${localWorkspaceFolder}/src"`) are resolved by
+        // the reference CLI; deacon emitted them literally (#312). Recursively
+        // substitute string leaves. (Unmodeled `extra` passthrough stays verbatim.)
+        if !config.customizations.is_null() {
+            config.customizations = VariableSubstitution::substitute_json_value(
+                &config.customizations,
+                context,
+                &mut report,
+            );
+        }
+
         // Substitute workspace_folder
         if let Some(ref workspace_folder) = config.workspace_folder {
             config.workspace_folder = Some(VariableSubstitution::substitute_string(
@@ -1158,6 +1170,16 @@ impl DevContainerConfig {
             config.build = Some(VariableSubstitution::substitute_json_value_with_options(
                 build, context, options, report,
             )?);
+        }
+
+        // Substitute customizations — see apply_variable_substitution (#312).
+        if !config.customizations.is_null() {
+            config.customizations = VariableSubstitution::substitute_json_value_with_options(
+                &config.customizations,
+                context,
+                options,
+                report,
+            )?;
         }
 
         // Substitute mounts (JSON values that may contain strings)
@@ -4058,6 +4080,56 @@ mod tests {
         assert_eq!(args.get("LITERAL").and_then(|v| v.as_str()), Some("plain"));
         // No unresolved templates remain anywhere in the build object.
         assert!(!substituted.build.unwrap().to_string().contains("${"));
+    }
+
+    #[test]
+    fn test_substitution_covers_customizations() {
+        // #312: the reference CLI substitutes template strings inside
+        // `customizations`; deacon must too (not leave them literal).
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = temp_dir.path();
+        let mut context = SubstitutionContext::new(workspace).unwrap();
+        context
+            .local_env
+            .insert("USER".to_string(), "alice".to_string());
+        context.container_workspace_folder = Some("/workspaces/proj".to_string());
+
+        let config = DevContainerConfig {
+            customizations: serde_json::json!({
+                "vscode": {
+                    "settings": {
+                        "terminal.integrated.cwd": "${localWorkspaceFolder}/src",
+                        "some.user": "${localEnv:USER}",
+                        "some.container": "${containerWorkspaceFolder}/x",
+                        "literal": "plain"
+                    }
+                }
+            }),
+            ..Default::default()
+        };
+
+        // Basic pass.
+        let (substituted, _) = config.clone().apply_variable_substitution(&context);
+        let s = &substituted.customizations["vscode"]["settings"];
+        assert_eq!(s["some.user"].as_str(), Some("alice"));
+        assert_eq!(s["some.container"].as_str(), Some("/workspaces/proj/x"));
+        assert_eq!(s["literal"].as_str(), Some("plain"));
+        assert!(
+            !s["terminal.integrated.cwd"]
+                .as_str()
+                .unwrap()
+                .contains("${localWorkspaceFolder}")
+        );
+        assert!(!substituted.customizations.to_string().contains("${"));
+
+        // Advanced pass mirrors it.
+        use crate::variable::{SubstitutionOptions, SubstitutionReport};
+        let options = SubstitutionOptions::default();
+        let mut report = SubstitutionReport::new();
+        let advanced = config
+            .apply_variable_substitution_advanced(&context, &options, &mut report)
+            .unwrap();
+        assert!(!advanced.customizations.to_string().contains("${"));
     }
 
     #[test]
