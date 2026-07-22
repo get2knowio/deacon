@@ -6,6 +6,9 @@
 //! Spec: the containers.dev spec / reference CLI
 //! Implementation: specs/001-read-config-parity/spec.md
 
+use crate::commands::shared::build_resolution::{
+    resolve_devcontainer_build_config, resolve_dockerfile_base_image,
+};
 use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
@@ -588,6 +591,14 @@ fn apply_upstream_merge_shape(
     let Some(obj) = base.as_object_mut() else {
         return base;
     };
+
+    // `id` is a per-metadata-entry marker on each `devcontainer.metadata` label
+    // entry (e.g. `ghcr.io/devcontainers/features/git:1`), not a merged-config
+    // field. It rides through `DevContainerConfig::extra` on the merge chain and
+    // the last entry's value survives, but upstream's `mergeConfiguration`
+    // (`pickConfigProperties`) never emits `id` in `MergedDevContainerConfig` —
+    // strip it so the merged output matches the reference.
+    obj.remove("id");
 
     for (singular, _) in COLLECTED_PROPERTIES {
         obj.remove(*singular);
@@ -1686,44 +1697,109 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         //      where `config.image` is None — at read-config time we
         //      don't know the built image tag, but we can find it via
         //      the container that `up` created.
-        let image_metadata_entries: Vec<deacon_core::config::DevContainerConfig> =
-            if container_info.is_none() {
-                use deacon_core::docker::Docker;
-                let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
-                let image_ref: Option<String> = if let Some(image) = config.image.as_deref() {
-                    Some(image.to_string())
-                } else if let Ok(canonical_workspace) = workspace_folder.canonicalize() {
-                    // For `build.dockerfile` configs `config.image` is None at
-                    // read-config time. Find the workspace's container via the
-                    // spec-mandated `devcontainer.local_folder` label (#80) —
-                    // the workspaceHash/configHash pair drifts whenever `up`
-                    // mutates the config mid-flight (workspace_mount injection,
-                    // image-metadata merge, etc.), so read-config can never
-                    // reconstruct an identical hash. The path label is stable.
+        let image_metadata_entries: Vec<deacon_core::config::DevContainerConfig> = if container_info
+            .is_none()
+        {
+            use deacon_core::docker::Docker;
+            let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
+
+            // The config file backing this read (CLI `--config` or the
+            // auto-discovered path); its parent anchors compose files and the
+            // Dockerfile, mirroring the feature-anchor logic above.
+            let config_path_for_build = args
+                .config_path
+                .as_deref()
+                .or(resolved_config_path.as_deref());
+            let config_dir = config_path_for_build
+                .and_then(|p| p.parent())
+                .unwrap_or(workspace_folder);
+
+            // Resolve the base image whose `devcontainer.metadata` label seeds
+            // the merged config, matching the reference CLI's precedence:
+            //   1. literal `config.image`
+            //   2. compose primary service's resolved `image:`
+            //   3. Dockerfile `FROM` base (following multi-stage + ARG)
+            //   4. fall back to the workspace's running container's image
+            // The reference reads the base image's baked-in feature metadata
+            // (e.g. `mcr…/devcontainers/base`'s `git` customizations) even for
+            // compose / Dockerfile configs before any container exists, so a
+            // cold `read-configuration` must too (#307 follow-up).
+            let mut image_ref: Option<String> = if let Some(image) = config.image.as_deref() {
+                Some(image.to_string())
+            } else if config.uses_compose() {
+                use deacon_core::compose::{ComposeManager, ServiceShape};
+                let manager = ComposeManager::with_docker_path(args.docker_path.clone());
+                // Resolve to absolute paths so the compose files (anchored to
+                // `config_dir`) are opened correctly regardless of the child
+                // process CWD — a relative `config_dir` otherwise gets joined
+                // twice and the `-f` file is not found.
+                let abs_workspace = workspace_folder
+                    .canonicalize()
+                    .unwrap_or_else(|_| workspace_folder.to_path_buf());
+                let abs_config_dir = config_dir
+                    .canonicalize()
+                    .unwrap_or_else(|_| config_dir.to_path_buf());
+                match manager.create_project(&config, &abs_workspace, &abs_config_dir) {
+                    Ok(project) => {
+                        match manager
+                            .get_command(&project)
+                            .extract_service_shape(&project.service)
+                            .await
+                        {
+                            Ok(ServiceShape::Image(img)) => Some(img),
+                            // Build-shaped or unresolvable services contribute
+                            // no base-image metadata (best-effort, like #91).
+                            _ => None,
+                        }
+                    }
+                    Err(_) => None,
+                }
+            } else if let Some(cfg_path) = config_path_for_build {
+                // Dockerfile-based (`build.dockerfile` / legacy `dockerFile`).
+                match resolve_devcontainer_build_config(&config, cfg_path) {
+                    Ok(Some(rb)) => match std::fs::read_to_string(&rb.dockerfile_path) {
+                        Ok(content) => resolve_dockerfile_base_image(
+                            &content,
+                            &rb.options,
+                            rb.target.as_deref(),
+                        ),
+                        Err(_) => None,
+                    },
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
+            // Fallback: no static base resolved above. Find the workspace's
+            // container via the spec-mandated `devcontainer.local_folder`
+            // label (#80) — the workspaceHash/configHash pair drifts whenever
+            // `up` mutates the config mid-flight (workspace_mount injection,
+            // image-metadata merge, etc.), so read-config can never
+            // reconstruct an identical hash. The path label is stable.
+            if image_ref.is_none() {
+                if let Ok(canonical_workspace) = workspace_folder.canonicalize() {
                     let label_selector = format!(
                         "devcontainer.source=deacon,devcontainer.local_folder={}",
                         canonical_workspace.display()
                     );
-                    match docker.list_containers(Some(&label_selector)).await {
-                        Ok(containers) if !containers.is_empty() => {
-                            match docker.inspect_container(&containers[0].id).await {
-                                Ok(Some(info)) => Some(info.image),
-                                _ => None,
+                    if let Ok(containers) = docker.list_containers(Some(&label_selector)).await {
+                        if let Some(first) = containers.first() {
+                            if let Ok(Some(info)) = docker.inspect_container(&first.id).await {
+                                image_ref = Some(info.image);
                             }
                         }
-                        _ => None,
                     }
-                } else {
-                    None
-                };
-                if let Some(image_ref) = image_ref {
-                    parse_image_metadata_entries(&docker, &image_ref).await
-                } else {
-                    Vec::new()
                 }
+            }
+            if let Some(image_ref) = image_ref {
+                parse_image_metadata_entries(&docker, &image_ref).await
             } else {
                 Vec::new()
-            };
+            }
+        } else {
+            Vec::new()
+        };
 
         let mut merged = compute_merged_configuration(
             &config,
@@ -1848,6 +1924,22 @@ mod tests {
             .map(|e| e["vscode"]["id"].as_str().unwrap())
             .collect();
         assert_eq!(ids, vec!["img0", "img1", "feat0", "base0"]);
+    }
+
+    #[test]
+    fn test_merge_shape_strips_per_entry_id() {
+        // `id` is a per-metadata-entry marker (e.g. a feature ref on an image
+        // label entry) that rides through the merge chain via `extra`. Upstream's
+        // `MergedDevContainerConfig` never emits it — the merged shape must drop it.
+        let base = json!({
+            "name": "x",
+            "id": "./local-features/setup-user",
+            "remoteUser": "codespace"
+        });
+        let shaped = apply_upstream_merge_shape(base, &[]);
+        assert!(shaped.get("id").is_none(), "id must be stripped: {shaped}");
+        assert_eq!(shaped["remoteUser"], "codespace");
+        assert_eq!(shaped["name"], "x");
     }
 
     #[test]
