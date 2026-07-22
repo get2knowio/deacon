@@ -197,9 +197,11 @@ async fn execute_lifecycle_commands(
     // Create substitution context
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
 
-    // Determine container workspace folder
+    // Determine container workspace folder. `run-user-commands` does not expose
+    // `--mount-workspace-git-root`, so it uses the git-root default (true) — which
+    // matches how `up` (also defaulting to true) created the container and mount.
     let container_workspace_folder =
-        crate::commands::shared::derive_container_workspace_folder(config, workspace_folder);
+        crate::commands::shared::derive_container_workspace_folder(config, workspace_folder, true);
 
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {

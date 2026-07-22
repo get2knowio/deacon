@@ -426,27 +426,17 @@ async fn resolve_compose_target_container(
 pub fn determine_container_working_dir(
     config: &DevContainerConfig,
     workspace_folder: &Path,
+    mount_workspace_git_root: bool,
 ) -> String {
-    // Use containerWorkspaceFolder if specified in config
-    if let Some(ref container_workspace_folder) = config.workspace_folder {
-        debug!(
-            "Using containerWorkspaceFolder from config: {}",
-            container_workspace_folder
-        );
-        container_workspace_folder.clone()
-    } else {
-        // Default to /workspaces/{workspace_name}
-        let workspace_name = workspace_folder
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("workspace");
-        let default_path = format!("/workspaces/{}", workspace_name);
-        debug!(
-            "Using default container working directory: {}",
-            default_path
-        );
-        default_path
-    }
+    // Matches read-configuration / the mount / the reference (issue #309): explicit
+    // workspaceFolder verbatim, else /workspaces/<basename(root)>[/<subpath>].
+    let dir = deacon_core::workspace::container_workspace_folder(
+        workspace_folder,
+        config.workspace_folder.as_deref(),
+        mount_workspace_git_root,
+    );
+    debug!("Container working directory: {}", dir);
+    dir
 }
 
 /// Apply pass-3 (`containerSubstitute`) to working_dir and effective_env values.
@@ -735,6 +725,7 @@ where
                 Some(config_ctx) => determine_container_working_dir(
                     &config_ctx.config,
                     config_ctx.workspace_folder.as_path(),
+                    args.mount_workspace_git_root,
                 ),
                 None => {
                     debug!("No config context; resolving home folder as cwd");
@@ -818,7 +809,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let workspace_path = temp_dir.path();
 
-        let working_dir = determine_container_working_dir(&config, workspace_path);
+        let working_dir = determine_container_working_dir(&config, workspace_path, true);
         assert_eq!(working_dir, "/custom/workspace");
     }
 
@@ -833,7 +824,7 @@ mod tests {
         let workspace_path = temp_dir.path();
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
 
-        let working_dir = determine_container_working_dir(&config, workspace_path);
+        let working_dir = determine_container_working_dir(&config, workspace_path, false);
         assert_eq!(working_dir, format!("/workspaces/{}", workspace_name));
     }
 
@@ -845,7 +836,7 @@ mod tests {
         };
 
         // Use a path that might not have a proper file name
-        let working_dir = determine_container_working_dir(&config, Path::new("/"));
+        let working_dir = determine_container_working_dir(&config, Path::new("/"), false);
         assert_eq!(working_dir, "/workspaces/workspace");
     }
 

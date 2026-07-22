@@ -265,8 +265,9 @@ pub(crate) async fn execute_compose_up(
                 // Spec default is `/workspaces/${localWorkspaceFolderBasename}`,
                 // not a bare `/workspaces`.
                 let remote_workspace_folder = super::helpers::default_remote_workspace_folder(
-                    config.workspace_folder.as_deref(),
                     workspace_folder,
+                    config.workspace_folder.as_deref(),
+                    args.mount_workspace_git_root,
                 );
 
                 // Serialize configuration if requested
@@ -512,6 +513,7 @@ pub(crate) async fn execute_compose_up(
             workspace_folder,
             &args.docker_path,
             force_pty,
+            args.mount_workspace_git_root,
         )
         .await?;
     }
@@ -571,8 +573,9 @@ pub(crate) async fn execute_compose_up(
     // Spec default is `/workspaces/${localWorkspaceFolderBasename}`, not a bare
     // `/workspaces`.
     let remote_workspace_folder = super::helpers::default_remote_workspace_folder(
-        config.workspace_folder.as_deref(),
         workspace_folder,
+        config.workspace_folder.as_deref(),
+        args.mount_workspace_git_root,
     );
 
     // Serialize configuration if requested
@@ -677,6 +680,7 @@ pub(crate) async fn execute_compose_post_create(
     workspace_folder: &Path,
     docker_path: &str,
     force_pty: bool,
+    mount_workspace_git_root: bool,
 ) -> Result<()> {
     debug!("Executing post-create lifecycle for compose project");
 
@@ -693,8 +697,11 @@ pub(crate) async fn execute_compose_post_create(
     // inside the shell and fall through to the default dir if it is absent. This
     // matches the reference CLI (run lifecycle from workspaceFolder) when the
     // workspace is mounted, and stays graceful when it is not.
-    let container_workspace_folder =
-        crate::commands::shared::derive_container_workspace_folder(config, workspace_folder);
+    let container_workspace_folder = crate::commands::shared::derive_container_workspace_folder(
+        config,
+        workspace_folder,
+        mount_workspace_git_root,
+    );
 
     // Get the primary container ID
     let compose_manager = ComposeManager::with_docker_path(docker_path.to_string());

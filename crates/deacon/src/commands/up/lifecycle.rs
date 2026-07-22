@@ -199,9 +199,13 @@ pub(crate) async fn execute_lifecycle_commands(
     // Create substitution context
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
 
-    // Determine container workspace folder
-    let container_workspace_folder =
-        crate::commands::shared::derive_container_workspace_folder(config, workspace_folder);
+    // Determine container workspace folder (matches the mount / read-configuration
+    // for git-subdir workspaces, #309).
+    let container_workspace_folder = crate::commands::shared::derive_container_workspace_folder(
+        config,
+        workspace_folder,
+        args.mount_workspace_git_root,
+    );
 
     // Determine if JSON log mode is active by checking DEACON_LOG_FORMAT env var
     // Per FR-001, FR-002: PTY toggle only applies in JSON log mode
