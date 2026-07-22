@@ -4,5 +4,6 @@
 	"remoteUser": "root",
 	"overrideCommand": true,
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"postCreateCommand": "test -f /usr/local/share/deacon/host-ca.crt && echo 'postCreate sees the injected corporate CA bundle'"
 }

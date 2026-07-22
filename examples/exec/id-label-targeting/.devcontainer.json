@@ -10,5 +10,6 @@
   "remoteEnv": {
     "APP_NAME": "exec-label-demo"
   },
-  "workspaceFolder": "/workspace"
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }

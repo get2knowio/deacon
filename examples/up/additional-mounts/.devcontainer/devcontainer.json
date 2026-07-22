@@ -3,6 +3,7 @@
 	"image": "ubuntu:22.04",
 	"remoteUser": "root",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"mounts": [
 		"source=${localWorkspaceFolder}/config,target=/etc/myapp,type=bind",
 		"source=myapp-cache,target=/var/cache/myapp,type=volume"

@@ -3,6 +3,7 @@
 	"image": "ubuntu:22.04",
 	"remoteUser": "vscode",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	
 	"features": {
 		"ghcr.io/devcontainers/features/common-utils:2": {

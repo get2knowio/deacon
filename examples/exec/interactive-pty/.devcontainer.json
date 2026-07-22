@@ -7,5 +7,6 @@
     }
   },
   "remoteUser": "vscode",
-  "workspaceFolder": "/workspace"
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 }

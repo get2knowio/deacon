@@ -5,6 +5,7 @@
 		"context": ".."
 	},
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"remoteUser": "devuser",
 	"postCreateCommand": "node --version && npm --version"
 }

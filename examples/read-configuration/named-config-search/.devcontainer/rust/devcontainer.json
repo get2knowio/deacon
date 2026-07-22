@@ -3,6 +3,7 @@
 	"image": "mcr.microsoft.com/devcontainers/rust:1",
 	"remoteUser": "vscode",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"containerEnv": {
 		"VARIANT": "rust"
 	}

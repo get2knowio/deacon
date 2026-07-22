@@ -5,6 +5,7 @@
 	},
 	"remoteUser": "root",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"overrideCommand": false,
 	"shutdownAction": "none"
 }

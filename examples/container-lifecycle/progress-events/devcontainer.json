@@ -2,6 +2,7 @@
   "name": "Progress Events Demo",
   "image": "alpine:3.19",
   "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "containerEnv": {
     "DEMO_PHASE": "progress-tracking"
   },

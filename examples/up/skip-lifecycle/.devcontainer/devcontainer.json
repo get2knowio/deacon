@@ -3,6 +3,7 @@
 	"image": "ubuntu:22.04",
 	"remoteUser": "root",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"onCreateCommand": "echo 'onCreate executed' && apt-get update",
 	"updateContentCommand": "echo 'updateContent executed' && date > /tmp/update.txt",
 	"postCreateCommand": "echo 'postCreate executed' && mkdir -p /workspace/setup",

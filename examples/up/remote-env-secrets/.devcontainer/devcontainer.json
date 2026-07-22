@@ -3,6 +3,7 @@
 	"image": "ubuntu:22.04",
 	"remoteUser": "root",
 	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"remoteEnv": {
 		"APP_ENV": "development",
 		"LOG_LEVEL": "debug",
