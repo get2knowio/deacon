@@ -408,6 +408,41 @@ pub(crate) async fn execute_compose_up(
         handle_lockfile_post_build(args, config_path, &fb.lockfile).await?;
     }
 
+    // #322: stamp the merged `devcontainer.metadata` on the compose service
+    // container too (via `deacon_labels`, applied by the injection override), so
+    // config living only in devcontainer.json — esp. `remoteEnv` — survives and
+    // is recoverable by exec/read-configuration/set-up `--container-id`, exactly
+    // like the single-container path. The effective image is the feature-extended
+    // one when features were built, else the service's own `image:`.
+    {
+        use deacon_core::compose::ServiceShape;
+        let effective_image = match &project.service_image_override {
+            Some(img) => Some(img.clone()),
+            None => match compose_manager
+                .get_command(&project)
+                .extract_service_shape(&project.service)
+                .await
+            {
+                Ok(ServiceShape::Image(img)) => Some(img),
+                _ => None,
+            },
+        };
+        if let Some(img) = effective_image {
+            if let Some(json) = super::merged_config::build_container_metadata_label(
+                &runtime.cli_docker(),
+                &img,
+                config,
+            )
+            .await
+            {
+                project.deacon_labels.insert(
+                    deacon_core::container::LABEL_DEVCONTAINER_METADATA.to_string(),
+                    json,
+                );
+            }
+        }
+    }
+
     // Apply `devcontainer.json` `mounts` (#266) and feature-contributed
     // `mounts` (#272) to the compose project. Run through `merge_mounts` in a
     // single call — same as the single-container path (up/container.rs) —
