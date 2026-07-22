@@ -279,53 +279,11 @@ async fn load_optional_config(path: Option<&std::path::Path>) -> Result<DevConta
 }
 
 /// Extract a `DevContainerConfig` from the container's `devcontainer.metadata`
-/// label. This label is a JSON array of metadata fragments that
-/// `ConfigMerger` already knows how to fold together.
-///
-/// Per spec §4 the label's contents are the authoritative image-metadata
-/// source. Missing label is NOT an error: many containers are not built by
-/// `deacon up` and still benefit from set-up running lifecycle hooks against
-/// the user's `--config`.
+/// label. Thin wrapper over the shared
+/// [`container_metadata::config_from_metadata_label`] so set-up, exec, and
+/// read-configuration all fold the label identically (#322).
 fn extract_image_metadata_config(container: &ContainerInfo) -> Result<Option<DevContainerConfig>> {
-    let Some(label) = container.labels.get("devcontainer.metadata") else {
-        debug!(
-            container_id = %container.id,
-            "Container has no devcontainer.metadata label; proceeding without image metadata"
-        );
-        return Ok(None);
-    };
-
-    let value: serde_json::Value = serde_json::from_str(label).with_context(|| {
-        format!(
-            "Failed to parse devcontainer.metadata label as JSON for container '{}'",
-            container.id
-        )
-    })?;
-
-    // PR-2 (#27) emits the label as a JSON array; tolerate both array and
-    // single-object forms for older images built before that bump.
-    let fragments: Vec<serde_json::Value> = match value {
-        serde_json::Value::Array(arr) => arr,
-        other => vec![other],
-    };
-
-    if fragments.is_empty() {
-        return Ok(None);
-    }
-
-    let mut configs = Vec::with_capacity(fragments.len());
-    for (idx, fragment) in fragments.into_iter().enumerate() {
-        let cfg: DevContainerConfig = serde_json::from_value(fragment).with_context(|| {
-            format!(
-                "Failed to deserialize devcontainer.metadata fragment {} for container '{}'",
-                idx, container.id
-            )
-        })?;
-        configs.push(cfg);
-    }
-
-    let merged = deacon_core::config::ConfigMerger::merge_configs(&configs);
-    Ok(Some(merged))
+    crate::commands::shared::container_metadata::config_from_metadata_label(container)
 }
 
 /// Merge `--config` (if any) on top of image metadata config (if any).
