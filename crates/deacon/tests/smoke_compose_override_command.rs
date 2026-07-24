@@ -7,7 +7,8 @@
 //!
 //! These hit a real Docker daemon and are docker-gated via a graceful skip.
 
-use assert_cmd::Command;
+mod support;
+
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -24,8 +25,7 @@ fn is_docker_available() -> bool {
 
 /// Best-effort cleanup; ignore failures since the project may already be torn down.
 fn deacon_down(workspace: &Path) {
-    let _ = Command::cargo_bin("deacon")
-        .unwrap()
+    let _ = support::deacon_command()
         .current_dir(workspace)
         .arg("down")
         .arg("--workspace-folder")
@@ -108,8 +108,7 @@ fn test_compose_override_command_default_keeps_service_alive() {
     )
     .unwrap();
 
-    let up_output = Command::cargo_bin("deacon")
-        .unwrap()
+    let up_output = support::deacon_command()
         .current_dir(workspace)
         .arg("up")
         .arg("--workspace-folder")
@@ -170,8 +169,7 @@ fn test_compose_override_command_explicit_false_runs_natural_command() {
     )
     .unwrap();
 
-    let up_output = Command::cargo_bin("deacon")
-        .unwrap()
+    let up_output = support::deacon_command()
         .current_dir(workspace)
         .arg("up")
         .arg("--workspace-folder")
@@ -236,8 +234,7 @@ fn test_compose_override_command_lifecycle_runs() {
     )
     .unwrap();
 
-    let up_output = Command::cargo_bin("deacon")
-        .unwrap()
+    let up_output = support::deacon_command()
         .current_dir(workspace)
         .arg("up")
         .arg("--workspace-folder")

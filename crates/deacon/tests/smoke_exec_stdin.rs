@@ -7,7 +7,8 @@
 //! NOTE: These tests assume Docker is available and running. They will fail
 //! if Docker is not present or cannot start containers.
 
-use assert_cmd::Command;
+mod support;
+
 use std::fs;
 use tempfile::TempDir;
 
@@ -46,7 +47,7 @@ fn test_exec_stdin_basic() {
     .unwrap();
 
     // Ensure container is up
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_out = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -63,7 +64,7 @@ fn test_exec_stdin_basic() {
     );
 
     // Exec with stdin
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -86,7 +87,7 @@ fn test_exec_stdin_basic() {
     assert!(exec_stdout.contains("hello stdin test"));
 
     // Cleanup
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _ = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -121,7 +122,7 @@ fn test_exec_stdin_streaming() {
     .unwrap();
 
     // First: up command to create container
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -140,7 +141,7 @@ fn test_exec_stdin_streaming() {
 
     // Second: exec command with stdin data
     let test_input = "hello stdin streaming test\nline 2\nline 3";
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -175,7 +176,7 @@ fn test_exec_stdin_streaming() {
     );
 
     // Clean up: down command
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _down_output = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -211,7 +212,7 @@ fn test_exec_stdin_shell_commands() {
     .unwrap();
 
     // First: up command to create container
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -230,7 +231,7 @@ fn test_exec_stdin_shell_commands() {
 
     // Test exec with tr command to transform stdin
     let test_input = "hello world";
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -260,7 +261,7 @@ fn test_exec_stdin_shell_commands() {
     );
 
     // Clean up: down command
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _down_output = down_cmd
         .current_dir(&temp_dir)
         .arg("down")

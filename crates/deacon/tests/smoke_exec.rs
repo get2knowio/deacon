@@ -9,7 +9,8 @@
 //! NOTE: These tests assume Docker is available and running. They will fail
 //! if Docker is not present or cannot start containers.
 
-use assert_cmd::Command;
+mod support;
+
 use std::fs;
 use tempfile::TempDir;
 
@@ -48,7 +49,7 @@ fn test_exec_stdout_without_tty() {
     .unwrap();
 
     // Ensure container is up
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_out = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -65,7 +66,7 @@ fn test_exec_stdout_without_tty() {
     );
 
     // Test exec command without TTY
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -88,7 +89,7 @@ fn test_exec_stdout_without_tty() {
     );
 
     // Cleanup
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _ = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -122,7 +123,7 @@ fn test_exec_exit_code_propagation() {
     .unwrap();
 
     // Ensure container is up for exit code test
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_out = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -139,7 +140,7 @@ fn test_exec_exit_code_propagation() {
     );
 
     // Test exec command that exits with specific code
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -161,7 +162,7 @@ fn test_exec_exit_code_propagation() {
     );
 
     // Cleanup
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _ = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -195,7 +196,7 @@ fn test_exec_working_directory() {
     .unwrap();
 
     // Ensure container is up
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_out = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -212,7 +213,7 @@ fn test_exec_working_directory() {
     );
 
     // Test exec with working directory
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -236,7 +237,7 @@ fn test_exec_working_directory() {
     );
 
     // Cleanup
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _ = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -270,7 +271,7 @@ fn test_exec_env_merges() {
     .unwrap();
 
     // Ensure container is up
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_out = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -287,7 +288,7 @@ fn test_exec_env_merges() {
     );
 
     // Test exec with --env
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -321,7 +322,7 @@ fn test_exec_env_merges() {
     );
 
     // Cleanup
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _ = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -360,7 +361,7 @@ fn test_up_remote_env_in_config() {
     .unwrap();
 
     // Test up command with remoteEnv in config
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -378,7 +379,7 @@ fn test_up_remote_env_in_config() {
     );
 
     // Test that we can exec and see the environment
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -430,7 +431,7 @@ fn test_exec_subfolder_config() {
     .unwrap();
 
     // Test up with config in subfolder
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -450,7 +451,7 @@ fn test_exec_subfolder_config() {
     );
 
     // Test exec with --config in subfolder
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -495,7 +496,7 @@ fn test_exec_tty_detection() {
     .unwrap();
 
     // Ensure container is up
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_out = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -512,7 +513,7 @@ fn test_exec_tty_detection() {
     );
 
     // Test exec command that checks if running in TTY
-    let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut exec_cmd = support::deacon_command();
     let exec_output = exec_cmd
         .current_dir(&temp_dir)
         .arg("exec")
@@ -531,7 +532,7 @@ fn test_exec_tty_detection() {
     );
 
     // Cleanup
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _ = down_cmd
         .current_dir(&temp_dir)
         .arg("down")

@@ -10,7 +10,8 @@
 //! Note: These tests require Docker and are only compiled on Unix systems.
 #![cfg(unix)]
 
-use assert_cmd::Command;
+mod support;
+
 use predicates::prelude::*;
 use std::path::PathBuf;
 
@@ -83,7 +84,7 @@ fn test_prebuild_stops_after_update_content() {
 
     let config_path = fixture_path.join("devcontainer.json");
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg(&fixture_path)
@@ -118,7 +119,7 @@ fn test_prebuild_rerun_executes_update_content_again() {
     let config_path = fixture_path.join("devcontainer.json");
 
     // First prebuild run
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg(&fixture_path)
@@ -130,7 +131,7 @@ fn test_prebuild_rerun_executes_update_content_again() {
         .success();
 
     // Second prebuild run (rerun scenario)
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg(&fixture_path)
@@ -159,7 +160,7 @@ fn test_prebuild_does_not_run_post_create() {
     let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg(&fixture_path)
@@ -192,7 +193,7 @@ fn test_prebuild_skip_post_attach_honored() {
     let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg(&fixture_path)
@@ -221,7 +222,7 @@ fn test_prebuild_with_features_metadata_merge() {
     let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg(&fixture_path)
@@ -253,7 +254,7 @@ fn test_prebuild_without_update_content_command() {
     let fixture_path = _fixture.path().to_path_buf();
     let config_path = fixture_path.join("devcontainer.json");
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
     cmd.arg("up")
         .arg("--workspace-folder")
         .arg(&fixture_path)
@@ -319,7 +320,7 @@ fn test_prebuild_to_normal_transition_reruns_oncreate_updatecontent() {
 
     // Helper function to read counter from container
     let read_counter = |phase: &str, temp_dir: &tempfile::TempDir| -> Option<u32> {
-        let mut exec_cmd = Command::cargo_bin("deacon").unwrap();
+        let mut exec_cmd = support::deacon_command();
         let exec_output = exec_cmd
             .current_dir(temp_dir.path())
             .arg("exec")
@@ -347,7 +348,7 @@ fn test_prebuild_to_normal_transition_reruns_oncreate_updatecontent() {
     // - Skip postCreate, postStart, postAttach (these are post* hooks)
     // - Store markers in .devcontainer-state/prebuild/ (isolated from normal markers)
 
-    let mut prebuild_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut prebuild_cmd = support::deacon_command();
     let prebuild_output = prebuild_cmd
         .current_dir(temp_dir.path())
         .arg("up")
@@ -423,7 +424,7 @@ fn test_prebuild_to_normal_transition_reruns_oncreate_updatecontent() {
     // up should see no markers and treat this as a fresh environment, running all
     // lifecycle phases including onCreate and updateContent again.
 
-    let mut normal_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut normal_cmd = support::deacon_command();
     let normal_output = normal_cmd
         .current_dir(temp_dir.path())
         .arg("up")
@@ -558,7 +559,7 @@ fn test_prebuild_marker_directory_isolation() {
     // Phase 1: Run prebuild and verify markers are in prebuild subdirectory
     // ========================================================================
 
-    let mut prebuild_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut prebuild_cmd = support::deacon_command();
     let prebuild_output = prebuild_cmd
         .current_dir(temp_dir.path())
         .arg("--user-data-folder")
@@ -618,7 +619,7 @@ fn test_prebuild_marker_directory_isolation() {
     // Phase 2: Run normal up and verify markers are in base directory
     // ========================================================================
 
-    let mut normal_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut normal_cmd = support::deacon_command();
     let normal_output = normal_cmd
         .current_dir(temp_dir.path())
         .arg("--user-data-folder")

@@ -1,13 +1,14 @@
 //! Integration tests for the down command
 
-use assert_cmd::Command;
+mod support;
+
 use predicates::prelude::*;
 use tempfile::TempDir;
 
 /// Test that down command works with basic arguments
 #[test]
 fn test_down_command_basic() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
 
     // Create a temp directory for testing
     let temp_dir = TempDir::new().unwrap();
@@ -38,7 +39,7 @@ fn test_down_command_basic() {
 /// Test that down command accepts remove flag
 #[test]
 fn test_down_command_with_remove() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
 
     // Create a temp directory for testing
     let temp_dir = TempDir::new().unwrap();
@@ -68,7 +69,7 @@ fn test_down_command_with_remove() {
 /// Test that down command shows help when run with --help
 #[test]
 fn test_down_command_help() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
 
     cmd.arg("down")
         .arg("--help")
@@ -82,7 +83,7 @@ fn test_down_command_help() {
 /// Test that up command accepts shutdown flag
 #[test]
 fn test_up_command_with_shutdown() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
 
     // Create a temp directory without devcontainer.json (will fail but should accept the flag)
     let temp_dir = TempDir::new().unwrap();
@@ -101,7 +102,7 @@ fn test_up_command_with_shutdown() {
 /// Test that down command accepts --all flag
 #[test]
 fn test_down_command_with_all() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
 
     let temp_dir = TempDir::new().unwrap();
 
@@ -130,7 +131,7 @@ fn test_down_command_with_all() {
 /// Test that down command accepts --volumes flag
 #[test]
 fn test_down_command_with_volumes() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
 
     let temp_dir = TempDir::new().unwrap();
 
@@ -159,7 +160,7 @@ fn test_down_command_with_volumes() {
 /// Test that down command accepts --force flag
 #[test]
 fn test_down_command_with_force() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
 
     let temp_dir = TempDir::new().unwrap();
 
@@ -188,7 +189,7 @@ fn test_down_command_with_force() {
 /// Test that down command accepts --timeout flag
 #[test]
 fn test_down_command_with_timeout() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
 
     let temp_dir = TempDir::new().unwrap();
 
@@ -218,7 +219,7 @@ fn test_down_command_with_timeout() {
 /// Test that down command accepts combined flags
 #[test]
 fn test_down_command_with_combined_flags() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = support::deacon_command();
 
     let temp_dir = TempDir::new().unwrap();
 

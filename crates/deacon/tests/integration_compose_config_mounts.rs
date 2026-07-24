@@ -7,7 +7,8 @@
 //! primary service container with the token resolved, the original compose
 //! service volume is untouched, and a CLI `--mount` is applied alongside it.
 
-use assert_cmd::Command;
+mod support;
+
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
@@ -25,8 +26,7 @@ fn is_docker_available() -> bool {
 
 /// Best-effort cleanup; ignore failures since the project may already be torn down.
 fn deacon_down(workspace: &Path) {
-    let _ = Command::cargo_bin("deacon")
-        .unwrap()
+    let _ = support::deacon_command()
         .current_dir(workspace)
         .arg("down")
         .arg("--workspace-folder")
@@ -137,8 +137,7 @@ volumes:
     let cli_mount_source = workspace.join("cli-data");
     fs::create_dir_all(&cli_mount_source).unwrap();
 
-    let up_output = Command::cargo_bin("deacon")
-        .unwrap()
+    let up_output = support::deacon_command()
         .current_dir(workspace)
         .arg("up")
         .arg("--workspace-folder")

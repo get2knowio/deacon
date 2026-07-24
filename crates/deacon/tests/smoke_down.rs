@@ -8,7 +8,8 @@
 //! NOTE: These tests assume Docker is available and running. They will fail
 //! if Docker is not present or cannot start containers.
 
-use assert_cmd::Command;
+mod support;
+
 use std::fs;
 use tempfile::TempDir;
 
@@ -49,7 +50,7 @@ fn test_down_before_up() {
     .unwrap();
 
     // Test down command before any up
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let down_output = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -96,7 +97,7 @@ fn test_down_after_up_idempotent() {
     .unwrap();
 
     // First: up command
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -114,7 +115,7 @@ fn test_down_after_up_idempotent() {
     );
 
     // Second: down command (should succeed)
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let down_output = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -134,7 +135,7 @@ fn test_down_after_up_idempotent() {
     println!("Down after up succeeded");
 
     // Third: down command again (should be idempotent, not error)
-    let mut down_cmd2 = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd2 = support::deacon_command();
     let down_output2 = down_cmd2
         .current_dir(&temp_dir)
         .arg("down")
@@ -184,8 +185,7 @@ fn test_down_all_sweeps_stale_by_local_folder() {
     .unwrap();
 
     // Bring up the deacon-managed container.
-    let up_output = Command::cargo_bin("deacon")
-        .unwrap()
+    let up_output = support::deacon_command()
         .arg("up")
         .arg("--skip-post-create")
         .arg("--skip-non-blocking-commands")
@@ -246,8 +246,7 @@ fn test_down_all_sweeps_stale_by_local_folder() {
     );
 
     // Sweep everything with --all --remove.
-    let down_output = Command::cargo_bin("deacon")
-        .unwrap()
+    let down_output = support::deacon_command()
         .arg("down")
         .arg("--workspace-folder")
         .arg(&workspace)
