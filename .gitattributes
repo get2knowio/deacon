@@ -18,3 +18,19 @@ conformance/inventory/constraints.json -text
 # Fixture schemas and inventories carrying their own fingerprints/expected bytes.
 fixtures/conformance/schemas/** -text
 fixtures/conformance/inventory-drift/** -text
+
+# The normative clause inventory (021-normative-clause-inventory) applies the same
+# discipline to prose: `clause generate`/`check` fingerprint-verify the vendored spec
+# Markdown against `manifest.json`, byte-compare the committed inventory against a fresh
+# regeneration, and explicitly reject any CR byte in the vendored/fixture prose. A Windows
+# CRLF checkout would break every one of those checks, so these paths must stay byte-exact.
+
+# Vendored upstream spec prose + their fingerprint manifests (never edited in place).
+conformance/spec/** -text
+
+# The machine-owned canonical clause inventory (byte-compared by `clause check` / V14).
+conformance/inventory/clauses.json -text
+
+# Fixture prose and clause inventories carrying their own fingerprints/expected bytes.
+fixtures/conformance/prose/** -text
+fixtures/conformance/clause-drift/** -text
