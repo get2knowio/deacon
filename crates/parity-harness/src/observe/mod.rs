@@ -68,6 +68,12 @@ pub struct RunContext {
     /// The container id, once the case has brought one up. `None` for pure CLI-process
     /// cases that never create a container.
     pub container_id: Option<String>,
+    /// The full `docker inspect` object for [`RunContext::container_id`], captured ONCE by
+    /// the runner (off the async executor via `spawn_blocking`) after the container exists.
+    /// The Docker channel observers read THIS instead of each spawning their own
+    /// `docker inspect` — so a case pays a single inspect, and no observer blocks the async
+    /// executor (finding #4). `None` when no container exists / it was removed.
+    pub container_inspect: Option<serde_json::Value>,
     /// The case's `fsAllowlist` — the path/glob allowlist the filesystem observer is
     /// scoped to (clarify Q1: allowlist-scoped, never a full-tree diff). Empty for cases
     /// with no filesystem expectation.
@@ -103,6 +109,7 @@ impl RunContext {
         RunContext {
             workspace,
             container_id: None,
+            container_inspect: None,
             fs_allowlist: Vec::new(),
             outcomes: HashMap::new(),
             op_snapshots: HashMap::new(),
@@ -184,7 +191,13 @@ pub(crate) fn not_captured(channel: &'static str, op_id: &str) -> RawChannelEvid
 /// Run `docker inspect <id>` and return the first result object, `None` when the object
 /// does not exist (container/image removed — a legitimate not-captured state), or a
 /// fail-loud [`HarnessError::DockerUnavailable`] when `docker` itself cannot run.
-pub(crate) fn docker_inspect(id: &str) -> Result<Option<serde_json::Value>, HarnessError> {
+///
+/// This is a BLOCKING call. Async callers (the runner) must invoke it via
+/// `tokio::task::spawn_blocking` so it never blocks the executor (finding #4); the
+/// one-shot refresh / `snapshot check` CLIs and the `Drop` cleanup guard call it directly
+/// (non-concurrent, like `Drop`). Observers never call it — they read the pre-fetched
+/// [`RunContext::container_inspect`].
+pub fn docker_inspect(id: &str) -> Result<Option<serde_json::Value>, HarnessError> {
     let output = std::process::Command::new("docker")
         .args(["inspect", id])
         .output()

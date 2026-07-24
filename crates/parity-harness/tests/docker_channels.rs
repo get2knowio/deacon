@@ -71,6 +71,12 @@ fn containers_for(ws: &str) -> Vec<String> {
 fn ctx_for(container_id: &str) -> RunContext {
     let mut ctx = RunContext::new(std::path::PathBuf::from("/tmp"));
     ctx.container_id = Some(container_id.to_string());
+    // The runner pre-fetches the inspect once and the observers read it (finding #4); this
+    // helper does the same so each observer sees the container's state AT this moment (the
+    // cleanup-transition test re-builds the context after stop/rm).
+    ctx.container_inspect = parity_harness::observe::docker_inspect(container_id)
+        .ok()
+        .flatten();
     ctx
 }
 

@@ -152,6 +152,19 @@ async fn snapshot_oracle(case: &TestCase, cfg: &RunConfig<'_>) -> Result<Evaluat
     if let Some(v) = snapshot::current_oracle_version_pin() {
         current.oracle_version = v;
     }
+    // Recompute imageDigests for a Docker case (finding #5) so a changed pinned image is
+    // caught; offloaded so the docker probe never blocks the async executor (finding #4).
+    // `None` (docker unreachable) carries the recorded digests rather than fabricating.
+    let case_for_digests = case.clone();
+    let fixtures_root = cfg.fixtures_root.to_path_buf();
+    let recomputed_digests = tokio::task::spawn_blocking(move || {
+        runner::image_digests_for_case(&case_for_digests, &fixtures_root)
+    })
+    .await
+    .map_err(runner::blocking_join_err)?;
+    if let Some(digests) = recomputed_digests {
+        current.image_digests = digests.into_iter().collect();
+    }
     if let snapshot::Staleness::Stale { field, .. } =
         snapshot::compare_staleness(&snap.provenance, &current)
     {

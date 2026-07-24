@@ -15,9 +15,7 @@ use serde_json::{Value, json};
 
 use crate::HarnessError;
 use crate::evidence::RawChannelEvidence;
-use crate::observe::{
-    ChannelObserver, RunContext, docker_inspect, env_array_to_object, not_captured,
-};
+use crate::observe::{ChannelObserver, RunContext, env_array_to_object, not_captured};
 
 /// Captures `chan-injected-process` from the case's container.
 #[derive(Debug, Clone, Copy)]
@@ -33,10 +31,8 @@ impl ChannelObserver for InjectedProcessObserver {
         ctx: &RunContext,
         op: &Operation,
     ) -> Result<RawChannelEvidence, HarnessError> {
-        let Some(id) = &ctx.container_id else {
-            return Ok(not_captured(CHAN_INJECTED_PROCESS, &op.id));
-        };
-        let Some(inspect) = docker_inspect(id)? else {
+        // Read the runner's pre-fetched inspect (finding #4) — no subprocess here.
+        let Some(inspect) = &ctx.container_inspect else {
             return Ok(not_captured(CHAN_INJECTED_PROCESS, &op.id));
         };
         let config = &inspect["Config"];
