@@ -3,7 +3,8 @@
 //! Verifies that spinner output does not appear when stderr is not a TTY (as in CI/assert_cmd capture)
 //! and that outputs remain free of spinner artifacts.
 
-use assert_cmd::Command;
+mod support;
+
 use std::fs;
 use tempfile::TempDir;
 
@@ -35,7 +36,7 @@ fn spinner_not_rendered_when_not_tty_up_down() {
     .unwrap();
 
     // Run `deacon up` with captured IO (non-TTY). Spinner should NOT render.
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -71,7 +72,7 @@ fn spinner_not_rendered_when_not_tty_up_down() {
     }
 
     // Run `deacon down` and again ensure no spinner frames leak
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let down_output = down_cmd
         .current_dir(&temp_dir)
         .arg("down")

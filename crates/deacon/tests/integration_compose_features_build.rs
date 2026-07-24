@@ -14,7 +14,8 @@
 //! because each test uses its own temp dir, compose project name, and image
 //! tag.
 
-use assert_cmd::Command;
+mod support;
+
 use std::fs;
 use std::process::Command as StdCommand;
 use tempfile::TempDir;
@@ -146,8 +147,7 @@ fn compose_features_image_shape_installs_feature() {
     // Best-effort cleanup before the test in case a previous run left state.
     compose_cleanup(workspace);
 
-    let up = Command::cargo_bin("deacon")
-        .expect("deacon binary")
+    let up = support::deacon_command()
         .current_dir(workspace)
         .args([
             "up",
@@ -270,8 +270,7 @@ fn compose_features_build_shape_installs_feature() {
     // subdirectory.
     compose_cleanup(workspace);
 
-    let up = Command::cargo_bin("deacon")
-        .expect("deacon binary")
+    let up = support::deacon_command()
         .current_dir(workspace)
         .args([
             "up",
@@ -399,8 +398,7 @@ fn build_compose_with_features_tags_final_image() {
     .expect("write devcontainer.json");
 
     let image_tag = "deacon-test/compose-features:latest";
-    let out = Command::cargo_bin("deacon")
-        .expect("deacon binary")
+    let out = support::deacon_command()
         .current_dir(workspace)
         .args([
             "build",

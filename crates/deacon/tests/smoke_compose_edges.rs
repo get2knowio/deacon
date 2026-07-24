@@ -9,7 +9,8 @@
 //! NOTE: These tests assume Docker is available and running. They will fail
 //! if Docker/Compose is not present or cannot start containers.
 
-use assert_cmd::Command;
+mod support;
+
 use std::fs;
 use tempfile::TempDir;
 
@@ -66,7 +67,7 @@ fn test_compose_path_detection_without_docker() {
     .unwrap();
 
     // Test up command with compose configuration
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -81,7 +82,7 @@ fn test_compose_path_detection_without_docker() {
     );
 
     // Cleanup only if we actually brought the project up successfully
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _ = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -133,7 +134,7 @@ fn test_compose_subfolder_config() {
     .unwrap();
 
     // Test up command with --config pointing to subfolder config
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -151,7 +152,7 @@ fn test_compose_subfolder_config() {
     );
 
     // Clean up: down command
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _down_output = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -185,7 +186,7 @@ fn test_compose_missing_file_edge_case() {
     .unwrap();
 
     // Test up command with missing compose file
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -246,7 +247,7 @@ services:
     .unwrap();
 
     // Test up command with invalid compose file
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -330,7 +331,7 @@ fn test_compose_multiple_files() {
     .unwrap();
 
     // Test up command with multiple compose files
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -400,7 +401,7 @@ RUN echo "app service" > /tmp/app.txt
     // The default log level is `warn`; the "Building Docker Compose service:
     // <name>" status is emitted at INFO, so opt into it via the global `-v`
     // flag to assert on the compose-service build indicators below.
-    let mut build_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut build_cmd = support::deacon_command();
     let build_output = build_cmd
         .current_dir(&temp_dir)
         .arg("-v")
@@ -499,16 +500,11 @@ fn test_compose_down_stops_but_keeps_containers() {
 
     cleanup();
 
-    // deacon's workspace-state cache lives under `std::env::temp_dir()` (shared
-    // across processes). Isolate this test's state via a per-test TMPDIR so a
-    // concurrent docker test can't clobber the shared state index and make our
-    // `down` lose the saved compose project. `up` and `down` must share it.
-    let state_home = temp_dir.path().join("state-home");
-    fs::create_dir_all(&state_home).unwrap();
-
-    let up = Command::cargo_bin("deacon")
-        .unwrap()
-        .env("TMPDIR", &state_home)
+    // `support::deacon_command()` isolates deacon's shared workspace-state cache
+    // per test process, so a concurrent docker test can't clobber the state
+    // index and make our `down` lose the saved compose project. `up` and `down`
+    // share the same isolated home automatically (same process).
+    let up = support::deacon_command()
         .arg("up")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
@@ -522,9 +518,7 @@ fn test_compose_down_stops_but_keeps_containers() {
     );
     assert_eq!(count("running"), 1, "service should be running after up");
 
-    let down = Command::cargo_bin("deacon")
-        .unwrap()
-        .env("TMPDIR", &state_home)
+    let down = support::deacon_command()
         .arg("down")
         .arg("--workspace-folder")
         .arg(temp_dir.path())

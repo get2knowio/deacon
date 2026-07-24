@@ -2,6 +2,44 @@
 
 #![allow(dead_code)]
 
+use assert_cmd::Command;
+use std::sync::OnceLock;
+use tempfile::TempDir;
+
+/// Process-global isolated temp home, created once per test process.
+///
+/// deacon's workspace-state cache lives at `std::env::temp_dir()/deacon-state/`
+/// — a path shared across every process. Its on-disk `index.json` is a single
+/// read-modify-write file, so two concurrent `deacon` invocations (e.g. two
+/// parallel `up`/`down` tests) can clobber each other's index entry
+/// (last-writer-wins), making a later `down` "lose" the state its `up` saved.
+/// See `crates/core/src/state.rs::default_cache_dir`.
+static ISOLATED_TMP: OnceLock<TempDir> = OnceLock::new();
+
+fn isolated_tmp_home() -> &'static std::path::Path {
+    ISOLATED_TMP
+        .get_or_init(|| TempDir::new().expect("failed to create isolated temp home for tests"))
+        .path()
+}
+
+/// Build a `deacon` CLI command with an isolated temp home, so its
+/// workspace-state cache can't collide with other test processes.
+///
+/// Prefer this over `Command::cargo_bin("deacon")` in any test that runs
+/// `up`/`down`/`exec` (or otherwise touches workspace state). Under nextest each
+/// test runs in its own process, so the [`OnceLock`] home is unique per test;
+/// an `up` and its later `down` within the same test share it (as they must).
+/// The redirect is via `TMPDIR` (Unix) plus `TMP`/`TEMP` (Windows), which is
+/// what `std::env::temp_dir()` honors on each platform.
+pub fn deacon_command() -> Command {
+    let home = isolated_tmp_home();
+    let mut cmd = Command::cargo_bin("deacon").expect("deacon binary should build");
+    cmd.env("TMPDIR", home);
+    cmd.env("TMP", home);
+    cmd.env("TEMP", home);
+    cmd
+}
+
 /// Helper to skip tests that require network access.
 ///
 /// Tests that make network requests should use this as a guard at the beginning:

@@ -7,7 +7,8 @@
 //! NOTE: These tests assume Docker is available and running. They will fail
 //! if Docker is not present or cannot start containers.
 
-use assert_cmd::Command;
+mod support;
+
 use std::fs;
 use tempfile::TempDir;
 
@@ -50,7 +51,7 @@ fn test_up_idempotency() {
     .unwrap();
 
     // First up command
-    let mut up_cmd1 = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd1 = support::deacon_command();
     let up_output1 = up_cmd1
         .current_dir(&temp_dir)
         .arg("up")
@@ -66,7 +67,7 @@ fn test_up_idempotency() {
     );
 
     // Second up command (should be idempotent)
-    let mut up_cmd2 = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd2 = support::deacon_command();
     let up_output2 = up_cmd2
         .current_dir(&temp_dir)
         .arg("up")
@@ -89,7 +90,7 @@ fn test_up_idempotency() {
     }
 
     // Clean up: down command
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _down_output = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -129,7 +130,7 @@ fn test_skip_non_blocking_commands() {
     .unwrap();
 
     // Test up command with --skip-non-blocking-commands flag
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -153,7 +154,7 @@ fn test_skip_non_blocking_commands() {
     }
 
     // Test a regular up command after the skip version for comparison
-    let mut up_cmd_normal = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd_normal = support::deacon_command();
     let up_output_normal = up_cmd_normal
         .current_dir(&temp_dir)
         .arg("up")
@@ -171,7 +172,7 @@ fn test_skip_non_blocking_commands() {
     );
 
     // Clean up: down command
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _down_output = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
@@ -208,7 +209,7 @@ fn test_skip_flag_combinations() {
     .unwrap();
 
     // Test up with --skip-post-create flag
-    let mut up_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd = support::deacon_command();
     let up_output = up_cmd
         .current_dir(&temp_dir)
         .arg("up")
@@ -227,7 +228,7 @@ fn test_skip_flag_combinations() {
     );
 
     // Test up with both skip flags
-    let mut up_cmd_both = Command::cargo_bin("deacon").unwrap();
+    let mut up_cmd_both = support::deacon_command();
     let up_output_both = up_cmd_both
         .current_dir(&temp_dir)
         .arg("up")
@@ -247,7 +248,7 @@ fn test_skip_flag_combinations() {
     );
 
     // Clean up: down command
-    let mut down_cmd = Command::cargo_bin("deacon").unwrap();
+    let mut down_cmd = support::deacon_command();
     let _down_output = down_cmd
         .current_dir(&temp_dir)
         .arg("down")
