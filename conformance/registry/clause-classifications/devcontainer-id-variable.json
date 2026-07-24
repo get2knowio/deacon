@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-devcontainer-id-variable-compute-a-sha-256-hash-from-the-utf-8-encoded-in-algo-ff771e6e",
+      "clause": "clu-devcontainer-id-variable-compute-a-sha-256-hash-from-the-utf-8-encoded-in-algo-ff771e6e",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-45721081",
+      "clause": "clu-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-45721081",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-bd0ca7d0",
+      "clause": "clu-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-bd0ca7d0",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-devcontainer-id-variable-it-should-only-be-used-in-parts-of-the-configura-desc-556d8d7d",
+      "clause": "clu-devcontainer-id-variable-it-should-only-be-used-in-parts-of-the-configura-desc-556d8d7d",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-devcontainer-id-variable-the-identifier-must-only-contain-alphanumeric-ch-desc-13534537",
+      "clause": "clu-devcontainer-id-variable-the-identifier-must-only-contain-alphanumeric-ch-desc-13534537",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-devcontainer-id-variable-they-must-ensure-that-it-is-unique-among-other-d-desc-f5994239",
+      "clause": "clu-devcontainer-id-variable-they-must-ensure-that-it-is-unique-among-other-d-desc-f5994239",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-devcontainer-id-variable-to-ensure-implementations-get-to-the-same-result-algo-001cb9f4",
+      "clause": "clu-devcontainer-id-variable-to-ensure-implementations-get-to-the-same-result-algo-001cb9f4",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-devcontainer-id-variable-use-a-base-32-encoded-representation-left-padded-algo-26efae91",
+      "clause": "clu-devcontainer-id-variable-use-a-base-32-encoded-representation-left-padded-algo-26efae91",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    }
+  ]
+}

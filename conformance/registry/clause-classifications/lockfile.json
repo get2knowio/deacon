@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-lockfile-dependson-an-array-of-feature-identifiers-equal-io-d7227bc0",
+      "clause": "clu-lockfile-dependson-an-array-of-feature-identifiers-equal-io-d7227bc0",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-lockfile-integrity-sha256-followed-by-the-hex-encoded-sha-io-87cbdc86",
+      "clause": "clu-lockfile-integrity-sha256-followed-by-the-hex-encoded-sha-io-87cbdc86",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-lockfile-local-features-and-the-deprecated-github-release-desc-c92caf0c",
+      "clause": "clu-lockfile-local-features-and-the-deprecated-github-release-desc-c92caf0c",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-lockfile-resolved-oci-feature-a-qualified-feature-id-with-io-d5cc5400",
+      "clause": "clu-lockfile-resolved-oci-feature-a-qualified-feature-id-with-io-d5cc5400",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-lockfile-the-feature-identifiers-recorded-as-keys-and-in-desc-5c3b3fc9",
+      "clause": "clu-lockfile-the-feature-identifiers-recorded-as-keys-and-in-desc-5c3b3fc9",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-lockfile-the-lockfile-is-named-devcontainer-lock-json-is-io-0aa47a05",
+      "clause": "clu-lockfile-the-lockfile-is-named-devcontainer-lock-json-is-io-0aa47a05",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-lockfile-version-the-full-version-number-io-3dc63be7",
+      "clause": "clu-lockfile-version-the-full-version-number-io-3dc63be7",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    }
+  ]
+}

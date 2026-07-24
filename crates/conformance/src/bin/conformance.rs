@@ -18,21 +18,27 @@ use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use deacon_conformance::certify::certify;
+use deacon_conformance::clause::{generate_clauses, render as render_clauses, write_clauses};
+use deacon_conformance::clause_diff::{
+    diff as clause_diff, render_json as render_clause_diff_json, render_md as render_clause_diff_md,
+};
 use deacon_conformance::diff::{
     diff, render_json as render_diff_json, render_md as render_diff_md,
 };
 use deacon_conformance::inventory::{
     InventoryDrift, compare, generate_inventory, render, write_inventory,
 };
-use deacon_conformance::load::{LoadError, Registry, load_inventory};
-use deacon_conformance::model::ConstraintInventory;
+use deacon_conformance::load::{
+    LoadError, Registry, load_clause_inventory, load_inventory, load_spec_manifest,
+};
+use deacon_conformance::model::{ClauseInventory, ConstraintInventory, DocumentScope};
 use deacon_conformance::report::write_reports;
 use deacon_conformance::validate::{
-    InventoryInputs, Violation, validate_path, validate_path_with_inventory,
+    ClauseInputs, InventoryInputs, Violation, validate_path, validate_path_with_inventory,
 };
 use deacon_conformance::{
-    CURRENT_SCHEMA_PIN, default_inventory_file, default_pinned_schemas_dir, default_registry_dir,
-    workspace_root,
+    CURRENT_SCHEMA_PIN, clause_paths_for, default_clauses_file, default_inventory_file,
+    default_pinned_schemas_dir, default_pinned_spec_dir, default_registry_dir, workspace_root,
 };
 
 /// Structural conformance-registry tooling (dev-only).
@@ -85,6 +91,67 @@ enum Command {
     Inventory {
         #[command(subcommand)]
         command: InventoryCommand,
+    },
+    /// Normative clause inventory tooling (021-normative-clause-inventory).
+    Clause {
+        #[command(subcommand)]
+        command: ClauseCommand,
+    },
+}
+
+/// `clause <generate|check|diff|scaffold>` — machine-owned prose-clause inventory
+/// operations (contracts/cli-clause.md). NEVER performs network IO and NEVER invokes
+/// an LLM — pure functions of the committed records and the vendored pinned prose.
+#[derive(Debug, Subcommand)]
+enum ClauseCommand {
+    /// Canonicalize the committed clause records against the vendored pinned prose
+    /// (recomputes ids/fingerprints, verifies each excerpt is present at its heading).
+    Generate {
+        /// Pinned-spec directory (holds `manifest.json` + the vendored Markdown files).
+        /// Defaults to `<workspace>/conformance/spec/<pin>/`.
+        #[arg(long, value_name = "DIR")]
+        spec: Option<PathBuf>,
+        /// Output clause-inventory file. Defaults to
+        /// `<workspace>/conformance/inventory/clauses.json`.
+        #[arg(long, value_name = "FILE")]
+        clauses: Option<PathBuf>,
+    },
+    /// Regenerate in memory and byte-compare against the committed clause inventory.
+    Check {
+        /// Pinned-spec directory (see `generate`).
+        #[arg(long, value_name = "DIR")]
+        spec: Option<PathBuf>,
+        /// Committed clause-inventory file to compare against (see `generate --clauses`).
+        #[arg(long, value_name = "FILE")]
+        clauses: Option<PathBuf>,
+    },
+    /// Deterministically diff two clause-inventory files (data-model §4, match key:
+    /// substance-anchored id): new / removed / moved / changed / non-material.
+    Diff {
+        /// The old (left) clause-inventory file.
+        #[arg(value_name = "OLD")]
+        old: PathBuf,
+        /// The new (right) clause-inventory file.
+        #[arg(value_name = "NEW")]
+        new: PathBuf,
+        /// Output format. Defaults to `json`; `md` renders the human review document.
+        #[arg(long, value_name = "FORMAT", default_value = "json")]
+        format: DiffFormat,
+        /// Write the diff to a file instead of stdout.
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Emit skeleton `clc-` records (stdout only) for every currently unclassified
+    /// clause, with the sentinel `disposition: "UNREVIEWED"` (loader-rejected). Per-clause
+    /// skeletons for consumer/ambiguous clauses; one per-document skeleton for authoring
+    /// documents. Never writes into the registry.
+    Scaffold {
+        /// Committed clause-inventory file to scaffold from (see `generate --clauses`).
+        #[arg(long, value_name = "FILE")]
+        clauses: Option<PathBuf>,
+        /// Pinned-spec directory (for per-document `scope`). Defaults to the pinned dir.
+        #[arg(long, value_name = "DIR")]
+        spec: Option<PathBuf>,
     },
 }
 
@@ -187,6 +254,333 @@ fn run(cli: Cli) -> i32 {
                 inventory_scaffold(&registry_dir, inventory)
             }
         },
+        Command::Clause { command } => match command {
+            ClauseCommand::Generate { spec, clauses } => clause_generate(spec, clauses),
+            ClauseCommand::Check { spec, clauses } => clause_check(spec, clauses),
+            ClauseCommand::Diff {
+                old,
+                new,
+                format,
+                out,
+            } => clause_diff_cmd(&old, &new, format, out.as_deref()),
+            ClauseCommand::Scaffold { clauses, spec } => {
+                clause_scaffold(&registry_dir, clauses, spec)
+            }
+        },
+    }
+}
+
+/// `clause generate` (contracts/cli-clause.md): fingerprint-verify the spec manifest,
+/// canonicalize the committed clause records against the vendored prose, and write the
+/// byte-stable inventory atomically. Exit `0` on success, `1` on any integrity error
+/// (never a partial file), `2` on a write IO failure.
+fn clause_generate(spec: Option<PathBuf>, clauses: Option<PathBuf>) -> i32 {
+    let spec_dir = spec.unwrap_or_else(default_pinned_spec_dir);
+    let out_file = clauses.unwrap_or_else(default_clauses_file);
+
+    let inventory = match generate_clauses(&spec_dir, &out_file) {
+        Ok(inv) => inv,
+        Err(e) => {
+            eprintln!("error: clause generation failed: {e}");
+            return 1;
+        }
+    };
+    match write_clauses(&out_file, &inventory) {
+        Ok(()) => {
+            println!("{}", out_file.display());
+            eprintln!(
+                "wrote {} clause unit(s) to {}",
+                inventory.units.len(),
+                out_file.display()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!(
+                "error: could not write clauses to {}: {e}",
+                out_file.display()
+            );
+            2
+        }
+    }
+}
+
+/// `clause check` (contracts/cli-clause.md): regenerate in memory and byte-compare
+/// against the committed clause inventory. Exit `0` if identical, `1` if it differs or
+/// on any generate-class error, `2` if the committed file is unreadable.
+fn clause_check(spec: Option<PathBuf>, clauses: Option<PathBuf>) -> i32 {
+    let spec_dir = spec.unwrap_or_else(default_pinned_spec_dir);
+    let clauses_file = clauses.unwrap_or_else(default_clauses_file);
+
+    let regenerated = match generate_clauses(&spec_dir, &clauses_file) {
+        Ok(inv) => inv,
+        Err(e) => {
+            eprintln!("error: clause regeneration failed: {e}");
+            return 1;
+        }
+    };
+    let committed_raw = match std::fs::read_to_string(&clauses_file) {
+        Ok(raw) => raw,
+        Err(e) => {
+            eprintln!(
+                "error: could not read committed clause inventory {}: {e}",
+                clauses_file.display()
+            );
+            return 2;
+        }
+    };
+
+    if committed_raw == render_clauses(&regenerated) {
+        eprintln!("ok: {} matches regeneration", clauses_file.display());
+        return 0;
+    }
+
+    // Compute a compact new/removed/moved/changed summary for diagnosis.
+    match serde_json::from_str::<ClauseInventory>(&committed_raw) {
+        Ok(committed) => {
+            let d = clause_diff(&committed, &regenerated);
+            eprintln!(
+                "error: committed clause inventory {} is out of date (new {}, removed {}, moved {}, \
+                 changed {}, non-material {})",
+                clauses_file.display(),
+                d.new_clauses.len(),
+                d.removed.len(),
+                d.moved.len(),
+                d.changed.len(),
+                d.non_material.len(),
+            );
+            for e in &d.new_clauses {
+                eprintln!("  + {}", e.id);
+            }
+            for e in &d.removed {
+                eprintln!("  - {}", e.id);
+            }
+            for e in &d.changed {
+                eprintln!("  ~ {} -> {}", e.old_id, e.new_id);
+            }
+        }
+        Err(e) => eprintln!(
+            "error: committed clause inventory is out of date and unparseable: {}: {e}",
+            clauses_file.display()
+        ),
+    }
+    1
+}
+
+/// `clause diff <old> <new>` (contracts/cli-clause.md): load two clause-inventory files,
+/// compute the deterministic revision diff, and write it to stdout or `--out`. Exit `0`
+/// on success (incl. an empty diff), `1` on unreadable/malformed input, `2` on `--out`
+/// write failure. NEVER performs network IO.
+fn clause_diff_cmd(old: &Path, new: &Path, format: DiffFormat, out: Option<&Path>) -> i32 {
+    let old_inv = match load_clause_diff_input(old) {
+        Ok(inv) => inv,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    let new_inv = match load_clause_diff_input(new) {
+        Ok(inv) => inv,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+
+    let result = clause_diff(&old_inv, &new_inv);
+    let rendered = match format {
+        DiffFormat::Json => render_clause_diff_json(&result),
+        DiffFormat::Md => render_clause_diff_md(&result),
+    };
+    let summary = format!(
+        "new {}, removed {}, moved {}, changed {}, non-material {}",
+        result.new_clauses.len(),
+        result.removed.len(),
+        result.moved.len(),
+        result.changed.len(),
+        result.non_material.len(),
+    );
+
+    match out {
+        Some(path) => match std::fs::write(path, &rendered) {
+            Ok(()) => {
+                println!("{}", path.display());
+                eprintln!("wrote clause diff to {} ({summary})", path.display());
+                0
+            }
+            Err(e) => {
+                eprintln!(
+                    "error: could not write clause diff to {}: {e}",
+                    path.display()
+                );
+                2
+            }
+        },
+        None => {
+            print!("{rendered}");
+            eprintln!("clause diff: {summary}");
+            0
+        }
+    }
+}
+
+/// Read one `clause diff` input file into a [`ClauseInventory`] (a missing file is a hard
+/// error — the diff has two required positional inputs).
+fn load_clause_diff_input(path: &Path) -> Result<ClauseInventory, String> {
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| format!("could not read clause inventory {}: {e}", path.display()))?;
+    serde_json::from_str::<ClauseInventory>(&raw)
+        .map_err(|e| format!("could not parse clause inventory {}: {e}", path.display()))
+}
+
+/// `clause scaffold` (contracts/cli-clause.md): emit skeleton `clc-` records to stdout for
+/// every currently unclassified clause. Per-clause skeletons for consumer/ambiguous
+/// clauses; ONE per-document skeleton for an authoring document that has no covering
+/// document-scope record yet. Each carries the sentinel `disposition: "UNREVIEWED"` — a
+/// value the loader rejects. Never writes into the registry.
+///
+/// Exit `0` on success (possibly zero skeletons); `1` if the inventory/registry/manifest
+/// is unreadable.
+fn clause_scaffold(registry_dir: &Path, clauses: Option<PathBuf>, spec: Option<PathBuf>) -> i32 {
+    let (default_spec, default_clauses) = clause_paths_for(registry_dir);
+    let clauses_file = clauses.unwrap_or(default_clauses);
+    let spec_dir = spec.unwrap_or(default_spec);
+
+    let committed = match load_clause_inventory(&clauses_file) {
+        Ok(Some(inv)) => inv,
+        Ok(None) => {
+            eprintln!(
+                "error: committed clause inventory {} does not exist",
+                clauses_file.display()
+            );
+            return 1;
+        }
+        Err(e) => {
+            eprintln!(
+                "error: could not read committed clause inventory {}: {e}",
+                clauses_file.display()
+            );
+            return 1;
+        }
+    };
+    let manifest = match load_spec_manifest(&spec_dir) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!(
+                "error: could not read spec manifest {}: {e}",
+                spec_dir.display()
+            );
+            return 1;
+        }
+    };
+    let scope: HashSet<&str> = manifest
+        .documents
+        .iter()
+        .filter(|d| d.scope == DocumentScope::Authoring)
+        .map(|d| d.key.as_str())
+        .collect();
+    let registry = match Registry::load(registry_dir) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!(
+                "error: could not read registry {}: {e}",
+                registry_dir.display()
+            );
+            return 1;
+        }
+    };
+    // Already-covered: per-clause classifications by clause id; document defaults by key.
+    let classified_clauses: HashSet<&str> = registry
+        .clause_classifications
+        .iter()
+        .filter_map(|c| c.clause.as_deref())
+        .collect();
+    let classified_docs: HashSet<&str> = registry
+        .clause_classifications
+        .iter()
+        .filter_map(|c| c.document.as_deref())
+        .collect();
+
+    use deacon_conformance::model::Testability;
+    let mut skeletons: Vec<ClauseScaffoldRecord> = Vec::new();
+    let mut emitted_doc_defaults: HashSet<String> = HashSet::new();
+    for unit in &committed.units {
+        if classified_clauses.contains(unit.id.as_str()) {
+            continue;
+        }
+        let authoring = scope.contains(unit.document.as_str());
+        let ambiguous = unit.testability == Testability::Ambiguous;
+        // Authoring, non-ambiguous clauses are covered by a per-document default.
+        if authoring && !ambiguous {
+            if classified_docs.contains(unit.document.as_str())
+                || emitted_doc_defaults.contains(&unit.document)
+            {
+                continue;
+            }
+            emitted_doc_defaults.insert(unit.document.clone());
+            skeletons.push(ClauseScaffoldRecord::for_document(&unit.document));
+        } else {
+            skeletons.push(ClauseScaffoldRecord::for_clause(&unit.id));
+        }
+    }
+
+    match serde_json::to_string_pretty(&skeletons) {
+        Ok(doc) => println!("{doc}"),
+        Err(e) => {
+            eprintln!("error: could not serialize scaffold records: {e}");
+            return 1;
+        }
+    }
+    eprintln!(
+        "emitted {} skeleton clause-classification record(s) for {} (sentinel disposition \
+         \"UNREVIEWED\" — edit before committing)",
+        skeletons.len(),
+        clauses_file.display()
+    );
+    0
+}
+
+/// A skeleton clause-classification record emitted by `clause scaffold` (sentinel
+/// `disposition: "UNREVIEWED"`, loader-rejected). Not the typed `ClauseClassification`.
+#[derive(Debug, serde::Serialize)]
+struct ClauseScaffoldRecord {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    clause: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    document: Option<String>,
+    disposition: &'static str,
+    behaviors: Vec<String>,
+    rationale: Option<String>,
+    notes: Option<String>,
+}
+
+impl ClauseScaffoldRecord {
+    const SENTINEL: &'static str = "UNREVIEWED";
+
+    fn for_clause(clause_id: &str) -> ClauseScaffoldRecord {
+        let tail = clause_id.strip_prefix("clu-").unwrap_or(clause_id);
+        ClauseScaffoldRecord {
+            id: format!("clc-{tail}"),
+            clause: Some(clause_id.to_string()),
+            document: None,
+            disposition: ClauseScaffoldRecord::SENTINEL,
+            behaviors: Vec::new(),
+            rationale: None,
+            notes: None,
+        }
+    }
+
+    fn for_document(document: &str) -> ClauseScaffoldRecord {
+        ClauseScaffoldRecord {
+            id: format!("clc-doc-{document}"),
+            clause: None,
+            document: Some(document.to_string()),
+            disposition: ClauseScaffoldRecord::SENTINEL,
+            behaviors: Vec::new(),
+            rationale: None,
+            notes: None,
+        }
     }
 }
 
@@ -505,7 +899,18 @@ fn validate(registry_dir: &Path, today: &str, json: bool) -> i32 {
         schemas_dir: &schemas_dir,
         inventory_file: &inventory_file,
     };
-    let violations = match validate_path_with_inventory(registry_dir, today, &repo_root, &inputs) {
+    let (spec_dir, clauses_file) = clause_paths_for(registry_dir);
+    let clause_inputs = ClauseInputs {
+        spec_dir: &spec_dir,
+        clauses_file: &clauses_file,
+    };
+    let violations = match validate_path_with_inventory(
+        registry_dir,
+        today,
+        &repo_root,
+        &inputs,
+        &clause_inputs,
+    ) {
         Ok(violations) => violations,
         Err(LoadError::Root { path, cause }) => {
             eprintln!("error: cannot read registry root {path:?}: {cause}");
@@ -593,8 +998,50 @@ fn report(registry_dir: &Path, today: &str, out_dir: Option<PathBuf>) -> i32 {
         }
     };
 
+    // The committed clause inventory + spec manifest are siblings of the registry dir.
+    let (spec_dir, clauses_file) = clause_paths_for(registry_dir);
+    let clause_inventory = match load_clause_inventory(&clauses_file) {
+        Ok(inv) => inv,
+        Err(e) => {
+            eprintln!(
+                "error: could not load clause inventory {}: {e}",
+                clauses_file.display()
+            );
+            return 2;
+        }
+    };
+    // Document-scope sets for the clause join (empty when the manifest is absent).
+    let (authoring_docs, covered_docs) = match load_spec_manifest(&spec_dir) {
+        Ok(manifest) => {
+            let authoring: std::collections::HashSet<String> = manifest
+                .documents
+                .iter()
+                .filter(|d| d.scope == DocumentScope::Authoring)
+                .map(|d| d.key.clone())
+                .collect();
+            let covered: std::collections::HashSet<String> = registry
+                .clause_classifications
+                .iter()
+                .filter_map(|c| c.document.clone())
+                .filter(|d| authoring.contains(d))
+                .collect();
+            (authoring, covered)
+        }
+        Err(_) => (
+            std::collections::HashSet::new(),
+            std::collections::HashSet::new(),
+        ),
+    };
+
     let out_dir = out_dir.unwrap_or_else(default_report_dir);
-    match write_reports(&registry, inventory.as_ref(), &out_dir) {
+    match write_reports(
+        &registry,
+        inventory.as_ref(),
+        clause_inventory.as_ref(),
+        &authoring_docs,
+        &covered_docs,
+        &out_dir,
+    ) {
         Ok((json_path, md_path)) => {
             // Human-readable result on stdout; diagnostics on stderr.
             println!("{}", json_path.display());
@@ -630,7 +1077,12 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
         schemas_dir: &schemas_dir,
         inventory_file: &inventory_file,
     };
-    let result = certify(&registry, &inputs);
+    let (spec_dir, clauses_file) = clause_paths_for(registry_dir);
+    let clause_inputs = ClauseInputs {
+        spec_dir: &spec_dir,
+        clauses_file: &clauses_file,
+    };
+    let result = certify(&registry, &inputs, &clause_inputs);
 
     if json {
         match serde_json::to_string_pretty(&result) {
@@ -648,6 +1100,11 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
                 BlockingKind::Uncovered => println!("blocking uncovered: {}", item.id),
                 BlockingKind::Constraint => println!(
                     "blocking constraint ({}): {}",
+                    item.code.as_deref().unwrap_or("?"),
+                    item.id
+                ),
+                BlockingKind::Clause => println!(
+                    "blocking clause ({}): {}",
                     item.code.as_deref().unwrap_or("?"),
                     item.id
                 ),

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-image-metadata-capadd-string-union-of-all-capadd-arrays-without-io-2f3f3193",
+      "clause": "clu-image-metadata-capadd-string-union-of-all-capadd-arrays-without-io-2f3f3193",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
+    },
+    {
+      "id": "clc-image-metadata-forwardports-number-string-union-of-all-ports-wi-io-62ee1814",
+      "clause": "clu-image-metadata-forwardports-number-string-union-of-all-ports-wi-io-62ee1814",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-auto-forward-ports"
+      ]
+    },
+    {
+      "id": "clc-image-metadata-id-string-init-boolean-privileged-boolean-capadd-io-8cf55d2d",
+      "clause": "clu-image-metadata-id-string-init-boolean-privileged-boolean-capadd-io-8cf55d2d",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-image-metadata-init-boolean-true-if-at-least-one-is-true-false-io-68bfc594",
+      "clause": "clu-image-metadata-init-boolean-true-if-at-least-one-is-true-false-io-68bfc594",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-image-metadata-mounts-string-type-src-dst-collected-list-of-all-io-a4d7d6d5",
+      "clause": "clu-image-metadata-mounts-string-type-src-dst-collected-list-of-all-io-a4d7d6d5",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
+    },
+    {
+      "id": "clc-image-metadata-record-dev-container-config-and-feature-metadata-desc-dac9ade3",
+      "clause": "clu-image-metadata-record-dev-container-config-and-feature-metadata-desc-dac9ade3",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-image-metadata-the-metadata-is-added-to-the-image-as-a-devconta-io-721243cf",
+      "clause": "clu-image-metadata-the-metadata-is-added-to-the-image-as-a-devconta-io-721243cf",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
+    },
+    {
+      "id": "clc-image-metadata-to-apply-the-metadata-together-with-a-user-s-dev-desc-4d54126e",
+      "clause": "clu-image-metadata-to-apply-the-metadata-together-with-a-user-s-dev-desc-4d54126e",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-image-metadata-to-simplify-adding-this-metadata-for-other-tools-desc-8bade94f",
+      "clause": "clu-image-metadata-to-simplify-adding-this-metadata-for-other-tools-desc-8bade94f",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-image-metadata-variables-in-string-values-will-be-substituted-a-desc-31cd8289",
+      "clause": "clu-image-metadata-variables-in-string-values-will-be-substituted-a-desc-31cd8289",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-image-metadata-we-are-adding-support-for-mounts-containerenv-co-desc-dbddd9df",
+      "clause": "clu-image-metadata-we-are-adding-support-for-mounts-containerenv-co-desc-dbddd9df",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-image-metadata-we-propose-to-add-metadata-to-the-image-with-the-desc-b54f56f3",
+      "clause": "clu-image-metadata-we-propose-to-add-metadata-to-the-image-with-the-desc-b54f56f3",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    }
+  ]
+}

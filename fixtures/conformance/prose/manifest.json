@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-spec-113500f4",
+  "documents": [
+    {
+      "key": "sample",
+      "file": "sample.md",
+      "upstreamUrl": "https://example.invalid/sample.md",
+      "sha256": "14b9ed39c3f87bc1786ffbac6e88aca7343efa66ee0eea2a2e494c806b22aa3f",
+      "scope": "consumer"
+    },
+    {
+      "key": "authoring-sample",
+      "file": "authoring-sample.md",
+      "upstreamUrl": "https://example.invalid/authoring-sample.md",
+      "sha256": "eca7030a9638e31ac5041ef03ac9adec3d0df467d8708f98da9d8c949ca032a7",
+      "scope": "authoring"
+    }
+  ]
+}

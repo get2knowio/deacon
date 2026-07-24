@@ -56,6 +56,8 @@ pub enum RecordType {
     Extension,
     Constraint,
     Classification,
+    ClauseUnit,
+    ClauseClassification,
 }
 
 impl RecordType {
@@ -74,6 +76,8 @@ impl RecordType {
             RecordType::Extension => "ext",
             RecordType::Constraint => "cst",
             RecordType::Classification => "cls",
+            RecordType::ClauseUnit => "clu",
+            RecordType::ClauseClassification => "clc",
         }
     }
 
@@ -92,6 +96,8 @@ impl RecordType {
             "ext" => RecordType::Extension,
             "cst" => RecordType::Constraint,
             "cls" => RecordType::Classification,
+            "clu" => RecordType::ClauseUnit,
+            "clc" => RecordType::ClauseClassification,
             _ => return None,
         })
     }
@@ -105,7 +111,7 @@ pub enum IdError {
     /// uppercase, or disallowed characters.
     #[error(
         "id {id:?} is malformed: expected \
-         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls)-[a-z0-9]+(-[a-z0-9]+)*$`"
+         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls|clu|clc)-[a-z0-9]+(-[a-z0-9]+)*$`"
     )]
     Format { id: String },
     /// The id is well-formed but its leading segment is not a known record prefix.
@@ -658,6 +664,180 @@ pub enum Disposition {
     NotApplicable,
 }
 
+// ---------------------------------------------------------------------------
+// Normative clause inventory (021-normative-clause-inventory, data-model.md §1–§3)
+// ---------------------------------------------------------------------------
+
+/// The spec-prose manifest — `conformance/spec/<rev-pin>/manifest.json`
+/// (data-model.md §1). Records the vendored pinned prose documents, their SHA-256
+/// fingerprints, and a per-document consumer/authoring `scope`, keyed to a
+/// `spec`-kind [`SourceRevision`]. The prose companion to [`SchemasManifest`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SpecManifest {
+    /// Schema version of the manifest format.
+    pub schema_version: u32,
+    /// MUST name an existing `rev-` record of kind `spec` in `revisions.json`
+    /// (V14 on mismatch).
+    pub revision: String,
+    /// One entry per vendored prose document, in file order.
+    pub documents: Vec<SpecDocument>,
+}
+
+/// One vendored prose document within a [`SpecManifest`] (data-model.md §1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SpecDocument {
+    /// Document key used in clause IDs, classification files, and diff sort order.
+    /// Lowercase `[a-z0-9-]+`, unique within the manifest.
+    pub key: String,
+    /// Filename of the vendored Markdown document, a sibling of the manifest.
+    pub file: String,
+    /// Upstream URL at the pinned commit — provenance only, never fetched.
+    pub upstream_url: String,
+    /// SHA-256 of the vendored file bytes; verified before every parse
+    /// (V14 / [`crate::load::LoadError::SpecFingerprintMismatch`] on mismatch).
+    pub sha256: String,
+    /// Consumer vs authoring scope. Gates the document-scope disposition default:
+    /// a document-scope `not-applicable` record is permitted only for `authoring`
+    /// documents (research Decision 7; V13 otherwise).
+    pub scope: DocumentScope,
+}
+
+/// A vendored prose document's scope under deacon's consumer-only mandate
+/// (constitution II). `authoring` documents may carry a document-scope disposition
+/// default (research Decision 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DocumentScope {
+    /// A consumer-facing document — every clause is classified per-clause.
+    Consumer,
+    /// An authoring/distribution document — a document-scope not-applicable default
+    /// is permitted (with per-clause overrides for consumer install/apply clauses).
+    Authoring,
+}
+
+/// The generated, committed clause inventory —
+/// `conformance/inventory/clauses.json` (data-model.md §2). The prose companion to
+/// [`ConstraintInventory`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClauseInventory {
+    /// Schema version of the inventory format.
+    pub schema_version: u32,
+    /// Equals the manifest's revision (and therefore the registry spec pin).
+    pub revision: String,
+    /// Canonicalized clause units, sorted by `id` in the committed artifact.
+    pub units: Vec<ClauseUnit>,
+}
+
+/// One atomic normative clause (data-model.md §2). Identity is **substance-anchored**
+/// (`hash8` over `document ‖ normalize_substance(excerpt)`, location excluded —
+/// research Decision 2): a pure move keeps the `id` (and its disposition), a material
+/// change mints a new `id` (drift-forcing).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClauseUnit {
+    /// `clu-<doc>-<substance-slug>-<strength>-<hash8>` — grammar-valid per
+    /// [`parse_id`] with the new `clu` prefix.
+    pub id: String,
+    /// Manifest document key this clause was drawn from.
+    pub document: String,
+    /// Detected/authored normative strength.
+    pub strength: Strength,
+    /// Proposed testability class.
+    pub testability: Testability,
+    /// Full lowercase-hex SHA-256 of `normalize_substance(excerpt)` — the distinct
+    /// fingerprint field the clarification requires; drift reads it (Decision 3).
+    pub fingerprint: String,
+    /// Non-empty; one entry per place the same normalized substance appears. Sorted
+    /// by `(anchor, ordinal)`. Multiple locations = the same obligation stated in
+    /// several places (they merge into one unit).
+    pub locations: Vec<ClauseLocation>,
+    /// Optional structural note (e.g. `{ "inCodeFence": true }`).
+    #[serde(default)]
+    pub context: Option<Value>,
+}
+
+/// The closed normative-strength taxonomy (data-model.md §2, research Decision 4).
+/// `must`/`should`/`may` are RFC-2119 keyword families; `algorithm`/`io-contract`/
+/// `descriptive` are authored labels not derivable from a single keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Strength {
+    Must,
+    Should,
+    May,
+    Algorithm,
+    IoContract,
+    Descriptive,
+}
+
+/// The closed testability taxonomy (data-model.md §2, research Decision 5).
+/// `ambiguous` means the strength/meaning could not be confidently determined; it
+/// requires a per-clause classification before `certify` passes (no document-scope
+/// cover — Decision 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Testability {
+    DirectlyTestable,
+    IndirectlyTestable,
+    Informative,
+    Ambiguous,
+    NotApplicable,
+}
+
+/// One provenance location of a [`ClauseUnit`] (data-model.md §2). `ordinal` and
+/// `heading`/`anchor` are provenance/order only — never identity inputs (Decision 2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClauseLocation {
+    /// Human-readable heading path (e.g. `Lifecycle scripts > onCreateCommand`).
+    pub heading: String,
+    /// GitHub-style slug of the owning heading — the excerpt-present-at-anchor key.
+    pub anchor: String,
+    /// 1-based position of this excerpt within its heading (provenance/order only).
+    pub ordinal: u32,
+    /// Verbatim source substring — the human-readable field. MUST be present in the
+    /// pinned document under `anchor` (V15 / `ExcerptNotFoundAtAnchor` otherwise).
+    pub excerpt: String,
+}
+
+/// A hand-authored clause-classification record (`clc-`) —
+/// `conformance/registry/clause-classifications/<doc>.json` (data-model.md §3).
+/// Closed model; exactly one of `clause` / `document` present (the XOR invariant is
+/// enforced structurally by V13, not by serde). Joins to the inventory by ID.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClauseClassification {
+    /// Per-clause: `clc-` + the exact tail of the referenced `clu-` id (structural
+    /// mirror; V13 if mismatched). Document-scope: `clc-doc-<document key>`.
+    pub id: String,
+    /// The `clu-` clause id this classifies (per-clause records); MUST exist in the
+    /// committed inventory (V11 when stale). Mutually exclusive with `document`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clause: Option<String>,
+    /// The manifest document key this dispositions wholesale (document-scope default);
+    /// MUST be an `authoring`-scope document (V13 otherwise). Mutually exclusive with
+    /// `clause`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document: Option<String>,
+    /// The disposition under the consumer-only scope (reuses 020's [`Disposition`];
+    /// `non-testable` is prose "informative").
+    pub disposition: Disposition,
+    /// Non-empty and every id an existing behavior iff `behavior-mapped`; absent/empty
+    /// otherwise (V13). Several clauses MAY map to one behavior (FR-010).
+    #[serde(default)]
+    pub behaviors: Vec<String>,
+    /// REQUIRED non-empty for `non-testable` / `not-applicable`; optional for
+    /// `behavior-mapped` (V13).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    /// Free-form notes (e.g. supersession of a retired prose source unit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -694,6 +874,18 @@ mod tests {
         assert_eq!(
             parse_id("cls-base-forwardports-type-3fa9c214").unwrap(),
             RecordType::Classification
+        );
+        assert_eq!(
+            parse_id("clu-reference-oncreatecommand-run-once-must-a1b2c3d4").unwrap(),
+            RecordType::ClauseUnit
+        );
+        assert_eq!(
+            parse_id("clc-reference-oncreatecommand-run-once-must-a1b2c3d4").unwrap(),
+            RecordType::ClauseClassification
+        );
+        assert_eq!(
+            parse_id("clc-doc-features").unwrap(),
+            RecordType::ClauseClassification
         );
     }
 
@@ -766,6 +958,8 @@ mod tests {
             RecordType::Extension,
             RecordType::Constraint,
             RecordType::Classification,
+            RecordType::ClauseUnit,
+            RecordType::ClauseClassification,
         ] {
             assert_eq!(RecordType::from_prefix(ty.prefix()), Some(ty));
             // A valid id built from the prefix parses back to the same type
@@ -1130,6 +1324,159 @@ mod tests {
         assert!(
             serde_json::from_str::<Classification>(
                 r#"{ "id": "cls-x", "constraint": "cst-x", "disposition": "UNREVIEWED" }"#
+            )
+            .is_err()
+        );
+    }
+
+    // ---- Normative clause inventory (021) ---------------------------------
+
+    #[test]
+    fn strength_spellings() {
+        round_trip(Strength::Must, json!("must"));
+        round_trip(Strength::Should, json!("should"));
+        round_trip(Strength::May, json!("may"));
+        round_trip(Strength::Algorithm, json!("algorithm"));
+        round_trip(Strength::IoContract, json!("io-contract"));
+        round_trip(Strength::Descriptive, json!("descriptive"));
+    }
+
+    #[test]
+    fn testability_spellings() {
+        round_trip(Testability::DirectlyTestable, json!("directly-testable"));
+        round_trip(
+            Testability::IndirectlyTestable,
+            json!("indirectly-testable"),
+        );
+        round_trip(Testability::Informative, json!("informative"));
+        round_trip(Testability::Ambiguous, json!("ambiguous"));
+        round_trip(Testability::NotApplicable, json!("not-applicable"));
+    }
+
+    #[test]
+    fn document_scope_spellings() {
+        round_trip(DocumentScope::Consumer, json!("consumer"));
+        round_trip(DocumentScope::Authoring, json!("authoring"));
+    }
+
+    #[test]
+    fn spec_manifest_round_trips() {
+        let manifest = SpecManifest {
+            schema_version: 1,
+            revision: "rev-spec-113500f4".into(),
+            documents: vec![
+                SpecDocument {
+                    key: "reference".into(),
+                    file: "devcontainer-reference.md".into(),
+                    upstream_url: "https://example/reference.md".into(),
+                    sha256: "daef12b6".into(),
+                    scope: DocumentScope::Consumer,
+                },
+                SpecDocument {
+                    key: "features".into(),
+                    file: "devcontainer-features.md".into(),
+                    upstream_url: "https://example/features.md".into(),
+                    sha256: "abcd1234".into(),
+                    scope: DocumentScope::Authoring,
+                },
+            ],
+        };
+        let value = serde_json::to_value(&manifest).unwrap();
+        assert_eq!(value["documents"][0]["scope"], json!("consumer"));
+        assert_eq!(value["documents"][1]["scope"], json!("authoring"));
+        assert_eq!(
+            value["documents"][0]["upstreamUrl"],
+            json!("https://example/reference.md")
+        );
+        let back: SpecManifest = serde_json::from_value(value).unwrap();
+        assert_eq!(back, manifest);
+    }
+
+    #[test]
+    fn clause_inventory_round_trips() {
+        let inventory = ClauseInventory {
+            schema_version: 1,
+            revision: "rev-spec-113500f4".into(),
+            units: vec![ClauseUnit {
+                id: "clu-reference-oncreatecommand-run-once-must-a1b2c3d4".into(),
+                document: "reference".into(),
+                strength: Strength::Must,
+                testability: Testability::DirectlyTestable,
+                fingerprint: "9f2a".into(),
+                locations: vec![ClauseLocation {
+                    heading: "Lifecycle scripts > onCreateCommand".into(),
+                    anchor: "oncreatecommand".into(),
+                    ordinal: 1,
+                    excerpt: "`onCreateCommand` ... MUST be run only once.".into(),
+                }],
+                context: None,
+            }],
+        };
+        let value = serde_json::to_value(&inventory).unwrap();
+        assert_eq!(value["units"][0]["strength"], json!("must"));
+        assert_eq!(value["units"][0]["context"], json!(null));
+        assert_eq!(value["units"][0]["locations"][0]["ordinal"], json!(1));
+        let back: ClauseInventory = serde_json::from_value(value).unwrap();
+        assert_eq!(back, inventory);
+    }
+
+    #[test]
+    fn clause_classification_per_clause_and_document_scope_round_trip() {
+        let per_clause = ClauseClassification {
+            id: "clc-reference-oncreatecommand-run-once-must-a1b2c3d4".into(),
+            clause: Some("clu-reference-oncreatecommand-run-once-must-a1b2c3d4".into()),
+            document: None,
+            disposition: Disposition::BehaviorMapped,
+            behaviors: vec!["bhv-up-lifecycle-oncreate-once".into()],
+            rationale: None,
+            notes: Some("Supersedes retired prose source link.".into()),
+        };
+        let value = serde_json::to_value(&per_clause).unwrap();
+        assert_eq!(value["disposition"], json!("behavior-mapped"));
+        assert!(
+            value.get("document").is_none(),
+            "document skipped when None"
+        );
+        assert!(value.get("rationale").is_none());
+        let back: ClauseClassification = serde_json::from_value(value).unwrap();
+        assert_eq!(back, per_clause);
+
+        let doc_scope = ClauseClassification {
+            id: "clc-doc-features".into(),
+            clause: None,
+            document: Some("features".into()),
+            disposition: Disposition::NotApplicable,
+            behaviors: vec![],
+            rationale: Some("Feature-authoring document; consumer-only scope.".into()),
+            notes: None,
+        };
+        let value = serde_json::to_value(&doc_scope).unwrap();
+        assert!(value.get("clause").is_none(), "clause skipped when None");
+        assert_eq!(value["document"], json!("features"));
+        let back: ClauseClassification = serde_json::from_value(value).unwrap();
+        assert_eq!(back, doc_scope);
+    }
+
+    #[test]
+    fn clause_records_reject_unknown_fields_and_sentinel() {
+        assert!(
+            serde_json::from_str::<SpecManifest>(
+                r#"{ "schemaVersion": 1, "revision": "rev-spec-x", "documents": [], "oops": 1 }"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<ClauseUnit>(
+                r#"{ "id": "clu-x-y-must-00000000", "document": "reference", "strength": "must",
+                 "testability": "directly-testable", "fingerprint": "ab", "locations": [],
+                 "context": null, "typo": true }"#
+            )
+            .is_err()
+        );
+        // The scaffold sentinel disposition is a hard schema failure at load.
+        assert!(
+            serde_json::from_str::<ClauseClassification>(
+                r#"{ "id": "clc-x", "clause": "clu-x", "disposition": "UNREVIEWED" }"#
             )
             .is_err()
         );

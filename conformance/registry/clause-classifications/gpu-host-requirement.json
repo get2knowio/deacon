@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-gpu-host-requirement-a-string-indicating-minimum-memory-requirements-io-1b5d1079",
+      "clause": "clu-gpu-host-requirement-a-string-indicating-minimum-memory-requirements-io-1b5d1079",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-gpu-host-requirement-indicates-the-minimum-required-number-of-cores-io-529e3b33",
+      "clause": "clu-gpu-host-requirement-indicates-the-minimum-required-number-of-cores-io-529e3b33",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-gpu-host-requirement-indicates-whether-or-not-a-gpu-is-required-a-val-io-d8c6d13d",
+      "clause": "clu-gpu-host-requirement-indicates-whether-or-not-a-gpu-is-required-a-val-io-d8c6d13d",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-gpu-host-requirement-we-propose-to-add-a-new-gpu-property-to-the-host-io-6b095695",
+      "clause": "clu-gpu-host-requirement-we-propose-to-add-a-new-gpu-property-to-the-host-io-6b095695",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    }
+  ]
+}

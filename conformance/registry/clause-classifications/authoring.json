@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-doc-features",
+      "document": "features",
+      "disposition": "not-applicable",
+      "rationale": "Authoring/distribution document; deacon consumes published features/templates but never authors, validates, or publishes them (constitution II \u2014 consumer-only scope)."
+    },
+    {
+      "id": "clc-doc-features-distribution",
+      "document": "features-distribution",
+      "disposition": "not-applicable",
+      "rationale": "Authoring/distribution document; deacon consumes published features/templates but never authors, validates, or publishes them (constitution II \u2014 consumer-only scope)."
+    },
+    {
+      "id": "clc-doc-templates",
+      "document": "templates",
+      "disposition": "not-applicable",
+      "rationale": "Authoring/distribution document; deacon consumes published features/templates but never authors, validates, or publishes them (constitution II \u2014 consumer-only scope)."
+    },
+    {
+      "id": "clc-doc-templates-distribution",
+      "document": "templates-distribution",
+      "disposition": "not-applicable",
+      "rationale": "Authoring/distribution document; deacon consumes published features/templates but never authors, validates, or publishes them (constitution II \u2014 consumer-only scope)."
+    },
+    {
+      "id": "clc-features-a-feature-s-options-specified-as-the-value-of-a-desc-9028c1c5",
+      "clause": "clu-features-a-feature-s-options-specified-as-the-value-of-a-desc-9028c1c5",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-all-commands-within-that-group-are-executed-in-p-algo-a78f4973",
+      "clause": "clu-features-all-commands-within-that-group-are-executed-in-p-algo-a78f4973",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-features-any-options-defined-by-a-feature-s-devcontainer-desc-94f2f9f6",
+      "clause": "clu-features-any-options-defined-by-a-feature-s-devcontainer-desc-94f2f9f6",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-applications-should-default-to-bin-sh-for-featur-desc-025df47e",
+      "clause": "clu-features-applications-should-default-to-bin-sh-for-featur-desc-025df47e",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-as-a-shorthand-the-value-of-a-feature-can-be-pro-desc-f3124266",
+      "clause": "clu-features-as-a-shorthand-the-value-of-a-feature-can-be-pro-desc-f3124266",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-by-default-features-are-installed-on-top-of-a-ba-desc-a302b55b",
+      "clause": "clu-features-by-default-features-are-installed-on-top-of-a-ba-desc-a302b55b",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-commands-provided-by-features-are-always-execute-desc-dd4498b0",
+      "clause": "clu-features-commands-provided-by-features-are-always-execute-desc-dd4498b0",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-compute-a-sha-256-hash-from-the-utf-8-encoded-in-algo-220fd88c",
+      "clause": "clu-features-compute-a-sha-256-hash-from-the-utf-8-encoded-in-algo-220fd88c",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-features-containerenv-is-added-before-the-feature-is-exec-desc-053522a1",
+      "clause": "clu-features-containerenv-is-added-before-the-feature-is-exec-desc-053522a1",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-each-command-contributed-by-a-feature-is-execute-desc-304ca215",
+      "clause": "clu-features-each-command-contributed-by-a-feature-is-execute-desc-304ca215",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-each-feature-script-executes-as-its-own-layer-to-desc-6a08d1b6",
+      "clause": "clu-features-each-feature-script-executes-as-its-own-layer-to-desc-6a08d1b6",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-feature-identifiers-should-be-assumed-to-be-case-desc-68ef18bd",
+      "clause": "clu-features-feature-identifiers-should-be-assumed-to-be-case-desc-68ef18bd",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-feature-scripts-run-as-the-root-user-and-sometim-desc-86913dfe",
+      "clause": "clu-features-feature-scripts-run-as-the-root-user-and-sometim-desc-86913dfe",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-if-any-of-the-features-indicated-in-the-dependso-desc-b94a100f",
+      "clause": "clu-features-if-any-of-the-features-indicated-in-the-dependso-desc-b94a100f",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-if-no-remoteuser-is-configured-remote-user-is-se-desc-fca91b8f",
+      "clause": "clu-features-if-no-remoteuser-is-configured-remote-user-is-se-desc-fca91b8f",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-in-the-snippet-above-myfeature-must-be-installed-must-7630c7ee",
+      "clause": "clu-features-in-the-snippet-above-myfeature-must-be-installed-must-7630c7ee",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-features-installsafter-is-not-evaluated-recursively-algo-7d30c616",
+      "clause": "clu-features-installsafter-is-not-evaluated-recursively-algo-7d30c616",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "notes": "Prose\u2192behavior traceability now flows through this clause; supersedes retired src-spec-lifecycle-up (021 T036)."
+    },
+    {
+      "id": "clc-features-installsafter-only-influences-the-installation-o-algo-6fcd528e",
+      "clause": "clu-features-installsafter-only-influences-the-installation-o-algo-6fcd528e",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-features-it-will-be-emitted-to-a-file-named-devcontainer-io-1d1b4962",
+      "clause": "clu-features-it-will-be-emitted-to-a-file-named-devcontainer-io-1d1b4962",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-features-parameters-like-capadd-securityop-are-concatenat-desc-1b18e10d",
+      "clause": "clu-features-parameters-like-capadd-securityop-are-concatenat-desc-1b18e10d",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-parameters-like-privileged-init-are-included-if-desc-8051176c",
+      "clause": "clu-features-parameters-like-privileged-init-are-included-if-desc-8051176c",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-remote-user-and-container-user-environment-varia-desc-2c5cca76",
+      "clause": "clu-features-remote-user-and-container-user-environment-varia-desc-2c5cca76",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-replace-w-g-replace-d-g-touppercase-algo-37933881",
+      "clause": "clu-features-replace-w-g-replace-d-g-touppercase-algo-37933881",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-features-the-dependson-property-must-be-evaluated-recursi-desc-02808f73",
+      "clause": "clu-features-the-dependson-property-must-be-evaluated-recursi-desc-02808f73",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-the-home-folders-of-the-two-users-are-passed-to-desc-e63de366",
+      "clause": "clu-features-the-home-folders-of-the-two-users-are-passed-to-desc-e63de366",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-the-id-becomes-the-name-of-the-environment-varia-desc-31d4642c",
+      "clause": "clu-features-the-id-becomes-the-name-of-the-environment-varia-desc-31d4642c",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-the-install-sh-script-for-each-feature-should-be-desc-b7c920aa",
+      "clause": "clu-features-the-install-sh-script-for-each-feature-should-be-desc-b7c920aa",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-the-latest-version-annotation-is-added-implicitl-desc-60c7b3c7",
+      "clause": "clu-features-the-latest-version-annotation-is-added-implicitl-desc-60c7b3c7",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-the-orchestrating-tool-should-assign-a-roundprio-algo-0de9ab37",
+      "clause": "clu-features-the-orchestrating-tool-should-assign-a-roundprio-algo-0de9ab37",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-features-the-properties-supporting-devcontainerid-in-the-desc-49ac4346",
+      "clause": "clu-features-the-properties-supporting-devcontainerid-in-the-desc-49ac4346",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-they-must-ensure-that-it-is-unique-among-other-d-desc-3180a890",
+      "clause": "clu-features-they-must-ensure-that-it-is-unique-among-other-d-desc-3180a890",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-to-ensure-that-the-appropriate-shell-is-used-the-desc-69c662f2",
+      "clause": "clu-features-to-ensure-that-the-appropriate-shell-is-used-the-desc-69c662f2",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-use-a-base-32-encoded-representation-left-padded-algo-cf1473ea",
+      "clause": "clu-features-use-a-base-32-encoded-representation-left-padded-algo-cf1473ea",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-templates-a-path-is-relative-to-the-root-of-the-template-s-desc-ec433cf4",
+      "clause": "clu-templates-a-path-is-relative-to-the-root-of-the-template-s-desc-ec433cf4",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-templates-a-supporting-tool-will-parse-the-options-object-desc-71357a1f",
+      "clause": "clu-templates-a-supporting-tool-will-parse-the-options-object-desc-71357a1f",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-templates-before-applying-a-template-tooling-must-inspect-desc-1eb54b25",
+      "clause": "clu-templates-before-applying-a-template-tooling-must-inspect-desc-1eb54b25",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-templates-for-a-directory-provide-the-full-relative-path-w-desc-6f870ac2",
+      "clause": "clu-templates-for-a-directory-provide-the-full-relative-path-w-desc-6f870ac2",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-templates-image-mcr-microsoft-com-devcontainers-java-0-tem-io-b5fb90c8",
+      "clause": "clu-templates-image-mcr-microsoft-com-devcontainers-java-0-tem-io-b5fb90c8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
+    },
+    {
+      "id": "clc-templates-the-tools-would-replace-the-option-id-with-the-s-desc-8c2b22b7",
+      "clause": "clu-templates-the-tools-would-replace-the-option-id-with-the-s-desc-8c2b22b7",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-templates-this-replacement-would-happen-before-dropping-th-desc-6c8076c4",
+      "clause": "clu-templates-this-replacement-would-happen-before-dropping-th-desc-6c8076c4",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    }
+  ]
+}

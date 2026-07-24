@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-features-lifecycle-scripts-all-other-semantics-match-the-existing-lifecycle-desc-c02f9c97",
+      "clause": "clu-features-lifecycle-scripts-all-other-semantics-match-the-existing-lifecycle-desc-c02f9c97",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-lifecycle-scripts-as-with-all-lifecycle-hooks-commands-are-execute-desc-fb55e890",
+      "clause": "clu-features-lifecycle-scripts-as-with-all-lifecycle-hooks-commands-are-execute-desc-fb55e890",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-lifecycle-scripts-if-one-of-the-lifecycle-scripts-fails-any-subseq-algo-3e112729",
+      "clause": "clu-features-lifecycle-scripts-if-one-of-the-lifecycle-scripts-fails-any-subseq-algo-3e112729",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-features-lifecycle-scripts-implementations-are-not-required-to-persist-feat-desc-e70d2cb7",
+      "clause": "clu-features-lifecycle-scripts-implementations-are-not-required-to-persist-feat-desc-e70d2cb7",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-lifecycle-scripts-no-subsequent-lifecycle-commands-shall-proceed-u-algo-0aca04ec",
+      "clause": "clu-features-lifecycle-scripts-no-subsequent-lifecycle-commands-shall-proceed-u-algo-0aca04ec",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-features-lifecycle-scripts-note-that-initializecommand-is-omitted-pending-f-desc-15212db2",
+      "clause": "clu-features-lifecycle-scripts-note-that-initializecommand-is-omitted-pending-f-desc-15212db2",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-lifecycle-scripts-when-a-dev-container-is-brought-up-for-each-life-algo-91b49557",
+      "clause": "clu-features-lifecycle-scripts-when-a-dev-container-is-brought-up-for-each-life-algo-91b49557",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    }
+  ]
+}

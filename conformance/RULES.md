@@ -122,27 +122,48 @@ distort the coverage denominator). If a purported differentiator has no external
 observable effect on stdout, stderr, exit code, container state, or the filesystem, it is
 out of scope for the registry.
 
-## Constraint inventory (V11 – V14)
+## Inventory join (V11 – V15) — constraints AND clauses
 
-This section is the human-readable companion to the schema-constraint-inventory join
-enforced in `crates/conformance/src/validate.rs::check_inventory`
-(020-schema-constraint-inventory). It stands in the same validate.rs/RULES.md lockstep
-as R1 – R8 / V1 – V10: the classes below are updated in the SAME change that alters the
-enforcement.
+This section is the human-readable companion to the two inventory joins enforced in
+`crates/conformance/src/validate.rs`: `check_inventory` (the schema-constraint inventory,
+020-schema-constraint-inventory) and `check_clause_inventory` (the normative-clause
+inventory, 021-normative-clause-inventory). It stands in the same validate.rs/RULES.md
+lockstep as R1 – R8 / V1 – V10: the classes below are updated in the SAME change that
+alters the enforcement.
 
-The **inventory** is the machine-extracted set of every constraint in the two vendored,
-pinned upstream schemas. Each unit carries exactly one hand-authored **classification**
-recording its disposition under deacon's consumer-only scope. Validation joins the two
-(and the vendored schemas) and reports these four classes alongside V1 – V10 in one run;
-all four also **block `certify`** (the release gate) — an unclassified, stale, malformed,
-or provenance-broken inventory can no more be certified around than a `gap-` record can.
+An **inventory unit** is either a machine-extracted schema **constraint** (`cst-`, from the
+vendored pinned JSON schemas) or a canonicalized prose **clause** (`clu-`, from the vendored
+pinned `docs/specs/` Markdown). Each unit carries an **effective disposition** recorded by a
+hand-authored **classification** (`cls-` for constraints, `clc-` for clauses) under deacon's
+consumer-only scope. Validation joins each inventory against its classifications (and the
+vendored sources) and reports these classes alongside V1 – V10 in one run; **all block
+`certify`** (the release gate) — an unclassified, stale, malformed, provenance-broken, or
+source-inconsistent inventory can no more be certified around than a `gap-` record can.
 
-| Class | Statement | Remedy |
+V11 – V14 are the **generalized** inventory-unit classes (they run for constraints AND
+clauses). **V15 is new and prose-only** (schema constraints, whose substance IS the parsed
+JSON, have no separate source-text-integrity dimension).
+
+| Class | Statement (inventory unit = schema constraint OR prose clause) | Remedy |
 |-------|-----------|--------|
-| **V11** | a classification's `constraint` names a `cst-` unit absent from the committed inventory (**stale**) | Delete or re-point the record in the same change that moved the inventory. Waiver-style self-invalidation — a classification whose unit vanished never lingers. |
-| **V12** | a constraint unit has **zero** classifications (**unclassified** — this IS the drift item; there is no separate drift record type) or **more than one** (**duplicated**) | Author exactly one classification for it (or remove the duplicate). Every unit of every kind requires one — including `annotation` and `unmodeled-keyword` units. |
-| **V13** | a classification's shape/linkage is broken: the `id`-tail mirror, the `behaviors` arity/existence rule vs its `disposition`, or a missing `rationale` on a `non-testable`/`not-applicable` record | Fix the record to satisfy the arity table below. |
-| **V14** | **provenance** breakage: the schemas manifest fingerprint mismatches a vendored file, the inventory's `revision` ≠ the registry's `schema`-kind revision pin, or the committed inventory no longer byte-matches a fresh regeneration | Re-vendor / re-`inventory generate`; never hand-edit the machine-owned inventory. |
+| **V11** | a classification (`cls-`/`clc-`) names a unit id (`cst-`/`clu-`) absent from its committed inventory (**stale**) | Delete or re-point the record in the same change that moved the inventory. Waiver-style self-invalidation — a classification whose unit vanished never lingers. |
+| **V12** | a unit has **no effective disposition** (**unclassified** — this IS the drift item; there is no separate drift record type) or **more than one** per-unit record (**duplicated**). For a clause: no per-clause `clc-` record AND no permitted document-scope default (see below); an unresolved `ambiguous` clause is V12 by construction. | Author exactly one classification (or the permitted document-scope default). Every unit of every kind requires one. |
+| **V13** | a classification's shape/linkage is broken: the `id`-tail mirror, the `behaviors` arity/existence rule vs its `disposition`, a missing `rationale` on a `non-testable`/`not-applicable` record, a clause record with BOTH or NEITHER of `clause`/`document`, or a document-scope default on a **consumer** document | Fix the record to satisfy the arity table below and the document-scope rule. |
+| **V14** | **provenance** breakage: a manifest fingerprint (schemas OR spec) mismatches a vendored file, the inventory's `revision` ≠ the registry's matching-kind revision pin (`schema`/`spec`), or the committed inventory no longer byte-matches a fresh regeneration (`inventory generate` / `clause generate`) | Re-vendor / re-generate; never hand-edit the machine-owned inventory. |
+| **V15** (clauses only) | **clause↔source integrity**: a clause's `strength` label contradicts its excerpt's RFC-2119 keywords, a `descriptive` clause hides an unqualified mandatory keyword, or an excerpt is not present in the pinned document under its recorded heading/anchor | Fix the excerpt, anchor, or strength label; `clause generate` fails loud on the same conditions so the committed inventory can never carry them. |
+
+### Document-scope disposition default (clauses only, research Decision 7)
+
+A `clc-` classification MAY be **document-scoped** — one `clc-doc-<key>` record dispositioning
+every non-`ambiguous` clause of an **authoring**-scope document as `not-applicable` (consumer-only
+scope, constitution II). Resolution order for a clause: a per-clause record wins; else, if the
+clause's document is `authoring`-scope AND its `testability` ≠ `ambiguous`, the document-scope
+default applies; else the clause is unclassified (V12, blocking). Two guard rails, both V13:
+a document-scope default is permitted **only** for `authoring` documents (a `consumer` document
+is classified clause-by-clause), and an `ambiguous` clause is **never** covered by a blanket
+default — it needs an explicit per-clause decision. The mixed authoring documents
+(`features`/`templates`) carry the document-scope default for their authoring bulk PLUS per-clause
+`behavior-mapped` overrides for the consumer install/apply clauses inside them.
 
 ### Disposition arity (V13)
 

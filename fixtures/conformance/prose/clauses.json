@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-spec-113500f4",
+  "units": [
+    {
+      "id": "clu-authoring-sample-a-feature-author-must-publish-the-feature-to-an-must-62f0091e",
+      "document": "authoring-sample",
+      "strength": "must",
+      "testability": "not-applicable",
+      "fingerprint": "dccd4a441ee9ea24cd492f80e98c9cda74d42930c2858982f922407028a4239b",
+      "locations": [
+        {
+          "heading": "Publishing",
+          "anchor": "publishing",
+          "ordinal": 1,
+          "excerpt": "A feature author MUST publish the feature to an OCI registry before it can be\nconsumed."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-authoring-sample-the-consuming-tool-must-invoke-the-feature-insta-must-823ab0b5",
+      "document": "authoring-sample",
+      "strength": "must",
+      "testability": "directly-testable",
+      "fingerprint": "ef1bb2a3c4200f994124878bd2d5b6e0213756c60117e6eeec72309593489fb9",
+      "locations": [
+        {
+          "heading": "Install contract",
+          "anchor": "install-contract",
+          "ordinal": 1,
+          "excerpt": "The consuming tool MUST invoke the feature install script as root."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-sample-outcome-success-io-6882cb22",
+      "document": "sample",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "91196b7d70409d007baabe55aac41bc15786cd1a74b369a95f32deb0051432ed",
+      "locations": [
+        {
+          "heading": "Lifecycle > Output contract",
+          "anchor": "output-contract",
+          "ordinal": 1,
+          "excerpt": "\"outcome\": \"success\""
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-sample-the-command-should-generally-complete-quickly-bu-desc-ab743426",
+      "document": "sample",
+      "strength": "descriptive",
+      "testability": "ambiguous",
+      "fingerprint": "1c2bc097094540e499340353de36da12c31570f4b6f0d2b0b75b667a40d59674",
+      "locations": [
+        {
+          "heading": "Lifecycle",
+          "anchor": "lifecycle",
+          "ordinal": 3,
+          "excerpt": "The command should generally complete quickly, but timing is not guaranteed."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-sample-the-tool-must-not-run-it-again-on-a-subsequent-s-must-dc0377df",
+      "document": "sample",
+      "strength": "must",
+      "testability": "directly-testable",
+      "fingerprint": "ea376f7d0acdb1c5831a40233dc73680e402eee20f55ea5a816e296e8b5ac322",
+      "locations": [
+        {
+          "heading": "Lifecycle",
+          "anchor": "lifecycle",
+          "ordinal": 2,
+          "excerpt": "The tool MUST NOT run it again\non a subsequent start."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-sample-the-tool-must-run-oncreatecommand-exactly-once-must-303235b2",
+      "document": "sample",
+      "strength": "must",
+      "testability": "directly-testable",
+      "fingerprint": "c0cedc27015d464891dd3c593eca54e5fd5ac1cebfb937cb3e330fc87cdc6715",
+      "locations": [
+        {
+          "heading": "Lifecycle",
+          "anchor": "lifecycle",
+          "ordinal": 1,
+          "excerpt": "The tool MUST run onCreateCommand exactly once."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-sample-this-paragraph-is-purely-descriptive-and-carries-desc-94cc2600",
+      "document": "sample",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "61aad94f8046d8f37a160b528d2ba1eafb3825101ef6cafdd33ae3db4e4f7f55",
+      "locations": [
+        {
+          "heading": "Sample Consumer Document",
+          "anchor": "sample-consumer-document",
+          "ordinal": 1,
+          "excerpt": "This paragraph is purely descriptive and\ncarries no obligation."
+        }
+      ],
+      "context": null
+    }
+  ]
+}
