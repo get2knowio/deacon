@@ -1,0 +1,8 @@
+[
+  {
+    "channel": "chan-exit-code",
+    "operation": "op-read",
+    "present": true,
+    "value": 0
+  }
+]

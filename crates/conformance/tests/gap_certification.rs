@@ -325,7 +325,12 @@ fn certify_fixture(
     registry_dir: &Path,
 ) -> deacon_conformance::certify::Certification {
     let reg = Registry::load(registry_dir).expect("fixture registry loads");
-    certify(&reg, &fx.inputs(), &no_clause_inputs())
+    certify(
+        &reg,
+        &fx.inputs(),
+        &no_clause_inputs(),
+        Path::new("/nonexistent-conformance/snapshots"),
+    )
 }
 
 /// Clause inputs pointing at absent paths, so the clause join scopes itself out (these
@@ -565,6 +570,7 @@ fn certify_clauses(registry: &Registry) -> deacon_conformance::certify::Certific
             spec_dir: &spec,
             clauses_file: &clauses,
         },
+        Path::new("/nonexistent-conformance/snapshots"),
     )
 }
 

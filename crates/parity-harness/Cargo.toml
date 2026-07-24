@@ -23,9 +23,14 @@ chrono = "0.4"
 # NEW dev-scope dependency: parses `.config/nextest.toml` in the registry check
 # (registry.rs / parity_registry_check) so profile-filter drift fails structurally.
 toml = "0.8"
+# Declarative conformance runner (022): the `matches` stdout/stderr assertion is a
+# regex match; `regex` is already a [workspace.dependencies] entry (used by core).
+regex = { workspace = true }
+# Isolated external temp workspaces for Docker-backed conformance cases (022 US5,
+# workspace.rs). Runtime dep now (not just dev): the RAII cleanup guard owns a TempDir.
+tempfile = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 
 [lints]
 workspace = true

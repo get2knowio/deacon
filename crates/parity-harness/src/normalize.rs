@@ -36,9 +36,253 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::HarnessError;
+use crate::evidence::{NormalizedChannelEvidence, RawChannelEvidence};
 
 /// Keys the reference adds that carry no cross-CLI meaning (pure noise).
 const DROP_KEYS: &[&str] = &["configFilePath"];
+
+// ===========================================================================
+// Declarative conformance runner: THE single channel-normalization entry point
+// and its named, field-specific rules (022-conformance-runner, D6, T042/T043).
+//
+// Named rules — `path_token`, `label_semantic`, `mount_source_canonical`,
+// `path_env_segmented`, `null_preserving` — REPLACE the T011 pass-through. Each rule
+// REWRITES or CANONICALIZES; NONE blanket-removes env vars, labels, mount sources,
+// entrypoints, commands, or networks (FR-029). The null/empty/default distinction is
+// preserved (FR-025). This is the ONLY normalizer (Constitution VIII).
+// ===========================================================================
+
+/// The normalizer version, recorded in snapshot provenance and participating in
+/// staleness (FR-030). It is bumped whenever ANY named normalization rule changes so a
+/// snapshot recorded under an older normalizer replays as stale (data-model §7).
+///
+/// SINGLE SOURCE OF TRUTH: re-exported from [`deacon_conformance::snapshot`] so the
+/// snapshot provenance (conformance, the lower crate) and this normalizer never drift.
+/// `"1"` was the T011 pass-through; `"2"` is the US3 named-rule normalizer. The runner
+/// stamps it into the verdict report (`VerdictReport::new`) and the refresh bin records
+/// it into `Provenance.normalizerVersion`; staleness compares the recorded value
+/// against it (T032).
+pub use deacon_conformance::snapshot::NORMALIZER_VERSION;
+
+/// The `<WORKSPACE>` / `<PROJECT>` path token substitution context for `path_token`
+/// (FR-024). Each `(path, token)` pair rewrites occurrences of an absolute temp path to
+/// a stable token so evidence is portable across machines/recordings. Substitutions are
+/// applied longest-path-first so a nested path tokenizes before its parent.
+#[derive(Debug, Clone, Default)]
+pub struct TokenMap {
+    subs: Vec<(String, String)>,
+}
+
+impl TokenMap {
+    /// An empty token map (no substitutions).
+    pub fn new() -> TokenMap {
+        TokenMap::default()
+    }
+
+    /// A token map that rewrites the workspace path to `<WORKSPACE>`.
+    pub fn workspace(workspace: &Path) -> TokenMap {
+        let mut m = TokenMap::new();
+        m.insert(workspace.to_string_lossy(), "<WORKSPACE>");
+        m
+    }
+
+    /// Add a `(path → token)` substitution. Empty paths are ignored.
+    pub fn insert(&mut self, path: impl Into<String>, token: impl Into<String>) {
+        let path = path.into();
+        if path.is_empty() {
+            return;
+        }
+        self.subs.push((path, token.into()));
+        // Longest path first: a nested path must tokenize before its parent prefix.
+        self.subs.sort_by_key(|(p, _)| std::cmp::Reverse(p.len()));
+    }
+
+    /// Apply every substitution to `s` (rewrite, never delete).
+    fn apply(&self, s: &str) -> String {
+        let mut out = s.to_string();
+        for (path, token) in &self.subs {
+            if out.contains(path.as_str()) {
+                out = out.replace(path.as_str(), token);
+            }
+        }
+        out
+    }
+}
+
+/// **Rule `path_token`** (FR-024): rewrite temp workspace/project paths to stable tokens
+/// in every string within `value`, recursively (object keys AND values, array
+/// elements). Rewrite, NEVER delete; structure, null, and empty are preserved.
+pub fn path_token(value: &Value, tokens: &TokenMap) -> Value {
+    match value {
+        Value::String(s) => Value::String(tokens.apply(s)),
+        Value::Array(items) => Value::Array(items.iter().map(|v| path_token(v, tokens)).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (tokens.apply(k), path_token(v, tokens)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// **Rule `null_preserving`** (FR-025): the channel normalizer NEVER prunes
+/// null / missing / empty / defaulted fields (unlike the config `prune`). This named
+/// rule is identity on the value — it exists so the preservation guarantee is explicit
+/// and auditable wherever the contract lists it. Only a named rule may ever collapse a
+/// specific field; nothing is dropped implicitly.
+pub fn null_preserving(value: &Value) -> Value {
+    value.clone()
+}
+
+/// **Rule `label_semantic`** (FR-026): parse container labels into a canonical
+/// key/value object so labels compare SEMANTICALLY, not as opaque strings. Accepts an
+/// object (`{k: v}`) or a Docker-style array of `"k=v"` strings and yields an object.
+/// NEVER blanket-removes a label (FR-029) — every label is preserved.
+pub fn label_semantic(labels: &Value) -> Value {
+    match labels {
+        Value::Array(items) => {
+            let mut map = Map::new();
+            for item in items {
+                if let Some(s) = item.as_str() {
+                    let (k, v) = s.split_once('=').unwrap_or((s, ""));
+                    map.insert(k.to_string(), Value::String(v.to_string()));
+                }
+            }
+            Value::Object(map)
+        }
+        other => other.clone(),
+    }
+}
+
+/// **Rule `mount_source_canonical`** (FR-027): path-substitute each mount `source`
+/// before compare, so two mounts that differ ONLY by a temp path compare equal. Given a
+/// mounts array `[{ source, target, ... }]`, rewrites each `source` via the token map.
+/// NEVER removes a mount (FR-029).
+pub fn mount_source_canonical(mounts: &Value, tokens: &TokenMap) -> Value {
+    match mounts {
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|m| match m {
+                    Value::Object(obj) => {
+                        let mut obj = obj.clone();
+                        if let Some(src) = obj.get("source").and_then(Value::as_str) {
+                            obj.insert("source".to_string(), Value::String(tokens.apply(src)));
+                        }
+                        Value::Object(obj)
+                    }
+                    other => path_token(other, tokens),
+                })
+                .collect(),
+        ),
+        other => path_token(other, tokens),
+    }
+}
+
+/// **Rule `path_env_segmented`** (FR-028): compare a PATH-like value SEGMENT-WISE, not as
+/// one string. Accepts a `:`-joined string OR an array of segments and yields an array
+/// of (path-tokenized) segments, so equality compares element-by-element. The optional
+/// executable probe (resolving which segment holds the invoked executable) is a seam for
+/// the injected-process channel (US5, FR-028) — the segmentation itself is the rule's
+/// core and is what US3 needs; no US3 channel requires the probe.
+pub fn path_env_segmented(path_value: &Value, tokens: &TokenMap) -> Value {
+    let segments: Vec<Value> = match path_value {
+        Value::String(s) => s
+            .split(':')
+            .map(|seg| Value::String(tokens.apply(seg)))
+            .collect(),
+        Value::Array(items) => items
+            .iter()
+            .map(|v| match v.as_str() {
+                Some(seg) => Value::String(tokens.apply(seg)),
+                None => path_token(v, tokens),
+            })
+            .collect(),
+        other => return path_token(other, tokens),
+    };
+    Value::Array(segments)
+}
+
+/// THE single channel-normalization entry point for the declarative runner
+/// (Constitution VIII — one normalizer). Applies the per-channel named rules
+/// (contract observer-channel.md) to a channel's [`RawChannelEvidence`], yielding
+/// [`NormalizedChannelEvidence`]. `present` is preserved verbatim — a not-captured
+/// channel (`present:false`) stays distinct from a captured-empty value (FR-018) — and
+/// nothing is blanket-removed (FR-029).
+pub fn normalize_channel(
+    channel: &str,
+    raw: &RawChannelEvidence,
+    tokens: &TokenMap,
+) -> NormalizedChannelEvidence {
+    debug_assert_eq!(
+        channel, raw.channel,
+        "normalize_channel: `channel` must match the evidence's channel"
+    );
+    NormalizedChannelEvidence {
+        channel: raw.channel.clone(),
+        operation: raw.operation.clone(),
+        present: raw.present,
+        value: apply_channel_rules(channel, &raw.value, tokens),
+    }
+}
+
+/// Apply the named rules the contract lists for `channel` (observer-channel.md). An
+/// unknown channel is identity (never blanket-removed).
+fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap) -> Value {
+    use deacon_conformance::model::{
+        CHAN_EXIT_CODE, CHAN_FILE_CONTENT, CHAN_FILESYSTEM, CHAN_IMAGE, CHAN_INJECTED_PROCESS,
+        CHAN_PROCESS_GRAPH, CHAN_STDERR, CHAN_STDOUT, CHAN_STRUCTURED_OUTPUT, CHAN_TEMPORAL,
+    };
+    match channel {
+        // No rule: an exit code carries no path/label/PATH content.
+        CHAN_EXIT_CODE => value.clone(),
+        CHAN_STDOUT | CHAN_STDERR => path_token(value, tokens),
+        CHAN_STRUCTURED_OUTPUT | CHAN_FILE_CONTENT => null_preserving(&path_token(value, tokens)),
+        CHAN_FILESYSTEM => path_token(value, tokens),
+        CHAN_IMAGE => normalize_image(value, tokens),
+        CHAN_PROCESS_GRAPH => normalize_process_graph(value, tokens),
+        CHAN_INJECTED_PROCESS => normalize_injected_process(value, tokens),
+        CHAN_TEMPORAL => null_preserving(value),
+        _ => value.clone(),
+    }
+}
+
+/// `chan-image`: `label_semantic` on the `labels` field, `path_token` elsewhere,
+/// `null_preserving` overall.
+fn normalize_image(value: &Value, tokens: &TokenMap) -> Value {
+    let mut v = path_token(value, tokens);
+    if let Value::Object(obj) = &mut v {
+        if let Some(labels) = obj.get("labels") {
+            let semantic = label_semantic(labels);
+            obj.insert("labels".to_string(), semantic);
+        }
+    }
+    null_preserving(&v)
+}
+
+/// `chan-process-graph`: `mount_source_canonical` on `mounts`, `path_token` elsewhere.
+fn normalize_process_graph(value: &Value, tokens: &TokenMap) -> Value {
+    let mut v = value.clone();
+    if let Value::Object(obj) = &mut v {
+        if let Some(mounts) = obj.get("mounts") {
+            let canonical = mount_source_canonical(mounts, tokens);
+            obj.insert("mounts".to_string(), canonical);
+        }
+    }
+    path_token(&v, tokens)
+}
+
+/// `chan-injected-process`: `path_env_segmented` on `path`, `path_token` + `null_preserving`.
+fn normalize_injected_process(value: &Value, tokens: &TokenMap) -> Value {
+    let mut v = value.clone();
+    if let Value::Object(obj) = &mut v {
+        if let Some(path) = obj.get("path") {
+            let segmented = path_env_segmented(path, tokens);
+            obj.insert("path".to_string(), segmented);
+        }
+    }
+    null_preserving(&path_token(&v, tokens))
+}
 
 // ===========================================================================
 // Configuration normalization (Tier 1 / Tier 1b)
@@ -304,6 +548,30 @@ pub const INTENTIONAL_LABEL_PREFIXES: &[&str] = &[
     "dev.containers.",
 ];
 
+/// **NAMED, SCOPED legacy rule `drop_noise_env` — chan-container-state ONLY** (research
+/// D6, FR-029). Whether `key` is a runtime-injected env var present in every container
+/// with no cross-CLI outcome meaning ([`NOISE_ENV_KEYS`]). This is the ONLY sanctioned
+/// env subtraction, scoped to the legacy observable-state channel and carrying the
+/// rationale above. The NEW per-channel `chan-injected-process` normalization
+/// ([`path_env_segmented`] + [`null_preserving`]) NEVER blanket-removes env — it
+/// preserves every var and characterizes intentional differences via scoped
+/// allowed-differences (US4), never a blanket ignore list.
+pub fn is_noise_env_key(key: &str) -> bool {
+    NOISE_ENV_KEYS.contains(&key)
+}
+
+/// **NAMED, SCOPED legacy rule `strip_intentional_labels` — chan-container-state ONLY**
+/// (research D6, FR-029). Whether `key` is a label both CLIs stamp by design and
+/// differently ([`INTENTIONAL_LABEL_PREFIXES`]). The ONLY sanctioned label subtraction,
+/// scoped to the legacy observable-state channel. The NEW `chan-image` normalization
+/// ([`label_semantic`]) NEVER blanket-removes a label — it parses labels to key/value
+/// and preserves them, deferring intentional differences to scoped allowed-differences.
+pub fn is_intentional_label(key: &str) -> bool {
+    INTENTIONAL_LABEL_PREFIXES
+        .iter()
+        .any(|p| key.starts_with(p))
+}
+
 /// Normalized single-mount state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountState {
@@ -399,19 +667,24 @@ pub fn container_state(case: &str, raw: &Value) -> Result<StateSnapshot, Harness
         }
     }
 
+    // Legacy chan-container-state env subtraction via the NAMED, SCOPED rule
+    // `drop_noise_env` ([`is_noise_env_key`]) — the only sanctioned env removal (D6).
     let env = str_array(&raw["Config"]["Env"])
         .into_iter()
         .filter(|e| {
             let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e.as_str());
-            !NOISE_ENV_KEYS.contains(&key)
+            !is_noise_env_key(key)
         })
         .collect();
 
+    // Legacy chan-container-state label subtraction via the NAMED, SCOPED rule
+    // `strip_intentional_labels` ([`is_intentional_label`]) — the only sanctioned label
+    // removal (D6).
     let labels = raw["Config"]["Labels"]
         .as_object()
         .map(|o| {
             o.iter()
-                .filter(|(k, _)| !INTENTIONAL_LABEL_PREFIXES.iter().any(|p| k.starts_with(p)))
+                .filter(|(k, _)| !is_intentional_label(k))
                 .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
                 .collect()
         })
@@ -619,6 +892,178 @@ fn diff_kv(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    use deacon_conformance::model::{
+        CHAN_EXIT_CODE, CHAN_IMAGE, CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_STDOUT,
+        CHAN_STRUCTURED_OUTPUT,
+    };
+
+    fn raw(channel: &str, value: Value) -> RawChannelEvidence {
+        RawChannelEvidence {
+            channel: channel.to_string(),
+            operation: "op-1".to_string(),
+            present: true,
+            value,
+        }
+    }
+
+    // -- T039: path_token rewrites (never deletes); null states distinct; no removal ---
+
+    #[test]
+    fn path_token_rewrites_temp_paths_to_a_stable_token_without_deleting() {
+        let tokens = TokenMap::workspace(std::path::Path::new("/tmp/ws-abc"));
+        let value = json!({
+            "rootFolderPath": "/tmp/ws-abc",
+            "mount": "source=/tmp/ws-abc/proj,target=/w",
+            "nested": ["/tmp/ws-abc/x", "/unrelated/y"],
+            "null_val": null, "empty_str": "", "empty_arr": [], "empty_obj": {}
+        });
+        let out = path_token(&value, &tokens);
+        assert_eq!(out["rootFolderPath"], json!("<WORKSPACE>"));
+        assert_eq!(out["mount"], json!("source=<WORKSPACE>/proj,target=/w"));
+        assert_eq!(out["nested"][0], json!("<WORKSPACE>/x"));
+        assert_eq!(out["nested"][1], json!("/unrelated/y"), "rewrite is scoped");
+        // The four null states remain DISTINCT and PRESENT (FR-025) — none deleted.
+        assert_eq!(out["null_val"], Value::Null);
+        assert_eq!(out["empty_str"], json!(""));
+        assert_eq!(out["empty_arr"], json!([]));
+        assert_eq!(out["empty_obj"], json!({}));
+        let obj = out.as_object().unwrap();
+        for k in ["null_val", "empty_str", "empty_arr", "empty_obj"] {
+            assert!(obj.contains_key(k), "field {k} must not be dropped");
+        }
+    }
+
+    #[test]
+    fn normalize_channel_preserves_present_false() {
+        let not_captured = RawChannelEvidence {
+            channel: CHAN_STRUCTURED_OUTPUT.to_string(),
+            operation: "op-1".to_string(),
+            present: false,
+            value: Value::Null,
+        };
+        let out = normalize_channel(CHAN_STRUCTURED_OUTPUT, &not_captured, &TokenMap::new());
+        assert!(
+            !out.present,
+            "present:false (not captured) is preserved (FR-018)"
+        );
+    }
+
+    #[test]
+    fn no_channel_blanket_removes_env_labels_mounts_entrypoint_command_networks() {
+        let tokens = TokenMap::new();
+        // Image: labels + env + entrypoint all survive normalization.
+        let img = raw(
+            CHAN_IMAGE,
+            json!({ "labels": {"a":"1"}, "env": ["A=1"], "entrypoint": ["/bin/sh"] }),
+        );
+        let n = normalize_channel(CHAN_IMAGE, &img, &tokens);
+        assert!(n.value.get("labels").is_some() && n.value.get("env").is_some());
+        assert!(
+            n.value.get("entrypoint").is_some(),
+            "entrypoint not removed"
+        );
+        // Process graph: mounts + networks + volumes survive.
+        let graph = raw(
+            CHAN_PROCESS_GRAPH,
+            json!({ "mounts": [{"source":"/s","target":"/t"}], "networks": ["n"], "volumes": ["v"] }),
+        );
+        let g = normalize_channel(CHAN_PROCESS_GRAPH, &graph, &tokens);
+        assert_eq!(g.value["mounts"].as_array().unwrap().len(), 1);
+        assert!(g.value.get("networks").is_some() && g.value.get("volumes").is_some());
+        // Injected process: env + command survive.
+        let inj = raw(
+            CHAN_INJECTED_PROCESS,
+            json!({ "env": {"A":"1"}, "command": ["run"], "path": "/usr/bin:/bin" }),
+        );
+        let i = normalize_channel(CHAN_INJECTED_PROCESS, &inj, &tokens);
+        assert!(i.value.get("env").is_some() && i.value.get("command").is_some());
+    }
+
+    // -- T040: label_semantic / mount_source_canonical / path_env_segmented ------------
+
+    #[test]
+    fn label_semantic_parses_and_compares_key_value() {
+        let as_array = label_semantic(&json!(["k1=v1", "k2=v2"]));
+        let as_object = json!({ "k1": "v1", "k2": "v2" });
+        assert_eq!(
+            as_array, as_object,
+            "labels compare semantically, not as strings"
+        );
+        // Already-object labels pass through unchanged; nothing removed.
+        assert_eq!(label_semantic(&as_object), as_object);
+    }
+
+    #[test]
+    fn mount_source_canonical_makes_temp_path_mounts_equal() {
+        let mut tokens = TokenMap::new();
+        tokens.insert("/tmp/ws-abc", "<WORKSPACE>");
+        tokens.insert("/tmp/ws-def", "<WORKSPACE>");
+        let a = mount_source_canonical(
+            &json!([{ "source": "/tmp/ws-abc/proj", "target": "/w" }]),
+            &tokens,
+        );
+        let b = mount_source_canonical(
+            &json!([{ "source": "/tmp/ws-def/proj", "target": "/w" }]),
+            &tokens,
+        );
+        assert_eq!(
+            a, b,
+            "two mounts differing only by temp path compare equal (FR-027)"
+        );
+        assert_eq!(a[0]["source"], json!("<WORKSPACE>/proj"));
+    }
+
+    #[test]
+    fn path_env_segmented_compares_segment_wise() {
+        let tokens = TokenMap::new();
+        let out = path_env_segmented(&json!("/usr/local/bin:/usr/bin:/bin"), &tokens);
+        assert_eq!(out, json!(["/usr/local/bin", "/usr/bin", "/bin"]));
+        // An array PATH normalizes to the same segmented form → segment-wise equality.
+        let from_array =
+            path_env_segmented(&json!(["/usr/local/bin", "/usr/bin", "/bin"]), &tokens);
+        assert_eq!(out, from_array);
+    }
+
+    #[test]
+    fn normalize_channel_applies_per_channel_rules() {
+        let tokens = TokenMap::workspace(std::path::Path::new("/tmp/ws"));
+        // structured-output: paths tokenized, structure preserved.
+        let s = normalize_channel(
+            CHAN_STRUCTURED_OUTPUT,
+            &raw(
+                CHAN_STRUCTURED_OUTPUT,
+                json!({ "root": "/tmp/ws", "keep": null }),
+            ),
+            &tokens,
+        );
+        assert_eq!(s.value["root"], json!("<WORKSPACE>"));
+        assert_eq!(s.value["keep"], Value::Null, "null preserved");
+        // exit-code: no rule (a number is untouched).
+        let e = normalize_channel(CHAN_EXIT_CODE, &raw(CHAN_EXIT_CODE, json!(0)), &tokens);
+        assert_eq!(e.value, json!(0));
+        // stdout: path_token on the string.
+        let o = normalize_channel(
+            CHAN_STDOUT,
+            &raw(CHAN_STDOUT, json!("at /tmp/ws/x")),
+            &tokens,
+        );
+        assert_eq!(o.value, json!("at <WORKSPACE>/x"));
+    }
+
+    #[test]
+    fn normalizer_version_is_bumped_for_named_rules() {
+        assert_eq!(NORMALIZER_VERSION, "2", "US3 named-rule normalizer");
+    }
+
+    #[test]
+    fn legacy_noise_rules_are_named_and_scoped() {
+        assert!(is_noise_env_key("PATH") && !is_noise_env_key("MY_VAR"));
+        assert!(
+            is_intentional_label("com.docker.compose.project")
+                && !is_intentional_label("org.opencontainers.image.title")
+        );
+    }
 
     #[test]
     fn prune_drops_nulls_empties_and_configfilepath() {

@@ -19,7 +19,11 @@ fn seed_registry_loads_cleanly() {
     // The four closed collections are seeded exactly (T004).
     assert_eq!(registry.revisions.len(), 4, "four pinned source revisions");
     assert_eq!(registry.dimensions.len(), 4, "os/arch/runtime/oracle");
-    assert_eq!(registry.channels.len(), 6, "six observable channels");
+    assert_eq!(
+        registry.channels.len(),
+        11,
+        "six original observable channels + five added by 022-conformance-runner"
+    );
     assert_eq!(registry.profiles.len(), 1, "one active profile");
     assert!(
         registry.profiles[0].active,

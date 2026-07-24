@@ -1,0 +1,5 @@
+{
+  "name": "conformance-unknown-field-echo",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "customUnknownKey": "preserved"
+}

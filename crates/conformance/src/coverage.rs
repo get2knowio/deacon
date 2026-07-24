@@ -316,16 +316,17 @@ mod tests {
             id: id.to_string(),
             behaviors: behaviors.iter().map(|b| b.to_string()).collect(),
             context: vec![],
-            executable: Executable {
+            executable: Some(Executable {
                 binary: "some_binary".to_string(),
                 test: None,
                 corpus: None,
                 case: None,
-            },
+            }),
             outcomes: vec![ExpectedOutcome {
                 channel: "chan-exit-code".to_string(),
                 expectation: "exits 0".to_string(),
             }],
+            ..TestCase::default()
         }
     }
 

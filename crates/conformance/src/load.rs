@@ -263,10 +263,84 @@ impl Registry {
             ),
         };
 
+        // 022-conformance-runner (T007, FR-003): every case record MUST be exactly one
+        // of legacy (binary-backed) or declarative (data-driven). A mixed/neither record
+        // is a structural malformation — reject it fail-loud at load, as a located
+        // schema error naming the offending case id, so it never reaches validation as a
+        // half-interpreted record. (Semantic well-formedness of a correctly-shaped
+        // declarative case is a V-series validation concern; see `validate.rs`.)
+        check_case_shapes(&root.join("cases.json"), &registry.cases, &mut errors);
+        // 022-conformance-runner (T062, FR-032/035): each allowed-difference must be
+        // exactly-one-of waiverId/divergenceId, target a dotted path within a channel
+        // (never a bare-channel/global-ignore), and be unique per (behavior, path) within
+        // its case — all fail-loud at load.
+        check_allowed_differences(&root.join("cases.json"), &registry.cases, &mut errors);
+
         if errors.is_empty() {
             Ok(registry)
         } else {
             Err(LoadError::Schema(errors))
+        }
+    }
+}
+
+/// Push a located [`SchemaError`] for every case record that is neither cleanly legacy
+/// nor cleanly declarative (both shapes present, or neither). The `location` names the
+/// offending case id (or its index when the id is empty) so the diagnosis is precise
+/// (022-conformance-runner, FR-003).
+fn check_case_shapes(cases_file: &Path, cases: &[TestCase], errors: &mut Vec<SchemaError>) {
+    for (idx, case) in cases.iter().enumerate() {
+        if let Err(shape) = case.classify() {
+            let location = if case.id.is_empty() {
+                format!("records[{idx}]")
+            } else {
+                format!("records[{idx}] ({})", case.id)
+            };
+            errors.push(SchemaError {
+                file: cases_file.to_path_buf(),
+                location: Some(location),
+                message: shape.message().to_string(),
+            });
+        }
+    }
+}
+
+/// Push a located [`SchemaError`] for every malformed allowed-difference: both/neither
+/// of `waiverId`/`divergenceId`, a bare-channel/global-ignore `observablePath`, or a
+/// duplicate `(behavior, observablePath)` within the same case (a conflicting duplicate).
+/// These are structural, per-case defects rejected fail-loud at load (FR-032/035).
+fn check_allowed_differences(cases_file: &Path, cases: &[TestCase], errors: &mut Vec<SchemaError>) {
+    for (idx, case) in cases.iter().enumerate() {
+        let mut seen: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
+        for (adx, ad) in case.allowed_differences.iter().enumerate() {
+            let where_at = format!("records[{idx}] ({}).allowedDifferences[{adx}]", case.id);
+            let mut push = |message: String| {
+                errors.push(SchemaError {
+                    file: cases_file.to_path_buf(),
+                    location: Some(where_at.clone()),
+                    message,
+                });
+            };
+            if let Err(id_err) = ad.resolved_id() {
+                push(id_err.message().to_string());
+            }
+            if ad.is_global_ignore() {
+                push(format!(
+                    "observablePath {:?} is a bare channel / global-ignore construct; scope it to \
+                     a dotted path within a channel (e.g. `chan-x.field.sub`), never a whole \
+                     channel (FR-032)",
+                    ad.observable_path
+                ));
+            }
+            let key = (ad.behavior.clone(), ad.observable_path.clone());
+            if !seen.insert(key) {
+                push(format!(
+                    "duplicate allowed difference for (behavior {:?}, observablePath {:?}); a \
+                     conflicting duplicate is rejected (FR-035)",
+                    ad.behavior, ad.observable_path
+                ));
+            }
         }
     }
 }

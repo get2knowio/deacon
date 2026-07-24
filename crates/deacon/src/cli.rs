@@ -1046,7 +1046,24 @@ pub struct Cli {
     ///
     /// When disabled (default), lifecycle commands run without PTY allocation. This is suitable
     /// for non-interactive scripts and automated environments.
-    #[arg(long, global = true, env = "DEACON_FORCE_TTY_IF_JSON")]
+    ///
+    /// Parsing: the documented case-insensitive truthy/falsey vocabulary
+    /// (`true`/`yes`/`on`/`1` vs `false`/`no`/`off`/`0`) is honored for BOTH the env var and
+    /// an explicit `--force-tty-if-json=<value>` via clap's `BoolishValueParser` — clap's
+    /// default `bool` parser accepts only exact lowercase `true`/`false`, which contradicted
+    /// this flag's documented contract (e.g. `DEACON_FORCE_TTY_IF_JSON=False` was rejected).
+    /// A bare `--force-tty-if-json` (no value) means `true` (`default_missing_value`);
+    /// `require_equals` keeps the bare switch from greedily consuming a following subcommand.
+    #[arg(
+        long,
+        global = true,
+        env = "DEACON_FORCE_TTY_IF_JSON",
+        value_parser = clap::builder::BoolishValueParser::new(),
+        num_args = 0..=1,
+        require_equals = true,
+        default_value_t = false,
+        default_missing_value = "true",
+    )]
     pub force_tty_if_json: bool,
 
     /// Default user env probe mode (none|loginInteractiveShell|interactiveShell|loginShell).

@@ -45,3 +45,6 @@ temp-env.workspace = true
 # Dev-only parity harness (publish = false). Consumed by the `parity_*` and
 # `consistency_*` test binaries; never linked into the shipped deacon binary.
 parity-harness = { path = "../parity-harness" }
+# Dev-only conformance registry (publish = false). The `parity_conformance_runner`
+# binary loads declarative cases from it; never linked into the shipped deacon binary.
+deacon-conformance = { path = "../conformance" }

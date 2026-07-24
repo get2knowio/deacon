@@ -122,6 +122,27 @@ distort the coverage denominator). If a purported differentiator has no external
 observable effect on stdout, stderr, exit code, container state, or the filesystem, it is
 out of scope for the registry.
 
+## The declarative conformance runner is DEV-ONLY (Principle II)
+
+The declarative conformance runner (022-conformance-runner) — the shared machinery that
+executes a `cases.json` record against deacon / the pinned reference / a committed
+snapshot, capturing and normalizing observable channels — is **contributor test tooling,
+never a shipped consumer command**. It adds NO `deacon` subcommand. Concretely:
+
+- `conformance snapshot check|diff` is a subcommand of the dev-only `deacon-conformance`
+  bin (`cargo run -p deacon-conformance -- …`), not of the `deacon` CLI.
+- `conformance-snapshot refresh` (the reviewed record path) is a `parity-harness` bin
+  (`cargo run -p parity-harness --bin conformance-snapshot -- …`), not `deacon`.
+- The live differential run is a **test binary** (`parity_conformance_runner`, `--profile
+  parity` only), not a runtime command.
+
+The consumer surface stays exactly `up`/`down`/`exec`/`build`/`read-configuration`/
+`run-user-commands`/`templates apply`/`doctor` (Constitution II). A declarative
+`operations[].subcommand` is validated to be in that surface (V16); the runner exercises
+only consumer commands, never authoring ones. Do NOT add a `deacon conformance` /
+`deacon snapshot` command — that would drag test tooling into the shipped binary and
+violate the consumer-only scope.
+
 ## Inventory join (V11 – V15) — constraints AND clauses
 
 This section is the human-readable companion to the two inventory joins enforced in
