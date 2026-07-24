@@ -22,7 +22,7 @@ use serde_json::json;
 
 use crate::HarnessError;
 use crate::evidence::RawChannelEvidence;
-use crate::observe::{ChannelObserver, RunContext, docker_inspect, not_captured};
+use crate::observe::{ChannelObserver, RunContext, not_captured};
 
 /// Captures `chan-temporal` from the case's container.
 #[derive(Debug, Clone, Copy)]
@@ -38,19 +38,17 @@ impl ChannelObserver for TemporalObserver {
         ctx: &RunContext,
         op: &Operation,
     ) -> Result<RawChannelEvidence, HarnessError> {
-        let Some(id) = &ctx.container_id else {
-            // No container OR it was cleaned up: the cleanup transition is exactly a
-            // not-captured temporal channel (FR-018).
-            return Ok(not_captured(CHAN_TEMPORAL, &op.id));
-        };
-        let Some(inspect) = docker_inspect(id)? else {
+        // No container OR it was cleaned up: the cleanup transition is exactly a
+        // not-captured temporal channel (FR-018). Reads the runner's pre-fetched inspect
+        // (finding #4) — no subprocess here.
+        let Some(inspect) = &ctx.container_inspect else {
             return Ok(not_captured(CHAN_TEMPORAL, &op.id));
         };
         Ok(RawChannelEvidence {
             channel: CHAN_TEMPORAL.to_string(),
             operation: op.id.clone(),
             present: true,
-            value: temporal_from_inspect(&inspect),
+            value: temporal_from_inspect(inspect),
         })
     }
 }

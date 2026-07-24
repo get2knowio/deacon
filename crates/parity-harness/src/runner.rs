@@ -126,6 +126,9 @@ pub(crate) async fn execute_ops(
     let mut outcomes: Vec<(String, ProcessOutcome)> = Vec::new();
     let mut op_snapshots: Vec<(String, crate::observe::OpSnapshot)> = Vec::new();
     let mut container_id: Option<String> = None;
+    // The final `up` container's full `docker inspect`, captured ONCE (off the executor)
+    // and handed to every Docker channel observer via `RunContext` (finding #4).
+    let mut container_inspect: Option<serde_json::Value> = None;
 
     for op in &case.operations {
         // Docker cases: one isolated workspace for every op. Config-only: per-op fixture.
@@ -163,13 +166,25 @@ pub(crate) async fn execute_ops(
         if docker_case && matches!(op.subcommand.as_str(), "up" | "exec") && inv.success {
             // Capture EVERY container matching this op's workspace label (not just one), so
             // the metamorphic oracle can detect a non-idempotent op that left a second
-            // container behind (finding #3).
-            let this_ids = containers_for_workspace(&workspace);
+            // container behind (finding #3). Both docker probes run via `spawn_blocking` so
+            // they never block the async executor (finding #4).
+            let ws_for_lookup = workspace.clone();
+            let this_ids =
+                tokio::task::spawn_blocking(move || containers_for_workspace(&ws_for_lookup))
+                    .await
+                    .map_err(blocking_join_err)?;
             let this_id = this_ids.first().cloned();
-            let temporal = this_id
-                .as_deref()
-                .and_then(|id| crate::observe::docker_inspect(id).ok().flatten())
-                .map(|inspect| crate::observe::temporal::temporal_from_inspect(&inspect))
+            let inspect = match this_id.clone() {
+                Some(id) => {
+                    tokio::task::spawn_blocking(move || crate::observe::docker_inspect(&id))
+                        .await
+                        .map_err(blocking_join_err)??
+                }
+                None => None,
+            };
+            let temporal = inspect
+                .as_ref()
+                .map(crate::observe::temporal::temporal_from_inspect)
                 .unwrap_or(serde_json::Value::Null);
             op_snapshots.push((
                 op.id.clone(),
@@ -180,7 +195,9 @@ pub(crate) async fn execute_ops(
                 },
             ));
             if op.subcommand == "up" {
+                // The final `up`'s container + its inspect are what the channel observers use.
                 container_id = this_id;
+                container_inspect = inspect;
             }
         }
 
@@ -206,6 +223,7 @@ pub(crate) async fn execute_ops(
     // Scope the filesystem observer to the case's declared allowlist (clarify Q1).
     ctx.fs_allowlist = case.fs_allowlist.clone();
     ctx.container_id = container_id;
+    ctx.container_inspect = container_inspect;
     for (op_id, outcome) in outcomes {
         ctx.record_outcome(op_id, outcome);
     }
@@ -234,6 +252,97 @@ fn unique_fixture_ids(case: &TestCase) -> Vec<String> {
     ids.sort();
     ids.dedup();
     ids
+}
+
+/// Map a `spawn_blocking` join failure (the offloaded blocking task panicked) to a
+/// fail-loud harness error. Used wherever the runner offloads a blocking docker probe so it
+/// never blocks the async executor (finding #4).
+pub(crate) fn blocking_join_err(e: tokio::task::JoinError) -> HarnessError {
+    HarnessError::DockerUnavailable {
+        cause: format!("a docker probe task failed to complete: {e}"),
+    }
+}
+
+/// The pinned-image digests a case's fixtures declare — the `imageDigests` provenance /
+/// staleness signal (FR-017, finding #5). A Docker case's snapshot MUST go stale when a
+/// pinned image's content changes upstream, so this recomputes the digest of every image
+/// the case's fixtures declare, at both record and replay time. Returns:
+///
+/// - `Some(empty)` for a NON-Docker case — it pulls no images, so its snapshot must NOT
+///   depend on any image digest (a `read-configuration` case gating on the base image would
+///   be the same false-staleness trap as gating on the host Node version); resolved without
+///   touching docker.
+/// - `Some(digests)` for a Docker case when `docker image inspect` resolves each declared
+///   image (sorted, deduped for determinism).
+/// - `None` for a Docker case when `docker` cannot be reached — the caller then carries the
+///   RECORDED digests rather than fabricating (e.g. the hermetic `snapshot check`, which has
+///   no docker: it cannot verify a Docker case's images and must not falsely flag them).
+///
+/// BLOCKING (it may shell out to `docker`); async callers offload it via `spawn_blocking`.
+pub fn image_digests_for_case(
+    case: &TestCase,
+    fixtures_root: &Path,
+) -> Option<Vec<(String, String)>> {
+    if !is_docker_case(case) {
+        return Some(Vec::new());
+    }
+    let mut out: Vec<(String, String)> = Vec::new();
+    for id in unique_fixture_ids(case) {
+        let Some(image) = fixture_image(&fixtures_root.join(&id)) else {
+            continue; // Dockerfile/compose fixture (no top-level `image` ref) — nothing to pin.
+        };
+        match image_digest(&image) {
+            Ok(Some(digest)) => out.push((image, digest)),
+            // Image not present locally / no digest — best-effort, skip (not a docker fault).
+            Ok(None) => {}
+            // `docker` itself cannot run — cannot determine; the caller carries recorded.
+            Err(()) => return None,
+        }
+    }
+    out.sort();
+    out.dedup();
+    Some(out)
+}
+
+/// The `image` ref a fixture's devcontainer config declares, if any (mirrors the conformance
+/// validator's `fixture_image`). A missing / unreadable / non-JSON config, or one with no
+/// top-level `image`, yields `None`.
+fn fixture_image(fixture_dir: &Path) -> Option<String> {
+    for rel in [".devcontainer/devcontainer.json", ".devcontainer.json"] {
+        let path = fixture_dir.join(rel);
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(doc) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if let Some(image) = doc.get("image").and_then(|v| v.as_str()) {
+            return Some(image.to_string());
+        }
+    }
+    None
+}
+
+/// The digest of a locally-available image `reference` via `docker image inspect`: its first
+/// `RepoDigests` entry (the registry digest), else its content `.Id`. `Ok(None)` when the
+/// image is absent locally / has neither; `Err(())` when `docker` itself cannot run.
+fn image_digest(reference: &str) -> Result<Option<String>, ()> {
+    let output = std::process::Command::new("docker")
+        .args([
+            "image",
+            "inspect",
+            reference,
+            "--format",
+            "{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}",
+        ])
+        .output()
+        .map_err(|_| ())?;
+    if !output.status.success() {
+        // Non-zero is usually "No such image" (not pulled) — a not-present state, not a fault.
+        return Ok(None);
+    }
+    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(if s.is_empty() { None } else { Some(s) })
 }
 
 /// Find EVERY container deacon created for `workspace` via its `devcontainer.local_folder`
@@ -357,8 +466,9 @@ pub async fn collect_evidence_on(
 /// recompute the case/fixture hashes, take the oracle version from the verified oracle,
 /// probe Node/Docker/Compose versions (via the shared
 /// [`deacon_conformance::snapshot::probe_environment`]), and stamp the source revision +
-/// normalizer version. `imageDigests` is empty for config-only cases (they pull no
-/// images); the Docker-image digest probe lands with the Docker channels (US5).
+/// normalizer version. `imageDigests` records the digest of each image a Docker case's
+/// fixtures pin ([`image_digests_for_case`]) so the snapshot goes stale if a pinned image's
+/// content changes; it is empty for config-only cases (they pull no images).
 ///
 /// Provenance fields are recorded verbatim from the environment — NEVER fabricated
 /// (constitution IV). A missing Node/Docker/Compose tool records an empty string (the
@@ -385,7 +495,12 @@ pub fn capture_provenance(
         node_version: env.node_version.unwrap_or_default(),
         docker_version: env.docker_version.unwrap_or_default(),
         compose_version: env.compose_version.unwrap_or_default(),
-        image_digests: Default::default(),
+        // Digests of the images a Docker case pins (empty for config-only cases); `.collect()`
+        // infers the `IndexMap` field type (finding #5).
+        image_digests: image_digests_for_case(case, cfg.fixtures_root)
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
         normalizer_version: crate::normalize::NORMALIZER_VERSION.to_string(),
         captured_at: crate::report::now_rfc3339(),
     })
@@ -565,6 +680,39 @@ mod tests {
     fn exec_kind_classifies_config_only() {
         assert_eq!(exec_kind("read-configuration"), ExecKind::Config);
         assert_eq!(exec_kind("up"), ExecKind::Lifecycle);
+    }
+
+    #[test]
+    fn image_digests_for_config_only_case_is_empty_without_docker() {
+        // A non-Docker case pulls no images → `Some(empty)`, resolved WITHOUT touching
+        // docker, so a read-configuration snapshot never gates on a base-image digest
+        // (finding #5). The path is nonexistent to prove no fixture/docker access happens.
+        let case = case_with_op(&[], &[]);
+        assert_eq!(
+            image_digests_for_case(&case, Path::new("/nonexistent")),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn fixture_image_reads_declared_image_else_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let dc = dir.path().join("fx/.devcontainer");
+        std::fs::create_dir_all(&dc).unwrap();
+        std::fs::write(
+            dc.join("devcontainer.json"),
+            r#"{ "image": "alpine:3.19" }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            fixture_image(&dir.path().join("fx")).as_deref(),
+            Some("alpine:3.19")
+        );
+        // A fixture with no top-level image (Dockerfile/compose) → None.
+        let dc2 = dir.path().join("fx2/.devcontainer");
+        std::fs::create_dir_all(&dc2).unwrap();
+        std::fs::write(dc2.join("devcontainer.json"), r#"{ "name": "x" }"#).unwrap();
+        assert_eq!(fixture_image(&dir.path().join("fx2")), None);
     }
 
     #[test]
